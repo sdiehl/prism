@@ -1,0 +1,161 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/nonexhaustive.pr
+---
+== tokens ==
+VOpen Type UIdent("Color") Eq UIdent("Red") Bar UIdent("Green") Bar UIdent("Blue") VSemi Fn Ident("name") LParen Ident("c") RParen Eq VOpen Match Ident("c") Of VOpen UIdent("Red") FatArrow Int(IntLit { value: 1, suffix: None }) VSemi UIdent("Green") FatArrow Int(IntLit { value: 2, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("name") LParen UIdent("Red") RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Color",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Red",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Green",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Blue",
+                    args: [],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..31,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "name",
+            params: [
+                Param {
+                    name: "c",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "c",
+                        ),
+                        span: 53..54,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Red",
+                                    [],
+                                ),
+                                span: 62..65,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 69..70,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Green",
+                                    [],
+                                ),
+                                span: 75..80,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 84..85,
+                            },
+                        },
+                    ],
+                ),
+                span: 47..85,
+            },
+            wheres: [],
+            span: 32..85,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 98..105,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "name",
+                                    ),
+                                    span: 106..110,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "Red",
+                                        ),
+                                        span: 111..114,
+                                    },
+                                ],
+                            ),
+                            span: 106..115,
+                        },
+                    ],
+                ),
+                span: 98..116,
+            },
+            wheres: [],
+            span: 86..116,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `name`: non-exhaustive match: missing Blue
+   ╭─[ <source>:3:3 ]
+   │
+ 3 │ ╭─▶   match c of
+   ┆ ┆   
+ 5 │ ├─▶     Green => 2
+   │ │                    
+   │ ╰──────────────────── in `name`: non-exhaustive match: missing Blue
+───╯

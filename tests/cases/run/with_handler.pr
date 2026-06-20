@@ -1,0 +1,27 @@
+-- `with handler` installs an effect handler over the rest of the block:
+-- the statements below it become the handled expression, no extra indent.
+effect Counter {
+  ctl get(Unit) : Int,
+  ctl bump(Unit) : Unit
+}
+
+fn counted() : Int =
+  let run =
+    with handler
+      get(u, k) => \(s) -> k(s)(s)
+      bump(u, k) => \(s) -> k(())(s + 1)
+      return r => \(s) -> r
+    bump(())
+    bump(())
+    bump(())
+    get(()) * 2
+  run(0)
+
+fn main() =
+  var total := counted()
+  with handler
+    get(u, k) => k(7)
+    bump(u, k) => k(())
+  bump(())
+  total := total + get(())
+  println(total)

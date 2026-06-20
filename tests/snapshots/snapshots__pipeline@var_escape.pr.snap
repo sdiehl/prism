@@ -1,0 +1,141 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/var_escape.pr
+---
+== tokens ==
+VOpen Fn Ident("leak") LParen RParen Colon LParen KwUnit RParen Arrow KwInt Eq VOpen Var Ident("x") ColonEq Int(IntLit { value: 0, suffix: None }) VSemi Lambda LParen Ident("u") RParen Arrow Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("leak") LParen RParen LParen LParen RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "leak",
+            params: [],
+            ret: Some(
+                Fun(
+                    [
+                        Unit,
+                    ],
+                    Empty,
+                    Int,
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    VarDecl(
+                        "x",
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 39..40,
+                        },
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "u",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 51..52,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 55..56,
+                                        },
+                                    ),
+                                    span: 51..56,
+                                },
+                            ),
+                            span: 43..56,
+                        },
+                    ),
+                ),
+                span: 30..56,
+            },
+            wheres: [],
+            span: 0..56,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 70..77,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "leak",
+                                            ),
+                                            span: 78..82,
+                                        },
+                                        [],
+                                    ),
+                                    span: 78..84,
+                                },
+                                [
+                                    Spanned {
+                                        node: Unit,
+                                        span: 85..87,
+                                    },
+                                ],
+                            ),
+                            span: 78..88,
+                        },
+                    ],
+                ),
+                span: 70..89,
+            },
+            wheres: [],
+            span: 58..89,
+        },
+    ],
+}
+
+== types ==
+Type Error: `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
+   ╭─[ <source>:3:3 ]
+   │
+ 3 │   \(u) -> x + 1
+   │   ──────┬──────  
+   │         ╰──────── `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
+───╯

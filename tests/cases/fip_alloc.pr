@@ -1,0 +1,2 @@
+type Box = Box(Int)
+fbip fn fresh(x) = Box(x)

@@ -1,0 +1,29 @@
+-- Arbitrary-precision Int: ring ops across the 63-bit immediate boundary, the
+-- three truncated div/rem sign cases, comparisons on mixed magnitudes, big
+-- literals, and parse_int past 64 bits. Interpreter and native must agree.
+
+fn main() =
+  let n = 99999999999999999999999
+  println(n)
+  println(n + 1)
+  println(n * n)
+  println(0 - n)
+  println(n - n)
+  println(n / 7)
+  println(n % 7)
+  println((0 - 7) / 2)
+  println((0 - 7) % 2)
+  println(7 / (0 - 2))
+  println(7 % (0 - 2))
+  println((0 - 7) / (0 - 2))
+  println((0 - 7) % (0 - 2))
+  println(if n > 42 then 1 else 0)
+  println(if 0 - n < 42 then 1 else 0)
+  println(if n == 99999999999999999999999 then 1 else 0)
+  println(parse_int("123456789012345678901234567890"))
+  println(parse_int("  -42  "))
+  println(parse_int("+17"))
+  println(parse_int("12abc"))
+  println(parse_int(""))
+  println(show(0 - unwrap_or(0, parse_int("123456789012345678901234567890"))))
+  println(factorial(30))

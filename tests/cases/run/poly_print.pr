@@ -1,0 +1,16 @@
+-- Printing a value of polymorphic type. A free (or generalized) element type
+-- labels a provably empty container by the free theorem, so the structural
+-- printer defaults those leaves and the spine prints exactly as the interpreter
+-- does, native matching interp (print_dispatch / default_printable in
+-- elaborate.rs). Previously these fell to the integer printer and garbled.
+type Tree(a) = Leaf | Node(Tree(a), a, Tree(a))
+
+fn main() =
+  println([])
+  println(None)
+  println([[], []])
+  println([None, None])
+  println(Some([]))
+  println((1, [], "hi", None))
+  println(Leaf)
+  println([Leaf])

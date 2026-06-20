@@ -1,0 +1,7 @@
+type Option(a) = None | Some(a)
+fn get(d, o) =
+  match o of
+    None => d
+    Some(x) => x
+
+fn main() = println(get(0, Some(42)))

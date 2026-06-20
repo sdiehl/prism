@@ -1,0 +1,205 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/var_escape_record.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LBrace Ident("f") Colon LParen KwInt RParen Arrow KwInt RBrace VSemi Fn Ident("leak") LParen RParen Colon UIdent("Box") Eq VOpen Var Ident("x") ColonEq Int(IntLit { value: 0, suffix: None }) VSemi UIdent("Box") LBrace Ident("f") Eq Lambda LParen Ident("n") RParen Arrow Ident("x") Plus Ident("n") RBrace VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("b") Eq Ident("leak") LParen RParen VSemi Ident("println") LParen LParen Ident("b") Dot Ident("f") RParen LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Fun(
+                            [
+                                Int,
+                            ],
+                            Empty,
+                            Int,
+                        ),
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "f",
+                                Fun(
+                                    [
+                                        Int,
+                                    ],
+                                    Empty,
+                                    Int,
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..34,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "leak",
+            params: [],
+            ret: Some(
+                Con(
+                    "Box",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    VarDecl(
+                        "x",
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 65..66,
+                        },
+                        Spanned {
+                            node: RecordCreate(
+                                "Box",
+                                [
+                                    (
+                                        "f",
+                                        Spanned {
+                                            node: Lam(
+                                                [
+                                                    Param {
+                                                        name: "n",
+                                                        ty: None,
+                                                        borrow: false,
+                                                        default: None,
+                                                    },
+                                                ],
+                                                Spanned {
+                                                    node: Bin(
+                                                        Add,
+                                                        Spanned {
+                                                            node: Var(
+                                                                "x",
+                                                            ),
+                                                            span: 87..88,
+                                                        },
+                                                        Spanned {
+                                                            node: Var(
+                                                                "n",
+                                                            ),
+                                                            span: 91..92,
+                                                        },
+                                                    ),
+                                                    span: 87..92,
+                                                },
+                                            ),
+                                            span: 79..92,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 69..94,
+                        },
+                    ),
+                ),
+                span: 56..94,
+            },
+            wheres: [],
+            span: 36..94,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "b",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "leak",
+                                ),
+                                span: 118..122,
+                            },
+                            [],
+                        ),
+                        span: 118..124,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 127..134,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: FieldAccess(
+                                                Spanned {
+                                                    node: Var(
+                                                        "b",
+                                                    ),
+                                                    span: 136..137,
+                                                },
+                                                "f",
+                                            ),
+                                            span: 135..140,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 1,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 141..142,
+                                            },
+                                        ],
+                                    ),
+                                    span: 135..143,
+                                },
+                            ],
+                        ),
+                        span: 127..144,
+                    },
+                ),
+                span: 110..144,
+            },
+            wheres: [],
+            span: 96..144,
+        },
+    ],
+}
+
+== types ==
+Type Error: `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
+   ╭─[ <source>:5:13 ]
+   │
+ 5 │   Box { f = \(n) -> x + n }
+   │             ──────┬──────  
+   │                   ╰──────── `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
+───╯

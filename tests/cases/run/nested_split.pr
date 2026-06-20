@@ -1,0 +1,18 @@
+fn classify(xs) =
+  match xs of
+    Cons(Nil, _) => 1
+    Cons(Cons(h, _), _) => h + 100
+    Nil => 0
+
+fn bxor(p) =
+  match p of
+    (true, false) => true
+    (false, true) => true
+    (_, _) => false
+
+fn main() =
+  println(classify([[7, 9], [8, 10]]))
+  println(classify(Cons(Nil, Nil)))
+  println(classify(Nil))
+  println(show(bxor((true, false))))
+  println(show(bxor((true, true))))

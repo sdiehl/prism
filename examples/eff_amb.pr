@@ -1,0 +1,32 @@
+effect Amb {
+  ctl choose(Int) : Int,
+  ctl reject(Unit) : Int
+}
+-- Nondeterminism by multishot resumption.
+--
+-- choose(n) offers a value in 0..n-1. reject() prunes a dead branch. The
+-- handler resumes the same continuation once per candidate and concatenates
+-- every outcome, so one straight-line function explores a whole search tree.
+-- Here k is an ordinary multishot closure.
+--
+-- triple(n) searches for Pythagorean triples a^2 + b^2 = c^2 with a <= b.
+
+fn triple(n) : !{Amb} Int =
+  let a = choose(n)
+  let b = choose(n)
+  let c = choose(n)
+  if a > 0 && b > 0 && a <= b && a * a + b * b == c * c then
+    a * 10000 + b * 100 + c
+  else
+    reject(())
+
+fn solutions(n) =
+  handle triple(n) with
+    choose(m, k) => flatten(map(\(i) -> k(i), range(0, m)))
+    reject(u, k) => Nil
+    return r => Cons(r, Nil)
+
+fn main() =
+  let sols = solutions(14)
+  println(length(sols))
+  println(sum(sols))

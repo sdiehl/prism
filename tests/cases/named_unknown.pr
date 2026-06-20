@@ -1,0 +1,5 @@
+-- A named argument must match a declared parameter.
+
+fn f(a, b := 0) = a + b
+
+fn main() = println(f(a := 1, z := 2))

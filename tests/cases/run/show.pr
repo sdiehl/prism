@@ -1,0 +1,8 @@
+fn main() =
+  let s = concat("a", concat("b", "c"))
+  println(s)
+  let label = concat(show_int(42), show_bool(true))
+  println(label)
+  println(if str_eq(s, "abc") then 1 else 0)
+  println(if str_eq(s, "abd") then 1 else 0)
+  println(str_len(concat(s, "de")))

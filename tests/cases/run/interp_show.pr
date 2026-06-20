@@ -1,0 +1,15 @@
+-- Holes render through show: records, lists, and effect ops under a handler.
+type Point = Point { x: Int, y: Int }
+
+effect Ask {
+  ctl ask(Unit) : Int
+}
+
+fn main() =
+  let p = Point { x = 1, y = 2 }
+  let xs = [1, 2, 3]
+  println("p = {p}")
+  println("xs = {xs}")
+  with handler
+    ask(u, k) => k(21)
+  println("answer = {ask(()) * 2}")

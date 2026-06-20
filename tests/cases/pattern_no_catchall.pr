@@ -1,0 +1,10 @@
+type Point = Point { x: Int, y: Int }
+
+pattern Diag(n) for Point =
+  view \(p) -> if p.x == p.y then Some(p.x) else None
+
+fn f(p : Point) : Int =
+  match p of
+    Diag(n) => n
+
+fn main() : Unit = println(f(Point { x = 1, y = 1 }))

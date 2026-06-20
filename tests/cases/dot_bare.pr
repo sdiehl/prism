@@ -1,0 +1,10 @@
+-- Bare `.name` is always record field access, never a zero-argument UFCS
+-- call: `p.norm1` looks for a field, so calling norm1 needs `p.norm1()`.
+
+type Point = Point { x: Int, y: Int }
+
+fn norm1(p : Point) : Int = p.x + p.y
+
+fn main() =
+  let p = Point { x = 1, y = 2 }
+  println(p.norm1)

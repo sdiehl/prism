@@ -1,0 +1,298 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/newtype.pr
+---
+== tokens ==
+VOpen Newtype UIdent("UserId") Eq UIdent("UserId") LParen KwInt RParen Deriving LParen UIdent("Show") Comma UIdent("Eq") RParen VSemi Newtype UIdent("Wrap") LParen Ident("a") RParen Eq UIdent("Wrap") LParen Ident("a") RParen VSemi Fn Ident("unwrap") LParen Ident("w") Colon UIdent("Wrap") LParen KwInt RParen RParen Colon KwInt Eq VOpen Match Ident("w") Of VOpen UIdent("Wrap") LParen Ident("x") RParen FatArrow Ident("x") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("u") Eq UIdent("UserId") LParen Int(IntLit { value: 7, suffix: None }) RParen VSemi Ident("print") LParen Ident("u") EqEq UIdent("UserId") LParen Int(IntLit { value: 7, suffix: None }) RParen RParen VSemi Ident("print") LParen Ident("unwrap") LParen UIdent("Wrap") LParen Ident("unwrap") LParen UIdent("Wrap") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen RParen RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "UserId",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "UserId",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [
+                (
+                    "Show",
+                    39..43,
+                ),
+                (
+                    "Eq",
+                    45..47,
+                ),
+            ],
+            newtype: true,
+            span: 0..48,
+        },
+        DataDecl {
+            name: "Wrap",
+            params: [
+                "a",
+            ],
+            ctors: [
+                Ctor {
+                    name: "Wrap",
+                    args: [
+                        Var(
+                            "a",
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: true,
+            span: 49..74,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "unwrap",
+            params: [
+                Param {
+                    name: "w",
+                    ty: Some(
+                        Con(
+                            "Wrap",
+                            [
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "w",
+                        ),
+                        span: 117..118,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Wrap",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 131..132,
+                                        },
+                                    ],
+                                ),
+                                span: 126..133,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 137..138,
+                            },
+                        },
+                    ],
+                ),
+                span: 111..138,
+            },
+            wheres: [],
+            span: 76..138,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "u",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "UserId",
+                                ),
+                                span: 162..168,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 7,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 169..170,
+                                },
+                            ],
+                        ),
+                        span: 162..171,
+                    },
+                    Spanned {
+                        node: Let(
+                            "_",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "print",
+                                        ),
+                                        span: 174..179,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Bin(
+                                                Eq,
+                                                Spanned {
+                                                    node: Var(
+                                                        "u",
+                                                    ),
+                                                    span: 180..181,
+                                                },
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "UserId",
+                                                            ),
+                                                            span: 185..191,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 7,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 192..193,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 185..194,
+                                                },
+                                            ),
+                                            span: 180..194,
+                                        },
+                                    ],
+                                ),
+                                span: 174..195,
+                            },
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "print",
+                                        ),
+                                        span: 198..203,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "unwrap",
+                                                    ),
+                                                    span: 204..210,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Call(
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "Wrap",
+                                                                ),
+                                                                span: 211..215,
+                                                            },
+                                                            [
+                                                                Spanned {
+                                                                    node: Call(
+                                                                        Spanned {
+                                                                            node: Var(
+                                                                                "unwrap",
+                                                                            ),
+                                                                            span: 216..222,
+                                                                        },
+                                                                        [
+                                                                            Spanned {
+                                                                                node: Call(
+                                                                                    Spanned {
+                                                                                        node: Var(
+                                                                                            "Wrap",
+                                                                                        ),
+                                                                                        span: 223..227,
+                                                                                    },
+                                                                                    [
+                                                                                        Spanned {
+                                                                                            node: Int(
+                                                                                                IntLit {
+                                                                                                    value: 5,
+                                                                                                    suffix: None,
+                                                                                                },
+                                                                                            ),
+                                                                                            span: 228..229,
+                                                                                        },
+                                                                                    ],
+                                                                                ),
+                                                                                span: 223..230,
+                                                                            },
+                                                                        ],
+                                                                    ),
+                                                                    span: 216..231,
+                                                                },
+                                                            ],
+                                                        ),
+                                                        span: 211..232,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 204..233,
+                                        },
+                                    ],
+                                ),
+                                span: 198..234,
+                            },
+                        ),
+                        span: 174..234,
+                    },
+                ),
+                span: 154..234,
+            },
+            wheres: [],
+            span: 140..234,
+        },
+    ],
+}
+
+== types ==
+Type Error: unknown class in deriving: Show
+   ╭─[ <source>:1:40 ]
+   │
+ 1 │ newtype UserId = UserId(Int) deriving (Show, Eq)
+   │                                        ──┬─  
+   │                                          ╰─── unknown class in deriving: Show
+───╯

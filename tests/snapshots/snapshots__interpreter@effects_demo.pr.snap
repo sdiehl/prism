@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/effects_demo.pr
+---
+22
+-1
+=> ()

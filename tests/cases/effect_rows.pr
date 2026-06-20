@@ -1,0 +1,16 @@
+effect Exn {
+  ctl raise(Int) : Int
+}
+
+fn risky(x) =
+  if x == 0 then
+    raise(99)
+  else
+    x
+
+fn safe(x) =
+  handle risky(x) with
+    raise(v, k) => 0 - v
+    return r => r
+
+fn main() = println(safe(0) + safe(7))

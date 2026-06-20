@@ -1,0 +1,10 @@
+opaque type Stack = Empty | Push(Int, Stack) deriving (Eq)
+
+pub fn empty() : Stack = Empty
+
+pub fn push(x : Int, s : Stack) : Stack = Push(x, s)
+
+pub fn top(s : Stack) : Int =
+  match s of
+    Empty => 0
+    Push(x, _) => x

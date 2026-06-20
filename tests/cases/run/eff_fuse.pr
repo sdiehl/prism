@@ -1,0 +1,23 @@
+-- A fused emit pipeline: an open tail-resumptive handler whose
+-- `fun give` clause re-performs `give` to the outer consumer. Evidence passing
+-- inlines every stage into direct forced-clause calls, so the producer ->
+-- transformer -> consumer chain runs as one loop with zero EOp cells, the
+-- fusion that intermediate-collection pipelines pay for. Output 10 20 30.
+effect Yield {
+  ctl give(Int) : Unit
+}
+
+fn produce() : !{Yield} Unit =
+  give(1)
+  give(2)
+  give(3)
+
+fn mapped() : !{Yield} Unit =
+  handle produce() with
+    fun give(x) => give(x * 10)
+    return r => r
+
+fn main() =
+  handle mapped() with
+    fun give(x) => println(x)
+    return r => r

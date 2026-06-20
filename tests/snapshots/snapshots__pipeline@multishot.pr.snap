@@ -1,0 +1,449 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/multishot.pr
+---
+== tokens ==
+VOpen Effect UIdent("Yield") LBrace Ctl Ident("yield") LParen KwInt RParen Colon KwBool RBrace VSemi Fn Ident("collect_bools") LParen RParen Eq VOpen Handle LParen Let Ident("a") Eq Ident("yield") LParen Int(IntLit { value: 1, suffix: None }) RParen In Let Ident("b") Eq Ident("yield") LParen Int(IntLit { value: 2, suffix: None }) RParen In Let Ident("c") Eq Ident("yield") LParen Int(IntLit { value: 3, suffix: None }) RParen In If Ident("a") Then If Ident("b") Then If Ident("c") Then Int(IntLit { value: 7, suffix: None }) Else Int(IntLit { value: 6, suffix: None }) Else Int(IntLit { value: 5, suffix: None }) Else Int(IntLit { value: 4, suffix: None }) RParen With VOpen Ident("yield") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("v") Gt Int(IntLit { value: 1, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("collect_bools") LParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Yield",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "yield",
+                    params: [
+                        Int,
+                    ],
+                    ret: Bool,
+                },
+            ],
+            span: 0..40,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "collect_bools",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Let(
+                            "a",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "yield",
+                                        ),
+                                        span: 81..86,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 87..88,
+                                        },
+                                    ],
+                                ),
+                                span: 81..89,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "b",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "yield",
+                                                ),
+                                                span: 105..110,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 2,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 111..112,
+                                                },
+                                            ],
+                                        ),
+                                        span: 105..113,
+                                    },
+                                    Spanned {
+                                        node: Let(
+                                            "c",
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "yield",
+                                                        ),
+                                                        span: 129..134,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Int(
+                                                                IntLit {
+                                                                    value: 3,
+                                                                    suffix: None,
+                                                                },
+                                                            ),
+                                                            span: 135..136,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 129..137,
+                                            },
+                                            Spanned {
+                                                node: If(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "a",
+                                                        ),
+                                                        span: 144..145,
+                                                    },
+                                                    Spanned {
+                                                        node: If(
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "b",
+                                                                ),
+                                                                span: 154..155,
+                                                            },
+                                                            Spanned {
+                                                                node: If(
+                                                                    Spanned {
+                                                                        node: Var(
+                                                                            "c",
+                                                                        ),
+                                                                        span: 164..165,
+                                                                    },
+                                                                    Spanned {
+                                                                        node: Int(
+                                                                            IntLit {
+                                                                                value: 7,
+                                                                                suffix: None,
+                                                                            },
+                                                                        ),
+                                                                        span: 171..172,
+                                                                    },
+                                                                    Spanned {
+                                                                        node: Int(
+                                                                            IntLit {
+                                                                                value: 6,
+                                                                                suffix: None,
+                                                                            },
+                                                                        ),
+                                                                        span: 178..179,
+                                                                    },
+                                                                ),
+                                                                span: 161..179,
+                                                            },
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 5,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 185..186,
+                                                            },
+                                                        ),
+                                                        span: 151..186,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 4,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 192..193,
+                                                    },
+                                                ),
+                                                span: 141..193,
+                                            },
+                                        ),
+                                        span: 121..193,
+                                    },
+                                ),
+                                span: 97..193,
+                            },
+                        ),
+                        span: 72..194,
+                    },
+                    [
+                        Op(
+                            "yield",
+                            [
+                                "v",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 219..220,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Bin(
+                                                Gt,
+                                                Spanned {
+                                                    node: Var(
+                                                        "v",
+                                                    ),
+                                                    span: 221..222,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 225..226,
+                                                },
+                                            ),
+                                            span: 221..226,
+                                        },
+                                    ],
+                                ),
+                                span: 219..227,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 244..245,
+                            },
+                        ),
+                    ],
+                ),
+                span: 65..245,
+            },
+            wheres: [],
+            span: 42..245,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 259..266,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "collect_bools",
+                                    ),
+                                    span: 267..280,
+                                },
+                                [],
+                            ),
+                            span: 267..282,
+                        },
+                    ],
+                ),
+                span: 259..283,
+            },
+            wheres: [],
+            span: 247..283,
+        },
+    ],
+}
+
+== types ==
+collect_bools : () -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn collect_bools() =
+  handle { return 1 to t@0; do yield(t@0) to a; return 2 to t@1; do yield(t@1) to b; return 3 to t@2; do yield(t@2) to c; return a to t@5; if t@5 then (return b to t@4; if t@4 then (return c to t@3; if t@3 then (return 7) else (return 6)) else (return 5)) else (return 4) } with { yield(v, k) => return v to t@6; return 1 to t@7; t@6 > t@7 to t@8; return k to t@9; (force t@9)(t@8), return r => return r }
+fn main() =
+  collect_bools() to t@10; print t@10 to t@11; print_nl
+
+== fbip (rc) ==
+fn collect_bools() =
+  handle { return 1 to t@0; do yield(t@0) to a; return 2 to t@1; do yield(t@1) to b; return 3 to t@2; do yield(t@2) to c; return a to t@5; if t@5 then (drop t@5 to _; return b to t@4; if t@4 then (drop t@4 to _; return c to t@3; if t@3 then (drop t@3 to _; return 7) else (drop t@3 to _; return 6)) else (drop t@4 to _; drop c to _; return 5)) else (drop t@5 to _; drop c to _; drop b to _; return 4) } with { yield(v, k) => return v to t@6; return 1 to t@7; t@6 > t@7 to t@8; return k to t@9; (force t@9)(t@8), return r => return r }
+fn main() =
+  collect_bools() to t@10; print t@10 to t@11; drop t@11 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_collect_bools() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  call void @prism_rc_inc(i64 %t2)
+  %t4 = call i64 @prism_apply_1(i64 %t2, i64 3)
+  call void @prism_rc_dec(i64 %t2)
+  call void @prism_rc_inc(i64 %t2)
+  %t6 = call i64 @prism_apply_1(i64 %t2, i64 5)
+  call void @prism_rc_dec(i64 %t2)
+  %t7 = call i64 @prism_apply_1(i64 %t2, i64 7)
+  call void @prism_rc_dec(i64 %t2)
+  %t8 = icmp ne i64 %t4, 1
+  br i1 %t8, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t4)
+  %t10 = icmp ne i64 %t6, 1
+  br i1 %t10, label %b3, label %b4
+
+b1:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_dec(i64 %t7)
+  call void @prism_rc_dec(i64 %t6)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  call void @prism_rc_dec(i64 %t6)
+  %t12 = icmp ne i64 %t7, 1
+  br i1 %t12, label %b6, label %b7
+
+b4:                                               ; preds = %b0
+  call void @prism_rc_dec(i64 %t6)
+  call void @prism_rc_dec(i64 %t7)
+  br label %b5
+
+b6:                                               ; preds = %b3
+  call void @prism_rc_dec(i64 %t7)
+  br label %b8
+
+b7:                                               ; preds = %b3
+  call void @prism_rc_dec(i64 %t7)
+  br label %b8
+
+b8:                                               ; preds = %b7, %b6
+  %t15 = phi i64 [ 15, %b6 ], [ 13, %b7 ]
+  br label %b5
+
+b5:                                               ; preds = %b4, %b8
+  %t18 = phi i64 [ %t15, %b8 ], [ 11, %b4 ]
+  br label %b2
+
+b2:                                               ; preds = %b1, %b5
+  %t22 = phi i64 [ %t18, %b5 ], [ 9, %b1 ]
+  ret i64 %t22
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_rc_inc(i64)
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_collect_bools()
+  call void @prism_print_int(i64 %t0)
+  call void @prism_rc_dec(i64 %t0)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  %t0 = and i64 %_p0, 3
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = icmp sgt i64 %_p0, 3
+  %t4 = zext i1 %t3 to i64
+  %t5 = shl i64 %t4, 1
+  %t6 = or i64 %t5, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t7 = call i64 @prism_rt_int_cmp(i64 %_p0, i64 3)
+  %t8 = icmp sgt i64 %t7, 0
+  %t9 = zext i1 %t8 to i64
+  %t10 = shl i64 %t9, 1
+  %t11 = or i64 %t10, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t12 = phi i64 [ %t6, %b0 ], [ %t11, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 3)
+  ret i64 %t12
+}
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+declare void @prism_apply_error()
+
+== run ==
+output: [4]
+result: ()

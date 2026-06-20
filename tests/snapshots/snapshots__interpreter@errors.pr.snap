@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/errors.pr
+---
+7
+-1
+100
+42
+300
+=> ()

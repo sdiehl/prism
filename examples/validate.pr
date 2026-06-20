@@ -1,0 +1,17 @@
+-- The `Fail` effect: an anonymous, recoverable failure. A validation body reads
+-- as a list of predicates, and the first failing `guard` short-circuits to the
+-- nearest failure context. The same failable computation is reified three ways
+-- with no new control flow: to a default, to an Option, to a Bool.
+
+fn valid_age(age) =
+  guard(age >= 0)
+  guard(age <= 150)
+  age
+
+fn main() =
+  println(default(\() -> valid_age(30), 0 - 1))
+  println(default(\() -> valid_age(0 - 5), 0 - 1))
+  println(succeeds(\() -> valid_age(200)))
+  println(succeeds(\() -> valid_age(42)))
+  println(unwrap_or(0, optional(\() -> valid_age(99))))
+  println(unwrap_or(0, optional(\() -> valid_age(0 - 1))))

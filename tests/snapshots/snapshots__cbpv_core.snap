@@ -1,0 +1,34 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::dump(\"core\", &src).unwrap()"
+---
+fn noisy(x) =
+  return x to t@0
+  print t@0 to t@1
+  print_nl
+  return x to t@2
+  return x to t@3
+  t@2 * t@3
+fn suspend(x) =
+  return thunk { \. return x to t@4; noisy(t@4) }
+fn force_twice(t) =
+  return t to t@5
+  (force t@5)() to t@7
+  return t to t@6
+  (force t@6)() to t@8
+  t@7 + t@8
+fn main() =
+  return 3 to t@9
+  suspend(t@9) to t
+  return 1 to t@10
+  print t@10 to t@11
+  print_nl
+  return t to t@12
+  force_twice(t@12) to t@13
+  print t@13 to t@14
+  print_nl
+  return 9 to t@15
+  suspend(t@15)
+  return 2 to t@16
+  print t@16 to t@17
+  print_nl

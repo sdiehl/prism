@@ -1,0 +1,23 @@
+{
+  "name": "tiny-prism-playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "lucide": "^0.469.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

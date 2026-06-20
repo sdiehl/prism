@@ -1,0 +1,267 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/option.pr
+---
+== tokens ==
+VOpen Type UIdent("Option") LParen Ident("a") RParen Eq UIdent("None") Bar UIdent("Some") LParen Ident("a") RParen VSemi Fn Ident("get") LParen Ident("d") Comma Ident("o") RParen Eq VOpen Match Ident("o") Of VOpen UIdent("None") FatArrow Ident("d") VSemi UIdent("Some") LParen Ident("x") RParen FatArrow Ident("x") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("get") LParen Int(IntLit { value: 0, suffix: None }) Comma UIdent("Some") LParen Int(IntLit { value: 42, suffix: None }) RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Option",
+            params: [
+                "a",
+            ],
+            ctors: [
+                Ctor {
+                    name: "None",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Some",
+                    args: [
+                        Var(
+                            "a",
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..31,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "get",
+            params: [
+                Param {
+                    name: "d",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "o",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "o",
+                        ),
+                        span: 55..56,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "None",
+                                    [],
+                                ),
+                                span: 64..68,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "d",
+                                ),
+                                span: 72..73,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Some",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 83..84,
+                                        },
+                                    ],
+                                ),
+                                span: 78..85,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 89..90,
+                            },
+                        },
+                    ],
+                ),
+                span: 49..90,
+            },
+            wheres: [],
+            span: 32..90,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 104..111,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "get",
+                                    ),
+                                    span: 112..115,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 116..117,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "Some",
+                                                ),
+                                                span: 119..123,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 42,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 124..126,
+                                                },
+                                            ],
+                                        ),
+                                        span: 119..127,
+                                    },
+                                ],
+                            ),
+                            span: 112..128,
+                        },
+                    ],
+                ),
+                span: 104..129,
+            },
+            wheres: [],
+            span: 92..129,
+        },
+    ],
+}
+
+== types ==
+get : forall a. (a, Option(a)) -> a
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn get(d, o) =
+  return o to t@0; case t@0 { None => return d | Some(x) => return x }
+fn main() =
+  return 0 to t@1; return 42 to t@2; return Some(t@2) to t@3; get(t@1, t@3) to t@4; print t@4 to t@5; print_nl
+
+== fbip (rc) ==
+fn get(d, o) =
+  return o to t@0; case t@0 { None => drop t@0 to _; return d | Some(x) => dup x to _; drop t@0 to _; drop d to _; return x }
+fn main() =
+  return 0 to t@1; return 42 to t@2; return Some(t@2) to t@3; get(t@1, t@3) to t@4; print t@4 to t@5; drop t@5 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_get(i64 %a0, i64 %a1) {
+entry:
+  %t0 = inttoptr i64 %a1 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %a1)
+  ret i64 %a0
+
+b3:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t4 = inttoptr i64 %3 to ptr
+  %t5 = load i64, ptr %t4, align 8
+  call void @prism_rc_inc(i64 %t5)
+  call void @prism_rc_dec(i64 %a1)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t5
+
+b1:                                               ; preds = %entry
+  unreachable
+}
+
+declare void @prism_rc_dec(i64)
+
+declare void @prism_rc_inc(i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 1, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 85, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call i64 @prism_get(i64 1, i64 %t3)
+  call void @prism_print_int(i64 %t4)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+== run ==
+output: [42]
+result: ()

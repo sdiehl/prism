@@ -1,0 +1,11 @@
+-- String interpolation: `{e}` holes desugar to concat/show calls,
+-- `\{` and `\}` escape literal braces.
+fn main() =
+  let n = 7
+  let who = "prism"
+  println("plain")
+  println("n = {n}, sum = {3 + 4}")
+  println("{1}{2}")
+  println("esc \{x\} ok")
+  println("hi {who}, n = {n}")
+  println("len = {who.str_len()}")

@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/pattern_views.pr
+---
+10
+2
+0
+=> ()

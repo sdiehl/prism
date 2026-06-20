@@ -1,0 +1,231 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/nonexhaustive_nested.pr
+---
+== tokens ==
+VOpen Type UIdent("List") LParen Ident("a") RParen Eq UIdent("Nil") Bar UIdent("Cons") LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("first_head") LParen Ident("xs") RParen Eq VOpen Match Ident("xs") Of VOpen UIdent("Cons") LParen UIdent("Cons") LParen Ident("h") Comma Ident("_") RParen Comma Ident("_") RParen FatArrow Ident("h") VSemi UIdent("Nil") FatArrow Int(IntLit { value: 0, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("first_head") LParen UIdent("Cons") LParen UIdent("Cons") LParen Int(IntLit { value: 1, suffix: None }) Comma UIdent("Nil") RParen Comma UIdent("Nil") RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "List",
+            params: [
+                "a",
+            ],
+            ctors: [
+                Ctor {
+                    name: "Nil",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Cons",
+                    args: [
+                        Var(
+                            "a",
+                        ),
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..37,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "first_head",
+            params: [
+                Param {
+                    name: "xs",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "xs",
+                        ),
+                        span: 67..69,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Cons",
+                                    [
+                                        Spanned {
+                                            node: Ctor(
+                                                "Cons",
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "h",
+                                                        ),
+                                                        span: 87..88,
+                                                    },
+                                                    Spanned {
+                                                        node: Wild,
+                                                        span: 90..91,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 82..92,
+                                        },
+                                        Spanned {
+                                            node: Wild,
+                                            span: 94..95,
+                                        },
+                                    ],
+                                ),
+                                span: 77..96,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "h",
+                                ),
+                                span: 100..101,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Nil",
+                                    [],
+                                ),
+                                span: 106..109,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 113..114,
+                            },
+                        },
+                    ],
+                ),
+                span: 61..114,
+            },
+            wheres: [],
+            span: 39..114,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 128..135,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "first_head",
+                                    ),
+                                    span: 136..146,
+                                },
+                                [
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "Cons",
+                                                ),
+                                                span: 147..151,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "Cons",
+                                                            ),
+                                                            span: 152..156,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 1,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 157..158,
+                                                            },
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "Nil",
+                                                                ),
+                                                                span: 160..163,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 152..164,
+                                                },
+                                                Spanned {
+                                                    node: Var(
+                                                        "Nil",
+                                                    ),
+                                                    span: 166..169,
+                                                },
+                                            ],
+                                        ),
+                                        span: 147..170,
+                                    },
+                                ],
+                            ),
+                            span: 136..171,
+                        },
+                    ],
+                ),
+                span: 128..172,
+            },
+            wheres: [],
+            span: 116..172,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `first_head`: non-exhaustive match: missing Cons(Nil, _)
+   ╭─[ <source>:4:3 ]
+   │
+ 4 │ ╭─▶   match xs of
+   ┆ ┆   
+ 6 │ ├─▶     Nil => 0
+   │ │                  
+   │ ╰────────────────── in `first_head`: non-exhaustive match: missing Cons(Nil, _)
+───╯

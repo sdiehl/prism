@@ -1,0 +1,20 @@
+-- Trailing `where` blocks attach helper definitions below a function, Haskell
+-- style. Bindings are non-recursive and let*-scoped: each sees the ones before
+-- it, desugaring to nested `let`s around the body. Signature constraints live on
+-- `given` (e.g. the prelude's `sort_by_ord ... given Ord(a)`), leaving `where`
+-- free for these blocks.
+
+fn roots(a, b, c) : (Float, Float) =
+    ((0.0 -. b +. d) /. two_a, (0.0 -. b -. d) /. two_a)
+  where
+    d = sqrt(b *. b -. 4.0 *. a *. c)
+    two_a = 2.0 *. a
+
+fn describe(n : Int) : String =
+    concat(parity, show(n))
+  where
+    parity = if n % 2 == 0 then "even " else "odd "
+
+fn main() =
+  println(roots(1.0, 0.0 -. 5.0, 6.0))
+  println(describe(0 - 42))

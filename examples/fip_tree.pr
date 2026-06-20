@@ -1,0 +1,44 @@
+-- FP^2 in-place tree relabel (Lorenzen/Leijen/Swierstra, ICFP 2023), statically
+-- checked. `relabel` walks the tree rebuilding every `Node`, and the reuse pass
+-- turns each rebuild into an in-place write over the cell it just dropped. The
+-- annotation is `fbip`, not `fip`: when the scrutinee is consumed by reuse
+-- Perceus dups each extracted field (subtree pointers, value), and a dup is
+-- non-linear.
+--
+-- A full red-black insert with rebalancing is NOT allocation-free here:
+-- rebalancing matches a deep pattern and rebuilds a DIFFERENT shape, so freed
+-- and rebuilt cells do not line up one for one and the reuse credit cannot cover
+-- every fresh node. relabel is the paper-sanctioned substitute, reusing every
+-- node and proven so.
+--
+-- Run with PRISM_REUSE_STATS=1 to see one reuse per node, PRISM_CHECK_LEAKS=1
+-- for zero live cells at exit.
+--
+-- Prints:
+--   45
+--   90
+
+type Tree = Leaf | Node(Tree, Int, Tree)
+
+-- Double every label in place: each `Node` matched is rebuilt over its own cell.
+fbip fn relabel(t) =
+  match t of
+    Leaf => Leaf
+    Node(l, x, r) => Node(relabel(l), x + x, relabel(r))
+
+fn sum_tree(t) =
+  match t of
+    Leaf => 0
+    Node(l, x, r) => sum_tree(l) + x + sum_tree(r)
+
+fn build(lo, hi) =
+  if lo >= hi then
+    Leaf
+  else
+    let mid = (lo + hi) / 2
+    Node(build(lo, mid), mid, build(mid + 1, hi))
+
+fn main() =
+  let t = build(0, 10)
+  println(sum_tree(t))
+  println(sum_tree(relabel(t)))

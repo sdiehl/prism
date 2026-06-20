@@ -1,0 +1,10 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn counter() : Int =\\n\\\n     \\x20 -- start at zero\\n\\\n     \\x20 var n := 0\\n\\\n     \\x20 -- bump it\\n\\\n     \\x20 n := n + 1\\n\\\n     \\x20 n\\n\")"
+---
+fn counter() : Int =
+  -- start at zero
+  var n := 0
+  -- bump it
+  n := n + 1
+  n

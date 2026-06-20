@@ -1,0 +1,13 @@
+-- Var reads reach show/print through the span-typed table, not re-inference:
+-- a String var interpolates verbatim, an Int var through show_int, and a
+-- ctor-typed var through its synthesized constructor printer.
+fn main() =
+  var line := "x"
+  var n := 5
+  var o := Some(3)
+  println("got {line}")
+  n := n + 2
+  println("n = {n}")
+  println("o = {o}")
+  o := None
+  println(show(o))

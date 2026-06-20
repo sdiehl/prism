@@ -1,0 +1,23 @@
+effect Log {
+  ctl log(Int) : Unit
+}
+effect Exn {
+  ctl raise(Int) : Int
+}
+
+fn work() : !{Log, Exn} Int =
+  log(1)
+  log(2)
+  let x = raise(0 - 7)
+  log(x)
+  x
+
+fn run() =
+  handle (handle work() with {
+      log(n, k) => let _ = println(n) in k(()),
+      return r => r
+    }) with
+    raise(code, k) => code
+    return r => r
+
+fn main() = println(run())

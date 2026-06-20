@@ -1,0 +1,39 @@
+effect Memo {
+  ctl recall(Int) : Option(Int),
+  ctl store(Int, Int) : Unit
+}
+-- Memoization as an effect, bolted on from the outside.
+--
+-- fib below is the textbook naive recursion: exponential, no cache, no clue
+-- that anything is being remembered. It just asks recall(n) before computing
+-- and announces store(n, r) after. Those are abstract operations with no
+-- meaning until a handler gives them one.
+--
+-- The handler is a parameter-passing handler (the eff_state.pr idiom) whose
+-- threaded state is a Map(Int, Int). recall looks the key up in the current
+-- map and resumes with the Option, store inserts and resumes with the grown
+-- map. So the cache lives entirely in the handler: fib gained memoization
+-- without a single change to its logic, and the same body would run un-cached
+-- under a handler that always answered recall with None.
+
+fn fib(n) : !{Memo} Int =
+  match recall(n) of
+    Some(v) => v
+    None =>
+      let r =
+        if n < 2 then
+          n
+        else
+          fib(n - 1) + fib(n - 2)
+      store(n, r)
+      r
+
+fn run_fib(n) =
+  let f =
+    handle fib(n) with
+      recall(key, k) => \(m) -> k(map_lookup(key, m))(m)
+      store(key, value, k) => \(m) -> k(())(map_insert(key, value, m))
+      return r => \(m) -> r
+  f(map_empty)
+
+fn main() : !{IO} Unit = println(run_fib(30))

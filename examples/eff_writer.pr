@@ -1,0 +1,23 @@
+effect Writer {
+  ctl tell(Int) : Unit
+}
+-- Writer: accumulate output on the side.
+--
+-- tell(n) appends to a log the producer never sees. The handler passes the
+-- accumulated list as a parameter: each tell conses onto it and resumes, and
+-- return hands back the final log. main sums the collected log.
+
+fn trace() : !{Writer} Unit =
+  tell(1)
+  tell(2)
+  tell(3)
+  tell(4)
+
+fn run_writer() =
+  let f =
+    handle trace() with
+      tell(m, k) => \(log) -> k(())(Cons(m, log))
+      return r => \(log) -> log
+  reverse(f(Nil))
+
+fn main() = println(sum(run_writer()))

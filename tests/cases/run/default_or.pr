@@ -1,0 +1,11 @@
+-- `??` falls back on failure and nests right; the fallback may itself be
+-- failable, letting its `Fail` escape to the next handler out.
+
+fn pick(xs, i, j) = xs.at_list(i) ?? xs.at_list(j) ?? 0 - 1
+
+fn main() =
+  let xs = [5, 6, 7]
+  println(pick(xs, 1, 0))
+  println(pick(xs, 9, 2))
+  println(pick(xs, 9, 9))
+  println(force(map_lookup(2, map_from_list([(1, 100), (2, 200)]))) ?? 0)

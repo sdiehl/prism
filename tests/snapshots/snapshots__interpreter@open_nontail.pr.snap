@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/open_nontail.pr
+---
+10
+10
+40
+140
+240
+=> ()

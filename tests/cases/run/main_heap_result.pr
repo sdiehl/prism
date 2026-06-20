@@ -1,0 +1,3 @@
+-- main returns a heap cell. The top-level result is read for its exit code
+-- (0 for a heap pointer) and must then be freed, not leaked.
+fn main() = "result"

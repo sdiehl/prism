@@ -1,0 +1,598 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/records.pr
+---
+== tokens ==
+VOpen Type UIdent("Point") Eq UIdent("Point") LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace VSemi Fn Ident("make") LParen Ident("a") Colon KwInt Comma Ident("b") Colon KwInt RParen Colon UIdent("Point") Eq UIdent("Point") LBrace Ident("x") Eq Ident("a") Comma Ident("y") Eq Ident("b") RBrace VSemi Fn Ident("sum_coords") LParen Ident("p") Colon UIdent("Point") RParen Colon KwInt Eq VOpen Match Ident("p") Of VOpen UIdent("Point") LBrace Ident("x") Eq Ident("px") Comma Ident("y") Eq Ident("py") RBrace FatArrow Ident("px") Plus Ident("py") VClose VClose VSemi Fn Ident("shift_x") LParen Ident("p") Colon UIdent("Point") Comma Ident("dx") Colon KwInt RParen Colon UIdent("Point") Eq UIdent("Point") LBrace DotDot Ident("p") Comma Ident("x") Eq Ident("dx") RBrace VSemi Fn Ident("main") LParen RParen Colon KwUnit Eq VOpen Let Ident("p") Eq Ident("make") LParen Int(IntLit { value: 3, suffix: None }) Comma Int(IntLit { value: 4, suffix: None }) RParen VSemi Let Ident("s") Eq Ident("sum_coords") LParen Ident("p") RParen VSemi Let Ident("q") Eq Ident("shift_x") LParen Ident("p") Comma Int(IntLit { value: 10, suffix: None }) RParen VSemi Let Ident("t") Eq Ident("sum_coords") LParen Ident("q") RParen VSemi Ident("println") LParen Ident("s") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Point",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Point",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "x",
+                                Int,
+                            ),
+                            (
+                                "y",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..37,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "make",
+            params: [
+                Param {
+                    name: "a",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "b",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Point",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: RecordCreate(
+                    "Point",
+                    [
+                        (
+                            "x",
+                            Spanned {
+                                node: Var(
+                                    "a",
+                                ),
+                                span: 86..87,
+                            },
+                        ),
+                        (
+                            "y",
+                            Spanned {
+                                node: Var(
+                                    "b",
+                                ),
+                                span: 93..94,
+                            },
+                        ),
+                    ],
+                ),
+                span: 74..96,
+            },
+            wheres: [],
+            span: 38..96,
+        },
+        Decl {
+            name: "sum_coords",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Point",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "p",
+                        ),
+                        span: 139..140,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Record(
+                                    "Point",
+                                    [
+                                        (
+                                            "x",
+                                            Spanned {
+                                                node: Var(
+                                                    "px",
+                                                ),
+                                                span: 160..162,
+                                            },
+                                        ),
+                                        (
+                                            "y",
+                                            Spanned {
+                                                node: Var(
+                                                    "py",
+                                                ),
+                                                span: 168..170,
+                                            },
+                                        ),
+                                    ],
+                                    false,
+                                ),
+                                span: 148..172,
+                            },
+                            body: Spanned {
+                                node: Bin(
+                                    Add,
+                                    Spanned {
+                                        node: Var(
+                                            "px",
+                                        ),
+                                        span: 176..178,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "py",
+                                        ),
+                                        span: 181..183,
+                                    },
+                                ),
+                                span: 176..183,
+                            },
+                        },
+                    ],
+                ),
+                span: 133..183,
+            },
+            wheres: [],
+            span: 98..183,
+        },
+        Decl {
+            name: "shift_x",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Point",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "dx",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Point",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: RecordUpdate(
+                    Spanned {
+                        node: Var(
+                            "p",
+                        ),
+                        span: 237..238,
+                    },
+                    "Point",
+                    [
+                        (
+                            "x",
+                            Spanned {
+                                node: Var(
+                                    "dx",
+                                ),
+                                span: 244..246,
+                            },
+                        ),
+                    ],
+                ),
+                span: 227..248,
+            },
+            wheres: [],
+            span: 185..248,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "p",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "make",
+                                ),
+                                span: 279..283,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 3,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 284..285,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 4,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 287..288,
+                                },
+                            ],
+                        ),
+                        span: 279..289,
+                    },
+                    Spanned {
+                        node: Let(
+                            "s",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "sum_coords",
+                                        ),
+                                        span: 300..310,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "p",
+                                            ),
+                                            span: 311..312,
+                                        },
+                                    ],
+                                ),
+                                span: 300..313,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "q",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "shift_x",
+                                                ),
+                                                span: 324..331,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Var(
+                                                        "p",
+                                                    ),
+                                                    span: 332..333,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 10,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 335..337,
+                                                },
+                                            ],
+                                        ),
+                                        span: 324..338,
+                                    },
+                                    Spanned {
+                                        node: Let(
+                                            "t",
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "sum_coords",
+                                                        ),
+                                                        span: 349..359,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Var(
+                                                                "q",
+                                                            ),
+                                                            span: 360..361,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 349..362,
+                                            },
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "println",
+                                                        ),
+                                                        span: 365..372,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Var(
+                                                                "s",
+                                                            ),
+                                                            span: 373..374,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 365..375,
+                                            },
+                                        ),
+                                        span: 341..375,
+                                    },
+                                ),
+                                span: 316..375,
+                            },
+                        ),
+                        span: 292..375,
+                    },
+                ),
+                span: 271..375,
+            },
+            wheres: [],
+            span: 250..375,
+        },
+    ],
+}
+
+== types ==
+make : (Int, Int) -> Point
+sum_coords : (Point) -> Int
+shift_x : (Point, Int) -> Point
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn make(a, b) =
+  return a to t@0; return b to t@1; return Point(t@0, t@1)
+fn sum_coords(p) =
+  return p to t@2; case t@2 { Point(px, py) => return px to t@3; return py to t@4; t@3 + t@4 }
+fn shift_x(p, dx) =
+  return p to t@5; case t@5 { Point(t@6, _) => return t@6 } to t@6; case t@5 { Point(_, t@7) => return t@7 } to t@7; return dx to t@8; return Point(t@8, t@7)
+fn main() =
+  return 3 to t@9; return 4 to t@10; make(t@9, t@10) to p; return p to t@11; sum_coords(t@11) to s; return p to t@12; return 10 to t@13; shift_x(t@12, t@13) to q; return q to t@14; sum_coords(t@14) to t; return s to t@15; print t@15 to t@16; print_nl
+
+== fbip (rc) ==
+fn make(a, b) =
+  return a to t@0; return b to t@1; return Point(t@0, t@1)
+fn sum_coords(p) =
+  return p to t@2; case t@2 { Point(px, py) => dup px to _; dup py to _; drop t@2 to _; return px to t@3; return py to t@4; t@3 + t@4 }
+fn shift_x(p, dx) =
+  return p to t@5; dup t@5 to _; case t@5 { Point(t@6, _) => dup t@6 to _; drop t@5 to _; return t@6 } to t@6; drop t@6 to _; case t@5 { Point(_, t@7) => dup t@7 to _; drop t@5 to _; return t@7 } to t@7; return dx to t@8; return Point(t@8, t@7)
+fn main() =
+  return 3 to t@9; return 4 to t@10; make(t@9, t@10) to p; dup p to _; return p to t@11; sum_coords(t@11) to s; return p to t@12; return 10 to t@13; shift_x(t@12, t@13) to q; return q to t@14; sum_coords(t@14) to t; drop t to _; return s to t@15; print t@15 to t@16; drop t@16 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_make(i64 %a0, i64 %a1) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 2)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %a0, ptr %t2, align 8
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 32
+  %t3 = inttoptr i64 %5 to ptr
+  store i64 %a1, ptr %t3, align 8
+  %t4 = ptrtoint ptr %t0 to i64
+  ret i64 %t4
+}
+
+declare ptr @prism_alloc(i64)
+
+define i64 @prism_sum_coords(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 32
+  %t5 = inttoptr i64 %5 to ptr
+  %t6 = load i64, ptr %t5, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_inc(i64 %t6)
+  call void @prism_rc_dec(i64 %a0)
+  %t10 = and i64 %t4, %t6
+  %t11 = and i64 %t10, 1
+  %t12 = icmp eq i64 %t11, 1
+  br i1 %t12, label %b3, label %b4
+
+b1:                                               ; preds = %entry
+  unreachable
+
+b3:                                               ; preds = %b2
+  %t13 = ashr i64 %t4, 1
+  %t14 = ashr i64 %t6, 1
+  %t15 = add i64 %t13, %t14
+  %t16 = shl i64 %t15, 1
+  %t17 = ashr i64 %t16, 1
+  %t18 = icmp eq i64 %t17, %t15
+  br i1 %t18, label %b6, label %b4
+
+b4:                                               ; preds = %b3, %b2
+  %t20 = call i64 @prism_rt_int_add(i64 %t4, i64 %t6)
+  br label %b5
+
+b6:                                               ; preds = %b3
+  %t19 = or i64 %t16, 1
+  br label %b5
+
+b5:                                               ; preds = %b4, %b6
+  %t21 = phi i64 [ %t19, %b6 ], [ %t20, %b4 ]
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_dec(i64 %t6)
+  ret i64 %t21
+}
+
+declare void @prism_rc_inc(i64)
+
+declare void @prism_rc_dec(i64)
+
+declare i64 @prism_rt_int_add(i64, i64)
+
+define i64 @prism_shift_x(i64 %a0, i64 %a1) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  %t1 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t1 to i64
+  %1 = add i64 %0, 8
+  %t2 = inttoptr i64 %1 to ptr
+  %t3 = load i64, ptr %t2, align 8
+  switch i64 %t3, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t1 to i64
+  %3 = add i64 %2, 24
+  %t4 = inttoptr i64 %3 to ptr
+  %t5 = load i64, ptr %t4, align 8
+  call void @prism_rc_inc(i64 %t5)
+  call void @prism_rc_dec(i64 %a0)
+  br label %b0
+
+b1:                                               ; preds = %entry
+  unreachable
+
+b0:                                               ; preds = %b2
+  %t8 = phi i64 [ %t5, %b2 ]
+  call void @prism_rc_dec(i64 %t8)
+  %t10 = inttoptr i64 %a0 to ptr
+  %4 = ptrtoint ptr %t10 to i64
+  %5 = add i64 %4, 8
+  %t11 = inttoptr i64 %5 to ptr
+  %t12 = load i64, ptr %t11, align 8
+  switch i64 %t12, label %b4 [
+    i64 0, label %b5
+  ]
+
+b5:                                               ; preds = %b0
+  %6 = ptrtoint ptr %t10 to i64
+  %7 = add i64 %6, 32
+  %t13 = inttoptr i64 %7 to ptr
+  %t14 = load i64, ptr %t13, align 8
+  call void @prism_rc_inc(i64 %t14)
+  call void @prism_rc_dec(i64 %a0)
+  br label %b3
+
+b4:                                               ; preds = %b0
+  unreachable
+
+b3:                                               ; preds = %b5
+  %t17 = phi i64 [ %t14, %b5 ]
+  %t18 = call ptr @prism_alloc(i64 2)
+  %8 = ptrtoint ptr %t18 to i64
+  %9 = add i64 %8, 8
+  %t19 = inttoptr i64 %9 to ptr
+  store i64 0, ptr %t19, align 8
+  %10 = ptrtoint ptr %t18 to i64
+  %11 = add i64 %10, 24
+  %t20 = inttoptr i64 %11 to ptr
+  store i64 %a1, ptr %t20, align 8
+  %12 = ptrtoint ptr %t18 to i64
+  %13 = add i64 %12, 32
+  %t21 = inttoptr i64 %13 to ptr
+  store i64 %t17, ptr %t21, align 8
+  %t22 = ptrtoint ptr %t18 to i64
+  ret i64 %t22
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_make(i64 7, i64 9)
+  call void @prism_rc_inc(i64 %t0)
+  %t2 = call i64 @prism_sum_coords(i64 %t0)
+  %t3 = call i64 @prism_shift_x(i64 %t0, i64 21)
+  %t4 = call i64 @prism_sum_coords(i64 %t3)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_print_int(i64 %t2)
+  call void @prism_rc_dec(i64 %t2)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+== run ==
+output: [7]
+result: ()

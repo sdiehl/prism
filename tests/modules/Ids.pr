@@ -1,0 +1,5 @@
+pub newtype UserId = UserId(Int) deriving (Eq)
+
+pub fn mk(n : Int) : UserId = UserId(n)
+
+pub fn same(a : UserId, b : UserId) : Bool = a == b

@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/fail_guard.pr
+---
+1
+2
+3
+99
+1
+0
+=> ()

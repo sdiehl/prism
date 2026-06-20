@@ -1,0 +1,43 @@
+-- Deconstructors: update paths and view/make patterns. `{ g | a.b.c = v }`
+-- rebuilds each level of the spine. On a uniquely owned value Perceus reuses
+-- every cell on the path (pointer writes, no allocation). A `pattern`
+-- declaration names a view (taking a value apart in a match) and an optional
+-- make (building one in expression position).
+--
+-- Expected output:
+-- 30
+-- 4
+-- 95
+-- 110
+-- 7
+-- 5
+-- 9
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Player = Player { pos: Vec2, hp: Int }
+
+type Game = Game { player: Player, score: Int }
+
+pattern Axis(n) for Vec2 =
+  view \(v) -> if v.y == 0 then Some(v.x) elif v.x == 0 then Some(v.y) else None
+  make \(n) -> Vec2 { x = n, y = 0 }
+
+-- A view arm matches like a guard. The catchall keeps the match exhaustive.
+fn norm(v : Vec2) : Int =
+  match v of
+    Axis(n) => n
+    _ => v.x + v.y
+
+fn main() : !{IO} Unit =
+  let g =
+    Game { player = Player { pos = Vec2 { x = 3, y = 4 }, hp = 100 }, score = 0 }
+  let g2 = { g | player.pos.x = 30, player.hp = 95, score = 110 }
+  println(g2.player.pos.x)
+  println(g2.player.pos.y)
+  println(g2.player.hp)
+  println(g2.score)
+  println(norm(Axis(7)))
+  println(norm(Vec2 { x = 2, y = 3 }))
+  let a = Axis(9)
+  println(a.x + a.y)

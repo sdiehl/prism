@@ -1,0 +1,7 @@
+-- Deep tail-call optimization: a million iterations in constant stack.
+fn loop(n, acc) =
+  if n == 0 then
+    acc
+  else
+    loop(n - 1, acc + n)
+fn main() = println(loop(1000000, 0))

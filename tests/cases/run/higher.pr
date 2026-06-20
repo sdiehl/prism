@@ -1,0 +1,15 @@
+fn double(x) = x * 2
+
+fn inc(x) = x + 1
+
+fn square(x) = x * x
+
+fn main() =
+  let f = compose(double, inc)
+  let g = compose(square, f)
+  println(f(5))
+  println(g(3))
+  println(sum(map(f, range(1, 6))))
+  let evens = filter(\(x) -> even(x), range(1, 11))
+  println(sum(evens))
+  println(sum(filter(\(x) -> odd(x), range(1, 11))))

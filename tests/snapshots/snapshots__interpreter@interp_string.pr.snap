@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/interp_string.pr
+---
+ab
+}x
+"x
+3!
+xyz
+=> ()

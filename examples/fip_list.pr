@@ -1,0 +1,52 @@
+-- FP^2 in-place list operations (Lorenzen/Leijen/Swierstra, ICFP 2023),
+-- statically checked. The `fbip` annotation makes the compiler PROVE the
+-- function allocates no fresh cell: every `Cons` it builds reuses one it just
+-- matched and dropped. Run with PRISM_REUSE_STATS=1 to watch the reuse hits, or
+-- PRISM_CHECK_LEAKS=1 to confirm zero live cells at exit.
+--
+-- These are fbip, not fip, because Perceus dups each extracted field (`h`) when
+-- the scrutinee is consumed by reuse, and a dup is non-linear. The reuse-credit
+-- refinement is what lets `rev_onto` pass: its rebuilt `Cons` is not in tail
+-- position, so the freed token must travel past several binds to reach it.
+--
+-- Prints:
+--   10
+--   6
+--   22
+
+-- Reverse onto an accumulator, the canonical FBIP. Each input `Cons` is matched,
+-- freed, and immediately reused as the next accumulator cell, so the reversal
+-- runs in place with zero allocation.
+fbip fn rev_onto(xs, acc) =
+  match xs of
+    Nil => acc
+    Cons(h, t) => rev_onto(t, Cons(h, acc))
+
+-- The seeding wrapper is not fbip: that initial `Nil` is a genuine fresh
+-- allocation with no cell to reuse, so it stays un-annotated.
+fn reverse_ip(xs) = rev_onto(xs, Nil)
+
+-- Spine-rebuilding map: drop each `Cons`, rebuild it around the bumped head.
+fbip fn bump(xs) =
+  match xs of
+    Nil => Nil
+    Cons(h, t) => Cons(h + 1, bump(t))
+
+-- Saturating transform: rebuild every cell, head chosen by a test. Both `if`
+-- branches end in a `Cons` reusing the same freed cell, so the reuse credit is
+-- spent exactly once on every path. (A `filter` that DROPS cells could not be
+-- fbip: the discard path frees a cell with no local allocation to reuse, and
+-- this runtime has no cross-call reuse credit, so it would allocate.)
+fbip fn cap_at(xs) =
+  match xs of
+    Nil => Nil
+    Cons(h, t) =>
+      if h > 9 then
+        Cons(9, cap_at(t))
+      else
+        Cons(h, cap_at(t))
+
+fn main() =
+  println(sum(reverse_ip([1, 2, 3, 4])))
+  println(sum(bump([1, 1, 1])))
+  println(sum(cap_at([1, 20, 3, 40])))

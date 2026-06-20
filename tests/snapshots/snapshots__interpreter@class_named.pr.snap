@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/class_named.pr
+---
+-1
+1
+1
+2
+3
+3
+2
+1
+=> ()

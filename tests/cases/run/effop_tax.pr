@@ -1,0 +1,21 @@
+-- A closed, single-effect handler whose clause is tail-resumptive: `ask`
+-- resumes exactly once, in tail position, with the resumption never captured
+-- in a closure. This is exactly what the direct-call fast path
+-- lowers without a free monad, so PRISM_EFFOP_STATS must report zero EOp cells;
+-- the gate ratchets on that, catching any regression back to the monadic path.
+effect Ask {
+  ctl ask(Unit) : Int
+}
+
+fn sum_env(n) : !{Ask} Int =
+  if n == 0 then
+    0
+  else
+    ask(()) + sum_env(n - 1)
+
+fn main() =
+  let r =
+    handle sum_env(100) with
+      ask(u, k) => k(2)
+      return x => x
+  println(r)

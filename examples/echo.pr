@@ -1,0 +1,17 @@
+-- cat -n: number each line of stdin.
+--
+-- read_line returns "" at end of input, the loop's stopping condition. Each
+-- line prints with its 1-based number. The recursion is the loop, the argument
+-- is the line counter, IO is confined to cat().
+--
+-- Input fixture (echo.in): three lines of text.
+
+fn cat(n) : !{IO} Unit =
+  let line = read_line()
+  if str_eq(line, "") then
+    ()
+  else
+    println(concat(show_int(n), concat("  ", line)))
+    cat(n + 1)
+
+fn main() : !{IO} Unit = cat(1)

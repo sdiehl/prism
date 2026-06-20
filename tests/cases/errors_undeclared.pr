@@ -1,0 +1,1 @@
+fn main() = println(try 1 catch { Malformed(m) => 2 })

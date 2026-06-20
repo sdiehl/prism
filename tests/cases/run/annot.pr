@@ -1,0 +1,4 @@
+fn main() =
+  println((1 : Int) + 2)
+  println(show(([] : List(Int))))
+  println((\(x) -> x : (Int) -> Int)(41) + 1)

@@ -1,0 +1,11 @@
+-- Arbitrary-precision Int. An unsuffixed literal is a mathematical integer:
+-- an immediate word while small, a limb cell once it outgrows 63 bits.
+-- pow and factorial work unchanged. Ord(Int) keys a Map with plain comparisons.
+
+fn main() : !{IO} Unit =
+  println(factorial(50))
+  println(pow(2, 100))
+  let m = map_from_list([(3, "three"), (1, "one"), (2, "two")])
+  println(map_size(m))
+  println(unwrap_or("?", map_lookup(2, m)))
+  println(unwrap_or("?", map_lookup(pow(10, 30), m)))

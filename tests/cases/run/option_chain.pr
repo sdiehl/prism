@@ -1,0 +1,6 @@
+fn safe_head(xs) = head(xs)
+
+fn main() =
+  let r =
+    and_then(\(x) -> if x > 3 then Some(x * 10) else None, safe_head(range(5, 10)))
+  println(unwrap_or(0, r))

@@ -1,0 +1,15 @@
+type Point = Point { x: Int, y: Int }
+fn make(a : Int, b : Int) : Point = Point { x = a, y = b }
+
+fn sum_coords(p : Point) : Int =
+  match p of
+    Point { x = px, y = py } => px + py
+
+fn shift_x(p : Point, dx : Int) : Point = Point { ..p, x = dx }
+
+fn main() : Unit =
+  let p = make(3, 4)
+  let s = sum_coords(p)
+  let q = shift_x(p, 10)
+  let t = sum_coords(q)
+  println(s)

@@ -1,0 +1,9 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn  main ( ) =\\n\\\n     \\x20 -- leading\\n\\\n     \\x20 let   x  =  1\\n\\\n     \\x20 -- trailing\\n\\\n     \\x20 x\\n\")"
+---
+fn main() =
+  -- leading
+  let x = 1
+  -- trailing
+  x

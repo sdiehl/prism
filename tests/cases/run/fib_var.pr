@@ -1,0 +1,15 @@
+fn fib2(n : Int) : Int =
+  var x := 0
+  var y := 1
+  repeat(n) fn
+    let t = x + y
+    x := y
+    y := t
+  x
+
+fn main() =
+  println(fib2(0))
+  println(fib2(1))
+  println(fib2(5))
+  println(fib2(10))
+  println(fib2(20))

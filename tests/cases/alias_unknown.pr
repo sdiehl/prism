@@ -1,0 +1,7 @@
+effect Tick {
+  ctl tick(Unit) : Int
+}
+
+alias App = {Tick, Missing}
+
+fn main() = println(1)

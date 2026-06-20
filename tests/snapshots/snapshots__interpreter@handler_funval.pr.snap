@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/handler_funval.pr
+---
+999
+10
+41
+41
+51
+114
+=> ()

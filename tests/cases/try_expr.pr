@@ -1,0 +1,9 @@
+fn half(n) =
+  if n % 2 == 0 then
+    Ok(n / 2)
+  else
+    Err("odd")
+
+fn bad(n) = Ok(half(n)? + 1)
+
+fn main() = println(0)

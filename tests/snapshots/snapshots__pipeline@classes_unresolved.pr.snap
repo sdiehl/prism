@@ -1,0 +1,160 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/classes_unresolved.pr
+---
+== tokens ==
+VOpen Type UIdent("Color") Eq UIdent("Red") Bar UIdent("Green") Bar UIdent("Blue") VSemi Class UIdent("Eq2") LParen Ident("a") RParen LBrace Ident("eq2") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool RBrace VSemi Instance Ident("eqInt2") Colon UIdent("Eq2") LParen KwInt RParen LBrace Fn Ident("eq2") LParen Ident("x") Comma Ident("y") RParen Eq Ident("x") EqEq Ident("y") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("eq2") LParen UIdent("Red") Comma UIdent("Blue") RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Color",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Red",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Green",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Blue",
+                    args: [],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..31,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "Eq2",
+            param: "a",
+            methods: [
+                (
+                    "eq2",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Empty,
+                        Bool,
+                    ),
+                ),
+            ],
+            span: 33..72,
+        },
+    ],
+    instances: [
+        InstanceDecl {
+            name: "eqInt2",
+            class: "Eq2",
+            head: Int,
+            context: [],
+            methods: [
+                Decl {
+                    name: "eq2",
+                    params: [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                        Param {
+                            name: "y",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    ret: None,
+                    eff: None,
+                    constraints: [],
+                    body: Spanned {
+                        node: Bin(
+                            Eq,
+                            Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 120..121,
+                            },
+                            Spanned {
+                                node: Var(
+                                    "y",
+                                ),
+                                span: 125..126,
+                            },
+                        ),
+                        span: 120..126,
+                    },
+                    wheres: [],
+                    span: 105..126,
+                },
+            ],
+            span: 74..128,
+        },
+    ],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "eq2",
+                        ),
+                        span: 142..145,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "Red",
+                            ),
+                            span: 146..149,
+                        },
+                        Spanned {
+                            node: Var(
+                                "Blue",
+                            ),
+                            span: 151..155,
+                        },
+                    ],
+                ),
+                span: 142..156,
+            },
+            wheres: [],
+            span: 130..156,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: no instance for Eq2(Color)
+    ╭─[ <source>:11:13 ]
+    │
+ 11 │ fn main() = eq2(Red, Blue)
+    │             ─┬─  
+    │              ╰─── in `main`: no instance for Eq2(Color)
+────╯

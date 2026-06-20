@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/block_stmts.pr
+---
+100
+2
+4
+6
+8
+21
+=> ()

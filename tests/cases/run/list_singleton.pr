@@ -1,0 +1,8 @@
+instance ordRev : Ord(Int) {
+  fn cmp(x, y) = int_cmp(y, x)
+}
+
+fn main() =
+  println(show([7]))
+  println(show([[1], [2, 3]]))
+  println(show(sort_by_ord[ordRev]([2, 7])))

@@ -1,0 +1,7 @@
+class Eq(a) {
+  eq : (a, a) -> Bool
+}
+
+type Foo = A | B deriving (Eq, Monoid)
+
+fn main() = A

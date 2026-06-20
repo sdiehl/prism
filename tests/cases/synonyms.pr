@@ -1,0 +1,13 @@
+alias Pair(a) = (a, a)
+alias Pairs(a) = Pair(Pair(a))
+alias Count = Int
+
+fn fst(p : Pair(Int)) : Int =
+  match p of
+    (a, b) => a
+
+fn quad(x : Count) : Pairs(Int) = ((x, x), (x, x))
+
+fn main() =
+  match quad(3) of
+    (l, r) => print(fst(l))

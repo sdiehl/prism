@@ -1,0 +1,5 @@
+fn twice(f, x) = f(f(x))
+
+fn inc(x) = x + 1
+
+fn main() = println(twice(inc, 0))

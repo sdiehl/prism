@@ -1,0 +1,9 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"-- module header\\n\\\n     fn first() : Int = 1\\n\\\n     -- between declarations\\n\\\n     fn second() : Int = 2\\n\\\n     -- dangling tail comment\\n\")"
+---
+-- module header
+fn first() : Int = 1
+-- between declarations
+fn second() : Int = 2
+-- dangling tail comment

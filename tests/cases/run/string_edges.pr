@@ -1,0 +1,18 @@
+-- Out-of-range and garbage inputs to the string builtins: substring clamps,
+-- char_at yields -1, parse_int yields None. Interp and native must agree.
+
+fn main() =
+  let s = "héllo"
+  println(substring(s, 10, 5))
+  println(substring(s, 3, 100))
+  println(substring(s, 0 - 2, 3))
+  println(substring(s, 1, 0 - 4))
+  println(char_at(s, 1))
+  println(char_at(s, 5))
+  println(char_at(s, 0 - 1))
+  println(parse_int("abc"))
+  println(parse_int("12abc"))
+  println(parse_int("  42  "))
+  println(parse_int("-7"))
+  println(parse_int(""))
+  println(parse_int("99999999999999999999"))

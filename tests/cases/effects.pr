@@ -1,0 +1,32 @@
+effect Exn {
+  ctl raise(Int) : Int
+}
+effect Ask {
+  ctl ask(Unit) : Int
+}
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+
+fn catch_exn() =
+  handle raise(42) with
+    raise(v, k) => v
+    return r => r
+
+fn ask_example() =
+  handle ask(()) with
+    ask(v, k) => k(99)
+    return r => r
+
+fn state_example() =
+  handle let a = get(()) in let _ = put(a + 1) in get(()) with
+    get(v, k) => k(10)
+    put(v, k) => k(())
+    return r => r
+
+fn main() =
+  let a = catch_exn()
+  let b = ask_example()
+  let c = state_example()
+  println(a + b + c)

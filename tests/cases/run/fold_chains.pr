@@ -1,0 +1,16 @@
+-- Fold-consumer fusion (effect_lower/state.rs). Every
+-- line drives the state-threading pass: a fold consumer (ssum/sfold/scollect)
+-- reads through the re-emitting transformers smap/skeep with the accumulator
+-- threaded into each, so the chain fuses to one loop. Lists from scollect are
+-- summed or measured, pinning the element type so the output stays scalar.
+fn double(n) = n * 2
+
+fn main() =
+  println(srange(1, 6).smap(double).ssum())
+  println(srange(1, 10).smap(double).skeep(\(x) -> x > 6).ssum())
+  println(srange(1, 5).smap(double).smap(\(x) -> x + 1).ssum())
+  println(sfold(srange(1, 6), 1, \(acc, x) -> acc * x))
+  println(length(srange(0, 20).skeep(even).scollect()))
+  println(sum(srange(1, 5).smap(double).scollect()))
+  println(srange(4, 4).ssum())
+  println(srange(1, 5).skeep(\(x) -> x > 100).ssum())

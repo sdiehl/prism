@@ -1,0 +1,9 @@
+error NotFound(String)
+
+fn lookup(k) =
+  if k == "x" then
+    1
+  else
+    throw NotFound(k)
+
+fn main() = println(lookup("y"))

@@ -1,0 +1,50 @@
+fn classify(xs) =
+  match xs of
+    Cons(h, t) if h > 10 => "big"
+    Cons(h, t) if h > 0 => "small"
+    Cons(h, t) => "other"
+    Nil => "empty"
+
+fn size(n) =
+  match n of
+    0 => "zero"
+    k if k > 100 => "huge"
+    k if k > 0 => "pos"
+    k => "neg"
+
+fn quadrant(p) =
+  match p of
+    (x, y) if x > 0 && y > 0 => 1
+    (x, y) if x < 0 && y > 0 => 2
+    (x, y) if x < 0 => 3
+    (x, y) => 4
+
+fn lit(n, b) =
+  match n of
+    0 if b => 10
+    0 => 20
+    _ => 30
+
+fn above(xs, floor) =
+  match xs of
+    Cons(h, t) if h > floor => h + above(t, floor)
+    Cons(h, t) => above(t, floor)
+    Nil => 0
+
+fn main() =
+  println(classify([42]))
+  println(classify([3]))
+  println(classify([0 - 5]))
+  println(classify([]))
+  println(size(0))
+  println(size(500))
+  println(size(7))
+  println(size(0 - 7))
+  println(quadrant((1, 2)))
+  println(quadrant((0 - 1, 2)))
+  println(quadrant((0 - 1, 0 - 2)))
+  println(quadrant((1, 0 - 2)))
+  println(lit(0, true))
+  println(lit(0, false))
+  println(lit(9, true))
+  println(above([5, 20, 1, 15], 10))

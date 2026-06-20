@@ -1,0 +1,6 @@
+fn sign(n) =
+  match n of
+    k if k > 0 => 1
+    k if k < 0 => 2
+
+fn main() = println(sign(3))

@@ -1,0 +1,8 @@
+type List(a) = Nil | Cons(a, List(a))
+
+fn first_head(xs) =
+  match xs of
+    Cons(Cons(h, _), _) => h
+    Nil => 0
+
+fn main() = println(first_head(Cons(Cons(1, Nil), Nil)))

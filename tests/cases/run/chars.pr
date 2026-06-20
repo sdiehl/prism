@@ -1,0 +1,18 @@
+fn classify(c : Char) : String =
+  match c of
+    'a' => "ay"
+    'z' => "zed"
+    _ => str_of_char(c)
+
+fn main() =
+  println('A')
+  println(show('A'))
+  println(ord('A'))
+  println(chr(66))
+  println(classify('a'))
+  println(classify('z'))
+  println(classify('q'))
+  println(eq('x', 'x'))
+  println(cmp('a', 'b'))
+  println(chars("hi!"))
+  println(sort_by_ord(['c', 'a', 'b']))

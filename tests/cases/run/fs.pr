@@ -1,0 +1,10 @@
+fn main() =
+  let path = "/tmp/prism_fs_case.txt"
+  remove_file(path)
+  println(show(file_exists(path)))
+  write_file(path, "alpha")
+  println(show(file_exists(path)))
+  append_file(path, ", beta")
+  println(read_file(path))
+  remove_file(path)
+  println(show(file_exists(path)))

@@ -1,0 +1,13 @@
+-- OS surface. write_file/read_file round-trip a file. getenv reads the
+-- environment (empty string when unset). args_count/arg expose the process
+-- argument vector too, but are left out here to keep the demo deterministic
+-- across the interpreter and native backends.
+
+fn main() : !{IO} Unit =
+  let path = "/tmp/prism_os_demo.txt"
+  write_file(path, "hello, os surface")
+  let contents = read_file(path)
+  println(str_len(contents))
+  println(contents)
+  let missing = getenv("PRISM_OS_DEMO_UNSET")
+  println(str_len(missing))

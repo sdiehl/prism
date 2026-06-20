@@ -1,0 +1,21 @@
+-- A failing `guard` short-circuits the rest of the block: the prints after it
+-- never run. `optional` reifies the outcome so both paths are observable.
+
+fn pipeline(a, b, c) =
+  optional() fn
+    guard(a)
+    println(1)
+    guard(b)
+    println(2)
+    guard(c)
+    println(3)
+    99
+
+fn report(o) =
+  match o of
+    None => println(0)
+    Some(n) => println(n)
+
+fn main() =
+  report(pipeline(true, true, true))
+  report(pipeline(true, false, true))

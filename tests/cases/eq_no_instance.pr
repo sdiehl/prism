@@ -1,0 +1,3 @@
+type Pair = MkPair(Int, Int)
+
+fn main() = MkPair(1, 2) == MkPair(3, 4)

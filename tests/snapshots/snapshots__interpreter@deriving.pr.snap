@@ -1,0 +1,24 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/deriving.pr
+---
+true
+false
+false
+true
+false
+false
+-1
+1
+0
+-1
+-1
+-1
+Rect(4, 5, Blue)
+Rect(4, 5, Blue)
+c = Circle(7, Blue)
+Red
+Green
+Blue
+=> ()

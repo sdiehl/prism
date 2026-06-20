@@ -1,0 +1,8 @@
+-- String literals inside interpolation holes: bare quotes, braces and
+-- escapes in nested strings, and nested interpolation itself.
+fn main() =
+  println("{concat("a", "b")}")
+  println("{concat("\}", "x")}")
+  println("{concat("\"", "x")}")
+  println("{concat("{1 + 2}", "!")}")
+  println("{concat("{concat("x", "y")}", "z")}")

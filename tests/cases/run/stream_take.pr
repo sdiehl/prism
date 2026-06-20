@@ -1,0 +1,15 @@
+-- Early-termination fusion (effect_lower/state.rs Step protocol).
+-- stake drops its continuation, so producers thread `Step S` and stop on SDone;
+-- its counter pairs with the downstream fold/collect state. The same program
+-- mixes a fold chain, a scollect, and for-loop (control) consumers, all fused.
+fn dbl(n) = n * 2
+
+fn main() =
+  println(srange(1, 100).stake(0).ssum())
+  println(srange(1, 3).stake(10).ssum())
+  println(srange(1, 100).smap(dbl).skeep(\(x) -> x > 2).stake(3).ssum())
+  println(length(srange(1, 100).stake(4).scollect()))
+  println(sum(srange(1, 100).skeep(even).stake(3).scollect()))
+  println(sfold(srange(1, 100).stake(4), 1, \(acc, x) -> acc * x))
+  for x in srange(10, 100).stake(2) do
+    println(x)

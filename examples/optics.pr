@@ -1,0 +1,90 @@
+-- Optics in tiny-prism, basic to advanced.
+--
+-- The language gives two primitives. `deriving (Lens)` synthesizes a getter
+-- `<f>_of` and a functional setter `with_<f>` per field. A `pattern .. for T`
+-- deconstructor gives a view/make pair, the moral of a prism. Everything else
+-- (first-class composable lenses, `over`, traversals) is ordinary code built
+-- on those, since a lens is just a get/set pair and setters compose. No optic
+-- types are baked into the compiler.
+--
+-- Expected output:
+--   3
+--   13
+--   Vec2(1, 2)
+--   3
+--   World(Player(hero, Vec2(7, 4), 30), 1)
+--   60
+--   on the x axis at 4
+--   not on an axis
+--   [Vec2(0, 0), Vec2(0, 0)]
+--   [Player(a, Vec2(0, 4), 12), Player(b, Vec2(0, 4), 8)]
+
+type Vec2 = Vec2 { x: Int, y: Int } deriving (Lens, Show)
+
+type Player = Player { name: String, pos: Vec2, hp: Int } deriving (Lens, Show)
+
+type World = World { player: Player, turn: Int } deriving (Lens, Show)
+
+-- A first-class, composable lens: a getter and a functional setter paired up.
+type Lens(s, a) = Lens { get: (s) -> a, set: (s, a) -> s }
+
+fn view(l : Lens(s, a), s : s) : a = (l.get)(s)
+
+fn set(l : Lens(s, a), s : s, a : a) : s = (l.set)(s, a)
+
+-- `over` modifies through a lens: read, transform, write back.
+fn over(l : Lens(s, a), f : (a) -> a, s : s) : s = (l.set)(s, f((l.get)(s)))
+
+-- Lens composition: focus through `l1 : s -> b` then `l2 : b -> a`, giving a
+-- lens `s -> a`. The heart of optics. Deep access stays a one-liner.
+fn compose_l(l1 : Lens(s, b), l2 : Lens(b, a)) : Lens(s, a) =
+  Lens { get = \(s) -> view(l2, view(l1, s)), set = \(s, a) -> set(l1, s, set(l2, view(l1, s), a)) }
+
+-- Primitive lenses lifted from the derived field functions.
+fn lx() : Lens(Vec2, Int) = Lens { get = x_of, set = with_x }
+
+fn lpos() : Lens(Player, Vec2) = Lens { get = pos_of, set = with_pos }
+
+fn lhp() : Lens(Player, Int) = Lens { get = hp_of, set = with_hp }
+
+fn lplayer() : Lens(World, Player) = Lens { get = player_of, set = with_player }
+
+-- A prism-like deconstructor: view a vector as its x when it lies on the x
+-- axis, rebuild one from an x. Works as both a pattern and a builder.
+pattern OnXAxis(x) for Vec2 =
+  view \(v) -> if v.y == 0 then Some(v.x) else None
+  make \(x) -> Vec2 { x = x, y = 0 }
+
+fn describe(v : Vec2) : String =
+  match v of
+    OnXAxis(x) => concat("on the x axis at ", show(x))
+    _ => "not on an axis"
+
+fn main() : !{IO} Unit =
+  let v = Vec2 { x = 3, y = 4 }
+  -- Basic: derived getter and functional setter, no optic plumbing.
+  println(x_of(v))
+  println(view(lx(), over(lx(), \(n) -> n + 10, v)))
+  -- `..r` functional update copies every field but the named one.
+  println(Vec2 { ..v, x = 1, y = 2 })
+  -- Compose lenses to reach a deeply nested field in one step.
+  let w =
+    World { player = Player { name = "hero", pos = v, hp = 30 }, turn = 1 }
+  let player_x = compose_l(lplayer(), compose_l(lpos(), lx()))
+  println(view(player_x, w))
+  println(set(player_x, w, 7))
+  -- `over` through the composed lens, then read it back.
+  println(view(player_x, over(player_x, \(n) -> n * 20, w)))
+  -- The prism as a pattern (partial view) and as a builder (total make).
+  println(describe(OnXAxis(4)))
+  println(describe(v))
+  -- A traversal is just `map` over a lens action: zero the x of every vector.
+  let vs = Cons(Vec2 { x = 9, y = 0 }, Cons(Vec2 { x = 3, y = 0 }, Nil))
+  println(map(\(p) -> set(lx(), p, 0), vs))
+  -- Compose freely: heal every player (over hp) and zero their pos.x (a deep
+  -- set) in one pass.
+  let party =
+    Cons(Player { name = "a", pos = v, hp = 2 }, Cons(Player { name = "b", pos = v, hp = 0 - 2 }, Nil))
+  let heal =
+    \(p) -> over(lhp(), \(h) -> h + 10, set(compose_l(lpos(), lx()), p, 0))
+  println(map(heal, party))

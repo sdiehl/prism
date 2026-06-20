@@ -1,0 +1,14 @@
+fn describe(xs) =
+  match xs of
+    Nil =>
+      println(0)
+      0
+    Cons(x, rest) =>
+      let n = length(rest) + 1
+      println(x)
+      println(n)
+      x * n
+
+fn main() =
+  println(describe(Nil))
+  println(describe(Cons(7, Cons(8, Cons(9, Nil)))))

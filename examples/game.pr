@@ -1,0 +1,31 @@
+-- Guess the number.
+--
+-- The player types a guess and the game replies with a hint, looping until
+-- exact. Pure logic is split from IO: hint() carries no effects (! Hint),
+-- play() is where all IO lives (!{IO} Unit). It prints -1 too low, 1 too high,
+-- then the round count on a hit. Drive it with game.in.
+
+type Hint = TooLow | TooHigh | Exact
+fn hint(secret, guess) : ! Hint =
+  if guess < secret then
+    TooLow
+  elif guess > secret then
+    TooHigh
+  else
+    Exact
+
+fn play(secret, round) : !{IO} Int =
+  let guess = read_int()
+  match hint(secret, guess) of
+    Exact => round
+    TooLow =>
+      println(0 - 1)
+      play(secret, round + 1)
+    TooHigh =>
+      println(1)
+      play(secret, round + 1)
+
+fn main() : !{IO} Unit =
+  let secret = 63
+  let rounds = play(secret, 1)
+  println(rounds)

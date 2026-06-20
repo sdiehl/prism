@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/opt_chain.pr
+---
+7
+-1
+99
+=> ()

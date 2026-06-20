@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/comp_guards.pr
+---
+16
+36
+1
+9
+10
+0
+2
+=> ()

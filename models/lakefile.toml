@@ -1,0 +1,8 @@
+name = "prism"
+defaultTargets = ["Prism", "Sanity"]
+
+[[lean_lib]]
+name = "Prism"
+
+[[lean_lib]]
+name = "Sanity"

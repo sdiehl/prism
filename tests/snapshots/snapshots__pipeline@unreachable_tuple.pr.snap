@@ -1,0 +1,212 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/unreachable_tuple.pr
+---
+== tokens ==
+VOpen Fn Ident("pick") LParen Ident("p") RParen Eq VOpen Match Ident("p") Of VOpen LParen True Comma Ident("_") RParen FatArrow Int(IntLit { value: 1, suffix: None }) VSemi LParen Ident("_") Comma True RParen FatArrow Int(IntLit { value: 2, suffix: None }) VSemi LParen False Comma False RParen FatArrow Int(IntLit { value: 3, suffix: None }) VSemi Ident("_") FatArrow Int(IntLit { value: 4, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("pick") LParen LParen True Comma False RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "pick",
+            params: [
+                Param {
+                    name: "p",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "p",
+                        ),
+                        span: 21..22,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Tuple(
+                                    [
+                                        Spanned {
+                                            node: Bool(
+                                                true,
+                                            ),
+                                            span: 31..35,
+                                        },
+                                        Spanned {
+                                            node: Wild,
+                                            span: 37..38,
+                                        },
+                                    ],
+                                ),
+                                span: 30..39,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 43..44,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Tuple(
+                                    [
+                                        Spanned {
+                                            node: Wild,
+                                            span: 50..51,
+                                        },
+                                        Spanned {
+                                            node: Bool(
+                                                true,
+                                            ),
+                                            span: 53..57,
+                                        },
+                                    ],
+                                ),
+                                span: 49..58,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 62..63,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Tuple(
+                                    [
+                                        Spanned {
+                                            node: Bool(
+                                                false,
+                                            ),
+                                            span: 69..74,
+                                        },
+                                        Spanned {
+                                            node: Bool(
+                                                false,
+                                            ),
+                                            span: 76..81,
+                                        },
+                                    ],
+                                ),
+                                span: 68..82,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 3,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 86..87,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Wild,
+                                span: 92..93,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 4,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 97..98,
+                            },
+                        },
+                    ],
+                ),
+                span: 15..98,
+            },
+            wheres: [],
+            span: 0..98,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 112..119,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "pick",
+                                    ),
+                                    span: 120..124,
+                                },
+                                [
+                                    Spanned {
+                                        node: Tuple(
+                                            [
+                                                Spanned {
+                                                    node: Bool(
+                                                        true,
+                                                    ),
+                                                    span: 126..130,
+                                                },
+                                                Spanned {
+                                                    node: Bool(
+                                                        false,
+                                                    ),
+                                                    span: 132..137,
+                                                },
+                                            ],
+                                        ),
+                                        span: 125..138,
+                                    },
+                                ],
+                            ),
+                            span: 120..139,
+                        },
+                    ],
+                ),
+                span: 112..140,
+            },
+            wheres: [],
+            span: 100..140,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `pick`: unreachable match arm
+   ╭─[ <source>:6:5 ]
+   │
+ 6 │     _ => 4
+   │     ┬  
+   │     ╰── in `pick`: unreachable match arm
+───╯

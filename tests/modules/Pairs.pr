@@ -1,0 +1,3 @@
+pub alias Pair(a) = (a, a)
+
+pub fn mk(x : Int) : Pair(Int) = (x, x)

@@ -1,0 +1,16 @@
+type Point = Point { x: Int, y: Int }
+
+pattern Diag(n) for Point =
+  view \(p) -> if p.x == p.y then Some(p.x) else None
+  make \(n) -> Point { x = n, y = n }
+
+fn classify(p : Point) : Int =
+  match p of
+    Diag(n) if n > 3 => n * 2
+    Diag(n) => n
+    _ => 0
+
+fn main() =
+  println(classify(Diag(5)))
+  println(classify(Point { x = 2, y = 2 }))
+  println(classify(Point { x = 1, y = 9 }))

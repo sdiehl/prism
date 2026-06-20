@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/sort_demo.pr
+---
+1
+2
+4
+5
+8
+=> ()

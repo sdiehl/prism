@@ -1,0 +1,50 @@
+-- Huet's zipper. A zipper turns a tree inside out: instead of holding the
+-- root and walking down to find a spot, you carry the focused subtree plus a
+-- Ctx, the path back to the root with every sibling you stepped past. Editing
+-- is then O(1) at the focus, and go_up reassembles one Branch at a time.
+--
+-- The reuse angle: go_up rebuilds a Branch of the exact shape it tore apart in
+-- go_left/go_right. When the Ctx frame is uniquely owned, Perceus reuses that
+-- cell in place, so a whole descend/edit/ascend round trip is pointer writes,
+-- not allocation (visible under PRISM_REUSE_STATS).
+--
+-- Expected output:
+-- Branch(Branch(Leaf(1), Leaf(2)), Branch(Leaf(99), Leaf(4)))
+
+type Tree = Leaf(Int) | Branch(Tree, Tree) deriving (Show)
+
+type Ctx = Top | L(Ctx, Tree) | R(Tree, Ctx)
+
+type Zipper = Zip(Tree, Ctx)
+
+fn go_left(z : Zipper) : Zipper =
+  match z of
+    Zip(Branch(l, r), c) => Zip(l, L(c, r))
+    _ => z
+
+fn go_right(z : Zipper) : Zipper =
+  match z of
+    Zip(Branch(l, r), c) => Zip(r, R(l, c))
+    _ => z
+
+fn go_up(z : Zipper) : Zipper =
+  match z of
+    Zip(t, L(c, r)) => Zip(Branch(t, r), c)
+    Zip(t, R(l, c)) => Zip(Branch(l, t), c)
+    Zip(t, Top) => Zip(t, Top)
+
+fn set_leaf(z : Zipper, n : Int) : Zipper =
+  match z of
+    Zip(Leaf(_), c) => Zip(Leaf(n), c)
+    _ => z
+
+fn to_top(z : Zipper) : ! Tree =
+  match z of
+    Zip(t, Top) => t
+    _ => to_top(go_up(z))
+
+fn main() : !{IO} Unit =
+  let t = Branch(Branch(Leaf(1), Leaf(2)), Branch(Leaf(3), Leaf(4)))
+  -- descend right then left to the Leaf(3), edit it, then zip back up
+  let z = set_leaf(go_left(go_right(Zip(t, Top))), 99)
+  println(show(to_top(z)))

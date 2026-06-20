@@ -1,0 +1,8 @@
+fn print_list(xs) =
+  match xs of
+    Nil => ()
+    Cons(x, rest) =>
+      println(x)
+      print_list(rest)
+
+fn main() = print_list(sort(Cons(5, Cons(2, Cons(8, Cons(1, Cons(4, Nil)))))))

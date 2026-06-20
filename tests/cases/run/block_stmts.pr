@@ -1,0 +1,10 @@
+fn step(acc, x) =
+  let doubled = x * 2
+  println(doubled)
+  acc + doubled
+
+fn main() =
+  println(100)
+  let total = foldl(step, 0, range(1, 5))
+  let bumped = total + 1
+  println(bumped)

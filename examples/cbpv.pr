@@ -1,0 +1,24 @@
+-- Call-by-push-value made observable: computations are not values.
+-- A thunk \() -> e suspends a computation as a value. Its effects fire
+-- at force time, once per force.
+
+-- Effectful: prints its argument, then returns.
+fn noisy(x) =
+  println(x)
+  x * x
+
+-- Wrapping in a thunk lets a computation be returned as a value.
+-- Calling suspend prints nothing: the body stays inert.
+fn suspend(x) = \() -> noisy(x)
+
+-- Thunks are first-class. Forcing twice runs the suspended print twice.
+fn force_twice(t) = t() + t()
+
+-- Effects run in block order: 1 prints first, then 3 at each of the two
+-- forces. The dropped suspend(9) thunk is never forced, so it never prints.
+fn main() =
+  let t = suspend(3)
+  println(1)
+  println(force_twice(t))
+  suspend(9)
+  println(2)

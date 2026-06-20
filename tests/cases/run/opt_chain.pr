@@ -1,0 +1,13 @@
+-- `a?.b` is `force(a).b`: a failable field access that short-circuits the
+-- whole chain on the first `None` and defaults through `??`. The reachable
+-- path yields its leaf; a `None` anywhere prunes to the fallback.
+
+type Leaf = Leaf { n: Int }
+type Node = Node { kid: Option(Leaf) }
+
+fn main() =
+  let full = Some(Node { kid = Some(Leaf { n = 7 }) })
+  println(full?.kid?.n ?? 0 - 1)
+  let gap = Some(Node { kid = None })
+  println(gap?.kid?.n ?? 0 - 1)
+  println((None : Option(Node))?.kid?.n ?? 99)

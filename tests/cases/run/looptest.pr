@@ -1,0 +1,7 @@
+fn looptest() =
+  var i := 10
+  while(\() -> i >= 1) fn
+    println(i)
+    i := i - 1
+
+fn main() = looptest()

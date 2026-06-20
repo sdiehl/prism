@@ -1,0 +1,251 @@
+#![allow(clippy::multiple_crate_versions)]
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+use tiny_prism::error::Error;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "prism",
+    version,
+    about = "A modern typed functional language with a call-by-push-value core that lowers to LLVM",
+    args_conflicts_with_subcommands = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+    /// A program to run; `prism <file>` is shorthand for `prism run <file>`
+    file: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Cmd {
+    /// Type-check and run a program in the interpreter
+    Run { file: PathBuf },
+    /// Compile a program to a native executable through LLVM
+    Build {
+        file: PathBuf,
+        #[arg(short, long, default_value = "a.out")]
+        out: PathBuf,
+        /// Lower through the MLIR backend instead of the textual LLVM emitter
+        #[arg(long)]
+        mlir: bool,
+    },
+    /// Type-check and print inferred signatures and effects
+    Check { file: PathBuf },
+    /// Print one pipeline artifact: tokens, ast, types, core, fbip, lowered, llvm, mlir
+    Dump { phase: String, file: PathBuf },
+    /// Print every pipeline phase for a program
+    Report { file: PathBuf },
+    /// Start the interactive shell
+    Repl {
+        /// Skip the startup banner
+        #[arg(long)]
+        no_banner: bool,
+    },
+    /// Format source files in place; with no path, every `.pr` file under the
+    /// current directory is formatted recursively; `-` filters stdin to stdout
+    Fmt {
+        /// Files or directories to format; `-` for stdin, default current dir
+        files: Vec<PathBuf>,
+        /// Check only: exit 1 if any file is not canonical, write nothing
+        #[arg(long)]
+        check: bool,
+    },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let cmd = match (cli.cmd, cli.file) {
+        (Some(cmd), _) => cmd,
+        (None, Some(file)) => Cmd::Run { file },
+        (None, None) => {
+            tiny_prism::repl::repl(true);
+            return ExitCode::SUCCESS;
+        }
+    };
+    match dispatch(cmd) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err((e, src, name)) => {
+            eprint!("{}", e.render(&src, &name));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn read(file: &PathBuf) -> Result<String, Error> {
+    std::fs::read_to_string(file).map_err(Error::Io)
+}
+
+// Imports resolve relative to the entry file's directory.
+fn base_of(file: &Path) -> PathBuf {
+    file.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+}
+
+fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
+    match cmd {
+        Cmd::Run { file } => {
+            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
+            let full = tiny_prism::with_prelude(&src);
+            // Stream `print` to the terminal and read from real stdin so the CLI
+            // behaves like a normal program. `exit(n)` maps to a real process
+            // exit with that code, skipping the `=> value` trailer.
+            let stdout = std::io::stdout();
+            let stdin = std::io::stdin();
+            let mut out = stdout.lock();
+            let mut input = stdin.lock();
+            let run = tiny_prism::interpret_io_at(&full, &base_of(&file), &mut out, &mut input)
+                .map_err(|e| (e, full, file_name(&file)))?;
+            drop(out);
+            drop(input);
+            if let Some(code) = run.exit {
+                std::process::exit(code);
+            }
+            println!("=> {}", run.value.show());
+            Ok(())
+        }
+        Cmd::Build { file, out, mlir } => {
+            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
+            let full = tiny_prism::with_prelude(&src);
+            build_dispatch(mlir, &full, &base_of(&file), &out)
+                .map_err(|e| (e, full, file_name(&file)))?;
+            println!("wrote {}", out.display());
+            Ok(())
+        }
+        Cmd::Check { file } => {
+            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
+            let full = tiny_prism::with_prelude(&src);
+            let checked = tiny_prism::check_at(&full, &base_of(&file))
+                .map_err(|e| (e, full, file_name(&file)))?;
+            for d in &checked.decls {
+                println!("{} : {}", d.name, d.ty.show());
+            }
+            Ok(())
+        }
+        Cmd::Dump { phase, file } => {
+            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
+            let full = tiny_prism::with_prelude(&src);
+            let out = tiny_prism::dump_at(&phase, &full, &base_of(&file))
+                .map_err(|e| (e, full, file_name(&file)))?;
+            println!("{out}");
+            Ok(())
+        }
+        Cmd::Report { file } => {
+            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
+            let full = tiny_prism::with_prelude(&src);
+            print!("{}", tiny_prism::report_at(&full, &base_of(&file)));
+            Ok(())
+        }
+        Cmd::Repl { no_banner } => {
+            tiny_prism::repl::repl(!no_banner);
+            Ok(())
+        }
+        Cmd::Fmt { files, check } => fmt_cmd(&files, check),
+    }
+}
+
+// Every `.pr` file under `root`, recursively, skipping any build artifacts in a
+// `target/` directory. A bad glob pattern yields nothing rather than erroring.
+fn glob_pr(root: &Path) -> Vec<PathBuf> {
+    let pattern = format!("{}/**/*.pr", root.display());
+    let Ok(paths) = glob::glob(&pattern) else {
+        return Vec::new();
+    };
+    paths
+        .filter_map(Result::ok)
+        .filter(|p| !p.components().any(|c| c.as_os_str() == "target"))
+        .collect()
+}
+
+// `prism fmt [paths..] [--check]`. With no path, the current directory is
+// walked, as is any directory path. Explicitly named files must parse. Files
+// reached by walking are skipped with a notice if they do not, so one
+// unparseable fixture cannot fail a whole-tree run.
+fn fmt_cmd(paths: &[PathBuf], check: bool) -> Result<(), (Error, String, String)> {
+    if paths.len() == 1 && paths[0].as_os_str() == "-" {
+        return fmt_stdin();
+    }
+    let mut targets: Vec<(PathBuf, bool)> = Vec::new();
+    if paths.is_empty() {
+        targets.extend(glob_pr(Path::new(".")).into_iter().map(|p| (p, false)));
+    } else {
+        for p in paths {
+            if p.is_dir() {
+                targets.extend(glob_pr(p).into_iter().map(|q| (q, false)));
+            } else {
+                targets.push((p.clone(), true));
+            }
+        }
+    }
+    targets.sort();
+    targets.dedup();
+
+    let mut needs_fmt = false;
+    for (path, strict) in targets {
+        let src = read(&path).map_err(|e| (e, String::new(), file_name(&path)))?;
+        let formatted = match tiny_prism::format(&src) {
+            Ok(f) => f,
+            Err(e) if strict => return Err((e, src, file_name(&path))),
+            Err(_) => {
+                eprintln!("{}: skipped (does not parse)", path.display());
+                continue;
+            }
+        };
+        if formatted == src {
+            continue;
+        }
+        if check {
+            eprintln!("{}: not formatted", path.display());
+            needs_fmt = true;
+        } else {
+            std::fs::write(&path, &formatted)
+                .map_err(|e| (Error::Io(e), String::new(), file_name(&path)))?;
+        }
+    }
+    if needs_fmt {
+        Err((
+            Error::Codegen("some files need formatting".into()),
+            String::new(),
+            String::new(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+// Editor format-on-save filter: read source on stdin, write the canonical form
+// to stdout. Any parse error is fatal so an editor never overwrites a buffer
+// with a half-formatted result.
+fn fmt_stdin() -> Result<(), (Error, String, String)> {
+    use std::io::Read as _;
+    let mut src = String::new();
+    std::io::stdin()
+        .read_to_string(&mut src)
+        .map_err(|e| (Error::Io(e), String::new(), "<stdin>".into()))?;
+    let formatted = tiny_prism::format(&src).map_err(|e| (e, src.clone(), "<stdin>".into()))?;
+    print!("{formatted}");
+    Ok(())
+}
+
+fn build_dispatch(mlir: bool, src: &str, base: &Path, out: &Path) -> Result<(), Error> {
+    if mlir {
+        #[cfg(feature = "mlir")]
+        return tiny_prism::build_mlir_at(src, base, out);
+        #[cfg(not(feature = "mlir"))]
+        {
+            let _ = base;
+            return Err(Error::Codegen(
+                "rebuild with --features mlir to use the MLIR backend".into(),
+            ));
+        }
+    }
+    tiny_prism::build_at(src, base, out)
+}
+
+fn file_name(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}

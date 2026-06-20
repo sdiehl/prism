@@ -1,0 +1,35 @@
+-- A line-at-a-time calculator REPL.
+--
+-- Each line is an operator and operand ("+ 5", "* 3") applied to an
+-- accumulator starting at 0. An empty line or "q" quits and prints the total.
+-- Parsing is substring + parse_int. step() is pure (! Int), repl() owns the IO.
+--
+-- Input fixture (calc.in): + 5, * 3, - 1, q  ->  5, 15, 14, 14.
+
+fn step(acc, op, n) : ! Int =
+  if str_eq(op, "+") then
+    acc + n
+  elif str_eq(op, "-") then
+    acc - n
+  elif str_eq(op, "*") then
+    acc * n
+  elif str_eq(op, "/") then
+    acc / n
+  else
+    acc
+
+fn repl(acc) : !{IO} Int =
+  let line = read_line()
+  if str_eq(line, "q") || str_eq(line, "") then
+    println(acc)
+    acc
+  else
+    let op = substring(line, 0, 1)
+    let n = unwrap_or(0, parse_int(substring(line, 2, str_len(line) - 2)))
+    let acc2 = step(acc, op, n)
+    println(acc2)
+    repl(acc2)
+
+fn main() : !{IO} Unit =
+  repl(0)
+  ()

@@ -1,0 +1,18 @@
+-- An effectful function flowing first-class through an eta-expanded thunk.
+-- Triggers whole-program monadic lowering, so it compiles natively too.
+
+effect Exn {
+  ctl raise(Int) : Int
+}
+
+fn risky(x) =
+  if x == 0 then
+    raise(1)
+  else
+    x
+
+fn main() =
+  println(handle let f = \(x) -> risky(x) in f(0) with {
+    raise(v, k) => 0 - v,
+    return r => r
+  })

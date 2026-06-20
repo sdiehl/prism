@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/nested_split.pr
+---
+107
+1
+0
+true
+false
+=> ()

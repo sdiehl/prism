@@ -1,0 +1,80 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/alias_cycle.pr
+---
+== tokens ==
+VOpen Alias UIdent("A") Eq LBrace UIdent("B") RBrace VSemi Alias UIdent("B") Eq LBrace UIdent("A") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [
+        AliasDecl {
+            name: "A",
+            labels: [
+                EffLabel {
+                    name: "B",
+                    args: [],
+                },
+            ],
+            span: 0..13,
+        },
+        AliasDecl {
+            name: "B",
+            labels: [
+                EffLabel {
+                    name: "A",
+                    args: [],
+                },
+            ],
+            span: 15..28,
+        },
+    ],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 42..49,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 50..51,
+                        },
+                    ],
+                ),
+                span: 42..52,
+            },
+            wheres: [],
+            span: 30..52,
+        },
+    ],
+}
+
+== types ==
+Type Error: effect alias cycle: A -> B -> A
+   ╭─[ <source>:1:1 ]
+   │
+ 1 │ alias A = {B}
+   │ ──────┬──────  
+   │       ╰──────── effect alias cycle: A -> B -> A
+───╯

@@ -1,0 +1,16 @@
+fn classify(n) =
+  if n % 15 == 0 then
+    println(3)
+    n / 15
+  elif n % 3 == 0 then
+    println(1)
+    n / 3
+  else
+    println(2)
+    let half = n / 2
+    half + 1
+
+fn main() =
+  println(classify(30))
+  println(classify(9))
+  println(classify(7))

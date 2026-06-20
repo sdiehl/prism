@@ -1,0 +1,60 @@
+-- 3D vector math where the "size" of a vector is a typeclass, not a function.
+-- A norm collapses a vector to one Float, but there is no single right way to do
+-- it: Euclidean length and Manhattan distance disagree. So Norm is a class with
+-- two NAMED instances over Vec3, and the caller picks which yardstick to use by
+-- writing norm[l1] vs the default. Only ==/= are overloaded, so add/scale/dot/
+-- cross are ordinary named functions and we lean on UFCS dot-chains to read them.
+
+type Vec3 = V(Float, Float, Float) deriving (Show, Eq)
+
+fn add(u : Vec3, v : Vec3) : Vec3 =
+  match (u, v) of
+    (V(a, b, c), V(x, y, z)) => V(a +. x, b +. y, c +. z)
+
+fn scale(s : Float, v : Vec3) : Vec3 =
+  match v of
+    V(x, y, z) => V(s *. x, s *. y, s *. z)
+
+fn dot(u : Vec3, v : Vec3) : Float =
+  match (u, v) of
+    (V(a, b, c), V(x, y, z)) => a *. x +. b *. y +. c *. z
+
+fn cross(u : Vec3, v : Vec3) : Vec3 =
+  match (u, v) of
+    (V(a, b, c), V(x, y, z)) =>
+      V(b *. z -. c *. y, c *. x -. a *. z, a *. y -. b *. x)
+
+fn absf(x : Float) : Float =
+  if x <. 0.0 then
+    0.0 -. x
+  else
+    x
+
+fn manhattan(v : Vec3) : Float =
+  match v of
+    V(x, y, z) => absf(x) +. absf(y) +. absf(z)
+
+class Norm(a) {
+  norm : (a) -> Float
+}
+
+-- Euclidean length: sqrt is a prelude builtin, so this is the true L2 norm.
+instance l2 : Norm(Vec3) {
+  fn norm(v) = sqrt(dot(v, v))
+}
+
+-- Manhattan length: sum of absolute components, a genuinely different yardstick.
+instance l1 : Norm(Vec3) {
+  fn norm(v) = manhattan(v)
+}
+
+fn main() : !{IO} Unit =
+  let u = V(1.0, 2.0, 2.0)
+  let v = V(3.0, 0.0, 4.0)
+  println("u = {u}")
+  println("v = {v}")
+  println("dot(u, v) = {dot(u, v)}")
+  println("cross(u, v) = {cross(u, v)}")
+  -- Two instances at one head are ambiguous, so name each yardstick explicitly.
+  println("l2 norm of u = {norm[l2](u)}")
+  println("l1 norm of u = {norm[l1](u)}")

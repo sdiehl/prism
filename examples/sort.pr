@@ -1,0 +1,23 @@
+-- One generic `sort` over any `Ord` type (a stable merge sort). A call on a
+-- list of primitives is specialized at the call site to a native kernel: a
+-- bignum-aware merge for Integer, a radix sort for Float and fixed-width ints.
+-- When the list is uniquely owned the kernel reuses cells in place, so the fast
+-- path allocates nothing. You still write one `sort`, or roll your own with
+-- insert_by_ord / merge_by_ord.
+--
+-- The lines below, in order:
+--   Integer  -- arbitrary precision (negatives, dupes, a value past i64), true
+--               numeric order on the bignum-aware path
+--   Float    -- IEEE total order, radix path
+--   I64      -- fixed-width machine int, radix path
+--   Char     -- Ord but no native kernel, so the generic merge sort runs
+--   String   -- generic merge sort, the same one `sort`
+--   reverse  -- descending with no second Ord instance: sort, then reverse
+
+fn main() =
+  println(sort([5, 2, 8, 1, 4, 2, 0 - 9, 100000000000000000000]))
+  println(sort([3.5, 0.0 -. 1.2, 2.8, 1.2]))
+  println(sort([to_i64(5), to_i64(0 - 2), to_i64(9), to_i64(0)]))
+  println(sort(['m', 'i', 'r', 'p', 's']))
+  println(sort(["pear", "apple", "quince"]))
+  println(reverse(sort([3, 1, 4, 1, 5, 9, 2, 6])))

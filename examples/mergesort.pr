@@ -1,0 +1,30 @@
+-- Merge sort: divide the list at the midpoint, sort halves, merge.
+
+fn merge(xs, ys) =
+  match xs of
+    Nil => ys
+    Cons(x, xr) =>
+      match ys of
+        Nil => xs
+        Cons(y, yr) =>
+          if x <= y then
+            Cons(x, merge(xr, ys))
+          else
+            Cons(y, merge(xs, yr))
+
+fn msort(xs) =
+  let n = length(xs)
+  if n <= 1 then
+    xs
+  else
+    let halves = split_at(n / 2, xs)
+    merge(msort(fst(halves)), msort(snd(halves)))
+
+fn print_list(xs) =
+  match xs of
+    Nil => ()
+    Cons(x, rest) =>
+      println(x)
+      print_list(rest)
+
+fn main() = print_list(msort([5, 3, 8, 1, 9, 2, 7, 4, 6]))

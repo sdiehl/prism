@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+hello world
+=> ()

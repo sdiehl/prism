@@ -1,0 +1,108 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/interp_holety.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq VOpen Let Ident("flag") Eq True VSemi Ident("println") LParen InterpStart("v = ") Ident("flag") Plus Int(IntLit { value: 1, suffix: None }) InterpEnd("") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "flag",
+                    Spanned {
+                        node: Bool(
+                            true,
+                        ),
+                        span: 93..97,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 100..107,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Marker(
+                                                Interp,
+                                            ),
+                                            span: 108..108,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Str(
+                                                    "v = ",
+                                                ),
+                                                span: 108..108,
+                                            },
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "flag",
+                                                        ),
+                                                        span: 114..118,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 121..122,
+                                                    },
+                                                ),
+                                                span: 114..122,
+                                            },
+                                            Spanned {
+                                                node: Str(
+                                                    "",
+                                                ),
+                                                span: 108..108,
+                                            },
+                                        ],
+                                    ),
+                                    span: 108..124,
+                                },
+                            ],
+                        ),
+                        span: 100..125,
+                    },
+                ),
+                span: 82..125,
+            },
+            wheres: [],
+            span: 68..125,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: type mismatch: expected Int, got Bool
+   ╭─[ <source>:4:17 ]
+   │
+ 4 │   println("v = {flag + 1}")
+   │                 ──┬─  
+   │                   ╰─── in `main`: type mismatch: expected Int, got Bool
+───╯

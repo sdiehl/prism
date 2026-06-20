@@ -1,0 +1,88 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/fip_alloc.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fbip Fn Ident("fresh") LParen Ident("x") RParen Eq UIdent("Box") LParen Ident("x") RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..19,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "fresh",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Box",
+                        ),
+                        span: 39..42,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 43..44,
+                        },
+                    ],
+                ),
+                span: 39..45,
+            },
+            wheres: [],
+            fip: Fbip,
+            span: 20..45,
+        },
+    ],
+}
+
+== types ==
+fresh : (Int) -> Box
+
+== core (cbpv) ==
+fn fresh(x) =
+  return x to t@0; return Box(t@0)
+
+== fip ==
+Type Error: function `fresh` is marked `fbip` but allocates a fresh `Box` (no reuse token available)
+   ╭─[ <source>:2:1 ]
+   │
+ 2 │ fbip fn fresh(x) = Box(x)
+   │ ────────────┬────────────  
+   │             ╰────────────── function `fresh` is marked `fbip` but allocates a fresh `Box` (no reuse token available)
+───╯

@@ -1,0 +1,905 @@
+type Option(a) = None | Some(a) deriving (Eq)
+
+type Result(a, e) = Ok(a) | Err(e) deriving (Eq)
+
+type List(a) = Nil | Cons(a, List(a)) deriving (Eq)
+
+type Map(k, v) = Tip | Bin(Int, k, v, Map(k, v), Map(k, v))
+fn id(x) = x
+
+fn const(x, y) = x
+
+fn compose(f, g, x) = f(g(x))
+
+fn flip(f, x, y) = f(y, x)
+
+fn not(b) =
+  if b then
+    false
+  else
+    true
+
+fn and(a, b) = a && b
+
+fn or(a, b) = a || b
+
+fn xor(a, b) =
+  if a then
+    not(b)
+  else
+    b
+
+fn abs(n) =
+  if n < 0 then
+    0 - n
+  else
+    n
+
+fn max(a, b) =
+  if a > b then
+    a
+  else
+    b
+
+fn min(a, b) =
+  if a < b then
+    a
+  else
+    b
+
+fn clamp(lo, hi, x) = max(lo, min(hi, x))
+
+fn signum(n) =
+  if n > 0 then
+    1
+  elif n < 0 then
+    0 - 1
+  else
+    0
+
+fn mod(a, b) = a % b
+
+fn even(n) = mod(n, 2) == 0
+
+fn odd(n) = not(even(n))
+
+fn gcd(a, b) =
+  if b == 0 then
+    a
+  else
+    gcd(b, mod(a, b))
+
+fn lcm(a, b) = a / gcd(a, b) * b
+
+fn pow(base, n) =
+  if n == 0 then
+    1
+  else
+    base * pow(base, n - 1)
+
+fn factorial(n) =
+  if n == 0 then
+    1
+  else
+    n * factorial(n - 1)
+
+fn fib(n) =
+  if n <= 1 then
+    n
+  else
+    fib(n - 1) + fib(n - 2)
+
+-- Floating-point constants and the transcendentals not exposed as builtins.
+-- sin, cos, exp, ln, sqrt and pow_float are builtins lowered to FP intrinsics.
+let pi = 3.141592653589793
+
+let e = 2.718281828459045
+
+let tau = 6.283185307179586
+
+fn tan(x) = sin(x) /. cos(x)
+
+fn log10(x) = ln(x) /. ln(10.0)
+
+fn log2(x) = ln(x) /. ln(2.0)
+
+-- Pseudo-random helpers over the seeded SplitMix64 stream. rand_below n yields
+-- 0..n-1; rand_range lo hi yields lo..hi-1.
+fn rand_below(n) = mod(rand(), n)
+
+fn rand_range(lo, hi) = lo + mod(rand(), hi - lo)
+
+fn rand_bool() = mod(rand(), 2) == 0
+
+fn between(lo, hi, x) = lo <= x && x <= hi
+
+fn fst(p) =
+  match p of
+    (x, _) => x
+
+fn snd(p) =
+  match p of
+    (_, y) => y
+
+fn swap(p) =
+  match p of
+    (x, y) => (y, x)
+
+fn pair_map(f, g, p) =
+  match p of
+    (x, y) => (f(x), g(y))
+
+fn is_some(o) =
+  match o of
+    None => false
+    Some(x) => true
+
+fn is_none(o) =
+  match o of
+    None => true
+    Some(x) => false
+
+fn unwrap_or(d, o) =
+  match o of
+    None => d
+    Some(x) => x
+
+fn map_option(f, o) =
+  match o of
+    None => None
+    Some(x) => Some(f(x))
+
+fn and_then(f, o) =
+  match o of
+    None => None
+    Some(x) => f(x)
+
+fn map_or(d, f, o) =
+  match o of
+    None => d
+    Some(x) => f(x)
+
+fn option_or(alt, o) =
+  match o of
+    None => alt
+    Some(x) => Some(x)
+
+fn option_to_list(o) =
+  match o of
+    None => Nil
+    Some(x) => Cons(x, Nil)
+
+fn both(o1, o2) =
+  match o1 of
+    None => None
+    Some(x) =>
+      match o2 of
+        None => None
+        Some(y) => Some((x, y))
+
+fn is_ok(r) =
+  match r of
+    Ok(x) => true
+    Err(e) => false
+
+fn is_err(r) =
+  match r of
+    Ok(x) => false
+    Err(e) => true
+
+fn map_result(f, r) =
+  match r of
+    Ok(x) => Ok(f(x))
+    Err(e) => Err(e)
+
+fn and_then_result(f, r) =
+  match r of
+    Ok(x) => f(x)
+    Err(e) => Err(e)
+
+fn result_or(d, r) =
+  match r of
+    Ok(x) => x
+    Err(e) => d
+
+fn ok_of_option(err, o) =
+  match o of
+    None => Err(err)
+    Some(x) => Ok(x)
+
+fn option_of_result(r) =
+  match r of
+    Ok(x) => Some(x)
+    Err(e) => None
+
+fn guard(b) =
+  if b then
+    ()
+  else
+    fail()
+
+fn optional(thunk) =
+  handle thunk() with
+    final ctl fail() => None
+    return r => Some(r)
+
+fn succeeds(thunk) =
+  handle thunk() with
+    final ctl fail() => false
+    return r => true
+
+fn default(thunk, d) =
+  handle thunk() with
+    final ctl fail() => d
+    return r => r
+
+-- Failable accessors: a missing element is a `fail()`, so `xs.at_list(0) ?? d`,
+-- `m.at_map(k) ?? d`, and `o.force() ?? d` all default cleanly through `??`.
+fn at_list(xs : List(a), i : Int) : a =
+  match nth(i, xs) of
+    Some(x) => x
+    None => fail()
+
+fn at_map(m : Map(k, v), key : k) : v given Ord(k) =
+  match map_lookup(key, m) of
+    Some(x) => x
+    None => fail()
+
+fn force(o) =
+  match o of
+    Some(x) => x
+    None => fail()
+
+fn singleton(x) = Cons(x, Nil)
+
+fn is_nil(xs) =
+  match xs of
+    Nil => true
+    Cons(x, rest) => false
+
+fn head(xs) =
+  match xs of
+    Nil => None
+    Cons(x, _) => Some(x)
+
+fn tail(xs) =
+  match xs of
+    Nil => Nil
+    Cons(_, rest) => rest
+
+fn last(xs) =
+  match xs of
+    Nil => None
+    Cons(x, Nil) => Some(x)
+    Cons(_, rest) => last(rest)
+
+fn length(xs) =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => 1 + length(rest)
+
+fn nth(n, xs) =
+  if n == 0 then
+    head(xs)
+  else
+    match xs of
+      Nil => None
+      Cons(_, rest) => nth(n - 1, rest)
+
+fn take(n, xs) =
+  if n == 0 then
+    Nil
+  else
+    match xs of
+      Nil => Nil
+      Cons(x, rest) => Cons(x, take(n - 1, rest))
+
+fn drop(n, xs) =
+  if n == 0 then
+    xs
+  else
+    match xs of
+      Nil => Nil
+      Cons(_, rest) => drop(n - 1, rest)
+
+fn take_while(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        Cons(x, take_while(p, rest))
+      else
+        Nil
+
+fn drop_while(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        drop_while(p, rest)
+      else
+        xs
+
+fn split_at(n, xs) = (take(n, xs), drop(n, xs))
+
+fn map(f, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => Cons(f(x), map(f, rest))
+
+fn filter(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        Cons(x, filter(p, rest))
+      else
+        filter(p, rest)
+
+fn foldr(f, z, xs) =
+  match xs of
+    Nil => z
+    Cons(x, rest) => f(x, foldr(f, z, rest))
+
+fn foldl(f, z, xs) =
+  match xs of
+    Nil => z
+    Cons(x, rest) => foldl(f, f(z, x), rest)
+
+fn append(xs, ys) =
+  match xs of
+    Nil => ys
+    Cons(x, rest) => Cons(x, append(rest, ys))
+
+fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
+
+fn flatten(xss) = foldr(append, Nil, xss)
+
+fn concat_map(f, xs) = flatten(map(f, xs))
+
+fn zip_with(f, xs, ys) =
+  match xs of
+    Nil => Nil
+    Cons(x, xr) =>
+      match ys of
+        Nil => Nil
+        Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
+
+fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
+
+fn unzip(ps) =
+  (map(\(p) -> match p of { (x, _) => x }, ps), map(\(p) -> match p of { (_, y) => y }, ps))
+
+fn all(p, xs) =
+  match xs of
+    Nil => true
+    Cons(x, rest) =>
+      if p(x) then
+        all(p, rest)
+      else
+        false
+
+fn any(p, xs) =
+  match xs of
+    Nil => false
+    Cons(x, rest) =>
+      if p(x) then
+        true
+      else
+        any(p, rest)
+
+fn count(p, xs) = length(filter(p, xs))
+
+fn find(p, xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      if p(x) then
+        Some(x)
+      else
+        find(p, rest)
+
+fn position_go(p, n, xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      if p(x) then
+        Some(n)
+      else
+        position_go(p, n + 1, rest)
+
+fn position(p, xs) = position_go(p, 0, xs)
+
+fn sum(xs) = foldl(\(a, b) -> a + b, 0, xs)
+
+fn product(xs) = foldl(\(a, b) -> a * b, 1, xs)
+
+fn maximum(xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) => Some(foldl(max, x, rest))
+
+fn minimum(xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) => Some(foldl(min, x, rest))
+
+fn replicate(n, x) =
+  if n == 0 then
+    Nil
+  else
+    Cons(x, replicate(n - 1, x))
+
+fn range(lo, hi) =
+  if lo >= hi then
+    Nil
+  else
+    Cons(lo, range(lo + 1, hi))
+
+fn tabulate(n, f) = map(f, range(0, n))
+
+fn insert_sorted(x, xs) =
+  match xs of
+    Nil => Cons(x, Nil)
+    Cons(y, rest) =>
+      if x <= y then
+        Cons(x, xs)
+      else
+        Cons(y, insert_sorted(x, rest))
+
+fn sort(xs : List(a)) : List(a) given Ord(a) = sort_by_ord(xs)
+
+fn list_to_option(xs) =
+  match xs of
+    Nil => None
+    Cons(x, _) => Some(x)
+
+fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
+
+fn chunks_of(n, xs) =
+  if is_nil(xs) then
+    Nil
+  else
+    Cons(take(n, xs), chunks_of(n, drop(n, xs)))
+
+fn scan_left(f, z, xs) =
+  Cons(z, match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) })
+
+fn while_loop(cond, body, s) =
+  if cond(s) then
+    while_loop(cond, body, body(s))
+  else
+    s
+
+fn for_range(lo, hi, f, s) =
+  if lo >= hi then
+    s
+  else
+    for_range(lo + 1, hi, f, f(lo, s))
+
+fn while(cond, body) =
+  if cond() then
+    body()
+    while(cond, body)
+
+fn repeat(n, body) =
+  if n > 0 then
+    body()
+    repeat(n - 1, body)
+
+effect Emit(a) {
+  ctl emit(a) : Unit
+}
+
+fn srange_go(lo, hi) =
+  if lo < hi then
+    emit(lo)
+    srange_go(lo + 1, hi)
+
+fn srange(lo, hi) = \(u) -> srange_go(lo, hi)
+
+fn sof_go(xs) =
+  match xs of
+    Nil => ()
+    Cons(x, rest) =>
+      emit(x)
+      sof_go(rest)
+
+fn sof(xs) = \(u) -> sof_go(xs)
+
+-- Arithmetic sequences backing the [a..z] / [a,b..z] list syntax.
+fn enum_from_to(lo, hi) =
+  if lo > hi then
+    Nil
+  else
+    Cons(lo, enum_from_to(lo + 1, hi))
+
+fn enum_seq(x, step, hi) =
+  if step > 0 && x > hi then
+    Nil
+  elif step < 0 && x < hi then
+    Nil
+  else
+    Cons(x, enum_seq(x + step, step, hi))
+
+fn enum_from_then_to(a, b, hi) =
+  let step = b - a
+  if step == 0 then
+    Nil
+  else
+    enum_seq(a, step, hi)
+
+fn smap_go(s, f) =
+  handle s(()) with
+    fun emit(x) => emit(f(x))
+    return r => r
+
+fn smap(s, f) = \(u) -> smap_go(s, f)
+
+fn skeep_go(s, p) =
+  handle s(()) with
+    fun emit(x) =>
+      if p(x) then
+        emit(x)
+    return r => r
+
+fn skeep(s, p) = \(u) -> skeep_go(s, p)
+
+fn stake_go(s, n) =
+  let g =
+    handle s(()) with
+      emit(x, k) =>
+        \(left) -> if left > 0 then let _ = emit(x) in k(())(left - 1) else ()
+      return r => \(left) -> ()
+  g(n)
+
+fn stake(s, n) = \(u) -> stake_go(s, n)
+
+fn sfold(s, z, f) =
+  let g =
+    handle s(()) with
+      emit(x, k) => \(acc) -> k(())(f(acc, x))
+      return r => \(acc) -> acc
+  g(z)
+
+fn ssum(s) =
+  sfold(s, 0) fn(acc, x)
+    acc + x
+
+fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
+
+fn str_join(sep, xs) =
+  match xs of
+    Nil => ""
+    Cons(x, Nil) => x
+    Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
+
+fn str_repeat(s, n) =
+  if n <= 0 then
+    ""
+  else
+    concat(s, str_repeat(s, n - 1))
+
+fn pad_left(s, w) =
+  let pad = w - str_len(s)
+  if pad <= 0 then
+    s
+  else
+    concat(str_repeat(" ", pad), s)
+
+fn pad_right(s, w) =
+  let pad = w - str_len(s)
+  if pad <= 0 then
+    s
+  else
+    concat(s, str_repeat(" ", pad))
+
+fn lines_of(xs) = str_join("\n", xs)
+
+fn index_of_from(c, s, i) =
+  if i >= str_len(s) then
+    0 - 1
+  elif char_at(s, i) == c then
+    i
+  else
+    index_of_from(c, s, i + 1)
+
+fn split_from(c, s, i) =
+  let j = index_of_from(c, s, i)
+  if j < 0 then
+    Cons(substring(s, i, str_len(s) - i), Nil)
+  else
+    Cons(substring(s, i, j - i), split_from(c, s, j + 1))
+
+fn split(c, s) = split_from(c, s, 0)
+
+fn str_of_char(c) = show_char(c)
+
+fn chars_from(s : String, i : Int) : List(Char) =
+  if i >= str_len(s) then
+    Nil
+  else
+    Cons(chr(char_at(s, i)), chars_from(s, i + 1))
+
+fn chars(s : String) : List(Char) = chars_from(s, 0)
+
+fn int_cmp(a, b) =
+  if a < b then
+    0 - 1
+  elif a > b then
+    1
+  else
+    0
+
+let map_empty = Tip
+
+fn map_height(m) =
+  match m of
+    Tip => 0
+    Bin(h, _, _, _, _) => h
+
+fn map_node(k, v, l, r) = Bin(1 + max(map_height(l), map_height(r)), k, v, l, r)
+
+fn map_bf(m) =
+  match m of
+    Tip => 0
+    Bin(_, _, _, l, r) => map_height(l) - map_height(r)
+
+fn map_rot_right(m) =
+  match m of
+    Bin(_, k, v, Bin(_, lk, lv, ll, lr), r) =>
+      map_node(lk, lv, ll, map_node(k, v, lr, r))
+    other => other
+
+fn map_rot_left(m) =
+  match m of
+    Bin(_, k, v, l, Bin(_, rk, rv, rl, rr)) =>
+      map_node(rk, rv, map_node(k, v, l, rl), rr)
+    other => other
+
+fn map_balance(m) =
+  let bf = map_bf(m)
+  if bf > 1 then
+    match m of
+      Bin(_, k, v, l, r) =>
+        if map_bf(l) < 0 then
+          map_rot_right(map_node(k, v, map_rot_left(l), r))
+        else
+          map_rot_right(m)
+      Tip => Tip
+  elif bf < 0 - 1 then
+    match m of
+      Bin(_, k, v, l, r) =>
+        if map_bf(r) > 0 then
+          map_rot_left(map_node(k, v, l, map_rot_right(r)))
+        else
+          map_rot_left(m)
+      Tip => Tip
+  else
+    m
+
+fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
+  match m of
+    Tip => map_node(key, value, Tip, Tip)
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_balance(map_node(k2, v2, map_insert(key, value, l), r))
+      elif c > 0 then
+        map_balance(map_node(k2, v2, l, map_insert(key, value, r)))
+      else
+        map_node(k2, value, l, r)
+
+fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
+  match m of
+    Tip => None
+    Bin(_, k2, v, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_lookup(key, l)
+      elif c > 0 then
+        map_lookup(key, r)
+      else
+        Some(v)
+
+fn map_member(key : k, m : Map(k, v)) : Bool given Ord(k) =
+  is_some(map_lookup(key, m))
+
+fn map_size(m) =
+  match m of
+    Tip => 0
+    Bin(_, _, _, l, r) => 1 + map_size(l) + map_size(r)
+
+fn map_min(m) =
+  match m of
+    Tip => None
+    Bin(_, k, v, Tip, _) => Some((k, v))
+    Bin(_, _, _, l, _) => map_min(l)
+
+fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
+  match m of
+    Tip => Tip
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_balance(map_node(k2, v2, map_delete(key, l), r))
+      elif c > 0 then
+        map_balance(map_node(k2, v2, l, map_delete(key, r)))
+      else
+        match l of
+          Tip => r
+          _ =>
+            match r of
+              Tip => l
+              _ =>
+                match map_min(r) of
+                  None => l
+                  Some((mk, mv)) =>
+                    map_balance(map_node(mk, mv, l, map_delete(mk, r)))
+
+fn map_to_list(m) =
+  match m of
+    Tip => Nil
+    Bin(_, k, v, l, r) => append(map_to_list(l), Cons((k, v), map_to_list(r)))
+
+fn map_keys(m) = map(fst, map_to_list(m))
+
+fn map_values(m) = map(snd, map_to_list(m))
+
+fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
+  foldl(\(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) }, Tip, xs)
+
+fn map_map_values(f, m) =
+  match m of
+    Tip => Tip
+    Bin(h, k, v, l, r) =>
+      Bin(h, k, f(v), map_map_values(f, l), map_map_values(f, r))
+
+let set_empty = map_empty
+
+fn set_insert(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+  map_insert(x, (), s)
+
+fn set_member(x : k, s : Map(k, Unit)) : Bool given Ord(k) = map_member(x, s)
+
+fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+  map_delete(x, s)
+
+fn set_size(s) = map_size(s)
+
+fn set_to_list(s) = map_keys(s)
+
+fn set_from_list(xs : List(k)) : Map(k, Unit) given Ord(k) =
+  foldl(\(acc, x) -> set_insert(x, acc), set_empty, xs)
+
+class Eq(a) {
+  eq : (a, a) -> Bool
+}
+
+class Ord(a) {
+  cmp : (a, a) -> Int
+}
+
+class Show(a) {
+  show_c : (a) -> String
+}
+
+instance eqInt : Eq(Int) {
+  fn eq(x, y) = x == y
+}
+
+instance eqI64 : Eq(I64) {
+  fn eq(x, y) = x == y
+}
+
+instance eqU64 : Eq(U64) {
+  fn eq(x, y) = x == y
+}
+
+instance eqBool : Eq(Bool) {
+  fn eq(x, y) = x == y
+}
+
+instance eqStr : Eq(String) {
+  fn eq(x, y) = str_eq(x, y)
+}
+
+instance eqFloat : Eq(Float) {
+  fn eq(x, y) = x ==. y
+}
+
+instance eqChar : Eq(Char) {
+  fn eq(x, y) = ord(x) == ord(y)
+}
+
+instance ordInt : Ord(Int) {
+  fn cmp(x, y) = int_cmp(x, y)
+}
+
+instance ordI64 : Ord(I64) {
+  fn cmp(x, y) = if x < y then 0 - 1 elif x > y then 1 else 0
+}
+
+instance ordU64 : Ord(U64) {
+  fn cmp(x, y) = if x < y then 0 - 1 elif x > y then 1 else 0
+}
+
+instance ordBool : Ord(Bool) {
+  fn cmp(x, y) = int_cmp(if x then 1 else 0, if y then 1 else 0)
+}
+
+instance ordStr : Ord(String) {
+  fn cmp(x, y) = str_cmp(x, y)
+}
+
+instance ordChar : Ord(Char) {
+  fn cmp(x, y) = int_cmp(ord(x), ord(y))
+}
+
+instance ordFloat : Ord(Float) {
+  fn cmp(x, y) = if x <. y then 0 - 1 elif x >. y then 1 else 0
+}
+
+instance showInt : Show(Int) {
+  fn show_c(x) = show_int(x)
+}
+
+instance showI64 : Show(I64) {
+  fn show_c(x) = show(x)
+}
+
+instance showU64 : Show(U64) {
+  fn show_c(x) = show(x)
+}
+
+instance showFloat : Show(Float) {
+  fn show_c(x) = show(x)
+}
+
+instance showBool : Show(Bool) {
+  fn show_c(x) = show_bool(x)
+}
+
+instance showStr : Show(String) {
+  fn show_c(x) = x
+}
+
+instance showChar : Show(Char) {
+  fn show_c(x) = show_char(x)
+}
+
+fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
+  match xs of
+    Nil => Cons(x, Nil)
+    Cons(y, rest) =>
+      if cmp(x, y) <= 0 then
+        Cons(x, xs)
+      else
+        Cons(y, insert_by_ord(x, rest))
+
+-- Stable merge of two already-sorted lists. The recursive Cons is turned into a
+-- loop by tail-recursion-modulo-cons, and Perceus reuses the consumed cells.
+fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
+  match xs of
+    Nil => ys
+    Cons(x, xr) =>
+      match ys of
+        Nil => xs
+        Cons(y, yr) =>
+          if cmp(x, y) <= 0 then
+            Cons(x, merge_by_ord(xr, ys))
+          else
+            Cons(y, merge_by_ord(xs, yr))
+
+-- Stable, O(n log n) merge sort. Primitive element types (Integer, Float, the
+-- fixed-width ints, Char, Bool) are specialized to a native kernel at the call
+-- site; any other Ord type uses this generic path. Write your own with
+-- insert_by_ord / merge_by_ord if you need different behavior.
+fn sort_by_ord(xs : List(a)) : List(a) given Ord(a) =
+  match xs of
+    Nil => Nil
+    Cons(_, Nil) => xs
+    _ =>
+      let mid = length(xs) / 2
+      let (l, r) = split_at(mid, xs)
+      merge_by_ord(sort_by_ord(l), sort_by_ord(r))

@@ -1,0 +1,35 @@
+-- Fixed-width I64 and U64: wrapping mod 2^64, signed vs unsigned division and
+-- ordering, suffix literals, conversions through Int, and the canonical-form
+-- invariant for Int across the 63-bit immediate boundary.
+
+fn main() =
+  let p63 = pow(2, 63)
+  let p64 = pow(2, 64)
+  let a = to_i64(p63)
+  println(a)
+  println(a - 1i64)
+  println(9223372036854775807i64 + 1i64)
+  println(4000000000000000000i64 * 3i64)
+  println(a / (0i64 - 1i64))
+  println(a % (0i64 - 1i64))
+  println(to_u64(p64 - 1))
+  println(18446744073709551615u64 + 1u64)
+  println(0u64 - 1u64)
+  let u = to_u64(p63)
+  println(u / 10u64)
+  println(u % 10u64)
+  println(if u > 1u64 then 1 else 0)
+  println(if a < 1i64 then 1 else 0)
+  println(int_of_i64(a))
+  println(int_of_u64(u))
+  println(int_of_u64(to_u64(0 - 1)))
+  println(int_of_i64(to_i64(p64 + 5)))
+  let x = 4611686018427387903
+  let y = x + x
+  let z = y - x
+  println(y)
+  println(match z of { 4611686018427387903 => 1, _ => 0 })
+  println(match y of { 9223372036854775806 => 1, _ => 0 })
+  println(p64 + p64)
+  println(p64 * p64)
+  println(p64 / 3)

@@ -1,0 +1,10 @@
+fn build(n : Int, acc : List(Int)) : List(Int) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(n, acc))
+
+fn main() =
+  let xs = build(250000, Nil)
+  let ys = [9]
+  println(length(ys))

@@ -1,0 +1,8 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn loop_it(xs : List(Int)) : Unit =\\n\\\n     \\x20 for x in xs do\\n\\\n     \\x20   -- visit each element\\n\\\n     \\x20   println(show(x))\\n\")"
+---
+fn loop_it(xs : List(Int)) : Unit =
+  for x in xs do
+    -- visit each element
+    println(show(x))

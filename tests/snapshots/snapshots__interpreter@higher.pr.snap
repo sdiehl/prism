@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/higher.pr
+---
+12
+64
+40
+30
+25
+=> ()

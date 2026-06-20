@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/fib_var.pr
+---
+0
+1
+5
+55
+6765
+=> ()

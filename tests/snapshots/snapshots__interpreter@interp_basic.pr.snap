@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/interp_basic.pr
+---
+plain
+n = 7, sum = 7
+12
+esc {x} ok
+hi prism, n = 7
+len = 5
+=> ()

@@ -1,0 +1,9 @@
+fn main() =
+  println(true)
+  println(1 == 2)
+  var b := false
+  println(b)
+  b := 3 > 2
+  println(b)
+  println("{show(true)} and {show(b)}")
+  println(())

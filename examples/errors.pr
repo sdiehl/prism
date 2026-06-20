@@ -1,0 +1,60 @@
+-- Errors as effect rows. Each `error` declaration is its own effect label and
+-- `throw` performs it, so a function's row is its error set. find_port carries
+-- {NotFound}, parse_port carries {Malformed}, and their composition unions to
+-- {NotFound, Malformed} with no umbrella enum or conversion glue.
+--
+-- `try`/`catch` is subtractive handler sugar (one nested `final ctl` per arm).
+-- A partial catch discharges its label and passes the rest to an outer try. An
+-- uncaught case is an unhandled-effect error naming exactly what remains.
+--
+-- Expected output:
+--   8080
+--   default 80
+--   bad config: oops
+--   443
+--   no such key: tls
+--
+error NotFound(String)
+error Malformed(String)
+
+fn find_port(cfg, key) =
+  match cfg of
+    Nil => throw NotFound(key)
+    Cons(pair, rest) =>
+      let (k, v) = pair
+      if k == key then
+        v
+      else
+        find_port(rest, key)
+
+fn parse_port(s) =
+  if s == "8080" then
+    8080
+  elif s == "443" then
+    443
+  else
+    throw Malformed(s)
+
+-- Composed: the row unions to {NotFound, Malformed}.
+fn port_of(cfg, key) : !{NotFound, Malformed} Int =
+  parse_port(find_port(cfg, key))
+
+fn describe(cfg, key) =
+  try
+    show(port_of(cfg, key))
+  catch
+    NotFound(k) => "no such key: {k}"
+    Malformed(s) => "bad config: {s}"
+
+fn main() =
+  let cfg = [("http", "8080"), ("https", "443"), ("smtp", "oops")]
+  println(describe(cfg, "http"))
+  let port =
+    try
+      try port_of(cfg, "gopher") catch { Malformed(s) => 0 }
+    catch
+      NotFound(k) => 80
+  println("default {show(port)}")
+  println(describe(cfg, "smtp"))
+  println(describe(cfg, "https"))
+  println(describe(cfg, "tls"))

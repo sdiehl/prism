@@ -1,0 +1,16 @@
+effect Exn {
+  ctl raise(Int) : Int
+}
+
+fn apply(f : (Int) -> Int ! {Exn}, x : Int) : !{Exn} Int = f(x)
+
+fn risky(x) =
+  if x == 0 then
+    raise(1)
+  else
+    x
+
+fn main() =
+  handle apply(risky, 0) with
+    raise(v, k) => 0 - v
+    return r => r

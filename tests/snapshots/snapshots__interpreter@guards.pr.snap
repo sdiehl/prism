@@ -1,0 +1,22 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/guards.pr
+---
+big
+small
+other
+empty
+zero
+huge
+pos
+neg
+1
+2
+3
+4
+10
+20
+30
+35
+=> ()

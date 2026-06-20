@@ -1,0 +1,11 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn main() =\\n\\\n     \\x20 -- bind the first\\n\\\n     \\x20 let x = 1\\n\\\n     \\x20 -- bind the second\\n\\\n     \\x20 let y = 2\\n\\\n     \\x20 -- combine them\\n\\\n     \\x20 x + y\\n\")"
+---
+fn main() =
+  -- bind the first
+  let x = 1
+  -- bind the second
+  let y = 2
+  -- combine them
+  x + y

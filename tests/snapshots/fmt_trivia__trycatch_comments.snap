@@ -1,0 +1,13 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"error Boom\\n\\\n     \\n\\\n     fn guarded() : Int =\\n\\\n     \\x20 try\\n\\\n     \\x20   -- the risky part\\n\\\n     \\x20   throw Boom\\n\\\n     \\x20 catch\\n\\\n     \\x20   -- recover from Boom\\n\\\n     \\x20   Boom => 0\\n\")"
+---
+error Boom
+
+fn guarded() : Int =
+  try
+    -- the risky part
+    throw Boom
+  catch
+    -- recover from Boom
+    Boom => 0

@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/interp_unterm.pr
+---
+Lexical Error: unterminated string literal at line 2:26
+   ╭─[ <source>:2:26 ]
+   │
+ 2 │ fn main() = println("a {x")
+   │                          │ 
+   │                          ╰─ here
+───╯

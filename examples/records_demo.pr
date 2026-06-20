@@ -1,0 +1,31 @@
+-- Nominal records: construction, nested field access, functional update.
+--
+-- Vec2 and Particle are record types tagged by constructor. step advances a
+-- Particle with `..p` update syntax, copying every field but the named one.
+-- Field chains like p.pos.x read through nesting. Pure data, no effects until
+-- the final prints.
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Particle = Particle { pos: Vec2, vel: Vec2 }
+fn add(a : Vec2, b : Vec2) : Vec2 = Vec2 { x = a.x + b.x, y = a.y + b.y }
+
+fn scale(k : Int, v : Vec2) : Vec2 = Vec2 { x = k * v.x, y = k * v.y }
+
+fn step(p : Particle) : Particle = Particle { ..p, pos = add(p.pos, p.vel) }
+
+fn run(p : Particle, n : Int) : Particle =
+  if n == 0 then
+    p
+  else
+    run(step(p), n - 1)
+
+fn main() : !{IO} Unit =
+  let origin = Vec2 { x = 0, y = 0 }
+  let p0 = Particle { pos = origin, vel = Vec2 { x = 3, y = 4 } }
+  let p = run(p0, 5)
+  let bounced = Particle { ..p, vel = scale(0 - 1, p.vel) }
+  println(p.pos.x)
+  println(p.pos.y)
+  println(bounced.vel.x)
+  println(bounced.vel.y)

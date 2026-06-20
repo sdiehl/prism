@@ -1,0 +1,58 @@
+-- A call-by-value lambda calculus interpreter, the host language pretending to
+-- BE a smaller language. Terms use de Bruijn indices: a variable is a number
+-- counting binders outward, so there are no names to freshen or capture. A
+-- value is a closure Clo(body, env): a Lam paired with the environment it was
+-- built in. eval looks Var(i) up by position, makes a Clo for Lam, and for App
+-- evaluates the body with the argument pushed onto the closure's own env.
+--
+-- A malformed term (an index past the end of env, or applying something that is
+-- not a closure) SIGNALS the Scope effect. Its handler is a `final ctl`: it
+-- drops the continuation and aborts to a fixed message, so failure escapes the
+-- recursion instead of threading an error up through every return.
+--
+-- Expected output:
+--   id(id)    = closure /\x.0
+--   (K id)    = closure /\x.1
+--   scope err = oops
+
+type Term = Var(Int) | Lam(Term) | App(Term, Term)
+
+type Val = Clo(Term, List(Val))
+
+effect Scope {
+  ctl bad(Int) : Val
+}
+
+fn lookup(env, i) : !{Scope} Val =
+  match nth(i, env) of
+    Some(v) => v
+    None => bad(i)
+
+fn eval(env, t) : !{Scope} Val =
+  match t of
+    Var(i) => lookup(env, i)
+    Lam(b) => Clo(b, env)
+    App(f, a) =>
+      match eval(env, f) of
+        Clo(b, cenv) => eval(Cons(eval(env, a), cenv), b)
+
+-- Every value is a closure; describe it by the variable its body returns, so
+-- distinct results (id's Var(0) vs K-applied's Var(1)) read out differently.
+fn describe(v) =
+  match v of
+    Clo(Var(i), _) => "closure /\\x.{show(i)}"
+    Clo(_, _) => "closure"
+
+fn run(t) =
+  handle describe(eval(Nil, t)) with
+    final ctl bad(_) => "oops"
+    return r => r
+
+fn main() =
+  let id = Lam(Var(0))
+  -- K = \x. \y. x  picks its first argument. Applying it to one arg leaves the
+  -- inner \y.x as a closure whose body Var(1) reaches past y to the captured x.
+  let k = Lam(Lam(Var(1)))
+  println("id(id)    = {run(App(id, id))}")
+  println("(K id)    = {run(App(k, id))}")
+  println("scope err = {run(Var(0))}")

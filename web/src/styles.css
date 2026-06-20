@@ -1,0 +1,383 @@
+:root {
+  --ink: #1b1b1b;
+  --muted: #6b6b6b;
+  --line: #e4e4e4;
+  --accent: #2f6f4f;
+  --bg-soft: #fafaf8;
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--ui);
+  color: var(--ink);
+  background: #fff;
+  -webkit-font-smoothing: antialiased;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+header .logo-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  text-decoration: none;
+}
+header .logo {
+  display: block;
+}
+header h1 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+header h1 b {
+  color: var(--accent);
+  font-weight: 600;
+}
+header .tag {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+header .grow {
+  flex: 1;
+}
+header a {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  color: var(--muted);
+}
+header a:hover {
+  color: var(--accent);
+}
+header a svg {
+  width: 18px;
+  height: 18px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+select,
+button {
+  font-family: var(--ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+select {
+  max-width: 190px;
+}
+select:hover,
+button:hover {
+  border-color: #c7c7c7;
+}
+button:active {
+  background: var(--bg-soft);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.run {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+button.run svg {
+  width: 14px;
+  height: 14px;
+}
+button.run:hover {
+  background: #285f44;
+}
+button.run:disabled {
+  background: var(--accent);
+}
+button.toggle.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+main.show-sigs {
+  grid-template-columns: 1fr 1fr minmax(200px, 0.68fr);
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.pane + .pane {
+  border-left: 1px solid var(--line);
+}
+.sigpane {
+  display: none;
+}
+main.show-sigs .sigpane {
+  display: flex;
+}
+.label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+.out {
+  flex: 1;
+  margin: 0;
+  padding: 18px;
+  border: 0;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: #fff;
+  overflow: auto;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.out.err {
+  color: #a4362f;
+}
+.out.dim {
+  color: var(--muted);
+}
+
+/* Code editor: a highlight layer behind a transparent textarea, with a
+   line-number gutter that flags lines carrying a diagnostic. */
+.editor {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.ed-shared {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  word-wrap: normal;
+}
+.gutter {
+  flex: none;
+  min-width: 3.4em;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+.gutter .lines {
+  padding: 18px 10px 18px 0;
+  color: var(--muted);
+  text-align: right;
+}
+.gutter .ln.err {
+  color: #a4362f;
+  font-weight: 600;
+}
+.codewrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.hl,
+#src {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  border: 0;
+  padding: 18px;
+  overflow: auto;
+}
+.hl {
+  color: var(--ink);
+  pointer-events: none;
+  background: #fff;
+}
+#src {
+  color: transparent;
+  caret-color: var(--ink);
+  background: transparent;
+  resize: none;
+  outline: none;
+}
+.hl .squig {
+  text-decoration: #d23 wavy underline;
+  text-decoration-skip-ink: none;
+}
+.tip {
+  position: fixed;
+  z-index: 20;
+  display: none;
+  max-width: 360px;
+  font-family: var(--ui);
+  font-size: 12px;
+  line-height: 1.4;
+  color: #fff;
+  background: #2a2a2a;
+  border-radius: 6px;
+  padding: 6px 9px;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.tip b {
+  color: #ff9a93;
+  font-weight: 600;
+}
+.tk-kw {
+  color: #8a3fa0;
+}
+.tk-ty {
+  color: #2660a4;
+}
+.tk-ctor {
+  color: #2660a4;
+}
+.tk-num {
+  color: #9a6a00;
+}
+.tk-lit {
+  color: #9a6a00;
+}
+.tk-str {
+  color: #3a7a55;
+}
+.tk-com {
+  color: #9aa0a6;
+  font-style: italic;
+}
+.tk-op {
+  color: #6b6b6b;
+}
+
+/* Narrow viewports (phones): the two side-by-side panes stack vertically, the
+   header wraps onto multiple rows, controls grow to fill the width with larger
+   tap targets, and the page scrolls instead of being locked to the viewport. */
+@media (max-width: 720px) {
+  html,
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+  header {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 12px 16px;
+  }
+  header .tag {
+    flex-basis: 100%;
+    order: 5;
+  }
+  header .grow {
+    display: none;
+  }
+  header a#gh {
+    margin-left: auto;
+  }
+  .controls {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .controls select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .controls button {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  select,
+  button {
+    font-size: 15px;
+    padding: 9px 14px;
+  }
+  main {
+    display: flex;
+    flex-direction: column;
+  }
+  .pane {
+    min-height: 0;
+  }
+  .pane + .pane {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  /* Give the editor a usable fixed height; output grows with its content. */
+  .pane:first-child .editor {
+    height: 55vh;
+    min-height: 280px;
+  }
+  .pane:nth-child(2) {
+    min-height: 160px;
+  }
+  .out {
+    font-size: 14px;
+    padding: 14px;
+  }
+  /* The Core IR and Type-signature toggles and their shared pane are a
+     desktop-only affordance; on phones the screen only has room for the
+     editor, Run/Format, and output. */
+  #dump,
+  #ir,
+  .sigpane {
+    display: none;
+  }
+}
+
+/* Phones (iPhone-class widths): the example dropdown takes a full row of its
+   own, and Run/Format sit on the row below sharing the width evenly, so the
+   toolbar never overflows the viewport edge. */
+@media (max-width: 480px) {
+  .controls select {
+    flex: 1 1 100%;
+  }
+  .controls button {
+    flex: 1 1 auto;
+    padding: 9px 10px;
+    justify-content: center;
+  }
+}

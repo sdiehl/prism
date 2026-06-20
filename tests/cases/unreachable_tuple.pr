@@ -1,0 +1,8 @@
+fn pick(p) =
+  match p of
+    (true, _) => 1
+    (_, true) => 2
+    (false, false) => 3
+    _ => 4
+
+fn main() = println(pick((true, false)))

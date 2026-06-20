@@ -1,0 +1,5 @@
+type Point = Point { x: Int, y: Int }
+
+fn main() : Unit =
+  let p = Point { x = 1 }
+  println(p.x)

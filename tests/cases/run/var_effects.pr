@@ -1,0 +1,6 @@
+fn main() =
+  var x := 0
+  repeat(3) fn
+    x := x + 1
+    println(x)
+  println(x * 100)

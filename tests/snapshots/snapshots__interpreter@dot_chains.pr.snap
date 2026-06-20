@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/dot_chains.pr
+---
+56
+4
+9
+50
+60
+70
+=> ()

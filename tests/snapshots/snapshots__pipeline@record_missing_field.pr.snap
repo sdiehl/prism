@@ -1,0 +1,119 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/record_missing_field.pr
+---
+== tokens ==
+VOpen Type UIdent("Point") Eq UIdent("Point") LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace VSemi Fn Ident("main") LParen RParen Colon KwUnit Eq VOpen Let Ident("p") Eq UIdent("Point") LBrace Ident("x") Eq Int(IntLit { value: 1, suffix: None }) RBrace VSemi Ident("println") LParen Ident("p") Dot Ident("x") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Point",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Point",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "x",
+                                Int,
+                            ),
+                            (
+                                "y",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..37,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "p",
+                    Spanned {
+                        node: RecordCreate(
+                            "Point",
+                            [
+                                (
+                                    "x",
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 80..81,
+                                    },
+                                ),
+                            ],
+                        ),
+                        span: 68..83,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 86..93,
+                            },
+                            [
+                                Spanned {
+                                    node: FieldAccess(
+                                        Spanned {
+                                            node: Var(
+                                                "p",
+                                            ),
+                                            span: 94..95,
+                                        },
+                                        "x",
+                                    ),
+                                    span: 94..97,
+                                },
+                            ],
+                        ),
+                        span: 86..98,
+                    },
+                ),
+                span: 60..98,
+            },
+            wheres: [],
+            span: 39..98,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: missing field(s) y in Point
+   ╭─[ <source>:4:11 ]
+   │
+ 4 │   let p = Point { x = 1 }
+   │           ───────┬───────  
+   │                  ╰───────── in `main`: missing field(s) y in Point
+───╯

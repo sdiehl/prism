@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/print_structural.pr
+---
+Green
+[1, 2, 3]
+(7, false)
+Node(Leaf, 5, Leaf)
+[(1, true), (2, false)]
+3
+7
+true
+()
+1000000000000000000000
+=> ()

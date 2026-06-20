@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/option_chain.pr
+---
+50
+=> ()

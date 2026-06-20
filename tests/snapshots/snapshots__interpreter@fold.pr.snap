@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/fold.pr
+---
+28
+5040
+8
+84
+12345
+=> ()

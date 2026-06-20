@@ -1,0 +1,11 @@
+-- A user variable spelled like a reuse token must not be shadowed by the
+-- token the fbip pass inserts in a reuse-firing match arm.
+type Pair = Pair(Int, Int)
+
+fn bump(p : Pair, _reuse_p : Int) : Pair =
+  match p of
+    Pair(a, b) => Pair(a + _reuse_p, b)
+
+fn main() =
+  match bump(Pair(1, 2), 10) of
+    Pair(x, y) => println(x + y)

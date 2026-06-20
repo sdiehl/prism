@@ -1,0 +1,89 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/if_nonunit.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq VOpen If True Then VOpen Int(IntLit { value: 42, suffix: None }) VClose VSemi Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: If(
+                            Spanned {
+                                node: Bool(
+                                    true,
+                                ),
+                                span: 17..21,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 42,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 31..33,
+                            },
+                            Spanned {
+                                node: Unit,
+                                span: 33..33,
+                            },
+                        ),
+                        span: 14..33,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 36..43,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 0,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 44..45,
+                                },
+                            ],
+                        ),
+                        span: 36..46,
+                    },
+                ),
+                span: 14..46,
+            },
+            wheres: [],
+            span: 0..46,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: type mismatch: expected Int, got Unit
+   ╭─[ <source>:3:7 ]
+   │
+ 3 │     42
+   │       │ 
+   │       ╰─ in `main`: type mismatch: expected Int, got Unit
+───╯

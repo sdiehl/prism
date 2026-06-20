@@ -1,0 +1,7 @@
+type Color = Red | Green | Blue
+fn name(c) =
+  match c of
+    Red => 1
+    _ => 0
+    Blue => 3
+fn main() = println(name(Blue))

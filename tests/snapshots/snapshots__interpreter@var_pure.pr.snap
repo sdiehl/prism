@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+55
+6765
+385
+21
+=> ()

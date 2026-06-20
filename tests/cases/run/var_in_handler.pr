@@ -1,0 +1,21 @@
+-- A `var` block nested inside the handled region of a user effect handler:
+-- the var's closed parameter-passing handler is open w.r.t. tick, so its
+-- resume escapes into the state closure and lowering must go whole-program.
+effect Tick {
+  ctl tick(Unit) : Unit
+}
+
+fn body() : Int =
+  var c := 0
+  tick(())
+  c := c + 1
+  tick(())
+  c := c + 10
+  c
+
+fn main() =
+  let r =
+    handle body() with
+      tick(u, k) => k(()) + 100
+      return x => x
+  println(r)

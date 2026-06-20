@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+220
+lo
+hi
+0
+3
+6
+=> ()

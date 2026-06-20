@@ -1,0 +1,5 @@
+fn noisy(borrow x) =
+  println(x)
+  x
+
+fn main() = noisy(3)

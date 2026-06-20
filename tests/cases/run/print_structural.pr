@@ -1,0 +1,19 @@
+-- Direct `print` of every shape must match the interpreter: each routes
+-- through the type-directed structural printer (constructor names, list/tuple
+-- syntax, fixed-width ints, bool, unit) rather than the raw integer printer.
+-- Regression for a native bug where print of non-primitives fell through to
+-- the integer printer; the blind spot was a corpus that only ever wrote
+-- `println(show(x))`, never bare `println(x)`.
+type Color = Red | Green | Blue
+type Tree = Leaf | Node(Tree, Int, Tree)
+fn main() =
+  println(Green)
+  println([1, 2, 3])
+  println((7, false))
+  println(Node(Leaf, 5, Leaf))
+  println([(1, true), (2, false)])
+  println(3i64)
+  println(7u64)
+  println(true)
+  println(())
+  println(1000000000000000000000)

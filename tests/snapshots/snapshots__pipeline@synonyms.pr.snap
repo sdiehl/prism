@@ -1,0 +1,428 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/synonyms.pr
+---
+== tokens ==
+VOpen Alias UIdent("Pair") LParen Ident("a") RParen Eq LParen Ident("a") Comma Ident("a") RParen VSemi Alias UIdent("Pairs") LParen Ident("a") RParen Eq UIdent("Pair") LParen UIdent("Pair") LParen Ident("a") RParen RParen VSemi Alias UIdent("Count") Eq KwInt VSemi Fn Ident("fst") LParen Ident("p") Colon UIdent("Pair") LParen KwInt RParen RParen Colon KwInt Eq VOpen Match Ident("p") Of VOpen LParen Ident("a") Comma Ident("b") RParen FatArrow Ident("a") VClose VClose VSemi Fn Ident("quad") LParen Ident("x") Colon UIdent("Count") RParen Colon UIdent("Pairs") LParen KwInt RParen Eq LParen LParen Ident("x") Comma Ident("x") RParen Comma LParen Ident("x") Comma Ident("x") RParen RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Match Ident("quad") LParen Int(IntLit { value: 3, suffix: None }) RParen Of VOpen LParen Ident("l") Comma Ident("r") RParen FatArrow Ident("print") LParen Ident("fst") LParen Ident("l") RParen RParen VClose VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    synonyms: [
+        SynonymDecl {
+            name: "Pair",
+            params: [
+                "a",
+            ],
+            ty: Tuple(
+                [
+                    Var(
+                        "a",
+                    ),
+                    Var(
+                        "a",
+                    ),
+                ],
+            ),
+            span: 0..22,
+        },
+        SynonymDecl {
+            name: "Pairs",
+            params: [
+                "a",
+            ],
+            ty: Con(
+                "Pair",
+                [
+                    Con(
+                        "Pair",
+                        [
+                            Var(
+                                "a",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            span: 23..53,
+        },
+        SynonymDecl {
+            name: "Count",
+            params: [],
+            ty: Int,
+            span: 54..71,
+        },
+    ],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "fst",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Pair",
+                            [
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "p",
+                        ),
+                        span: 111..112,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Tuple(
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "a",
+                                            ),
+                                            span: 121..122,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "b",
+                                            ),
+                                            span: 124..125,
+                                        },
+                                    ],
+                                ),
+                                span: 120..126,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "a",
+                                ),
+                                span: 130..131,
+                            },
+                        },
+                    ],
+                ),
+                span: 105..131,
+            },
+            wheres: [],
+            span: 73..131,
+        },
+        Decl {
+            name: "quad",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Con(
+                            "Count",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Pairs",
+                    [
+                        Int,
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Tuple(
+                    [
+                        Spanned {
+                            node: Tuple(
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 169..170,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 172..173,
+                                    },
+                                ],
+                            ),
+                            span: 168..174,
+                        },
+                        Spanned {
+                            node: Tuple(
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 177..178,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 180..181,
+                                    },
+                                ],
+                            ),
+                            span: 176..182,
+                        },
+                    ],
+                ),
+                span: 167..183,
+            },
+            wheres: [],
+            span: 133..183,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "quad",
+                                ),
+                                span: 205..209,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 3,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 210..211,
+                                },
+                            ],
+                        ),
+                        span: 205..212,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Tuple(
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "l",
+                                            ),
+                                            span: 221..222,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 224..225,
+                                        },
+                                    ],
+                                ),
+                                span: 220..226,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "print",
+                                        ),
+                                        span: 230..235,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "fst",
+                                                    ),
+                                                    span: 236..239,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "l",
+                                                        ),
+                                                        span: 240..241,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 236..242,
+                                        },
+                                    ],
+                                ),
+                                span: 230..243,
+                            },
+                        },
+                    ],
+                ),
+                span: 199..243,
+            },
+            wheres: [],
+            span: 185..243,
+        },
+    ],
+}
+
+== types ==
+fst : ((Int, Int)) -> Int
+quad : (Int) -> ((Int, Int), (Int, Int))
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn fst(p) =
+  return p to t@0; case t@0 { (a, b) => return a }
+fn quad(x) =
+  return x to t@1; return x to t@2; return (t@1, t@2) to t@3; return x to t@4; return x to t@5; return (t@4, t@5) to t@6; return (t@3, t@6)
+fn main() =
+  return 3 to t@7; quad(t@7) to t@8; case t@8 { (l, r) => return l to t@9; fst(t@9) to t@10; print t@10 }
+
+== fbip (rc) ==
+fn fst(p) =
+  return p to t@0; case t@0 { (a, b) => dup a to _; drop t@0 to _; return a }
+fn quad(x) =
+  dup x to _; dup x to _; return x to t@1; return x to t@2; return (t@1, t@2) to t@3; dup x to _; return x to t@4; return x to t@5; return (t@4, t@5) to t@6; return (t@3, t@6)
+fn main() =
+  return 3 to t@7; quad(t@7) to t@8; case t@8 { (l, r) => dup l to _; drop t@8 to _; return l to t@9; fst(t@9) to t@10; print t@10 }
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_fst(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  br label %b2
+
+b2:                                               ; preds = %entry
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 24
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 32
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t2)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t2
+
+b1:                                               ; No predecessors!
+  unreachable
+}
+
+declare void @prism_rc_inc(i64)
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_quad(i64 %a0) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  call void @prism_rc_inc(i64 %a0)
+  %t2 = call ptr @prism_alloc(i64 2)
+  %0 = ptrtoint ptr %t2 to i64
+  %1 = add i64 %0, 8
+  %t3 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t3, align 8
+  %2 = ptrtoint ptr %t2 to i64
+  %3 = add i64 %2, 24
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 %a0, ptr %t4, align 8
+  %4 = ptrtoint ptr %t2 to i64
+  %5 = add i64 %4, 32
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 %a0, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t2 to i64
+  call void @prism_rc_inc(i64 %a0)
+  %t8 = call ptr @prism_alloc(i64 2)
+  %6 = ptrtoint ptr %t8 to i64
+  %7 = add i64 %6, 8
+  %t9 = inttoptr i64 %7 to ptr
+  store i64 0, ptr %t9, align 8
+  %8 = ptrtoint ptr %t8 to i64
+  %9 = add i64 %8, 24
+  %t10 = inttoptr i64 %9 to ptr
+  store i64 %a0, ptr %t10, align 8
+  %10 = ptrtoint ptr %t8 to i64
+  %11 = add i64 %10, 32
+  %t11 = inttoptr i64 %11 to ptr
+  store i64 %a0, ptr %t11, align 8
+  %t12 = ptrtoint ptr %t8 to i64
+  %t13 = call ptr @prism_alloc(i64 2)
+  %12 = ptrtoint ptr %t13 to i64
+  %13 = add i64 %12, 8
+  %t14 = inttoptr i64 %13 to ptr
+  store i64 0, ptr %t14, align 8
+  %14 = ptrtoint ptr %t13 to i64
+  %15 = add i64 %14, 24
+  %t15 = inttoptr i64 %15 to ptr
+  store i64 %t6, ptr %t15, align 8
+  %16 = ptrtoint ptr %t13 to i64
+  %17 = add i64 %16, 32
+  %t16 = inttoptr i64 %17 to ptr
+  store i64 %t12, ptr %t16, align 8
+  %t17 = ptrtoint ptr %t13 to i64
+  ret i64 %t17
+}
+
+declare ptr @prism_alloc(i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_quad(i64 7)
+  %t1 = inttoptr i64 %t0 to ptr
+  br label %b2
+
+b2:                                               ; preds = %entry
+  %0 = ptrtoint ptr %t1 to i64
+  %1 = add i64 %0, 24
+  %t2 = inttoptr i64 %1 to ptr
+  %t3 = load i64, ptr %t2, align 8
+  %2 = ptrtoint ptr %t1 to i64
+  %3 = add i64 %2, 32
+  %t4 = inttoptr i64 %3 to ptr
+  %t5 = load i64, ptr %t4, align 8
+  call void @prism_rc_inc(i64 %t3)
+  call void @prism_rc_dec(i64 %t0)
+  %t8 = call i64 @prism_fst(i64 %t3)
+  call void @prism_print_int(i64 %t8)
+  call void @prism_rc_dec(i64 %t8)
+  ret i64 0
+
+b1:                                               ; No predecessors!
+  unreachable
+}
+
+declare void @prism_print_int(i64)
+
+== run ==
+output: [3]
+result: ()

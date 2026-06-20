@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/var_interp.pr
+---
+got x
+n = 7
+o = Some(3)
+None
+=> ()

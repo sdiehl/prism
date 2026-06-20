@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>tiny-prism playground</title>
+
+    <meta name="description" content="An in-browser playground for tiny-prism, a tiny functional language with algebraic effect types. Edit, run, and inspect Core IR, all compiled to WebAssembly." />
+    <meta name="theme-color" content="#2f6f4f" />
+    <link rel="canonical" href="https://sdiehl.github.io/prism/" />
+
+    <!-- Open Graph (Facebook, LinkedIn, WhatsApp, Slack, Discord, iMessage) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="tiny-prism" />
+    <meta property="og:title" content="tiny-prism playground" />
+    <meta property="og:description" content="An in-browser playground for tiny-prism, a tiny functional language with algebraic effect types. Edit, run, and inspect Core IR, all compiled to WebAssembly." />
+    <meta property="og:url" content="https://sdiehl.github.io/prism/" />
+    <meta property="og:image" content="https://sdiehl.github.io/prism/prism.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="256" />
+    <meta property="og:image:height" content="256" />
+    <meta property="og:image:alt" content="The tiny-prism logo." />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="tiny-prism playground" />
+    <meta name="twitter:description" content="An in-browser playground for tiny-prism, a tiny functional language with algebraic effect types. Edit, run, and inspect Core IR, all compiled to WebAssembly." />
+    <meta name="twitter:image" content="https://sdiehl.github.io/prism/prism.png" />
+    <meta name="twitter:image:alt" content="The tiny-prism logo." />
+  </head>
+  <body>
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1>tiny<b>-prism</b></h1>
+      <span class="tag">a tiny language with effect types</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <select id="examples" title="Load an example"></select>
+        <button id="run" class="run" disabled>Run</button>
+        <button id="fmt" disabled>Format</button>
+        <button id="dump" class="toggle" disabled>Type signatures</button>
+        <button id="ir" class="toggle" disabled>Core IR</button>
+      </div>
+      <a id="gh" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.78 0 12.29c0 5.2 3.44 9.6 8.21 11.16.6.11.82-.25.82-.56 0-.28-.01-1.02-.02-2-3.34.71-4.04-1.58-4.04-1.58-.55-1.37-1.34-1.73-1.34-1.73-1.09-.73.08-.72.08-.72 1.21.08 1.84 1.22 1.84 1.22 1.07 1.79 2.81 1.27 3.5.97.11-.76.42-1.27.76-1.56-2.67-.3-5.47-1.31-5.47-5.83 0-1.29.47-2.34 1.24-3.17-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.21a11.6 11.6 0 0 1 3-.39c1.02 0 2.05.13 3 .39 2.28-1.53 3.29-1.21 3.29-1.21.66 1.66.25 2.88.12 3.18.77.83 1.24 1.88 1.24 3.17 0 4.53-2.81 5.53-5.49 5.82.43.36.81 1.08.81 2.18 0 1.58-.01 2.85-.01 3.24 0 .31.21.68.83.56C20.57 21.88 24 17.48 24 12.29 24 5.78 18.63.5 12 .5z"/></svg>
+      </a>
+    </header>
+    <main>
+      <section class="pane">
+        <div class="label">Source</div>
+        <div class="editor">
+          <div class="gutter"><div class="lines ed-shared" id="gutter"></div></div>
+          <div class="codewrap">
+            <pre class="hl ed-shared" id="hl" aria-hidden="true"></pre>
+            <textarea id="src" class="ed-shared" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" autofocus></textarea>
+          </div>
+        </div>
+      </section>
+      <section class="pane">
+        <div class="label">Output</div>
+        <pre id="out" class="out dim">Loading wasm...</pre>
+      </section>
+      <section class="pane sigpane">
+        <div class="label" id="siglabel">Type signatures</div>
+        <pre id="sigs" class="out dim"></pre>
+      </section>
+    </main>
+    <div id="tip" class="tip"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

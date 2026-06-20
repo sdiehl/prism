@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/interp_empty.pr
+---
+Lexical Error: empty interpolation hole `{}` at line 2:24
+   ╭─[ <source>:2:24 ]
+   │
+ 2 │ fn main() = println("a {} b")
+   │                        │ 
+   │                        ╰─ here
+───╯

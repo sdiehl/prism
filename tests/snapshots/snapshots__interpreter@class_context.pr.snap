@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/class_context.pr
+---
+-1
+1
+0
+29
+31
+314
+=> ()

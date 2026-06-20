@@ -1,0 +1,123 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/eq_no_instance.pr
+---
+== tokens ==
+VOpen Type UIdent("Pair") Eq UIdent("MkPair") LParen KwInt Comma KwInt RParen VSemi Fn Ident("main") LParen RParen Eq UIdent("MkPair") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen EqEq UIdent("MkPair") LParen Int(IntLit { value: 3, suffix: None }) Comma Int(IntLit { value: 4, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Pair",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "MkPair",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..28,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Eq,
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "MkPair",
+                                ),
+                                span: 42..48,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 49..50,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 2,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 52..53,
+                                },
+                            ],
+                        ),
+                        span: 42..54,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "MkPair",
+                                ),
+                                span: 58..64,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 3,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 65..66,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 4,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 68..69,
+                                },
+                            ],
+                        ),
+                        span: 58..70,
+                    },
+                ),
+                span: 42..70,
+            },
+            wheres: [],
+            span: 30..70,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: no instance for Eq(Pair)
+   ╭─[ <source>:3:13 ]
+   │
+ 3 │ fn main() = MkPair(1, 2) == MkPair(3, 4)
+   │             ──────────────┬─────────────  
+   │                           ╰─────────────── in `main`: no instance for Eq(Pair)
+───╯

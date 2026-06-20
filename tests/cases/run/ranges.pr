@@ -1,0 +1,11 @@
+-- Haskell-style arithmetic sequence syntax (grammar.lalrpop -> Sugar::Range ->
+-- prelude enum_from_to / enum_from_then_to). [a..z] steps by 1; a prefix sets
+-- the step, and the formatter round-trips the [..] form.
+fn main() =
+  println([1..10])
+  println([0, 2..10])
+  println([0, 3, 6..9])
+  println([10..1])
+  println([10, 8..1])
+  println(sum([1..100]))
+  println(length([1..0]))

@@ -1,0 +1,38 @@
+-- The `??` operator runs its left side in a `Fail` context and falls back to
+-- the right on failure. It reads as Verse's `or`. The failable accessors
+-- at_list / at_map / force raise `fail()` on a miss, so lookups default
+-- cleanly. They chain: `a ?? b ?? c` nests right, each `??` its own handler.
+-- Optional chaining `a?.b` is `force(a).b`, so a path short-circuits on the
+-- first `None` and defaults with `??`. Expected output:
+--
+--   10
+--   -1
+--   80
+--   8080
+--   443
+--   7
+--   99
+--   42
+--   -1
+--   -1
+
+type City = City { zip: Int }
+type Addr = Addr { city: Option(City) }
+
+fn main() =
+  let xs = [10, 20, 30]
+  println(xs.at_list(0) ?? 0 - 1)
+  println(xs.at_list(9) ?? 0 - 1)
+  let cfg = map_from_list([("host", 80)])
+  println(cfg.at_map("host") ?? 8080)
+  println(cfg.at_map("port") ?? 8080)
+  println(cfg.at_map("port") ?? cfg.at_map("https") ?? 443)
+  println(force(Some(7)) ?? 0)
+  println(force(None) ?? force(None) ?? 99)
+  -- Optional chaining: the whole path short-circuits if any link is `None`.
+  let full = Some(Addr { city = Some(City { zip = 42 }) })
+  println(full?.city?.zip ?? 0 - 1)
+  let middle = Some(Addr { city = None })
+  println(middle?.city?.zip ?? 0 - 1)
+  let outer = (None : Option(Addr))
+  println(outer?.city?.zip ?? 0 - 1)

@@ -1,0 +1,11 @@
+-- Resource scoping: `with scoped(name)` runs the rest of the block as the
+-- continuation, so enter/exit bracket it in RAII reading order.
+fn scoped(name, k) =
+  println(concat("enter ", name))
+  k()
+  println(concat("exit ", name))
+
+fn main() =
+  with scoped("outer")
+  with scoped("inner")
+  println("body")

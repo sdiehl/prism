@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/final_ctl.pr
+---
+20000
+-60
+32
+110
+42
+=> ()

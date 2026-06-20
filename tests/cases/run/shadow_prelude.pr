@@ -1,0 +1,4 @@
+-- A user fib shadows the prelude's: the later definition wins everywhere.
+fn fib(n) = n * 100
+
+fn main() = println(fib(10))

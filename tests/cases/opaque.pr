@@ -1,0 +1,15 @@
+opaque type Counter = Counter(Int) deriving (Eq)
+
+fn zero() : Counter = Counter(0)
+
+fn bump(c : Counter) : Counter =
+  match c of
+    Counter(n) => Counter(n + 1)
+
+fn value(c : Counter) : Int =
+  match c of
+    Counter(n) => n
+
+fn main() =
+  print(value(bump(bump(zero()))))
+  print(zero() == zero())

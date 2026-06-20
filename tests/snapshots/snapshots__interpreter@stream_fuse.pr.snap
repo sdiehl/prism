@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+9
+25
+49
+81
+100
+=> ()

@@ -1,0 +1,29 @@
+effect Gen {
+  ctl yield(Int) : Unit
+}
+-- Generators from a yield effect.
+--
+-- produce() yields a sequence without knowing what consumes it. A consumer is
+-- just a handler: total folds each value into k(()), counted adds one per
+-- yield. One producer, reinterpreted by the handler it runs under.
+
+fn produce(n) : !{Gen} Unit =
+  if n == 0 then
+    ()
+  else
+    yield(n)
+    produce(n - 1)
+
+fn total(n) =
+  handle produce(n) with
+    yield(v, k) => v + k(())
+    return r => 0
+
+fn counted(n) =
+  handle produce(n) with
+    yield(v, k) => 1 + k(())
+    return r => 0
+
+fn main() =
+  println(total(10))
+  println(counted(10))

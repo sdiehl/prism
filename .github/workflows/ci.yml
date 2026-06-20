@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+    steps:
+      - uses: actions/checkout@v6
+
+      # Toolchain version + components come from rust-toolchain.toml, so CI and
+      # local fmt/clippy always run the identical rustc/rustfmt/clippy.
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM 22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all
+
+      - name: Check prism formatting
+        run: |
+          cargo build --release 2>/dev/null
+          ./target/release/prism fmt --check
+
+      - name: Build release
+        run: cargo build --all --release
+
+      - name: Compile every example
+        run: |
+          for f in examples/*.pr; do
+            echo "== $f"
+            ./target/release/prism build "$f" -o /tmp/example_bin
+          done
+
+  web:
+    name: Web playground
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build wasm bundle
+        run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+
+      - name: Bake examples
+        run: bash scripts/gen-playground-examples.sh
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install, check, build
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm typecheck
+          pnpm build
+
+  mlir:
+    name: MLIR backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Toolchain pinned via rust-toolchain.toml (single source of truth).
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install LLVM 22
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-22-dev libmlir-22-dev mlir-22-tools libpolly-22-dev clang-22
+
+      - name: Build with mlir backend
+        run: cargo build --features mlir
+        env:
+          LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+          MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+          TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+
+      - name: Run mlir parity test
+        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo test --features mlir --test parity
+        env:
+          LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+          MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+          TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+          PRISM_CC: /usr/lib/llvm-22/bin/clang

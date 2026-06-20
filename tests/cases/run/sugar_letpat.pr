@@ -1,0 +1,23 @@
+type Pair = Pair(Int, Int)
+
+fn shift(p, n) =
+  let Pair(a, b) = p
+  Pair(a + n, b + n)
+
+fn total(p) =
+  let Pair(a, b) = p
+  a + b
+
+fn main() =
+  let (x, y) = (3, 9)
+  println(x + y)
+  let (a, (b, c)) = (1, (2, 3))
+  println(a * b * c)
+  let Pair(u, v) = shift(Pair(10, 20), 5)
+  println(v - u)
+  let (_, w) = (5, 6)
+  println(w)
+  var t := 0
+  t := t + x
+  println(t)
+  println(Pair(1, 2).shift(10).total())

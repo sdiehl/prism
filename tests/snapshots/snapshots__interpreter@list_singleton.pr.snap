@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/list_singleton.pr
+---
+[7]
+[[1], [2, 3]]
+[7, 2]
+=> ()

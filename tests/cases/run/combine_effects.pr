@@ -1,0 +1,37 @@
+effect Raise {
+  ctl raise(Int) : Int
+}
+
+effect Tick {
+  ctl tick(Unit) : Int
+}
+
+alias Boom = {Raise}
+
+alias App = {Boom, Tick}
+
+fn total(n) : !{App} Int =
+  let a = tick(())
+  let b =
+    if n == 0 then
+      raise(a)
+    else
+      n * tick(())
+  a + b
+
+fn recover(n) : !{Tick} Int =
+  handle total(n) with
+    raise(c, k) => 0 - c
+    return r => r
+
+fn run_one(n) =
+  let f =
+    handle recover(n) with
+      tick(u, k) => \(s) -> k(s)(s + 1)
+      return r => \(s) -> r
+  f(1)
+
+fn main() =
+  println(run_one(0))
+  println(run_one(3))
+  println(run_one(7))

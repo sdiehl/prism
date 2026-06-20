@@ -1,0 +1,14 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn sign(n : Int) : Int =\\n\\\n     \\x20 if n == 0 then\\n\\\n     \\x20   -- exactly zero\\n\\\n     \\x20   0\\n\\\n     \\x20 elif n > 0 then\\n\\\n     \\x20   -- strictly positive\\n\\\n     \\x20   1\\n\\\n     \\x20 else\\n\\\n     \\x20   -- strictly negative\\n\\\n     \\x20   9\\n\")"
+---
+fn sign(n : Int) : Int =
+  if n == 0 then
+    -- exactly zero
+    0
+  elif n > 0 then
+    -- strictly positive
+    1
+  else
+    -- strictly negative
+    9

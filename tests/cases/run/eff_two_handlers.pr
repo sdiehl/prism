@@ -1,0 +1,21 @@
+-- One effectful function reached from two different handlers: the single
+-- handler the static fast path could collapse is gone, so this only allocates
+-- zero EOp cells under the evidence-passing path (multi-handler),
+-- where `use_env`'s `ask` becomes a forced evidence thunk that differs between
+-- the two call sites (k(1) vs k(2)). Output 33 must match interp == native.
+effect Reader {
+  ctl ask(Unit) : Int
+}
+
+fn use_env(x) : !{Reader} Int = x + ask(())
+
+fn main() =
+  let a =
+    handle use_env(10) with
+      ask(u, k) => k(1)
+      return r => r
+  let b =
+    handle use_env(20) with
+      ask(u, k) => k(2)
+      return r => r
+  println(a + b)

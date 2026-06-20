@@ -1,0 +1,34 @@
+effect Ask {
+  ctl ask(Unit) : Int
+}
+effect Log {
+  ctl log(Int) : Unit
+}
+-- Non-tail resumption through nested handlers.
+--
+-- The inner Ask handler uses the resume's result: it binds r = k(10), prints
+-- it, then keeps computing. Its body also performs Log, known only to the outer
+-- handler, so every resumption forwards out and threads back in. Deep handler
+-- semantics make k include the handler itself: each k(10) returns the rest of
+-- work() already filtered through the return clause (r * 2), and the clause
+-- runs on after it. The handler stays installed across the forwarded Log hops,
+-- so the second ask is still caught after the first resume crossed outward.
+
+fn work() : !{Ask, Log} Int =
+  let a = ask(())
+  log(a)
+  let b = ask(())
+  log(b)
+  a + b
+
+fn run() =
+  handle (handle work() with {
+      ask(u, k) => let r = k(10) in let _ = println(r) in r + 100,
+      return r => r * 2
+    }) with
+    log(n, k) =>
+      println(n)
+      k(())
+    return r => r
+
+fn main() = println(run())

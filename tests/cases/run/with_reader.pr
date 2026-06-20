@@ -1,0 +1,11 @@
+-- `with x <- f(args)` passes the rest of the block as f's final argument,
+-- so CPS-shaped helpers read straight down instead of nesting.
+fn with_value(v, k) = k(v)
+
+fn with_doubled(v, k) = k(v * 2)
+
+fn main() =
+  with x <- with_value(40)
+  with y <- with_doubled(x + 1)
+  println(x + 2)
+  println(y)

@@ -1,0 +1,5 @@
+fn leak() : (Unit) -> Int =
+  var x := 0
+  \(u) -> x + 1
+
+fn main() = println(leak()(()))

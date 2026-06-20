@@ -1,0 +1,88 @@
+-- Okasaki red-black trees, an FBIP stress test.
+--
+-- insert rebuilds the path down and rebalances up. Each node on the path is a
+-- uniquely-owned cell, so the refcount reuse analysis turns the rebuild into
+-- in-place writes (PRISM_REUSE_STATS=1 to watch the hits). balance is the four
+-- classic rotations with a bare-variable catch-all for exhaustiveness.
+--
+-- black_height doubles as a well-formedness oracle. It returns -1 when a node's
+-- subtrees disagree on black height, so a positive result proves the red-black
+-- invariant holds.
+
+type Color = R | B
+
+type RB = E | T(Color, RB, Int, RB)
+fn balance(c, l, x, r) : ! RB =
+  match T(c, l, x, r) of
+    T(B, T(R, T(R, a, xv, b), yv, cc), zv, d) =>
+      T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
+    T(B, T(R, a, xv, T(R, b, yv, cc)), zv, d) =>
+      T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
+    T(B, a, xv, T(R, T(R, b, yv, cc), zv, d)) =>
+      T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
+    T(B, a, xv, T(R, b, yv, T(R, cc, zv, d))) =>
+      T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
+    other => other
+
+fn ins(x, t) : ! RB =
+  match t of
+    E => T(R, E, x, E)
+    T(c, l, v, r) =>
+      if x < v then
+        balance(c, ins(x, l), v, r)
+      elif x > v then
+        balance(c, l, v, ins(x, r))
+      else
+        t
+
+fn blacken(t) : ! RB =
+  match t of
+    E => E
+    T(c, l, x, r) => T(B, l, x, r)
+
+fn insert(x, t) : ! RB = blacken(ins(x, t))
+
+fn from_list(xs, t) : ! RB =
+  match xs of
+    Nil => t
+    Cons(x, rest) => from_list(rest, insert(x, t))
+
+fn size(t) : ! Int =
+  match t of
+    E => 0
+    T(c, l, x, r) => 1 + size(l) + size(r)
+
+fn sum_rb(t) : ! Int =
+  match t of
+    E => 0
+    T(c, l, x, r) => x + sum_rb(l) + sum_rb(r)
+
+fn member(x, t) : ! Bool =
+  match t of
+    E => false
+    T(c, l, v, r) =>
+      if x == v then
+        true
+      elif x < v then
+        member(x, l)
+      else
+        member(x, r)
+
+fn black_height(t) : ! Int =
+  match t of
+    E => 1
+    T(c, l, x, r) =>
+      let lh = black_height(l)
+      let rh = black_height(r)
+      if lh < 0 || rh < 0 || lh /= rh then
+        0 - 1
+      else
+        lh + (match c of { B => 1, R => 0 })
+
+fn main() =
+  let t = from_list([5, 3, 8, 1, 4, 7, 9, 2, 6, 0, 5, 3], E)
+  println(size(t))
+  println(sum_rb(t))
+  println(if member(7, t) then 1 else 0)
+  println(if member(42, t) then 1 else 0)
+  println(black_height(t))

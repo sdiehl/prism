@@ -1,0 +1,2 @@
+-- A hole with no closing `}` before the string ends is a lex error.
+fn main() = println("a {x")

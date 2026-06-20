@@ -1,0 +1,60 @@
+-- Brzozowski derivatives: regular expression matching without backtracking.
+--
+-- The trick is to ask, of a regex r and a character c, "what regex matches the
+-- tails of strings that r would accept once their leading c is consumed?" That
+-- regex is the derivative d/dc r. To test a whole string you simply take one
+-- derivative per character, left to right, and then ask whether the regex left
+-- standing matches the empty string. No stack of continuations, no backtracking
+-- across alternatives: the search state IS a regex, and matching is a fold.
+--
+-- nullable(r) decides emptiness; deriv(c, r) is the calculus rule for each
+-- constructor; matches(re, s) folds deriv over the codepoints of s.
+
+type Re = Eps | Nul | Chr(Int) | Seq(Re, Re) | Alt(Re, Re) | Star(Re) deriving (Eq, Show)
+
+-- Does r match the empty string?
+fn nullable(r) : Bool =
+  match r of
+    Eps => true
+    Nul => false
+    Chr(_) => false
+    Seq(a, b) => and(nullable(a), nullable(b))
+    Alt(a, b) => or(nullable(a), nullable(b))
+    Star(_) => true
+
+-- The Brzozowski derivative of r with respect to codepoint c.
+fn deriv(c, r) : Re =
+  match r of
+    Eps => Nul
+    Nul => Nul
+    Chr(a) =>
+      if a == c then
+        Eps
+      else
+        Nul
+    Seq(a, b) =>
+      if nullable(a) then
+        Alt(Seq(deriv(c, a), b), deriv(c, b))
+      else
+        Seq(deriv(c, a), b)
+    Alt(a, b) => Alt(deriv(c, a), deriv(c, b))
+    Star(a) => Seq(deriv(c, a), Star(a))
+
+-- Fold deriv over s's codepoints, then test for empty-string membership.
+fn go(re, s, i) : Bool =
+  if i >= str_len(s) then
+    nullable(re)
+  else
+    go(deriv(char_at(s, i), re), s, i + 1)
+
+fn matches(re, s) : Bool = go(re, s, 0)
+
+fn main() : !{IO} Unit =
+  -- (a|b)* c
+  let ab = Star(Alt(Chr(ord('a')), Chr(ord('b'))))
+  let re = Seq(ab, Chr(ord('c')))
+  println(matches(re, "c"))
+  println(matches(re, "aac"))
+  println(matches(re, "abbc"))
+  println(matches(re, "ab"))
+  println(matches(re, ""))

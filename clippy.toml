@@ -1,0 +1,2 @@
+# Sized to the largest lowering/emit walker; do not raise casually.
+too-many-lines-threshold = 354

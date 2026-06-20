@@ -1,0 +1,20 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/floats.pr
+---
+3.25
+3.5
+3
+3
+4
+4
+9
+10
+1
+1
+1
+1
+1
+1
+=> ()

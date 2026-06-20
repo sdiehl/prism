@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/strings_lib.pr
+---
+3
+49
+3
+1025
+=> ()

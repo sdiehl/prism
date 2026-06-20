@@ -1,0 +1,43 @@
+-- Row-extensible structured errors: each `error` case is its own effect
+-- label, `throw` performs it (legal in value position because the op's
+-- return type instantiates fresh per site), and `try`/`catch` is one
+-- nested `final ctl` handle per arm, so partial catch just leaves the
+-- uncaught label in the enclosing row. `both` pins the inferred union
+-- via its annotation: drop a label and it stops typechecking.
+
+error NotFound(String)
+error Malformed(String)
+error OutOfFuel
+
+fn lookup(k) =
+  if k == "x" then
+    7
+  else
+    throw NotFound(k)
+
+fn parse_num(s) =
+  if s == "1" then
+    1
+  else
+    throw Malformed(s)
+
+fn both(k, s) : !{NotFound, Malformed} Int = lookup(k) + parse_num(s)
+
+fn burn(n) =
+  if n == 0 then
+    throw OutOfFuel
+  else
+    n - 1
+
+fn main() =
+  println(try lookup("x") catch { NotFound(k) => 0 - 1 })
+  println(try lookup("y") catch { NotFound(k) => 0 - 1 })
+  let c = try both("y", "1") catch { NotFound(k) => 100, Malformed(m) => 200 }
+  println(c)
+  println(try burn(0) catch { OutOfFuel => 42 })
+  let outer =
+    try
+      try both("x", "zzz") catch { NotFound(k) => 0 - 5 }
+    catch
+      Malformed(m) => 300
+  println(outer)

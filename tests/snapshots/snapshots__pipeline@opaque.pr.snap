@@ -1,0 +1,361 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/opaque.pr
+---
+== tokens ==
+VOpen Opaque Type UIdent("Counter") Eq UIdent("Counter") LParen KwInt RParen Deriving LParen UIdent("Eq") RParen VSemi Fn Ident("zero") LParen RParen Colon UIdent("Counter") Eq UIdent("Counter") LParen Int(IntLit { value: 0, suffix: None }) RParen VSemi Fn Ident("bump") LParen Ident("c") Colon UIdent("Counter") RParen Colon UIdent("Counter") Eq VOpen Match Ident("c") Of VOpen UIdent("Counter") LParen Ident("n") RParen FatArrow UIdent("Counter") LParen Ident("n") Plus Int(IntLit { value: 1, suffix: None }) RParen VClose VClose VSemi Fn Ident("value") LParen Ident("c") Colon UIdent("Counter") RParen Colon KwInt Eq VOpen Match Ident("c") Of VOpen UIdent("Counter") LParen Ident("n") RParen FatArrow Ident("n") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("print") LParen Ident("value") LParen Ident("bump") LParen Ident("bump") LParen Ident("zero") LParen RParen RParen RParen RParen RParen VSemi Ident("print") LParen Ident("zero") LParen RParen EqEq Ident("zero") LParen RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Counter",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Counter",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [
+                (
+                    "Eq",
+                    45..47,
+                ),
+            ],
+            newtype: false,
+            span: 7..48,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "zero",
+            params: [],
+            ret: Some(
+                Con(
+                    "Counter",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Counter",
+                        ),
+                        span: 72..79,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 80..81,
+                        },
+                    ],
+                ),
+                span: 72..82,
+            },
+            wheres: [],
+            span: 50..82,
+        },
+        Decl {
+            name: "bump",
+            params: [
+                Param {
+                    name: "c",
+                    ty: Some(
+                        Con(
+                            "Counter",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Counter",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "c",
+                        ),
+                        span: 125..126,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Counter",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 142..143,
+                                        },
+                                    ],
+                                ),
+                                span: 134..144,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "Counter",
+                                        ),
+                                        span: 148..155,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Bin(
+                                                Add,
+                                                Spanned {
+                                                    node: Var(
+                                                        "n",
+                                                    ),
+                                                    span: 156..157,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 160..161,
+                                                },
+                                            ),
+                                            span: 156..161,
+                                        },
+                                    ],
+                                ),
+                                span: 148..162,
+                            },
+                        },
+                    ],
+                ),
+                span: 119..162,
+            },
+            wheres: [],
+            span: 84..162,
+        },
+        Decl {
+            name: "value",
+            params: [
+                Param {
+                    name: "c",
+                    ty: Some(
+                        Con(
+                            "Counter",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "c",
+                        ),
+                        span: 202..203,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Counter",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 219..220,
+                                        },
+                                    ],
+                                ),
+                                span: 211..221,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 225..226,
+                            },
+                        },
+                    ],
+                ),
+                span: 196..226,
+            },
+            wheres: [],
+            span: 164..226,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "print",
+                                ),
+                                span: 242..247,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "value",
+                                            ),
+                                            span: 248..253,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "bump",
+                                                        ),
+                                                        span: 254..258,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Call(
+                                                                Spanned {
+                                                                    node: Var(
+                                                                        "bump",
+                                                                    ),
+                                                                    span: 259..263,
+                                                                },
+                                                                [
+                                                                    Spanned {
+                                                                        node: Call(
+                                                                            Spanned {
+                                                                                node: Var(
+                                                                                    "zero",
+                                                                                ),
+                                                                                span: 264..268,
+                                                                            },
+                                                                            [],
+                                                                        ),
+                                                                        span: 264..270,
+                                                                    },
+                                                                ],
+                                                            ),
+                                                            span: 259..271,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 254..272,
+                                            },
+                                        ],
+                                    ),
+                                    span: 248..273,
+                                },
+                            ],
+                        ),
+                        span: 242..274,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "print",
+                                ),
+                                span: 277..282,
+                            },
+                            [
+                                Spanned {
+                                    node: Bin(
+                                        Eq,
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "zero",
+                                                    ),
+                                                    span: 283..287,
+                                                },
+                                                [],
+                                            ),
+                                            span: 283..289,
+                                        },
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "zero",
+                                                    ),
+                                                    span: 293..297,
+                                                },
+                                                [],
+                                            ),
+                                            span: 293..299,
+                                        },
+                                    ),
+                                    span: 283..299,
+                                },
+                            ],
+                        ),
+                        span: 277..300,
+                    },
+                ),
+                span: 242..300,
+            },
+            wheres: [],
+            span: 228..300,
+        },
+    ],
+    exports: {
+        "Counter",
+    },
+    opaques: {
+        "Counter",
+    },
+}
+
+== types ==
+Type Error: unknown class in deriving: Eq
+   ╭─[ <source>:1:46 ]
+   │
+ 1 │ opaque type Counter = Counter(Int) deriving (Eq)
+   │                                              ─┬  
+   │                                               ╰── unknown class in deriving: Eq
+───╯

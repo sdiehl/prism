@@ -1,0 +1,44 @@
+effect Env {
+  ctl ask(Unit) : Int,
+  ctl config() : Int,
+  ctl tell(Int) : Unit
+}
+
+fn use_env() : !{Env} Int =
+  tell(ask(()))
+  tell(config())
+  tell(config())
+  config() + ask(())
+
+-- One handler mixing all three clause forms. The val RHS prints 999 exactly
+-- once at install time even though config() is used three times, so {IO} is
+-- attributed here, not to use_env's {Env} row.
+fn run_env(env : Int) : !{IO} Int =
+  handle use_env() with
+    fun ask(u) => env * 2
+    val config =
+      println(999)
+      41
+    tell(x, k) =>
+      println(x)
+      k(())
+    return r => r
+
+fn add_two() : !{Env} Int = ask(()) + ask(())
+
+fn mid() : !{Env} Int =
+  let inner =
+    handle add_two() with
+      fun ask(u) => 7
+      return r => r
+  inner + ask(())
+
+-- Nested handlers: the inner fun clause shadows the outer one for add_two.
+fn nested() : Int =
+  handle mid() with
+    fun ask(u) => 100
+    return r => r
+
+fn main() =
+  println(run_env(5))
+  println(nested())

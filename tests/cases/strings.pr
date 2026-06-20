@@ -1,0 +1,10 @@
+fn greet(name) = concat("hello ", name)
+
+fn describe(n) = concat(show_int(n), if n == 1 then " item" else " items")
+
+fn main() =
+  println(greet("world"))
+  println(describe(1))
+  println(describe(3))
+  println(show_bool(str_eq("a", "a")))
+  println(show_int(str_len("prism")))

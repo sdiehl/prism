@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+280
+20
+55
+=> ()

@@ -1,0 +1,15 @@
+-- Prelude even/odd, gcd/lcm, and number theory (perfect numbers, factors).
+
+fn is_perfect(n) =
+  let divs = filter(\(k) -> mod(n, k) == 0, range(1, n))
+  sum(divs) == n
+
+fn factors(n) = filter(\(k) -> mod(n, k) == 0, range(1, n + 1))
+
+fn main() =
+  println(if even(42) then 1 else 0)
+  println(if odd(17) then 1 else 0)
+  println(gcd(48, 18))
+  println(lcm(4, 6))
+  println(if is_perfect(6) then 1 else 0)
+  println(sum(factors(28)))

@@ -1,0 +1,16 @@
+-- Currying: multi-arg functions are sugar for nested lambdas,
+-- so you can partially apply them.
+
+fn add(x, y) = x + y
+
+fn main() =
+  let add5 = add(5)
+  -- partial application yields a function
+  println(add5(10))
+  -- 15
+  println(add(3)(4))
+  -- 7, fully applied one arg at a time
+  let twice = \(f) -> \(x) -> f(f(x))
+  let inc = add(1)
+  println(twice(inc)(40))
+-- 42

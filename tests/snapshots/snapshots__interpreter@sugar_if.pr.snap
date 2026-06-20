@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/sugar_if.pr
+---
+4
+3
+2
+0
+0
+2
+4
+200
+33
+=> ()

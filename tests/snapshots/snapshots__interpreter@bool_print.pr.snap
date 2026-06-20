@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/bool_print.pr
+---
+true
+false
+false
+true
+true and true
+()
+=> ()

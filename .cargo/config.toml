@@ -1,0 +1,2 @@
+[env]
+LLVM_SYS_221_PREFIX = "/opt/homebrew/opt/llvm"

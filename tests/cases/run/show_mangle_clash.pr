@@ -1,0 +1,13 @@
+-- `Foo(Bar)` and a type literally named `Foo_Bar` once mangled to the same
+-- generated show function (`_show_Foo_Bar`), so one served both: the interpreter
+-- crashed on the wrong pattern and native silently printed the other's value.
+-- Length-prefixed mangling keeps the two show functions distinct.
+type Bar = B deriving (Show)
+
+type Foo(a) = F(a) deriving (Show)
+
+type Foo_Bar = G deriving (Show)
+
+fn main() =
+  println(show(F(B)))
+  println(show(G))

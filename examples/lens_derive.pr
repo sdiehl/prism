@@ -1,0 +1,19 @@
+-- `deriving (Lens)` synthesizes a getter `<f>_of` and a functional setter
+-- `with_<f>` per field. They are ordinary functions, no optic types needed.
+-- On a uniquely owned value the setter is FBIP-reused.
+--
+-- Expected output:
+-- 3
+-- 7
+-- 9
+-- 4
+type Vec2 = Vec2 { x: Int, y: Int } deriving (Lens)
+
+fn main() : !{IO} Unit =
+  let v = Vec2 { x = 3, y = 4 }
+  println(x_of(v))
+  let v2 = with_x(v, 7)
+  println(x_of(v2))
+  let v3 = with_y(with_x(v, 9), 4)
+  println(v3.x)
+  println(v3.y)

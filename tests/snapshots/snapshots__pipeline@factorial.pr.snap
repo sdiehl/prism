@@ -1,0 +1,304 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/factorial.pr
+---
+== tokens ==
+VOpen Fn Ident("fact") LParen Ident("n") RParen Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("r") Eq Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Let Ident("u") Eq Ident("println") LParen Ident("r") RParen VSemi Ident("r") VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "fact",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: If(
+                    Spanned {
+                        node: Bin(
+                            Eq,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 18..19,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 23..24,
+                            },
+                        ),
+                        span: 18..24,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 34..35,
+                    },
+                    Spanned {
+                        node: Bin(
+                            Mul,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 47..48,
+                            },
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "fact",
+                                        ),
+                                        span: 51..55,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Bin(
+                                                Sub,
+                                                Spanned {
+                                                    node: Var(
+                                                        "n",
+                                                    ),
+                                                    span: 56..57,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 60..61,
+                                                },
+                                            ),
+                                            span: 56..61,
+                                        },
+                                    ],
+                                ),
+                                span: 51..62,
+                            },
+                        ),
+                        span: 47..62,
+                    },
+                ),
+                span: 15..62,
+            },
+            wheres: [],
+            span: 0..62,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "r",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "fact",
+                                ),
+                                span: 86..90,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 5,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 91..92,
+                                },
+                            ],
+                        ),
+                        span: 86..93,
+                    },
+                    Spanned {
+                        node: Let(
+                            "u",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "println",
+                                        ),
+                                        span: 104..111,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 112..113,
+                                        },
+                                    ],
+                                ),
+                                span: 104..114,
+                            },
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 117..118,
+                            },
+                        ),
+                        span: 96..118,
+                    },
+                ),
+                span: 78..118,
+            },
+            wheres: [],
+            span: 64..118,
+        },
+    ],
+}
+
+== types ==
+fact : (Int) -> Int
+main : () -> Int ! {IO}
+
+== core (cbpv) ==
+fn fact(n) =
+  return n to t@0; return 0 to t@1; t@0 == t@1 to t@7; if t@7 then (return 1) else (return n to t@5; return n to t@2; return 1 to t@3; t@2 - t@3 to t@4; fact(t@4) to t@6; t@5 * t@6)
+fn main() =
+  return 5 to t@8; fact(t@8) to r; return r to t@9; print t@9 to t@10; print_nl to u; return r
+
+== fbip (rc) ==
+fn fact(n) =
+  dup n to _; return n to t@0; return 0 to t@1; t@0 == t@1 to t@7; if t@7 then (drop t@7 to _; drop n to _; return 1) else (drop t@7 to _; dup n to _; return n to t@5; return n to t@2; return 1 to t@3; t@2 - t@3 to t@4; fact(t@4) to t@6; t@5 * t@6)
+fn main() =
+  return 5 to t@8; fact(t@8) to r; dup r to _; return r to t@9; print t@9 to t@10; drop t@10 to _; print_nl to u; drop u to _; return r
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_fact(i64 %a0) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  %t1 = and i64 %a0, 1
+  %t2 = and i64 %t1, 1
+  %t3 = icmp eq i64 %t2, 1
+  br i1 %t3, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t4 = icmp eq i64 %a0, 1
+  %t5 = zext i1 %t4 to i64
+  %t6 = shl i64 %t5, 1
+  %t7 = or i64 %t6, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t8 = call i64 @prism_rt_int_cmp(i64 %a0, i64 1)
+  %t9 = icmp eq i64 %t8, 0
+  %t10 = zext i1 %t9 to i64
+  %t11 = shl i64 %t10, 1
+  %t12 = or i64 %t11, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t13 = phi i64 [ %t7, %b0 ], [ %t12, %b1 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 1)
+  %t14 = icmp ne i64 %t13, 1
+  br i1 %t14, label %b3, label %b4
+
+b3:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t13)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 3
+
+b4:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t13)
+  call void @prism_rc_inc(i64 %a0)
+  %t19 = and i64 %a0, 3
+  %t20 = and i64 %t19, 1
+  %t21 = icmp eq i64 %t20, 1
+  br i1 %t21, label %b5, label %b6
+
+b5:                                               ; preds = %b4
+  %t22 = ashr i64 %a0, 1
+  %t24 = sub i64 %t22, 1
+  %t25 = shl i64 %t24, 1
+  %t26 = ashr i64 %t25, 1
+  %t27 = icmp eq i64 %t26, %t24
+  br i1 %t27, label %b8, label %b6
+
+b6:                                               ; preds = %b5, %b4
+  %t29 = call i64 @prism_rt_int_sub(i64 %a0, i64 3)
+  br label %b7
+
+b8:                                               ; preds = %b5
+  %t28 = or i64 %t25, 1
+  br label %b7
+
+b7:                                               ; preds = %b6, %b8
+  %t30 = phi i64 [ %t28, %b8 ], [ %t29, %b6 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 3)
+  %t31 = call i64 @prism_fact(i64 %t30)
+  %t32 = call i64 @prism_rt_int_mul(i64 %a0, i64 %t31)
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %t31)
+  ret i64 %t32
+}
+
+declare void @prism_rc_inc(i64)
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+declare void @prism_rc_dec(i64)
+
+declare i64 @prism_rt_int_sub(i64, i64)
+
+declare i64 @prism_rt_int_mul(i64, i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_fact(i64 11)
+  call void @prism_rc_inc(i64 %t0)
+  call void @prism_print_int(i64 %t0)
+  call void @prism_rc_dec(i64 %t0)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  ret i64 %t0
+}
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+== run ==
+output: [120]
+result: 120

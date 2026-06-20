@@ -1,0 +1,5 @@
+type Shape = Circle(Int) | Square(Int)
+
+fn main() =
+  let Circle(r) = Circle(3)
+  println(r)

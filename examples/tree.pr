@@ -1,0 +1,45 @@
+type Tree = Leaf | Node(Int, Tree, Tree)
+fn insert(x, t) : ! Tree =
+  match t of
+    Leaf => Node(x, Leaf, Leaf)
+    Node(v, l, r) =>
+      if x < v then
+        Node(v, insert(x, l), r)
+      elif x > v then
+        Node(v, l, insert(x, r))
+      else
+        t
+
+fn contains(x, t) : ! Bool =
+  match t of
+    Leaf => false
+    Node(v, l, r) =>
+      if x == v then
+        true
+      elif x < v then
+        contains(x, l)
+      else
+        contains(x, r)
+
+fn size(t) : ! Int =
+  match t of
+    Leaf => 0
+    Node(_, l, r) => 1 + size(l) + size(r)
+
+fn height(t) : ! Int =
+  match t of
+    Leaf => 0
+    Node(_, l, r) => 1 + max(height(l), height(r))
+
+fn sum_tree(t) : ! Int =
+  match t of
+    Leaf => 0
+    Node(v, l, r) => v + sum_tree(l) + sum_tree(r)
+
+fn main() : !{IO} Unit =
+  let t = insert(7, insert(1, insert(8, insert(3, insert(5, Leaf)))))
+  println(size(t))
+  println(height(t))
+  println(sum_tree(t))
+  println(if contains(3, t) then 1 else 0)
+  println(if contains(9, t) then 1 else 0)

@@ -1,0 +1,17 @@
+-- Ordered maps and sets from the prelude. Map(k, v) is a height-balanced AVL
+-- tree rebuilt on each insert, so it is persistent. FBIP reuse writes the
+-- rebalanced path in place. Key order comes from the Ord instance, so one
+-- tree is generic over any orderable key (Int and String here) with no
+-- comparator threaded by hand. Set(k) is just Map(k, Unit).
+
+fn main() : !{IO} Unit =
+  let m = map_from_list([(3, 30), (1, 10), (2, 20), (5, 50), (4, 40)])
+  println(map_size(m))
+  println(unwrap_or(0, map_lookup(4, m)))
+  println(sum(map_values(m)))
+  let m2 = map_delete(3, m)
+  println(sum(map_keys(m2)))
+  let d = map_from_list([("pear", 2), ("apple", 1), ("plum", 3)])
+  println(unwrap_or(0, map_lookup("apple", d)))
+  let s = set_from_list([4, 1, 4, 2, 1, 3])
+  println(set_size(s))

@@ -1,0 +1,127 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/letpat_refutable.pr
+---
+== tokens ==
+VOpen Type UIdent("Shape") Eq UIdent("Circle") LParen KwInt RParen Bar UIdent("Square") LParen KwInt RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Let UIdent("Circle") LParen Ident("r") RParen Eq UIdent("Circle") LParen Int(IntLit { value: 3, suffix: None }) RParen VSemi Ident("println") LParen Ident("r") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Shape",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Circle",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Square",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 0..38,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "Circle",
+                                ),
+                                span: 70..76,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 3,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 77..78,
+                                },
+                            ],
+                        ),
+                        span: 70..79,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Circle",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 65..66,
+                                        },
+                                    ],
+                                ),
+                                span: 58..67,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "println",
+                                        ),
+                                        span: 82..89,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 90..91,
+                                        },
+                                    ],
+                                ),
+                                span: 82..92,
+                            },
+                        },
+                    ],
+                ),
+                span: 54..92,
+                synth: true,
+            },
+            wheres: [],
+            span: 40..92,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: non-exhaustive match: missing Square(_)
+   ╭─[ <source>:4:3 ]
+   │
+ 4 │ ╭─▶   let Circle(r) = Circle(3)
+ 5 │ ├─▶   println(r)
+   │ │                  
+   │ ╰────────────────── in `main`: non-exhaustive match: missing Square(_)
+───╯

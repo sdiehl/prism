@@ -1,0 +1,23 @@
+-- UFCS dot chains: `xs.f(args)` is parse-time sugar for `f(xs, args)` and
+-- chains left-fold. The prelude list functions are function-first, so the
+-- receiver-first wrappers here keep the chains readable; sum, length and
+-- append already take the collection first and chain directly.
+
+fn over(xs, f) = map(f, xs)
+
+fn keep(xs, p) = filter(p, xs)
+
+fn foreach(xs, f) =
+  match xs of
+    Nil => ()
+    Cons(x, rest) =>
+      f(x)
+      foreach(rest, f)
+
+fn main() =
+  let xs = range(1, 8)
+  println(xs.over(\(x) -> x * x).keep(even).sum())
+  println(xs.keep(odd).length())
+  println(xs.append(range(8, 10)).length())
+  xs.over(\(x) -> x * 10).keep(\(x) -> x > 40).foreach fn(x)
+    println(x)

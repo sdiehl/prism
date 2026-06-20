@@ -1,0 +1,25 @@
+fn half(n) =
+  if n % 2 == 0 then
+    Ok(n / 2)
+  else
+    Err(0 - n)
+
+fn quarter(n) =
+  let h = half(n)?
+  let q = half(h)?
+  Ok(q)
+
+fn check(n) =
+  half(n)?
+  Ok(n)
+
+fn report(r) =
+  match r of
+    Ok(v) => println(v)
+    Err(e) => println(e)
+
+fn main() =
+  report(quarter(12))
+  report(quarter(6))
+  report(check(8))
+  report(check(5))

@@ -1,0 +1,24 @@
+-- Hailstone (Collatz) sequence, tail-recursive with an accumulator.
+-- Counts steps to reach 1 and tracks the peak value along the way.
+
+fn collatz_step(n) =
+  if even(n) then
+    n / 2
+  else
+    3 * n + 1
+
+fn collatz_len(n, acc) =
+  if n == 1 then
+    acc + 1
+  else
+    collatz_len(collatz_step(n), acc + 1)
+
+fn collatz_max(n, peak) =
+  if n == 1 then
+    peak
+  else
+    collatz_max(collatz_step(n), max(n, peak))
+
+fn main() =
+  println(collatz_len(27, 0))
+  println(collatz_max(27, 27))

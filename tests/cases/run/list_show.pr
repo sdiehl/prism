@@ -1,0 +1,5 @@
+fn main() =
+  println(show([1, 2, 3]))
+  println(show(([] : List(Int))))
+  println(show([[1], [2, 3]]))
+  println(show(Some([1, 2])))

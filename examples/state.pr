@@ -1,0 +1,25 @@
+-- State as explicit threading.
+--
+-- State is a value threaded through every call. A stateful step is a pure
+-- function s -> (result, s). The annotation ! (Int, Int) on step proves it has
+-- no IO: all mutation is explicit. This is the structure that var blocks and a
+-- State effect desugar to, written out by hand.
+
+type Op = Inc | Dec | Reset | Get
+fn step(op, s) : ! (Int, Int) =
+  match op of
+    Inc => (s + 1, s + 1)
+    Dec => (s - 1, s - 1)
+    Reset => (0, 0)
+    Get => (s, s)
+
+fn run(ops, s) : !{IO} Unit =
+  match ops of
+    Nil => ()
+    Cons(op, rest) =>
+      match step(op, s) of
+        (v, s2) =>
+          println(v)
+          run(rest, s2)
+
+fn main() : !{IO} Unit = run([Inc, Inc, Inc, Get, Dec, Reset, Inc, Get], 0)

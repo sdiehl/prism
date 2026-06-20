@@ -1,0 +1,15 @@
+fn nums() : !{Emit(Int)} Unit =
+  emit(1)
+  emit(2)
+
+fn words() : !{Emit(String)} Unit =
+  emit("a")
+  emit("b")
+
+fn main() =
+  handle nums() with
+    fun emit(n) => println(n)
+    return r => ()
+  handle words() with
+    fun emit(w) => println(w)
+    return r => ()

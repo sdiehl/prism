@@ -1,0 +1,24 @@
+fn grade(n) =
+  if n >= 90 then
+    4
+  elif n >= 75 then
+    3
+  elif n >= 60 then
+    2
+  else
+    0
+
+fn main() =
+  println(grade(95))
+  println(grade(80))
+  println(grade(61))
+  println(grade(12))
+  for i in srange(0, 5) do
+    if i % 2 == 0 then
+      println(i)
+  if grade(12) == 1 then
+    println(100)
+  elif grade(12) == 0 then
+    println(200)
+  if grade(80) == 3 then
+    println(33)

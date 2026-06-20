@@ -1,0 +1,566 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/strings.pr
+---
+== tokens ==
+VOpen Fn Ident("greet") LParen Ident("name") RParen Eq Ident("concat") LParen StringLit("hello ") Comma Ident("name") RParen VSemi Fn Ident("describe") LParen Ident("n") RParen Eq Ident("concat") LParen Ident("show_int") LParen Ident("n") RParen Comma If Ident("n") EqEq Int(IntLit { value: 1, suffix: None }) Then StringLit(" item") Else StringLit(" items") RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Ident("greet") LParen StringLit("world") RParen RParen VSemi Ident("println") LParen Ident("describe") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VSemi Ident("println") LParen Ident("describe") LParen Int(IntLit { value: 3, suffix: None }) RParen RParen VSemi Ident("println") LParen Ident("show_bool") LParen Ident("str_eq") LParen StringLit("a") Comma StringLit("a") RParen RParen RParen VSemi Ident("println") LParen Ident("show_int") LParen Ident("str_len") LParen StringLit("prism") RParen RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "greet",
+            params: [
+                Param {
+                    name: "name",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "concat",
+                        ),
+                        span: 17..23,
+                    },
+                    [
+                        Spanned {
+                            node: Str(
+                                "hello ",
+                            ),
+                            span: 24..32,
+                        },
+                        Spanned {
+                            node: Var(
+                                "name",
+                            ),
+                            span: 34..38,
+                        },
+                    ],
+                ),
+                span: 17..39,
+            },
+            wheres: [],
+            span: 0..39,
+        },
+        Decl {
+            name: "describe",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "concat",
+                        ),
+                        span: 58..64,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "show_int",
+                                    ),
+                                    span: 65..73,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "n",
+                                        ),
+                                        span: 74..75,
+                                    },
+                                ],
+                            ),
+                            span: 65..76,
+                        },
+                        Spanned {
+                            node: If(
+                                Spanned {
+                                    node: Bin(
+                                        Eq,
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 81..82,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 86..87,
+                                        },
+                                    ),
+                                    span: 81..87,
+                                },
+                                Spanned {
+                                    node: Str(
+                                        " item",
+                                    ),
+                                    span: 93..100,
+                                },
+                                Spanned {
+                                    node: Str(
+                                        " items",
+                                    ),
+                                    span: 106..114,
+                                },
+                            ),
+                            span: 78..114,
+                        },
+                    ],
+                ),
+                span: 58..115,
+            },
+            wheres: [],
+            span: 41..115,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 131..138,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "greet",
+                                            ),
+                                            span: 139..144,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Str(
+                                                    "world",
+                                                ),
+                                                span: 145..152,
+                                            },
+                                        ],
+                                    ),
+                                    span: 139..153,
+                                },
+                            ],
+                        ),
+                        span: 131..154,
+                    },
+                    Spanned {
+                        node: Let(
+                            "_",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "println",
+                                        ),
+                                        span: 157..164,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "describe",
+                                                    ),
+                                                    span: 165..173,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 174..175,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 165..176,
+                                        },
+                                    ],
+                                ),
+                                span: 157..177,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "println",
+                                                ),
+                                                span: 180..187,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "describe",
+                                                            ),
+                                                            span: 188..196,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 3,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 197..198,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 188..199,
+                                                },
+                                            ],
+                                        ),
+                                        span: 180..200,
+                                    },
+                                    Spanned {
+                                        node: Let(
+                                            "_",
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "println",
+                                                        ),
+                                                        span: 203..210,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Call(
+                                                                Spanned {
+                                                                    node: Var(
+                                                                        "show_bool",
+                                                                    ),
+                                                                    span: 211..220,
+                                                                },
+                                                                [
+                                                                    Spanned {
+                                                                        node: Call(
+                                                                            Spanned {
+                                                                                node: Var(
+                                                                                    "str_eq",
+                                                                                ),
+                                                                                span: 221..227,
+                                                                            },
+                                                                            [
+                                                                                Spanned {
+                                                                                    node: Str(
+                                                                                        "a",
+                                                                                    ),
+                                                                                    span: 228..231,
+                                                                                },
+                                                                                Spanned {
+                                                                                    node: Str(
+                                                                                        "a",
+                                                                                    ),
+                                                                                    span: 233..236,
+                                                                                },
+                                                                            ],
+                                                                        ),
+                                                                        span: 221..237,
+                                                                    },
+                                                                ],
+                                                            ),
+                                                            span: 211..238,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 203..239,
+                                            },
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "println",
+                                                        ),
+                                                        span: 242..249,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Call(
+                                                                Spanned {
+                                                                    node: Var(
+                                                                        "show_int",
+                                                                    ),
+                                                                    span: 250..258,
+                                                                },
+                                                                [
+                                                                    Spanned {
+                                                                        node: Call(
+                                                                            Spanned {
+                                                                                node: Var(
+                                                                                    "str_len",
+                                                                                ),
+                                                                                span: 259..266,
+                                                                            },
+                                                                            [
+                                                                                Spanned {
+                                                                                    node: Str(
+                                                                                        "prism",
+                                                                                    ),
+                                                                                    span: 267..274,
+                                                                                },
+                                                                            ],
+                                                                        ),
+                                                                        span: 259..275,
+                                                                    },
+                                                                ],
+                                                            ),
+                                                            span: 250..276,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 242..277,
+                                            },
+                                        ),
+                                        span: 203..277,
+                                    },
+                                ),
+                                span: 180..277,
+                            },
+                        ),
+                        span: 157..277,
+                    },
+                ),
+                span: 131..277,
+            },
+            wheres: [],
+            span: 117..277,
+        },
+    ],
+}
+
+== types ==
+greet : (String) -> String
+describe : (Int) -> String
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn greet(name) =
+  return "hello " to t@0; return name to t@1; concat(t@0, t@1)
+fn describe(n) =
+  return n to t@2; show_int(t@2) to t@3; return n to t@4; return 1 to t@5; t@4 == t@5 to t@6; if t@6 then (return " item") else (return " items") to t@7; concat(t@3, t@7)
+fn main() =
+  return "world" to t@8; greet(t@8) to t@9; prints t@9 to t@10; print_nl to _; return 1 to t@11; describe(t@11) to t@12; prints t@12 to t@13; print_nl to _; return 3 to t@14; describe(t@14) to t@15; prints t@15 to t@16; print_nl to _; return "a" to t@17; return "a" to t@18; str_eq(t@17, t@18) to t@19; show_bool(t@19) to t@20; prints t@20 to t@21; print_nl to _; return "prism" to t@22; str_len(t@22) to t@23; show_int(t@23) to t@24; prints t@24 to t@25; print_nl
+
+== fbip (rc) ==
+fn greet(name) =
+  return "hello " to t@0; return name to t@1; concat(t@0, t@1)
+fn describe(n) =
+  dup n to _; return n to t@2; show_int(t@2) to t@3; return n to t@4; return 1 to t@5; t@4 == t@5 to t@6; if t@6 then (drop t@6 to _; return " item") else (drop t@6 to _; return " items") to t@7; concat(t@3, t@7)
+fn main() =
+  return "world" to t@8; greet(t@8) to t@9; prints t@9 to t@10; drop t@10 to _; print_nl to _; drop _ to _; return 1 to t@11; describe(t@11) to t@12; prints t@12 to t@13; drop t@13 to _; print_nl to _; drop _ to _; return 3 to t@14; describe(t@14) to t@15; prints t@15 to t@16; drop t@16 to _; print_nl to _; drop _ to _; return "a" to t@17; return "a" to t@18; str_eq(t@17, t@18) to t@19; show_bool(t@19) to t@20; prints t@20 to t@21; drop t@21 to _; print_nl to _; drop _ to _; return "prism" to t@22; str_len(t@22) to t@23; show_int(t@23) to t@24; prints t@24 to t@25; drop t@25 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@.str0 = private constant [7 x i8] c"hello \00"
+@.str1 = private constant [6 x i8] c" item\00"
+@.str2 = private constant [7 x i8] c" items\00"
+@.str3 = private constant [6 x i8] c"world\00"
+@.fmts = private constant [3 x i8] c"%s\00"
+@.str4 = private constant [2 x i8] c"a\00"
+@.str5 = private constant [2 x i8] c"a\00"
+@.str6 = private constant [6 x i8] c"prism\00"
+
+define i64 @prism_greet(i64 %a0) {
+entry:
+  %t0 = call i64 @prism_str_lit(ptr @.str0, i64 6)
+  %t1 = call i64 @prism_str_concat(i64 %t0, i64 %a0)
+  call void @prism_rc_dec(i64 %t0)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t1
+}
+
+declare i64 @prism_str_lit(ptr, i64)
+
+declare i64 @prism_str_concat(i64, i64)
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_describe(i64 %a0) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  %t1 = call i64 @prism_show_int(i64 %a0)
+  call void @prism_rc_dec(i64 %a0)
+  %t2 = and i64 %a0, 3
+  %t3 = and i64 %t2, 1
+  %t4 = icmp eq i64 %t3, 1
+  br i1 %t4, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t5 = icmp eq i64 %a0, 3
+  %t6 = zext i1 %t5 to i64
+  %t7 = shl i64 %t6, 1
+  %t8 = or i64 %t7, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t9 = call i64 @prism_rt_int_cmp(i64 %a0, i64 3)
+  %t10 = icmp eq i64 %t9, 0
+  %t11 = zext i1 %t10 to i64
+  %t12 = shl i64 %t11, 1
+  %t13 = or i64 %t12, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t14 = phi i64 [ %t8, %b0 ], [ %t13, %b1 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 3)
+  %t15 = icmp ne i64 %t14, 1
+  br i1 %t15, label %b3, label %b4
+
+b3:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t14)
+  %t17 = call i64 @prism_str_lit(ptr @.str1, i64 5)
+  br label %b5
+
+b4:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t14)
+  %t19 = call i64 @prism_str_lit(ptr @.str2, i64 6)
+  br label %b5
+
+b5:                                               ; preds = %b4, %b3
+  %t20 = phi i64 [ %t17, %b3 ], [ %t19, %b4 ]
+  %t21 = call i64 @prism_str_concat(i64 %t1, i64 %t20)
+  call void @prism_rc_dec(i64 %t1)
+  call void @prism_rc_dec(i64 %t20)
+  ret i64 %t21
+}
+
+declare void @prism_rc_inc(i64)
+
+declare i64 @prism_show_int(i64)
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_str_lit(ptr @.str3, i64 5)
+  %t1 = call i64 @prism_greet(i64 %t0)
+  %t2 = inttoptr i64 %t1 to ptr
+  %0 = ptrtoint ptr %t2 to i64
+  %1 = add i64 %0, 24
+  %t3 = inttoptr i64 %1 to ptr
+  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t3)
+  call void @prism_rc_dec(i64 %t1)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t6 = call i64 @prism_describe(i64 3)
+  %t7 = inttoptr i64 %t6 to ptr
+  %3 = ptrtoint ptr %t7 to i64
+  %4 = add i64 %3, 24
+  %t8 = inttoptr i64 %4 to ptr
+  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t8)
+  call void @prism_rc_dec(i64 %t6)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t11 = call i64 @prism_describe(i64 7)
+  %t12 = inttoptr i64 %t11 to ptr
+  %6 = ptrtoint ptr %t12 to i64
+  %7 = add i64 %6, 24
+  %t13 = inttoptr i64 %7 to ptr
+  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t13)
+  call void @prism_rc_dec(i64 %t11)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t16 = call i64 @prism_str_lit(ptr @.str4, i64 1)
+  %t17 = call i64 @prism_str_lit(ptr @.str5, i64 1)
+  %t18 = call i64 @prism_str_eq(i64 %t16, i64 %t17)
+  %t19 = shl i64 %t18, 1
+  %t20 = or i64 %t19, 1
+  call void @prism_rc_dec(i64 %t16)
+  call void @prism_rc_dec(i64 %t17)
+  %t21 = ashr i64 %t20, 1
+  %t22 = call i64 @prism_show_bool(i64 %t21)
+  call void @prism_rc_dec(i64 %t20)
+  %t23 = inttoptr i64 %t22 to ptr
+  %9 = ptrtoint ptr %t23 to i64
+  %10 = add i64 %9, 24
+  %t24 = inttoptr i64 %10 to ptr
+  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t24)
+  call void @prism_rc_dec(i64 %t22)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t27 = call i64 @prism_str_lit(ptr @.str6, i64 5)
+  %t28 = call i64 @prism_str_len(i64 %t27)
+  %t29 = shl i64 %t28, 1
+  %t30 = or i64 %t29, 1
+  call void @prism_rc_dec(i64 %t27)
+  %t31 = call i64 @prism_show_int(i64 %t30)
+  call void @prism_rc_dec(i64 %t30)
+  %t32 = inttoptr i64 %t31 to ptr
+  %12 = ptrtoint ptr %t32 to i64
+  %13 = add i64 %12, 24
+  %t33 = inttoptr i64 %13 to ptr
+  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t33)
+  call void @prism_rc_dec(i64 %t31)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare i32 @printf(ptr, ...)
+
+declare void @prism_print_nl()
+
+declare i64 @prism_str_eq(i64, i64)
+
+declare i64 @prism_show_bool(i64)
+
+declare i64 @prism_str_len(i64)
+
+== run ==
+output: [hello world, 1 item, 3 items, true, 5]
+result: ()

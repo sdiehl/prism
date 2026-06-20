@@ -1,0 +1,5 @@
+alias A = {B}
+
+alias B = {A}
+
+fn main() = println(1)

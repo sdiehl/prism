@@ -1,0 +1,116 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/nonexhaustive_bool.pr
+---
+== tokens ==
+VOpen Fn Ident("flag") LParen Ident("b") RParen Eq VOpen Match Ident("b") Of VOpen True FatArrow Int(IntLit { value: 1, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("flag") LParen True RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "flag",
+            params: [
+                Param {
+                    name: "b",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "b",
+                        ),
+                        span: 21..22,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Bool(
+                                    true,
+                                ),
+                                span: 30..34,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 38..39,
+                            },
+                        },
+                    ],
+                ),
+                span: 15..39,
+            },
+            wheres: [],
+            span: 0..39,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 52..59,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "flag",
+                                    ),
+                                    span: 60..64,
+                                },
+                                [
+                                    Spanned {
+                                        node: Bool(
+                                            true,
+                                        ),
+                                        span: 65..69,
+                                    },
+                                ],
+                            ),
+                            span: 60..70,
+                        },
+                    ],
+                ),
+                span: 52..71,
+            },
+            wheres: [],
+            span: 40..71,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `flag`: non-exhaustive match: missing false
+   ╭─[ <source>:2:3 ]
+   │
+ 2 │ ╭─▶   match b of
+ 3 │ ├─▶     true => 1
+   │ │                   
+   │ ╰─────────────────── in `flag`: non-exhaustive match: missing false
+───╯

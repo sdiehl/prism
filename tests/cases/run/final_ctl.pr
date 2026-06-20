@@ -1,0 +1,86 @@
+-- `final ctl op(ps) => body` is a handler clause that never resumes: the
+-- captured continuation is discarded and body's value becomes the handler's
+-- result. Sections: an abort thrown from 20000 non-tail frames each holding
+-- a live cons cell (the abandoned continuation drops leak-clean), a mixed
+-- handler (fun + ctl + final ctl), an outer final ctl discarding a
+-- continuation that spans an inner handler's region, and a local named
+-- `resume`, which shadows the rejection and stays an ordinary binding.
+
+effect Abort {
+  ctl abort(Int) : Int
+}
+
+effect Tick {
+  ctl tick(Int) : Int
+}
+
+effect Mix {
+  ctl ask() : Int,
+  ctl double(Int) : Int,
+  ctl quit(Int) : Int
+}
+
+fn first(xs) =
+  match xs of
+    Nil => 0
+    Cons(x, _) => x
+
+-- Every frame keeps `cell` live across the recursive call, so the abandoned
+-- continuation owns the whole 20000-cell spine when abort fires at the bottom.
+fn probe(n, acc) : !{Abort} Int =
+  if n == 0 then
+    abort(length(acc))
+  else
+    let cell = Cons(n, acc)
+    let r = probe(n - 1, cell)
+    r + first(cell)
+
+fn deep_abort() =
+  handle probe(20000, Nil) with
+    final ctl abort(code) => code
+    return r => r
+
+fn mixed(n) : !{Mix} Int =
+  let a = ask()
+  let b = double(a + n)
+  if b > 50 then
+    quit(b)
+  else
+    0
+  a + b
+
+fn run_mixed(n) =
+  handle mixed(n) with
+    fun ask() => 10
+    double(x, k) => k(x * 2)
+    final ctl quit(code) => 0 - code
+    return r => r
+
+-- The discarded continuation spans the inner Tick handler's region: the
+-- second tick never runs and the inner handler is dropped with the frames.
+fn work() : !{Tick, Abort} Int =
+  let a = tick(1)
+  let b = abort(a + 100)
+  tick(b)
+
+fn nested() =
+  handle (handle work() with {
+      tick(n, k) => k(n * 10),
+      return r => r
+    }) with
+    final ctl abort(code) => code
+    return r => r
+
+fn recovered() =
+  handle abort(41) with
+    final ctl abort(code) =>
+      let resume = \(x) -> x + 1
+      resume(code)
+    return r => r
+
+fn main() =
+  println(deep_abort())
+  println(run_mixed(20))
+  println(run_mixed(1))
+  println(nested())
+  println(recovered())

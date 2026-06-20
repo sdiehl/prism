@@ -1,0 +1,21 @@
+-- Stream fusion by evidence passing. A stream is a thunk that
+-- performs Emit(a). The transformers smap/skeep are open handlers that re-emit,
+-- and a `for ... in` consumer is the tail-resumptive handler that prints. The
+-- combinators wrap their body in a thunk (smap(s,f) = \u -> smap_go(s,f)), so
+-- the effect escapes first-class, yet the chain still lowers to direct
+-- forced-clause calls. The evidence for emit is threaded into each thunk at its
+-- force site, so producer -> smap -> skeep -> consumer runs as one loop, zero
+-- EOp cells, no intermediate lists. Expected output:
+--
+--   9
+--   25
+--   49
+--   81
+--   100
+
+fn main() =
+  for n in srange(1, 11).smap(\(x) -> x * x).skeep(\(x) -> x > 5) do
+    if odd(n) then
+      println(n)
+    elif n > 80 then
+      println(n)

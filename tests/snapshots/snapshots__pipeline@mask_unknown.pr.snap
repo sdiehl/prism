@@ -1,0 +1,65 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/mask_unknown.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq Ident("println") LParen Mask Lt UIdent("Nope") Gt LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 12..19,
+                    },
+                    [
+                        Spanned {
+                            node: Mask(
+                                "Nope",
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 31..32,
+                                },
+                            ),
+                            span: 20..33,
+                        },
+                    ],
+                ),
+                span: 12..34,
+            },
+            wheres: [],
+            span: 0..34,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: unknown effect `Nope` in mask
+   ╭─[ <source>:1:21 ]
+   │
+ 1 │ fn main() = println(mask<Nope>(1))
+   │                     ──────┬──────  
+   │                           ╰──────── in `main`: unknown effect `Nope` in mask
+───╯

@@ -1,0 +1,20 @@
+-- Fold as universal list recursion: foldl sums, products, and digit assembly,
+-- plus scan_left for running totals.
+
+fn digits(n) =
+  if n < 10 then
+    Cons(n, Nil)
+  else
+    Cons(mod(n, 10), digits(n / 10))
+
+fn from_digits(ds) = foldl(\(acc, d) -> acc * 10 + d, 0, ds)
+
+fn main() =
+  let xs = range(1, 8)
+  println(foldl(\(a, b) -> a + b, 0, xs))
+  println(foldl(\(a, b) -> a * b, 1, xs))
+  let sums = scan_left(\(a, b) -> a + b, 0, xs)
+  println(length(sums))
+  println(sum(sums))
+  let ds = reverse(digits(12345))
+  println(from_digits(ds))

@@ -1,0 +1,25 @@
+fn count_to(limit : Int) : Int =
+  var i := 0
+  while(\() -> i < limit) fn
+    i := i + 1
+  i
+
+fn shadowed() : Int =
+  let x = 100
+  let keep = x
+  var x := x + 1
+  x := x * 2
+  x + keep
+
+fn interleaved(n : Int) : Int =
+  var a := 1
+  var b := 10
+  repeat(n) fn
+    a := a + b
+    b := b + a
+  a * 1000 + b
+
+fn main() =
+  println(count_to(7))
+  println(shadowed())
+  println(interleaved(3))

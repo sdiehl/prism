@@ -1,0 +1,5 @@
+fn cps(v, k) = k(v)
+
+fn main() =
+  println(0)
+  with x <- cps(1)

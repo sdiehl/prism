@@ -1,0 +1,49 @@
+-- Conway's Game of Life on a 5x5 grid: a tiny universe with one law. Each cell
+-- watches its eight neighbors and obeys B3/S23: it is born when exactly three
+-- neighbors are alive, survives when two or three are, and otherwise dies. The
+-- grid is a List(List(Int)) of 0/1, and out-of-bounds neighbors count as dead.
+-- We seed a blinker (a horizontal row of three) and watch it oscillate with
+-- period two: the bar tips from horizontal to vertical and back, forever.
+
+-- Cell read that treats everything outside the grid as dead. We index by hand
+-- through the failable at_list, defaulting any out-of-range row or column to 0.
+fn cell(grid, r, c) =
+  if r < 0 || c < 0 then
+    0
+  else
+    default(\() -> at_list(at_list(grid, r), c), 0)
+
+fn neighbors(grid, r, c) =
+  let ds =
+    [(0 - 1, 0 - 1), (0 - 1, 0), (0 - 1, 1), (0, 0 - 1), (0, 1), (1, 0 - 1), (1, 0), (1, 1)]
+  sum(map(\(d) -> match d of { (dr, dc) => cell(grid, r + dr, c + dc) }, ds))
+
+fn next_cell(grid, r, c) =
+  let n = neighbors(grid, r, c)
+  if n == 3 then
+    1
+  elif n == 2 && cell(grid, r, c) == 1 then
+    1
+  else
+    0
+
+fn step(grid) =
+  let rows = length(grid)
+  let cols = length(at_list(grid, 0))
+  map(\(r) -> map(\(c) -> next_cell(grid, r, c), range(0, cols)), range(0, rows))
+
+fn render_row(row) = str_join("", map(\(x) -> if x == 1 then "#" else ".", row))
+
+fn render(grid) = lines_of(map(render_row, grid))
+
+-- Run the grid forward, printing each generation separated by a blank line.
+fn evolve(grid, gens) =
+  println(render(grid))
+  if gens > 0 then
+    println("")
+    evolve(step(grid), gens - 1)
+
+fn main() =
+  let seed =
+    [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
+  evolve(seed, 3)

@@ -1,0 +1,585 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/rowcapture.pr
+---
+== tokens ==
+VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("use_pure") LParen Ident("h") Colon Forall Ident("e0") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("apply_io") LParen Ident("h") RParen VSemi Fn Ident("call_poly") LParen Ident("h") Colon Forall Ident("e0") Dot LParen LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("amb") RBrace RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace Comma Ident("f") RParen Eq Ident("h") LParen Ident("f") RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Ident("use_pure") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VSemi Ident("println") LParen Ident("call_poly") LParen Lambda LParen Ident("g") RParen Arrow Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen Comma Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "apply_io",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Fun(
+                            [
+                                Int,
+                            ],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "IO",
+                                        args: [],
+                                    },
+                                ],
+                                None,
+                            ),
+                            Int,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "g",
+                        ),
+                        span: 199..200,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 201..202,
+                        },
+                    ],
+                ),
+                span: 199..203,
+            },
+            wheres: [],
+            span: 148..203,
+        },
+        Decl {
+            name: "use_pure",
+            params: [
+                Param {
+                    name: "h",
+                    ty: Some(
+                        Forall(
+                            [
+                                "e0",
+                            ],
+                            Fun(
+                                [
+                                    Int,
+                                ],
+                                Cons(
+                                    [],
+                                    Some(
+                                        "e0",
+                                    ),
+                                ),
+                                Int,
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "apply_io",
+                        ),
+                        span: 269..277,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "h",
+                            ),
+                            span: 278..279,
+                        },
+                    ],
+                ),
+                span: 269..280,
+            },
+            wheres: [],
+            span: 205..280,
+        },
+        Decl {
+            name: "call_poly",
+            params: [
+                Param {
+                    name: "h",
+                    ty: Some(
+                        Forall(
+                            [
+                                "e0",
+                            ],
+                            Fun(
+                                [
+                                    Fun(
+                                        [
+                                            Int,
+                                        ],
+                                        Cons(
+                                            [],
+                                            Some(
+                                                "amb",
+                                            ),
+                                        ),
+                                        Int,
+                                    ),
+                                ],
+                                Cons(
+                                    [],
+                                    Some(
+                                        "e0",
+                                    ),
+                                ),
+                                Int,
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "f",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "h",
+                        ),
+                        span: 357..358,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "f",
+                            ),
+                            span: 359..360,
+                        },
+                    ],
+                ),
+                span: 357..361,
+            },
+            wheres: [],
+            span: 282..361,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 377..384,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "use_pure",
+                                            ),
+                                            span: 385..393,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Lam(
+                                                    [
+                                                        Param {
+                                                            name: "x",
+                                                            ty: None,
+                                                            borrow: false,
+                                                            default: None,
+                                                        },
+                                                    ],
+                                                    Spanned {
+                                                        node: Bin(
+                                                            Add,
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "x",
+                                                                ),
+                                                                span: 402..403,
+                                                            },
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 41,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 406..408,
+                                                            },
+                                                        ),
+                                                        span: 402..408,
+                                                    },
+                                                ),
+                                                span: 394..408,
+                                            },
+                                        ],
+                                    ),
+                                    span: 385..409,
+                                },
+                            ],
+                        ),
+                        span: 377..410,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 413..420,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "call_poly",
+                                            ),
+                                            span: 421..430,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Lam(
+                                                    [
+                                                        Param {
+                                                            name: "g",
+                                                            ty: None,
+                                                            borrow: false,
+                                                            default: None,
+                                                        },
+                                                    ],
+                                                    Spanned {
+                                                        node: Call(
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "g",
+                                                                ),
+                                                                span: 439..440,
+                                                            },
+                                                            [
+                                                                Spanned {
+                                                                    node: Int(
+                                                                        IntLit {
+                                                                            value: 1,
+                                                                            suffix: None,
+                                                                        },
+                                                                    ),
+                                                                    span: 441..442,
+                                                                },
+                                                            ],
+                                                        ),
+                                                        span: 439..443,
+                                                    },
+                                                ),
+                                                span: 431..443,
+                                            },
+                                            Spanned {
+                                                node: Lam(
+                                                    [
+                                                        Param {
+                                                            name: "x",
+                                                            ty: None,
+                                                            borrow: false,
+                                                            default: None,
+                                                        },
+                                                    ],
+                                                    Spanned {
+                                                        node: Bin(
+                                                            Add,
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "x",
+                                                                ),
+                                                                span: 453..454,
+                                                            },
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 41,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 457..459,
+                                                            },
+                                                        ),
+                                                        span: 453..459,
+                                                    },
+                                                ),
+                                                span: 445..459,
+                                            },
+                                        ],
+                                    ),
+                                    span: 421..460,
+                                },
+                            ],
+                        ),
+                        span: 413..461,
+                    },
+                ),
+                span: 377..461,
+            },
+            wheres: [],
+            span: 363..461,
+        },
+    ],
+}
+
+== types ==
+apply_io : ((Int) -> Int ! {IO}) -> Int ! {IO}
+use_pure : (forall e0. (Int) -> Int ! {e0}) -> Int ! {IO}
+call_poly : forall e1. (forall e0. ((Int) -> Int ! {e1}) -> Int ! {e0}, (Int) -> Int ! {e1}) -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn apply_io(g) =
+  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+fn use_pure(h) =
+  return h to t@2; apply_io(t@2)
+fn call_poly(h, f) =
+  return f to t@3; return h to t@4; (force t@4)(t@3)
+fn main() =
+  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; print_nl to _; return thunk { \g. return 1 to t@10; return g to t@11; (force t@11)(t@10) } to t@12; return thunk { \x. return x to t@13; return 41 to t@14; t@13 + t@14 } to t@15; call_poly(t@12, t@15) to t@16; print t@16 to t@17; print_nl
+
+== fbip (rc) ==
+fn apply_io(g) =
+  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+fn use_pure(h) =
+  return h to t@2; apply_io(t@2)
+fn call_poly(h, f) =
+  return f to t@3; return h to t@4; (force t@4)(t@3)
+fn main() =
+  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; drop t@9 to _; print_nl to _; drop _ to _; return thunk { \g. return 1 to t@10; return g to t@11; (force t@11)(t@10) } to t@12; return thunk { \x. return x to t@13; return 41 to t@14; t@13 + t@14 } to t@15; call_poly(t@12, t@15) to t@16; print t@16 to t@17; drop t@17 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_apply_io(i64 %a0) {
+entry:
+  %t0 = call i64 @prism_apply_1(i64 %a0, i64 3)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+    i64 1, label %_lam1
+    i64 2, label %_lam2
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_lam1:                                            ; preds = %entry
+  %_r1 = call i64 @prism_lam_1(i64 %_a0)
+  br label %_merge
+
+_lam2:                                            ; preds = %entry
+  %_r2 = call i64 @prism_lam_2(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam2, %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ]
+  ret i64 %_result
+}
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_use_pure(i64 %a0) {
+entry:
+  %t0 = musttail call i64 @prism_apply_io(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_call_poly(i64 %a0, i64 %a1) {
+entry:
+  %t0 = call i64 @prism_apply_1(i64 %a0, i64 %a1)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call i64 @prism_use_pure(i64 %t2)
+  call void @prism_print_int(i64 %t3)
+  call void @prism_rc_dec(i64 %t3)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t6 = call ptr @prism_alloc(i64 0)
+  %2 = ptrtoint ptr %t6 to i64
+  %3 = add i64 %2, 8
+  %t7 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t6 to i64
+  %t9 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t9 to i64
+  %5 = add i64 %4, 8
+  %t10 = inttoptr i64 %5 to ptr
+  store i64 2, ptr %t10, align 8
+  %t11 = ptrtoint ptr %t9 to i64
+  %t12 = call i64 @prism_call_poly(i64 %t8, i64 %t11)
+  call void @prism_print_int(i64 %t12)
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  %t0 = and i64 %_p0, 83
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = ashr i64 %_p0, 1
+  %t5 = add i64 %t3, 41
+  %t6 = shl i64 %t5, 1
+  %t7 = ashr i64 %t6, 1
+  %t8 = icmp eq i64 %t7, %t5
+  br i1 %t8, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t9 = or i64 %t6, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 83)
+  ret i64 %t11
+}
+
+declare i64 @prism_rt_int_add(i64, i64)
+
+define i64 @prism_lam_1(i64 %_p0) {
+entry:
+  %t0 = call i64 @prism_apply_1(i64 %_p0, i64 3)
+  call void @prism_rc_dec(i64 %_p0)
+  ret i64 %t0
+}
+
+define i64 @prism_lam_2(i64 %_p0) {
+entry:
+  %t0 = and i64 %_p0, 83
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = ashr i64 %_p0, 1
+  %t5 = add i64 %t3, 41
+  %t6 = shl i64 %t5, 1
+  %t7 = ashr i64 %t6, 1
+  %t8 = icmp eq i64 %t7, %t5
+  br i1 %t8, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t9 = or i64 %t6, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 83)
+  ret i64 %t11
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [42, 42]
+result: ()

@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/eff_fn_list.pr
+---
+5
+-6
+12
+13
+=> ()

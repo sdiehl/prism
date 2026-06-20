@@ -1,0 +1,11 @@
+-- Generalize must not pick a row name the user already wrote: the bare row
+-- `amb` generalizes inside `forall e0` and must not be captured by it.
+fn apply_io(g : (Int) -> Int ! {IO}) : !{IO} Int = g(1)
+
+fn use_pure(h : forall e0. (Int) -> Int ! {| e0}) : !{IO} Int = apply_io(h)
+
+fn call_poly(h : forall e0. ((Int) -> Int ! {| amb}) -> Int ! {| e0}, f) = h(f)
+
+fn main() =
+  println(use_pure(\(x) -> x + 41))
+  println(call_poly(\(g) -> g(1), \(x) -> x + 41))

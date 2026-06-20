@@ -1,0 +1,7 @@
+type List(a) = Nil | Cons(a, List(a))
+fn length(xs) =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => 1 + length(rest)
+
+fn main() = println(length(Cons(1, Cons(2, Cons(3, Nil)))))

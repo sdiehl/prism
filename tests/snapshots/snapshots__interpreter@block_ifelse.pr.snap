@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/block_ifelse.pr
+---
+3
+2
+1
+3
+2
+4
+=> ()

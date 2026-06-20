@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/fold_chains.pr
+---
+30
+78
+24
+120
+10
+20
+0
+0
+=> ()

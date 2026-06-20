@@ -1,0 +1,11 @@
+newtype UserId = UserId(Int) deriving (Show, Eq)
+newtype Wrap(a) = Wrap(a)
+
+fn unwrap(w : Wrap(Int)) : Int =
+  match w of
+    Wrap(x) => x
+
+fn main() =
+  let u = UserId(7)
+  print(u == UserId(7))
+  print(unwrap(Wrap(unwrap(Wrap(5)))))

@@ -1,0 +1,10 @@
+-- Unicode strings. Literals carry UTF-8. str_len, char_at and substring index
+-- by codepoint, not byte, so multi-byte text behaves the way it reads. Every
+-- string is a refcounted cell, so none of this leaks.
+
+fn main() =
+  let s = concat("héllo, ", "wörld→")
+  println(str_len(s))
+  println(char_at(s, 1))
+  println(char_at(s, 12))
+  println(substring(s, 7, 6))

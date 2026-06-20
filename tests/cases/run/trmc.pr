@@ -1,0 +1,16 @@
+fn build(n : Int, acc : List(Int)) : List(Int) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(n, acc))
+
+fn main() =
+  let xs = build(200000, Nil)
+  let ys = map(\(n) -> n + 1, xs)
+  println(length(ys))
+  let zs = filter(\(n) -> n % 2 == 0, ys)
+  println(length(zs))
+  println(sum(zs))
+  let ws = append(zs, build(100000, Nil))
+  println(length(ws))
+  println(sum(ws))

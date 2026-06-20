@@ -1,0 +1,9 @@
+class Loud(a) {
+  loud : (a) -> Int
+}
+
+instance loudInt : Loud(Int) {
+  fn loud(x) = let _ = println(x) in x
+}
+
+fn main() = loud(3)

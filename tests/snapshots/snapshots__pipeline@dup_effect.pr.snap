@@ -1,0 +1,90 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/dup_effect.pr
+---
+== tokens ==
+VOpen Effect UIdent("A") LBrace Ctl Ident("ping") LParen KwInt RParen Colon KwUnit RBrace VSemi Effect UIdent("B") LBrace Ctl Ident("ping") LParen KwInt RParen Colon KwUnit RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("ping") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "A",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ping",
+                    params: [
+                        Int,
+                    ],
+                    ret: Unit,
+                },
+            ],
+            span: 0..35,
+        },
+        EffectDecl {
+            name: "B",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ping",
+                    params: [
+                        Int,
+                    ],
+                    ret: Unit,
+                },
+            ],
+            span: 37..72,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "ping",
+                        ),
+                        span: 86..90,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 91..92,
+                        },
+                    ],
+                ),
+                span: 86..93,
+            },
+            wheres: [],
+            span: 74..93,
+        },
+    ],
+}
+
+== types ==
+Type Error: operation `ping` is declared in both `A` and `B`
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ ╭─▶ effect B {
+   ┆ ┆   
+ 7 │ ├─▶ }
+   │ │       
+   │ ╰─────── operation `ping` is declared in both `A` and `B`
+───╯

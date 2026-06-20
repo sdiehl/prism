@@ -1,0 +1,6 @@
+-- stake(0) drops the continuation before anything is emitted, an empty
+-- list lifts to an empty stream, and stake past the end just drains.
+fn main() =
+  println(srange(0, 10).stake(0).ssum())
+  println(length(sof(Nil).scollect()))
+  println(sof([1, 2, 3]).stake(5).ssum())

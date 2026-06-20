@@ -1,0 +1,182 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/dot_bare.pr
+---
+== tokens ==
+VOpen Type UIdent("Point") Eq UIdent("Point") LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace VSemi Fn Ident("norm1") LParen Ident("p") Colon UIdent("Point") RParen Colon KwInt Eq Ident("p") Dot Ident("x") Plus Ident("p") Dot Ident("y") VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("p") Eq UIdent("Point") LBrace Ident("x") Eq Int(IntLit { value: 1, suffix: None }) Comma Ident("y") Eq Int(IntLit { value: 2, suffix: None }) RBrace VSemi Ident("println") LParen Ident("p") Dot Ident("norm1") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Point",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Point",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "x",
+                                Int,
+                            ),
+                            (
+                                "y",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 149..186,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "norm1",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Point",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: FieldAccess(
+                            Spanned {
+                                node: Var(
+                                    "p",
+                                ),
+                                span: 216..217,
+                            },
+                            "x",
+                        ),
+                        span: 216..219,
+                    },
+                    Spanned {
+                        node: FieldAccess(
+                            Spanned {
+                                node: Var(
+                                    "p",
+                                ),
+                                span: 222..223,
+                            },
+                            "y",
+                        ),
+                        span: 222..225,
+                    },
+                ),
+                span: 216..225,
+            },
+            wheres: [],
+            span: 188..225,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "p",
+                    Spanned {
+                        node: RecordCreate(
+                            "Point",
+                            [
+                                (
+                                    "x",
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 261..262,
+                                    },
+                                ),
+                                (
+                                    "y",
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 2,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 268..269,
+                                    },
+                                ),
+                            ],
+                        ),
+                        span: 249..271,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 274..281,
+                            },
+                            [
+                                Spanned {
+                                    node: FieldAccess(
+                                        Spanned {
+                                            node: Var(
+                                                "p",
+                                            ),
+                                            span: 282..283,
+                                        },
+                                        "norm1",
+                                    ),
+                                    span: 282..289,
+                                },
+                            ],
+                        ),
+                        span: 274..290,
+                    },
+                ),
+                span: 241..290,
+            },
+            wheres: [],
+            span: 227..290,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: no field `norm1` on type `Point`
+    ╭─[ <source>:10:11 ]
+    │
+ 10 │   println(p.norm1)
+    │           ───┬───  
+    │              ╰───── in `main`: no field `norm1` on type `Point`
+────╯

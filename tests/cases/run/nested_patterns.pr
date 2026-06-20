@@ -1,0 +1,47 @@
+fn sum_pair(o) =
+  match o of
+    Some((a, b)) => a + b
+    None => 0
+
+fn classify(n) =
+  match n of
+    0 => 100
+    1 => 200
+    _ => 300
+
+fn fizz(o) =
+  match o of
+    Some(0) => 1000
+    Some(n) => n
+    None => 0 - 1
+
+fn flag(b) =
+  match b of
+    true => 1
+    _ => 0
+
+fn fmatch(x) =
+  match x of
+    1.5 => 1
+    _ => 0
+
+fn deep(x) =
+  match x of
+    Some((1, (a, b))) => a * b
+    Some((n, _)) => n
+    None => 0
+
+fn main() =
+  let u1 = println(sum_pair(Some((3, 4))))
+  let u2 = println(sum_pair(None))
+  let u3 = println(classify(0))
+  let u4 = println(classify(1))
+  let u5 = println(classify(7))
+  let u6 = println(fizz(Some(0)))
+  let u7 = println(fizz(Some(42)))
+  let u8 = println(fizz(None))
+  let u9 = println(flag(true))
+  let u10 = println(flag(false))
+  let u11 = println(fmatch(1.5))
+  let u12 = println(fmatch(2.0))
+  println(deep(Some((1, (6, 7)))))

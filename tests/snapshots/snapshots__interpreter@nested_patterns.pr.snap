@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/nested_patterns.pr
+---
+7
+0
+100
+200
+300
+1000
+42
+-1
+1
+0
+1
+0
+42
+=> ()

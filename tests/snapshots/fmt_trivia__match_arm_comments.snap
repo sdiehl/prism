@@ -1,0 +1,14 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn classify(n : Int) : String =\\n\\\n     \\x20 -- dispatch on the value\\n\\\n     \\x20 match n of\\n\\\n     \\x20   -- the zero case\\n\\\n     \\x20   0 => \\\"zero\\\"\\n\\\n     \\x20   -- everything else\\n\\\n     \\x20   _ =>\\n\\\n     \\x20     -- build the label\\n\\\n     \\x20     let s = \\\"nonzero\\\"\\n\\\n     \\x20     s\\n\")"
+---
+fn classify(n : Int) : String =
+  -- dispatch on the value
+  match n of
+    -- the zero case
+    0 => "zero"
+    -- everything else
+    _ =>
+      -- build the label
+      let s = "nonzero"
+      s

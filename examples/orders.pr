@@ -1,0 +1,52 @@
+-- An order desk exercising the whole failure model. A comprehension with a
+-- failable guard prunes unknown items. `?.` and `??` read an optional customer
+-- discount. Named arguments price a line. `transact` charges an account, so an
+-- overdrawing purchase rolls back as if it never happened.
+-- Expected output:
+--
+--   ink
+--   pad
+--   30
+--   10
+--   10
+--   10
+--   -1
+
+type Tier = Tier { off: Int }
+type Customer = Customer { tier: Option(Tier) }
+
+fn charge(price, qty := 1, off := 0) = (price - off) * qty
+
+fn main() =
+  let prices = map_from_list([("pen", 3), ("ink", 12), ("pad", 5)])
+  let cart = ["pen", "ink", "missing", "pad"]
+  -- Failable guard: an unknown item makes `at_map` fail and is pruned, like
+  -- the under-priced `pen`. Only stocked items over 4 survive.
+  let bill = [name for name in sof(cart), if prices.at_map(name) > 4]
+  for item in sof(bill) do
+    println(item)
+  -- Optional chaining defaults a missing discount to 0 through `??`.
+  let c = Some(Customer { tier = Some(Tier { off = 2 }) })
+  let off = c?.tier?.off ?? 0
+  println(charge(prices.at_map("ink") ?? 0, qty := 3, off := off))
+  var balance := 20
+  -- A line that fits commits and reports the new balance.
+  let r1 =
+    transact
+      balance := balance - charge(prices.at_map("pad") ?? 0, qty := 2)
+      guard(balance >= 0)
+      balance
+    else
+      0 - 1
+  println(balance)
+  println(r1)
+  -- A line that overdraws fails its guard, so the balance rolls back.
+  let r2 =
+    transact
+      balance := balance - charge(prices.at_map("ink") ?? 0, qty := 5)
+      guard(balance >= 0)
+      balance
+    else
+      0 - 1
+  println(balance)
+  println(r2)

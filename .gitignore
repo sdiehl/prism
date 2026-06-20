@@ -1,0 +1,13 @@
+/target
+/target-mlir
+/docs/book
+/web/pkg
+/web/src/examples.ts
+/web/node_modules
+/web/dist
+.DS_Store
+*.ll
+*.mlir
+/a.out
+/models/.lake
+/models/lake-manifest.json

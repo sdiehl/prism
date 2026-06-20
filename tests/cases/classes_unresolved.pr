@@ -1,0 +1,11 @@
+type Color = Red | Green | Blue
+
+class Eq2(a) {
+  eq2 : (a, a) -> Bool
+}
+
+instance eqInt2 : Eq2(Int) {
+  fn eq2(x, y) = x == y
+}
+
+fn main() = eq2(Red, Blue)

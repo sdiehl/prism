@@ -1,0 +1,34 @@
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+-- Algebraic State, the Koka way.
+--
+-- The handler interprets get/put by parameter passing. Each clause returns a
+-- function s -> result, and `k(v)(s)` threads the state forward. The handled
+-- block becomes a state transformer that we run with an initial s.
+--
+-- counter() never mentions a state value, it just performs get and put. The
+-- row is inferred and discharged at the handler, so the same ops could be
+-- reinterpreted (logging, bounding) without touching counter.
+
+fn tick() : !{State} Int =
+  let n = get(())
+  put(n + 1)
+  n
+
+fn counter() : !{State} Int =
+  tick()
+  tick()
+  tick()
+  get(())
+
+fn run_counter(init) =
+  let f =
+    handle counter() with
+      get(u, k) => \(s) -> k(s)(s)
+      put(s2, k) => \(s) -> k(())(s2)
+      return r => \(s) -> r
+  f(init)
+
+fn main() = println(run_counter(0))

@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/sugar_letpat.pr
+---
+12
+6
+10
+6
+3
+23
+=> ()

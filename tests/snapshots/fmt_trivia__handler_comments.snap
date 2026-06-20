@@ -1,0 +1,19 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"effect State {\\n\\\n     \\x20 ctl get() : Int,\\n\\\n     \\x20 ctl put(Int) : Unit\\n\\\n     }\\n\\\n     \\n\\\n     fn run() : !{State} Int =\\n\\\n     \\x20 -- install the handler\\n\\\n     \\x20 with handler\\n\\\n     \\x20   -- read the cell\\n\\\n     \\x20   get(k) => k(42)\\n\\\n     \\x20   -- write the cell\\n\\\n     \\x20   put(v, k) => k(())\\n\\\n     \\x20 -- after the handler is in scope\\n\\\n     \\x20 let a = get()\\n\\\n     \\x20 a\\n\")"
+---
+effect State {
+  ctl get() : Int,
+  ctl put(Int) : Unit
+}
+
+fn run() : !{State} Int =
+  -- install the handler
+  with handler
+    -- read the cell
+    get(k) => k(42)
+    -- write the cell
+    put(v, k) => k(())
+  -- after the handler is in scope
+  let a = get()
+  a

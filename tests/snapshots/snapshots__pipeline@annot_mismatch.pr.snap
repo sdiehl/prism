@@ -1,0 +1,65 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/annot_mismatch.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq Ident("println") LParen LParen Int(IntLit { value: 1, suffix: None }) Colon KwString RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 12..19,
+                    },
+                    [
+                        Spanned {
+                            node: Ann(
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 21..22,
+                                },
+                                Str,
+                            ),
+                            span: 20..32,
+                        },
+                    ],
+                ),
+                span: 12..33,
+            },
+            wheres: [],
+            span: 0..33,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: type mismatch: expected String, got Int
+   ╭─[ <source>:1:22 ]
+   │
+ 1 │ fn main() = println((1 : String))
+   │                      ┬  
+   │                      ╰── in `main`: type mismatch: expected String, got Int
+───╯

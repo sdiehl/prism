@@ -1,0 +1,25 @@
+effect Ask {
+  ctl ask(Unit) : Int
+}
+effect Log {
+  ctl log(Int) : Unit
+}
+
+fn work() : !{Ask, Log} Int =
+  let a = ask(())
+  log(a)
+  let b = ask(())
+  log(b)
+  a + b
+
+fn run() =
+  handle (handle work() with {
+      ask(u, k) => let r = k(10) in let _ = println(r) in r + 100,
+      return r => r * 2
+    }) with
+    log(n, k) =>
+      println(n)
+      k(())
+    return r => r
+
+fn main() = println(run())

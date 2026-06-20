@@ -1,0 +1,62 @@
+-- Huet's zipper (Huet, "The Zipper", JFP 1997) navigated in place, FP^2-checked.
+-- A `Loc` is the focused subtree paired with a `Ctx`, the one-hole context that
+-- remembers the path to the root. Moving down rebuilds one `Loc` and one `Ctx`
+-- frame. Moving up consumes a frame and rebuilds the parent `Loc`. Each step
+-- frees exactly the cells it rebuilds, so the reuse pass turns every move into an
+-- in-place pointer shuffle, proven `fbip` (not fip: retained subtree pointers are
+-- dup'd when their cell is reused, and a dup is non-linear).
+--
+-- The walk descends left, left, then back up twice to where it started, reading
+-- the focused label at each stop.
+--
+-- Run with PRISM_REUSE_STATS=1 to see two reuses per move, PRISM_CHECK_LEAKS=1
+-- for zero live cells at exit.
+--
+-- Prints:
+--   4
+--   2
+--   1
+--   2
+--   4
+
+type Tree = Lf | Br(Tree, Int, Tree)
+
+-- Ctx records, per frame, the descent side plus what we left behind (sibling
+-- subtree and parent label) so go_up can rebuild.
+type Ctx = Top | L(Ctx, Int, Tree) | R(Tree, Int, Ctx)
+
+type Loc = Loc(Tree, Ctx)
+
+fbip fn go_left(loc) =
+  match loc of
+    Loc(Br(l, x, r), c) => Loc(l, L(c, x, r))
+    other => other
+
+fbip fn go_right(loc) =
+  match loc of
+    Loc(Br(l, x, r), c) => Loc(r, R(l, x, c))
+    other => other
+
+fbip fn go_up(loc) =
+  match loc of
+    Loc(t, L(c, x, r)) => Loc(Br(t, x, r), c)
+    Loc(t, R(l, x, c)) => Loc(Br(l, x, t), c)
+    other => other
+
+fn focus(loc) =
+  match loc of
+    Loc(Br(_, x, _), _) => x
+    Loc(Lf, _) => 0 - 1
+
+fn main() =
+  let t = Br(Br(Br(Lf, 1, Lf), 2, Br(Lf, 3, Lf)), 4, Br(Lf, 5, Lf))
+  let l0 = Loc(t, Top)
+  println(focus(l0))
+  let l1 = go_left(l0)
+  println(focus(l1))
+  let l2 = go_left(l1)
+  println(focus(l2))
+  let l3 = go_up(l2)
+  println(focus(l3))
+  let l4 = go_up(l3)
+  println(focus(l4))

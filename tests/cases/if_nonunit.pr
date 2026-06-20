@@ -1,0 +1,4 @@
+fn main() =
+  if true then
+    42
+  println(0)

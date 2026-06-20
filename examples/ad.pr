@@ -1,0 +1,46 @@
+-- Forward-mode automatic differentiation falls out of dual numbers: pair every
+-- value with its derivative and let the algebra carry the chain rule for you.
+-- A polynomial written once against a `Num` class evaluates twice. Feed it a
+-- plain Float and you get the value; feed it D(5.0, 1.0), where 1.0 seeds
+-- dx/dx, and the same code threads the slope alongside, no symbolic step.
+
+type Dual = D(Float, Float)
+
+-- Projections out of a dual: re is the value, im the derivative.
+fn re(d) =
+  match d of
+    D(x, _) => x
+
+fn im(d) =
+  match d of
+    D(_, x) => x
+
+class Num(a) {
+  fromI : (Int) -> a,
+  add : (a, a) -> a,
+  mul : (a, a) -> a
+}
+
+instance numFloat : Num(Float) {
+  fn fromI(x) = to_float(x),
+  fn add(x, y) = x +. y,
+  fn mul(x, y) = x *. y
+}
+
+-- Product rule lives in `mul`: the derivative of a*b is a*b' + a'*b. `add` is
+-- componentwise and a constant has a zero derivative.
+instance numDual : Num(Dual) {
+  fn fromI(x) = D(to_float(x), 0.0),
+  fn add(p, q) = D(re(p) +. re(q), im(p) +. im(q)),
+  fn mul(p, q) = D(re(p) *. re(q), re(p) *. im(q) +. im(p) *. re(q))
+}
+
+-- p(x) = x^3 + 2x, built only from class methods so it runs at either type.
+fn poly(x : a) : a given Num(a) = add(mul(mul(x, x), x), mul(fromI(2), x))
+
+fn main() =
+  let value = poly[numFloat](5.0)
+  let slope = poly[numDual](D(5.0, 1.0))
+  println(concat("poly(5)        = ", show(value)))
+  println(concat("poly(5)  [dual] = ", show(re(slope))))
+  println(concat("poly'(5)       = ", show(im(slope))))

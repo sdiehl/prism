@@ -1,0 +1,179 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/guard_nonexhaustive.pr
+---
+== tokens ==
+VOpen Fn Ident("sign") LParen Ident("n") RParen Eq VOpen Match Ident("n") Of VOpen Ident("k") If Ident("k") Gt Int(IntLit { value: 0, suffix: None }) FatArrow Int(IntLit { value: 1, suffix: None }) VSemi Ident("k") If Ident("k") Lt Int(IntLit { value: 0, suffix: None }) FatArrow Int(IntLit { value: 2, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("sign") LParen Int(IntLit { value: 3, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "sign",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 21..22,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Var(
+                                    "k",
+                                ),
+                                span: 30..31,
+                            },
+                            guard: Spanned {
+                                node: Bin(
+                                    Gt,
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 35..36,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 39..40,
+                                    },
+                                ),
+                                span: 35..40,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 44..45,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Var(
+                                    "k",
+                                ),
+                                span: 50..51,
+                            },
+                            guard: Spanned {
+                                node: Bin(
+                                    Lt,
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 55..56,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 59..60,
+                                    },
+                                ),
+                                span: 55..60,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 64..65,
+                            },
+                        },
+                    ],
+                ),
+                span: 15..65,
+            },
+            wheres: [],
+            span: 0..65,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 79..86,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "sign",
+                                    ),
+                                    span: 87..91,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 3,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 92..93,
+                                    },
+                                ],
+                            ),
+                            span: 87..94,
+                        },
+                    ],
+                ),
+                span: 79..95,
+            },
+            wheres: [],
+            span: 67..95,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `sign`: non-exhaustive match: missing _
+   ╭─[ <source>:2:3 ]
+   │
+ 2 │ ╭─▶   match n of
+   ┆ ┆   
+ 4 │ ├─▶     k if k < 0 => 2
+   │ │                         
+   │ ╰───────────────────────── in `sign`: non-exhaustive match: missing _
+───╯

@@ -1,0 +1,106 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/eff_arity_annot.pr
+---
+== tokens ==
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen LBrace Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit RBrace VSemi Fn Ident("consume") LParen Ident("f") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Emit") LParen KwInt Comma KwInt RParen RBrace RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Emit",
+            params: [
+                "a",
+            ],
+            ops: [
+                EffOp {
+                    name: "emit",
+                    params: [
+                        Var(
+                            "a",
+                        ),
+                    ],
+                    ret: Unit,
+                },
+            ],
+            span: 0..39,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "consume",
+            params: [
+                Param {
+                    name: "f",
+                    ty: Some(
+                        Fun(
+                            [
+                                Unit,
+                            ],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "Emit",
+                                        args: [
+                                            Int,
+                                            Int,
+                                        ],
+                                    },
+                                ],
+                                None,
+                            ),
+                            Unit,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 99..100,
+            },
+            wheres: [],
+            span: 41..100,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Unit,
+                span: 114..116,
+            },
+            wheres: [],
+            span: 102..116,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `consume`: effect `Emit` expects 1 type argument(s), got 2
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ fn consume(f : (Unit) -> Unit ! {Emit(Int, Int)}) : Int = 0
+   │ ─────────────────────────────┬─────────────────────────────  
+   │                              ╰─────────────────────────────── in `consume`: effect `Emit` expects 1 type argument(s), got 2
+───╯

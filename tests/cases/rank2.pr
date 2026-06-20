@@ -1,0 +1,7 @@
+fn pick(g : forall a. (a) -> a) : Int =
+  if g(true) then
+    g(10)
+  else
+    g(20)
+
+fn main() = println(pick(\(x) -> x))

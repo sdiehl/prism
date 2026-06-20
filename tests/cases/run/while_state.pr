@@ -1,0 +1,17 @@
+effect Counter {
+  ctl get(Unit) : Int,
+  ctl bump(Unit) : Unit
+}
+
+fn count_up() : !{Counter, IO} Unit =
+  while(\() -> get(()) < 4) fn
+    println(get(()) * 10)
+    bump(())
+
+fn main() =
+  let f =
+    handle count_up() with
+      get(u, k) => \(s) -> k(s)(s)
+      bump(u, k) => \(s) -> k(())(s + 1)
+      return r => \(s) -> s
+  println(f(0))

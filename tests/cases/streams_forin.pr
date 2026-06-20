@@ -1,0 +1,4 @@
+fn main() =
+  for x in sof([1, 2, 3]) do
+    println(x)
+  println(srange(0, 4).smap(\(n) -> n * n).ssum())

@@ -1,0 +1,2 @@
+-- An empty interpolation hole `{}` is a lex error pointing at the `{`.
+fn main() = println("a {} b")

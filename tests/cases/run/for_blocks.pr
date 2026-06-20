@@ -1,0 +1,8 @@
+fn squares(n) =
+  for i in srange(1, n) do
+    println(i * i)
+
+fn main() =
+  for i in srange(0, 3) do
+    println(i)
+  squares(5)

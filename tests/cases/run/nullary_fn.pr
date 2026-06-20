@@ -1,0 +1,26 @@
+-- Nullary function types: empty domains in annotations, ctor fields,
+-- stored closures in lists, and an effectful variant.
+
+type Lazy = Lazy { thunk: () -> Int }
+
+fn force(g : () -> Int) : Int = g()
+
+fn pick(fs : List(() -> Int), i : Int) : Int =
+  match fs of
+    Nil => 0
+    Cons(f, rest) =>
+      if i == 0 then
+        f()
+      else
+        pick(rest, i - 1)
+
+fn tell(g : () -> Unit ! {IO}) : !{IO} Unit = g()
+
+fn main() =
+  println(force(\() -> 41 + 1))
+  let l = Lazy { thunk = \() -> 100 }
+  let t = l.thunk
+  println(t())
+  println(pick([\() -> 10, \() -> 20], 1))
+  tell() fn
+    println(force(\() -> 7))

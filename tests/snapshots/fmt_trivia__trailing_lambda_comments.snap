@@ -1,0 +1,8 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn each(xs : List(Int)) : Unit =\\n\\\n     \\x20 xs.foreach() fn(x)\\n\\\n     \\x20   -- handle one item\\n\\\n     \\x20   println(show(x))\\n\")"
+---
+fn each(xs : List(Int)) : Unit =
+  xs.foreach fn(x)
+    -- handle one item
+    println(show(x))

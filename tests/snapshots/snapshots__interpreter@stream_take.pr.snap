@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/stream_take.pr
+---
+0
+3
+18
+4
+12
+24
+10
+11
+=> ()

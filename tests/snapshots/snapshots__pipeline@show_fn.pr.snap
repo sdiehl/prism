@@ -1,0 +1,97 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/show_fn.pr
+---
+== tokens ==
+VOpen Fn Ident("inc") LParen Ident("x") RParen Eq Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("show") LParen Ident("inc") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "inc",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 12..13,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 16..17,
+                    },
+                ),
+                span: 12..17,
+            },
+            wheres: [],
+            span: 0..17,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "show",
+                        ),
+                        span: 31..35,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "inc",
+                            ),
+                            span: 36..39,
+                        },
+                    ],
+                ),
+                span: 31..40,
+            },
+            wheres: [],
+            span: 19..40,
+        },
+    ],
+}
+
+== types ==
+inc : (Int) -> Int
+main : () -> String
+
+== core (cbpv) ==
+Type Error: cannot show a function of type (Int) -> Int
+   ╭─[ <source>:3:18 ]
+   │
+ 3 │ fn main() = show(inc)
+   │                  ─┬─  
+   │                   ╰─── cannot show a function of type (Int) -> Int
+───╯

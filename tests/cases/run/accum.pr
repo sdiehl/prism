@@ -1,0 +1,22 @@
+fn sum_acc(n, acc) =
+  if n == 0 then
+    acc
+  else
+    sum_acc(n - 1, acc + n)
+
+fn fib_acc(n, a, b) =
+  if n == 0 then
+    a
+  else
+    fib_acc(n - 1, b, a + b)
+
+fn pow_acc(base, n, acc) =
+  if n == 0 then
+    acc
+  else
+    pow_acc(base, n - 1, acc * base)
+
+fn main() =
+  println(sum_acc(50, 0))
+  println(fib_acc(20, 0, 1))
+  println(pow_acc(2, 10, 1))

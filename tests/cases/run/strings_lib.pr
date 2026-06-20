@@ -1,0 +1,7 @@
+fn main() =
+  let s = "12,345,6789"
+  let parts = split(44, s)
+  println(length(parts))
+  println(char_at(s, 0))
+  println(str_len(substring(s, 3, 3)))
+  println(unwrap_or(0, parse_int("1024")) + 1)

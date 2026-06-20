@@ -1,0 +1,11 @@
+effect Ask {
+  ctl ask() : Int
+}
+
+fn leak() : (Unit) -> Int =
+  with f <- handler
+    ask(k) => k(5)
+    return r => r
+  \(u) -> f.ask()
+
+fn main() = println(leak()(()))

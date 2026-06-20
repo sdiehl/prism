@@ -1,0 +1,66 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/show_unknown.pr
+---
+== tokens ==
+VOpen Fn Ident("shw") LParen Ident("x") RParen Eq Ident("show") LParen Ident("x") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "shw",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "show",
+                        ),
+                        span: 12..16,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 17..18,
+                        },
+                    ],
+                ),
+                span: 12..19,
+            },
+            wheres: [],
+            span: 0..19,
+        },
+    ],
+}
+
+== types ==
+shw : forall a. (a) -> String
+
+== core (cbpv) ==
+Type Error: cannot infer the type to show; annotate the argument, e.g. (e : List(Int))
+   ╭─[ <source>:1:18 ]
+   │
+ 1 │ fn shw(x) = show(x)
+   │                  ┬  
+   │                  ╰── cannot infer the type to show; annotate the argument, e.g. (e : List(Int))
+───╯

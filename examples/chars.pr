@@ -1,0 +1,26 @@
+-- A real Char type: a Unicode codepoint, physically an Int at runtime but
+-- typechecked distinctly. Literals are 'c', patterns match like ints, ord/chr
+-- bridge to Int. Eq/Ord/Show come from prelude instances. print omits the
+-- newline that println adds.
+
+fn vowel(c : Char) : Bool =
+  match c of
+    'a' => true
+    'e' => true
+    'i' => true
+    'o' => true
+    'u' => true
+    _ => false
+
+fn shift(c : Char, n : Int) : Char = chr(ord(c) + n)
+
+fn main() =
+  print("upper: ")
+  println(str_of_char(shift('a', ord('A') - ord('a'))))
+  println(show('Z'))
+  println(ord('A'))
+  println(vowel('e'))
+  println(vowel('q'))
+  println(chars("prism"))
+  println(sort_by_ord(['m', 'i', 'r', 'p', 's']))
+  println(cmp('a', 'b'))

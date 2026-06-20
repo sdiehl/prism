@@ -1,0 +1,11 @@
+-- Two's-complement low 64 bits of a multi-limb negative Integer: the magnitude
+-- exceeds 2^64 so it spans more than one limb, and the high limbs must not
+-- perturb the low 64 bits of -M (which is 0 - low64(M) mod 2^64).
+
+fn main() =
+  let m = pow(2, 100) + 12345
+  let neg = 0 - m
+  println(to_u64(neg))
+  println(to_i64(neg))
+  println(to_u64(0 - (pow(2, 128) + 1)))
+  println(to_i64(0 - pow(2, 70)))

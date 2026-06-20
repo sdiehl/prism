@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/poly_print.pr
+---
+[]
+None
+[[], []]
+[None, None]
+Some([])
+(1, [], hi, None)
+Leaf
+[Leaf]
+=> ()

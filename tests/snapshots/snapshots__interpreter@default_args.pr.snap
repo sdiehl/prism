@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/default_args.pr
+---
+3
+8
+12
+6
+=> ()

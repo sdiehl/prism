@@ -1,0 +1,20 @@
+effect Reader {
+  ctl ask(Unit) : Int
+}
+-- Reader: a read-only environment as an effect.
+--
+-- ask() pulls a value from an ambient context the code never names. The
+-- handler supplies it, so the same function runs against any environment.
+-- scaled() and shifted() both ask without threading config through their
+-- signatures. The row {Reader} is discharged at the handler.
+
+fn scaled(x) : !{Reader} Int = x * ask(())
+
+fn shifted(x) : !{Reader} Int = scaled(x) + ask(())
+
+fn with_env(env) =
+  handle shifted(5) with
+    ask(u, k) => k(env)
+    return r => r
+
+fn main() = println(with_env(10))

@@ -1,0 +1,130 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/named_missing.pr
+---
+== tokens ==
+VOpen Fn Ident("f") LParen Ident("a") Comma Ident("b") ColonEq Int(IntLit { value: 0, suffix: None }) RParen Eq Ident("a") Plus Ident("b") VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("f") LParen Ident("b") ColonEq Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "f",
+            params: [
+                Param {
+                    name: "a",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "b",
+                    ty: None,
+                    borrow: false,
+                    default: Some(
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 146..147,
+                        },
+                    ),
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "a",
+                        ),
+                        span: 151..152,
+                    },
+                    Spanned {
+                        node: Var(
+                            "b",
+                        ),
+                        span: 155..156,
+                    },
+                ),
+                span: 151..156,
+            },
+            wheres: [],
+            span: 133..156,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 170..177,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "f",
+                                    ),
+                                    span: 178..179,
+                                },
+                                [
+                                    Spanned {
+                                        node: Sugar(
+                                            Assign(
+                                                "b",
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 5,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 185..186,
+                                                },
+                                            ),
+                                        ),
+                                        span: 180..186,
+                                    },
+                                ],
+                            ),
+                            span: 178..187,
+                        },
+                    ],
+                ),
+                span: 170..188,
+            },
+            wheres: [],
+            span: 158..188,
+        },
+    ],
+}
+
+== types ==
+Type Error: call to `f` is missing argument `a`
+   ╭─[ <source>:6:21 ]
+   │
+ 6 │ fn main() = println(f(b := 5))
+   │                     ────┬────  
+   │                         ╰────── call to `f` is missing argument `a`
+───╯

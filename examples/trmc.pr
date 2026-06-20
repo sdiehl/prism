@@ -1,0 +1,28 @@
+-- Tail recursion modulo constructor. `descend` is not tail recursive: the
+-- recursive call sits inside Cons. The backend compiles it to a
+-- destination-passing loop (allocate the cell with a hole, recurse into the
+-- hole), so a 400000-deep recursion runs in constant stack. `total` recurses
+-- inside `+` and compiles to an accumulator loop. Plain recursion would smash
+-- the C stack.
+--
+-- Prints:
+--   400001
+--   400001
+--   80000200000
+
+fn descend(n : Int) : List(Int) =
+  if n == 0 then
+    [0]
+  else
+    Cons(n, descend(n - 1))
+
+fn total(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(h, t) => h + total(t)
+
+fn main() =
+  let xs = descend(400000)
+  println(length(xs))
+  println(length(map(\(n) -> n + 1, xs)))
+  println(total(xs))

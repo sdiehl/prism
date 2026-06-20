@@ -1,0 +1,29 @@
+{
+  "lineWidth": 100,
+  "markdown": {
+    "lineWidth": 80,
+    "textWrap": "never"
+  },
+  "json": {
+    "indentWidth": 2
+  },
+  "toml": {
+    "indentWidth": 2
+  },
+  "excludes": [
+    "target",
+    "_build",
+    "_opam",
+    ".git",
+    ".venv",
+    "dist",
+    "node_modules",
+    "LICENSE",
+    "models/.lake"
+  ],
+  "plugins": [
+    "https://plugins.dprint.dev/markdown-0.17.8.wasm",
+    "https://plugins.dprint.dev/json-0.19.4.wasm",
+    "https://plugins.dprint.dev/toml-0.6.3.wasm"
+  ]
+}

@@ -1,0 +1,866 @@
+use marginalia::Span;
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, IfTail};
+use crate::lex::Token;
+
+grammar;
+
+extern {
+    type Location = usize;
+    type Error = (Span, String);
+
+    enum Token {
+        "fn"     => Token::Fn,
+        "fip"    => Token::Fip,
+        "fbip"   => Token::Fbip,
+        "pub"    => Token::Pub,
+        "import" => Token::Import,
+        "as"     => Token::As,
+        "type"   => Token::Type,
+        "newtype" => Token::Newtype,
+        "opaque" => Token::Opaque,
+        "effect" => Token::Effect,
+        "error"  => Token::KwError,
+        "throw"  => Token::Throw,
+        "try"    => Token::Try,
+        "catch"  => Token::Catch,
+        "transact" => Token::Transact,
+        "alias"  => Token::Alias,
+        "class"  => Token::Class,
+        "instance" => Token::Instance,
+        "pattern" => Token::Pattern,
+        "deriving" => Token::Deriving,
+        "where"  => Token::Where,
+        "given"  => Token::Given,
+        "handle" => Token::Handle,
+        "with"   => Token::With,
+        "handler" => Token::Handler,
+        "mask"   => Token::Mask,
+        "ctl"    => Token::Ctl,
+        "final"  => Token::Final,
+        "fun"    => Token::Fun,
+        "val"    => Token::Val,
+        "return" => Token::Return,
+        "let"    => Token::Let,
+        "var"    => Token::Var,
+        "borrow" => Token::Borrow,
+        "in"     => Token::In,
+        "for"    => Token::For,
+        "do"     => Token::Do,
+        "if"     => Token::If,
+        "then"   => Token::Then,
+        "else"   => Token::Else,
+        "elif"   => Token::Elif,
+        "match"  => Token::Match,
+        "of"     => Token::Of,
+        "forall" => Token::Forall,
+        "true"   => Token::True,
+        "false"  => Token::False,
+        "Int"    => Token::KwInt,
+        "Bool"   => Token::KwBool,
+        "Unit"   => Token::KwUnit,
+        "Float"  => Token::KwFloat,
+        "Char"   => Token::KwChar,
+        "String" => Token::KwString,
+        "I64"    => Token::KwI64,
+        "U64"    => Token::KwU64,
+        "str"    => Token::StringLit(<String>),
+        "istart" => Token::InterpStart(<String>),
+        "imid"   => Token::InterpMid(<String>),
+        "iend"   => Token::InterpEnd(<String>),
+        "->"    => Token::Arrow,
+        "<-"    => Token::LArrow,
+        "=>"    => Token::FatArrow,
+        "="     => Token::Eq,
+        "&&"    => Token::AmpAmp,
+        "||"    => Token::PipePipe,
+        "|>"    => Token::PipeRight,
+        ">>"    => Token::CompRight,
+        "<<"    => Token::CompLeft,
+        "|"     => Token::Bar,
+        "\\"    => Token::Lambda,
+        "+."    => Token::PlusDot,
+        "-."    => Token::MinusDot,
+        "+"     => Token::Plus,
+        "-"     => Token::Minus,
+        "*."    => Token::StarDot,
+        "*"     => Token::Star,
+        "/."    => Token::SlashDot,
+        "/"     => Token::Slash,
+        "%"     => Token::Percent,
+        "==."   => Token::EqDot,
+        "/=."   => Token::NeDot,
+        "<."    => Token::LtDot,
+        "<=."   => Token::LeDot,
+        ">."    => Token::GtDot,
+        ">=."   => Token::GeDot,
+        "=="    => Token::EqEq,
+        "/="    => Token::Ne,
+        "<"     => Token::Lt,
+        "<="    => Token::Le,
+        ">"     => Token::Gt,
+        ">="    => Token::Ge,
+        "("     => Token::LParen,
+        ")"     => Token::RParen,
+        "{"     => Token::LBrace,
+        "}"     => Token::RBrace,
+        "["     => Token::LBracket,
+        "]"     => Token::RBracket,
+        ","     => Token::Comma,
+        ":="    => Token::ColonEq,
+        ":"     => Token::Colon,
+        "!"     => Token::Bang,
+        ".."    => Token::DotDot,
+        "."     => Token::Dot,
+        "?"     => Token::Question,
+        "??"    => Token::QuestionQuestion,
+        "?."    => Token::QuestionDot,
+        "v{"    => Token::VOpen,
+        "v}"    => Token::VClose,
+        "v;"    => Token::VSemi,
+        "ident" => Token::Ident(<String>),
+        "uid"   => Token::UIdent(<String>),
+        "qual"  => Token::QualName(<String>),
+        "int"   => Token::Int(<IntLit>),
+        "float" => Token::Float(<f64>),
+        "char"  => Token::CharLit(<char>),
+    }
+}
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => { if let Some(x) = e { v.push(x); } v },
+};
+
+CommaPlus<T>: Vec<T> = {
+    <first:T> "," <rest:Comma<T>> => { let mut v = vec![first]; v.extend(rest); v },
+    <e:T> => vec![e],
+};
+
+pub Program: Vec<(Vis, Item)> = {
+    "v{" <items:Items> "v}" => items,
+};
+
+Items: Vec<(Vis, Item)> = {
+    <v:(<PubItem> "v;")*> <last:PubItem?> => { let mut v = v; if let Some(d) = last { v.push(d); } v },
+};
+
+// A leading `pub` exports the item transparently; `opaque` (types/newtypes only)
+// exports the name but hides constructors. Resolution reads the flag, the item
+// shape is unchanged.
+PubItem: (Vis, Item) = {
+    "opaque" <i:OpaqueItem> => (Vis::Opaque, i),
+    "pub" <i:Item> => (Vis::Pub, i),
+    <i:Item> => (Vis::Priv, i),
+};
+
+OpaqueItem: Item = {
+    <d:Data> => Item::Data(d),
+    <n:Newtype> => Item::Data(n),
+};
+
+Item: Item = {
+    <i:ImportD> => Item::Import(i),
+    <d:Data> => Item::Data(d),
+    <n:Newtype> => Item::Data(n),
+    <e:EffDecl> => Item::Effect(e),
+    <e:ErrorD> => Item::Error(e),
+    <a:AliasOrSynonym> => a,
+    <c:ClassD> => Item::Class(c),
+    <i:InstanceD> => Item::Instance(i),
+    <p:PatternD> => Item::Pattern(p),
+    <c:ConstD> => Item::Fn(c),
+    <f:Fn> => Item::Fn(f),
+};
+
+ImportD: ImportDecl = {
+    <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> <ns:("(" <Comma<ImportName>> ")")?> <r:@R> =>
+        ImportDecl { path: p, alias: a, names: ns, span: Span::new(l, r) },
+};
+
+ModPath: Vec<String> = {
+    <u:"uid">  => vec![u],
+    <q:"qual"> => q.split('.').map(str::to_string).collect(),
+};
+
+ImportName: String = {
+    <n:"ident"> => n,
+    <n:"uid">   => n,
+};
+
+PatternD: PatternDecl = {
+    <l:@L> "pattern" <name:"uid"> "(" <params:Comma<"ident">> ")" "for" <ty:"uid"> "=" <cs:PatClauses> <r:@R> =>?
+        pattern_decl(name, params, ty, cs, Span::new(l, r))
+            .map_err(|error| lalrpop_util::ParseError::User { error }),
+};
+
+PatClauses: Vec<(String, S<Expr>, Span)> = {
+    <c:PatClause> => vec![c],
+    "v{" <v:(<PatClause> "v;")*> <e:PatClause?> "v}" => {
+        let mut v = v; if let Some(x) = e { v.push(x); } v
+    },
+};
+
+PatClause: (String, S<Expr>, Span) = {
+    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == "view" || kw == "make" {
+        Ok((kw, e, Span::new(l, r)))
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), "expected `view` or `make` in pattern declaration".to_string()),
+        })
+    },
+};
+
+ClassD: ClassDecl = {
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" "{" <methods:ClassSigs> "}" <r:@R> =>
+        ClassDecl { name, param, methods, span: Span::new(l, r) },
+};
+
+ClassSigs: Vec<(String, Ty)> = {
+    <v:(<ClassSig> ArmSep)*> <e:ClassSig?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+ClassSig: (String, Ty) = {
+    <n:"ident"> ":" <t:Type> => (n, t),
+};
+
+InstanceD: InstanceDecl = {
+    <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?>
+        "{" <methods:InstFns> "}" <r:@R> =>
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, span: Span::new(l, r) },
+};
+
+InstFns: Vec<Decl> = {
+    <v:(<Fn> ArmSep)*> <e:Fn?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+// Constraint qualifier on a signature uses `given`; Haskell-style `where` is
+// reserved for trailing definition blocks (see WhereBlock).
+GivenClause: Vec<Constraint> = {
+    "given" <first:ConstraintP> <rest:("," <ConstraintP>)*> => {
+        let mut v = vec![first]; v.extend(rest); v
+    },
+};
+
+ConstraintP: Constraint = {
+    <l:@L> <class:"uid"> "(" <ty:Type> ")" <r:@R> =>
+        Constraint { class, ty, span: Span::new(l, r) },
+};
+
+Data: DataDecl = {
+    <l:@L> "type" <name:"uid"> <params:TyParams?> "=" <body:CtorsRhs> <r:@R> =>
+        DataDecl { name, params: params.unwrap_or_default(), ctors: body.0, deriving: body.1, newtype: false, span: Span::new(l, r) },
+};
+
+// A newtype is a single-constructor, single-field data type; lowering to a
+// `DataDecl` makes it nominally distinct and matchable with zero typechecker or
+// core change. (Boxed rather than zero-cost; the representation is one field.)
+Newtype: DataDecl = {
+    <l:@L> "newtype" <name:"uid"> <params:TyParams?> "=" <c:Ctor> <d:Derives?> <r:@R> =>? {
+        if c.args.len() != 1 {
+            return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), format!("newtype `{name}` must have exactly one field")),
+            });
+        }
+        Ok(DataDecl { name, params: params.unwrap_or_default(), ctors: vec![c], deriving: d.unwrap_or_default(), newtype: true, span: Span::new(l, r) })
+    },
+};
+
+CtorsRhs: (Vec<Ctor>, Vec<(String, Span)>) = {
+    <c:Ctors> <d:Derives?> => (c, d.unwrap_or_default()),
+    "v{" <c:Ctor> <rest:(("v;")? "|" <Ctor>)*> <d:(("v;")? <Derives>)?> "v}" => {
+        let mut v = vec![c]; v.extend(rest); (v, d.unwrap_or_default())
+    },
+};
+
+Derives: Vec<(String, Span)> = {
+    "deriving" "(" <cs:Comma<DeriveName>> ")" => cs,
+};
+
+DeriveName: (String, Span) = {
+    <l:@L> <n:"uid"> <r:@R> => (n, Span::new(l, r)),
+};
+
+TyParams: Vec<String> = { "(" <ps:Comma<"ident">> ")" => ps };
+
+Ctors: Vec<Ctor> = {
+    <c:Ctor> <rest:("|" <Ctor>)*> => { let mut v = vec![c]; v.extend(rest); v },
+};
+
+Ctor: Ctor = {
+    <name:"uid"> <args:CtorArgs?> => Ctor { name, args: args.unwrap_or_default(), fields: None },
+    <name:"uid"> "{" <fs:Comma<RecordField>> "}" => {
+        let args: Vec<Ty> = fs.iter().map(|(_, t)| t.clone()).collect();
+        Ctor { name, args, fields: Some(fs) }
+    },
+};
+
+CtorArgs: Vec<Ty> = { "(" <ts:Comma<Type>> ")" => ts };
+
+RecordField: (String, Ty) = {
+    <n:"ident"> ":" <t:Type> => (n, t),
+};
+
+// One `alias` form covers both effect aliases (`alias N = { row }`) and type
+// synonyms (`alias N(a) = Ty`); the shared prefix avoids an LALR conflict, and
+// the RHS shape picks which decl it becomes.
+AliasOrSynonym: Item = {
+    <l:@L> "alias" <name:"uid"> <params:TyParams?> "=" <rhs:AliasRhs> <r:@R> =>
+        match rhs {
+            AliasRhs::Eff(labels) => Item::Alias(AliasDecl { name, labels, span: Span::new(l, r) }),
+            AliasRhs::Ty(ty) => Item::Synonym(SynonymDecl {
+                name, params: params.unwrap_or_default(), ty, span: Span::new(l, r),
+            }),
+        },
+};
+
+AliasRhs: AliasRhs = {
+    "{" <labels:Comma<EffLabel>> "}" => AliasRhs::Eff(labels),
+    <t:Type> => AliasRhs::Ty(t),
+};
+
+ErrorD: ErrorDecl = {
+    <l:@L> "error" <name:"uid"> <params:CtorArgs?> <r:@R> =>
+        ErrorDecl { name, params: params.unwrap_or_default(), span: Span::new(l, r) },
+};
+
+EffDecl: EffectDecl = {
+    <l:@L> "effect" <name:"uid"> <params:TyParams?> "{" <ops:EffOpList> "}" <r:@R> =>
+        EffectDecl { name, params: params.unwrap_or_default(), ops, span: Span::new(l, r) },
+};
+
+EffOpSep: () = { "," => (), "v;" => () };
+
+EffOpList: Vec<EffOp> = {
+    <v:(<EffOp> <EffOpSep>)*> <e:EffOp?> => {
+        let mut result: Vec<EffOp> = v.into_iter().map(|(op, _)| op).collect();
+        if let Some(x) = e { result.push(x); }
+        result
+    },
+};
+
+EffOp: EffOp = {
+    "ctl" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+        EffOp { name, params, ret },
+};
+
+// An op parameter may carry a binder name (`v : a`); only the type is kept.
+EffOpParam: Ty = {
+    <t:Type> => t,
+    "ident" ":" <t:Type> => t,
+};
+
+Fn: Decl = {
+    <l:@L> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
+        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, span: Span::new(l, r) },
+};
+
+// An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
+FipKw: Fip = {
+    "fip"  => Fip::Fip,
+    "fbip" => Fip::Fbip,
+    ()     => Fip::No,
+};
+
+// A top-level immutable constant: `let NAME = EXPR` or `let NAME : TYPE = EXPR`.
+// Modeled as a zero-param `Decl` flagged `konst`, so references inline the
+// value rather than push a call frame.
+ConstD: Decl = {
+    <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, span: Span::new(l, r) },
+};
+
+// Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
+// are non-recursive and let*-scoped (each sees the earlier ones); desugar folds
+// them into nested `let`s around the body.
+WhereBlock: Vec<(String, S<Expr>)> = {
+    "where" "v{" <v:(<WhereBind> "v;")*> <e:WhereBind?> "v}" => {
+        let mut v = v; if let Some(x) = e { v.push(x); } v
+    },
+};
+
+WhereBind: (String, S<Expr>) = {
+    <name:"ident"> "=" <e:Expr> => (name, e),
+    <name:"ident"> "=" <e:BlockExpr> => (name, e),
+};
+
+ExprOrBlock: S<Expr> = { Expr, BlockExpr };
+
+BlockExpr: S<Expr> = {
+    // Re-span the block to its braces but carry the sugar marker through, so the
+    // formatter can still restore `with` / statement `?` from the synth flag.
+    <l:@L> "v{" <b:Stmts> "v}" <r:@R> =>
+        Spanned { synth: b.synth, node: b.node, span: Span::new(l, r) },
+};
+
+Stmts: S<Expr> = {
+    Expr,
+    <l:@L> <e:Expr> "v;" <rest:Stmts> <r:@R> => seq_stmt(e, rest, l, r),
+    <l:@L> "if" <c:Expr> "then" <t:ExprOrBlock> <tail:OpenIfTail> <r:@R> =>
+        open_if(c, t, tail, l, r),
+    <l:@L> "let" <x:"ident"> "=" <v:Expr> ("in")? "v;" <rest:Stmts> <r:@R> =>
+        let_stmt(x, v, rest, l, r),
+    <l:@L> "let" <x:"ident"> "=" <v:BlockExpr> "v;" <rest:Stmts> <r:@R> =>
+        let_stmt(x, v, rest, l, r),
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> ("in")? "v;" <rest:Stmts> =>
+        let_pat(p, v, rest, l),
+    <l:@L> "let" <p:LetPat> "=" <v:BlockExpr> "v;" <rest:Stmts> =>
+        let_pat(p, v, rest, l),
+    <l:@L> "var" <x:"ident"> ":=" <v:Expr> "v;" <rest:Stmts> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::VarDecl(x, Box::new(v), Box::new(rest))), span: Span::new(l, r) },
+    // The `with` family. Each form takes an optional `; <Stmts>` continuation:
+    // present, it is the block the `with` wraps; absent (a trailing `with` with
+    // nothing after it), `with_rest` substitutes the rejection sentinel so a
+    // single desugar pass reports the one "nothing to wrap" diagnostic.
+    <l:@L> "with" <x:"ident"> "<-" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::NamedHandle(x, Box::new(with_rest(rest, l, r)), arms)), span: Span::new(l, r) },
+    <l:@L> "with" <x:"ident"> "<-" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
+        with_stmt(Some(x), c, with_rest(rest, l, r), l, r),
+    <l:@L> "with" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
+        with_stmt(None, c, with_rest(rest, l, r), l, r),
+    <l:@L> "with" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
+        Spanned { synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms), span: Span::empty(l) },
+};
+
+RetAnn: (Option<Vec<EffLabel>>, Option<Ty>) = {
+    ":" "!" "{" <effs:Comma<EffLabel>> "}" <t:Type> => (Some(effs), Some(t)),
+    ":" "!" <t:Type>                                => (Some(vec![]), Some(t)),
+    ":" <t:Type>                                    => (None, Some(t)),
+    ()                                              => (None, None),
+};
+
+EffLabel: EffLabel = {
+    <s:"ident"> => EffLabel::bare(s),
+    <s:"uid"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+};
+
+Param: Param = {
+    <b:"borrow"?> <name:"ident"> <ty:Ann?> <default:(":=" <Expr>)?> => Param { name, ty, borrow: b.is_some(), default },
+};
+
+Ann: Ty = { ":" <t:Type> => t };
+
+Type: Ty = {
+    "forall" <vs:(<"ident">)+> "." <t:Type> => Ty::Forall(vs, Box::new(t)),
+    <l:@L> <a:Arrow> <eff:ArrowEff?> <r:@R> =>? match eff {
+        None => Ok(a),
+        Some(row) => match a {
+            Ty::Fun(ps, _, cod) => Ok(Ty::Fun(ps, row, cod)),
+            _ => Err(lalrpop_util::ParseError::User {
+                error: (
+                    Span::new(l, r),
+                    "effect row `! {..}` only applies to a function type".to_string(),
+                ),
+            }),
+        },
+    },
+};
+
+pub TypeSig: Ty = { Type };
+
+Arrow: Ty = {
+    "(" ")" "->" <cod:Arrow> => Ty::Fun(vec![], Row::Empty, Box::new(cod)),
+    <dom:AType> "->" <cod:Arrow> => match dom {
+        Ty::Tuple(ts) => Ty::Fun(ts, Row::Empty, Box::new(cod)),
+        d => Ty::Fun(vec![d], Row::Empty, Box::new(cod)),
+    },
+    AType,
+};
+
+ArrowEff: Row = {
+    "!" "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Row::Cons(ls, tl),
+    "!" => Row::Cons(vec![], None),
+};
+
+AType: Ty = {
+    "Int"    => Ty::Int,
+    "I64"    => Ty::I64,
+    "U64"    => Ty::U64,
+    "Bool"   => Ty::Bool,
+    "Unit"   => Ty::Unit,
+    "Float"  => Ty::Float,
+    "Char"   => Ty::Char,
+    "String" => Ty::Str,
+    "[" <t:Type> "]" => Ty::Con("List".into(), vec![t]),
+    <v:"ident"> => Ty::Var(v),
+    <n:"uid"> <args:CtorArgs?> => Ty::Con(n, args.unwrap_or_default()),
+    <q:"qual"> <args:CtorArgs?> => Ty::Con(q, args.unwrap_or_default()),
+    "(" <t:Type> ")" => t,
+    "(" <first:Type> "," <rest:Comma<Type>> ")" => {
+        let mut ts = vec![first]; ts.extend(rest); Ty::Tuple(ts)
+    },
+};
+
+pub Expr: S<Expr> = {
+    <l:@L> "if" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
+        Spanned { synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+    <l:@L> "let" <x:"ident"> "=" <v:Expr> "in" <b:Expr> <r:@R> =>
+        Spanned { synth: false, node: Expr::Let(x, Box::new(v), Box::new(b)), span: Span::new(l, r) },
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "in" <b:Expr> =>
+        let_pat(p, v, b, l),
+    <l:@L> "\\" "(" <ps:Comma<Param>> ")" "->" <b:Expr> <r:@R> =>
+        Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) },
+    <l:@L> "match" <s:Pipe> "of" <arms:MatchArms> <r:@R> =>
+        Spanned { synth: false, node: Expr::Match(Box::new(s), arms), span: Span::new(l, r) },
+    <l:@L> "handle" <body:Expr> "with" <arms:HandleArms> <r:@R> =>
+        Spanned { synth: false, node: Expr::Handle(Box::new(body), arms), span: Span::new(l, r) },
+    <l:@L> "throw" <n:"uid"> <args:("(" <Comma<Expr>> ")")?> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Throw(n, args.unwrap_or_default())), span: Span::new(l, r) },
+    <l:@L> "try" <body:ExprOrBlock> ("v;")? "catch" <arms:CatchArms> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::TryCatch(Box::new(body), arms)), span: Span::new(l, r) },
+    <l:@L> "transact" <body:ExprOrBlock> ("v;")? "else" <fb:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
+    <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> <x:"ident"> ":=" <v:Expr> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Assign(x, Box::new(v))), span: Span::new(l, r) },
+    Default,
+};
+
+// `a ?? b`: failable fallback. Right-associative and looser than comparison so
+// `x.at_list(0) ?? -1` and `a ?? b ?? c` read naturally.
+Default: S<Expr> = {
+    <l:@L> <a:Pipe> "??" <b:Default> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Default(Box::new(a), Box::new(b))), span: Span::new(l, r) },
+    Pipe,
+};
+
+Qual: Qualifier = {
+    "let" <x:"ident"> "=" <e:Pipe> => Qualifier::Bind(x, e),
+    "if" <g:Pipe> => Qualifier::Guard(g),
+};
+
+IfElse: S<Expr> = {
+    ("v;")? "else" <e:ExprOrBlock> => e,
+    <l:@L> ("v;")? "elif" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
+        Spanned { synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+};
+
+OpenIfTail: IfTail = {
+    () => IfTail::End,
+    "v;" <rest:Stmts> => IfTail::Rest(rest),
+    ("v;")? "elif" <c:Expr> "then" <t:ExprOrBlock> <tail:OpenIfTail> =>
+        IfTail::Elif(c, t, Box::new(tail)),
+};
+
+LetPat: S<Pattern> = {
+    <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
+        let mut ps = vec![p]; ps.extend(rest);
+        Spanned { synth: false, node: Pattern::Tuple(ps), span: Span::new(l, r) }
+    },
+};
+
+MatchArms: Vec<Arm> = {
+    "{" <arms:Arms> "}" => arms,
+    "v{" <arms:Arms> "v}" => arms,
+};
+
+HandleArms: Vec<HandlerArm> = {
+    "{" <arms:Comma<HandlerArm>> "}" => arms,
+    "v{" <arms:HArms> "v}" => arms,
+};
+
+CatchArms: Vec<CatchArm> = {
+    "{" <arms:Comma<CatchArm>> "}" => arms,
+    "v{" <arms:CArms> "v}" => arms,
+};
+
+CArms: Vec<CatchArm> = {
+    <v:(<CatchArm> ArmSep)*> <e:CatchArm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+CatchArm: CatchArm = {
+    <l:@L> <n:"uid"> <bs:("(" <Comma<"ident">> ")")?> "=>" <body:ExprOrBlock> <r:@R> =>
+        CatchArm { name: n, binders: bs.unwrap_or_default(), body, span: Span::new(l, r) },
+};
+
+HArms: Vec<HandlerArm> = {
+    <v:(<HandlerArm> ArmSep)*> <e:HandlerArm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+HandlerArm: HandlerArm = {
+    "return" <x:"ident"> "=>" <body:ExprOrBlock> => HandlerArm::Return(x, body),
+    <name:"ident"> "(" <params:(<"ident"> ",")*> <k:"ident"> ")" "=>" <body:ExprOrBlock>
+        => HandlerArm::Op(name, params, k, body),
+    "fun" <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock>
+        => HandlerArm::Sugar(SugarArm::Fun(name, params, body)),
+    "final" "ctl" <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock>
+        => HandlerArm::Sugar(SugarArm::Final(name, params, body)),
+    "val" <name:"ident"> "=" <body:ExprOrBlock> => HandlerArm::Sugar(SugarArm::Val(name, body)),
+};
+
+Pipe: S<Expr> = {
+    <l:@L> <x:Pipe> "|>" <f:Compose> <r:@R> =>
+        Spanned { synth: false, node: Expr::Pipe(Box::new(x), Box::new(f)), span: Span::new(l, r) },
+    Compose,
+};
+
+Compose: S<Expr> = {
+    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> => {
+        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
+        let inner = Spanned { synth: false,
+            node: Expr::Call(Box::new(f), vec![xvar.clone()]),
+            span: Span::new(l, r)
+        };
+        let outer = Spanned { synth: false,
+            node: Expr::Call(Box::new(g), vec![inner]),
+            span: Span::new(l, r)
+        };
+        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
+        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
+    },
+    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> => {
+        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
+        let inner = Spanned { synth: false,
+            node: Expr::Call(Box::new(g), vec![xvar.clone()]),
+            span: Span::new(l, r)
+        };
+        let outer = Spanned { synth: false,
+            node: Expr::Call(Box::new(f), vec![inner]),
+            span: Span::new(l, r)
+        };
+        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
+        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
+    },
+    Or,
+};
+
+ArmSep: () = { "," => (), "v;" => () };
+
+Arms: Vec<Arm> = {
+    <v:(<Arm> ArmSep)*> <e:Arm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+Arm: Arm = {
+    <p:Pattern> "=>" <b:ExprOrBlock> => Arm { pat: p, guard: None, body: b },
+    <p:Pattern> "if" <g:Expr> "=>" <b:ExprOrBlock> => Arm { pat: p, guard: Some(g), body: b },
+};
+
+Pattern: S<Pattern> = {
+    <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" <fields:RecordPatFields> "}" <r:@R> => {
+        let (named, spread) = fields;
+        Spanned { synth: false, node: Pattern::Record(n, named, spread), span: Span::new(l, r) }
+    },
+    PatAtom,
+};
+
+RecordPatFields: (Vec<(String, S<Pattern>)>, bool) = {
+    <fields:(<RecordPatField> ",")*> ".." => (fields, true),
+    <fields:Comma<RecordPatField>> => (fields, false),
+};
+
+RecordPatField: (String, S<Pattern>) = {
+    <n:"ident"> "=" <p:Pattern> => (n, p),
+    <l:@L> <n:"ident"> <r:@R> => (n.clone(), Spanned { synth: false,
+        node: Pattern::Var(n),
+        span: Span::new(l, r),
+    }),
+};
+
+PatAtom: S<Pattern> = {
+    <l:@L> <v:"ident"> <r:@R> =>
+        Spanned { synth: false, node: if v == "_" { Pattern::Wild } else { Pattern::Var(v) }, span: Span::new(l, r) },
+    <l:@L> <n:"int"> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Int(n), span: Span::new(l, r) },
+    <l:@L> <f:"float"> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Float(f), span: Span::new(l, r) },
+    <l:@L> <c:"char"> <r:@R> =>
+        Spanned { synth: false, node: Pattern::Char(c), span: Span::new(l, r) },
+    <l:@L> "true" <r:@R> =>
+        Spanned { synth: false, node: Pattern::Bool(true), span: Span::new(l, r) },
+    <l:@L> "false" <r:@R> =>
+        Spanned { synth: false, node: Pattern::Bool(false), span: Span::new(l, r) },
+    <l:@L> "[" "]" <r:@R> =>
+        Spanned { synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: Span::new(l, r) },
+    <l:@L> "[" <ps:CommaPlus<Pattern>> "]" <r:@R> => {
+        let nil_span = Span::new(r, r);
+        let nil = Spanned { synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: nil_span };
+        let result = ps.into_iter().rev().fold(nil, |rest, p| {
+            let s = p.span;
+            Spanned { synth: false, node: Pattern::Ctor("Cons".into(), vec![p, rest]), span: s }
+        });
+        Spanned { synth: false, node: result.node, span: Span::new(l, r) }
+    },
+    <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
+        let mut pats = vec![p]; pats.extend(rest);
+        Spanned { synth: false, node: Pattern::Tuple(pats), span: Span::new(l, r) }
+    },
+};
+
+PatArgs: Vec<S<Pattern>> = { "(" <ps:Comma<Pattern>> ")" => ps };
+
+Or: S<Expr> = {
+    <l:@L> <a:Or> "||" <b:And> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Or, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+    And,
+};
+
+And: S<Expr> = {
+    <l:@L> <a:And> "&&" <b:Cmp> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::And, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+    Cmp,
+};
+
+Cmp: S<Expr> = {
+    <l:@L> <la:Add> <op:CmpOp> <ra:Add> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(op, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Add,
+};
+
+CmpOp: BinOp = {
+    "=="  => BinOp::Eq,
+    "/="  => BinOp::Ne,
+    "<"   => BinOp::Lt,
+    "<="  => BinOp::Le,
+    ">"   => BinOp::Gt,
+    ">="  => BinOp::Ge,
+    "==." => BinOp::Eqf,
+    "/=." => BinOp::Nef,
+    "<."  => BinOp::Ltf,
+    "<=." => BinOp::Lef,
+    ">."  => BinOp::Gtf,
+    ">=." => BinOp::Gef,
+};
+
+Add: S<Expr> = {
+    <l:@L> <la:Add> "+" <ra:Mul> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Add, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Add> "-" <ra:Mul> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Sub, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Add> "+." <ra:Mul> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Addf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Add> "-." <ra:Mul> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Subf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Mul,
+};
+
+Mul: S<Expr> = {
+    <l:@L> <la:Mul> "*" <ra:Call> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "/" <ra:Call> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "%" <ra:Call> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "*." <ra:Call> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "/." <ra:Call> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Call,
+};
+
+// Bare `.name` is record field access; `.name(` and `.name fn` are UFCS calls.
+// Field accesses are not directly callable, which keeps the split LR(1):
+// call an accessed closure via parentheses or a let binding.
+Call: S<Expr> = {
+    <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
+        Spanned { synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+    <l:@L> <e:Call> "?." <field:"ident"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
+    <l:@L> <e:Call> "?" <r:@R> => try_mark(e, l, r),
+    CallTight,
+};
+
+CallTight: S<Expr> = {
+    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> ")" <r:@R> =>
+        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) },
+    <l:@L> <f:CallTight> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        let span = Span::new(l, r);
+        a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span });
+        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span }
+    },
+    <l:@L> <f:CallTight> "[" <first:"ident"> <rest:("," <"ident">)*> "]" <r:@R> => {
+        let mut is = vec![first]; is.extend(rest);
+        Spanned { synth: false, node: Expr::Inst(Box::new(f), is), span: Span::new(l, r) }
+    },
+    <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
+        dot_call(e, m, a, l, r),
+    <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) });
+        dot_call(e, m, a, l, r)
+    },
+    <l:@L> <e:Call> "." <m:"ident"> "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        let lam = Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) };
+        dot_call(e, m, vec![lam], l, r)
+    },
+    Atom,
+};
+
+TrailerParams: Vec<Param> = {
+    () => vec![],
+    "(" <first:Param> <rest:("," <Param>)*> ")" => {
+        let mut v = vec![first]; v.extend(rest); v
+    },
+};
+
+Atom: S<Expr> = {
+    <l:@L> "mask" "<" <eff:"uid"> ">" "(" <e:Expr> ")" <r:@R> =>
+        Spanned { synth: false, node: Expr::Mask(eff, Box::new(e)), span: Span::new(l, r) },
+    // `error` is a keyword now, so spell out the call to keep the panic builtin callable.
+    <l:@L> "error" "(" <a:Comma<Expr>> ")" <r:@R> => {
+        let f = Spanned { synth: false, node: Expr::Var("error".into()), span: Span::new(l, l + "error".len()) };
+        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) }
+    },
+    <l:@L> <n:"int"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Int(n), span: Span::new(l, r) },
+    <l:@L> <f:"float"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Float(f), span: Span::new(l, r) },
+    <l:@L> <c:"char"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Char(c), span: Span::new(l, r) },
+    <l:@L> <s:"str"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Str(s), span: Span::new(l, r) },
+    <l:@L> <first:"istart"> <h:Expr> <parts:(<"imid"> <Expr>)*> <last:"iend"> <r:@R> =>
+        interp_lit(first, h, parts, last, l, r),
+    <l:@L> "true" <r:@R> =>
+        Spanned { synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
+    <l:@L> "false" <r:@R> =>
+        Spanned { synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
+    <l:@L> "(" ")" <r:@R> =>
+        Spanned { synth: false, node: Expr::Unit, span: Span::new(l, r) },
+    <l:@L> <id:"ident"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Var(id), span: Span::new(l, r) },
+    <l:@L> <c:"uid"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Var(c), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <r:@R> =>
+        Spanned { synth: false, node: Expr::Var(q), span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> ")" <r:@R> =>
+        Spanned { synth: e.synth, node: e.node, span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> ":" <t:Type> ")" <r:@R> =>
+        Spanned { synth: false, node: Expr::Ann(Box::new(e), t), span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> "," <rest:Comma<Expr>> ")" <r:@R> => {
+        let mut elems = vec![e]; elems.extend(rest);
+        Spanned { synth: false, node: Expr::Tuple(elems), span: Span::new(l, r) }
+    },
+    <l:@L> "[" "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::List(vec![]), span: Span::new(l, r) },
+    <l:@L> "[" <elems:CommaPlus<Expr>> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::List(elems), span: Span::new(l, r) },
+    // Haskell-style arithmetic sequences: [a..z] steps by 1, [a,b..z] (or any
+    // prefix) steps by b-a.
+    <l:@L> "[" <pre:CommaPlus<Expr>> ".." <hi:Expr> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Range(pre, Box::new(hi))), span: Span::new(l, r) },
+    <l:@L> "[" <head:Pipe> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Comp(Box::new(head), x, Box::new(s), qs)), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" <fields:Comma<RecordExprField>> "}" <r:@R> =>
+        Spanned { synth: false, node: Expr::RecordCreate(n, fields), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" ".." <base:Expr> <rest:("," <RecordExprField>)*> "}" <r:@R> =>
+        Spanned { synth: false, node: Expr::RecordUpdate(Box::new(base), n, rest), span: Span::new(l, r) },
+    <l:@L> "{" <base:Expr> "|" <ups:CommaPlus<PathUpdate>> "}" <r:@R> =>
+        Spanned { synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
+};
+
+PathUpdate: (Vec<String>, S<Expr>) = {
+    <first:"ident"> <rest:("." <"ident">)*> "=" <e:Expr> => {
+        let mut p = vec![first]; p.extend(rest); (p, e)
+    },
+};
+
+RecordExprField: (String, S<Expr>) = {
+    <n:"ident"> "=" <e:Expr> => (n, e),
+};

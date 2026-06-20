@@ -1,0 +1,46 @@
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+effect Exn {
+  ctl raise(Int) : Int
+}
+-- Composing two effects: State and Exn.
+--
+-- accumulate() carries {State}, validate() carries {Exn}. Each is discharged
+-- by its own handler. The handlers are sequenced, not nested: State runs to a
+-- final value first, then that value flows into the Exn-guarded check. So each
+-- handler wraps a block that performs only the one effect it interprets.
+--
+-- Truly interleaved rows (an op firing inside another effect's handler and
+-- forwarding out through it) are shown in eff_forward.pr. Sequencing is the
+-- simplest idiom when the effects need not interleave.
+
+fn accumulate(xs) : !{State} Int =
+  match xs of
+    Nil => get(())
+    Cons(x, rest) =>
+      let n = get(())
+      put(n + x)
+      accumulate(rest)
+
+fn validate(total) : !{Exn} Int =
+  if total > 100 then
+    raise(0 - 1)
+  else
+    total
+
+fn run(xs) =
+  let f =
+    handle accumulate(xs) with
+      get(u, k) => \(s) -> k(s)(s)
+      put(s2, k) => \(s) -> k(())(s2)
+      return r => \(s) -> r
+  let total = f(0)
+  handle validate(total) with
+    raise(code, k) => code
+    return r => r
+
+fn main() =
+  println(run([10, 20, 30]))
+  println(run([50, 60, 70]))

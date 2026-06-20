@@ -1,0 +1,13 @@
+type Inner = Inner { a: Int, b: Int }
+
+type Box = Box { inner: Inner, tag: Int }
+
+fn double(x) = x * 2
+
+fn main() =
+  let xs = range(1, 6)
+  let ys = map(double, xs)
+  println(sum(ys))
+  let bx = Box { inner = Inner { a = 1, b = 2 }, tag = 3 }
+  let bx2 = { bx | inner.a = 10 }
+  println(bx2.inner.a + bx2.inner.b + bx2.tag)

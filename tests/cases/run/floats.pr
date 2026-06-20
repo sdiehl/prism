@@ -1,0 +1,19 @@
+fn main() =
+  let a = 1.5 +. 2.0
+  let b = a *. 2.0
+  let c = b -. 0.5
+  let d = c /. 2.0
+  println(d)
+  println(show_float(a))
+  println(truncate(d))
+  println(floor_to_int(d))
+  println(ceil_to_int(d))
+  println(truncate(sqrt(16.0)))
+  println(truncate(abs_float(0.0 -. 9.0)))
+  println(truncate(to_float(5) *. 2.0))
+  println(if a <. b then 1 else 0)
+  println(if b >. a then 1 else 0)
+  println(if a ==. 3.5 then 1 else 0)
+  println(if a /=. b then 1 else 0)
+  println(if a <=. a then 1 else 0)
+  println(if b >=. a then 1 else 0)

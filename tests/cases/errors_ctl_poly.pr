@@ -1,0 +1,10 @@
+effect Bail {
+  ctl bail(String) : a
+}
+
+fn main() =
+  let r =
+    handle bail("nope") with
+      bail(m, k) => k(0)
+      return v => v
+  println(r)

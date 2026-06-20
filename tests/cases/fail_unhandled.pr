@@ -1,0 +1,8 @@
+-- An unhandled `Fail` reaching a position required to be pure is an ordinary
+-- unhandled-effect type error: no special checker, the effect row enforces it.
+
+fn must_not_fail() : ! Int =
+  guard(false)
+  0
+
+fn main() = println(must_not_fail())

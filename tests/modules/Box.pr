@@ -1,0 +1,7 @@
+type Inner = Wrap(Int)
+
+fn unwrap(i : Inner) : Int =
+  match i of
+    Wrap(n) => n
+
+pub fn make(n : Int) : Int = unwrap(Wrap(n))

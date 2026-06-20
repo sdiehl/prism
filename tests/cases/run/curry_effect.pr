@@ -1,0 +1,29 @@
+-- Partial application of an effectful function must lower correctly: the curry
+-- closure has to run the function at full arity so its effect reaches the
+-- handler. Once this silently miscompiled natively (empty output) because the
+-- partial call was lowered as a full effectful call. Eta-expansion at
+-- elaboration turns each partial application into a real closure.
+effect St {
+  ctl get() : Int
+}
+
+fn add3(a, b, c) = a + b + c + get()
+
+fn add2(a, b) = a + b + get()
+
+fn main() =
+  -- direct partial-by-2 then complete
+  println(handle add3(1, 2)(3) with {
+    get(k) => k(100),
+    return r => r
+  })
+  -- multi-step: a closure partially applied again (the harder case)
+  println(handle let f = add3(1) in let g = f(2) in g(3) with {
+    get(k) => k(100),
+    return r => r
+  })
+  -- one-step partial of a 2-ary effectful function
+  println(handle add2(1)(2) with {
+    get(k) => k(100),
+    return r => r
+  })

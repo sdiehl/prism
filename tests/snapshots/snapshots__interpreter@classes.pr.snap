@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/classes.pr
+---
+int:42
+yes
+int:7!
+no!
+=> ()

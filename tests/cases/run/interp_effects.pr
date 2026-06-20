@@ -1,0 +1,16 @@
+-- Holes run left to right (loud prints before the literal is built),
+-- and interpolated pieces can accumulate through a var in a loop.
+fn loud(n : Int) : Int =
+  println(n)
+  n
+
+fn cell(i : Int) : String = "[{i}]"
+
+fn banner(s : String) : String = "row {s} done"
+
+fn main() =
+  println("pair = {loud(1)} then {loud(2)}")
+  var line := ""
+  for i in srange(0, 3) do
+    line := concat(line, cell(i))
+  println(banner(line))

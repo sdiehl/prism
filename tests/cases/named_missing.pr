@@ -1,0 +1,6 @@
+-- A named call is a complete call: a required parameter with no default and no
+-- argument is an error, not a partial application.
+
+fn f(a, b := 0) = a + b
+
+fn main() = println(f(b := 5))

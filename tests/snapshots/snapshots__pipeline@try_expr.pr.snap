@@ -1,0 +1,245 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/try_expr.pr
+---
+== tokens ==
+VOpen Fn Ident("half") LParen Ident("n") RParen Eq VOpen If Ident("n") Percent Int(IntLit { value: 2, suffix: None }) EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen UIdent("Ok") LParen Ident("n") Slash Int(IntLit { value: 2, suffix: None }) RParen VClose VSemi Else VOpen UIdent("Err") LParen StringLit("odd") RParen VClose VClose VSemi Fn Ident("bad") LParen Ident("n") RParen Eq UIdent("Ok") LParen Ident("half") LParen Ident("n") RParen Question Plus Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "half",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: If(
+                    Spanned {
+                        node: Bin(
+                            Eq,
+                            Spanned {
+                                node: Bin(
+                                    Rem,
+                                    Spanned {
+                                        node: Var(
+                                            "n",
+                                        ),
+                                        span: 18..19,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 2,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 22..23,
+                                    },
+                                ),
+                                span: 18..23,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 27..28,
+                            },
+                        ),
+                        span: 18..28,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "Ok",
+                                ),
+                                span: 38..40,
+                            },
+                            [
+                                Spanned {
+                                    node: Bin(
+                                        Div,
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 41..42,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 2,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 45..46,
+                                        },
+                                    ),
+                                    span: 41..46,
+                                },
+                            ],
+                        ),
+                        span: 38..47,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "Err",
+                                ),
+                                span: 59..62,
+                            },
+                            [
+                                Spanned {
+                                    node: Str(
+                                        "odd",
+                                    ),
+                                    span: 63..68,
+                                },
+                            ],
+                        ),
+                        span: 59..69,
+                    },
+                ),
+                span: 15..69,
+            },
+            wheres: [],
+            span: 0..69,
+        },
+        Decl {
+            name: "bad",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Ok",
+                        ),
+                        span: 83..85,
+                    },
+                    [
+                        Spanned {
+                            node: Bin(
+                                Add,
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Marker(
+                                                Try,
+                                            ),
+                                            span: 86..86,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "half",
+                                                        ),
+                                                        span: 86..90,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Var(
+                                                                "n",
+                                                            ),
+                                                            span: 91..92,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 86..93,
+                                            },
+                                        ],
+                                    ),
+                                    span: 86..94,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 97..98,
+                                },
+                            ),
+                            span: 86..98,
+                        },
+                    ],
+                ),
+                span: 83..99,
+            },
+            wheres: [],
+            span: 71..99,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 113..120,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 121..122,
+                        },
+                    ],
+                ),
+                span: 113..123,
+            },
+            wheres: [],
+            span: 101..123,
+        },
+    ],
+}
+
+== types ==
+Type Error: `?` is only allowed on a whole statement: write `let x = e?` or `e?`
+   ╭─[ <source>:7:16 ]
+   │
+ 7 │ fn bad(n) = Ok(half(n)? + 1)
+   │                ────┬───  
+   │                    ╰───── `?` is only allowed on a whole statement: write `let x = e?` or `e?`
+───╯

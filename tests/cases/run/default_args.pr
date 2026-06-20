@@ -1,0 +1,11 @@
+-- Defaults fill only when every remaining parameter has one; otherwise the
+-- call stays a partial application and curries as usual.
+
+fn add3(a, b, c := 0) = a + b + c
+
+fn main() =
+  println(add3(1, 2))
+  println(add3(1, 2, 5))
+  println(add3(1, 2, c := 9))
+  let partial = add3(1)
+  println(partial(2, 3))

@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/rollback.pr
+---
+6
+11
+6
+6
+11
+-2
+=> ()

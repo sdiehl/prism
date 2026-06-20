@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/chars.pr
+---
+A
+A
+65
+B
+ay
+zed
+q
+true
+-1
+[h, i, !]
+[a, b, c]
+=> ()

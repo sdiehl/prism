@@ -1,0 +1,9 @@
+type Box = Box { f: (Int) -> Int }
+
+fn leak() : Box =
+  var x := 0
+  Box { f = \(n) -> x + n }
+
+fn main() =
+  let b = leak()
+  println((b.f)(1))

@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/int_low64_neg.pr
+---
+18446744073709539271
+-12345
+18446744073709551615
+0
+=> ()

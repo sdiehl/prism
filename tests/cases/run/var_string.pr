@@ -1,0 +1,7 @@
+-- A var holding a String reaches print as a type-erased effect op read, so
+-- the generic print must tag-dispatch at runtime (the native miscompile
+-- printed the string cell as a bignum).
+fn main() =
+  var line := "hello"
+  line := concat(line, " world")
+  println(line)

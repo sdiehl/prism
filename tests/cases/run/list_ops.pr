@@ -1,0 +1,5 @@
+fn main() =
+  let s = sum(range(1, 11))
+  let p = product(range(1, 6))
+  println(s)
+  println(p)

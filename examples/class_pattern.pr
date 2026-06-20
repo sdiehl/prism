@@ -1,0 +1,37 @@
+-- A class-dispatched pattern. `pattern First(n) for Peek = view peek` names a
+-- class method as its view, so one pattern deconstructs every instance type.
+-- First(n) matches a Box, a Range, or anything with a Peek instance,
+-- dispatched by dictionary like an ordinary method call.
+--
+-- Expected output:
+-- 7
+-- 3
+-- 0
+class Peek(c) {
+  peek : (c) -> Option(Int)
+}
+
+type Box = Box { v: Int }
+
+type Range = Range { lo: Int, hi: Int }
+
+instance peekBox : Peek(Box) {
+  fn peek(b) = Some(b.v)
+}
+
+instance peekRange : Peek(Range) {
+  fn peek(r) = if r.lo < r.hi then Some(r.lo) else None
+}
+
+pattern First(n) for Peek =
+  view peek
+
+fn head_or(x : c, d : Int) : Int given Peek(c) =
+  match x of
+    First(n) => n
+    _ => d
+
+fn main() : !{IO} Unit =
+  println(head_or(Box { v = 7 }, 0))
+  println(head_or(Range { lo = 3, hi = 9 }, 0))
+  println(head_or(Range { lo = 5, hi = 5 }, 0))

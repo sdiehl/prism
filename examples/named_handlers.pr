@@ -1,0 +1,58 @@
+-- Koka-style named handlers. `with f <- handler { .. }` binds a first-class
+-- handler instance. `f.op(args)` dispatches to that instance even when another
+-- handler of the same effect sits closer. Each instance desugars to a fresh
+-- private effect (ops renamed op@f@n, unforgeable from source), so the rest of
+-- the pipeline sees ordinary effects. Escape analysis rejects a closure that
+-- would carry an instance out of its `with` block.
+--
+-- Expected output:
+--   conf.toml
+--   data.csv
+--   conf.toml:data.csv
+--   inner/named
+--   70
+
+effect Read {
+  ctl read() : String
+}
+
+effect Ask {
+  ctl ask() : Int
+}
+
+-- two instances of one effect. Dispatch is by instance, not by innermost.
+fn sources() =
+  with conf <- handler
+    read(k) => k("conf.toml")
+    return r => r
+  with data <- handler
+    read(k) => k("data.csv")
+    return r => r
+  println(conf.read())
+  println(data.read())
+  println(concat(conf.read(), concat(":", data.read())))
+
+-- a bare read() still goes to the innermost ordinary handler. The named
+-- instance only answers calls addressed through it.
+fn mixed() =
+  with named <- handler
+    read(k) => k("named")
+    return r => r
+  let inner =
+    handle read() with
+      read(k) => k("inner")
+      return r => r
+  println(concat(inner, concat("/", named.read())))
+
+-- multishot through a named instance. The continuation after h.ask() is
+-- resumed twice. (3 * 10) + (4 * 10) = 70
+fn multishot() : Int =
+  with h <- handler
+    ask(k) => k(3) + k(4)
+    return r => r
+  h.ask() * 10
+
+fn main() =
+  sources()
+  mixed()
+  println(multishot())

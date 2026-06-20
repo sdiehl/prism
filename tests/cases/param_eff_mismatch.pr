@@ -1,0 +1,13 @@
+effect Emit(a) {
+  ctl emit(a) : Unit
+}
+
+fn ints() : !{Emit(Int)} Unit = emit(1)
+
+fn strs() : !{Emit(String)} Unit = emit("x")
+
+fn both() : !{Emit(Int)} Unit =
+  ints()
+  strs()
+
+fn main() = ()

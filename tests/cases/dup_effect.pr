@@ -1,0 +1,9 @@
+effect A {
+  ctl ping(Int) : Unit
+}
+
+effect B {
+  ctl ping(Int) : Unit
+}
+
+fn main() = ping(1)

@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/trmc.pr
+---
+200000
+100000
+10000100000
+200000
+15000150000
+=> ()

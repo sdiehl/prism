@@ -1,0 +1,4 @@
+fn pick(g : forall a b. (a, b) -> a) : Int = g(g(1, true), "x")
+
+fn main() =
+  println((\(x, y) -> x : forall a b. (a, b) -> a)(pick(\(x, y) -> x), 2))

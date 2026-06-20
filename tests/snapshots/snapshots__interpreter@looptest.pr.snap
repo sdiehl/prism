@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/looptest.pr
+---
+10
+9
+8
+7
+6
+5
+4
+3
+2
+1
+=> ()

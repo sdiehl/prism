@@ -1,0 +1,24 @@
+-- Named handler instances: `with f <- handler` binds f, and f.ask()
+-- dispatches to f's handler even when g's handler is innermost. Each
+-- instance is a fresh private effect, so resumed (and multishot)
+-- continuations thread through unrelated instances untouched.
+effect Ask {
+  ctl ask() : Int
+}
+
+fn main() =
+  with f <- handler
+    ask(k) => k(1)
+    return r => r
+  with g <- handler
+    ask(k) => k(2)
+    return r => r
+  println(f.ask())
+  println(g.ask())
+  println(10 * f.ask() + g.ask())
+  let twice =
+    with h <- handler
+      ask(k) => k(3) + k(4)
+      return r => r
+    h.ask() * 10
+  println(twice)

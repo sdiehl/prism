@@ -1,0 +1,18 @@
+-- Fold-consumer stream fusion. A fold consumer (ssum, or
+-- sfold) handles emit by parameter passing: its clause is a state transformer
+-- \(x, acc) -> acc', not tail-resumptive, so the evidence path cannot take it.
+-- State threading instead turns emit's evidence into that transformer and threads
+-- the accumulator through every producer and through smap/skeep. The whole chain
+-- producer -> smap -> skeep -> fold runs as one loop, zero EOp cells, no
+-- intermediate list. Expected output:
+--
+--   280
+--   20
+--   55
+
+fn square(n) = n * n
+
+fn main() =
+  println(srange(1, 10).smap(square).skeep(\(x) -> x > 5).ssum())
+  println(sfold(srange(1, 5), 0, \(acc, x) -> acc + x * 2))
+  println(ssum(srange(1, 11)))

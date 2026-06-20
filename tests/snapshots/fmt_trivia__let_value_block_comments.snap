@@ -1,0 +1,14 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn pick(b : Bool) : Int =\\n\\\n     \\x20 let r =\\n\\\n     \\x20   -- choose a branch\\n\\\n     \\x20   if b then\\n\\\n     \\x20     -- the yes side\\n\\\n     \\x20     1\\n\\\n     \\x20   else\\n\\\n     \\x20     -- the no side\\n\\\n     \\x20     2\\n\\\n     \\x20 r\\n\")"
+---
+fn pick(b : Bool) : Int =
+  let r =
+    -- choose a branch
+    if b then
+      -- the yes side
+      1
+    else
+      -- the no side
+      2
+  r

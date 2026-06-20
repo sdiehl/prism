@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/list_show.pr
+---
+[1, 2, 3]
+[]
+[[1], [2, 3]]
+Some([1, 2])
+=> ()

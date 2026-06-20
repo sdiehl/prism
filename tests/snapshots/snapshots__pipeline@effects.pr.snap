@@ -1,0 +1,1614 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/effects.pr
+---
+== tokens ==
+VOpen Effect UIdent("Exn") LBrace Ctl Ident("raise") LParen KwInt RParen Colon KwInt RBrace VSemi Effect UIdent("Ask") LBrace Ctl Ident("ask") LParen KwUnit RParen Colon KwInt RBrace VSemi Effect UIdent("State") LBrace Ctl Ident("get") LParen KwUnit RParen Colon KwInt Comma Ctl Ident("put") LParen KwInt RParen Colon KwUnit RBrace VSemi Fn Ident("catch_exn") LParen RParen Eq VOpen Handle Ident("raise") LParen Int(IntLit { value: 42, suffix: None }) RParen With VOpen Ident("raise") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("ask_example") LParen RParen Eq VOpen Handle Ident("ask") LParen LParen RParen RParen With VOpen Ident("ask") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 99, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("state_example") LParen RParen Eq VOpen Handle Let Ident("a") Eq Ident("get") LParen LParen RParen RParen In Let Ident("_") Eq Ident("put") LParen Ident("a") Plus Int(IntLit { value: 1, suffix: None }) RParen In Ident("get") LParen LParen RParen RParen With VOpen Ident("get") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 10, suffix: None }) RParen VSemi Ident("put") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen LParen RParen RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("a") Eq Ident("catch_exn") LParen RParen VSemi Let Ident("b") Eq Ident("ask_example") LParen RParen VSemi Let Ident("c") Eq Ident("state_example") LParen RParen VSemi Ident("println") LParen Ident("a") Plus Ident("b") Plus Ident("c") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Exn",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "raise",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                },
+            ],
+            span: 0..37,
+        },
+        EffectDecl {
+            name: "Ask",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ask",
+                    params: [
+                        Unit,
+                    ],
+                    ret: Int,
+                },
+            ],
+            span: 38..74,
+        },
+        EffectDecl {
+            name: "State",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get",
+                    params: [
+                        Unit,
+                    ],
+                    ret: Int,
+                },
+                EffOp {
+                    name: "put",
+                    params: [
+                        Int,
+                    ],
+                    ret: Unit,
+                },
+            ],
+            span: 75..136,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "catch_exn",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "raise",
+                                ),
+                                span: 164..169,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 42,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 170..172,
+                                },
+                            ],
+                        ),
+                        span: 164..173,
+                    },
+                    [
+                        Op(
+                            "raise",
+                            [
+                                "v",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Var(
+                                    "v",
+                                ),
+                                span: 198..199,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 216..217,
+                            },
+                        ),
+                    ],
+                ),
+                span: 157..217,
+            },
+            wheres: [],
+            span: 138..217,
+        },
+        Decl {
+            name: "ask_example",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "ask",
+                                ),
+                                span: 247..250,
+                            },
+                            [
+                                Spanned {
+                                    node: Unit,
+                                    span: 251..253,
+                                },
+                            ],
+                        ),
+                        span: 247..254,
+                    },
+                    [
+                        Op(
+                            "ask",
+                            [
+                                "v",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 277..278,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 99,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 279..281,
+                                        },
+                                    ],
+                                ),
+                                span: 277..282,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 299..300,
+                            },
+                        ),
+                    ],
+                ),
+                span: 240..300,
+            },
+            wheres: [],
+            span: 219..300,
+        },
+        Decl {
+            name: "state_example",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Let(
+                            "a",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "get",
+                                        ),
+                                        span: 340..343,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Unit,
+                                            span: 344..346,
+                                        },
+                                    ],
+                                ),
+                                span: 340..347,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "put",
+                                                ),
+                                                span: 359..362,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Bin(
+                                                        Add,
+                                                        Spanned {
+                                                            node: Var(
+                                                                "a",
+                                                            ),
+                                                            span: 363..364,
+                                                        },
+                                                        Spanned {
+                                                            node: Int(
+                                                                IntLit {
+                                                                    value: 1,
+                                                                    suffix: None,
+                                                                },
+                                                            ),
+                                                            span: 367..368,
+                                                        },
+                                                    ),
+                                                    span: 363..368,
+                                                },
+                                            ],
+                                        ),
+                                        span: 359..369,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "get",
+                                                ),
+                                                span: 373..376,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Unit,
+                                                    span: 377..379,
+                                                },
+                                            ],
+                                        ),
+                                        span: 373..380,
+                                    },
+                                ),
+                                span: 351..380,
+                            },
+                        ),
+                        span: 332..380,
+                    },
+                    [
+                        Op(
+                            "get",
+                            [
+                                "v",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 403..404,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 10,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 405..407,
+                                        },
+                                    ],
+                                ),
+                                span: 403..408,
+                            },
+                        ),
+                        Op(
+                            "put",
+                            [
+                                "v",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 426..427,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Unit,
+                                            span: 428..430,
+                                        },
+                                    ],
+                                ),
+                                span: 426..431,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 448..449,
+                            },
+                        ),
+                    ],
+                ),
+                span: 325..449,
+            },
+            wheres: [],
+            span: 302..449,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "a",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "catch_exn",
+                                ),
+                                span: 473..482,
+                            },
+                            [],
+                        ),
+                        span: 473..484,
+                    },
+                    Spanned {
+                        node: Let(
+                            "b",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "ask_example",
+                                        ),
+                                        span: 495..506,
+                                    },
+                                    [],
+                                ),
+                                span: 495..508,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "c",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "state_example",
+                                                ),
+                                                span: 519..532,
+                                            },
+                                            [],
+                                        ),
+                                        span: 519..534,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "println",
+                                                ),
+                                                span: 537..544,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Bin(
+                                                        Add,
+                                                        Spanned {
+                                                            node: Bin(
+                                                                Add,
+                                                                Spanned {
+                                                                    node: Var(
+                                                                        "a",
+                                                                    ),
+                                                                    span: 545..546,
+                                                                },
+                                                                Spanned {
+                                                                    node: Var(
+                                                                        "b",
+                                                                    ),
+                                                                    span: 549..550,
+                                                                },
+                                                            ),
+                                                            span: 545..550,
+                                                        },
+                                                        Spanned {
+                                                            node: Var(
+                                                                "c",
+                                                            ),
+                                                            span: 553..554,
+                                                        },
+                                                    ),
+                                                    span: 545..554,
+                                                },
+                                            ],
+                                        ),
+                                        span: 537..555,
+                                    },
+                                ),
+                                span: 511..555,
+                            },
+                        ),
+                        span: 487..555,
+                    },
+                ),
+                span: 465..555,
+            },
+            wheres: [],
+            span: 451..555,
+        },
+    ],
+}
+
+== types ==
+catch_exn : () -> Int
+ask_example : () -> Int
+state_example : () -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn catch_exn() =
+  handle { return 42 to t@0; do raise(t@0) } with { raise(v, k) => return v, return r => return r }
+fn ask_example() =
+  handle { return () to t@1; do ask(t@1) } with { ask(v, k) => return 99 to t@2; return k to t@3; (force t@3)(t@2), return r => return r }
+fn state_example() =
+  handle { return () to t@4; do get(t@4) to a; return a to t@5; return 1 to t@6; t@5 + t@6 to t@7; do put(t@7) to _; return () to t@8; do get(t@8) } with { get(v, k) => return 10 to t@9; return k to t@10; (force t@10)(t@9), put(v, k) => return () to t@11; return k to t@12; (force t@12)(t@11), return r => return r }
+fn main() =
+  catch_exn() to a; ask_example() to b; state_example() to c; return a to t@13; return b to t@14; t@13 + t@14 to t@15; return c to t@16; t@15 + t@16 to t@17; print t@17 to t@18; print_nl
+
+== fbip (rc) ==
+fn catch_exn() =
+  handle { return 42 to t@0; do raise(t@0) } with { raise(v, k) => return v, return r => return r }
+fn ask_example() =
+  handle { return () to t@1; do ask(t@1) } with { ask(v, k) => drop v to _; return 99 to t@2; return k to t@3; (force t@3)(t@2), return r => return r }
+fn state_example() =
+  handle { return () to t@4; do get(t@4) to a; return a to t@5; return 1 to t@6; t@5 + t@6 to t@7; do put(t@7) to _; drop _ to _; return () to t@8; do get(t@8) } with { get(v, k) => drop v to _; return 10 to t@9; return k to t@10; (force t@10)(t@9), put(v, k) => drop v to _; return () to t@11; return k to t@12; (force t@12)(t@11), return r => return r }
+fn main() =
+  catch_exn() to a; ask_example() to b; state_example() to c; return a to t@13; return b to t@14; t@13 + t@14 to t@15; return c to t@16; t@15 + t@16 to t@17; print t@17 to t@18; drop t@18 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@.str0 = private constant [52 x i8] c"ICE: unhandled effect op in closed handler dispatch\00"
+@.str1 = private constant [52 x i8] c"ICE: unhandled effect op in closed handler dispatch\00"
+@.str2 = private constant [52 x i8] c"ICE: unhandled effect op in closed handler dispatch\00"
+
+define i64 @prism_catch_exn() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 85, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t4 to i64
+  %5 = add i64 %4, 8
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 0, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t4 to i64
+  %t7 = call i64 @prism_ebind(i64 %t3, i64 %t6)
+  %t8 = call i64 @prism_0.handle(i64 %t7)
+  ret i64 %t8
+}
+
+declare ptr @prism_alloc(i64)
+
+define i64 @prism_ebind(i64 %a0, i64 %a1) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  %t7 = call i64 @prism_apply_1(i64 %a1, i64 %t4)
+  call void @prism_rc_dec(i64 %a1)
+  ret i64 %t7
+
+b3:                                               ; preds = %entry
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 24
+  %t8 = inttoptr i64 %5 to ptr
+  %t9 = load i64, ptr %t8, align 8
+  %6 = ptrtoint ptr %t0 to i64
+  %7 = add i64 %6, 32
+  %t10 = inttoptr i64 %7 to ptr
+  %t11 = load i64, ptr %t10, align 8
+  %8 = ptrtoint ptr %t0 to i64
+  %9 = add i64 %8, 40
+  %t12 = inttoptr i64 %9 to ptr
+  %t13 = load i64, ptr %t12, align 8
+  call void @prism_rc_inc(i64 %t11)
+  call void @prism_rc_inc(i64 %t9)
+  call void @prism_rc_inc(i64 %t13)
+  %t17 = call i64 @prism_reuse_token(i64 %a0)
+  %t18 = call ptr @prism_alloc(i64 2)
+  %10 = ptrtoint ptr %t18 to i64
+  %11 = add i64 %10, 8
+  %t19 = inttoptr i64 %11 to ptr
+  store i64 8, ptr %t19, align 8
+  %12 = ptrtoint ptr %t18 to i64
+  %13 = add i64 %12, 24
+  %t20 = inttoptr i64 %13 to ptr
+  store i64 %a1, ptr %t20, align 8
+  %14 = ptrtoint ptr %t18 to i64
+  %15 = add i64 %14, 32
+  %t21 = inttoptr i64 %15 to ptr
+  store i64 %t13, ptr %t21, align 8
+  %t22 = ptrtoint ptr %t18 to i64
+  %t23 = call ptr @prism_reuse_alloc(i64 %t17, i64 3)
+  %16 = ptrtoint ptr %t23 to i64
+  %17 = add i64 %16, 8
+  %t24 = inttoptr i64 %17 to ptr
+  store i64 1, ptr %t24, align 8
+  %18 = ptrtoint ptr %t23 to i64
+  %19 = add i64 %18, 24
+  %t25 = inttoptr i64 %19 to ptr
+  store i64 %t9, ptr %t25, align 8
+  %20 = ptrtoint ptr %t23 to i64
+  %21 = add i64 %20, 32
+  %t26 = inttoptr i64 %21 to ptr
+  store i64 %t11, ptr %t26, align 8
+  %22 = ptrtoint ptr %t23 to i64
+  %23 = add i64 %22, 40
+  %t27 = inttoptr i64 %23 to ptr
+  store i64 %t22, ptr %t27, align 8
+  %t28 = ptrtoint ptr %t23 to i64
+  ret i64 %t28
+
+b1:                                               ; preds = %entry
+  unreachable
+}
+
+define i64 @prism_0.handle(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t4
+
+b3:                                               ; preds = %entry
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 24
+  %t7 = inttoptr i64 %5 to ptr
+  %t8 = load i64, ptr %t7, align 8
+  %6 = ptrtoint ptr %t0 to i64
+  %7 = add i64 %6, 32
+  %t9 = inttoptr i64 %7 to ptr
+  %t10 = load i64, ptr %t9, align 8
+  %8 = ptrtoint ptr %t0 to i64
+  %9 = add i64 %8, 40
+  %t11 = inttoptr i64 %9 to ptr
+  %t12 = load i64, ptr %t11, align 8
+  call void @prism_rc_inc(i64 %t8)
+  call void @prism_rc_inc(i64 %t10)
+  call void @prism_rc_inc(i64 %t12)
+  call void @prism_rc_dec(i64 %a0)
+  %t17 = and i64 %t8, 7
+  %t18 = and i64 %t17, 1
+  %t19 = icmp eq i64 %t18, 1
+  br i1 %t19, label %b4, label %b5
+
+b1:                                               ; preds = %entry
+  unreachable
+
+b4:                                               ; preds = %b3
+  %t20 = icmp eq i64 %t8, 7
+  %t21 = zext i1 %t20 to i64
+  %t22 = shl i64 %t21, 1
+  %t23 = or i64 %t22, 1
+  br label %b6
+
+b5:                                               ; preds = %b3
+  %t24 = call i64 @prism_rt_int_cmp(i64 %t8, i64 7)
+  %t25 = icmp eq i64 %t24, 0
+  %t26 = zext i1 %t25 to i64
+  %t27 = shl i64 %t26, 1
+  %t28 = or i64 %t27, 1
+  br label %b6
+
+b6:                                               ; preds = %b5, %b4
+  %t29 = phi i64 [ %t23, %b4 ], [ %t28, %b5 ]
+  call void @prism_rc_dec(i64 %t8)
+  call void @prism_rc_dec(i64 7)
+  %t30 = icmp ne i64 %t29, 1
+  br i1 %t30, label %b7, label %b8
+
+b7:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t29)
+  %t32 = call ptr @prism_alloc(i64 1)
+  %10 = ptrtoint ptr %t32 to i64
+  %11 = add i64 %10, 8
+  %t33 = inttoptr i64 %11 to ptr
+  store i64 4, ptr %t33, align 8
+  %12 = ptrtoint ptr %t32 to i64
+  %13 = add i64 %12, 24
+  %t34 = inttoptr i64 %13 to ptr
+  store i64 %t12, ptr %t34, align 8
+  %t35 = ptrtoint ptr %t32 to i64
+  call void @prism_rc_dec(i64 %t35)
+  ret i64 %t10
+
+b8:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t29)
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
+  %t40 = call i64 @prism_str_lit(ptr @.str0, i64 51)
+  call void @prism_fatal(i64 %t40)
+  ret i64 0
+}
+
+define i64 @prism_ask_example() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t4 to i64
+  %5 = add i64 %4, 8
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 1, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t4 to i64
+  %t7 = call i64 @prism_ebind(i64 %t3, i64 %t6)
+  %t8 = call i64 @prism_9.handle(i64 %t7)
+  ret i64 %t8
+}
+
+define i64 @prism_9.handle(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t4
+
+b3:                                               ; preds = %entry
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 24
+  %t7 = inttoptr i64 %5 to ptr
+  %t8 = load i64, ptr %t7, align 8
+  %6 = ptrtoint ptr %t0 to i64
+  %7 = add i64 %6, 32
+  %t9 = inttoptr i64 %7 to ptr
+  %t10 = load i64, ptr %t9, align 8
+  %8 = ptrtoint ptr %t0 to i64
+  %9 = add i64 %8, 40
+  %t11 = inttoptr i64 %9 to ptr
+  %t12 = load i64, ptr %t11, align 8
+  call void @prism_rc_inc(i64 %t8)
+  call void @prism_rc_inc(i64 %t10)
+  call void @prism_rc_inc(i64 %t12)
+  call void @prism_rc_dec(i64 %a0)
+  %t17 = and i64 %t8, 1
+  %t18 = and i64 %t17, 1
+  %t19 = icmp eq i64 %t18, 1
+  br i1 %t19, label %b4, label %b5
+
+b1:                                               ; preds = %entry
+  unreachable
+
+b4:                                               ; preds = %b3
+  %t20 = icmp eq i64 %t8, 1
+  %t21 = zext i1 %t20 to i64
+  %t22 = shl i64 %t21, 1
+  %t23 = or i64 %t22, 1
+  br label %b6
+
+b5:                                               ; preds = %b3
+  %t24 = call i64 @prism_rt_int_cmp(i64 %t8, i64 1)
+  %t25 = icmp eq i64 %t24, 0
+  %t26 = zext i1 %t25 to i64
+  %t27 = shl i64 %t26, 1
+  %t28 = or i64 %t27, 1
+  br label %b6
+
+b6:                                               ; preds = %b5, %b4
+  %t29 = phi i64 [ %t23, %b4 ], [ %t28, %b5 ]
+  call void @prism_rc_dec(i64 %t8)
+  call void @prism_rc_dec(i64 1)
+  %t30 = icmp ne i64 %t29, 1
+  br i1 %t30, label %b7, label %b8
+
+b7:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t29)
+  %t32 = call ptr @prism_alloc(i64 1)
+  %10 = ptrtoint ptr %t32 to i64
+  %11 = add i64 %10, 8
+  %t33 = inttoptr i64 %11 to ptr
+  store i64 5, ptr %t33, align 8
+  %12 = ptrtoint ptr %t32 to i64
+  %13 = add i64 %12, 24
+  %t34 = inttoptr i64 %13 to ptr
+  store i64 %t12, ptr %t34, align 8
+  %t35 = ptrtoint ptr %t32 to i64
+  call void @prism_rc_dec(i64 %t10)
+  %t37 = call i64 @prism_apply_1(i64 %t35, i64 199)
+  call void @prism_rc_dec(i64 %t35)
+  ret i64 %t37
+
+b8:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t29)
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
+  %t41 = call i64 @prism_str_lit(ptr @.str1, i64 51)
+  call void @prism_fatal(i64 %t41)
+  ret i64 0
+}
+
+define i64 @prism_state_example() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t4 to i64
+  %5 = add i64 %4, 8
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 2, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t4 to i64
+  %t7 = call i64 @prism_ebind(i64 %t3, i64 %t6)
+  %t8 = call ptr @prism_alloc(i64 0)
+  %6 = ptrtoint ptr %t8 to i64
+  %7 = add i64 %6, 8
+  %t9 = inttoptr i64 %7 to ptr
+  store i64 3, ptr %t9, align 8
+  %t10 = ptrtoint ptr %t8 to i64
+  %t11 = call i64 @prism_ebind(i64 %t7, i64 %t10)
+  %t12 = call i64 @prism_18.handle(i64 %t11)
+  ret i64 %t12
+}
+
+define i64 @prism_18.handle(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t4
+
+b3:                                               ; preds = %entry
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 24
+  %t7 = inttoptr i64 %5 to ptr
+  %t8 = load i64, ptr %t7, align 8
+  %6 = ptrtoint ptr %t0 to i64
+  %7 = add i64 %6, 32
+  %t9 = inttoptr i64 %7 to ptr
+  %t10 = load i64, ptr %t9, align 8
+  %8 = ptrtoint ptr %t0 to i64
+  %9 = add i64 %8, 40
+  %t11 = inttoptr i64 %9 to ptr
+  %t12 = load i64, ptr %t11, align 8
+  call void @prism_rc_inc(i64 %t8)
+  call void @prism_rc_inc(i64 %t10)
+  call void @prism_rc_inc(i64 %t12)
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_inc(i64 %t8)
+  %t18 = and i64 %t8, 3
+  %t19 = and i64 %t18, 1
+  %t20 = icmp eq i64 %t19, 1
+  br i1 %t20, label %b4, label %b5
+
+b1:                                               ; preds = %entry
+  unreachable
+
+b4:                                               ; preds = %b3
+  %t21 = icmp eq i64 %t8, 3
+  %t22 = zext i1 %t21 to i64
+  %t23 = shl i64 %t22, 1
+  %t24 = or i64 %t23, 1
+  br label %b6
+
+b5:                                               ; preds = %b3
+  %t25 = call i64 @prism_rt_int_cmp(i64 %t8, i64 3)
+  %t26 = icmp eq i64 %t25, 0
+  %t27 = zext i1 %t26 to i64
+  %t28 = shl i64 %t27, 1
+  %t29 = or i64 %t28, 1
+  br label %b6
+
+b6:                                               ; preds = %b5, %b4
+  %t30 = phi i64 [ %t24, %b4 ], [ %t29, %b5 ]
+  call void @prism_rc_dec(i64 %t8)
+  call void @prism_rc_dec(i64 3)
+  %t31 = icmp ne i64 %t30, 1
+  br i1 %t31, label %b7, label %b8
+
+b7:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t30)
+  call void @prism_rc_dec(i64 %t8)
+  %t34 = call ptr @prism_alloc(i64 1)
+  %10 = ptrtoint ptr %t34 to i64
+  %11 = add i64 %10, 8
+  %t35 = inttoptr i64 %11 to ptr
+  store i64 6, ptr %t35, align 8
+  %12 = ptrtoint ptr %t34 to i64
+  %13 = add i64 %12, 24
+  %t36 = inttoptr i64 %13 to ptr
+  store i64 %t12, ptr %t36, align 8
+  %t37 = ptrtoint ptr %t34 to i64
+  call void @prism_rc_dec(i64 %t10)
+  %t39 = call i64 @prism_apply_1(i64 %t37, i64 21)
+  call void @prism_rc_dec(i64 %t37)
+  ret i64 %t39
+
+b8:                                               ; preds = %b6
+  call void @prism_rc_dec(i64 %t30)
+  %t41 = and i64 %t8, 5
+  %t42 = and i64 %t41, 1
+  %t43 = icmp eq i64 %t42, 1
+  br i1 %t43, label %b9, label %b10
+
+b9:                                               ; preds = %b8
+  %t44 = icmp eq i64 %t8, 5
+  %t45 = zext i1 %t44 to i64
+  %t46 = shl i64 %t45, 1
+  %t47 = or i64 %t46, 1
+  br label %b11
+
+b10:                                              ; preds = %b8
+  %t48 = call i64 @prism_rt_int_cmp(i64 %t8, i64 5)
+  %t49 = icmp eq i64 %t48, 0
+  %t50 = zext i1 %t49 to i64
+  %t51 = shl i64 %t50, 1
+  %t52 = or i64 %t51, 1
+  br label %b11
+
+b11:                                              ; preds = %b10, %b9
+  %t53 = phi i64 [ %t47, %b9 ], [ %t52, %b10 ]
+  call void @prism_rc_dec(i64 %t8)
+  call void @prism_rc_dec(i64 5)
+  %t54 = icmp ne i64 %t53, 1
+  br i1 %t54, label %b12, label %b13
+
+b12:                                              ; preds = %b11
+  call void @prism_rc_dec(i64 %t53)
+  %t56 = call ptr @prism_alloc(i64 1)
+  %14 = ptrtoint ptr %t56 to i64
+  %15 = add i64 %14, 8
+  %t57 = inttoptr i64 %15 to ptr
+  store i64 7, ptr %t57, align 8
+  %16 = ptrtoint ptr %t56 to i64
+  %17 = add i64 %16, 24
+  %t58 = inttoptr i64 %17 to ptr
+  store i64 %t12, ptr %t58, align 8
+  %t59 = ptrtoint ptr %t56 to i64
+  call void @prism_rc_dec(i64 %t10)
+  %t61 = call i64 @prism_apply_1(i64 %t59, i64 0)
+  call void @prism_rc_dec(i64 %t59)
+  ret i64 %t61
+
+b13:                                              ; preds = %b11
+  call void @prism_rc_dec(i64 %t53)
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
+  %t65 = call i64 @prism_str_lit(ptr @.str2, i64 51)
+  call void @prism_fatal(i64 %t65)
+  ret i64 0
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_catch_exn()
+  %t1 = call i64 @prism_ask_example()
+  %t2 = call i64 @prism_state_example()
+  %t3 = and i64 %t0, %t1
+  %t4 = and i64 %t3, 1
+  %t5 = icmp eq i64 %t4, 1
+  br i1 %t5, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t6 = ashr i64 %t0, 1
+  %t7 = ashr i64 %t1, 1
+  %t8 = add i64 %t6, %t7
+  %t9 = shl i64 %t8, 1
+  %t10 = ashr i64 %t9, 1
+  %t11 = icmp eq i64 %t10, %t8
+  br i1 %t11, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t13 = call i64 @prism_rt_int_add(i64 %t0, i64 %t1)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t12 = or i64 %t9, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t14 = phi i64 [ %t12, %b3 ], [ %t13, %b1 ]
+  call void @prism_rc_dec(i64 %t0)
+  call void @prism_rc_dec(i64 %t1)
+  %t15 = and i64 %t14, %t2
+  %t16 = and i64 %t15, 1
+  %t17 = icmp eq i64 %t16, 1
+  br i1 %t17, label %b4, label %b5
+
+b4:                                               ; preds = %b2
+  %t18 = ashr i64 %t14, 1
+  %t19 = ashr i64 %t2, 1
+  %t20 = add i64 %t18, %t19
+  %t21 = shl i64 %t20, 1
+  %t22 = ashr i64 %t21, 1
+  %t23 = icmp eq i64 %t22, %t20
+  br i1 %t23, label %b7, label %b5
+
+b5:                                               ; preds = %b4, %b2
+  %t25 = call i64 @prism_rt_int_add(i64 %t14, i64 %t2)
+  br label %b6
+
+b7:                                               ; preds = %b4
+  %t24 = or i64 %t21, 1
+  br label %b6
+
+b6:                                               ; preds = %b5, %b7
+  %t26 = phi i64 [ %t24, %b7 ], [ %t25, %b5 ]
+  call void @prism_rc_dec(i64 %t14)
+  call void @prism_rc_dec(i64 %t2)
+  call void @prism_print_int(i64 %t26)
+  call void @prism_rc_dec(i64 %t26)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare i64 @prism_rt_int_add(i64, i64)
+
+declare void @prism_rc_dec(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+declare void @prism_rc_inc(i64)
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+declare i64 @prism_str_lit(ptr, i64)
+
+declare void @prism_fatal(i64)
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+    i64 1, label %_lam1
+    i64 2, label %_lam2
+    i64 3, label %_lam3
+    i64 4, label %_lam4
+    i64 5, label %_lam5
+    i64 6, label %_lam6
+    i64 7, label %_lam7
+    i64 8, label %_lam8
+    i64 9, label %_lam9
+    i64 10, label %_lam10
+    i64 11, label %_lam11
+    i64 12, label %_lam12
+    i64 13, label %_lam13
+    i64 14, label %_lam14
+    i64 15, label %_lam15
+    i64 16, label %_lam16
+    i64 17, label %_lam17
+    i64 18, label %_lam18
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_lam1:                                            ; preds = %entry
+  %_r1 = call i64 @prism_lam_1(i64 %_a0)
+  br label %_merge
+
+_lam2:                                            ; preds = %entry
+  %_r2 = call i64 @prism_lam_2(i64 %_a0)
+  br label %_merge
+
+_lam3:                                            ; preds = %entry
+  %_r3 = call i64 @prism_lam_3(i64 %_a0)
+  br label %_merge
+
+_lam4:                                            ; preds = %entry
+  %2 = ptrtoint ptr %_cp to i64
+  %3 = add i64 %2, 24
+  %_fp4_0 = inttoptr i64 %3 to ptr
+  %_fv4_0 = load i64, ptr %_fp4_0, align 8
+  %_r4 = call i64 @prism_lam_4(i64 %_fv4_0, i64 %_a0)
+  br label %_merge
+
+_lam5:                                            ; preds = %entry
+  %4 = ptrtoint ptr %_cp to i64
+  %5 = add i64 %4, 24
+  %_fp5_0 = inttoptr i64 %5 to ptr
+  %_fv5_0 = load i64, ptr %_fp5_0, align 8
+  %_r5 = call i64 @prism_lam_5(i64 %_fv5_0, i64 %_a0)
+  br label %_merge
+
+_lam6:                                            ; preds = %entry
+  %6 = ptrtoint ptr %_cp to i64
+  %7 = add i64 %6, 24
+  %_fp6_0 = inttoptr i64 %7 to ptr
+  %_fv6_0 = load i64, ptr %_fp6_0, align 8
+  %_r6 = call i64 @prism_lam_6(i64 %_fv6_0, i64 %_a0)
+  br label %_merge
+
+_lam7:                                            ; preds = %entry
+  %8 = ptrtoint ptr %_cp to i64
+  %9 = add i64 %8, 24
+  %_fp7_0 = inttoptr i64 %9 to ptr
+  %_fv7_0 = load i64, ptr %_fp7_0, align 8
+  %_r7 = call i64 @prism_lam_7(i64 %_fv7_0, i64 %_a0)
+  br label %_merge
+
+_lam8:                                            ; preds = %entry
+  %10 = ptrtoint ptr %_cp to i64
+  %11 = add i64 %10, 24
+  %_fp8_0 = inttoptr i64 %11 to ptr
+  %_fv8_0 = load i64, ptr %_fp8_0, align 8
+  %12 = ptrtoint ptr %_cp to i64
+  %13 = add i64 %12, 32
+  %_fp8_1 = inttoptr i64 %13 to ptr
+  %_fv8_1 = load i64, ptr %_fp8_1, align 8
+  %_r8 = call i64 @prism_lam_8(i64 %_fv8_0, i64 %_fv8_1, i64 %_a0)
+  br label %_merge
+
+_lam9:                                            ; preds = %entry
+  %_r9 = call i64 @prism_lam_9(i64 %_a0)
+  br label %_merge
+
+_lam10:                                           ; preds = %entry
+  %_r10 = call i64 @prism_lam_10(i64 %_a0)
+  br label %_merge
+
+_lam11:                                           ; preds = %entry
+  %_r11 = call i64 @prism_lam_11(i64 %_a0)
+  br label %_merge
+
+_lam12:                                           ; preds = %entry
+  %_r12 = call i64 @prism_lam_12(i64 %_a0)
+  br label %_merge
+
+_lam13:                                           ; preds = %entry
+  %_r13 = call i64 @prism_lam_13(i64 %_a0)
+  br label %_merge
+
+_lam14:                                           ; preds = %entry
+  %_r14 = call i64 @prism_lam_14(i64 %_a0)
+  br label %_merge
+
+_lam15:                                           ; preds = %entry
+  %14 = ptrtoint ptr %_cp to i64
+  %15 = add i64 %14, 24
+  %_fp15_0 = inttoptr i64 %15 to ptr
+  %_fv15_0 = load i64, ptr %_fp15_0, align 8
+  %_r15 = call i64 @prism_lam_15(i64 %_fv15_0, i64 %_a0)
+  br label %_merge
+
+_lam16:                                           ; preds = %entry
+  %_r16 = call i64 @prism_lam_16(i64 %_a0)
+  br label %_merge
+
+_lam17:                                           ; preds = %entry
+  %_r17 = call i64 @prism_lam_17(i64 %_a0)
+  br label %_merge
+
+_lam18:                                           ; preds = %entry
+  %_r18 = call i64 @prism_lam_18(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam18, %_lam17, %_lam16, %_lam15, %_lam14, %_lam13, %_lam12, %_lam11, %_lam10, %_lam9, %_lam8, %_lam7, %_lam6, %_lam5, %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ], [ %_r5, %_lam5 ], [ %_r6, %_lam6 ], [ %_r7, %_lam7 ], [ %_r8, %_lam8 ], [ %_r9, %_lam9 ], [ %_r10, %_lam10 ], [ %_r11, %_lam11 ], [ %_r12, %_lam12 ], [ %_r13, %_lam13 ], [ %_r14, %_lam14 ], [ %_r15, %_lam15 ], [ %_r16, %_lam16 ], [ %_r17, %_lam17 ], [ %_r18, %_lam18 ]
+  ret i64 %_result
+}
+
+declare i64 @prism_reuse_token(i64)
+
+declare ptr @prism_reuse_alloc(i64, i64)
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 9, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 3)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 7, ptr %t5, align 8
+  %6 = ptrtoint ptr %t3 to i64
+  %7 = add i64 %6, 32
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t3 to i64
+  %9 = add i64 %8, 40
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 %t2, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  call void @prism_effop_alloc()
+  ret i64 %t8
+}
+
+declare void @prism_effop_alloc()
+
+define i64 @prism_lam_1(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 10, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 3)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 1, ptr %t5, align 8
+  %6 = ptrtoint ptr %t3 to i64
+  %7 = add i64 %6, 32
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t3 to i64
+  %9 = add i64 %8, 40
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 %t2, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  call void @prism_effop_alloc()
+  ret i64 %t8
+}
+
+define i64 @prism_lam_2(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 11, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 3)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 3, ptr %t5, align 8
+  %6 = ptrtoint ptr %t3 to i64
+  %7 = add i64 %6, 32
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t3 to i64
+  %9 = add i64 %8, 40
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 %t2, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  call void @prism_effop_alloc()
+  ret i64 %t8
+}
+
+define i64 @prism_lam_3(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t4 to i64
+  %5 = add i64 %4, 8
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 12, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t4 to i64
+  %t7 = call i64 @prism_ebind(i64 %t3, i64 %t6)
+  %t8 = call ptr @prism_alloc(i64 0)
+  %6 = ptrtoint ptr %t8 to i64
+  %7 = add i64 %6, 8
+  %t9 = inttoptr i64 %7 to ptr
+  store i64 13, ptr %t9, align 8
+  %t10 = ptrtoint ptr %t8 to i64
+  %t11 = call i64 @prism_ebind(i64 %t7, i64 %t10)
+  %t12 = call ptr @prism_alloc(i64 0)
+  %8 = ptrtoint ptr %t12 to i64
+  %9 = add i64 %8, 8
+  %t13 = inttoptr i64 %9 to ptr
+  store i64 14, ptr %t13, align 8
+  %t14 = ptrtoint ptr %t12 to i64
+  %t15 = call i64 @prism_ebind(i64 %t11, i64 %t14)
+  ret i64 %t15
+}
+
+define i64 @prism_lam_4(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t1 = call i64 @prism_apply_1(i64 %_fv0, i64 %_p0)
+  call void @prism_rc_dec(i64 %_fv0)
+  %t2 = call i64 @prism_0.handle(i64 %t1)
+  ret i64 %t2
+}
+
+define i64 @prism_lam_5(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t1 = call i64 @prism_apply_1(i64 %_fv0, i64 %_p0)
+  call void @prism_rc_dec(i64 %_fv0)
+  %t2 = call i64 @prism_9.handle(i64 %t1)
+  ret i64 %t2
+}
+
+define i64 @prism_lam_6(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t1 = call i64 @prism_apply_1(i64 %_fv0, i64 %_p0)
+  call void @prism_rc_dec(i64 %_fv0)
+  %t2 = call i64 @prism_18.handle(i64 %t1)
+  ret i64 %t2
+}
+
+define i64 @prism_lam_7(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t1 = call i64 @prism_apply_1(i64 %_fv0, i64 %_p0)
+  call void @prism_rc_dec(i64 %_fv0)
+  %t2 = call i64 @prism_18.handle(i64 %t1)
+  ret i64 %t2
+}
+
+define i64 @prism_lam_8(i64 %_fv0, i64 %_fv1, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv1)
+  %t1 = call i64 @prism_apply_1(i64 %_fv1, i64 %_p0)
+  call void @prism_rc_dec(i64 %_fv1)
+  call void @prism_rc_inc(i64 %_fv0)
+  %t3 = call i64 @prism_ebind(i64 %t1, i64 %_fv0)
+  ret i64 %t3
+}
+
+define i64 @prism_lam_9(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  ret i64 %t3
+}
+
+define i64 @prism_lam_10(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  ret i64 %t3
+}
+
+define i64 @prism_lam_11(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  ret i64 %t3
+}
+
+define i64 @prism_lam_12(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 3, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  %t4 = call ptr @prism_alloc(i64 1)
+  %4 = ptrtoint ptr %t4 to i64
+  %5 = add i64 %4, 8
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 15, ptr %t5, align 8
+  %6 = ptrtoint ptr %t4 to i64
+  %7 = add i64 %6, 24
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %t7 = ptrtoint ptr %t4 to i64
+  %t8 = call i64 @prism_ebind(i64 %t3, i64 %t7)
+  ret i64 %t8
+}
+
+define i64 @prism_lam_13(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 16, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 3)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 5, ptr %t5, align 8
+  %6 = ptrtoint ptr %t3 to i64
+  %7 = add i64 %6, 32
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t3 to i64
+  %9 = add i64 %8, 40
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 %t2, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  call void @prism_effop_alloc()
+  ret i64 %t8
+}
+
+define i64 @prism_lam_14(i64 %_p0) {
+entry:
+  call void @prism_rc_dec(i64 %_p0)
+  %t1 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t1 to i64
+  %1 = add i64 %0, 8
+  %t2 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t2, align 8
+  %2 = ptrtoint ptr %t1 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t3, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  %t5 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t5 to i64
+  %5 = add i64 %4, 8
+  %t6 = inttoptr i64 %5 to ptr
+  store i64 17, ptr %t6, align 8
+  %t7 = ptrtoint ptr %t5 to i64
+  %t8 = call i64 @prism_ebind(i64 %t4, i64 %t7)
+  ret i64 %t8
+}
+
+define i64 @prism_lam_15(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t1 = and i64 %_fv0, %_p0
+  %t2 = and i64 %t1, 1
+  %t3 = icmp eq i64 %t2, 1
+  br i1 %t3, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t4 = ashr i64 %_fv0, 1
+  %t5 = ashr i64 %_p0, 1
+  %t6 = add i64 %t4, %t5
+  %t7 = shl i64 %t6, 1
+  %t8 = ashr i64 %t7, 1
+  %t9 = icmp eq i64 %t8, %t6
+  br i1 %t9, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t11 = call i64 @prism_rt_int_add(i64 %_fv0, i64 %_p0)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t10 = or i64 %t7, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t12 = phi i64 [ %t10, %b3 ], [ %t11, %b1 ]
+  call void @prism_rc_dec(i64 %_fv0)
+  call void @prism_rc_dec(i64 %_p0)
+  %t13 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t13 to i64
+  %1 = add i64 %0, 8
+  %t14 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t14, align 8
+  %2 = ptrtoint ptr %t13 to i64
+  %3 = add i64 %2, 24
+  %t15 = inttoptr i64 %3 to ptr
+  store i64 %t12, ptr %t15, align 8
+  %t16 = ptrtoint ptr %t13 to i64
+  ret i64 %t16
+}
+
+define i64 @prism_lam_16(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  ret i64 %t3
+}
+
+define i64 @prism_lam_17(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 18, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 3)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 3, ptr %t5, align 8
+  %6 = ptrtoint ptr %t3 to i64
+  %7 = add i64 %6, 32
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 %_p0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t3 to i64
+  %9 = add i64 %8, 40
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 %t2, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  call void @prism_effop_alloc()
+  ret i64 %t8
+}
+
+define i64 @prism_lam_18(i64 %_p0) {
+entry:
+  %t0 = call ptr @prism_alloc(i64 1)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 %_p0, ptr %t2, align 8
+  %t3 = ptrtoint ptr %t0 to i64
+  ret i64 %t3
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [151]
+result: ()

@@ -1,0 +1,18 @@
+[book]
+title = "Prism"
+authors = ["Stephen Diehl"]
+description = "A small, modern, OCaml-class functional language with algebraic effects."
+src = "src"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+no-section-label = true
+additional-css = ["theme/tabs.css"]
+additional-js = ["theme/tabs.js"]
+git-repository-url = "https://github.com/sdiehl/tiny-prism"
+
+[output.html.playground]
+runnable = false
+
+[preprocessor.tabs]

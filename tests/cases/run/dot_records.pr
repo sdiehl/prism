@@ -1,0 +1,18 @@
+-- Field access and UFCS coexist: bare `.name` always reads a record field,
+-- `.name(...)` is always a call. `width` is both a field and a top-level
+-- function; the parens pick which one you get.
+
+type Box = Box { width: Int, height: Int }
+
+fn area(b : Box) : Int = b.width * b.height
+
+fn width(b : Box) : Int = b.height * 10
+
+fn grow(b : Box, k : Int) : Box = Box { ..b, width = b.width + k }
+
+fn main() =
+  let b = Box { width = 3, height = 4 }
+  println(b.width)
+  println(b.width())
+  println(b.area())
+  println(b.grow(2).area())

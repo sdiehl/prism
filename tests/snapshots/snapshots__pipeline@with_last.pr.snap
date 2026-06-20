@@ -1,0 +1,148 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/with_last.pr
+---
+== tokens ==
+VOpen Fn Ident("cps") LParen Ident("v") Comma Ident("k") RParen Eq Ident("k") LParen Ident("v") RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VSemi With Ident("x") LArrow Ident("cps") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "cps",
+            params: [
+                Param {
+                    name: "v",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "k",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "k",
+                        ),
+                        span: 15..16,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "v",
+                            ),
+                            span: 17..18,
+                        },
+                    ],
+                ),
+                span: 15..19,
+            },
+            wheres: [],
+            span: 0..19,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 35..42,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 0,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 43..44,
+                                },
+                            ],
+                        ),
+                        span: 35..45,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "cps",
+                                ),
+                                span: 58..61,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 62..63,
+                                },
+                                Spanned {
+                                    node: Lam(
+                                        [
+                                            Param {
+                                                name: "x",
+                                                ty: None,
+                                                borrow: false,
+                                                default: None,
+                                            },
+                                        ],
+                                        Spanned {
+                                            node: Marker(
+                                                With,
+                                            ),
+                                            span: 48..64,
+                                        },
+                                    ),
+                                    span: 48..48,
+                                    synth: true,
+                                },
+                            ],
+                        ),
+                        span: 48..64,
+                    },
+                ),
+                span: 35..64,
+            },
+            wheres: [],
+            span: 21..64,
+        },
+    ],
+}
+
+== types ==
+Type Error: `with` cannot be the last statement of a block: there is nothing for it to wrap
+   ╭─[ <source>:5:3 ]
+   │
+ 5 │   with x <- cps(1)
+   │   ────────┬───────  
+   │           ╰───────── `with` cannot be the last statement of a block: there is nothing for it to wrap
+───╯

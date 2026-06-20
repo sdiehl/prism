@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/show.pr
+---
+abc
+42true
+1
+0
+5
+=> ()

@@ -1,0 +1,16 @@
+-- FP^2 in-place discipline, statically checked. `bump` is `fbip`: it
+-- deconstructs each `Cons` and rebuilds it, so the reuse pass turns every
+-- constructor into an in-place update over the dropped cell and the compiler
+-- PROVES the body allocates nothing fresh. `combine` is `fip`: linear, no
+-- duplication, no borrowed parameter, no allocation.
+
+fbip fn bump(xs) =
+  match xs of
+    Nil => Nil
+    Cons(h, t) => Cons(h + 1, bump(t))
+
+fip fn combine(x, y, z) = x + y * z
+
+fn main() =
+  println(sum(bump([1, 2, 3, 4])))
+  println(combine(10, 3, 4))

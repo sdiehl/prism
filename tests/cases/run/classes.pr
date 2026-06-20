@@ -1,0 +1,19 @@
+class Pretty(a) {
+  pretty : (a) -> String
+}
+
+instance prettyInt : Pretty(Int) {
+  fn pretty(x) = concat("int:", show_int(x))
+}
+
+instance prettyBool : Pretty(Bool) {
+  fn pretty(b) = if b then "yes" else "no"
+}
+
+fn shout(x : a) : String given Pretty(a) = concat(pretty(x), "!")
+
+fn main() =
+  println(pretty(42))
+  println(pretty(true))
+  println(shout(7))
+  println(shout(false))

@@ -1,0 +1,17 @@
+-- A `do` performed while an application argument is still pending around it.
+-- `bump(5)` performs `ask` and returns a closure; that closure is then applied
+-- to a second argument (7). The perform unwinds the continuation up to the
+-- handler while the outer application of 7 is live, so resuming must rebuild
+-- that pending application: result is ask(=100) + 5 + 7 = 112. Pins the
+-- continuation handling for the Frame::Args case in `perform`.
+
+effect Reader {
+  ctl ask(Unit) : Int
+}
+
+fn main() =
+  let bump = \(a) -> let x = ask(()) in \(b) -> x + a + b
+  println(handle bump(5)(7) with {
+    ask(u, k) => k(100),
+    return r => r
+  })

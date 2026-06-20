@@ -1,0 +1,57 @@
+effect Delim {
+  ctl shift0(Int) : Int
+}
+
+-- Delimited continuations, the Danvy-Filinski shift/reset intuition pump.
+--
+-- A handler IS a delimiter. The classic Scheme idiom and its Prism twin:
+--
+--     Scheme                              Prism
+--     ------                              -----
+--     (reset BODY)                        handle body() with ... (the delimiter)
+--     (shift k EXPR)                      ctl shift0(v, k) => EXPR (capture k)
+--     k                                   resume, here the 2nd clause param
+--
+-- The captured continuation k is "delimited": it reaches only up to the
+-- enclosing handle, NOT out to main. So in
+--
+--     1 + reset( 10 + shift0(100) )
+--
+-- k is the slice `\hole -> 10 + hole` (the +10 lives inside the delimiter),
+-- and the +1 lives OUTSIDE it. Calling k re-runs the +10; the +1 runs once.
+--
+-- Same shift0, three handlers differing only in how often they call k:
+--
+--   use k 0x   Scheme (+ 1 (reset (+ 10 (shift k 100))))         = 101
+--   use k 1x   Scheme (+ 1 (reset (+ 10 (shift k (k 100)))))     = 111
+--   use k 2x   Scheme (+ 1 (reset (+ 10 (shift k (k (k 100)))))) = 121
+--
+-- Note 2x gives 121, not 122: the captured +10 runs twice, the outer +1 once.
+-- That k is an ordinary multishot value, callable any number of times, is the
+-- whole point. Scheme needs a runtime escape hatch for this; here it falls out
+-- of the effect handler, and compiles to native code.
+
+fn body() : !{Delim} Int = 10 + shift0(100)
+
+-- (shift k 100): k captured, never invoked. The delimiter just yields 100.
+fn reset_abort() =
+  handle body() with
+    shift0(v, k) => v
+    return r => r
+
+-- (shift k (k 100)): resume once, the ordinary single-shot case.
+fn reset_once() =
+  handle body() with
+    shift0(v, k) => k(v)
+    return r => r
+
+-- (shift k (k (k 100))): resume the SAME continuation twice. Multishot.
+fn reset_twice() =
+  handle body() with
+    shift0(v, k) => k(k(v))
+    return r => r
+
+fn main() =
+  println(1 + reset_abort())
+  println(1 + reset_once())
+  println(1 + reset_twice())

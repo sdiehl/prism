@@ -1,0 +1,12 @@
+-- Trial-division primality test: filter + all + closures over a range.
+
+fn is_prime(n) =
+  if n < 2 then
+    false
+  else
+    all(\(k) -> mod(n, k) /= 0, range(2, n))
+
+fn main() =
+  let ps = filter(is_prime, range(2, 30))
+  println(length(ps))
+  println(sum(ps))

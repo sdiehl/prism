@@ -1,0 +1,4 @@
+-- A type error inside a hole points at the hole expression itself.
+fn main() =
+  let flag = true
+  println("v = {flag + 1}")

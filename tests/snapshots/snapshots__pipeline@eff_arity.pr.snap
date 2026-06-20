@@ -1,0 +1,103 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/eff_arity.pr
+---
+== tokens ==
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen LBrace Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit RBrace VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwInt Comma KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Emit",
+            params: [
+                "a",
+            ],
+            ops: [
+                EffOp {
+                    name: "emit",
+                    params: [
+                        Var(
+                            "a",
+                        ),
+                    ],
+                    ret: Unit,
+                },
+            ],
+            span: 0..39,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "bad",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Emit",
+                        args: [
+                            Int,
+                            Str,
+                        ],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "emit",
+                        ),
+                        span: 80..84,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 85..86,
+                        },
+                    ],
+                ),
+                span: 80..87,
+            },
+            wheres: [],
+            span: 41..87,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Unit,
+                span: 101..103,
+            },
+            wheres: [],
+            span: 89..103,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `bad`: effect `Emit` expects 1 type argument(s), got 2
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ fn bad() : !{Emit(Int, String)} Unit = emit(1)
+   │ ───────────────────────┬──────────────────────  
+   │                        ╰──────────────────────── in `bad`: effect `Emit` expects 1 type argument(s), got 2
+───╯

@@ -1,0 +1,24 @@
+-- Nested and multi-var rollback. The inner transact fails and restores only
+-- its own change to `a`; the outer one then completes and commits `b`. The
+-- second, outer transact fails after touching both vars, so both roll back to
+-- the values left by the first block. Restored state is leak-clean because the
+-- discarded continuation frees with the failed attempt.
+fn main() =
+  var a := 1
+  var b := 10
+  let r1 =
+    transact
+      a := a + 5
+      let inner = transact let _ = a := a + 100 in fail() else 0
+      b := b + 1
+      a
+    else
+      0 - 1
+  println(a)
+  println(b)
+  println(r1)
+  let r2 =
+    transact let _ = a := a + 50 in let _ = b := b + 50 in fail() else 0 - 2
+  println(a)
+  println(b)
+  println(r2)

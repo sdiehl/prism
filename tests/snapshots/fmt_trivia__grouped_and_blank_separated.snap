@@ -1,0 +1,12 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn doc() : Int =\\n\\\n     \\x20 -- first group line one\\n\\\n     \\x20 -- first group line two\\n\\\n     \\n\\\n     \\x20 -- second group after a blank divider\\n\\\n     \\x20 let x = 1\\n\\\n     \\x20 let y = 2\\n\\\n     \\x20 x + y\\n\")"
+---
+fn doc() : Int =
+  -- first group line one
+  -- first group line two
+
+  -- second group after a blank divider
+  let x = 1
+  let y = 2
+  x + y

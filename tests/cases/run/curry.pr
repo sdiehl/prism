@@ -1,0 +1,24 @@
+-- Currying parity across backends: under-application (one or many steps),
+-- over-application, and incremental application of a closure passed to a
+-- higher-order function must all match the interpreter.
+fn add3(a, b, c) = a + b + c
+fn add(a, b) = a + b
+fn mk() = add
+fn twice(f, x) = f(f(x))
+
+fn main() =
+  let f = add3(1)
+  let g = f(2)
+  let step = g(3)
+  -- multi-step: 1 then 1 then 1
+  let whole = add3(10)(20)(30)
+  -- chained re-partial-application
+  let one_two = add3(100, 200)
+  let part = one_two(300)
+  -- partial-by-2 then complete
+  let inc = add(1)
+  let h = twice(inc, 5)
+  -- closure applied incrementally inside a HOF
+  let over = mk()(7, 8)
+  -- over-application: nullary yields a 2-ary
+  println(step + whole + part + h + over)

@@ -1,0 +1,143 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/nonexhaustive_int.pr
+---
+== tokens ==
+VOpen Fn Ident("small") LParen Ident("n") RParen Eq VOpen Match Ident("n") Of VOpen Int(IntLit { value: 0, suffix: None }) FatArrow Int(IntLit { value: 10, suffix: None }) VSemi Int(IntLit { value: 1, suffix: None }) FatArrow Int(IntLit { value: 20, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("small") LParen Int(IntLit { value: 0, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "small",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 22..23,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 31..32,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 10,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 36..38,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 43..44,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 20,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 48..50,
+                            },
+                        },
+                    ],
+                ),
+                span: 16..50,
+            },
+            wheres: [],
+            span: 0..50,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 63..70,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "small",
+                                    ),
+                                    span: 71..76,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 77..78,
+                                    },
+                                ],
+                            ),
+                            span: 71..79,
+                        },
+                    ],
+                ),
+                span: 63..80,
+            },
+            wheres: [],
+            span: 51..80,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `small`: non-exhaustive match: missing 2
+   ╭─[ <source>:2:3 ]
+   │
+ 2 │ ╭─▶   match n of
+   ┆ ┆   
+ 4 │ ├─▶     1 => 20
+   │ │                 
+   │ ╰───────────────── in `small`: non-exhaustive match: missing 2
+───╯
