@@ -768,6 +768,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism"
+version = "0.2.0"
+dependencies = [
+ "anstyle",
+ "ariadne",
+ "cc",
+ "clap",
+ "glob",
+ "inkwell",
+ "insta",
+ "lalrpop",
+ "lalrpop-util",
+ "libmimalloc-sys",
+ "logos",
+ "marginalia",
+ "num-bigint",
+ "offsides",
+ "rustyline",
+ "thiserror",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1051,29 +1074,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tiny-prism"
-version = "0.2.0"
-dependencies = [
- "anstyle",
- "ariadne",
- "cc",
- "clap",
- "glob",
- "inkwell",
- "insta",
- "lalrpop",
- "lalrpop-util",
- "libmimalloc-sys",
- "logos",
- "marginalia",
- "num-bigint",
- "offsides",
- "rustyline",
- "thiserror",
- "wasm-bindgen",
 ]
 
 [[package]]

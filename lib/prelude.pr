@@ -615,7 +615,7 @@ fn concat_all(xs : List(String)) : String = string_of_array(array_of_list(xs))
 -- the hash (and thus iteration order) is a pure function of the inserts, identical
 -- across the interpreter and native backends.
 
-type HashMap(v) = HM { buckets : Array(List((String, v))), size : Int }
+type HashMap(v) = HM { buckets: Array(List((String, v))), size: Int }
 
 -- FNV-1a, a real fixed-width hash written in the language: fold each byte in with
 -- xor, then a wrapping 64-bit multiply by the FNV prime. `byte_at` is O(1), so
@@ -628,7 +628,8 @@ fn fnv_from(s, i, h) =
 
 fn str_hash(s : String) : U64 = fnv_from(s, 0, 14695981039346656037u64)
 
-fn bucket_of(k : String, n : Int) : Int = int_of_u64(u64_rem(str_hash(k), to_u64(n)))
+fn bucket_of(k : String, n : Int) : Int =
+  int_of_u64(u64_rem(str_hash(k), to_u64(n)))
 
 fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
 
@@ -677,7 +678,8 @@ fn hm_put_raw(hm : HashMap(v), k : String, x : v) : HashMap(v) =
   let bs = hm.buckets
   let i = bucket_of(k, array_len(bs))
   match assoc_put(array_get(bs, i), k, x) of
-    (chain, added) => HM { buckets = array_set(bs, i, chain), size = hm.size + added }
+    (chain, added) =>
+      HM { buckets = array_set(bs, i, chain), size = hm.size + added }
 
 fn buckets_to_list(bs, i, n) =
   if i >= n then
@@ -718,7 +720,8 @@ fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
   let bs = hm.buckets
   let i = bucket_of(k, array_len(bs))
   match assoc_del(array_get(bs, i), k) of
-    (chain, removed) => HM { buckets = array_set(bs, i, chain), size = hm.size - removed }
+    (chain, removed) =>
+      HM { buckets = array_set(bs, i, chain), size = hm.size - removed }
 
 fn assoc_del(pairs, k) =
   match pairs of
@@ -748,7 +751,8 @@ fn hm_from_list_go(hm, ps) =
       match p of
         (k, x) => hm_from_list_go(hm_insert(hm, k, x), rest)
 
-fn hm_from_list(ps : List((String, v))) : HashMap(v) = hm_from_list_go(hm_new(), ps)
+fn hm_from_list(ps : List((String, v))) : HashMap(v) =
+  hm_from_list_go(hm_new(), ps)
 
 fn hm_adjust(f, hm : HashMap(v), k : String) : HashMap(v) =
   match hm_lookup(hm, k) of
@@ -770,7 +774,8 @@ fn array_to_list_go(arr, i, acc) =
   else
     array_to_list_go(arr, i - 1, Cons(array_get(arr, i), acc))
 
-fn array_to_list(arr : Array(a)) : List(a) = array_to_list_go(arr, array_len(arr) - 1, Nil)
+fn array_to_list(arr : Array(a)) : List(a) =
+  array_to_list_go(arr, array_len(arr) - 1, Nil)
 
 -- Command-line arguments as a list.
 fn args_go(i, n) =
@@ -794,9 +799,17 @@ fn is_alnum(c : Int) : Bool = is_alpha(c) || is_digit(c)
 
 fn is_space(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
 
-fn to_lower_c(c : Int) : Int = if is_upper(c) then c + 32 else c
+fn to_lower_c(c : Int) : Int =
+  if is_upper(c) then
+    c + 32
+  else
+    c
 
-fn to_upper_c(c : Int) : Int = if is_lower(c) then c - 32 else c
+fn to_upper_c(c : Int) : Int =
+  if is_lower(c) then
+    c - 32
+  else
+    c
 
 -- Byte-level substring queries (ASCII-oriented: byte index equals codepoint index
 -- for ASCII text). `occurs_at` tests whether `needle` sits at offset j in s.
@@ -839,9 +852,11 @@ fn map_case(s, i, arr, up) =
     let c = byte_at(s, i)
     map_case(s, i + 1, array_push(arr, if up then to_upper_c(c) else to_lower_c(c)), up)
 
-fn to_upper(s : String) : String = string_of_bytes(map_case(s, 0, array_empty(), true))
+fn to_upper(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), true))
 
-fn to_lower(s : String) : String = string_of_bytes(map_case(s, 0, array_empty(), false))
+fn to_lower(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), false))
 
 fn ltrim_idx(s, i) =
   if i < byte_len(s) && is_space(byte_at(s, i)) then
@@ -1177,7 +1192,7 @@ instance foldableOption : Foldable(Option) {
 -- Applicative: a Functor with `pure` and application `ap` inside the structure.
 class Applicative(f) given Functor(f) {
   pure : (a) -> f(a),
-  ap : (f((a) -> b), f(a)) -> f(b)
+  ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
 }
 
 fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)
@@ -1200,7 +1215,7 @@ instance applicativeOption : Applicative(Option) {
 -- Monad: structural sequencing via `bind`. Effects ride the effect system, so
 -- there is no do-notation; this is for List/Option-style structure.
 class Monad(m) given Applicative(m) {
-  bind : (m(a), (a) -> m(b)) -> m(b)
+  bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
 }
 
 fn option_bind(o, g) =

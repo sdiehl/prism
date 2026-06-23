@@ -97,6 +97,7 @@ last : forall a. (List(a)) -> Option(a) ! {}
 lcm : (Int, Int) -> Int ! {}
 length : forall a. (List(a)) -> Int ! {}
 lines_of : (List(String)) -> String ! {}
+list_ap : forall a b e0. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0} ! {}
 list_to_option : forall a. (List(a)) -> Option(a) ! {}
 log10 : (Float) -> Float ! {}
 log2 : (Float) -> Float ! {}
@@ -135,6 +136,9 @@ nth : forall a. (Int, List(a)) -> Option(a) ! {}
 occurs_at : (String, String, Int, Int) -> Bool ! {}
 odd : (Int) -> Bool ! {}
 ok_of_option : forall a b. (a, Option(b)) -> Result(b, a) ! {}
+option_ap : forall a b e0. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0} ! {}
+option_bind : forall a b e0. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0} ! {}
+option_fold_r : forall a b e0. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0} ! {}
 option_of_result : forall a b. (Result(a, b)) -> Option(a) ! {}
 option_or : forall a. (Option(a), Option(a)) -> Option(a) ! {}
 option_to_list : forall a. (Option(a)) -> List(a) ! {}

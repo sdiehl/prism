@@ -277,6 +277,10 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
                 collect_type_vars(p, out);
             }
         }
+        Type::App(h, a) => {
+            collect_type_vars(h, out);
+            collect_type_vars(a, out);
+        }
         _ => {}
     }
 }
@@ -299,6 +303,10 @@ pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
             for p in ps {
                 collect_row_vars(p, out);
             }
+        }
+        Type::App(h, a) => {
+            collect_row_vars(h, out);
+            collect_row_vars(a, out);
         }
         Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
         _ => {}

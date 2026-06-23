@@ -492,7 +492,7 @@ impl<'a> Rw<'a> {
 
     fn sugar(&mut self, s: &mut Sugar<Surface>, span: Span) {
         match s {
-            Sugar::Default(a, b) | Sugar::Transact(a, b) => {
+            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
                 self.expr(a);
                 self.expr(b);
             }

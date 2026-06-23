@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{Entry, Tc, TcErr};
 use crate::sym::Sym;
-use crate::types::ty::{EffRow, Label, Type, APP};
+use crate::types::ty::{EffRow, Label, Type};
 
 impl Tc<'_> {
     pub(super) fn subtype(&mut self, a: &Type, b: &Type) -> Result<(), TcErr> {
@@ -33,27 +33,32 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // Two application spines unify head-to-head, argument-to-argument.
+            (Type::App(h1, a1), Type::App(h2, a2)) => {
+                let h1 = self.apply(h1);
+                let h2 = self.apply(h2);
+                self.subtype(&h1, &h2)?;
+                let a1 = self.apply(a1);
+                let a2 = self.apply(a2);
+                self.subtype(&a1, &a2)
+            }
             // Higher-kinded application versus a concrete constructor: peel the
-            // last argument off the saturated side and match the head (a `* -> *`
-            // var) against the partially-applied constructor. `f(a) ~ List(b)`
-            // gives `f := List, a := b`.
-            (Type::Con(ap, ha), Type::Con(m, ys))
-                if ap.as_str() == APP && m.as_str() != APP && !ys.is_empty() && ha.len() == 2 =>
-            {
+            // last argument off the saturated side and match the (`* -> *`) head
+            // against the partially-applied constructor. `f(a) ~ List(b)` gives
+            // `f := List, a := b`; deeper spines recurse.
+            (Type::App(h, a), Type::Con(m, ys)) if !ys.is_empty() => {
                 let (init, last) = ys.split_at(ys.len() - 1);
-                let h = self.apply(&ha[0]);
+                let h = self.apply(h);
                 self.subtype(&h, &Type::Con(*m, init.to_vec()))?;
-                let a = self.apply(&ha[1]);
+                let a = self.apply(a);
                 let last = self.apply(&last[0]);
                 self.subtype(&a, &last)
             }
-            (Type::Con(m, ys), Type::Con(ap, ha))
-                if ap.as_str() == APP && m.as_str() != APP && !ys.is_empty() && ha.len() == 2 =>
-            {
+            (Type::Con(m, ys), Type::App(h, a)) if !ys.is_empty() => {
                 let (init, last) = ys.split_at(ys.len() - 1);
-                let h = self.apply(&ha[0]);
+                let h = self.apply(h);
                 self.subtype(&Type::Con(*m, init.to_vec()), &h)?;
-                let a = self.apply(&ha[1]);
+                let a = self.apply(a);
                 let last = self.apply(&last[0]);
                 self.subtype(&last, &a)
             }
@@ -165,6 +170,19 @@ impl Tc<'_> {
                     self.inst(*e, &arg, left)?;
                 }
                 Ok(())
+            }
+            // Articulate `ex` into an application `?h(?a)` of fresh existentials,
+            // each spliced to ex's left so the solution stays well-scoped, then
+            // solve them against the head and argument.
+            Type::App(h, a) => {
+                let he = self.fresh_id();
+                let ae = self.fresh_id();
+                let app = Type::App(Box::new(Type::Exist(he)), Box::new(Type::Exist(ae)));
+                self.splice_solved(ex, &[he, ae], app)?;
+                let h = self.apply(&h);
+                self.inst(he, &h, left)?;
+                let a = self.apply(&a);
+                self.inst(ae, &a, left)
             }
             Type::Tuple(elems) => {
                 let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();

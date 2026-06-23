@@ -437,6 +437,21 @@ fn rw_sugar(
             args.push((**hi).clone());
             rw(&call(evar(f, span), args, span), env, cx)
         }
+        // `f >> g` lowers to `\x -> g(f(x))`, `f << g` to `\x -> f(g(x))`. The
+        // bound name is unforgeable, so the synthesized lambda cannot capture.
+        Sugar::Compose(forward, f, g) => {
+            let (outer, inner) = if *forward { (g, f) } else { (f, g) };
+            let xv = evar(crate::names::COMPOSE, span);
+            let inner_call = call((**inner).clone(), vec![xv], span);
+            let body = call((**outer).clone(), vec![inner_call], span);
+            let param = Param {
+                name: crate::names::COMPOSE.into(),
+                ty: None,
+                borrow: false,
+                default: None,
+            };
+            rw(&sp(Expr::Lam(vec![param], Box::new(body)), span), env, cx)
+        }
     }
 }
 

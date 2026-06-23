@@ -340,10 +340,33 @@ pub(super) fn build_classes(
             infos.push((mname.clone(), t));
         }
         let dname = dict_ctor(&c.name);
+        // The dictionary cell is structurally typed, not a row of placeholders:
+        // a leading field per superclass (that class's dictionary over the same
+        // parameter), then one field per method carrying the method's own type
+        // generalized over its type/row variables, with the class parameter left
+        // free as the dictionary's parameter.
+        let param = Sym::from(&c.param);
+        let mut dict_args: Vec<Type> = c
+            .supers
+            .iter()
+            .map(|s| Type::Con(Sym::from(&dict_ctor(s)), vec![Type::Var(param)]))
+            .collect();
+        for (_, mt) in &infos {
+            let mut tvars = BTreeSet::new();
+            collect_type_vars(mt, &mut tvars);
+            tvars.remove(&param);
+            let mut scheme = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), mt.clone());
+            let mut rvars = BTreeSet::new();
+            super::env::collect_row_vars(mt, &mut rvars);
+            for rv in rvars {
+                scheme = Type::RowForall(rv, Box::new(scheme));
+            }
+            dict_args.push(scheme);
+        }
         data.insert(
             dname.clone(),
             DataInfo {
-                params: vec![],
+                params: vec![c.param.clone()],
                 ctors: vec![dname.clone()],
             },
         );
@@ -351,9 +374,8 @@ pub(super) fn build_classes(
             dname.clone(),
             CtorInfo {
                 type_name: Sym::from(&dname),
-                params: vec![],
-                // Leading superclass-dictionary fields, then one field per method.
-                args: vec![Type::Int; c.supers.len() + infos.len()],
+                params: vec![param],
+                args: dict_args,
                 tag: 0,
                 fields: vec![],
             },

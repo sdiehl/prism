@@ -797,6 +797,12 @@ fn fmt_sugar_inline(s: &Sugar<Surface>, mode: Mode) -> Option<String> {
             let b_s = fmt_expr_inline(b, mode)?;
             Some(format!("{a_s} ?? {b_s}"))
         }
+        Sugar::Compose(forward, f, g) => {
+            let f_s = fmt_expr_inline(f, mode)?;
+            let g_s = fmt_expr_inline(g, mode)?;
+            let op = if *forward { ">>" } else { "<<" };
+            Some(format!("{f_s} {op} {g_s}"))
+        }
         Sugar::OptChain(e, field) => {
             let e_s = fmt_expr_inline(e, mode)?;
             Some(format!("{e_s}?.{field}"))

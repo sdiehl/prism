@@ -1,7 +1,7 @@
 //! Operator spelling, precedence, and the parenthesization rules that keep a
 //! reprinted binary-operator tree parsing back to the same shape.
 
-use crate::syntax::ast::{BinOp, Expr};
+use crate::syntax::ast::{BinOp, Expr, Sugar};
 
 pub(super) const fn binop_prec(op: BinOp) -> u8 {
     match op {
@@ -24,7 +24,12 @@ pub(super) const fn binop_prec(op: BinOp) -> u8 {
 pub(super) const fn low_prec_operand(child: &Expr) -> bool {
     matches!(
         child,
-        Expr::Match(..) | Expr::If(..) | Expr::Let(..) | Expr::Lam(..) | Expr::Pipe(..)
+        Expr::Match(..)
+            | Expr::If(..)
+            | Expr::Let(..)
+            | Expr::Lam(..)
+            | Expr::Pipe(..)
+            | Expr::Sugar(Sugar::Compose(..))
     )
 }
 

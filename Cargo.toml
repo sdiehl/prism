@@ -1,5 +1,5 @@
 [package]
-name = "tiny-prism"
+name = "prism"
 version = "0.2.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]

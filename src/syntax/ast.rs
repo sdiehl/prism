@@ -494,6 +494,10 @@ pub enum Sugar<P: Phase> {
     // (one or more exprs) sets the start and, from its first two, the step;
     // desugars to prelude `enum_from_to` / `enum_from_then_to`.
     Range(Vec<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // Point-free function composition `f >> g` (forward, `true`) or `f << g`
+    // (backward, `false`). Kept as sugar so the surface operator survives
+    // formatting; desugar lowers it to `\x -> g(f(x))` / `\x -> f(g(x))`.
+    Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
 }
 
 #[derive(Clone, Debug)]

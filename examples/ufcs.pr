@@ -1,0 +1,33 @@
+-- Uniform function call: x |> f is just f(x), so any function reads as a
+-- method on its first-class data. Pipe a value through a chain instead of
+-- nesting calls inside-out. With currying, f(args) in a pipe stage leaves the
+-- piped value as the final argument: xs |> map(double) is map(double, xs).
+
+fn double(x) = x * 2
+
+fn square(x) = x * x
+
+fn inc(x) = x + 1
+
+-- map/filter/sum read left to right when piped: the data leads, the verbs follow.
+fn pipeline(xs) = xs |> filter(odd) |> map(square) |> map(inc) |> sum
+
+fn main() =
+  -- nested calls vs. the same thing piped
+  println(sum(map(square, filter(odd, range(1, 6)))))
+  println(range(1, 6) |> filter(odd) |> map(square) |> sum)
+  -- 1 + 9 + 25 = 35 both ways
+  println(pipeline(range(1, 11)))
+  -- >> composes forward: (f >> g)(x) = g(f(x)). << composes backward like the
+  -- mathematical f . g: (f << g)(x) = f(g(x)). No argument is ever named.
+  let transform = double >> inc >> square
+  let transform_back = square << inc << double
+  println(transform(3))
+  -- square(inc(double(3))) = square(7) = 49
+  println(transform_back(3))
+  -- same chain, written right to left: square(inc(double(3))) = 49
+
+  -- a pipe stage can be a partially applied function or a composed one
+  println(10 |> transform)
+  println(5 |> inc >> double)
+-- (5+1)*2 = 12

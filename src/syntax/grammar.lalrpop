@@ -600,32 +600,10 @@ Pipe: S<Expr> = {
 };
 
 Compose: S<Expr> = {
-    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> => {
-        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
-        let inner = Spanned { synth: false,
-            node: Expr::Call(Box::new(f), vec![xvar.clone()]),
-            span: Span::new(l, r)
-        };
-        let outer = Spanned { synth: false,
-            node: Expr::Call(Box::new(g), vec![inner]),
-            span: Span::new(l, r)
-        };
-        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
-        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
-    },
-    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> => {
-        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
-        let inner = Spanned { synth: false,
-            node: Expr::Call(Box::new(g), vec![xvar.clone()]),
-            span: Span::new(l, r)
-        };
-        let outer = Spanned { synth: false,
-            node: Expr::Call(Box::new(f), vec![inner]),
-            span: Span::new(l, r)
-        };
-        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
-        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
-    },
+    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(true, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(false, Box::new(f), Box::new(g))), span: Span::new(l, r) },
     Or,
 };
 

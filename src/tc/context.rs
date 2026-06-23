@@ -141,11 +141,8 @@ impl Tc<'_> {
                 self.apply_row(row),
                 Box::new(self.apply(r)),
             ),
-            // Re-reduce `@App(?f, a)` once its head existential resolves to a
-            // concrete constructor.
-            Type::Con(n, ps) if n.as_str() == crate::types::ty::APP && ps.len() == 2 => {
-                Type::app(self.apply(&ps[0]), self.apply(&ps[1]))
-            }
+            // Re-reduce an application once its head existential resolves.
+            Type::App(h, a) => Type::app(self.apply(h), self.apply(a)),
             Type::Con(n, ps) => Type::Con(*n, ps.iter().map(|p| self.apply(p)).collect()),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.apply(t)).collect()),
             other => other.clone(),

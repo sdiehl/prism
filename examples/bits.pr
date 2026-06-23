@@ -31,9 +31,14 @@ fn hash(xs : List(Int)) : U64 =
 fn main() : !{IO} Unit =
   let a = to_i64(12)
   let b = to_i64(10)
-  println(int_of_i64(i64_and(a, b)))          -- 1100 & 1010 = 1000
-  println(int_of_i64(i64_or(a, b)))           -- 1100 | 1010 = 1110
-  println(int_of_i64(i64_shr(to_i64(0 - 256), to_i64(4)))) -- arithmetic: -16
-  println(int_of_u64(u64_shl(to_u64(15), to_u64(4))))      -- 240
-  println(int_of_u64(u64_shr(to_u64(256), to_u64(8))))     -- 1
+  println(int_of_i64(i64_and(a, b)))
+  -- 1100 & 1010 = 1000
+  println(int_of_i64(i64_or(a, b)))
+  -- 1100 | 1010 = 1110
+  println(int_of_i64(i64_shr(to_i64(0 - 256), to_i64(4))))
+  -- arithmetic: -16
+  println(int_of_u64(u64_shl(to_u64(15), to_u64(4))))
+  -- 240
+  println(int_of_u64(u64_shr(to_u64(256), to_u64(8))))
+  -- 1
   println(int_of_u64(hash([104, 101, 108, 108, 111])))

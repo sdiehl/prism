@@ -16,5 +16,4 @@ fn chunks(xs : List(Int)) : List(String) =
 fn render(xs : List(Int)) : String =
   concat_all(Cons("[", append(chunks(xs), Cons("]", Nil))))
 
-fn main() : !{IO} Unit =
-  println(render([1, 2, 3, 4, 5]))
+fn main() : !{IO} Unit = println(render([1, 2, 3, 4, 5]))
