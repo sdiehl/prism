@@ -1,6 +1,6 @@
 use super::{
-    builtin, dict_ctor, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict, Elab, Error,
-    FloatOp, Span, Sym, Type, Value,
+    builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
+    Elab, Error, FloatOp, Span, Sym, Type, Value,
 };
 
 impl Elab<'_> {
@@ -98,7 +98,7 @@ impl Elab<'_> {
                     all.push(self.dict_value(&c, &mut binds));
                 }
                 all.extend(vals);
-                wrap_binds(binds, Comp::Call(format!("i@{inst}@{mname}").into(), all))
+                wrap_binds(binds, Comp::Call(instance_method(inst, &mname).into(), all))
             }
             // A dict parameter or a superclass projection: compute the dict cell
             // value (a `_c{i}` var, or a Case that projects a super field) and

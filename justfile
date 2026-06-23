@@ -43,9 +43,9 @@ wasm:
     wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
 
 examples:
-    bash scripts/gen-playground-examples.sh
+    cd web && pnpm gen-examples
 
-web: wasm examples
+web: wasm
     cd web && pnpm install && pnpm dev
 
 web-build:

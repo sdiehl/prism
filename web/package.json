@@ -5,6 +5,10 @@
   "type": "module",
   "packageManager": "pnpm@11.6.0",
   "scripts": {
+    "gen-examples": "node scripts/gen-examples.mjs",
+    "predev": "node scripts/gen-examples.mjs",
+    "prebuild": "node scripts/gen-examples.mjs",
+    "pretypecheck": "node scripts/gen-examples.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

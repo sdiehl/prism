@@ -7,7 +7,7 @@ use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
 use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
-use crate::names::{self, dict_ctor};
+use crate::names::{self, dict_ctor, instance_method};
 use crate::sym::Sym;
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, Pattern, Program, Spanned,
@@ -985,7 +985,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             let mut params = dps.clone();
             params.extend(m.params.iter().map(|p| p.name.clone()));
             fns.push(CoreFn {
-                name: format!("i@{}@{}", inst.name, m.name).into(),
+                name: instance_method(&inst.name, &m.name).into(),
                 body: elab.elab(&m.body, &locals)?,
                 params: params.into_iter().map(Sym::from).collect(),
             });
@@ -1005,7 +1005,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
             let mut args: Vec<Value> = dps.iter().map(|d| Value::Var(d.clone().into())).collect();
             args.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
-            let call = Comp::Call(format!("i@{}@{mname}", inst.name).into(), args);
+            let call = Comp::Call(instance_method(&inst.name, mname).into(), args);
             fields.push(Value::Thunk(Box::new(Comp::Lam(
                 ps.into_iter().map(Sym::from).collect(),
                 Box::new(call),

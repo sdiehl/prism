@@ -21,6 +21,14 @@ pub fn module_of(canon: &str) -> &str {
     canon.rsplit_once(['.', '@']).map_or("", |(m, _)| m)
 }
 
+// A module-private top-level name (e.g. `Data.Map@helper`). The `@` is
+// unforgeable in source so it cannot clash with a user name, and codegen
+// rewrites it to a dot. `module_of` is the inverse.
+#[must_use]
+pub fn private(module: &str, name: &str) -> String {
+    format!("{module}@{name}")
+}
+
 // Hygienic binders for synthesized handler and match arms.
 pub const CONT: &str = "k@";
 pub const STATE: &str = "s@";
@@ -101,6 +109,13 @@ pub fn is_var_runner(name: &str) -> bool {
 #[must_use]
 pub fn dict_ctor(class: &str) -> String {
     format!("{DICT_PREFIX}{class}")
+}
+
+// The top-level function lowered from instance `inst`'s method `method`
+// (e.g. `i@Show_Int@show`), called from that instance's dictionary thunks.
+#[must_use]
+pub fn instance_method(inst: &str, method: &str) -> String {
+    format!("i@{inst}@{method}")
 }
 
 // FBIP reuse token bound to the scrutinee variable it recycles.

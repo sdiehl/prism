@@ -172,7 +172,7 @@ fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, String> {
             let canon = match path {
                 None => n.clone(),
                 Some(path) if exports.contains(&n) => format!("{path}.{n}"),
-                Some(path) => format!("{path}@{n}"),
+                Some(path) => crate::names::private(path, &n),
             };
             (n, canon)
         })

@@ -98,9 +98,6 @@ jobs:
       - name: Build wasm bundle
         run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
 
-      - name: Bake examples
-        run: bash scripts/gen-playground-examples.sh
-
       - uses: pnpm/action-setup@v6
         with:
           version: 11
