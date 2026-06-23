@@ -45,6 +45,7 @@ Program {
         ClassDecl {
             name: "Eq",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "eq",

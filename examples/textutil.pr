@@ -1,0 +1,42 @@
+-- A tour of the prelude string utilities and the hash-table word counter.
+-- Everything is hard-coded and deterministic: we trim and re-case a phrase,
+-- probe it with the prefix/suffix/substring predicates, locate a needle with
+-- index_of, then fold a word list into a HashMap(Int) of frequencies. Keys are
+-- sorted before printing so the line order is fixed.
+--
+-- Prints:
+--   trim:        [hello, Prism]
+--   to_upper:    HELLO, PRISM
+--   to_lower:    hello, prism
+--   starts_with: true
+--   ends_with:   true
+--   contains:    true
+--   index_of:    7
+--   the:   3
+--   cat:   2
+--   mat:   1
+--   size:  5
+--   keys:  cat mat on sat the
+
+fn tally(m : HashMap(Int), ws : List(String)) : HashMap(Int) =
+  match ws of
+    Nil => m
+    Cons(w, rest) => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
+
+fn main() : !{IO} Unit =
+  let phrase = "  hello, Prism  "
+  let clean = trim(phrase)
+  println(concat("trim:        [", concat(clean, "]")))
+  println(concat("to_upper:    ", to_upper(clean)))
+  println(concat("to_lower:    ", to_lower(clean)))
+  println(concat("starts_with: ", show_bool(starts_with("hello", clean))))
+  println(concat("ends_with:   ", show_bool(ends_with("Prism", clean))))
+  println(concat("contains:    ", show_bool(contains("Prism", clean))))
+  println(concat("index_of:    ", show_int(index_of("Prism", clean))))
+  let words = ["the", "cat", "sat", "on", "the", "mat", "the", "cat"]
+  let freq = tally(hm_new(), words)
+  println(concat("the:   ", show_int(hm_get_or(0, freq, "the"))))
+  println(concat("cat:   ", show_int(hm_get_or(0, freq, "cat"))))
+  println(concat("mat:   ", show_int(hm_get_or(0, freq, "mat"))))
+  println(concat("size:  ", show_int(hm_size(freq))))
+  println(concat("keys:  ", str_join(" ", sort_by_ord(hm_keys(freq)))))

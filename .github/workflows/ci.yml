@@ -82,11 +82,11 @@ jobs:
       - name: Bake examples
         run: bash scripts/gen-playground-examples.sh
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm

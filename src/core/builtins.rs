@@ -102,6 +102,8 @@ pub enum Builtin {
     AppendFile,
     RemoveFile,
     Exit,
+    System,
+    Eprint,
     ArgsCount,
     Arg,
     ShowInt,
@@ -122,6 +124,44 @@ pub enum Builtin {
     U64Rem,
     I64Cmp,
     U64Cmp,
+    // Wrapping fixed-width add/sub/mul (the I64 variants already exist below for
+    // the elaborator; both lanes are surface-exposed so a userland hash can do
+    // fixed-width arithmetic without bignum promotion).
+    U64Add,
+    U64Sub,
+    U64Mul,
+    // O(1) byte access and byte-wise string building (UTF-8 unaware), so a lexer
+    // or hash scans raw bytes in linear time rather than walking codepoints.
+    ByteAt,
+    ByteLen,
+    StringOfBytes,
+    // Drop the last element of an array (in place when uniquely owned).
+    ArrayPop,
+    // Fixed-width bitwise and shift ops, one runtime call each, both lanes (the
+    // and/or/xor bit patterns coincide across signedness; `i64_shr` is arithmetic
+    // and `u64_shr` logical). Shift counts are taken modulo 64.
+    I64And,
+    I64Or,
+    I64Xor,
+    I64Shl,
+    I64Shr,
+    U64And,
+    U64Or,
+    U64Xor,
+    U64Shl,
+    U64Shr,
+    // Fixed-size polymorphic array, an ordinary heap cell (so reference counting
+    // recurses into its elements for free). `array_set` writes in place when the
+    // array is uniquely owned (FBIP), else copies.
+    ArrayNew,
+    ArrayEmpty,
+    ArrayLen,
+    ArrayGet,
+    ArraySet,
+    ArrayPush,
+    // Concatenate every string in an array into one fresh string with a single
+    // allocation: the O(n) string builder that replaces a chain of `concat`.
+    StringOfArray,
     // Stable sort of a `List` of a primitive element, chosen at the call site
     // when a `sort`/`sort_by_ord` use resolves to a canonical primitive `Ord`
     // instance. Not surface-callable; emitted only by the elaborator. Args are
@@ -150,6 +190,8 @@ impl Builtin {
         Self::AppendFile,
         Self::RemoveFile,
         Self::Exit,
+        Self::System,
+        Self::Eprint,
         Self::ArgsCount,
         Self::Arg,
         Self::ShowInt,
@@ -170,6 +212,30 @@ impl Builtin {
         Self::U64Rem,
         Self::I64Cmp,
         Self::U64Cmp,
+        Self::U64Add,
+        Self::U64Sub,
+        Self::U64Mul,
+        Self::ByteAt,
+        Self::ByteLen,
+        Self::StringOfBytes,
+        Self::ArrayPop,
+        Self::I64And,
+        Self::I64Or,
+        Self::I64Xor,
+        Self::I64Shl,
+        Self::I64Shr,
+        Self::U64And,
+        Self::U64Or,
+        Self::U64Xor,
+        Self::U64Shl,
+        Self::U64Shr,
+        Self::ArrayNew,
+        Self::ArrayEmpty,
+        Self::ArrayLen,
+        Self::ArrayGet,
+        Self::ArraySet,
+        Self::ArrayPush,
+        Self::StringOfArray,
         Self::SortPrim,
     ];
 
@@ -195,6 +261,8 @@ impl Builtin {
             Self::AppendFile => "append_file",
             Self::RemoveFile => "remove_file",
             Self::Exit => "exit",
+            Self::System => "system",
+            Self::Eprint => "eprint",
             Self::ArgsCount => "args_count",
             Self::Arg => "arg",
             Self::ShowInt => "show_int",
@@ -215,6 +283,30 @@ impl Builtin {
             Self::U64Rem => "u64_rem",
             Self::I64Cmp => "i64_cmp",
             Self::U64Cmp => "u64_cmp",
+            Self::U64Add => "u64_add",
+            Self::U64Sub => "u64_sub",
+            Self::U64Mul => "u64_mul",
+            Self::ByteAt => "byte_at",
+            Self::ByteLen => "byte_len",
+            Self::StringOfBytes => "string_of_bytes",
+            Self::ArrayPop => "array_pop",
+            Self::I64And => "i64_and",
+            Self::I64Or => "i64_or",
+            Self::I64Xor => "i64_xor",
+            Self::I64Shl => "i64_shl",
+            Self::I64Shr => "i64_shr",
+            Self::U64And => "u64_and",
+            Self::U64Or => "u64_or",
+            Self::U64Xor => "u64_xor",
+            Self::U64Shl => "u64_shl",
+            Self::U64Shr => "u64_shr",
+            Self::ArrayNew => "array_new",
+            Self::ArrayEmpty => "array_empty",
+            Self::ArrayLen => "array_len",
+            Self::ArrayGet => "array_get",
+            Self::ArraySet => "array_set",
+            Self::ArrayPush => "array_push",
+            Self::StringOfArray => "string_of_array",
             Self::SortPrim => "sort_prim",
         }
     }
@@ -247,6 +339,8 @@ impl Builtin {
                 | Self::AppendFile
                 | Self::RemoveFile
                 | Self::Exit
+                | Self::System
+                | Self::Eprint
                 | Self::ArgsCount
                 | Self::Arg
         )
@@ -294,12 +388,47 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("append_file", 2, BuiltinKind::Str),
     ("remove_file", 1, BuiltinKind::Str),
     ("exit", 1, BuiltinKind::Str),
+    ("system", 1, BuiltinKind::Str),
+    ("eprint", 1, BuiltinKind::Str),
     ("args_count", 0, BuiltinKind::Str),
     ("arg", 1, BuiltinKind::Str),
     ("to_i64", 1, BuiltinKind::Int),
     ("to_u64", 1, BuiltinKind::Int),
     ("int_of_i64", 1, BuiltinKind::Int),
     ("int_of_u64", 1, BuiltinKind::Int),
+    ("array_new", 2, BuiltinKind::Str),
+    ("array_empty", 0, BuiltinKind::Str),
+    ("array_len", 1, BuiltinKind::Str),
+    ("array_get", 2, BuiltinKind::Str),
+    ("array_set", 3, BuiltinKind::Str),
+    ("array_push", 2, BuiltinKind::Str),
+    ("array_pop", 1, BuiltinKind::Str),
+    ("string_of_array", 1, BuiltinKind::Str),
+    ("string_of_bytes", 1, BuiltinKind::Str),
+    ("byte_at", 2, BuiltinKind::Str),
+    ("byte_len", 1, BuiltinKind::Str),
+    ("i64_add", 2, BuiltinKind::Str),
+    ("i64_sub", 2, BuiltinKind::Str),
+    ("i64_mul", 2, BuiltinKind::Str),
+    ("u64_add", 2, BuiltinKind::Str),
+    ("u64_sub", 2, BuiltinKind::Str),
+    ("u64_mul", 2, BuiltinKind::Str),
+    ("i64_div", 2, BuiltinKind::Str),
+    ("i64_rem", 2, BuiltinKind::Str),
+    ("i64_cmp", 2, BuiltinKind::Str),
+    ("u64_div", 2, BuiltinKind::Str),
+    ("u64_rem", 2, BuiltinKind::Str),
+    ("u64_cmp", 2, BuiltinKind::Str),
+    ("i64_and", 2, BuiltinKind::Str),
+    ("i64_or", 2, BuiltinKind::Str),
+    ("i64_xor", 2, BuiltinKind::Str),
+    ("i64_shl", 2, BuiltinKind::Str),
+    ("i64_shr", 2, BuiltinKind::Str),
+    ("u64_and", 2, BuiltinKind::Str),
+    ("u64_or", 2, BuiltinKind::Str),
+    ("u64_xor", 2, BuiltinKind::Str),
+    ("u64_shl", 2, BuiltinKind::Str),
+    ("u64_shr", 2, BuiltinKind::Str),
 ];
 
 #[must_use]

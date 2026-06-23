@@ -16,6 +16,7 @@ Program {
         ClassDecl {
             name: "Ord",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "cmp",

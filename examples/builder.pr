@@ -1,0 +1,20 @@
+-- O(n) string building: accumulate chunks in a list (O(1) prepend), then
+-- fold them into one string with a single allocation via `concat_all`, instead
+-- of a right-nested chain of `concat` that recopies the growing suffix at every
+-- step. `concat_all` packs the list into a fixed Array(String) and concatenates
+-- it in one pass (`string_of_array`).
+--
+-- Prints:
+--   [1, 2, 3, 4, 5]
+
+fn chunks(xs : List(Int)) : List(String) =
+  match xs of
+    Nil => Nil
+    Cons(x, Nil) => Cons(show_int(x), Nil)
+    Cons(x, rest) => Cons(show_int(x), Cons(", ", chunks(rest)))
+
+fn render(xs : List(Int)) : String =
+  concat_all(Cons("[", append(chunks(xs), Cons("]", Nil))))
+
+fn main() : !{IO} Unit =
+  println(render([1, 2, 3, 4, 5]))

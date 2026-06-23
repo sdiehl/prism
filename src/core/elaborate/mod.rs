@@ -955,7 +955,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     for inst in &prog.instances {
         let info = &checked.instances[&inst.name];
         let class = &checked.classes[&info.class];
-        let dps: Vec<String> = (0..info.context.len()).map(|i| format!("_c{i}")).collect();
+        // Dict params: the declared context first (so method bodies' `_c{i}`
+        // indices are unchanged), then one per superclass obligation.
+        let nctx = info.context.len();
+        let dps: Vec<String> = (0..(nctx + info.supers.len()))
+            .map(|i| format!("_c{i}"))
+            .collect();
         for m in &inst.methods {
             let sig = &class
                 .methods
@@ -986,6 +991,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             });
         }
         let mut fields = Vec::new();
+        // Leading superclass-dictionary fields (the trailing dict params), then
+        // one thunk per method. `Dict::Super` and method projection index past
+        // these leading fields.
+        for j in 0..info.supers.len() {
+            fields.push(Value::Var(format!("_c{}", nctx + j).into()));
+        }
         for (mname, sig) in &class.methods {
             let arity = match sig {
                 Type::Fun(d, _, _) => d.len(),

@@ -211,8 +211,8 @@ PatClause: (String, S<Expr>, Span) = {
 };
 
 ClassD: ClassDecl = {
-    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" "{" <methods:ClassSigs> "}" <r:@R> =>
-        ClassDecl { name, param, methods, span: Span::new(l, r) },
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> "{" <methods:ClassSigs> "}" <r:@R> =>
+        ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods, span: Span::new(l, r) },
 };
 
 ClassSigs: Vec<(String, Ty)> = {

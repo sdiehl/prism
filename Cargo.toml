@@ -1,6 +1,6 @@
 [package]
 name = "tiny-prism"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"

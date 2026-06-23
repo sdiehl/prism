@@ -1520,13 +1520,19 @@ pub(super) fn escape_str(s: &str) -> String {
 fn str_builtin_kinds(sym: &str) -> (&'static [usize], &'static [usize], bool) {
     match sym {
         "prism_str_len" | "prism_str_eq" | "prism_str_cmp" | "prism_args_count"
-        | "prism_i64_cmp" | "prism_u64_cmp" | "prism_file_exists" => (&[], &[], true),
-        "prism_show_bool" | "prism_show_char" | "prism_arg" | "prism_exit" => (&[0], &[], false),
+        | "prism_i64_cmp" | "prism_u64_cmp" | "prism_file_exists" | "prism_system"
+        | "prism_array_len" | "prism_byte_len" => (&[], &[], true),
+        "prism_char_at" | "prism_byte_at" => (&[1], &[], true),
+        // Index/count args are raw integers; the element/array args and the
+        // result (cell or polymorphic value) pass through unchanged.
+        "prism_array_get" | "prism_array_set" => (&[1], &[], false),
+        "prism_show_bool" | "prism_show_char" | "prism_arg" | "prism_exit" | "prism_array_new" => {
+            (&[0], &[], false)
+        }
         "prism_show_float" => (&[], &[0], false),
         "prism_show_float_prec" => (&[1], &[0], false),
         "prism_pow_float" => (&[], &[0, 1], false),
         "prism_substring" => (&[1, 2], &[], false),
-        "prism_char_at" => (&[1], &[], true),
         _ => (&[], &[], false),
     }
 }
@@ -1658,6 +1664,7 @@ mod tests {
         "prism_i64_cmp",
         "prism_u64_cmp",
         "prism_file_exists",
+        "prism_system",
         "prism_show_bool",
         "prism_show_char",
         "prism_arg",
@@ -1667,5 +1674,11 @@ mod tests {
         "prism_pow_float",
         "prism_substring",
         "prism_char_at",
+        "prism_array_len",
+        "prism_array_new",
+        "prism_array_get",
+        "prism_array_set",
+        "prism_byte_len",
+        "prism_byte_at",
     ];
 }

@@ -74,6 +74,10 @@ pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
 pub enum Dict {
     Global(String, Vec<Self>),
     Param(usize),
+    // Project a superclass dictionary from a subclass dictionary: the `idx`-th
+    // leading (superclass) field of the dict cell for class `subclass`. Used to
+    // discharge `Eq(a)` from a `given Ord(a)` when `Ord` declares `Eq` a super.
+    Super(Box<Self>, String, usize),
 }
 
 // Spans are the identity of dispatch sites. Desugar must keep them unique per
@@ -84,6 +88,9 @@ pub type DictTable = BTreeMap<Span, Vec<Dict>>;
 #[derive(Clone, Debug)]
 pub struct ClassInfo {
     pub param: String,
+    // Superclass class names; each instance carries one resolved superclass
+    // dictionary per entry, stored as a leading field of its dict cell.
+    pub supers: Vec<String>,
     pub methods: Vec<(String, Type)>,
 }
 
@@ -92,6 +99,9 @@ pub struct InstInfo {
     pub class: String,
     pub head: Type,
     pub context: Vec<(String, Type)>,
+    // Resolved superclass obligations `(super_class, head)`, one per the class's
+    // declared supers, discharged at each use site and embedded in the dict cell.
+    pub supers: Vec<(String, Type)>,
 }
 
 // Per update path, the rebuild chain: one (ctor name, field index, arity)
@@ -182,6 +192,7 @@ struct Tc<'a> {
     fixed: BTreeMap<Span, Type>,
     span_types: BTreeMap<Span, Type>,
     pending: Vec<(Span, Type)>,
+    classes: &'a BTreeMap<String, ClassInfo>,
     instances: &'a BTreeMap<String, InstInfo>,
     inst_keys: &'a InstKeys,
     constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
@@ -286,6 +297,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            classes: &classes,
             instances: &instances,
             inst_keys: &inst_keys,
             constrained,
@@ -465,6 +477,7 @@ fn infer_expr_full(
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
         pending: Vec::new(),
+        classes: &checked.classes,
         instances: &checked.instances,
         inst_keys: &checked.inst_keys,
         constrained: checked.constrained.clone(),

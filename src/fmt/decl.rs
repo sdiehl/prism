@@ -66,7 +66,22 @@ pub(super) fn fmt_class(c: &ClassDecl) -> String {
         .iter()
         .map(|(n, t)| format!("  {n} : {}", fmt_ty(t)))
         .collect();
-    format!("class {}({}) {{\n{}\n}}", c.name, c.param, sigs.join(",\n"))
+    let sup = if c.supers.is_empty() {
+        String::new()
+    } else {
+        let parts: Vec<String> = c
+            .supers
+            .iter()
+            .map(|s| format!("{s}({})", c.param))
+            .collect();
+        format!(" given {}", parts.join(", "))
+    };
+    format!(
+        "class {}({}){sup} {{\n{}\n}}",
+        c.name,
+        c.param,
+        sigs.join(",\n")
+    )
 }
 
 pub(super) fn fmt_constraints(cs: &[Constraint]) -> String {

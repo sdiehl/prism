@@ -389,6 +389,7 @@ mod tests {
     fn tc<'a>(
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
+        classes: &'a BTreeMap<String, super::super::ClassInfo>,
         instances: &'a BTreeMap<String, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
     ) -> Tc<'a> {
@@ -403,6 +404,7 @@ mod tests {
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            classes,
             instances,
             inst_keys,
             constrained: BTreeMap::new(),
@@ -451,9 +453,10 @@ mod tests {
     fn rewrite_row_is_order_insensitive() {
         let ctors = BTreeMap::new();
         let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
         let instances = BTreeMap::new();
         let inst_keys = BTreeMap::new();
-        let mut t = tc(&ctors, &eff_ops, &instances, &inst_keys);
+        let mut t = tc(&ctors, &eff_ops, &classes, &instances, &inst_keys);
 
         let io = Label::bare("IO");
         let head = |a: &str, b: &str| {

@@ -131,6 +131,20 @@ impl Tc<'_> {
                     return Ok(Dict::Param(i));
                 }
             }
+            // No direct constraint, but a `given D(t)` whose class D has `class`
+            // among its (transitive) superclasses entails it: project the super
+            // dictionary out of D's param dict cell.
+            for (i, (cclass, cty)) in cur_constraints.iter().enumerate() {
+                if self.apply(cty) == *t {
+                    if let Some(path) = self.super_path(cclass, class) {
+                        let mut d = Dict::Param(i);
+                        for (sub, idx) in path {
+                            d = Dict::Super(Box::new(d), sub, idx);
+                        }
+                        return Ok(d);
+                    }
+                }
+            }
             let key = Self::head_key(class, t, span)?;
             match self
                 .inst_keys
@@ -186,7 +200,35 @@ impl Tc<'_> {
             let ct = self.apply(&ct);
             ctx_dicts.push(self.resolve(cclass, &ct, span, None, depth + 1)?);
         }
+        // Superclass dictionaries follow the declared context, in the same order
+        // the instance constructor lays them out as leading dict-cell fields.
+        for (sclass, sty) in &info.supers {
+            let mut st = sty.clone();
+            for (n, x) in &subs {
+                st = st.subst_var(*n, x);
+            }
+            let st = self.apply(&st);
+            ctx_dicts.push(self.resolve(sclass, &st, span, None, depth + 1)?);
+        }
         Ok(Dict::Global(inst_name, ctx_dicts))
+    }
+
+    // The field-index path projecting class `want` out of a `from` dictionary
+    // via superclasses, or `None` if `want` is not a superclass of `from`. Each
+    // step names the class whose dict cell is being projected and the leading
+    // field index of the superclass within it.
+    fn super_path(&self, from: &str, want: &str) -> Option<Vec<(String, usize)>> {
+        let info = self.classes.get(from)?;
+        for (idx, s) in info.supers.iter().enumerate() {
+            if s == want {
+                return Some(vec![(from.to_string(), idx)]);
+            }
+            if let Some(mut rest) = self.super_path(s, want) {
+                rest.insert(0, (from.to_string(), idx));
+                return Some(rest);
+            }
+        }
+        None
     }
 
     fn head_key(class: &str, t: &Type, span: Span) -> Result<HeadKey, TypeError> {
@@ -302,7 +344,8 @@ pub(super) fn build_classes(
             CtorInfo {
                 type_name: Sym::from(&dname),
                 params: vec![],
-                args: vec![Type::Int; infos.len()],
+                // Leading superclass-dictionary fields, then one field per method.
+                args: vec![Type::Int; c.supers.len() + infos.len()],
                 tag: 0,
                 fields: vec![],
             },
@@ -311,6 +354,7 @@ pub(super) fn build_classes(
             c.name.clone(),
             ClassInfo {
                 param: c.param.clone(),
+                supers: c.supers.clone(),
                 methods: infos,
             },
         );
@@ -440,6 +484,18 @@ pub(super) fn build_classes(
                 ),
             });
         }
+        // Each declared superclass of the class becomes an obligation `S(head)`
+        // discharged at every use site and embedded as a leading dict field.
+        let mut supers = Vec::new();
+        for s in &class.supers {
+            if !classes.contains_key(s) {
+                return Err(TypeError::Other {
+                    span: i.span,
+                    msg: format!("class {} names unknown superclass {s}", i.class),
+                });
+            }
+            supers.push((s.clone(), head.clone()));
+        }
         inst_keys
             .entry((i.class.clone(), key))
             .or_default()
@@ -450,6 +506,7 @@ pub(super) fn build_classes(
                 class: i.class.clone(),
                 head,
                 context,
+                supers,
             },
         );
     }

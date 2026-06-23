@@ -348,12 +348,47 @@ const BUILTINS: &[(&str, &str)] = &[
     ("append_file", "(String, String) -> Result(Unit, String)"),
     ("remove_file", "(String) -> Unit"),
     ("exit", "forall a. (Int) -> a"),
+    ("system", "(String) -> Int ! {IO}"),
+    ("eprint", "(String) -> Unit ! {IO}"),
     ("args_count", "() -> Int"),
     ("arg", "(Int) -> String"),
     ("to_i64", "(Int) -> I64"),
     ("to_u64", "(Int) -> U64"),
     ("int_of_i64", "(I64) -> Int"),
     ("int_of_u64", "(U64) -> Int"),
+    ("i64_and", "(I64, I64) -> I64"),
+    ("i64_or", "(I64, I64) -> I64"),
+    ("i64_xor", "(I64, I64) -> I64"),
+    ("i64_shl", "(I64, I64) -> I64"),
+    ("i64_shr", "(I64, I64) -> I64"),
+    ("u64_and", "(U64, U64) -> U64"),
+    ("u64_or", "(U64, U64) -> U64"),
+    ("u64_xor", "(U64, U64) -> U64"),
+    ("u64_shl", "(U64, U64) -> U64"),
+    ("u64_shr", "(U64, U64) -> U64"),
+    ("array_new", "forall a. (Int, a) -> Array(a)"),
+    ("array_empty", "forall a. () -> Array(a)"),
+    ("array_len", "forall a. (Array(a)) -> Int"),
+    ("array_get", "forall a. (Array(a), Int) -> a"),
+    ("array_set", "forall a. (Array(a), Int, a) -> Array(a)"),
+    ("array_push", "forall a. (Array(a), a) -> Array(a)"),
+    ("array_pop", "forall a. (Array(a)) -> Array(a)"),
+    ("string_of_array", "(Array(String)) -> String"),
+    ("string_of_bytes", "(Array(Int)) -> String"),
+    ("byte_at", "(String, Int) -> Int"),
+    ("byte_len", "(String) -> Int"),
+    ("i64_add", "(I64, I64) -> I64"),
+    ("i64_sub", "(I64, I64) -> I64"),
+    ("i64_mul", "(I64, I64) -> I64"),
+    ("u64_add", "(U64, U64) -> U64"),
+    ("u64_sub", "(U64, U64) -> U64"),
+    ("u64_mul", "(U64, U64) -> U64"),
+    ("i64_div", "(I64, I64) -> I64"),
+    ("i64_rem", "(I64, I64) -> I64"),
+    ("i64_cmp", "(I64, I64) -> Int"),
+    ("u64_div", "(U64, U64) -> U64"),
+    ("u64_rem", "(U64, U64) -> U64"),
+    ("u64_cmp", "(U64, U64) -> Int"),
 ];
 
 // A builtin signature carries its latent effects on the arrow. The row feeds
@@ -417,6 +452,15 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     let mut data = BTreeMap::new();
     let mut ctors = BTreeMap::new();
     let mut env = base_env()?;
+    // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface
+    // constructors, manipulated only through the `array_*` builtins.
+    data.insert(
+        "Array".to_string(),
+        DataInfo {
+            params: vec!["a".to_string()],
+            ctors: vec![],
+        },
+    );
     for dd in &prog.types {
         data.insert(
             dd.name.clone(),
@@ -534,7 +578,8 @@ mod tests {
         for (name, sig) in super::BUILTINS {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
             let want: &[&str] = match *name {
-                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" => &["IO"],
+                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" | "system"
+                | "eprint" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

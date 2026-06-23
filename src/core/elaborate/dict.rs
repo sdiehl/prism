@@ -59,6 +59,24 @@ impl Elab<'_> {
                 binds.push((Comp::Call(inst.clone().into(), vals), v.clone()));
                 Value::Var(v.into())
             }
+            // Project a superclass dict from a subclass dict cell: the super
+            // fields lead the cell, so the field index is the super index.
+            Dict::Super(d, subclass, idx) => {
+                let parent = self.dict_value(d, binds);
+                let cls = &self.checked.classes[subclass];
+                let n = cls.supers.len() + cls.methods.len();
+                let fv = self.fresh();
+                let binders = (0..n)
+                    .map(|j| (j == *idx).then(|| Sym::from(&fv)))
+                    .collect();
+                let pat = CorePat::Ctor(Sym::from(&dict_ctor(subclass)), binders);
+                let out = self.fresh();
+                binds.push((
+                    Comp::Case(parent, vec![(pat, Comp::Return(Value::Var(fv.into())))]),
+                    out.clone(),
+                ));
+                Value::Var(out.into())
+            }
         }
     }
 
@@ -82,17 +100,30 @@ impl Elab<'_> {
                 all.extend(vals);
                 wrap_binds(binds, Comp::Call(format!("i@{inst}@{mname}").into(), all))
             }
-            Dict::Param(i) => {
-                let n = self.checked.classes[class].methods.len();
+            // A dict parameter or a superclass projection: compute the dict cell
+            // value (a `_c{i}` var, or a Case that projects a super field) and
+            // pull the method out of it. Methods follow the leading super fields.
+            other => {
+                let mut binds = Vec::new();
+                let dv = self.dict_value(other, &mut binds);
+                let cls = &self.checked.classes[class];
+                let nsup = cls.supers.len();
+                let n = nsup + cls.methods.len();
+                let field = nsup + idx;
                 let mv = self.fresh();
-                let binders = (0..n).map(|j| (j == idx).then(|| Sym::from(&mv))).collect();
+                let binders = (0..n)
+                    .map(|j| (j == field).then(|| Sym::from(&mv)))
+                    .collect();
                 let pat = CorePat::Ctor(Sym::from(&dict_ctor(class)), binders);
-                Comp::Case(
-                    Value::Var(format!("_c{i}").into()),
-                    vec![(
-                        pat,
-                        Comp::App(Box::new(Comp::Force(Value::Var(mv.into()))), vals),
-                    )],
+                wrap_binds(
+                    binds,
+                    Comp::Case(
+                        dv,
+                        vec![(
+                            pat,
+                            Comp::App(Box::new(Comp::Force(Value::Var(mv.into()))), vals),
+                        )],
+                    ),
                 )
             }
         }

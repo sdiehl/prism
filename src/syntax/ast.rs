@@ -237,6 +237,10 @@ pub enum AliasRhs {
 pub struct ClassDecl {
     pub name: String,
     pub param: String,
+    // Superclass class names, each a constraint over `param` (`class Ord(a)
+    // given Eq(a)` records `["Eq"]`). Every instance of this class then carries
+    // a resolved superclass dictionary, projectable from a `given` constraint.
+    pub supers: Vec<String>,
     pub methods: Vec<(String, Ty)>,
     pub span: Span,
 }

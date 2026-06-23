@@ -1,0 +1,25 @@
+-- A tour of the prelude hash table (HashMap): insert and update, lookup with a
+-- default, membership, size, and the key set. Iteration order is a deterministic
+-- function of the inserts; the keys are sorted before printing only so the line
+-- reads in a fixed alphabetical order.
+--
+-- Prints:
+--   100
+--   250
+--   true
+--   false
+--   3
+--   apple banana cherry
+
+fn main() : !{IO} Unit =
+  let m = hm_new()
+  let m = hm_insert(m, "apple", 50)
+  let m = hm_insert(m, "banana", 250)
+  let m = hm_insert(m, "cherry", 75)
+  let m = hm_insert(m, "apple", 100)
+  println(hm_get_or(0, m, "apple"))
+  println(hm_get_or(0, m, "banana"))
+  println(hm_member(m, "cherry"))
+  println(hm_member(m, "durian"))
+  println(hm_size(m))
+  println(str_join(" ", sort_by_ord(hm_keys(m))))

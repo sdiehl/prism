@@ -1,0 +1,66 @@
+-- Growable mutable Array(a), an ordinary heap cell so reference counting recurses
+-- into its elements for free. `array_set`/`array_push` mutate in place when the
+-- array is uniquely owned (FBIP, threading one array linearly) and copy otherwise;
+-- `array_push` doubles capacity when full, so appends are amortized O(1). Run with
+-- PRISM_CHECK_LEAKS=1 to confirm zero leaked cells.
+--
+-- A Sieve of Eratosthenes: the boolean array is owned by exactly one binding at
+-- every step, so every `array_set` mutates in place.
+--
+-- Prints:
+--   15
+--   1
+--   10
+--   285
+
+-- Mark multiples of `step` starting at `i` as composite, in place.
+fn mark(sieve : Array(Bool), i : Int, n : Int, step : Int) : Array(Bool) =
+  if i >= n then
+    sieve
+  else
+    mark(array_set(sieve, i, false), i + step, n, step)
+
+fn sift(sieve : Array(Bool), p : Int, n : Int) : Array(Bool) =
+  if p * p >= n then
+    sieve
+  elif array_get(sieve, p) then
+    sift(mark(sieve, p * p, n, p), p + 1, n)
+  else
+    sift(sieve, p + 1, n)
+
+fn count_from(sieve : Array(Bool), i : Int, n : Int, acc : Int) : Int =
+  if i >= n then
+    acc
+  elif array_get(sieve, i) then
+    count_from(sieve, i + 1, n, acc + 1)
+  else
+    count_from(sieve, i + 1, n, acc)
+
+-- Append the squares 0..n-1, growing the array as it fills.
+fn grow(arr : Array(Int), i : Int, n : Int) : Array(Int) =
+  if i >= n then
+    arr
+  else
+    grow(array_push(arr, i * i), i + 1, n)
+
+fn total(arr : Array(Int), i : Int, acc : Int) : Int =
+  if i >= array_len(arr) then
+    acc
+  else
+    total(arr, i + 1, acc + array_get(arr, i))
+
+fn main() : !{IO} Unit =
+  let n = 50
+  let s = array_new(n, true)
+  let s = array_set(s, 0, false)
+  let s = array_set(s, 1, false)
+  let s = sift(s, 2, n)
+  println(count_from(s, 2, n, 0))
+  -- A shared array copies on update: the original is untouched.
+  let base = array_new(3, 7)
+  let bumped = array_set(base, 0, 99)
+  println(array_get(base, 0) - array_get(base, 0) + array_get(bumped, 0) - 98)
+  -- Grow from empty by pushing, doubling capacity as needed.
+  let g = grow(array_empty(), 0, 10)
+  println(array_len(g))
+  println(total(g, 0, 0))

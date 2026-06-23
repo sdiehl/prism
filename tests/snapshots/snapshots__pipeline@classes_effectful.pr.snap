@@ -16,6 +16,7 @@ Program {
         ClassDecl {
             name: "Loud",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "loud",
