@@ -62,7 +62,17 @@ pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
-    Ok(typecheck(&program)?)
+    let checked = typecheck(&program)?;
+    emit_warnings(&checked);
+    Ok(checked)
+}
+
+// Surface non-fatal checker diagnostics (orphan/overlapping instances) on stderr.
+// Errors abort earlier, so this only runs once a program type checks.
+fn emit_warnings(checked: &Checked) {
+    for w in &checked.warnings {
+        eprintln!("warning: {}", w.msg);
+    }
 }
 
 fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core), Error> {
@@ -70,6 +80,7 @@ fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
     let checked = typecheck(&program)?;
+    emit_warnings(&checked);
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &core)?;
     reconcile_effects(&checked, &core)?;

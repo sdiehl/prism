@@ -16,7 +16,8 @@ use tiny_prism::error::Error;
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
-    /// A program to run; `prism <file>` is shorthand for `prism run <file>`
+    /// A file or project to run; `prism <path>` is shorthand for `prism run
+    /// <path>`. A directory or a `prism.toml` is run as a project.
     file: Option<PathBuf>,
 }
 
@@ -75,7 +76,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn read(file: &PathBuf) -> Result<String, Error> {
+fn read(file: &Path) -> Result<String, Error> {
     std::fs::read_to_string(file).map_err(Error::Io)
 }
 
@@ -86,11 +87,30 @@ fn base_of(file: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
+// Resolve a CLI argument into the source to compile, the module-resolution base,
+// and a display name. A directory or a `prism.toml` is a project: the entry comes
+// from the manifest and modules resolve from the project's `src/`. A `.pr` file
+// is a single-file program whose imports resolve relative to its own directory.
+fn resolve_input(arg: &Path) -> Result<(String, PathBuf, String), (Error, String, String)> {
+    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == "prism.toml");
+    if is_project {
+        let project = tiny_prism::project::load_project(arg)
+            .map_err(|e| (e, String::new(), arg.display().to_string()))?;
+        let src =
+            read(&project.entry).map_err(|e| (e, String::new(), file_name(&project.entry)))?;
+        let full = tiny_prism::with_prelude(&src);
+        Ok((full, project.src_dir, file_name(&project.entry)))
+    } else {
+        let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;
+        let full = tiny_prism::with_prelude(&src);
+        Ok((full, base_of(arg), file_name(arg)))
+    }
+}
+
 fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
     match cmd {
         Cmd::Run { file } => {
-            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
-            let full = tiny_prism::with_prelude(&src);
+            let (full, base, name) = resolve_input(&file)?;
             // Stream `print` to the terminal and read from real stdin so the CLI
             // behaves like a normal program. `exit(n)` maps to a real process
             // exit with that code, skipping the `=> value` trailer.
@@ -98,8 +118,8 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             let stdin = std::io::stdin();
             let mut out = stdout.lock();
             let mut input = stdin.lock();
-            let run = tiny_prism::interpret_io_at(&full, &base_of(&file), &mut out, &mut input)
-                .map_err(|e| (e, full, file_name(&file)))?;
+            let run = tiny_prism::interpret_io_at(&full, &base, &mut out, &mut input)
+                .map_err(|e| (e, full, name))?;
             drop(out);
             drop(input);
             if let Some(code) = run.exit {
@@ -109,35 +129,28 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             Ok(())
         }
         Cmd::Build { file, out, mlir } => {
-            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
-            let full = tiny_prism::with_prelude(&src);
-            build_dispatch(mlir, &full, &base_of(&file), &out)
-                .map_err(|e| (e, full, file_name(&file)))?;
+            let (full, base, name) = resolve_input(&file)?;
+            build_dispatch(mlir, &full, &base, &out).map_err(|e| (e, full, name))?;
             println!("wrote {}", out.display());
             Ok(())
         }
         Cmd::Check { file } => {
-            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
-            let full = tiny_prism::with_prelude(&src);
-            let checked = tiny_prism::check_at(&full, &base_of(&file))
-                .map_err(|e| (e, full, file_name(&file)))?;
+            let (full, base, name) = resolve_input(&file)?;
+            let checked = tiny_prism::check_at(&full, &base).map_err(|e| (e, full, name))?;
             for d in &checked.decls {
                 println!("{} : {}", d.name, d.ty.show());
             }
             Ok(())
         }
         Cmd::Dump { phase, file } => {
-            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
-            let full = tiny_prism::with_prelude(&src);
-            let out = tiny_prism::dump_at(&phase, &full, &base_of(&file))
-                .map_err(|e| (e, full, file_name(&file)))?;
+            let (full, base, name) = resolve_input(&file)?;
+            let out = tiny_prism::dump_at(&phase, &full, &base).map_err(|e| (e, full, name))?;
             println!("{out}");
             Ok(())
         }
         Cmd::Report { file } => {
-            let src = read(&file).map_err(|e| (e, String::new(), file_name(&file)))?;
-            let full = tiny_prism::with_prelude(&src);
-            print!("{}", tiny_prism::report_at(&full, &base_of(&file)));
+            let (full, base, _name) = resolve_input(&file)?;
+            print!("{}", tiny_prism::report_at(&full, &base));
             Ok(())
         }
         Cmd::Repl { no_banner } => {

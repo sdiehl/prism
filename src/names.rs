@@ -13,6 +13,14 @@ pub const FAIL_OP: &str = "fail";
 
 pub const DICT_PREFIX: &str = "_D";
 
+// The module path encoded in a canonical name: everything before the final `.`
+// (an exported name like `Data.Map.insert`) or `@` (a private name like
+// `Data.Map@helper`). A bare name belongs to the root module and yields "".
+#[must_use]
+pub fn module_of(canon: &str) -> &str {
+    canon.rsplit_once(['.', '@']).map_or("", |(m, _)| m)
+}
+
 // Hygienic binders for synthesized handler and match arms.
 pub const CONT: &str = "k@";
 pub const STATE: &str = "s@";

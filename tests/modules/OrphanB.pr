@@ -1,0 +1,5 @@
+import Typ (Widget)
+
+instance weq2 : Eq(Widget) {
+  fn eq(a, b) = false
+}

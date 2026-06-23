@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::env::{collect_type_vars, convert_data, wrap_forall};
-use super::{ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted};
+use super::{
+    ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted, Warning,
+};
 use crate::error::TypeError;
 use crate::names::dict_ctor;
 use crate::sym::Sym;
@@ -153,14 +155,25 @@ impl Tc<'_> {
             {
                 Some([one]) => one.clone(),
                 Some(many @ [_, _, ..]) => {
+                    // Name the defining module of each candidate when they span
+                    // more than one; for purely root-local named instances the
+                    // bare list is clearer (and keeps the message stable).
+                    let cross_module = many
+                        .iter()
+                        .filter_map(|n| self.instances.get(n))
+                        .any(|i| !i.module.is_empty());
+                    let listed = if cross_module {
+                        provenance_list(self.instances, many)
+                    } else {
+                        many.join(", ")
+                    };
                     return Err(TypeError::Other {
                         span,
                         msg: format!(
-                            "ambiguous instance for {class}({}): {}; select one with f[name]",
+                            "ambiguous instance for {class}({}): {listed}; select one with f[name]",
                             t.show(),
-                            many.join(", ")
                         ),
-                    })
+                    });
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -253,6 +266,7 @@ type BuildClassResult = (
     InstKeys,
     BTreeMap<String, (String, usize)>,
     BTreeMap<String, (Type, Vec<(String, Type)>)>,
+    Vec<Warning>,
 );
 
 const fn head_name(t: &Type) -> Option<HeadKey> {
@@ -280,6 +294,7 @@ pub(super) fn build_classes(
     let mut classes: BTreeMap<String, ClassInfo> = BTreeMap::new();
     let mut instances: BTreeMap<String, InstInfo> = BTreeMap::new();
     let mut inst_keys = InstKeys::new();
+    let mut warnings: Vec<Warning> = Vec::new();
     let mut methods: BTreeMap<String, (String, usize)> = BTreeMap::new();
     let mut constrained: BTreeMap<String, (Type, Vec<(String, Type)>)> = BTreeMap::new();
     for c in &prog.classes {
@@ -526,6 +541,33 @@ pub(super) fn build_classes(
             }
             supers.push((s.clone(), head.clone()));
         }
+        // Orphan rule: an instance must be anchored to the module that defines
+        // its class or its head type. Anywhere else it is an orphan, warned now
+        // and (once packages and separate compilation land) an error across a
+        // package boundary. Primitive heads count as prelude-defined.
+        let inst_mod = i.module.as_str();
+        let class_mod = crate::names::module_of(&i.class);
+        let head_mod = match &head {
+            Type::Con(n, _) => crate::names::module_of(n.as_str()),
+            _ => "",
+        };
+        if class_mod != inst_mod && head_mod != inst_mod {
+            let where_ = if inst_mod.is_empty() {
+                "this program".to_string()
+            } else {
+                format!("module `{inst_mod}`")
+            };
+            warnings.push(Warning {
+                span: i.span,
+                msg: format!(
+                    "orphan instance `{}` for {}({}): neither the class nor the type is \
+                     defined in {where_}; define it alongside the class or the type",
+                    i.name,
+                    i.class,
+                    head.show()
+                ),
+            });
+        }
         inst_keys
             .entry((i.class.clone(), key))
             .or_default()
@@ -535,10 +577,57 @@ pub(super) fn build_classes(
             InstInfo {
                 class: i.class.clone(),
                 head,
+                module: i.module.clone(),
                 context,
                 supers,
             },
         );
     }
-    Ok((classes, instances, inst_keys, methods, constrained))
+    // Overlap: two or more instances for the same (class, head) are allowed (the
+    // use site disambiguates with `f[name]`), but when they come from different
+    // modules the conflict is invisible at definition time, so flag it. Instances
+    // from a single module (or all root-local, the deliberate named-instance
+    // case) are left alone.
+    for ((class, _key), names) in &inst_keys {
+        if names.len() < 2 {
+            continue;
+        }
+        let mods: BTreeSet<&str> = names
+            .iter()
+            .filter_map(|n| instances.get(n))
+            .map(|i| i.module.as_str())
+            .collect();
+        if mods.len() < 2 {
+            continue;
+        }
+        warnings.push(Warning {
+            span: marginalia::Span::default(),
+            msg: format!(
+                "overlapping instances for {class}: {}; uses must disambiguate with f[name]",
+                provenance_list(&instances, names)
+            ),
+        });
+    }
+    Ok((
+        classes,
+        instances,
+        inst_keys,
+        methods,
+        constrained,
+        warnings,
+    ))
+}
+
+/// Render a list of instance names with their defining module, for overlap and
+/// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
+/// program) ``.
+fn provenance_list(instances: &BTreeMap<String, InstInfo>, names: &[String]) -> String {
+    names
+        .iter()
+        .map(|n| match instances.get(n).map(|i| i.module.as_str()) {
+            Some(m) if !m.is_empty() => format!("`{n}` (module `{m}`)"),
+            _ => format!("`{n}` (this program)"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

@@ -251,6 +251,10 @@ pub struct InstanceDecl<P: Phase = Surface> {
     pub head: Ty,
     pub context: Vec<Constraint>,
     pub methods: Vec<Decl<P>>,
+    // The module that defines this instance, for the orphan/overlap rules and
+    // provenance diagnostics. Empty for a root-program instance. A user instance
+    // is tagged by the renamer; a derived one by its data type's canonical name.
+    pub module: String,
     pub span: Span,
 }
 

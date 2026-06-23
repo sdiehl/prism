@@ -89,6 +89,7 @@ Program {
                     span: 72..108,
                 },
             ],
+            module: "",
             span: 39..110,
         },
     ],

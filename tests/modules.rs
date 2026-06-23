@@ -1,5 +1,6 @@
 //! Multi-module resolution: qualified, selective, and aliased imports;
-//! private-name namespacing; and the eager conflict policy.
+//! private-name namespacing; canonical disjoint namespaces; and the scoping
+//! rules that let modules share a short name.
 
 use std::path::Path;
 
@@ -113,15 +114,49 @@ fn dotted_module_path() {
 }
 
 #[test]
-fn export_clash_between_modules_is_eager_error() {
-    let e = err("import Apple\nimport Banana\nfn main() = print(0)");
-    assert!(e.contains("`dup`") && e.contains("clashes"), "{e}");
+fn modules_sharing_a_name_coexist_when_qualified() {
+    // Apple and Banana both export `dup`; qualification reaches each disjointly,
+    // the case the old eager-uniqueness policy made impossible.
+    let src = "import Apple\nimport Banana\nfn main() = print(Apple.dup() + Banana.dup())";
+    assert_eq!(out(src), "3\n");
 }
 
 #[test]
-fn export_clash_with_root_is_eager_error() {
-    let e = err("import Math\nfn square(x : Int) : Int = x\nfn main() = print(square(1))");
-    assert!(e.contains("`square`") && e.contains("clashes"), "{e}");
+fn unqualified_use_of_a_shared_name_is_unbound() {
+    // Neither module is selectively imported, so bare `dup` reaches no symbol.
+    let e = err("import Apple\nimport Banana\nfn main() = print(dup())");
+    assert!(e.contains("unbound variable 'dup'"), "{e}");
+}
+
+#[test]
+fn root_definition_shadows_an_import() {
+    // A root binding wins over an imported name: `square` is the root's identity
+    // function (5), not Math's squaring one (25).
+    let src = "import Math\nfn square(x : Int) : Int = x\nfn main() = print(square(5))";
+    assert_eq!(out(src), "5\n");
+}
+
+#[test]
+fn selective_import_isolates_unselected_names() {
+    // `import Math (square)` brings only `square`; `bump` stays out of scope.
+    assert_eq!(
+        out("import Math (square)\nfn main() = print(square(5))"),
+        "25\n"
+    );
+    let e = err("import Math (square)\nfn main() = print(bump(1))");
+    assert!(e.contains("unbound variable 'bump'"), "{e}");
+}
+
+#[test]
+fn qualified_access_to_a_private_name_is_rejected() {
+    let e = err("import Math\nfn main() = print(Math.helper(1))");
+    assert!(e.contains("does not export `helper`"), "{e}");
+}
+
+#[test]
+fn unqualified_ambiguity_is_rejected() {
+    let e = err("import LibA (map)\nimport LibB (map)\nfn main() = print(map(1))");
+    assert!(e.contains("`map` is ambiguous"), "{e}");
 }
 
 #[test]
@@ -137,4 +172,39 @@ fn unknown_qualifier_errors() {
 #[test]
 fn unimported_module_errors() {
     assert!(err("import Missing\nfn main() = print(0)").contains("Missing"));
+}
+
+fn warnings(src: &str) -> Vec<String> {
+    check_at(&with_prelude(src), base())
+        .expect("should type check")
+        .warnings
+        .into_iter()
+        .map(|w| w.msg)
+        .collect()
+}
+
+#[test]
+fn type_local_instance_is_not_an_orphan() {
+    // Stack derives Eq in its own module, anchored to the type: no warning.
+    let ws = warnings("import Stack\nfn main() = print(0)");
+    assert!(!ws.iter().any(|w| w.contains("orphan")), "{ws:?}");
+}
+
+#[test]
+fn instance_far_from_class_and_type_warns_orphan() {
+    // `Orphan` defines Eq(Widget) but owns neither Eq (prelude) nor Widget (Typ).
+    let ws = warnings("import Orphan\nfn main() = print(0)");
+    assert!(
+        ws.iter().any(|w| w.contains("orphan instance `weq`")),
+        "{ws:?}"
+    );
+}
+
+#[test]
+fn overlap_across_modules_warns() {
+    let ws = warnings("import Orphan\nimport OrphanB\nfn main() = print(0)");
+    assert!(
+        ws.iter().any(|w| w.contains("overlapping instances")),
+        "{ws:?}"
+    );
 }

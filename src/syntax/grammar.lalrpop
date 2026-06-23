@@ -226,7 +226,7 @@ ClassSig: (String, Ty) = {
 InstanceD: InstanceDecl = {
     <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?>
         "{" <methods:InstFns> "}" <r:@R> =>
-        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, span: Span::new(l, r) },
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, module: String::new(), span: Span::new(l, r) },
 };
 
 InstFns: Vec<Decl> = {

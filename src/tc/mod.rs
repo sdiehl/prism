@@ -98,6 +98,9 @@ pub struct ClassInfo {
 pub struct InstInfo {
     pub class: String,
     pub head: Type,
+    // The module that defines this instance (empty for root), for the orphan and
+    // overlap rules and for naming provenance in ambiguity diagnostics.
+    pub module: String,
     pub context: Vec<(String, Type)>,
     // Resolved superclass obligations `(super_class, head)`, one per the class's
     // declared supers, discharged at each use site and embedded in the dict cell.
@@ -107,6 +110,15 @@ pub struct InstInfo {
 // Per update path, the rebuild chain: one (ctor name, field index, arity)
 // step per path segment, resolved at the update expression's span.
 pub type PathRes = BTreeMap<Span, Vec<Vec<(String, usize, usize)>>>;
+
+/// A non-fatal diagnostic raised during checking (an orphan or overlapping
+/// instance). Carries a span so it can be rendered like an error but does not
+/// stop compilation.
+#[derive(Clone, Debug)]
+pub struct Warning {
+    pub span: Span,
+    pub msg: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct Checked {
@@ -127,6 +139,7 @@ pub struct Checked {
     pub constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     pub dicts: DictTable,
     pub seeds: u32,
+    pub warnings: Vec<Warning>,
 }
 
 // A subsumption failure. `Fail` is a plain mismatch the caller renders with its
@@ -249,7 +262,7 @@ fn concrete_effects(ty: &Type) -> Effects {
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
     let seeds = env::seed_var_states(&eff_ops);
-    let (classes, instances, inst_keys, methods, mut constrained) =
+    let (classes, instances, inst_keys, methods, mut constrained, warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
     let effects = effects::fixpoint(prog, &eff_ops);
@@ -453,6 +466,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         constrained: constrained_final,
         dicts,
         seeds,
+        warnings,
     })
 }
 

@@ -366,6 +366,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
             head: i.head,
             context: i.context,
             methods,
+            module: i.module,
             span: i.span,
         });
     }

@@ -123,6 +123,7 @@ Program {
                     span: 71..112,
                 },
             ],
+            module: "",
             span: 40..114,
         },
         InstanceDecl {
@@ -210,6 +211,7 @@ Program {
                     span: 147..188,
                 },
             ],
+            module: "",
             span: 116..190,
         },
     ],
