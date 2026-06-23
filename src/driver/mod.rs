@@ -63,15 +63,19 @@ pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
     let checked = typecheck(&program)?;
-    emit_warnings(&checked);
+    emit_warnings(src, &checked);
     Ok(checked)
 }
 
-// Surface non-fatal checker diagnostics (orphan/overlapping instances) on stderr.
-// Errors abort earlier, so this only runs once a program type checks.
-fn emit_warnings(checked: &Checked) {
+// Surface non-fatal checker diagnostics (orphan/overlapping instances) on stderr,
+// with a source caret when the warning points into this source. Errors abort
+// earlier, so this only runs once a program type checks.
+fn emit_warnings(src: &str, checked: &Checked) {
     for w in &checked.warnings {
-        eprintln!("warning: {}", w.msg);
+        eprint!(
+            "{}",
+            crate::error::render_warning(src, "<source>", &w.span, &w.msg, true)
+        );
     }
 }
 
@@ -80,7 +84,7 @@ fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
     let checked = typecheck(&program)?;
-    emit_warnings(&checked);
+    emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &core)?;
     reconcile_effects(&checked, &core)?;

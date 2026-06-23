@@ -114,6 +114,15 @@ fn dotted_module_path() {
 }
 
 #[test]
+fn full_path_qualifier() {
+    // The whole module path qualifies too, not just the last component.
+    assert_eq!(
+        out("import Geo.Util\nfn main() = print(Geo.Util.one())"),
+        "1\n"
+    );
+}
+
+#[test]
 fn modules_sharing_a_name_coexist_when_qualified() {
     // Apple and Banana both export `dup`; qualification reaches each disjointly,
     // the case the old eager-uniqueness policy made impossible.
@@ -157,6 +166,49 @@ fn qualified_access_to_a_private_name_is_rejected() {
 fn unqualified_ambiguity_is_rejected() {
     let e = err("import LibA (map)\nimport LibB (map)\nfn main() = print(map(1))");
     assert!(e.contains("`map` is ambiguous"), "{e}");
+}
+
+#[test]
+fn pub_import_reexports_qualified() {
+    // Facade `pub import`s square from Math; an importer reaches Facade.square,
+    // resolving to Math's definition.
+    assert_eq!(
+        out("import Facade\nfn main() = print(Facade.square(5))"),
+        "25\n"
+    );
+}
+
+#[test]
+fn pub_import_reexport_is_selectively_importable() {
+    assert_eq!(
+        out("import Facade (square)\nfn main() = print(square(6))"),
+        "36\n"
+    );
+}
+
+#[test]
+fn pub_import_without_a_list_reexports_everything() {
+    // FacadeAll `pub import`s all of Math, so bump comes through too.
+    assert_eq!(
+        out("import FacadeAll\nfn main() = print(FacadeAll.bump(3))"),
+        "4\n"
+    );
+}
+
+#[test]
+fn plain_import_does_not_reexport() {
+    // PlainFacade imports Math without `pub`, so it re-exports nothing.
+    let e = err("import PlainFacade\nfn main() = print(PlainFacade.square(5))");
+    assert!(e.contains("does not export `square`"), "{e}");
+}
+
+#[test]
+fn reexports_chain() {
+    // Facade2 re-exports from Facade, which re-exports from Math.
+    assert_eq!(
+        out("import Facade2\nfn main() = print(Facade2.square(7))"),
+        "49\n"
+    );
 }
 
 #[test]

@@ -14,7 +14,8 @@ use crate::syntax::ast::{
 
 pub(super) fn fmt_import(i: &ImportDecl) -> String {
     use std::fmt::Write as _;
-    let mut s = format!("import {}", i.path.join("."));
+    let kw = if i.reexport { "pub import" } else { "import" };
+    let mut s = format!("{kw} {}", i.path.join("."));
     if let Some(a) = &i.alias {
         write!(s, " as {a}").unwrap();
     }

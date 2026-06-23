@@ -75,7 +75,12 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             }
         }
         match item {
-            Item::Import(i) => imports.push(i),
+            Item::Import(mut i) => {
+                // `pub import` re-exports; the parse-time export set stays own-only
+                // (re-exports are propagated during resolution).
+                i.reexport = vis == Vis::Pub;
+                imports.push(i);
+            }
             Item::Data(d) => types.push(d),
             Item::Effect(e) => effects.push(e),
             Item::Error(e) => errors.push(e),

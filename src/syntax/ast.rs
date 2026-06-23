@@ -149,6 +149,9 @@ pub struct ImportDecl {
     pub path: Vec<String>,
     pub alias: Option<String>,
     pub names: Option<Vec<String>>,
+    // A `pub import` re-exports the imported names from this module, so a
+    // downstream importer can reach them through this module too.
+    pub reexport: bool,
     pub span: Span,
 }
 

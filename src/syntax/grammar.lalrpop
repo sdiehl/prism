@@ -174,7 +174,7 @@ Item: Item = {
 
 ImportD: ImportDecl = {
     <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> <ns:("(" <Comma<ImportName>> ")")?> <r:@R> =>
-        ImportDecl { path: p, alias: a, names: ns, span: Span::new(l, r) },
+        ImportDecl { path: p, alias: a, names: ns, reexport: false, span: Span::new(l, r) },
 };
 
 ModPath: Vec<String> = {

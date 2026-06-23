@@ -557,8 +557,16 @@ pub(super) fn build_classes(
             } else {
                 format!("module `{inst_mod}`")
             };
+            // A root-program instance's span indexes the entry source, so it can
+            // carry a caret; an imported module's span belongs to another file,
+            // so leave it empty and the warning renders as a plain line.
+            let span = if inst_mod.is_empty() {
+                i.span
+            } else {
+                Span::default()
+            };
             warnings.push(Warning {
-                span: i.span,
+                span,
                 msg: format!(
                     "orphan instance `{}` for {}({}): neither the class nor the type is \
                      defined in {where_}; define it alongside the class or the type",

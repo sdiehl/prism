@@ -32,6 +32,11 @@ type Unqualified = BTreeMap<String, String>;
 /// names; an entry has more than one index only when imports share a qualifier.
 type Quals = BTreeMap<String, Vec<usize>>;
 
+/// A module's exported names mapped to the canonical symbol each resolves to.
+/// For an own definition that is `Module.name`; for a `pub import` re-export it
+/// is the original definition's canonical symbol.
+type Exports = BTreeMap<String, String>;
+
 /// Every name a program binds at the top level: the universe a `pub` export or
 /// an importer may refer to (type and constructor names, effects, errors,
 /// aliases, classes, pattern synonyms, functions).
@@ -52,44 +57,18 @@ pub fn binders(p: &Program) -> BTreeSet<String> {
     s
 }
 
-/// How an exported name is visible to importers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Visibility {
-    /// A fully transparent export: a value, a function, or a data type whose
-    /// constructors are themselves exported.
-    Public,
-    /// An `opaque` type: the type name is visible but its constructors are not,
-    /// so importers can name the type but cannot build or match its values.
-    OpaqueType,
-}
-
-/// The names a module makes visible to importers, with their visibility: every
-/// `pub` item, plus the constructors of every transparent `pub` data type. An
-/// `opaque` type exports its name only (`OpaqueType`); its constructors stay
-/// module-private, so the private-namespacing machinery hides them.
-fn exports_of_vis(p: &Program) -> BTreeMap<String, Visibility> {
-    let mut e: BTreeMap<String, Visibility> = BTreeMap::new();
-    for n in &p.exports {
-        let vis = if p.opaques.contains(n) {
-            Visibility::OpaqueType
-        } else {
-            Visibility::Public
-        };
-        e.insert(n.clone(), vis);
-    }
+/// The names a module makes visible to importers: every `pub` item, plus the
+/// constructors of every transparent `pub` data type. An `opaque` type exports
+/// its name only; its constructors stay module-private, so their absence from
+/// this set hides them from importers.
+fn exports_of(p: &Program) -> BTreeSet<String> {
+    let mut e = p.exports.clone();
     for d in &p.types {
         if p.exports.contains(&d.name) && !p.opaques.contains(&d.name) {
-            for c in &d.ctors {
-                e.insert(c.name.clone(), Visibility::Public);
-            }
+            e.extend(d.ctors.iter().map(|c| c.name.clone()));
         }
     }
     e
-}
-
-/// The bare set of names a module exports (visibility-erased).
-fn exports_of(p: &Program) -> BTreeSet<String> {
-    exports_of_vis(p).into_keys().collect()
 }
 
 /// Resolve a parsed program to canonical form.
@@ -110,10 +89,11 @@ pub fn resolve(program: Program) -> Result<Program, TypeError> {
     Ok(program)
 }
 
-/// A loaded module's identity and the names it exports, with their visibility.
+/// A loaded module's identity and the canonical symbol each exported name
+/// resolves to (its own definitions plus any `pub import` re-exports).
 struct ModInfo {
     path: String,
-    exports: BTreeMap<String, Visibility>,
+    exports: Exports,
 }
 
 /// Resolve a program that may import other modules, loading them under `base`.
@@ -129,18 +109,26 @@ pub fn resolve_modules(root: Program, base: &Path) -> Result<Program, Error> {
     }
 
     let mut modules = load(&root, base)?;
-    let mods: Vec<ModInfo> = modules
+    let mut mods: Vec<ModInfo> = modules
         .iter()
-        .map(|m| ModInfo {
-            path: m.path.join("."),
-            exports: exports_of_vis(&m.prog),
+        .map(|m| {
+            let path = m.path.join(".");
+            let exports = exports_of(&m.prog)
+                .into_iter()
+                .map(|n| {
+                    let canon = format!("{path}.{n}");
+                    (n, canon)
+                })
+                .collect();
+            ModInfo { path, exports }
         })
         .collect();
-    let by_path: BTreeMap<&str, usize> = mods
+    let by_path: BTreeMap<String, usize> = mods
         .iter()
         .enumerate()
-        .map(|(i, m)| (m.path.as_str(), i))
+        .map(|(i, m)| (m.path.clone(), i))
         .collect();
+    add_reexports(&mut mods, &modules, &by_path)?;
 
     // The root is the empty-path module: its own names (and the prelude prepended
     // to it) stay bare, so `main` and the prelude keep their global symbols.
@@ -186,7 +174,7 @@ fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, String> {
 /// `import M (a)` admits both bare `a` and `M.a`.
 fn build_scope(
     imports: &[ImportDecl],
-    by_path: &BTreeMap<&str, usize>,
+    by_path: &BTreeMap<String, usize>,
     mods: &[ModInfo],
 ) -> Result<(Unqualified, Quals), Error> {
     let mut unqualified: Unqualified = BTreeMap::new();
@@ -198,12 +186,12 @@ fn build_scope(
             .ok_or_else(|| Error::Resolve(format!("cannot resolve import of module `{path}`")))?;
         if let Some(names) = &imp.names {
             for n in names {
-                if !mods[idx].exports.contains_key(n) {
+                let Some(canon) = mods[idx].exports.get(n) else {
                     return Err(Error::Resolve(format!(
                         "module `{path}` does not export `{n}`"
                     )));
-                }
-                let canon = format!("{path}.{n}");
+                };
+                let canon = canon.clone();
                 if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
                     if prev != canon {
                         return Err(Error::Resolve(format!(
@@ -213,13 +201,63 @@ fn build_scope(
                 }
             }
         }
-        let qual = imp
+        // The full module path is always a valid qualifier (`Geo.Util.one`); the
+        // short name (alias, else last component) is the convenient one
+        // (`Util.one`). Register both, skipping the short when it equals the path.
+        let short = imp
             .alias
             .clone()
             .unwrap_or_else(|| imp.path.last().cloned().unwrap_or_default());
-        quals.entry(qual).or_default().push(idx);
+        quals.entry(path.clone()).or_default().push(idx);
+        if short != path {
+            quals.entry(short).or_default().push(idx);
+        }
     }
     Ok((unqualified, quals))
+}
+
+/// Propagate `pub import` re-exports: a module that `pub import`s names from
+/// another adds them to its own export table, each pointing at the original
+/// definition's canonical symbol. Iterated to a fixpoint so a chain of
+/// re-exports (A re-exports from B, which re-exports from C) fully resolves. An
+/// own definition shadows a re-export of the same name. A `pub import` with no
+/// name list re-exports everything the source currently exports.
+fn add_reexports(
+    mods: &mut [ModInfo],
+    modules: &[Module],
+    by_path: &BTreeMap<String, usize>,
+) -> Result<(), Error> {
+    loop {
+        let snapshot: Vec<Exports> = mods.iter().map(|m| m.exports.clone()).collect();
+        let mut changed = false;
+        for (ti, m) in modules.iter().enumerate() {
+            for imp in m.prog.imports.iter().filter(|i| i.reexport) {
+                let path = imp.path.join(".");
+                let si = *by_path.get(path.as_str()).ok_or_else(|| {
+                    Error::Resolve(format!("cannot resolve import of module `{path}`"))
+                })?;
+                let src = &snapshot[si];
+                let names: Vec<String> = imp
+                    .names
+                    .as_ref()
+                    .map_or_else(|| src.keys().cloned().collect(), Clone::clone);
+                for n in names {
+                    if let Some(canon) = src.get(&n) {
+                        if let std::collections::btree_map::Entry::Vacant(e) =
+                            mods[ti].exports.entry(n)
+                        {
+                            e.insert(canon.clone());
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Concatenate the rewritten modules into the root, producing one flat program.
@@ -672,7 +710,10 @@ impl<'a> Rw<'a> {
         if self.locals.iter().any(|l| l == name) {
             return name.to_string();
         }
-        if let Some((q, n)) = name.split_once('.') {
+        // Split on the LAST dot, so a multi-segment qualifier (`Geo.Util.one`)
+        // resolves as (`Geo.Util`, `one`) and a single one (`Map.insert`) as
+        // (`Map`, `insert`).
+        if let Some((q, n)) = name.rsplit_once('.') {
             return self.qualified(q, n, name, span);
         }
         if let Some(canon) = self.own.get(name).or_else(|| self.unqualified.get(name)) {
@@ -699,7 +740,11 @@ impl<'a> Rw<'a> {
                 self.record(span, format!("module `{q}` does not export `{n}`"));
                 full.to_string()
             }
-            [m] => format!("{}.{}", m.path, n),
+            [m] => m
+                .exports
+                .get(n)
+                .cloned()
+                .unwrap_or_else(|| full.to_string()),
             many => {
                 let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
                 self.record(

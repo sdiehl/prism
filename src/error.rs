@@ -306,6 +306,52 @@ const fn span_range(s: &Span) -> Range<usize> {
     s.start..s.end
 }
 
+/// Render a non-fatal warning against `src`.
+///
+/// Produces a yellow source caret when `span` is a non-empty range inside `src`,
+/// and a plain `warning: ...` line otherwise (e.g. a warning about a definition
+/// in another module, whose span does not index this source). Always ends with a
+/// newline.
+#[must_use]
+pub fn render_warning(src: &str, name: &str, span: &Span, msg: &str, color: bool) -> String {
+    let range = span_range(span);
+    let plain = || format!("warning: {msg}\n");
+    if range.start >= range.end || range.end > src.len() {
+        return plain();
+    }
+    let map = SourceMap::new(src);
+    let n = map.prelude;
+    let (body, file, at) = if range.start < n {
+        (&map.full[..n], "<prelude>", range.start..range.end.min(n))
+    } else {
+        (map.user(), name, range.start - n..range.end - n)
+    };
+    let mut buf = Vec::<u8>::new();
+    let ok = Report::build(
+        ReportKind::Custom("warning", Color::Yellow),
+        (file, at.clone()),
+    )
+    .with_config(Config::default().with_color(color))
+    .with_message(msg)
+    .with_label(
+        Label::new((file, at))
+            .with_message("here")
+            .with_color(Color::Yellow),
+    )
+    .finish()
+    .write((file, Source::from(body)), &mut buf)
+    .is_ok();
+    if !ok {
+        return plain();
+    }
+    let rendered = String::from_utf8_lossy(&buf).into_owned();
+    if color {
+        rendered
+    } else {
+        strip_ansi(&rendered)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_report(
     map: &SourceMap<'_>,
