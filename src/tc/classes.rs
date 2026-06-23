@@ -319,7 +319,15 @@ pub(super) fn build_classes(
                 });
             }
             let sorted: Vec<Sym> = vars.into_iter().collect();
-            let scheme = wrap_forall(&sorted, t.clone());
+            let mut scheme = wrap_forall(&sorted, t.clone());
+            // Generalize over the method's effect-row variables too, so an
+            // effect-polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`)
+            // is row-polymorphic rather than carrying a free row var.
+            let mut rvars = BTreeSet::new();
+            super::env::collect_row_vars(&t, &mut rvars);
+            for rv in rvars {
+                scheme = Type::RowForall(rv, Box::new(scheme));
+            }
             env.insert(Sym::from(mname), scheme.clone());
             methods.insert(mname.clone(), (c.name.clone(), idx));
             constrained.insert(

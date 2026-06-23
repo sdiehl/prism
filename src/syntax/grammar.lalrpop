@@ -481,6 +481,7 @@ AType: Ty = {
     "Char"   => Ty::Char,
     "String" => Ty::Str,
     "[" <t:Type> "]" => Ty::Con("List".into(), vec![t]),
+    <v:"ident"> <args:CtorArgs> => Ty::App(v, args),
     <v:"ident"> => Ty::Var(v),
     <n:"uid"> <args:CtorArgs?> => Ty::Con(n, args.unwrap_or_default()),
     <q:"qual"> <args:CtorArgs?> => Ty::Con(q, args.unwrap_or_default()),

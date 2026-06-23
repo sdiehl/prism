@@ -141,6 +141,14 @@ impl Tc<'_> {
                 Sym::from(n),
                 args.iter().map(|x| self.convert_annot(x, a)).collect(),
             ),
+            ast::Ty::App(v, args) => {
+                // The head is a type variable (rigid or to-be-unified), applied.
+                let head = self.convert_annot(&ast::Ty::Var(v.clone()), a);
+                Type::apps(
+                    head,
+                    args.iter().map(|x| self.convert_annot(x, a)).collect(),
+                )
+            }
             ast::Ty::Tuple(ts) => {
                 Type::Tuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
             }
@@ -237,6 +245,10 @@ pub(super) fn convert_data(t: &ast::Ty) -> Type {
             convert_data(r),
         ),
         ast::Ty::Con(n, args) => Type::Con(Sym::from(n), args.iter().map(convert_data).collect()),
+        ast::Ty::App(v, args) => Type::apps(
+            Type::Var(Sym::from(v)),
+            args.iter().map(convert_data).collect(),
+        ),
         ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(convert_data).collect()),
     }
 }
@@ -265,6 +277,30 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
                 collect_type_vars(p, out);
             }
         }
+        _ => {}
+    }
+}
+
+// Free effect-row variables in a type, so a class method's signature can be
+// generalized over its row variables (an effect-polymorphic method like `fmap`).
+pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
+    match t {
+        Type::Fun(ps, row, r) => {
+            for p in ps {
+                collect_row_vars(p, out);
+            }
+            if let EffRow::Var(v) = row.tail() {
+                out.insert(*v);
+            }
+            row.for_each_arg(&mut |a| collect_row_vars(a, out));
+            collect_row_vars(r, out);
+        }
+        Type::Con(_, ps) | Type::Tuple(ps) => {
+            for p in ps {
+                collect_row_vars(p, out);
+            }
+        }
+        Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
         _ => {}
     }
 }

@@ -9,6 +9,12 @@ pub type Effects = BTreeSet<Sym>;
 // these constants rather than scattered string literals.
 pub const LIST: &str = "List";
 pub const CONS: &str = "Cons";
+// The head of a higher-kinded type application `f(a)`, represented as the binary
+// `Con(APP, [head, arg])` so the generic `Con` recursions (substitution, free
+// vars, occurs) traverse it unchanged. It is normalized away (`@App(List, a)`
+// becomes `List(a)`) the moment its head resolves to a concrete constructor. The
+// `@` prefix makes it unspellable as a source type name.
+pub const APP: &str = "@App";
 pub const NIL: &str = "Nil";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
@@ -203,6 +209,38 @@ impl Type {
         Self::Str,
     ];
 
+    /// Apply a (possibly higher-kinded) type to one argument, reducing when the
+    /// head is a concrete constructor: `app(List, a) = List(a)`, but
+    /// `app(f, a) = @App(f, a)` while `f` is still a variable/existential.
+    #[must_use]
+    pub fn app(head: Self, arg: Self) -> Self {
+        match head {
+            Self::Con(n, mut xs) if n.as_str() != APP => {
+                xs.push(arg);
+                Self::Con(n, xs)
+            }
+            other => Self::Con(Sym::from(APP), vec![other, arg]),
+        }
+    }
+
+    /// Apply a head to several arguments left-to-right.
+    #[must_use]
+    pub fn apps(head: Self, args: Vec<Self>) -> Self {
+        args.into_iter().fold(head, Self::app)
+    }
+
+    // Re-reduce an `@App` whose head may have just become concrete via
+    // substitution; a no-op on any other shape.
+    fn renorm_app(self) -> Self {
+        match self {
+            Self::Con(n, xs) if n.as_str() == APP && xs.len() == 2 => {
+                let mut it = xs.into_iter();
+                Self::app(it.next().unwrap(), it.next().unwrap())
+            }
+            other => other,
+        }
+    }
+
     #[must_use]
     pub fn fun(params: Vec<Self>, ret: Self) -> Self {
         Self::Fun(params, EffRow::Empty, Box::new(ret))
@@ -265,7 +303,9 @@ impl Type {
                 row.map_args(&|a| a.subst_exist(v, with)),
                 Box::new(r.subst_exist(v, with)),
             ),
-            Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_exist(v, with)).collect()),
+            Self::Con(n, ps) => {
+                Self::Con(*n, ps.iter().map(|p| p.subst_exist(v, with)).collect()).renorm_app()
+            }
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_exist(v, with)).collect()),
             other => other.clone(),
         }
@@ -300,7 +340,9 @@ impl Type {
                 row.map_args(&|a| a.subst_var(name, with)),
                 Box::new(r.subst_var(name, with)),
             ),
-            Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_var(name, with)).collect()),
+            Self::Con(n, ps) => {
+                Self::Con(*n, ps.iter().map(|p| p.subst_var(name, with)).collect()).renorm_app()
+            }
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_var(name, with)).collect()),
             other => other.clone(),
         }
@@ -368,6 +410,10 @@ impl Type {
                     format!(" ! {}", row.show())
                 };
                 format!("({}) -> {}{}", ps.join(", "), r.show(), row_s)
+            }
+            // A higher-kinded application `@App(head, arg)` prints as `head(arg)`.
+            Self::Con(n, ps) if n.as_str() == APP && ps.len() == 2 => {
+                format!("{}({})", ps[0].show(), ps[1].show())
             }
             Self::Con(n, ps) if ps.is_empty() => n.to_string(),
             Self::Con(n, ps) => {

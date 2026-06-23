@@ -358,6 +358,9 @@ pub enum Ty {
     Char,
     Str,
     Var(String),
+    // Higher-kinded application of a type variable: `f(a)`, `t(a, b)`. The head is
+    // always a (lowercase) variable; a constructor head parses as `Con` instead.
+    App(String, Vec<Self>),
     // A `var x := e` state cell, lowered straight to the pinned existential
     // `Exist(n)` so every read/write/handler of one var unifies through it. Only
     // desugar produces it. It never appears in source or surviving annotations.

@@ -386,7 +386,26 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         }
         for inst in &prog.instances {
             for m in &inst.methods {
-                let effs = effects::of_decl(m, &effects, &eff_ops);
+                // A method whose class signature is effect-polymorphic (carries a
+                // row variable, like `fmap`) may perform the effects flowing
+                // through that row; `check_instance` verifies it against the
+                // signature. Only methods declared pure are held to the syntactic
+                // purity check.
+                let poly = classes.get(&inst.class).is_some_and(|c| {
+                    c.methods
+                        .iter()
+                        .find(|(n, _)| n == &m.name)
+                        .is_some_and(|(_, t)| {
+                            let mut rv = std::collections::BTreeSet::new();
+                            env::collect_row_vars(t, &mut rv);
+                            !rv.is_empty()
+                        })
+                });
+                let effs = if poly {
+                    Effects::new()
+                } else {
+                    effects::of_decl(m, &effects, &eff_ops)
+                };
                 if !effs.is_empty() {
                     let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
                     return Err(TypeError::Other {

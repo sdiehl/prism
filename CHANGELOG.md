@@ -10,6 +10,7 @@
 - Prelude `HashMap(v)`: a separate-chaining hash table with String keys built on the growable array (`hm_new`/`hm_insert`/`hm_lookup`/`hm_member`/`hm_get_or`/`hm_keys`/`hm_values`/`hm_size`/`hm_to_list`/`hm_delete`/`hm_from_list`/`hm_adjust`), doubling its bucket count past load factor 1. Keys hash by a fixed-width FNV-1a written in the language, so iteration order is a deterministic function of the inserts.
 - O(1) byte access: `byte_at`/`byte_len` (UTF-8 unaware) and `string_of_bytes`, so a lexer or hash scans raw bytes in linear time. `array_pop` rounds out the array API, and `array_foldl`/`array_to_list` are added to the prelude.
 - Surface fixed-width arithmetic: `i64_*`/`u64_*` `add`/`sub`/`mul`/`div`/`rem`/`cmp` (wrapping, no bignum promotion), enabling a real fixed-width hash in userland.
+- Higher-kinded types: a class parameter may range over a type constructor (kind `* -> *`), applied as `f(a)` in method signatures, with instance resolution keyed on the head constructor. The prelude adds the `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` tower with `List` and `Option` instances. `fmap`/`traverse` are effect-polymorphic, so the per-element effect row threads through instead of an `Applicative` wrapper (effects, not do-notation).
 - String-utility prelude: character classifiers (`is_digit`/`is_alpha`/`is_alnum`/`is_space`/`is_upper`/`is_lower`, `to_upper_c`/`to_lower_c`), `starts_with`/`ends_with`/`contains`/`index_of`, `to_upper`/`to_lower`/`trim`, and `args()`.
 
 ## 0.1.0

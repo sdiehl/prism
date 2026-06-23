@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::{Entry, Tc, TcErr};
 use crate::sym::Sym;
-use crate::types::ty::{EffRow, Label, Type};
+use crate::types::ty::{EffRow, Label, Type, APP};
 
 impl Tc<'_> {
     pub(super) fn subtype(&mut self, a: &Type, b: &Type) -> Result<(), TcErr> {
@@ -32,6 +32,30 @@ impl Tc<'_> {
                     self.subtype(&x, &y)?;
                 }
                 Ok(())
+            }
+            // Higher-kinded application versus a concrete constructor: peel the
+            // last argument off the saturated side and match the head (a `* -> *`
+            // var) against the partially-applied constructor. `f(a) ~ List(b)`
+            // gives `f := List, a := b`.
+            (Type::Con(ap, ha), Type::Con(m, ys))
+                if ap.as_str() == APP && m.as_str() != APP && !ys.is_empty() && ha.len() == 2 =>
+            {
+                let (init, last) = ys.split_at(ys.len() - 1);
+                let h = self.apply(&ha[0]);
+                self.subtype(&h, &Type::Con(*m, init.to_vec()))?;
+                let a = self.apply(&ha[1]);
+                let last = self.apply(&last[0]);
+                self.subtype(&a, &last)
+            }
+            (Type::Con(m, ys), Type::Con(ap, ha))
+                if ap.as_str() == APP && m.as_str() != APP && !ys.is_empty() && ha.len() == 2 =>
+            {
+                let (init, last) = ys.split_at(ys.len() - 1);
+                let h = self.apply(&ha[0]);
+                self.subtype(&Type::Con(*m, init.to_vec()), &h)?;
+                let a = self.apply(&ha[1]);
+                let last = self.apply(&last[0]);
+                self.subtype(&last, &a)
             }
             (Type::Fun(a1, eff1, r1), Type::Fun(a2, eff2, r2)) if a1.len() == a2.len() => {
                 for (x, y) in a1.iter().zip(a2) {

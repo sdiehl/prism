@@ -192,6 +192,10 @@ pub(super) fn fmt_ty(t: &Ty) -> String {
         Ty::Char => "Char".into(),
         Ty::Str => "String".into(),
         Ty::Var(x) => x.clone(),
+        Ty::App(v, args) => {
+            let args: Vec<String> = args.iter().map(fmt_ty).collect();
+            format!("{v}({})", args.join(", "))
+        }
         Ty::Forall(vs, t) => {
             let mut vs = vs.clone();
             let mut cur = t.as_ref();

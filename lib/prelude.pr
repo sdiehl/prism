@@ -1141,6 +1141,95 @@ instance showChar : Show(Char) {
   fn show_c(x) = show_char(x)
 }
 
+-- Higher-kinded classes: the parameter ranges over a type constructor (kind
+-- * -> *), applied in the method signatures as `f(a)`. `fmap` is effect-
+-- polymorphic, so mapping an effectful function threads its row `e` through.
+class Functor(f) {
+  fmap : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
+}
+
+instance functorList : Functor(List) {
+  fn fmap(g, xs) = map(g, xs)
+}
+
+instance functorOption : Functor(Option) {
+  fn fmap(g, o) = map_option(g, o)
+}
+
+-- Foldable: collapse a container with an effect-polymorphic right fold.
+class Foldable(t) {
+  fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
+}
+
+fn option_fold_r(g, z, o) =
+  match o of
+    None => z
+    Some(x) => g(x, z)
+
+instance foldableList : Foldable(List) {
+  fn fold_r(g, z, xs) = foldr(g, z, xs)
+}
+
+instance foldableOption : Foldable(Option) {
+  fn fold_r(g, z, o) = option_fold_r(g, z, o)
+}
+
+-- Applicative: a Functor with `pure` and application `ap` inside the structure.
+class Applicative(f) given Functor(f) {
+  pure : (a) -> f(a),
+  ap : (f((a) -> b), f(a)) -> f(b)
+}
+
+fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)
+
+fn option_ap(fo, xo) =
+  match fo of
+    None => None
+    Some(g) => map_option(g, xo)
+
+instance applicativeList : Applicative(List) {
+  fn pure(x) = singleton(x),
+  fn ap(fs, xs) = list_ap(fs, xs)
+}
+
+instance applicativeOption : Applicative(Option) {
+  fn pure(x) = Some(x),
+  fn ap(fo, xo) = option_ap(fo, xo)
+}
+
+-- Monad: structural sequencing via `bind`. Effects ride the effect system, so
+-- there is no do-notation; this is for List/Option-style structure.
+class Monad(m) given Applicative(m) {
+  bind : (m(a), (a) -> m(b)) -> m(b)
+}
+
+fn option_bind(o, g) =
+  match o of
+    None => None
+    Some(x) => g(x)
+
+instance monadList : Monad(List) {
+  fn bind(xs, g) = concat_map(g, xs)
+}
+
+instance monadOption : Monad(Option) {
+  fn bind(o, g) = option_bind(o, g)
+}
+
+-- Traversable: an effect-polymorphic traversal. The per-element effect row `e`
+-- replaces the classic `Applicative` parameter; `traverse` is effectful map.
+class Traversable(t) given Functor(t), Foldable(t) {
+  traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}
+}
+
+instance traversableList : Traversable(List) {
+  fn traverse(g, xs) = map(g, xs)
+}
+
+instance traversableOption : Traversable(Option) {
+  fn traverse(g, o) = map_option(g, o)
+}
+
 fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => Cons(x, Nil)
