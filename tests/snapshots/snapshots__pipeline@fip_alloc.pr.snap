@@ -51,22 +51,22 @@ Program {
                         node: Var(
                             "Box",
                         ),
-                        span: 39..42,
+                        span: 40..43,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 43..44,
+                            span: 44..45,
                         },
                     ],
                 ),
-                span: 39..45,
+                span: 40..46,
             },
             wheres: [],
             fip: Fbip,
-            span: 20..45,
+            span: 21..46,
         },
     ],
 }
@@ -80,9 +80,9 @@ fn fresh(x) =
 
 == fip ==
 Type Error: function `fresh` is marked `fbip` but allocates a fresh `Box` (no reuse token available)
-   ╭─[ <source>:2:1 ]
+   ╭─[ <source>:3:1 ]
    │
- 2 │ fbip fn fresh(x) = Box(x)
+ 3 │ fbip fn fresh(x) = Box(x)
    │ ────────────┬────────────  
    │             ╰────────────── function `fresh` is marked `fbip` but allocates a fresh `Box` (no reuse token available)
 ───╯

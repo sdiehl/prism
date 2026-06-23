@@ -18,6 +18,7 @@ pub mod core;
 pub mod driver;
 pub mod error;
 pub mod eval;
+pub mod fixpoint;
 pub mod fmt;
 pub mod fresh;
 pub mod lex;

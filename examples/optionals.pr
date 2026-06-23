@@ -17,6 +17,7 @@
 --   -1
 
 type City = City { zip: Int }
+
 type Addr = Addr { city: Option(City) }
 
 fn main() =

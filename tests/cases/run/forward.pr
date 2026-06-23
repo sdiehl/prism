@@ -1,6 +1,7 @@
 effect Log {
   ctl log(Int) : Unit
 }
+
 effect Exn {
   ctl raise(Int) : Int
 }

@@ -1,4 +1,5 @@
 type Pair = Pair(Int, Int)
+
 fn main() : Int =
   let shared = Pair(1, 2)
   let dead = Pair(7, 8)

@@ -15,6 +15,7 @@
 --   no such key: tls
 --
 error NotFound(String)
+
 error Malformed(String)
 
 fn find_port(cfg, key) =

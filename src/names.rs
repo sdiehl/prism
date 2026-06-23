@@ -22,6 +22,25 @@ pub const RET: &str = "r@";
 pub const ERR: &str = "e@";
 pub const COMPOSE: &str = "x@";
 
+// Fixed binders of the free-monad driver templates (the per-handle driver,
+// `mask_driver`, `ebind`, and the resume thunks they emit). Each template is a
+// closed top-level function and the templates never nest one inside another, so
+// these fixed binders cannot capture across templates; the `@` keeps them clear
+// of user names. `CONT`/`RET`/`COMPOSE` above are reused for `k@`/`r@`/`x@`.
+pub const OP_ID: &str = "id@";
+pub const OP_SKIP: &str = "sk@";
+pub const OP_ARG: &str = "a@";
+pub const RESUME_VAL: &str = "y@";
+pub const RESUME_KONT: &str = "kr@";
+pub const FWD_SKIP: &str = "sk1@";
+pub const EBIND_FN: &str = "f@";
+
+// Evidence binder holding the active clause of the op with the given id.
+#[must_use]
+pub fn ev(id: i64) -> String {
+    format!("ev@{id}")
+}
+
 #[must_use]
 pub fn var_get(x: &str, n: u32) -> String {
     format!("get@{x}@{n}")

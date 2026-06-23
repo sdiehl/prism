@@ -1,6 +1,7 @@
 effect Ask {
   ctl ask(Unit) : Int
 }
+
 effect Log {
   ctl log(Int) : Unit
 }

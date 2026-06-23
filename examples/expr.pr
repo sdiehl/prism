@@ -1,4 +1,5 @@
 type Expr = Lit(Int) | Add(Expr, Expr) | Sub(Expr, Expr) | Mul(Expr, Expr) | Div(Expr, Expr) | Neg(Expr)
+
 fn eval(e) : ! Result(Int, Int) =
   match e of
     Lit(n) => Ok(n)

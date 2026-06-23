@@ -2,6 +2,7 @@ effect State {
   ctl get(Unit) : Int,
   ctl put(Int) : Unit
 }
+
 -- Algebraic State, the Koka way.
 --
 -- The handler interprets get/put by parameter passing. Each clause returns a

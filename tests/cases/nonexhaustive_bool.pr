@@ -1,4 +1,5 @@
 fn flag(b) =
   match b of
     true => 1
+
 fn main() = println(flag(true))

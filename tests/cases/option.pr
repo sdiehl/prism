@@ -1,4 +1,5 @@
 type Option(a) = None | Some(a)
+
 fn get(d, o) =
   match o of
     None => d

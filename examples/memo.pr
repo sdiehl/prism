@@ -2,6 +2,7 @@ effect Memo {
   ctl recall(Int) : Option(Int),
   ctl store(Int, Int) : Unit
 }
+
 -- Memoization as an effect, bolted on from the outside.
 --
 -- fib below is the textbook naive recursion: exponential, no cache, no clue

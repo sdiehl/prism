@@ -6,6 +6,7 @@
 -- then the round count on a hit. Drive it with game.in.
 
 type Hint = TooLow | TooHigh | Exact
+
 fn hint(secret, guess) : ! Hint =
   if guess < secret then
     TooLow

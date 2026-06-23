@@ -2,6 +2,7 @@ effect Amb {
   ctl choose(Int) : Int,
   ctl reject(Unit) : Int
 }
+
 -- Nondeterminism by multishot resumption.
 --
 -- choose(n) offers a value in 0..n-1. reject() prunes a dead branch. The

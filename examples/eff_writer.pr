@@ -1,6 +1,7 @@
 effect Writer {
   ctl tell(Int) : Unit
 }
+
 -- Writer: accumulate output on the side.
 --
 -- tell(n) appends to a log the producer never sees. The handler passes the

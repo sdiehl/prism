@@ -23,7 +23,7 @@ use super::flow::{self, Loc};
 use super::{contains_mask, each_subcomp, each_value, thunks_in_value, Env, Lowerer, MaskOp};
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
 use crate::core::fv;
-use crate::names::ENTRY_POINT;
+use crate::names::{ev, ENTRY_POINT};
 use crate::sym::Sym;
 
 impl Lowerer {
@@ -46,7 +46,7 @@ impl Lowerer {
             let env: Env = self
                 .ev_ids(f.name)?
                 .into_iter()
-                .map(|id| (id, ev_name(id).into()))
+                .map(|id| (id, ev(id).into()))
                 .collect();
             let loc: Loc = f
                 .params
@@ -228,7 +228,7 @@ impl Lowerer {
                     let mut env2 = env.clone();
                     let mut ps2 = ps.clone();
                     for id in ids {
-                        let nm: Sym = ev_name(id).into();
+                        let nm: Sym = ev(id).into();
                         env2.insert(id, nm);
                         ps2.push(nm);
                     }
@@ -319,10 +319,6 @@ impl Lowerer {
                 .all(|op| strip_resume(&op.body, &resume_set(op.resume)).is_some())
         })
     }
-}
-
-pub(super) fn ev_name(id: i64) -> String {
-    format!("ev@{id}")
 }
 
 pub(super) fn resume_set(resume: Sym) -> BTreeSet<Sym> {

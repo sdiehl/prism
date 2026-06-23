@@ -6,6 +6,7 @@
 -- State effect desugar to, written out by hand.
 
 type Op = Inc | Dec | Reset | Get
+
 fn step(op, s) : ! (Int, Int) =
   match op of
     Inc => (s + 1, s + 1)

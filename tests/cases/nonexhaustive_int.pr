@@ -2,4 +2,5 @@ fn small(n) =
   match n of
     0 => 10
     1 => 20
+
 fn main() = println(small(0))

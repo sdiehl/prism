@@ -11,6 +11,10 @@ type Ops = BTreeMap<String, EffOpInfo>;
 // effect row: annotated higher-order parameters. Applying one performs its row.
 type Locals = BTreeMap<String, Effects>;
 
+// This set-pass is not a redundant twin of the DK row unifier: its result seeds
+// each function's row prefix in `infer_decl`, so the unifier knows which labels
+// to expect. It cannot be dropped in favour of projecting the inferred row until
+// effect-row inference becomes fully principal on its own.
 pub(crate) fn fixpoint(prog: &Program<Core>, ops: &Ops) -> BTreeMap<String, Effects> {
     let mut map: BTreeMap<String, Effects> = prog
         .fns

@@ -4,6 +4,7 @@
 -- names, recursing into fields. No typeclasses, just the type.
 
 type Tree = Leaf | Node(Tree, Int, Tree)
+
 fn build(n) : ! Tree =
   if n == 0 then
     Leaf

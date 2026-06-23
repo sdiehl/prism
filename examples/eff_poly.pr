@@ -1,9 +1,11 @@
 effect Tick {
   ctl tick(Unit) : Int
 }
+
 effect Say {
   ctl say(Int) : Unit
 }
+
 -- Effect polymorphism: one higher-order function, any effect row.
 --
 -- twice is written once, with a row variable e for whatever its argument

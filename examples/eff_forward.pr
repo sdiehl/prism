@@ -1,9 +1,11 @@
 effect Log {
   ctl log(Int) : Unit
 }
+
 effect Exn {
   ctl raise(Int) : Int
 }
+
 -- Cross-effect forwarding: an inner handler re-emits what it does not catch.
 --
 -- work() performs both Log and Exn. The inner handler interprets Log (prints

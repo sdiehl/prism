@@ -1,9 +1,11 @@
 effect Ask {
   ctl ask(Unit) : Int
 }
+
 effect Log {
   ctl log(Int) : Unit
 }
+
 -- Non-tail resumption through nested handlers.
 --
 -- The inner Ask handler uses the resume's result: it binds r = k(10), prints

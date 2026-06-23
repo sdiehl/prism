@@ -6,7 +6,9 @@
 -- via its annotation: drop a label and it stops typechecking.
 
 error NotFound(String)
+
 error Malformed(String)
+
 error OutOfFuel
 
 fn lookup(k) =

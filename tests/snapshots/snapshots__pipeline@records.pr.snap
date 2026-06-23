@@ -82,7 +82,7 @@ Program {
                                 node: Var(
                                     "a",
                                 ),
-                                span: 86..87,
+                                span: 87..88,
                             },
                         ),
                         (
@@ -91,15 +91,15 @@ Program {
                                 node: Var(
                                     "b",
                                 ),
-                                span: 93..94,
+                                span: 94..95,
                             },
                         ),
                     ],
                 ),
-                span: 74..96,
+                span: 75..97,
             },
             wheres: [],
-            span: 38..96,
+            span: 39..97,
         },
         Decl {
             name: "sum_coords",
@@ -127,7 +127,7 @@ Program {
                         node: Var(
                             "p",
                         ),
-                        span: 139..140,
+                        span: 140..141,
                     },
                     [
                         Arm {
@@ -141,7 +141,7 @@ Program {
                                                 node: Var(
                                                     "px",
                                                 ),
-                                                span: 160..162,
+                                                span: 161..163,
                                             },
                                         ),
                                         (
@@ -150,13 +150,13 @@ Program {
                                                 node: Var(
                                                     "py",
                                                 ),
-                                                span: 168..170,
+                                                span: 169..171,
                                             },
                                         ),
                                     ],
                                     false,
                                 ),
-                                span: 148..172,
+                                span: 149..173,
                             },
                             body: Spanned {
                                 node: Bin(
@@ -165,24 +165,24 @@ Program {
                                         node: Var(
                                             "px",
                                         ),
-                                        span: 176..178,
+                                        span: 177..179,
                                     },
                                     Spanned {
                                         node: Var(
                                             "py",
                                         ),
-                                        span: 181..183,
+                                        span: 182..184,
                                     },
                                 ),
-                                span: 176..183,
+                                span: 177..184,
                             },
                         },
                     ],
                 ),
-                span: 133..183,
+                span: 134..184,
             },
             wheres: [],
-            span: 98..183,
+            span: 99..184,
         },
         Decl {
             name: "shift_x",
@@ -221,7 +221,7 @@ Program {
                         node: Var(
                             "p",
                         ),
-                        span: 237..238,
+                        span: 238..239,
                     },
                     "Point",
                     [
@@ -231,15 +231,15 @@ Program {
                                 node: Var(
                                     "dx",
                                 ),
-                                span: 244..246,
+                                span: 245..247,
                             },
                         ),
                     ],
                 ),
-                span: 227..248,
+                span: 228..249,
             },
             wheres: [],
-            span: 185..248,
+            span: 186..249,
         },
         Decl {
             name: "main",
@@ -258,7 +258,7 @@ Program {
                                 node: Var(
                                     "make",
                                 ),
-                                span: 279..283,
+                                span: 280..284,
                             },
                             [
                                 Spanned {
@@ -268,7 +268,7 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 284..285,
+                                    span: 285..286,
                                 },
                                 Spanned {
                                     node: Int(
@@ -277,11 +277,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 287..288,
+                                    span: 288..289,
                                 },
                             ],
                         ),
-                        span: 279..289,
+                        span: 280..290,
                     },
                     Spanned {
                         node: Let(
@@ -292,18 +292,18 @@ Program {
                                         node: Var(
                                             "sum_coords",
                                         ),
-                                        span: 300..310,
+                                        span: 301..311,
                                     },
                                     [
                                         Spanned {
                                             node: Var(
                                                 "p",
                                             ),
-                                            span: 311..312,
+                                            span: 312..313,
                                         },
                                     ],
                                 ),
-                                span: 300..313,
+                                span: 301..314,
                             },
                             Spanned {
                                 node: Let(
@@ -314,14 +314,14 @@ Program {
                                                 node: Var(
                                                     "shift_x",
                                                 ),
-                                                span: 324..331,
+                                                span: 325..332,
                                             },
                                             [
                                                 Spanned {
                                                     node: Var(
                                                         "p",
                                                     ),
-                                                    span: 332..333,
+                                                    span: 333..334,
                                                 },
                                                 Spanned {
                                                     node: Int(
@@ -330,11 +330,11 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 335..337,
+                                                    span: 336..338,
                                                 },
                                             ],
                                         ),
-                                        span: 324..338,
+                                        span: 325..339,
                                     },
                                     Spanned {
                                         node: Let(
@@ -345,18 +345,18 @@ Program {
                                                         node: Var(
                                                             "sum_coords",
                                                         ),
-                                                        span: 349..359,
+                                                        span: 350..360,
                                                     },
                                                     [
                                                         Spanned {
                                                             node: Var(
                                                                 "q",
                                                             ),
-                                                            span: 360..361,
+                                                            span: 361..362,
                                                         },
                                                     ],
                                                 ),
-                                                span: 349..362,
+                                                span: 350..363,
                                             },
                                             Spanned {
                                                 node: Call(
@@ -364,33 +364,33 @@ Program {
                                                         node: Var(
                                                             "println",
                                                         ),
-                                                        span: 365..372,
+                                                        span: 366..373,
                                                     },
                                                     [
                                                         Spanned {
                                                             node: Var(
                                                                 "s",
                                                             ),
-                                                            span: 373..374,
+                                                            span: 374..375,
                                                         },
                                                     ],
                                                 ),
-                                                span: 365..375,
+                                                span: 366..376,
                                             },
                                         ),
-                                        span: 341..375,
+                                        span: 342..376,
                                     },
                                 ),
-                                span: 316..375,
+                                span: 317..376,
                             },
                         ),
-                        span: 292..375,
+                        span: 293..376,
                     },
                 ),
-                span: 271..375,
+                span: 272..376,
             },
             wheres: [],
-            span: 250..375,
+            span: 251..376,
         },
     ],
 }

@@ -5,6 +5,7 @@ type Result(a, e) = Ok(a) | Err(e) deriving (Eq)
 type List(a) = Nil | Cons(a, List(a)) deriving (Eq)
 
 type Map(k, v) = Tip | Bin(Int, k, v, Map(k, v), Map(k, v))
+
 fn id(x) = x
 
 fn const(x, y) = x

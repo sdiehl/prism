@@ -1,6 +1,7 @@
 effect Reader {
   ctl ask(Unit) : Int
 }
+
 -- Reader: a read-only environment as an effect.
 --
 -- ask() pulls a value from an ambient context the code never names. The

@@ -201,8 +201,16 @@ fn fmt_program(prog: &Program) -> String {
 
     let mut out = String::new();
     let mut prev_end: usize = 0;
-    for (start, end, s) in items {
+    for (idx, (start, end, s)) in items.into_iter().enumerate() {
+        let boundary = out.len();
         emit_leading_trivia(prev_end, start, &mut out);
+        // Top-level declarations are always separated by a blank line. The
+        // leading trivia already opens the gap with one when the source had it;
+        // otherwise insert one ahead of any attached doc comment so the comment
+        // stays with its declaration.
+        if idx > 0 && !out[boundary..].starts_with('\n') {
+            out.insert(boundary, '\n');
+        }
         out.push_str(&s);
         out.push('\n');
         prev_end = end;

@@ -1,5 +1,7 @@
 alias Pair(a) = (a, a)
+
 alias Pairs(a) = Pair(Pair(a))
+
 alias Count = Int
 
 fn fst(p : Pair(Int)) : Int =

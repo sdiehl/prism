@@ -243,6 +243,22 @@ impl Tc<'_> {
             (EffRow::Empty, EffRow::Empty) => Ok(()),
             (EffRow::Var(x), EffRow::Var(y)) if x == y => Ok(()),
             (EffRow::Exist(x), EffRow::Exist(y)) if x == y => Ok(()),
+            // Two row existentials: solve the younger (further right in context)
+            // to the older, so a solution only references entries to its left and
+            // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
+            (EffRow::Exist(x), EffRow::Exist(y)) => {
+                let xi = self
+                    .index_ex_row(*x)
+                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{x} not in context")))?;
+                let yi = self
+                    .index_ex_row(*y)
+                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{y} not in context")))?;
+                if xi > yi {
+                    self.solve_row(*x, EffRow::Exist(*y))
+                } else {
+                    self.solve_row(*y, EffRow::Exist(*x))
+                }
+            }
             (EffRow::Exist(x), other) | (other, EffRow::Exist(x)) => {
                 let mut fv = BTreeSet::new();
                 other.free_exist_row(&mut fv);

@@ -577,6 +577,22 @@ impl Tc<'_> {
         Ok(self.apply(&tb))
     }
 
+    // The numeric defaulting rule, in one place: an ambiguous operand defaults
+    // to `Int`. `==`/`!=` invoke it for an unconstrained (existential) operand;
+    // the ordered and arithmetic operators invoke it for any operand that is not
+    // already a fixed-width integer. This is the only site the `Int` literal and
+    // its `subtype` decision live, so Eq and Ord share one rule.
+    fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
+        self.subtype(ty, &Type::Int).map_err(|e| {
+            e.or(TypeError::Mismatch {
+                span,
+                expected: Type::Int.show(),
+                found: ty.show(),
+            })
+        })?;
+        Ok(Type::Int)
+    }
+
     fn synth_bin(
         &mut self,
         env: &Env,
@@ -613,13 +629,7 @@ impl Tc<'_> {
                         self.fixed.insert(span, ta);
                     }
                     Type::Exist(_) => {
-                        self.subtype(&ta, &Type::Int).map_err(|e| {
-                            e.or(TypeError::Mismatch {
-                                span: a.span,
-                                expected: Type::Int.show(),
-                                found: ta.show(),
-                            })
-                        })?;
+                        self.default_numeric(&ta, a.span)?;
                     }
                     _ => self.wanted.push(Wanted {
                         span,
@@ -633,16 +643,7 @@ impl Tc<'_> {
                 let ta = self.apply(&ta);
                 let t = match ta {
                     Type::I64 | Type::U64 => ta,
-                    other => {
-                        self.subtype(&other, &Type::Int).map_err(|e| {
-                            e.or(TypeError::Mismatch {
-                                span: a.span,
-                                expected: Type::Int.show(),
-                                found: other.show(),
-                            })
-                        })?;
-                        Type::Int
-                    }
+                    other => self.default_numeric(&other, a.span)?,
                 };
                 self.check(env, b, &t)?;
                 if t != Type::Int {

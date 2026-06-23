@@ -1,0 +1,21 @@
+-- Higher-order instantiation of a scheme carrying a shared latent effect row.
+-- Previously ICEd with `solve_row: ^N not in context`: a row existential
+-- introduced under a forall marker was solved into a left-scoped existential and
+-- then truncated. `unify_row` now solves the younger row var to the older, so
+-- the solution stays in scope.
+
+fn inc(x) = x + 1
+
+-- A parameter that calls its argument: the scheme gains a shared row var.
+fn applyf(f, x) = f(x)
+
+-- A composed function-parameter via `>>`.
+fn compose2(f, g, x) = (f >> g)(x)
+
+fn main() =
+  -- applyf used directly and threaded through a higher-order combinator.
+  println(applyf(inc, 2))
+  println(foldr(applyf, 0, [inc, inc]))
+  -- compose2 likewise.
+  println(compose2(inc, inc, 0))
+  println(foldr(compose2(inc), 0, [inc, inc]))

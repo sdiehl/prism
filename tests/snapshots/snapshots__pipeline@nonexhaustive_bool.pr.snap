@@ -73,7 +73,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 52..59,
+                        span: 53..60,
                     },
                     [
                         Spanned {
@@ -82,25 +82,25 @@ Program {
                                     node: Var(
                                         "flag",
                                     ),
-                                    span: 60..64,
+                                    span: 61..65,
                                 },
                                 [
                                     Spanned {
                                         node: Bool(
                                             true,
                                         ),
-                                        span: 65..69,
+                                        span: 66..70,
                                     },
                                 ],
                             ),
-                            span: 60..70,
+                            span: 61..71,
                         },
                     ],
                 ),
-                span: 52..71,
+                span: 53..72,
             },
             wheres: [],
-            span: 40..71,
+            span: 41..72,
         },
     ],
 }

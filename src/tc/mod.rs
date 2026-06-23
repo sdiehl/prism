@@ -331,6 +331,13 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                 });
                 continue;
             }
+            // The set-pass result is a load-bearing *seed* for row inference,
+            // not a redundant parallel computation: it tells `infer_decl` which
+            // effect labels to place in this function's row prefix so direct
+            // `do op` and effect-op calls land in the row. Drop it and a function
+            // that performs `raise` infers as pure. So `effects.rs` cannot be
+            // collapsed into a pure row projection without first making effect-row
+            // inference fully principal (discovering labels on its own).
             let latent_set = effects.get(&d.name).cloned().unwrap_or_default();
             let latent = EffRow::from_set(&latent_set);
             let ty = tc
