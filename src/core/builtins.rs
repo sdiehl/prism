@@ -135,7 +135,7 @@ pub enum Builtin {
     ByteAt,
     ByteLen,
     StringOfBytes,
-    // Drop the last element of an array (in place when uniquely owned).
+    // Pop last element, in place when uniquely owned.
     ArrayPop,
     // Fixed-width bitwise and shift ops, one runtime call each, both lanes (the
     // and/or/xor bit patterns coincide across signedness; `i64_shr` is arithmetic

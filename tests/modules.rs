@@ -1,4 +1,4 @@
-//! Multi-module resolution (M2): qualified, selective, and aliased imports;
+//! Multi-module resolution: qualified, selective, and aliased imports;
 //! private-name namespacing; and the eager conflict policy.
 
 use std::path::Path;

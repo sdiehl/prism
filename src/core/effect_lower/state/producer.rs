@@ -55,7 +55,7 @@ impl Lowerer {
                 };
                 Comp::Bind(Box::new(tm), st2, Box::new(tn))
             }
-            // A pure head binds normally. The accumulator passes through.
+            // Pure head: the accumulator passes through.
             Comp::Bind(m, x, n) => {
                 let mut loc2 = loc.clone();
                 loc2.insert(*x, flow::result_sig(m, loc, &self.latent, &self.flow));

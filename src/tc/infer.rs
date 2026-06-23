@@ -794,12 +794,10 @@ impl Tc<'_> {
         Type::fun(params, ret)
     }
 
-    // The number of effect-type parameters of `eff`. A parametric effect carries
-    // them on its ops, so it is always found here. Not-found means zero, reachable
-    // two ways that are both correctly zero: a builtin effect (`IO`, `Exn`) has no
-    // parameters, and an undeclared effect a user named (e.g. `mask<Nope>`) flows
-    // through the latent row to here before the perform/mask existence check
-    // rejects it, so zero is a placeholder that the later check supersedes.
+    // Effect-type parameter count for `eff`. Not-found means zero, correct both
+    // ways: builtins (`IO`, `Exn`) have none, and an undeclared effect (e.g.
+    // `mask<Nope>`) reaches here before the perform/mask existence check rejects
+    // it, so zero is a superseded placeholder.
     fn eff_arity(&self, eff: Sym) -> usize {
         self.eff_ops
             .values()

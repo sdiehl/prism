@@ -47,7 +47,7 @@ pub(super) fn idx64(n: usize) -> i64 {
 
 #[derive(Clone)]
 enum LamBody {
-    // An ordinary closure: lower its computation body.
+    // An ordinary closure.
     Core(Comp),
     // A curry adapter for under-application. Once saturated with its remaining
     // params it forwards all captured-plus-remaining values to `target` (an

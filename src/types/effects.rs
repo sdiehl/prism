@@ -25,10 +25,8 @@ pub(crate) fn fixpoint(prog: &Program<Core>, ops: &Ops) -> BTreeMap<String, Effe
         let mut changed = false;
         for d in &prog.fns {
             let e = of_decl(d, &map, ops);
-            // A lookup is not a panic: the map was seeded from prog.fns, but an
-            // absent function legitimately means "no effects" (the same
-            // Effects::new() the map starts with), so fall back rather than
-            // asserting presence.
+            // An absent function legitimately means "no effects" (the
+            // Effects::new() the map starts with), so fall back, never panic.
             let slot = map.entry(d.name.clone()).or_default();
             if e != *slot {
                 *slot = e;

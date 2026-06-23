@@ -22,9 +22,8 @@ pub fn pp_core(core: &Core) -> String {
 
 const STEP: &str = "  ";
 
-// A human-readable rendering of the core: every bind in a sequence lands on its
-// own line and `if`/`case`/`handle` bodies become indented blocks, unlike the
-// single `;`-joined line `pp_core` emits for snapshots.
+// Multi-line rendering: one bind per line, indented `if`/`case`/`handle` blocks,
+// unlike the single `;`-joined line `pp_core` emits for snapshots.
 #[must_use]
 pub fn pp_core_pretty(core: &Core) -> String {
     let mut out = String::new();

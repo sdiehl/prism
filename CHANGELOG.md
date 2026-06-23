@@ -12,6 +12,8 @@
 - Surface fixed-width arithmetic: `i64_*`/`u64_*` `add`/`sub`/`mul`/`div`/`rem`/`cmp` (wrapping, no bignum promotion), enabling a real fixed-width hash in userland.
 - Higher-kinded types: a class parameter may range over a type constructor (kind `* -> *`), applied as `f(a)` in method signatures, with instance resolution keyed on the head constructor. The prelude adds the `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` tower with `List` and `Option` instances. `fmap`/`traverse` are effect-polymorphic, so the per-element effect row threads through instead of an `Applicative` wrapper (effects, not do-notation).
 - String-utility prelude: character classifiers (`is_digit`/`is_alpha`/`is_alnum`/`is_space`/`is_upper`/`is_lower`, `to_upper_c`/`to_lower_c`), `starts_with`/`ends_with`/`contains`/`index_of`, `to_upper`/`to_lower`/`trim`, and `args()`.
+- `prism fmt` separates top-level declarations with a blank line and keeps `>>`/`<<` function composition as surface sugar (printing `f >> g` rather than expanding it to a lambda), so formatting round-trips these forms.
+- Editor tooling: a dependency-free Neovim highlighter under `scripts/nvim/` (an `ftdetect/` filetype map for `*.pr` plus a `syntax/` highlighter), with its keyword set mirrored from `src/lex/token.rs` so it tracks the lexer.
 
 ## 0.1.0
 

@@ -166,8 +166,7 @@ pub enum Item {
     Fn(Decl),
 }
 
-// The parser only ever builds `Surface` items, so `Item` stays non-generic and
-// refers to the default-phase decls above.
+// The parser only builds `Surface` items, so `Item` stays non-generic.
 
 // `pattern Polar(r, t) for Complex = view \(c) -> ... make \(r, t) -> ...`:
 // a Scala-style extractor. `view` deconstructs in match position, `make`

@@ -229,11 +229,11 @@ __attribute__((destructor)) static void prism_reuse_report(void) {
     }
 }
 
-/* Effect-op allocation tax (DESIGN.md s4 Phase 0): every EOp cell the
- * free-monad lowering builds for a `do op` bumps this. With PRISM_EFFOP_STATS
- * set a destructor reports the total to stderr, leaving stdout (the
- * parity-checked channel) untouched, so the count can be ratcheted down as
- * the tail-resumptive direct-call fast path lands. */
+/* Effect-op allocation counter: every EOp cell the free-monad lowering builds
+ * for a `do op` bumps this. With PRISM_EFFOP_STATS set a destructor reports the
+ * total to stderr, leaving stdout (the parity-checked channel) untouched, so a
+ * fused pipeline can be asserted to allocate zero EOp cells while a genuinely
+ * escaping effect's fallback count stays observable. */
 static long prism_effop_allocs = 0;
 
 __attribute__((destructor)) static void prism_effop_report(void) {

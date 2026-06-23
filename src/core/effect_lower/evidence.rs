@@ -134,9 +134,8 @@ impl Lowerer {
                 }
                 Comp::Call(*g, a)
             }
-            // Forcing a thunk-valued variable: append the evidence for the ops
-            // its body performs, in ascending id order to match how the thunk's
-            // parameters were laid out.
+            // Append this thunk's evidence in ascending id order, matching its
+            // param layout.
             Comp::App(f, args) => {
                 let mut a = self.thread_values(args, env, loc)?;
                 if let Comp::Force(Value::Var(v)) = f.as_ref() {
