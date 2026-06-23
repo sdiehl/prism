@@ -163,6 +163,20 @@ pub fn lower(
         early: false,
     };
 
+    // The two fusion paths and the free-monad fallback are three answer-type
+    // strategies for the same evidence translation, tried in order of how little
+    // they reify: the evidence path is the Identity answer (a clause is a plain
+    // thunk, `do op` is `force(ev)(args)`, resume is a direct return); the state
+    // path is the State answer (a clause is a transformer `\(args, acc) -> acc'`,
+    // producers thread an accumulator, and `stake` adds a `Step` short-circuit);
+    // the free monad reifies the continuation when neither answer fits. They are
+    // kept as separate passes deliberately: the Identity translation threads
+    // values through ordinary CBPV bind, while the State translation threads an
+    // explicit accumulator and splits consumer from producer, so the core `Bind`
+    // and `do op` handling genuinely differs rather than sharing one traversal.
+    // What they do share, the static eligibility prologue, is factored into
+    // [`Lowerer::fusion_handles`].
+    //
     // The evidence path subsumes the free monad whenever it applies: every
     // reachable handler tail-resumptive and every escaping effectful thunk
     // trackable to its force sites. It fully succeeds or returns None, falling

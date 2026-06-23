@@ -284,33 +284,47 @@ impl Lowerer {
         }
     }
 
-    // Static eligibility for evidence passing: no masks, at least one handle,
-    // the program is closed (nothing latent escapes main), and every reachable
-    // handler is tail-resumptive. Escaping effectful thunks are fine here: the
-    // rewrite confirms it can track each one. An open handler whose clause
-    // re-performs its own op (smap-style `emit(f(x))`) is fine: that op is
-    // caught by an outer handler, whose evidence is in scope as a parameter.
-    fn ev_eligible(&self, core: &Core) -> bool {
+    // The eligibility prologue both stream-fusion front-ends share. A program
+    // can fuse only if it has no masks, lets nothing latent escape (neither a
+    // first-class effectful thunk the flow cannot track nor an open latent at
+    // `main`), and installs at least one handler. Returns the program's handles
+    // for the caller's own per-handler shape check, or None when a guard fails
+    // (the caller then falls back to the free monad). The two callers,
+    // [`ev_eligible`](Self::ev_eligible) and [`fold_uniform`](Self::fold_uniform),
+    // differ only in that per-handler check, not in this prologue.
+    pub(super) fn fusion_handles<'a>(&self, core: &'a Core) -> Option<Vec<&'a Comp>> {
         if core.fns.iter().any(|f| contains_mask(&f.body)) {
-            return false;
+            return None;
         }
         if flow::escapes(core, &self.latent, &self.flow) {
-            return false;
+            return None;
         }
         if self
             .latent
             .get(&Sym::new(ENTRY_POINT))
             .is_some_and(|s| !s.is_empty())
         {
-            return false;
+            return None;
         }
         let mut handles = Vec::new();
         for f in &core.fns {
             find_handles(&f.body, &mut handles);
         }
         if handles.is_empty() {
-            return false;
+            return None;
         }
+        Some(handles)
+    }
+
+    // Static eligibility for evidence passing: the shared fusion prologue plus
+    // every reachable handler being tail-resumptive. Escaping effectful thunks
+    // are fine here: the rewrite confirms it can track each one. An open handler
+    // whose clause re-performs its own op (smap-style `emit(f(x))`) is fine: that
+    // op is caught by an outer handler, whose evidence is in scope as a parameter.
+    fn ev_eligible(&self, core: &Core) -> bool {
+        let Some(handles) = self.fusion_handles(core) else {
+            return false;
+        };
         handles.iter().all(|h| {
             let Comp::Handle { ops, .. } = h else {
                 return false;

@@ -2,11 +2,10 @@
 //! whole program streams a single op through fold/forward/control/take
 //! handlers, and recognise each clause shape.
 
-use super::super::evidence::{find_handles, resume_set, strip_resume};
+use super::super::evidence::{resume_set, strip_resume};
 use super::super::flow::{self, Loc};
-use super::super::{contains_mask, Lowerer};
+use super::super::Lowerer;
 use crate::core::cbpv::{Comp, Core, HandleOp, Value};
-use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 
 use super::anf::{branch_resumes, is_id_return, is_id_transformer, strip_state, tail_if};
@@ -21,26 +20,7 @@ impl Lowerer {
         if self.op_ids.len() != 1 {
             return None;
         }
-        if core.fns.iter().any(|f| contains_mask(&f.body)) {
-            return None;
-        }
-        if flow::escapes(core, &self.latent, &self.flow) {
-            return None;
-        }
-        if self
-            .latent
-            .get(&Sym::new(ENTRY_POINT))
-            .is_some_and(|s| !s.is_empty())
-        {
-            return None;
-        }
-        let mut handles = Vec::new();
-        for f in &core.fns {
-            find_handles(&f.body, &mut handles);
-        }
-        if handles.is_empty() {
-            return None;
-        }
+        let handles = self.fusion_handles(core)?;
         let mut op: Option<Sym> = None;
         let mut folds = 0u32;
         let mut takes = 0u32;
