@@ -40,275 +40,377 @@ Desugaring rewrites surface sugar into the smaller core-surface language the che
 
 Function composition lowers to a lambda, kept as sugar only so the operator survives formatting.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/compose_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/compose_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 An arithmetic sequence lowers to a prelude enumeration call.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/range_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/range_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A list comprehension (and the statement `for`) lowers to a stream (a producer performing the `Emit` effect, Section [9](#9-effect-lowering)) that emits each surviving element, collected with `scollect` (a stream consumer that gathers the emissions into a list), so it fuses with no intermediate list.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/comp_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/comp_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A record update rebuilds the constructor along the named fields; on a uniquely owned value the rebuild is the in-place write of Section [10](#10-reference-counting-and-fbip-reuse).
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/record_update_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/record_update_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 `deriving (Lens)` synthesizes a getter and a functional setter per field.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/lens_derive.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/lens_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 The failure fallback `a ?? b` runs `a` under a `Fail` handler that yields `b` if `a` fails.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/default_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/default_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A method call `e.m(args)` is uniform-function-call sugar: the receiver becomes the first argument.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/ufcs_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/ufcs_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A string with interpolation holes becomes a concatenation of its literal pieces and the `show` of each hole.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/interp_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/interp_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 `try`/`catch`/`throw` is subtractive handler sugar: one nested `final ctl` clause (the non-resumable handler clause of [Spec 7.2](./spec.md#72-clause-sugar)) per arm, each discharging one error label.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/trycatch_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/trycatch_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 `transact body else fallback` snapshots every live `var`, runs the body under a `Fail` handler, and restores the snapshots on failure, so a failed attempt leaves observable state unchanged.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/transact.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/transact_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 Optional chaining `a?.b` is `force(a).b`, where `force` raises `fail()` on `None`, so a path short-circuits at the first `None` and an enclosing `??` supplies the default.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/optionals.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/optchain_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A `with f <- handler { .. }` block binds a first-class handler instance over a fresh private effect; `f.op(..)` targets it by name.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/with_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/with_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A trailing block argument is appended as the call's last argument.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/trailingblock_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/trailingblock_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A bidirectional pattern synonym desugars to a `view` call in match position and a `make` call in expression position.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/pattern_syn_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/pattern_syn_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 A nested path update rebuilds the single-constructor spine (the chain of nested constructor cells) along the path.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/pathupdate_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/pathupdate_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 `deriving (Eq, Ord, Show)` generates one structural instance per class.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/deriving_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/deriving_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 The postfix `e?` unwraps `Ok` and short-circuits on `Err`.
 
-{{#tabs }} {{#tab name="Surface" }}
+{{#tabs }}
+
+{{#tab name="Surface" }}
 
 ```prism
 {{#include ../examples/postfix_try_sugar.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/postfix_try_desugared.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 The `var` desugaring is shown with full Source / Desugared / Core stage tabs in [Spec 7.4](./spec.md#74-local-mutation); default and named arguments lower to positional ones in the same pass.
 

@@ -258,25 +258,33 @@ A `var` mutates, yet the function holding it stays pure. `fib_iter` below update
 
 A `var x := e` desugars to a private two-operation effect (a get and a set); each read of `x` becomes a perform of get, each `x := v` a perform of set. In the same pass, a handler that threads the value as a hidden parameter is wrapped around the block. That handler discharges the get and set labels (Section [7.1](#71-observability)), so they never reach the function's type: the state is implemented but not observable. Effect lowering then turns the tail-resumptive handler into threaded arguments and the loop into a constant-stack loop, so the lowered code allocates nothing.
 
-{{#tabs }} {{#tab name="Source" }}
+{{#tabs }}
+
+{{#tab name="Source" }}
 
 ```prism
 {{#include ../examples/var_fib.pr}}
 ```
 
-{{#endtab }} {{#tab name="Desugared" }}
+{{#endtab }}
+
+{{#tab name="Desugared" }}
 
 ```text
 {{#include ../examples/var_desugared.txt}}
 ```
 
-{{#endtab }} {{#tab name="Core" }}
+{{#endtab }}
+
+{{#tab name="Core" }}
 
 ```text
 {{#include ../examples/var_core.txt}}
 ```
 
-{{#endtab }} {{#endtabs }}
+{{#endtab }}
+
+{{#endtabs }}
 
 An escape analysis keeps the purity honest: the compiler rejects any closure or returned value that would carry the var out of its block, so the state cannot outlive its handler.
 

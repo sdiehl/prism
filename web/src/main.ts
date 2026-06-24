@@ -186,9 +186,24 @@ for (const name of names) {
   opt.textContent = name;
   sel.append(opt);
 }
+// A docs "Open in playground" link carries the snippet UTF-8 + base64 in the
+// URL fragment (`#code=...`). When present, it overrides the default example.
+function sharedSource(): string | null {
+  const m = /[#&]code=([^&]+)/.exec(location.hash);
+  if (!m) return null;
+  try {
+    const bin = atob(decodeURIComponent(m[1]));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 const start = examples.factorial ? "factorial" : (names[0] ?? "");
 sel.value = start;
-src.value = examples[start] ?? "";
+const shared = sharedSource();
+src.value = shared ?? examples[start] ?? "";
 sel.onchange = () => {
   src.value = examples[sel.value] ?? "";
   out.textContent = "";
