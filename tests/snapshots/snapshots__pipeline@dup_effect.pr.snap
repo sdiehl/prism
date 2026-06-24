@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/dup_effect.pr
 ---
 == tokens ==

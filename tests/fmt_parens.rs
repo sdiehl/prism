@@ -5,8 +5,8 @@
 // reparses its own output, so a dropped-but-required paren surfaces as an Err
 // here. Each case also pins idempotence.
 fn roundtrips(src: &str) {
-    let once = tiny_prism::format(src).expect("input must parse");
-    let twice = tiny_prism::format(&once).expect("formatted output must reparse");
+    let once = prism::format(src).expect("input must parse");
+    let twice = prism::format(&once).expect("formatted output must reparse");
     assert_eq!(once, twice, "formatter not idempotent: {src:?} -> {once:?}");
 }
 

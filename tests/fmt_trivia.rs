@@ -7,8 +7,8 @@
 // must reproduce it, so a snapshot can never lock in an unstable layout.
 
 fn fmt(src: &str) -> String {
-    let once = tiny_prism::format(src).expect("case must parse");
-    let twice = tiny_prism::format(&once).expect("formatted output must parse");
+    let once = prism::format(src).expect("case must parse");
+    let twice = prism::format(&once).expect("formatted output must parse");
     assert_eq!(once, twice, "formatter is not idempotent on this case");
     once
 }

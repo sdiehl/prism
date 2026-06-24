@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use tiny_prism::{check_at, interpret_at, with_prelude};
+use prism::{check_at, interpret_at, with_prelude};
 
 fn base() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/modules"))

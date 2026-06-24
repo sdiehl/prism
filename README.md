@@ -24,7 +24,7 @@ sudo apt install llvm-22-dev         # Debian/Ubuntu
 Then build with:
 
 ```shell
-LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/tiny-prism
+LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/prism
 ```
 
 This builds the `prism` binary. Native compilation also needs `clang` on `$PATH` (override with `PRISM_CC`).

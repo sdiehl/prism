@@ -31,7 +31,7 @@ fn have(tool: &str) -> bool {
 fn stat(case: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(case);
     let src = std::fs::read_to_string(&path).map_err(|e| format!("{case}: {e}"))?;
-    let full = tiny_prism::with_prelude(&src);
+    let full = prism::with_prelude(&src);
     let bin = std::env::temp_dir().join(format!(
         "prism_perf_{}_{}",
         std::process::id(),
@@ -43,7 +43,7 @@ fn stat(case: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
         }
         let _ = std::fs::remove_file(&bin);
     };
-    if let Err(e) = tiny_prism::build(&full, &bin) {
+    if let Err(e) = prism::build(&full, &bin) {
         cleanup();
         return Err(format!("{case}: build failed: {e}"));
     }

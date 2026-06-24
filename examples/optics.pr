@@ -1,4 +1,4 @@
--- Optics in tiny-prism, basic to advanced.
+-- Optics in prism, basic to advanced.
 --
 -- The language gives two primitives. `deriving (Lens)` synthesizes a getter
 -- `<f>_of` and a functional setter `with_<f>` per field. A `pattern .. for T`

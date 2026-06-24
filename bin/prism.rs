@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use tiny_prism::error::Error;
+use prism::error::Error;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -63,7 +63,7 @@ fn main() -> ExitCode {
         (Some(cmd), _) => cmd,
         (None, Some(file)) => Cmd::Run { file },
         (None, None) => {
-            tiny_prism::repl::repl(true);
+            prism::repl::repl(true);
             return ExitCode::SUCCESS;
         }
     };
@@ -94,15 +94,15 @@ fn base_of(file: &Path) -> PathBuf {
 fn resolve_input(arg: &Path) -> Result<(String, PathBuf, String), (Error, String, String)> {
     let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == "prism.toml");
     if is_project {
-        let project = tiny_prism::project::load_project(arg)
+        let project = prism::project::load_project(arg)
             .map_err(|e| (e, String::new(), arg.display().to_string()))?;
         let src =
             read(&project.entry).map_err(|e| (e, String::new(), file_name(&project.entry)))?;
-        let full = tiny_prism::with_prelude(&src);
+        let full = prism::with_prelude(&src);
         Ok((full, project.src_dir, file_name(&project.entry)))
     } else {
         let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;
-        let full = tiny_prism::with_prelude(&src);
+        let full = prism::with_prelude(&src);
         Ok((full, base_of(arg), file_name(arg)))
     }
 }
@@ -118,7 +118,7 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             let stdin = std::io::stdin();
             let mut out = stdout.lock();
             let mut input = stdin.lock();
-            let run = tiny_prism::interpret_io_at(&full, &base, &mut out, &mut input)
+            let run = prism::interpret_io_at(&full, &base, &mut out, &mut input)
                 .map_err(|e| (e, full, name))?;
             drop(out);
             drop(input);
@@ -136,7 +136,7 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
         }
         Cmd::Check { file } => {
             let (full, base, name) = resolve_input(&file)?;
-            let checked = tiny_prism::check_at(&full, &base).map_err(|e| (e, full, name))?;
+            let checked = prism::check_at(&full, &base).map_err(|e| (e, full, name))?;
             for d in &checked.decls {
                 println!("{} : {}", d.name, d.ty.show());
             }
@@ -144,17 +144,17 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
         }
         Cmd::Dump { phase, file } => {
             let (full, base, name) = resolve_input(&file)?;
-            let out = tiny_prism::dump_at(&phase, &full, &base).map_err(|e| (e, full, name))?;
+            let out = prism::dump_at(&phase, &full, &base).map_err(|e| (e, full, name))?;
             println!("{out}");
             Ok(())
         }
         Cmd::Report { file } => {
             let (full, base, _name) = resolve_input(&file)?;
-            print!("{}", tiny_prism::report_at(&full, &base));
+            print!("{}", prism::report_at(&full, &base));
             Ok(())
         }
         Cmd::Repl { no_banner } => {
-            tiny_prism::repl::repl(!no_banner);
+            prism::repl::repl(!no_banner);
             Ok(())
         }
         Cmd::Fmt { files, check } => fmt_cmd(&files, check),
@@ -200,7 +200,7 @@ fn fmt_cmd(paths: &[PathBuf], check: bool) -> Result<(), (Error, String, String)
     let mut needs_fmt = false;
     for (path, strict) in targets {
         let src = read(&path).map_err(|e| (e, String::new(), file_name(&path)))?;
-        let formatted = match tiny_prism::format(&src) {
+        let formatted = match prism::format(&src) {
             Ok(f) => f,
             Err(e) if strict => return Err((e, src, file_name(&path))),
             Err(_) => {
@@ -239,7 +239,7 @@ fn fmt_stdin() -> Result<(), (Error, String, String)> {
     std::io::stdin()
         .read_to_string(&mut src)
         .map_err(|e| (Error::Io(e), String::new(), "<stdin>".into()))?;
-    let formatted = tiny_prism::format(&src).map_err(|e| (e, src.clone(), "<stdin>".into()))?;
+    let formatted = prism::format(&src).map_err(|e| (e, src.clone(), "<stdin>".into()))?;
     print!("{formatted}");
     Ok(())
 }
@@ -247,7 +247,7 @@ fn fmt_stdin() -> Result<(), (Error, String, String)> {
 fn build_dispatch(mlir: bool, src: &str, base: &Path, out: &Path) -> Result<(), Error> {
     if mlir {
         #[cfg(feature = "mlir")]
-        return tiny_prism::build_mlir_at(src, base, out);
+        return prism::build_mlir_at(src, base, out);
         #[cfg(not(feature = "mlir"))]
         {
             let _ = base;
@@ -256,7 +256,7 @@ fn build_dispatch(mlir: bool, src: &str, base: &Path, out: &Path) -> Result<(), 
             ));
         }
     }
-    tiny_prism::build_at(src, base, out)
+    prism::build_at(src, base, out)
 }
 
 fn file_name(p: &Path) -> String {

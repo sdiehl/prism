@@ -8,7 +8,7 @@ edition = "2021"
 keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/sdiehl/tiny-prism"
+repository = "https://github.com/sdiehl/prism"
 description = "An effect-typed functional language with a call-by-push-value core that compiles to native code through LLVM."
 
 [dependencies]
@@ -48,7 +48,7 @@ wasm = ["dep:wasm-bindgen"]
 mimalloc = ["dep:libmimalloc-sys"]
 
 [lib]
-name = "tiny_prism"
+name = "prism"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 

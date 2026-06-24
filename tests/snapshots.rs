@@ -7,13 +7,13 @@
 fn pipeline() {
     insta::glob!("cases/*.pr", |path| {
         let src = std::fs::read_to_string(path).unwrap();
-        insta::assert_snapshot!(tiny_prism::report(&src));
+        insta::assert_snapshot!(prism::report(&src));
     });
 }
 
 #[test]
 fn prelude_type_checks() {
-    let checked = tiny_prism::check(tiny_prism::with_prelude("").as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude("").as_str()).unwrap();
     let mut lines: Vec<String> = checked
         .decls
         .iter()
@@ -22,7 +22,7 @@ fn prelude_type_checks() {
                 "{} : {} ! {}",
                 d.name,
                 d.ty.show(),
-                tiny_prism::types::show_effects(&d.effects)
+                prism::types::show_effects(&d.effects)
             )
         })
         .collect();
@@ -35,10 +35,10 @@ fn prelude_type_checks() {
 fn var_stays_pure() {
     let root = env!("CARGO_MANIFEST_DIR");
     let src = std::fs::read_to_string(format!("{root}/tests/cases/run/fib_var.pr")).unwrap();
-    let checked = tiny_prism::check(tiny_prism::with_prelude(&src).as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
     let d = checked.decls.iter().find(|d| d.name == "fib2").unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
-    assert_eq!(tiny_prism::types::show_effects(&d.effects), "{}");
+    assert_eq!(prism::types::show_effects(&d.effects), "{}");
 }
 
 // The bounded-stack rule is scoped to `fip`. The identical non-tail recursive
@@ -49,12 +49,12 @@ fn var_stays_pure() {
 #[test]
 fn bounded_stack_rule_is_fip_only() {
     let prog = |kw: &str| {
-        tiny_prism::with_prelude(&format!(
+        prism::with_prelude(&format!(
             "fip fn wrap(x) = x\n{kw} fn relay(x) = wrap(relay(x))\nfn main() = println(relay(1))"
         ))
     };
-    tiny_prism::dump("core", &prog("fbip")).expect("fbip may recurse non-tail");
-    let err = format!("{}", tiny_prism::dump("core", &prog("fip")).unwrap_err());
+    prism::dump("core", &prog("fbip")).expect("fbip may recurse non-tail");
+    let err = format!("{}", prism::dump("core", &prog("fip")).unwrap_err());
     assert!(
         err.contains("non-tail position"),
         "fip relay must be rejected for non-tail recursion: {err}"
@@ -68,8 +68,8 @@ fn bounded_stack_rule_is_fip_only() {
 #[cfg(feature = "native")]
 #[test]
 fn fip_tail_recursion_lowers_to_a_loop() {
-    let src = tiny_prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println(spin(1))");
-    let ir = tiny_prism::emit_ir(&src).expect("tail-recursive fip must be accepted");
+    let src = prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println(spin(1))");
+    let ir = prism::emit_ir(&src).expect("tail-recursive fip must be accepted");
     let start = ir
         .find("define i64 @prism_spin(")
         .expect("spin must be emitted");
@@ -95,12 +95,12 @@ fn fip_tail_recursion_lowers_to_a_loop() {
 #[cfg(feature = "native")]
 #[test]
 fn recursive_fip_examples_lower_to_loops() {
-    let src = tiny_prism::with_prelude(
+    let src = prism::with_prelude(
         "fip fn rev_onto(xs, acc) =\n  match xs of\n    Nil => acc\n    Cons(h, t) => rev_onto(t, Cons(h, acc))\n\
          fip fn bump(xs) =\n  match xs of\n    Nil => Nil\n    Cons(h, t) => Cons(h + 1, bump(t))\n\
          fn main() = println(sum(rev_onto([1,2,3], Nil)) + sum(bump([1,2,3])))",
     );
-    let ir = tiny_prism::emit_ir(&src).expect("recursive accumulator/TRMC fip must be accepted");
+    let ir = prism::emit_ir(&src).expect("recursive accumulator/TRMC fip must be accepted");
     let block = |sym: &str| {
         let start = ir
             .find(&format!("define i64 @{sym}("))
@@ -135,7 +135,7 @@ fn higher_order_effects_propagate() {
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn go(n) = apply(boom, n)\n";
-    let checked = tiny_prism::check(tiny_prism::with_prelude(src).as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
     let apply = checked.decls.iter().find(|d| d.name == "apply").unwrap();
     assert_eq!(
         apply.ty.show(),
@@ -145,7 +145,7 @@ fn higher_order_effects_propagate() {
     // `go`'s row and reported effects, which the syntactic set pass missed.
     let go = checked.decls.iter().find(|d| d.name == "go").unwrap();
     assert_eq!(go.ty.show(), "(Int) -> Int ! {Exn}");
-    assert_eq!(tiny_prism::types::show_effects(&go.effects), "{Exn}");
+    assert_eq!(prism::types::show_effects(&go.effects), "{Exn}");
 }
 
 // A handler discharges the effect it names from the surrounding row, even when
@@ -156,10 +156,10 @@ fn handler_discharges_higher_order_effect() {
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn attempt(n) =\n  handle apply(boom, n) with\n    raise(c, k) => c\n    return r => r\n";
-    let checked = tiny_prism::check(tiny_prism::with_prelude(src).as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
     let attempt = checked.decls.iter().find(|d| d.name == "attempt").unwrap();
     assert_eq!(attempt.ty.show(), "(Int) -> Int");
-    assert_eq!(tiny_prism::types::show_effects(&attempt.effects), "{}");
+    assert_eq!(prism::types::show_effects(&attempt.effects), "{}");
 }
 
 // Purity gates read the inferred row, so an effect laundered through a function
@@ -170,7 +170,7 @@ fn borrow_rejects_laundered_effect() {
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn use_borrow(borrow x, n) = apply(boom, n) + x\n";
-    let err = tiny_prism::check(tiny_prism::with_prelude(src).as_str()).unwrap_err();
+    let err = prism::check(prism::with_prelude(src).as_str()).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("borrow") && msg.contains("Exn"), "got: {msg}");
 }
@@ -183,13 +183,13 @@ fn borrow_rejects_laundered_effect() {
 fn mask_reports_effect_in_both_engines() {
     // The inferred row carries the masked effect.
     let ok = "effect Ask { ctl ask() : Int }\nfn m() = mask<Ask>(5)\n";
-    let checked = tiny_prism::check(tiny_prism::with_prelude(ok).as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude(ok).as_str()).unwrap();
     let m = checked.decls.iter().find(|d| d.name == "m").unwrap();
-    assert_eq!(tiny_prism::types::show_effects(&m.effects), "{Ask}");
+    assert_eq!(prism::types::show_effects(&m.effects), "{Ask}");
     // And the purity gate (which reads that row) rejects a masked effect under a
     // `borrow` parameter, just as it does an ordinary one.
     let bad = "effect Ask { ctl ask() : Int }\nfn g(borrow x) = mask<Ask>(x)\n";
-    let err = tiny_prism::check(tiny_prism::with_prelude(bad).as_str()).unwrap_err();
+    let err = prism::check(prism::with_prelude(bad).as_str()).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("borrow") && msg.contains("Ask"), "got: {msg}");
 }
@@ -293,8 +293,8 @@ fn unhandled_effect_traps_both_backends() {
 
 fn interp_output(path: &std::path::Path) -> String {
     let src = std::fs::read_to_string(path).unwrap();
-    let full = tiny_prism::with_prelude(&src);
-    match tiny_prism::interpret(&full) {
+    let full = prism::with_prelude(&src);
+    match prism::interpret(&full) {
         Ok(run) => format!("{}=> {}", run.term, run.value.show()),
         Err(e) => format!("ERROR: {e}"),
     }
@@ -330,8 +330,8 @@ fn print_kind_coverage() {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
-            if let Ok(run) = tiny_prism::interpret(&tiny_prism::with_prelude(&src)) {
-                seen.extend(run.out.iter().map(tiny_prism::eval::Rv::kind));
+            if let Ok(run) = prism::interpret(&prism::with_prelude(&src)) {
+                seen.extend(run.out.iter().map(prism::eval::Rv::kind));
             }
         }
     }
@@ -379,9 +379,7 @@ fn print_show_consistency() {
 }
 
 fn run_out(src: &str) -> String {
-    tiny_prism::interpret(&tiny_prism::with_prelude(src))
-        .unwrap()
-        .term
+    prism::interpret(&prism::with_prelude(src)).unwrap().term
 }
 
 // The CBPV showcase lives in examples/, outside the cases/run glob. Its
@@ -395,7 +393,7 @@ fn cbpv_example() {
     let out = interp_output(std::path::Path::new(&path));
     insta::assert_snapshot!("interpreter@cbpv.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
-    insta::assert_snapshot!("cbpv_core", tiny_prism::dump("core", &src).unwrap());
+    insta::assert_snapshot!("cbpv_core", prism::dump("core", &src).unwrap());
 }
 
 // Effect polymorphism showcase, also in examples/. The snapshot name keeps
@@ -418,10 +416,10 @@ fn var_pure_example() {
     let out = interp_output(std::path::Path::new(&path));
     insta::assert_snapshot!("interpreter@var_pure.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
-    let checked = tiny_prism::check(tiny_prism::with_prelude(&src).as_str()).unwrap();
+    let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
     let d = checked.decls.iter().find(|d| d.name == "fib_iter").unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
-    assert_eq!(tiny_prism::types::show_effects(&d.effects), "{}");
+    assert_eq!(prism::types::show_effects(&d.effects), "{}");
 }
 
 // Deconstructors showcase, also in examples/. Same naming trick so the
@@ -435,7 +433,7 @@ fn lenses_example() {
     insta::assert_snapshot!("interpreter@lenses.pr", out);
     let src = "type A = A { x: Int }\ntype B = B { a: A }\n\
                fn main() =\n  let b = B { a = A { x = 1 } }\n  print({ b | a.x = 2 }.a.x)\n";
-    let fbip = tiny_prism::dump("fbip", src).unwrap();
+    let fbip = prism::dump("fbip", src).unwrap();
     assert!(fbip.contains("reuse#"), "nested update path must reuse");
 }
 
@@ -450,7 +448,7 @@ fn lens_derive_example() {
     insta::assert_snapshot!("interpreter@lens_derive.pr", out);
     let src = "type P = P { x: Int, y: Int } deriving (Lens)\n\
                fn main() =\n  print(with_x(P { x = 1, y = 2 }, 9).x)\n";
-    let fbip = tiny_prism::dump("fbip", src).unwrap();
+    let fbip = prism::dump("fbip", src).unwrap();
     assert!(fbip.contains("reuse#"), "derived setter must reuse");
 }
 
@@ -477,7 +475,7 @@ fn stream_fuse_example() {
     let out = interp_output(std::path::Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fuse.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
-    let lowered = tiny_prism::dump("lowered", &tiny_prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp"),
         "stream chain must fuse away EOp cells"
@@ -499,7 +497,7 @@ fn stream_fold_example() {
     let out = interp_output(std::path::Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fold.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
-    let lowered = tiny_prism::dump("lowered", &tiny_prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp"),
         "fold chain must fuse away EOp cells"
@@ -521,7 +519,7 @@ fn streams_example() {
     let out = interp_output(std::path::Path::new(&path));
     insta::assert_snapshot!("interpreter@streams.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
-    let lowered = tiny_prism::dump("lowered", &tiny_prism::with_prelude(&src)).unwrap();
+    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(!lowered.contains("EOp"), "streams must fuse away EOp cells");
     assert!(
         !lowered.contains("handle"),
@@ -540,11 +538,11 @@ fn rc_balanced() {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
-            let full = tiny_prism::with_prelude(&src);
-            if tiny_prism::dump("core", &full).is_err() {
+            let full = prism::with_prelude(&src);
+            if prism::dump("core", &full).is_err() {
                 continue;
             }
-            if let Err(err) = tiny_prism::rc_balanced(&full) {
+            if let Err(err) = prism::rc_balanced(&full) {
                 panic!("{}: {err}", path.display());
             }
         }
@@ -556,7 +554,7 @@ fn rc_balanced() {
 #[test]
 fn singleton_list_pattern() {
     let src = "fn main() =\n  match [7] of\n    [x] => print(x)\n    _ => print(0)\n";
-    let run = tiny_prism::interpret(&tiny_prism::with_prelude(src)).unwrap();
+    let run = prism::interpret(&prism::with_prelude(src)).unwrap();
     assert_eq!(run.out.len(), 1);
     assert_eq!(run.out[0].show(), "7");
 }
@@ -575,10 +573,10 @@ fn corpus_files() -> impl Iterator<Item = std::path::PathBuf> {
 fn fmt_idempotent() {
     for path in corpus_files() {
         let src = std::fs::read_to_string(&path).unwrap();
-        let Ok(once) = tiny_prism::format(&src) else {
+        let Ok(once) = prism::format(&src) else {
             continue;
         };
-        let twice = tiny_prism::format(&once).unwrap();
+        let twice = prism::format(&once).unwrap();
         assert_eq!(once, twice, "fmt not idempotent: {}", path.display());
     }
 }
@@ -590,12 +588,12 @@ fn fmt_idempotent() {
 fn fmt_preserves_core() {
     for path in corpus_files() {
         let src = std::fs::read_to_string(&path).unwrap();
-        let Ok(core) = tiny_prism::dump("core", &tiny_prism::with_prelude(&src)) else {
+        let Ok(core) = prism::dump("core", &prism::with_prelude(&src)) else {
             continue;
         };
-        let once = tiny_prism::format(&src)
+        let once = prism::format(&src)
             .unwrap_or_else(|e| panic!("{} parses but won't format: {e}", path.display()));
-        let formatted_core = tiny_prism::dump("core", &tiny_prism::with_prelude(&once))
+        let formatted_core = prism::dump("core", &prism::with_prelude(&once))
             .unwrap_or_else(|e| panic!("{} lost typeability after fmt: {e}", path.display()));
         assert_eq!(core, formatted_core, "fmt changed core: {}", path.display());
     }

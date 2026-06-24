@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use tiny_prism::project::load_project;
-use tiny_prism::{interpret_at, with_prelude};
+use prism::project::load_project;
+use prism::{interpret_at, with_prelude};
 
 fn hello() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/projects/hello"))
@@ -16,7 +16,7 @@ fn project_resolves_modules_from_src_root() {
     assert_eq!(project.name, "hello");
     let src = std::fs::read_to_string(&project.entry).expect("entry reads");
     let run = interpret_at(&with_prelude(&src), &project.src_dir).expect("resolves and runs");
-    let out: Vec<String> = run.out.iter().map(tiny_prism::eval::Rv::show).collect();
+    let out: Vec<String> = run.out.iter().map(prism::eval::Rv::show).collect();
     assert_eq!(out, ["42"]);
 }
 
@@ -51,7 +51,7 @@ fn project_native_build_matches_interpreter() {
         .expect("interprets")
         .term;
     let bin = std::env::temp_dir().join(format!("prism_proj_{}", std::process::id()));
-    tiny_prism::build_at(&full, &project.src_dir, &bin).expect("native build");
+    prism::build_at(&full, &project.src_dir, &bin).expect("native build");
     let out = std::process::Command::new(&bin)
         .output()
         .expect("runs binary");

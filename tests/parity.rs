@@ -21,7 +21,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use tiny_prism::error::Error;
+use prism::error::Error;
 
 fn cc() -> String {
     std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
@@ -35,14 +35,14 @@ fn have(tool: &str) -> bool {
 }
 
 fn source(path: &Path) -> String {
-    tiny_prism::with_prelude(&std::fs::read_to_string(path).unwrap())
+    prism::with_prelude(&std::fs::read_to_string(path).unwrap())
 }
 
 // The interpreter's real terminal output, byte-for-byte what a native binary's
 // stdout must equal. `term` (not a join over `out`) preserves the print/println
 // distinction: a bare `print` adds no newline.
 fn interpreted(full: &str) -> String {
-    tiny_prism::interpret(full).unwrap().term
+    prism::interpret(full).unwrap().term
 }
 
 // The runnable corpus: every example/run-case the interpreter executes cleanly
@@ -61,8 +61,8 @@ fn corpus() -> Vec<PathBuf> {
             }
             let full = source(&path);
             let on_platform =
-                tiny_prism::off_platform_builtins(&full, root).is_ok_and(|ops| ops.is_empty());
-            if on_platform && tiny_prism::interpret(&full).is_ok() {
+                prism::off_platform_builtins(&full, root).is_ok_and(|ops| ops.is_empty());
+            if on_platform && prism::interpret(&full).is_ok() {
                 out.push(path);
             }
         }
@@ -166,7 +166,7 @@ fn native_matches_interpreter() {
         );
         return;
     }
-    run_corpus("llvm", tiny_prism::build);
+    run_corpus("llvm", prism::build);
 }
 
 #[cfg(feature = "mlir")]
@@ -176,5 +176,5 @@ fn mlir_matches_interpreter() {
         eprintln!("skipping mlir parity: clang or mlir-translate not found");
         return;
     }
-    run_corpus("mlir", tiny_prism::build_mlir);
+    run_corpus("mlir", prism::build_mlir);
 }

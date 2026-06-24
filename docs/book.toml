@@ -11,8 +11,8 @@ no-section-label = true
 smart-punctuation = true
 additional-css = ["theme/tabs.css"]
 additional-js = ["theme/tabs.js", "theme/prism-highlight.js"]
-git-repository-url = "https://github.com/sdiehl/tiny-prism"
-edit-url-template = "https://github.com/sdiehl/tiny-prism/edit/main/docs/{path}"
+git-repository-url = "https://github.com/sdiehl/prism"
+edit-url-template = "https://github.com/sdiehl/prism/edit/main/docs/{path}"
 
 [output.html.playground]
 runnable = false

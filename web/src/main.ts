@@ -1,5 +1,5 @@
 import { createElement, Play } from "lucide";
-import init, { core_ir, diagnostics, dump, fmt, tokens } from "../pkg/tiny_prism.js";
+import init, { core_ir, diagnostics, dump, fmt, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import "./styles.css";
 

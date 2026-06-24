@@ -42,8 +42,8 @@ pub fn with_prelude(src: &str) -> String {
 
 /// # Examples
 /// ```
-/// let src = tiny_prism::with_prelude("fn double(x : Int) : Int = x * 2");
-/// let checked = tiny_prism::check(&src).unwrap();
+/// let src = prism::with_prelude("fn double(x : Int) : Int = x * 2");
+/// let checked = prism::check(&src).unwrap();
 /// let double = checked.decls.iter().find(|d| d.name == "double").unwrap();
 /// assert_eq!(double.ty.show(), "(Int) -> Int");
 /// ```
@@ -165,8 +165,8 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
 
 /// # Examples
 /// ```
-/// let src = tiny_prism::with_prelude("fn main() = print(1 + 2)");
-/// let run = tiny_prism::interpret(&src).unwrap();
+/// let src = prism::with_prelude("fn main() = print(1 + 2)");
+/// let run = prism::interpret(&src).unwrap();
 /// assert_eq!(run.out[0].show(), "3");
 /// ```
 ///
