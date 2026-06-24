@@ -1,0 +1,5 @@
+-- `a?.b` is `force(a).b`. `force` raises fail() on `None`, so a path
+-- short-circuits at the first `None` and an enclosing `??` supplies the default.
+full?.city?.zip ?? -1
+  ==>
+(force(force(full).city).zip) ?? -1

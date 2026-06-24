@@ -1,0 +1,9 @@
+-- A record is a single-constructor product type with named fields. Fields are
+-- read with `.f`, built with `C { f = e, ... }`, and updated functionally.
+type Point = Point { x: Int, y: Int }
+
+fn main() =
+  let p = Point { x = 3, y = 4 }
+  let q = Point { ..p, y = 9 }
+  println(p.x)
+  println(q.y)

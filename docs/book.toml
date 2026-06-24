@@ -8,11 +8,25 @@ src = "src"
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
 no-section-label = true
+smart-punctuation = true
 additional-css = ["theme/tabs.css"]
-additional-js = ["theme/tabs.js"]
+additional-js = ["theme/tabs.js", "theme/prism-highlight.js"]
 git-repository-url = "https://github.com/sdiehl/tiny-prism"
+edit-url-template = "https://github.com/sdiehl/tiny-prism/edit/main/docs/{path}"
 
 [output.html.playground]
 runnable = false
+copyable = true
+
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+heading-split-level = 3
+
+[output.html.fold]
+enable = true
+level = 1
 
 [preprocessor.tabs]

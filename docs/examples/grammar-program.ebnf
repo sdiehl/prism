@@ -1,0 +1,32 @@
+program   ->  { topdecl }                       -- separated by layout
+
+topdecl   ->  [ "pub" | "opaque" ] item
+item      ->  import | datatype | newtype | synonym | rowalias
+           |  classdecl | instancedecl | effectdecl | errordecl
+           |  patterndecl | constdecl | fundecl
+
+import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
+           |  "pub" "import" modpath [ "(" name , ... ")" ]
+modpath   ->  conid { "." conid }
+name      ->  varid | conid
+
+datatype  ->  "type" conid [ tyvars ] "=" ctor { "|" ctor } [ deriving ]
+newtype   ->  "newtype" conid [ tyvars ] "=" ctor [ deriving ]
+synonym   ->  "alias" conid [ tyvars ] "=" type
+rowalias  ->  "alias" conid "=" "{" [ label , ... ] "}"
+tyvars    ->  "(" varid , ... ")"
+ctor      ->  conid [ "(" type , ... ")" ]
+           |  conid "{" field , ... "}"
+field     ->  varid ":" type
+deriving  ->  "deriving" "(" conid , ... ")"
+
+constdecl ->  "let" varid [ ":" type ] "=" expr
+fundecl   ->  [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
+                [ retann ] [ given ] "=" expr [ wheres ]
+param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
+retann    ->  ":" "!" "{" [ label , ... ] "}" type
+           |  ":" "!" type
+           |  ":" type
+given     ->  "given" constraint , ...
+constraint -> conid "(" type ")"
+wheres    ->  "where" "{" { varid "=" expr } "}"

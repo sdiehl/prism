@@ -1,0 +1,2 @@
+-- at_list fails past the end of the list; ?? supplies the fallback
+fn main() = println(at_list([10, 20, 30], 5) ?? 99)

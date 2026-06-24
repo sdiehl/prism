@@ -1,0 +1,8 @@
+-- `{ base | a.b = e }` rebuilds the single-constructor spine along the path,
+-- reusing each cell when uniquely owned (FBIP).
+{ l | from.x = 9 }
+  ==>
+match l of
+  Line(from, to) =>
+    match from of
+      Vec2(x, y) => Line(Vec2(9, y), to)

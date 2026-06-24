@@ -1,0 +1,18 @@
+value  ->  Var sym
+        |  Int i | I64 i | U64 i | Float f | Bool b | Unit | Str s
+        |  Ctor sym tag [ value, ... ]
+        |  Tuple [ value, ... ]
+        |  Thunk comp                         -- suspend a computation as a value
+
+comp   ->  Return value                       -- produce a value
+        |  Bind comp sym comp                  -- run, name the result, continue
+        |  Force value                         -- run a thunk
+        |  Lam [ sym, ... ] comp
+        |  App comp [ value, ... ]
+        |  Call sym [ value, ... ]             -- direct call to a top-level fn
+        |  If value comp comp
+        |  Case value [ (pat, comp), ... ]
+        |  Prim op value value                 -- primitive arithmetic / compare
+        |  Do sym [ value, ... ]               -- perform an effect operation
+        |  Handle { body, return_var, return_body, ops }   -- install a handler
+        |  Mask [ sym, ... ] comp              -- bypass matching handlers

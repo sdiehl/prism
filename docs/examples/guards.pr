@@ -1,0 +1,28 @@
+-- Pattern guards: `pat if cond => body`. The guard sees the pattern's
+-- variables; when it is false the value falls through to the next arm.
+-- Coverage counts only unguarded arms toward exhaustiveness, so a match
+-- covered solely by guarded arms is rejected at compile time.
+
+-- The classic: literal-free fizzbuzz, first true guard wins.
+fn fizzbuzz(n : Int) : String =
+  match n of
+    k if k % 15 == 0 => "FizzBuzz"
+    k if k % 3 == 0 => "Fizz"
+    k if k % 5 == 0 => "Buzz"
+    k => show(k)
+
+-- Guarded insertion keeps the list sorted. The catchall handles both Nil and
+-- the spot where x belongs.
+fn insert(x : Int, xs : List(Int)) : List(Int) =
+  match xs of
+    Cons(h, t) if h < x => Cons(h, insert(x, t))
+    _ => Cons(x, xs)
+
+fn isort(xs : List(Int)) : List(Int) = foldr(insert, [], xs)
+
+-- Expected output:
+--   1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz 11 Fizz 13 14 FizzBuzz
+--   [1, 2, 5, 7, 9]
+fn main() =
+  println(str_join(" ", map(fizzbuzz, range(1, 16))))
+  println(show(isort([5, 2, 9, 1, 7])))

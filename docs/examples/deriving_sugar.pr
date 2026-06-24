@@ -1,0 +1,5 @@
+type Color = Red | Green | Blue deriving (Eq, Ord, Show)
+
+fn main() =
+  println(show(Green))
+  println(Red == Red)

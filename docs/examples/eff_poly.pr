@@ -1,0 +1,43 @@
+effect Tick {
+  ctl tick(Unit) : Int
+}
+
+effect Say {
+  ctl say(Int) : Unit
+}
+
+-- Effect polymorphism: one higher-order function, any effect row.
+--
+-- twice is written once, with a row variable e for whatever its argument
+-- performs. Each call site unifies e with that thunk's row: {} for the pure
+-- thunk, {Tick} and {Say} for the effectful ones. A handler discharges only
+-- the label it names. e carries the rest along.
+
+fn twice(f : (Unit) -> Int ! {| e}) = f(()) + f(())
+
+-- e = {}: pure code needs no handler at all.
+fn pure_use() =
+  twice() fn(u)
+    21
+
+-- e = {Tick}: a counting handler hands out 1 then 2, so the same thunk
+-- answers differently per force.
+fn tick_use() =
+  let g =
+    handle twice(\(u) -> tick(())) with
+      tick(u, k) => \(n) -> k(n)(n + 1)
+      return r => \(n) -> r
+  g(1)
+
+-- e = {Say}: each force shouts before answering.
+fn say_use() =
+  handle twice(\(u) -> let _ = say(9) in 9) with
+    say(m, k) =>
+      println(m)
+      k(())
+    return r => r
+
+fn main() =
+  println(pure_use())
+  println(tick_use())
+  println(say_use())

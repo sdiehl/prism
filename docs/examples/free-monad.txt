@@ -1,0 +1,11 @@
+-- Reified computation tree (the free-monad fallback)
+EPure v                      -- a finished result
+EOp id skip arg k            -- a suspended operation:
+                             --   id   : numeric identity of the operation
+                             --   skip : matching handlers still to bypass (mask depth)
+                             --   arg  : the operation argument
+                             --   k    : resumption closure \resume_value -> Eff
+
+-- Sequencing extends the tree without forcing it:
+ebind (EPure v)          f  =  f v
+ebind (EOp id skip a k)  f  =  EOp id skip a (\r -> ebind (k r) f)

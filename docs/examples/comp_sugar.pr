@@ -1,0 +1,1 @@
+fn main() = println(sum([x * x for x in srange(1, 6)]))

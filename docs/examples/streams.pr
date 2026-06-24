@@ -1,0 +1,22 @@
+-- Streams as effects: a stream is a producer performing Emit(a), the
+-- transformers smap/skeep/stake are handlers that re-emit, and the consumers
+-- ssum/scollect/for are handlers that fold. A dot chain nests the handlers over
+-- one producer, with no intermediate lists. stake stops the source early by
+-- dropping its continuation. Expected output:
+--
+--   220
+--   lo
+--   hi
+--   0
+--   3
+--   6
+
+fn square(n) = n * n
+
+fn main() =
+  println(srange(1, 1000).smap(square).skeep(even).stake(5).ssum())
+  for w in sof(["lo", "hi"]) do
+    println(w)
+  let xs = srange(0, 1000000).smap(\(n) -> n * 3).stake(3).scollect()
+  for x in sof(xs) do
+    println(x)

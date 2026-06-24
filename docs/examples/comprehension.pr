@@ -1,0 +1,34 @@
+-- List comprehensions and qualified for-loops. A comprehension
+-- `[ e for x in s, <quals> ]` collects e per element. Qualifiers filter with
+-- `if g` and bind with `let y = e`. A guard may be failable: it prunes the
+-- element when computing g raises Fail, not only when g returns false. The
+-- statement form `for x in s, <quals> do body` runs body per survivor.
+-- Expected output:
+--
+--   1
+--   4
+--   9
+--   16
+--   25
+--   30
+--   40
+--   50
+--   2
+--   4
+--   10
+--   30
+
+fn main() =
+  for sq in sof([x * x for x in srange(1, 6)]) do
+    println(sq)
+  for y in sof([y for x in srange(1, 6), let y = x * 10, if y > 20]) do
+    println(y)
+  for x in srange(1, 6),
+      if even(x) do
+    println(x)
+  -- Failable guard: `at_list` fails past the end, so the guard prunes
+  -- out-of-range indices just as it prunes the zero price. Keeps 10 and 30.
+  let prices = [10, 0, 30]
+  for i in srange(0, 6),
+      if at_list(prices, i) > 0 do
+    println(at_list(prices, i))

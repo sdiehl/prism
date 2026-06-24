@@ -1,0 +1,5 @@
+fn inc(x) = x + 1
+fn double(x) = x * 2
+
+-- a dot-chain reads left to right: inc(5), then double(...)
+fn main() = println(5.inc().double())

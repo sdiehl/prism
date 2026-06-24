@@ -1,0 +1,6 @@
+-- `[ head for x in s, <quals> ]` becomes a producer that emits `head` for each
+-- surviving element, collected into a list by `scollect`. A guard `if g` skips
+-- an element; a binder `let y = e` extends the scope inward.
+[x * x for x in srange(1, 6)]
+  ==>
+scollect(\(u) -> for x in srange(1, 6) do emit(x * x))

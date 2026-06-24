@@ -1,0 +1,14 @@
+-- twice demands a pure (Int) -> Int. fib_iter mutates two locals in a loop,
+-- yet is accepted here: its inferred row is empty.
+fn twice(f : (Int) -> Int) = f(f(6))
+
+fn fib_iter(n : Int) : Int =
+  var a := 0
+  var b := 1
+  repeat(n) fn
+    let t = a + b
+    a := b
+    b := t
+  a
+
+fn main() = println(twice(fib_iter))

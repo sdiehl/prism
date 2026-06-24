@@ -1,0 +1,5 @@
+offset  field      meaning
+   0    refcount   number of live references to this cell
+   8    tag        constructor tag; reserved values mark String and bignum cells
+  16    arity      number of fields (or byte length for a String)
+  24    fields     arity words, each a value or pointer (UTF-8 bytes for a String)

@@ -1,0 +1,31 @@
+effect Exn {
+  ctl raise(Int) : Int
+}
+
+-- Exceptions as an effect: raise and catch.
+--
+-- raise aborts the computation. The handler clause drops the captured
+-- continuation k and returns a recovery value, so control never comes back.
+-- checked() raises deep inside a helper, far from the catching handler: the
+-- effect propagates across calls and is discharged where the handle sits.
+
+fn safe_div(n, d) : !{Exn} Int =
+  if d == 0 then
+    raise(0 - 1)
+  else
+    n / d
+
+fn checked(n) : !{Exn} Int =
+  let a = safe_div(100, n)
+  let b = safe_div(a, n - 5)
+  a + b
+
+fn attempt(n) =
+  handle checked(n) with
+    raise(code, k) => code
+    return r => r
+
+fn main() =
+  let good = attempt(2)
+  let bad = attempt(5)
+  println(good * 100 + bad)

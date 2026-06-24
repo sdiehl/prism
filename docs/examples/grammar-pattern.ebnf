@@ -1,0 +1,8 @@
+pattern  ->  conid [ "(" pattern , ... ")" ]        -- constructor
+          |  conid "{" fieldpat , ... "}"            -- record, ".." allowed
+          |  varid                                    -- variable binding
+          |  "_"                                      -- wildcard
+          |  integer | float | char | "true" | "false"
+          |  "[" [ pattern , ... ] "]"                -- list
+          |  "(" pattern "," pattern , ... ")"        -- tuple
+fieldpat ->  varid "=" pattern  |  ".."

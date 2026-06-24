@@ -1,0 +1,7 @@
+type Vec2 = Vec2 { x: Int, y: Int }
+
+fn main() =
+  let v = Vec2 { x = 1, y = 2 }
+  let w = Vec2 { ..v, x = 7 }
+  println(w.x)
+  println(w.y)

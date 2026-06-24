@@ -1,0 +1,21 @@
+-- A sum type: a value is exactly one of the listed constructors, each with its
+-- own fields. Construction names a constructor; destruction matches on it.
+type Shape = Circle(Int) | Rect(Int, Int)
+
+fn area(s) =
+  match s of
+    Circle(r) => 3 * r * r
+    Rect(w, h) => w * h
+
+-- A recursive sum type, the canonical binary tree.
+type Tree = Leaf | Node(Tree, Int, Tree)
+
+fn sum_tree(t) =
+  match t of
+    Leaf => 0
+    Node(l, v, r) => sum_tree(l) + v + sum_tree(r)
+
+fn main() =
+  println(area(Circle(10)))
+  println(area(Rect(3, 4)))
+  println(sum_tree(Node(Node(Leaf, 1, Leaf), 2, Node(Leaf, 3, Leaf))))
