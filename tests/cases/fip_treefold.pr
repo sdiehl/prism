@@ -1,0 +1,13 @@
+-- `relabel` is linear (the `Int` label is a scalar, so `x + x` is fine; the two
+-- subtrees are each used once) and rebuilds every `Node` in place, so it clears
+-- the linearity and allocation passes. But a binary tree has TWO recursive calls
+-- and only one can be the tail-modulo-constructor hole; the other keeps a frame
+-- per level, O(depth) stack. So `fip` rejects it on bounded stack: it is `fbip`,
+-- not `fip`. This is the case that reaches the stack rule only after passing the
+-- (now type-aware) linearity check.
+type Tree = Leaf | Node(Tree, Int, Tree)
+
+fip fn relabel(t) =
+  match t of
+    Leaf => Leaf
+    Node(l, x, r) => Node(relabel(l), x + x, relabel(r))

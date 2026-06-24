@@ -4,11 +4,37 @@ expression: "tiny_prism::report(&src)"
 input_file: tests/cases/fip_dup.pr
 ---
 == tokens ==
-VOpen Fip Fn Ident("twice") LParen Ident("x") RParen Eq Ident("x") Plus Ident("x") VClose
+VOpen Type UIdent("Lst") Eq UIdent("Nil") Bar UIdent("Cons") LParen KwInt Comma UIdent("Lst") RParen VSemi Fip Fn Ident("use_twice") LParen Ident("xs") RParen Eq VOpen Match Ident("xs") Of VOpen UIdent("Nil") FatArrow Ident("xs") VSemi UIdent("Cons") LParen Ident("h") Comma Ident("t") RParen FatArrow Ident("xs") VClose VClose VClose
 
 == ast ==
 Program {
-    types: [],
+    types: [
+        DataDecl {
+            name: "Lst",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Nil",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Cons",
+                    args: [
+                        Int,
+                        Con(
+                            "Lst",
+                            [],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 392..423,
+        },
+    ],
     effects: [],
     errors: [],
     aliases: [],
@@ -16,10 +42,10 @@ Program {
     instances: [],
     fns: [
         Decl {
-            name: "twice",
+            name: "use_twice",
             params: [
                 Param {
-                    name: "x",
+                    name: "xs",
                     ty: None,
                     borrow: false,
                     default: None,
@@ -29,42 +55,82 @@ Program {
             eff: None,
             constraints: [],
             body: Spanned {
-                node: Bin(
-                    Add,
+                node: Match(
                     Spanned {
                         node: Var(
-                            "x",
+                            "xs",
                         ),
-                        span: 301..302,
+                        span: 456..458,
                     },
-                    Spanned {
-                        node: Var(
-                            "x",
-                        ),
-                        span: 305..306,
-                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Nil",
+                                    [],
+                                ),
+                                span: 466..469,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "xs",
+                                ),
+                                span: 473..475,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Cons",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "h",
+                                            ),
+                                            span: 485..486,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "t",
+                                            ),
+                                            span: 488..489,
+                                        },
+                                    ],
+                                ),
+                                span: 480..490,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "xs",
+                                ),
+                                span: 494..496,
+                            },
+                        },
+                    ],
                 ),
-                span: 301..306,
+                span: 450..496,
             },
             wheres: [],
             fip: Fip,
-            span: 283..306,
+            span: 425..496,
         },
     ],
 }
 
 == types ==
-twice : (Int) -> Int
+use_twice : (Lst) -> Lst
 
 == core (cbpv) ==
-fn twice(x) =
-  return x to t@0; return x to t@1; t@0 + t@1
+fn use_twice(xs) =
+  return xs to t@0; case t@0 { Nil => return xs | Cons(h, t) => return xs }
 
 == fip ==
-Type Error: function `twice` is marked `fip` but is not linear (duplicates a value)
-   ╭─[ <source>:5:1 ]
-   │
- 5 │ fip fn twice(x) = x + x
-   │ ───────────┬───────────  
-   │            ╰───────────── function `twice` is marked `fip` but is not linear (duplicates a value)
-───╯
+Type Error: function `use_twice` is marked `fip` but is not linear (duplicates a value)
+    ╭─[ <source>:8:1 ]
+    │
+  8 │ ╭─▶ fip fn use_twice(xs) =
+    ┆ ┆   
+ 11 │ ├─▶     Cons(h, t) => xs
+    │ │                          
+    │ ╰────────────────────────── function `use_twice` is marked `fip` but is not linear (duplicates a value)
+────╯

@@ -14,8 +14,8 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Sigs};
 use crate::core::{
-    balanced, check_fip, elaborate, fip_annots, insert_rc, lower_effects, pp_core, pp_core_pretty,
-    reuse, Core,
+    balanced, check_fip, check_fip_linear, elaborate, fip_annots, insert_rc, lower_effects,
+    pp_core, pp_core_pretty, reuse, Core,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -86,7 +86,7 @@ fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core
     let checked = typecheck(&program)?;
     emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
-    fip_check(&program, &core)?;
+    fip_check(&program, &checked, &core)?;
     reconcile_effects(&checked, &core)?;
     Ok((program, checked, core))
 }
@@ -130,19 +130,21 @@ fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
     Ok(())
 }
 
-// Check the FP^2 discipline of every `fip`/`fbip`-annotated function over the
-// reuse-lowered core. Runs on every check/build/interpret (shared `frontend`).
-// Pure annotated functions are unaffected by effect lowering, so checking the
-// un-effect-lowered reuse core matches `dump fbip`.
-fn fip_check(program: &Program<CorePhase>, core: &Core) -> Result<(), Error> {
+// Check the FP^2 discipline of every `fip`/`fbip`-annotated function. Linearity
+// is a property of the SOURCE term, so it is checked on the raw elaborated core
+// (`check_fip_linear`), using the typechecker's param/field types to exempt
+// scalars (a `dup` on an immediate is a runtime no-op). Zero-allocation, the
+// callee closure, and bounded stack are properties of the COMPILED term, so they
+// are checked on the reuse-lowered core (`check_fip`). Runs on every
+// check/build/interpret (shared `frontend`); pure annotated functions are
+// unaffected by effect lowering, so this un-effect-lowered core matches
+// `dump fbip`.
+fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Result<(), Error> {
     let annots = fip_annots(program);
     if annots.is_empty() {
         return Ok(());
     }
-    let sigs = borrow_sigs(program);
-    let users: std::collections::BTreeSet<crate::sym::Sym> =
-        core.fns.iter().map(|f| f.name).collect();
-    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(|msg| {
+    let to_err = |msg: String| {
         // Point the diagnostic at the offending annotated function: its name
         // appears backtick-quoted in the message, so the first annotated decl
         // whose name occurs there owns the span.
@@ -153,7 +155,12 @@ fn fip_check(program: &Program<CorePhase>, core: &Core) -> Result<(), Error> {
             .find(|d| msg.contains(&format!("`{}`", d.name)))
             .map_or_else(marginalia::Span::default, |d| d.span);
         Error::Type(crate::error::TypeError::Other { span, msg })
-    })
+    };
+    let sigs = borrow_sigs(program);
+    let users: std::collections::BTreeSet<crate::sym::Sym> =
+        core.fns.iter().map(|f| f.name).collect();
+    check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
+    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
 }
 
 /// # Examples
@@ -563,7 +570,7 @@ pub fn report_at(src: &str, base: &Path) -> String {
     };
     section(&mut out, "core (cbpv)", pp_core(&core).trim_end());
 
-    if let Err(e) = fip_check(&program, &core) {
+    if let Err(e) = fip_check(&program, &checked, &core) {
         section(&mut out, "fip", &render(e));
         return out;
     }

@@ -1,23 +1,25 @@
 -- FP^2 in-place list operations (Lorenzen/Leijen/Swierstra, ICFP 2023),
--- statically checked. The `fbip` annotation makes the compiler PROVE the
--- function allocates no fresh cell: every `Cons` it builds reuses one it just
--- matched and dropped. Run with PRISM_REUSE_STATS=1 to watch the reuse hits, or
+-- statically checked. The annotation makes the compiler PROVE the function
+-- allocates no fresh cell: every `Cons` it builds reuses one it just matched and
+-- dropped. Run with PRISM_REUSE_STATS=1 to watch the reuse hits, or
 -- PRISM_CHECK_LEAKS=1 to confirm zero live cells at exit.
 --
--- These are fbip, not fip, because Perceus dups each extracted field (`h`) when
--- the scrutinee is consumed by reuse, and a dup is non-linear. The reuse-credit
--- refinement is what lets `rev_onto` pass: its rebuilt `Cons` is not in tail
--- position, so the freed token must travel past several binds to reach it.
+-- `rev_onto` and `bump` are `fip`: linear (each binding used once) AND bounded
+-- stack. `rev_onto` is a plain tail call and `bump` is a tail-modulo-constructor
+-- (`Cons(.., bump(t))`), so both lower to a constant-stack loop, not recursion.
+-- `cap_at` is only `fbip`: its `h` is read by the guard AND rebuilt into the
+-- `Cons`, two uses of one value, so it is not linear (its element type is generic
+-- `a`, so `h` cannot be assumed an immediate). Zero-allocation still holds.
 --
 -- Prints:
 --   10
 --   6
 --   22
 
--- Reverse onto an accumulator, the canonical FBIP. Each input `Cons` is matched,
+-- Reverse onto an accumulator, the canonical fip. Each input `Cons` is matched,
 -- freed, and immediately reused as the next accumulator cell, so the reversal
--- runs in place with zero allocation.
-fbip fn rev_onto(xs, acc) =
+-- runs in place with zero allocation, and the tail call makes it a loop.
+fip fn rev_onto(xs, acc) =
   match xs of
     Nil => acc
     Cons(h, t) => rev_onto(t, Cons(h, acc))
@@ -27,7 +29,7 @@ fbip fn rev_onto(xs, acc) =
 fn reverse_ip(xs) = rev_onto(xs, Nil)
 
 -- Spine-rebuilding map: drop each `Cons`, rebuild it around the bumped head.
-fbip fn bump(xs) =
+fip fn bump(xs) =
   match xs of
     Nil => Nil
     Cons(h, t) => Cons(h + 1, bump(t))

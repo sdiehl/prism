@@ -87,6 +87,44 @@ fn fip_tail_recursion_lowers_to_a_loop() {
     );
 }
 
+// The realistic payoff: a recursive accumulator (`rev_onto`, a tail call) and a
+// spine map (`bump`, tail-modulo-constructor) both accepted as `fip` and both
+// lowered to constant-stack loops. `rev_onto`'s self-call is a `musttail` jump;
+// `bump` is split into a `.trmc` hole-passing loop. Neither leaves a plain
+// self-call frame in its own body.
+#[cfg(feature = "native")]
+#[test]
+fn recursive_fip_examples_lower_to_loops() {
+    let src = tiny_prism::with_prelude(
+        "fip fn rev_onto(xs, acc) =\n  match xs of\n    Nil => acc\n    Cons(h, t) => rev_onto(t, Cons(h, acc))\n\
+         fip fn bump(xs) =\n  match xs of\n    Nil => Nil\n    Cons(h, t) => Cons(h + 1, bump(t))\n\
+         fn main() = println(sum(rev_onto([1,2,3], Nil)) + sum(bump([1,2,3])))",
+    );
+    let ir = tiny_prism::emit_ir(&src).expect("recursive accumulator/TRMC fip must be accepted");
+    let block = |sym: &str| {
+        let start = ir
+            .find(&format!("define i64 @{sym}("))
+            .unwrap_or_else(|| panic!("{sym} must be emitted"));
+        let rest = &ir[start..];
+        rest[..rest.find("\n}").map_or(rest.len(), |e| e + 2)].to_string()
+    };
+    // rev_onto: its own body must self-call only via musttail.
+    let rev = block("prism_rev_onto");
+    let rev_total = rev.matches("call i64 @prism_rev_onto").count();
+    let rev_tail = rev.matches("musttail call i64 @prism_rev_onto").count();
+    assert!(
+        rev_tail >= 1 && rev_total == rev_tail,
+        "rev_onto must loop:\n{rev}"
+    );
+    // bump: the recursion lives in the `.trmc` hole-passing helper, looping via
+    // musttail; the wrapper `prism_bump` itself does not self-recurse.
+    let trmc = block("prism_bump.trmc");
+    assert!(
+        trmc.contains("musttail call i64 @prism_bump.trmc"),
+        "bump must lower to a TRMC loop:\n{trmc}"
+    );
+}
+
 // Higher-order effect inference: a function's row must account for effects
 // performed by applying its function-typed arguments. `apply` propagates its
 // argument's row into its own, and an effect routed through `apply` (an opaque

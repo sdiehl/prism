@@ -1,5 +1,11 @@
--- `fip` requires linearity: every owned value is consumed exactly once. Using
--- `x` twice forces a `dup`, which (unlike `fbip`) `fip` rejects. Duplicating an
--- immediate is a runtime no-op, but the discipline still forbids it so the
--- annotation means strict linear consumption.
-fip fn twice(x) = x + x
+-- `fip` requires linearity over HEAP values: each owned reference is consumed at
+-- most once. `xs` is a list (a heap value), so consuming it by `match` and then
+-- returning it whole is two uses of one reference, which needs a `dup`. (A scalar
+-- like `Int` is exempt: `dup` on an immediate is a runtime no-op, so `x + x`
+-- stays linear. This rejection is specifically about a heap cell.)
+type Lst = Nil | Cons(Int, Lst)
+
+fip fn use_twice(xs) =
+  match xs of
+    Nil => xs
+    Cons(h, t) => xs

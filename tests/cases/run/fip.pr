@@ -1,10 +1,15 @@
--- FP^2 in-place discipline, statically checked. `bump` is `fbip`: it
--- deconstructs each `Cons` and rebuilds it, so the reuse pass turns every
--- constructor into an in-place update over the dropped cell and the compiler
--- PROVES the body allocates nothing fresh. `combine` is `fip`: linear, no
--- duplication, no borrowed parameter, no allocation.
+-- FP^2 in-place discipline, statically checked. `rev_onto` and `bump` are `fip`:
+-- linear (each binding used once) AND bounded stack. `rev_onto` is a tail call
+-- and `bump` a tail-modulo-constructor, so codegen lowers both to a constant-
+-- stack loop while the reuse pass keeps them allocation-free. `combine` is the
+-- degenerate `fip`: linear, non-recursive, scalar.
 
-fbip fn bump(xs) =
+fip fn rev_onto(xs, acc) =
+  match xs of
+    Nil => acc
+    Cons(h, t) => rev_onto(t, Cons(h, acc))
+
+fip fn bump(xs) =
   match xs of
     Nil => Nil
     Cons(h, t) => Cons(h + 1, bump(t))
@@ -12,5 +17,6 @@ fbip fn bump(xs) =
 fip fn combine(x, y, z) = x + y * z
 
 fn main() =
+  println(sum(rev_onto([1, 2, 3, 4], Nil)))
   println(sum(bump([1, 2, 3, 4])))
   println(combine(10, 3, 4))
