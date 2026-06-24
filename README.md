@@ -17,8 +17,8 @@ Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/)
 The compiler links against LLVM 22, so the dev libraries must be present:
 
 ```shell
-brew install llvm             # macOS
-sudo apt install llvm-22-dev  # Debian/Ubuntu
+brew install llvm                    # macOS
+sudo apt install llvm-22-dev         # Debian/Ubuntu
 ```
 
 Then build with:

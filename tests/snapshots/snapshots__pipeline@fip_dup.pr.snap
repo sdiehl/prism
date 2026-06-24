@@ -1,0 +1,70 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/fip_dup.pr
+---
+== tokens ==
+VOpen Fip Fn Ident("twice") LParen Ident("x") RParen Eq Ident("x") Plus Ident("x") VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "twice",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 301..302,
+                    },
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 305..306,
+                    },
+                ),
+                span: 301..306,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 283..306,
+        },
+    ],
+}
+
+== types ==
+twice : (Int) -> Int
+
+== core (cbpv) ==
+fn twice(x) =
+  return x to t@0; return x to t@1; t@0 + t@1
+
+== fip ==
+Type Error: function `twice` is marked `fip` but is not linear (duplicates a value)
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ fip fn twice(x) = x + x
+   │ ───────────┬───────────  
+   │            ╰───────────── function `twice` is marked `fip` but is not linear (duplicates a value)
+───╯

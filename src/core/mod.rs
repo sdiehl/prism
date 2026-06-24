@@ -5,6 +5,7 @@ mod elaborate;
 pub mod fbip;
 pub mod fv;
 mod pretty;
+pub mod tailrec;
 
 pub use cbpv::{reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 pub use effect_lower::lower as lower_effects;

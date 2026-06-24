@@ -12,6 +12,7 @@ use std::slice;
 
 use crate::core::builtins::{builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
+use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
 use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, Value};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
@@ -75,12 +76,11 @@ struct LamInfo {
 // non-TRMC path, and each hole is written once before anyone reads it. `1 + f(x)`
 // tails get the same treatment with an integer accumulator instead of a hole
 // (Int `+` is associative and commutative, including bignum promotion).
-#[derive(Clone, Copy)]
-enum TrmcMode {
-    Hole,
-    Acc,
-}
-
+//
+// The decision of WHICH shape a tail realizes (`trmc_mode`/`trmc_shape`) lives
+// in `core::tailrec`, shared with the `fip` bounded-stack check so the static
+// promise and this emitted code can never classify a tail differently. Only the
+// code emission below is backend-specific.
 #[derive(Clone)]
 struct TrmcCtx {
     name: Sym,
@@ -88,117 +88,6 @@ struct TrmcCtx {
     arity: usize,
     mode: TrmcMode,
     extra: String,
-}
-
-enum TrmcShape<'a> {
-    Ctor {
-        token: Option<&'a Sym>,
-        tag: i64,
-        fields: &'a [Value],
-        hole: usize,
-    },
-    Acc(&'a Value),
-}
-
-fn occurs(v: &Value, x: &str) -> usize {
-    match v {
-        Value::Var(y) => usize::from(*y == x),
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().map(|f| occurs(f, x)).sum(),
-        Value::Thunk(c) => 2 * usize::from(fv::comp(c).iter().any(|s| *s == x)),
-        _ => 0,
-    }
-}
-
-fn ctor_shape<'a>(v: &'a Value, x: &str, token: Option<&'a Sym>) -> Option<TrmcShape<'a>> {
-    let (tag, fields) = match v {
-        Value::Ctor(_, t, fs) => (idx64(*t), fs.as_slice()),
-        Value::Tuple(fs) => (0, fs.as_slice()),
-        _ => return None,
-    };
-    let hole = fields
-        .iter()
-        .position(|f| matches!(f, Value::Var(y) if *y == x))?;
-    let total: usize = fields.iter().map(|f| occurs(f, x)).sum();
-    (total == 1).then_some(TrmcShape::Ctor {
-        token,
-        tag,
-        fields,
-        hole,
-    })
-}
-
-fn trmc_shape<'a>(k: &'a Comp, x: &str) -> Option<TrmcShape<'a>> {
-    match k {
-        Comp::Return(v) => ctor_shape(v, x, None),
-        Comp::Reuse(Value::Var(tok), v) if *tok != x => ctor_shape(v, x, Some(tok)),
-        Comp::Prim(CoreOp::Add, a, b) => match (occurs(a, x), occurs(b, x)) {
-            (1, 0) if matches!(a, Value::Var(_)) => Some(TrmcShape::Acc(b)),
-            (0, 1) if matches!(b, Value::Var(_)) => Some(TrmcShape::Acc(a)),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn scan_trmc(c: &Comp, name: &str, arity: usize, ctor: &mut bool, acc: &mut bool) {
-    match c {
-        Comp::Bind(m, x, n) => {
-            if let Comp::Call(g, args) = m.as_ref() {
-                if *g == name && args.len() == arity {
-                    match trmc_shape(n, x.as_str()) {
-                        Some(TrmcShape::Ctor { .. }) => return *ctor = true,
-                        Some(TrmcShape::Acc(_)) => return *acc = true,
-                        None => {}
-                    }
-                }
-            }
-            scan_trmc(n, name, arity, ctor, acc);
-        }
-        Comp::If(_, t, e) => {
-            scan_trmc(t, name, arity, ctor, acc);
-            scan_trmc(e, name, arity, ctor, acc);
-        }
-        Comp::Case(_, arms) => {
-            for (_, b) in arms {
-                scan_trmc(b, name, arity, ctor, acc);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn trmc_mode(name: &str, arity: usize, body: &Comp) -> Option<TrmcMode> {
-    let (mut ctor, mut acc) = (false, false);
-    scan_trmc(body, name, arity, &mut ctor, &mut acc);
-    match (ctor, acc) {
-        (true, false) => Some(TrmcMode::Hole),
-        (false, true) => Some(TrmcMode::Acc),
-        _ => None,
-    }
-}
-
-// Elaboration nests binds to the left, hiding the recursive call from the
-// tail pattern; the monad associativity law `(a to y; b) to x; k` ==
-// `a to y; (b to x; k)` flattens them. Skipped when it would capture y in k.
-fn reassoc(c: &Comp) -> Comp {
-    match c {
-        Comp::Bind(m, x, n) => rebind(reassoc(m), *x, reassoc(n)),
-        Comp::If(v, t, e) => Comp::If(v.clone(), Box::new(reassoc(t)), Box::new(reassoc(e))),
-        Comp::Case(v, arms) => Comp::Case(
-            v.clone(),
-            arms.iter().map(|(p, b)| (p.clone(), reassoc(b))).collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-fn rebind(m: Comp, x: Sym, n: Comp) -> Comp {
-    match m {
-        Comp::Bind(a, y, b) if y == "_" || (y != x && !fv::comp(&n).contains(&y)) => {
-            Comp::Bind(a, y, Box::new(rebind(*b, x, n)))
-        }
-        other => Comp::Bind(Box::new(other), x, Box::new(n)),
-    }
 }
 
 #[derive(Default)]

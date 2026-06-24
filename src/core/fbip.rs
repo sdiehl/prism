@@ -6,6 +6,7 @@ use crate::syntax::ast::{Core as CorePhase, Fip, Program};
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv::{comp as freev, pat_vars};
+use super::tailrec::{recursive_calls, scc_of, TailClass};
 
 // Perceus-style reference counting (Reinking et al.). Function parameters and
 // every let-bound result are owned; each owned value is consumed exactly once on
@@ -712,11 +713,16 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
 // runtime (`prism_alloc(0)` mallocs and bumps the live count even for a nullary
 // constructor), so the only allocation-free way to build is `Comp::Reuse` over a
 // dropped cell. The check is intraprocedural plus a call-graph closure: an
-// annotated function may only call annotated functions (`fip` may call `fip` or
-// `fbip`) or allocation-free prims/builtins, else an unannotated callee's
-// allocation would silently break the caller's guarantee. Constant-stack is NOT
-// checked: `fip` as implemented guarantees zero-allocation and linearity, not yet
-// bounded stack. TRMC eligibility is decided later in codegen.
+// annotated function may only call annotated functions or allocation-free
+// prims/builtins, else an unannotated callee's allocation would silently break
+// the caller's guarantee. `fbip` may call `fip` or `fbip`; `fip` may call only
+// `fip` (a bounded callee returns within a bounded frame), since an `fbip`
+// callee is allowed unbounded stack. Constant-stack IS checked for `fip`: every
+// recursive call within its call-graph SCC must be a tail call or a
+// TRMC-eligible tail (modulo one constructor field or one addition), classified
+// by the shared `core::tailrec` so acceptance never outruns what codegen loops.
+// `fbip` is unchanged: it proves zero-allocation and linearity only and may
+// recurse non-tail.
 
 pub type Fips = BTreeMap<Sym, Fip>;
 
@@ -770,8 +776,58 @@ pub fn check_fip(
             }
         }
         fip_comp(&f.body, want, f.name.as_str(), fips, users)?;
+        if want == Fip::Fip {
+            bounded_stack(f, core, users)?;
+        }
     }
     Ok(())
+}
+
+// Bounded-stack rule (the third FP^2 property): a `fip` function runs in O(1)
+// stack iff every recursive call inside its own frame is a loop, not a frame.
+// Compute the SCC (mutual recursion counts) and classify each in-group call
+// with the shared `tailrec`: a `NonTail` recursive call grows the stack one
+// frame per element and is rejected. Codegen lowers at most one TRMC shape per
+// function and only for direct self-recursion, so a body mixing cons- and
+// add-TRMC, or one that pairs TRMC with a mutual call, is rejected too: those
+// are exactly the shapes the backend would leave as real recursion.
+fn bounded_stack(f: &CoreFn, core: &Core, users: &BTreeSet<Sym>) -> Result<(), String> {
+    let group = scc_of(core, users, f.name);
+    let (mut cons, mut add, mut mutual) = (false, false, false);
+    for (g, cls) in recursive_calls(&f.body, f.name, f.params.len(), &group) {
+        match cls {
+            TailClass::NonTail => return Err(nontail_err(f.name.as_str())),
+            TailClass::TrmcCons => cons = true,
+            TailClass::TrmcAdd => add = true,
+            TailClass::Tail => {}
+        }
+        mutual |= g != f.name;
+    }
+    if cons && add {
+        return Err(format!(
+            "function `{}` is marked `fip` but mixes tail-modulo-constructor and \
+             tail-modulo-addition recursion; codegen loops only one shape per function, \
+             so split it or annotate it `fbip`",
+            f.name
+        ));
+    }
+    if (cons || add) && mutual {
+        return Err(format!(
+            "function `{}` is marked `fip` but pairs tail-modulo-constructor/addition \
+             recursion with a mutually recursive call; codegen loops only direct self-TRMC, \
+             so make the mutual call a plain tail call or annotate it `fbip`",
+            f.name
+        ));
+    }
+    Ok(())
+}
+
+fn nontail_err(fname: &str) -> String {
+    format!(
+        "function `{fname}` is marked `fip` but recurses in non-tail position (one stack \
+         frame per element); make the recursive call a tail call or a tail under a single \
+         constructor / addition, or annotate it `fbip`"
+    )
 }
 
 fn fip_comp(
@@ -790,11 +846,22 @@ fn fip_comp(
         )),
         Comp::Call(g, args) => {
             if users.contains(g) {
-                if !matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)) {
-                    return Err(format!(
-                        "a `{}` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`",
-                        kw(want)
-                    ));
+                // `fbip` may call either discipline; `fip` may call only `fip`,
+                // because an `fbip` callee is allowed unbounded stack and would
+                // break the caller's bounded-stack guarantee.
+                let ok = match want {
+                    Fip::Fip => matches!(fips.get(g), Some(Fip::Fip)),
+                    Fip::Fbip | Fip::No => matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)),
+                };
+                if !ok {
+                    return Err(match want {
+                        Fip::Fip => format!(
+                            "a `fip` function may only call `fip` functions (bounded stack), but `{fname}` calls `{g}`"
+                        ),
+                        Fip::Fbip | Fip::No => format!(
+                            "a `fbip` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`"
+                        ),
+                    });
                 }
             } else if !alloc_free_prim(g.as_str()) {
                 return Err(format!(
@@ -916,4 +983,137 @@ fn merge(
         out.insert(k, va);
     }
     Ok(())
+}
+
+// Direct coverage of `bounded_stack`'s rules. The strict no-`Dup` linearity pass
+// rejects every recursive heap function before this check is reached end-to-end,
+// so the mixed-mode and mutual-plus-TRMC paths can only be exercised on
+// hand-built core (the linearity and allocation passes are bypassed here, which
+// is exactly what isolates the stack rule).
+#[cfg(test)]
+mod tests {
+    use super::super::cbpv::CoreOp;
+    use super::*;
+
+    fn users(names: &[&str]) -> BTreeSet<Sym> {
+        names.iter().map(|n| Sym::from(*n)).collect()
+    }
+
+    fn one(name: &str, arity: usize, body: Comp) -> CoreFn {
+        CoreFn {
+            name: name.into(),
+            params: (0..arity)
+                .map(|i| Sym::from(format!("p{i}").as_str()))
+                .collect(),
+            body,
+        }
+    }
+
+    // `f(x) to t; <k>` — the recursive-call-feeding-continuation shape.
+    fn rec(k: Comp) -> Comp {
+        Comp::Bind(
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+            "t".into(),
+            Box::new(k),
+        )
+    }
+
+    fn cons_tail() -> Comp {
+        rec(Comp::Return(Value::Ctor(
+            "Cons".into(),
+            1,
+            vec![Value::Var("h".into()), Value::Var("t".into())],
+        )))
+    }
+
+    fn add_tail() -> Comp {
+        rec(Comp::Prim(
+            CoreOp::Add,
+            Value::Int(1),
+            Value::Var("t".into()),
+        ))
+    }
+
+    #[test]
+    fn nontail_self_call_is_rejected() {
+        let f = one(
+            "f",
+            1,
+            rec(Comp::Prim(
+                CoreOp::Mul,
+                Value::Var("t".into()),
+                Value::Var("x".into()),
+            )),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f"])).unwrap_err();
+        assert!(err.contains("non-tail position"), "{err}");
+    }
+
+    #[test]
+    fn plain_tail_and_one_trmc_mode_is_accepted() {
+        // A cons-TRMC tail beside a plain self tail-call: codegen loops both.
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+        );
+        let f = one("f", 1, body);
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(bounded_stack(&f, &core, &users(&["f"])).is_ok());
+    }
+
+    #[test]
+    fn mixed_cons_and_add_is_rejected() {
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(add_tail()),
+        );
+        let f = one("f", 1, body);
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f"])).unwrap_err();
+        assert!(err.contains("mixes"), "{err}");
+    }
+
+    #[test]
+    fn trmc_paired_with_mutual_call_is_rejected() {
+        // f cons-TRMCs itself but also tail-calls g (its SCC partner); codegen
+        // loops only direct self-TRMC, so the mutual call would grow the stack.
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(Comp::Call("g".into(), vec![Value::Var("x".into())])),
+        );
+        let f = one("f", 1, body);
+        let g = one("g", 1, Comp::Call("f".into(), vec![Value::Var("x".into())]));
+        let core = Core {
+            fns: vec![f.clone(), g],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f", "g"])).unwrap_err();
+        assert!(err.contains("mutually recursive"), "{err}");
+    }
+
+    #[test]
+    fn nonrecursive_is_trivially_bounded() {
+        let f = one(
+            "f",
+            2,
+            Comp::Prim(
+                CoreOp::Add,
+                Value::Var("p0".into()),
+                Value::Var("p1".into()),
+            ),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(bounded_stack(&f, &core, &users(&["f"])).is_ok());
+    }
 }

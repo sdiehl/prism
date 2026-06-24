@@ -1,0 +1,110 @@
+---
+source: tests/snapshots.rs
+expression: "tiny_prism::report(&src)"
+input_file: tests/cases/fip_nontail.pr
+---
+== tokens ==
+VOpen Fip Fn Ident("wrap") LParen Ident("x") RParen Eq Ident("x") VSemi Fip Fn Ident("relay") LParen Ident("x") RParen Eq Ident("wrap") LParen Ident("relay") LParen Ident("x") RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "wrap",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Var(
+                    "x",
+                ),
+                span: 471..472,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 454..472,
+        },
+        Decl {
+            name: "relay",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "wrap",
+                        ),
+                        span: 492..496,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "relay",
+                                    ),
+                                    span: 497..502,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 503..504,
+                                    },
+                                ],
+                            ),
+                            span: 497..505,
+                        },
+                    ],
+                ),
+                span: 492..506,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 474..506,
+        },
+    ],
+}
+
+== types ==
+wrap : forall a. (a) -> a
+relay : forall a b. (a) -> b
+
+== core (cbpv) ==
+fn wrap(x) =
+  return x
+fn relay(x) =
+  return x to t@0; relay(t@0) to t@1; wrap(t@1)
+
+== fip ==
+Type Error: function `relay` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+   ╭─[ <source>:9:1 ]
+   │
+ 9 │ fip fn relay(x) = wrap(relay(x))
+   │ ────────────────┬───────────────  
+   │                 ╰───────────────── function `relay` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+───╯

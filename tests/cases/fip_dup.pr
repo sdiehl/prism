@@ -1,0 +1,5 @@
+-- `fip` requires linearity: every owned value is consumed exactly once. Using
+-- `x` twice forces a `dup`, which (unlike `fbip`) `fip` rejects. Duplicating an
+-- immediate is a runtime no-op, but the discipline still forbids it so the
+-- annotation means strict linear consumption.
+fip fn twice(x) = x + x

@@ -41,6 +41,52 @@ fn var_stays_pure() {
     assert_eq!(tiny_prism::types::show_effects(&d.effects), "{}");
 }
 
+// The bounded-stack rule is scoped to `fip`. The identical non-tail recursive
+// body type-checks as `fbip` (zero heap, unbounded stack is allowed) but is
+// rejected as `fip`, which now also proves bounded stack. `relay` is linear
+// (each binding used once), so it clears the allocation/linearity passes and the
+// rejection is purely the new stack rule.
+#[test]
+fn bounded_stack_rule_is_fip_only() {
+    let prog = |kw: &str| {
+        tiny_prism::with_prelude(&format!(
+            "fip fn wrap(x) = x\n{kw} fn relay(x) = wrap(relay(x))\nfn main() = println(relay(1))"
+        ))
+    };
+    tiny_prism::dump("core", &prog("fbip")).expect("fbip may recurse non-tail");
+    let err = format!("{}", tiny_prism::dump("core", &prog("fip")).unwrap_err());
+    assert!(
+        err.contains("non-tail position"),
+        "fip relay must be rejected for non-tail recursion: {err}"
+    );
+}
+
+// The promise/codegen handshake: every tail-recursive function the new
+// `check_fip` accepts must be lowered to a loop by the backend, never a
+// self-call frame. Both read `core::tailrec`, so an accepted `fip` self-call
+// becomes a `musttail` jump and no plain self-call survives.
+#[cfg(feature = "native")]
+#[test]
+fn fip_tail_recursion_lowers_to_a_loop() {
+    let src = tiny_prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println(spin(1))");
+    let ir = tiny_prism::emit_ir(&src).expect("tail-recursive fip must be accepted");
+    let start = ir
+        .find("define i64 @prism_spin(")
+        .expect("spin must be emitted");
+    let rest = &ir[start..];
+    let block = &rest[..rest.find("\n}").map_or(rest.len(), |e| e + 2)];
+    assert!(
+        block.contains("musttail call"),
+        "spin must loop via musttail, not recurse:\n{block}"
+    );
+    let total = block.matches("call i64 @prism_spin").count();
+    let tail = block.matches("musttail call i64 @prism_spin").count();
+    assert_eq!(
+        total, tail,
+        "every self-call must be a tail loop, not a stack frame:\n{block}"
+    );
+}
+
 // Higher-order effect inference: a function's row must account for effects
 // performed by applying its function-typed arguments. `apply` propagates its
 // argument's row into its own, and an effect routed through `apply` (an opaque
