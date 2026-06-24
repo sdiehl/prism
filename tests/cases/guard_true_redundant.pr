@@ -1,0 +1,8 @@
+-- A wildcard arm guarded by the irrefutable `if true` always matches, so it
+-- shadows every later arm: the `0` arm below is unreachable.
+fn classify(n : Int) : Int =
+  match n of
+    x if true => 1
+    0 => 2
+
+fn main() : Int = classify(5)

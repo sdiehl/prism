@@ -563,9 +563,7 @@ fn sfold(s, z, f) =
       return r => \(acc) -> acc
   g(z)
 
-fn ssum(s) =
-  sfold(s, 0) fn(acc, x)
-    acc + x
+fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 

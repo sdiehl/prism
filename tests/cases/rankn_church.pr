@@ -1,0 +1,16 @@
+-- Church numerals, the canonical higher-rank idiom: the encoding stores a
+-- polymorphic fold in a data field (`forall a. ((a) -> a, a) -> a`), used at the
+-- abstract `a` when building numbers and instantiated to `Int` when counting.
+type CNat = CNat(forall a. ((a) -> a, a) -> a)
+
+fn czero() : CNat = CNat(\(f, x) -> x)
+
+fn csucc(n : CNat) : CNat =
+  match n of
+    CNat(g) => CNat(\(f, x) -> f(g(f, x)))
+
+fn toInt(n : CNat) : Int =
+  match n of
+    CNat(g) => g(\(k) -> k + 1, 0)
+
+fn main() = println(toInt(csucc(csucc(csucc(czero())))))

@@ -4,8 +4,8 @@
 //! parent module; this layer calls back into them through `super::`.
 
 use super::{
-    fmt_block, fmt_expr, fmt_expr_break, fmt_expr_inline, forces_break, has_comments,
-    is_trailing_call, Mode, INDENT, LINE_WIDTH,
+    block_trailing_call, fmt_block, fmt_expr, fmt_expr_break, fmt_expr_inline, forces_break,
+    has_comments, Mode, INDENT, LINE_WIDTH,
 };
 use crate::syntax::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
@@ -310,11 +310,14 @@ pub(super) fn fmt_fn(d: &Decl, mode: Mode) -> String {
     let sig = format!("{kw} {}({}){}{} =", d.name, params.join(", "), ret_ann, wh);
 
     // A body carrying comments cannot collapse onto the signature line; only the
-    // laid-out path has room to re-emit them.
+    // laid-out path has room to re-emit them. A trailing-lambda call is tried
+    // inline too: when its lambda body fits on the line it stays `f(\x -> e)`
+    // rather than expanding to the `f() fn(x)` block form; a block-bodied lambda
+    // does not fit inline, so it still falls through to the trailing layout.
     let bodied = has_comments(d.span.start, d.body.span.end);
-    let trailing = mode == Mode::Layout && is_trailing_call(&d.body);
+    let block_trailing = mode == Mode::Layout && block_trailing_call(&d.body);
     let stay_inline = mode == Mode::Flat || !forces_break(&d.body);
-    if !bodied && !trailing && stay_inline && d.wheres.is_empty() {
+    if !bodied && !block_trailing && stay_inline && d.wheres.is_empty() {
         if let Some(body) = fmt_expr_inline(&d.body, mode) {
             let line = format!("{sig} {body}");
             if line.len() <= LINE_WIDTH {

@@ -1,0 +1,117 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/impredicative_list.pr
+---
+== tokens ==
+VOpen Fn Ident("idlist") LParen RParen Colon UIdent("List") LParen Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen Eq UIdent("Cons") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Comma UIdent("Nil") RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "idlist",
+            params: [],
+            ret: Some(
+                Con(
+                    "List",
+                    [
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Cons",
+                        ),
+                        span: 276..280,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "x",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: Var(
+                                        "x",
+                                    ),
+                                    span: 289..290,
+                                },
+                            ),
+                            span: 281..290,
+                        },
+                        Spanned {
+                            node: Var(
+                                "Nil",
+                            ),
+                            span: 292..295,
+                        },
+                    ],
+                ),
+                span: 276..296,
+            },
+            wheres: [],
+            span: 235..296,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 316..317,
+            },
+            wheres: [],
+            span: 298..317,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `idlist`: impredicative type: a polymorphic type cannot be a type argument to `List` (a type parameter ranges over monomorphic types). Higher-rank types are allowed as function arguments, results, and declared data fields; wrap the polymorphic type in a data type with a polymorphic field to carry it here.
+   ╭─[ <source>:4:1 ]
+   │
+ 4 │ fn idlist() : List(forall a. (a) -> a) = Cons(\(x) -> x, Nil)
+   │ ──────────────────────────────┬──────────────────────────────  
+   │                               ╰──────────────────────────────── in `idlist`: impredicative type: a polymorphic type cannot be a type argument to `List` (a type parameter ranges over monomorphic types). Higher-rank types are allowed as function arguments, results, and declared data fields; wrap the polymorphic type in a data type with a polymorphic field to carry it here.
+───╯

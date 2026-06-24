@@ -1,0 +1,7 @@
+-- Soundness: a parameter typed `forall a. (a) -> a` demands a genuinely
+-- polymorphic argument. A lambda that constrains its argument (here `x + 1`
+-- forces `Int`) is not polymorphic, so passing it is rejected: the body is
+-- checked against the rigid skolem `a`, and `x + 1` cannot use it at `Int`.
+fn pick(g : forall a. (a) -> a) : Int = g(1)
+
+fn main() = println(pick(\(x) -> x + 1))

@@ -1,4 +1,5 @@
 fn inc(x) = x + 1
+
 fn dbl(x) = x * 2
 
 -- forward composition: inc, then dbl

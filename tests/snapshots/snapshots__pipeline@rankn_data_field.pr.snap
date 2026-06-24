@@ -1,0 +1,309 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_data_field.pr
+---
+== tokens ==
+VOpen Type UIdent("Wrap") Eq UIdent("Wrap") LParen Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen VSemi Fn Ident("useit") LParen Ident("w") Colon UIdent("Wrap") RParen Colon KwInt Eq VOpen Match Ident("w") Of VOpen UIdent("Wrap") LParen Ident("f") RParen FatArrow Ident("f") LParen Int(IntLit { value: 42, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("useit") LParen UIdent("Wrap") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Wrap",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Wrap",
+                    args: [
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 124..160,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "useit",
+            params: [
+                Param {
+                    name: "w",
+                    ty: Some(
+                        Con(
+                            "Wrap",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "w",
+                        ),
+                        span: 197..198,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Wrap",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "f",
+                                            ),
+                                            span: 211..212,
+                                        },
+                                    ],
+                                ),
+                                span: 206..213,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "f",
+                                        ),
+                                        span: 217..218,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 42,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 219..221,
+                                        },
+                                    ],
+                                ),
+                                span: 217..222,
+                            },
+                        },
+                    ],
+                ),
+                span: 191..222,
+            },
+            wheres: [],
+            span: 162..222,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 236..243,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "useit",
+                                    ),
+                                    span: 244..249,
+                                },
+                                [
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "Wrap",
+                                                ),
+                                                span: 250..254,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Lam(
+                                                        [
+                                                            Param {
+                                                                name: "x",
+                                                                ty: None,
+                                                                borrow: false,
+                                                                default: None,
+                                                            },
+                                                        ],
+                                                        Spanned {
+                                                            node: Var(
+                                                                "x",
+                                                            ),
+                                                            span: 263..264,
+                                                        },
+                                                    ),
+                                                    span: 255..264,
+                                                },
+                                            ],
+                                        ),
+                                        span: 250..265,
+                                    },
+                                ],
+                            ),
+                            span: 244..266,
+                        },
+                    ],
+                ),
+                span: 236..267,
+            },
+            wheres: [],
+            span: 224..267,
+        },
+    ],
+}
+
+== types ==
+useit : (Wrap) -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn useit(w) =
+  return w to t@0; case t@0 { Wrap(f) => return 42 to t@1; return f to t@2; (force t@2)(t@1) }
+fn main() =
+  return thunk { \x. return x } to t@3; return Wrap(t@3) to t@4; useit(t@4) to t@5; print t@5 to t@6; print_nl
+
+== fbip (rc) ==
+fn useit(w) =
+  return w to t@0; case t@0 { Wrap(f) => dup f to _; drop t@0 to _; return 42 to t@1; return f to t@2; (force t@2)(t@1) }
+fn main() =
+  return thunk { \x. return x } to t@3; return Wrap(t@3) to t@4; useit(t@4) to t@5; print t@5 to t@6; drop t@6 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_useit(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  %t7 = call i64 @prism_apply_1(i64 %t4, i64 85)
+  call void @prism_rc_dec(i64 %t4)
+  ret i64 %t7
+
+b1:                                               ; preds = %entry
+  unreachable
+}
+
+declare void @prism_rc_inc(i64)
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 1)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 %t2, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t3 to i64
+  %t7 = call i64 @prism_useit(i64 %t6)
+  call void @prism_print_int(i64 %t7)
+  call void @prism_rc_dec(i64 %t7)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  ret i64 %_p0
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [42]
+result: ()

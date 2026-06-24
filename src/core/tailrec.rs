@@ -257,17 +257,21 @@ fn walk(
 // shrink an SCC and let a mutually recursive non-tail cycle slip the
 // bounded-stack check, so both sources matter; over-approximating via `fv` only
 // grows an SCC, which is safe (it demands tail recursion of a few more calls).
-fn call_graph(core: &Core, users: &BTreeSet<Sym>) -> BTreeMap<Sym, BTreeSet<Sym>> {
+fn call_graph(core: &Core, users: &BTreeSet<Sym>, refs: bool) -> BTreeMap<Sym, BTreeSet<Sym>> {
     core.fns
         .iter()
         .map(|f| {
             let mut heads = Vec::new();
             super::cbpv::calls_in(&f.body, &mut heads);
-            let edges = heads
-                .into_iter()
-                .chain(fv::comp(&f.body))
-                .filter(|n| users.contains(n))
-                .collect();
+            let edges: BTreeSet<Sym> = if refs {
+                heads
+                    .into_iter()
+                    .chain(fv::comp(&f.body))
+                    .filter(|n| users.contains(n))
+                    .collect()
+            } else {
+                heads.into_iter().filter(|n| users.contains(n)).collect()
+            };
             (f.name, edges)
         })
         .collect()
@@ -293,12 +297,26 @@ fn reaches(adj: &BTreeMap<Sym, BTreeSet<Sym>>, start: Sym) -> BTreeSet<Sym> {
 /// singleton, so it has no in-group call sites to constrain).
 #[must_use]
 pub fn scc_of(core: &Core, users: &BTreeSet<Sym>, f: Sym) -> BTreeSet<Sym> {
-    let adj = call_graph(core, users);
-    let fwd = reaches(&adj, f);
+    scc_in(&call_graph(core, users, true), f)
+}
+
+/// The SCC of `f` using only direct-call edges (no first-class references).
+///
+/// This is a subset of [`scc_of`]: a member present here recurses with `f`
+/// through actual calls, whereas a member only in [`scc_of`] is tied to `f`
+/// solely by a function flowing as a value. The bounded-stack rule uses the
+/// sound `scc_of`; this finer view only sharpens the rejection message.
+#[must_use]
+pub fn scc_of_calls(core: &Core, users: &BTreeSet<Sym>, f: Sym) -> BTreeSet<Sym> {
+    scc_in(&call_graph(core, users, false), f)
+}
+
+fn scc_in(adj: &BTreeMap<Sym, BTreeSet<Sym>>, f: Sym) -> BTreeSet<Sym> {
+    let fwd = reaches(adj, f);
     let mut scc = BTreeSet::new();
     scc.insert(f);
     for g in fwd {
-        if g != f && reaches(&adj, g).contains(&f) {
+        if g != f && reaches(adj, g).contains(&f) {
             scc.insert(g);
         }
     }
@@ -475,5 +493,22 @@ mod tests {
         assert_eq!(scc_of(&core, &users, "f".into()), group(&["f", "g"]));
         // h reaches f but f never reaches h, so h is its own component.
         assert_eq!(scc_of(&core, &users, "h".into()), group(&["h"]));
+    }
+
+    #[test]
+    fn reference_only_cycle_splits_scc_views() {
+        // f calls g directly; g merely returns f as a first-class value (a
+        // reference, not a call). The sound `scc_of` ties them together, but the
+        // direct-call view keeps them apart, which is what lets the rejection say
+        // the group exists only because a function flows as a value.
+        let core = Core {
+            fns: vec![
+                fnamed("f", Comp::Call("g".into(), vec![])),
+                fnamed("g", Comp::Return(Value::Var("f".into()))),
+            ],
+        };
+        let users = group(&["f", "g"]);
+        assert_eq!(scc_of(&core, &users, "f".into()), group(&["f", "g"]));
+        assert_eq!(scc_of_calls(&core, &users, "f".into()), group(&["f"]));
     }
 }

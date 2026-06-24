@@ -435,13 +435,6 @@ fn block_step<'a>(cur: &'a S<Expr>, indent: usize) -> Option<BlockStep<'a>> {
     })
 }
 
-fn is_trailing_call(e: &S<Expr>) -> bool {
-    match &e.node {
-        Expr::Call(_, args) => matches!(args.last(), Some(a) if matches!(a.node, Expr::Lam(..))),
-        _ => false,
-    }
-}
-
 // In statement position, `match` and `if` always lay out across lines, even
 // when they would fit on one: their arms and branches read better stacked, the
 // way other languages write them. Synth matches (pattern-let / `?` desugar) are
@@ -451,6 +444,36 @@ const fn forces_break(e: &S<Expr>) -> bool {
         e.node,
         Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..))
     ) && !e.synth
+}
+
+// A call whose last argument is a lambda with a statement-shaped body: a
+// sequence/binding (`Let`), a handler/match/if, or imperative sugar (`var`,
+// `:=`, `throw`, `try`, `for`, `transact`, named `with`). Such a body reads
+// better as the offside `f() fn(x)` block. A lambda whose body is a single
+// value expression is left to print inline as `f(\x -> e)`.
+fn block_trailing_call(e: &S<Expr>) -> bool {
+    let Expr::Call(_, args) = &e.node else {
+        return false;
+    };
+    let Some(Expr::Lam(_, body)) = args.last().map(|a| &a.node) else {
+        return false;
+    };
+    matches!(
+        body.node,
+        Expr::Let(..)
+            | Expr::Handle(..)
+            | Expr::Match(..)
+            | Expr::If(..)
+            | Expr::Sugar(
+                Sugar::VarDecl(..)
+                    | Sugar::Assign(..)
+                    | Sugar::Throw(..)
+                    | Sugar::TryCatch(..)
+                    | Sugar::For(..)
+                    | Sugar::Transact(..)
+                    | Sugar::NamedHandle(..)
+            )
+    )
 }
 
 // A call whose last argument is a lambda prints as a trailing block:
@@ -511,18 +534,20 @@ fn fmt_open_if(e: &S<Expr>, indent: usize) -> Option<String> {
 }
 
 fn fmt_stmt(e: &S<Expr>, indent: usize) -> String {
-    if let Some(s) = fmt_trailing(e, indent) {
-        return s;
-    }
     if let Some(s) = fmt_open_if(e, indent) {
         return s;
     }
-    if !forces_break(e) && !has_comments(e.span.start, e.span.end) {
+    // A trailing-lambda call with a simple body prints inline as `f(\x -> e)`;
+    // one with a statement-shaped body keeps the offside `f() fn(x)` block.
+    if !block_trailing_call(e) && !forces_break(e) && !has_comments(e.span.start, e.span.end) {
         if let Some(s) = fmt_expr_inline(e, Mode::Layout) {
             if indent * INDENT.len() + s.len() <= LINE_WIDTH {
                 return s;
             }
         }
+    }
+    if let Some(s) = fmt_trailing(e, indent) {
+        return s;
     }
     if matches!(e.node, Expr::Let(..)) {
         return format!("({})", fmt_expr(e, indent + 1, Mode::Flat));

@@ -1,0 +1,8 @@
+-- An irrefutable `if true` guard always matches, so its wildcard arm completes
+-- coverage: the match is exhaustive without a separate default arm.
+fn classify(n : Int) : Int =
+  match n of
+    0 => 0
+    x if true => 1
+
+fn main() : Int = classify(5)

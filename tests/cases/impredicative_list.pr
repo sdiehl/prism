@@ -1,0 +1,6 @@
+-- Predicativity: a type-constructor argument ranges over monotypes, so a
+-- polymorphic type written directly as a `List` element is impredicative and
+-- rejected with a clear message (wrap it in a data type to carry it first-class).
+fn idlist() : List(forall a. (a) -> a) = Cons(\(x) -> x, Nil)
+
+fn main() : Int = 0

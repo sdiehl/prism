@@ -231,12 +231,22 @@ impl Tc<'_> {
     // step names the class whose dict cell is being projected and the leading
     // field index of the superclass within it.
     fn super_path(&self, from: &str, want: &str) -> Option<Vec<(String, usize)>> {
+        self.super_path_d(from, want, 0)
+    }
+
+    // `build_classes` already rejects superclass cycles, so this never loops in
+    // practice; the depth bound is a defensive backstop that degrades to `None`
+    // rather than overflowing if a cycle ever slips through.
+    fn super_path_d(&self, from: &str, want: &str, depth: usize) -> Option<Vec<(String, usize)>> {
+        if depth > MAX_INSTANCE_DEPTH {
+            return None;
+        }
         let info = self.classes.get(from)?;
         for (idx, s) in info.supers.iter().enumerate() {
             if s == want {
                 return Some(vec![(from.to_string(), idx)]);
             }
-            if let Some(mut rest) = self.super_path(s, want) {
+            if let Some(mut rest) = self.super_path_d(s, want, depth + 1) {
                 rest.insert(0, (from.to_string(), idx));
                 return Some(rest);
             }
@@ -282,6 +292,67 @@ const fn head_name(t: &Type) -> Option<HeadKey> {
         Type::Con(n, _) => Some(HeadKey::Con(*n)),
         _ => None,
     }
+}
+
+// Reject a cyclic superclass hierarchy (`class A given B`, `class B given A`)
+// with a readable path instead of letting `super_path` overflow the stack at the
+// first use site. Three-color DFS; a gray (on-stack) target is a back edge.
+fn check_superclass_cycles(
+    classes: &BTreeMap<String, ClassInfo>,
+    decls: &[ast::ClassDecl],
+) -> Result<(), TypeError> {
+    fn dfs<'a>(
+        node: &'a str,
+        classes: &'a BTreeMap<String, ClassInfo>,
+        color: &mut BTreeMap<&'a str, u8>,
+        path: &mut Vec<&'a str>,
+    ) -> Option<Vec<String>> {
+        color.insert(node, 1);
+        path.push(node);
+        if let Some(info) = classes.get(node) {
+            for s in &info.supers {
+                let Some((skey, _)) = classes.get_key_value(s.as_str()) else {
+                    continue;
+                };
+                match color.get(skey.as_str()).copied().unwrap_or(0) {
+                    1 => {
+                        let from = path.iter().position(|p| *p == skey.as_str()).unwrap_or(0);
+                        let mut cyc: Vec<String> =
+                            path[from..].iter().map(|p| (*p).to_string()).collect();
+                        cyc.push(skey.clone());
+                        return Some(cyc);
+                    }
+                    0 => {
+                        if let Some(cyc) = dfs(skey, classes, color, path) {
+                            return Some(cyc);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        path.pop();
+        color.insert(node, 2);
+        None
+    }
+    let mut color: BTreeMap<&str, u8> = BTreeMap::new();
+    for start in classes.keys() {
+        if color.get(start.as_str()).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let mut path = Vec::new();
+        if let Some(cyc) = dfs(start, classes, &mut color, &mut path) {
+            let span = decls
+                .iter()
+                .find(|d| cyc.contains(&d.name))
+                .map_or_else(Span::default, |d| d.span);
+            return Err(TypeError::Other {
+                span,
+                msg: format!("superclass cycle: {}", cyc.join(" -> ")),
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn build_classes(
@@ -404,6 +475,10 @@ pub(super) fn build_classes(
             },
         );
     }
+    // Superclass edges may point forward, so the cycle check waits until every
+    // class is registered. A cyclic hierarchy would otherwise send `super_path`
+    // into unbounded recursion at the first use site.
+    check_superclass_cycles(&classes, &prog.classes)?;
     for i in &prog.instances {
         let class = classes.get(&i.class).ok_or_else(|| TypeError::Other {
             span: i.span,

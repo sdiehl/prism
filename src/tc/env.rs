@@ -47,9 +47,15 @@ impl Tc<'_> {
                 }
                 self.check_annot_rows(r, span)
             }
-            ast::Ty::Con(_, ts) | ast::Ty::Tuple(ts) => {
+            ast::Ty::Con(n, ts) => {
+                no_polytype_args(ts, n, span)?;
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
+            ast::Ty::App(v, ts) => {
+                no_polytype_args(ts, v, span)?;
+                ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
+            }
+            ast::Ty::Tuple(ts) => ts.iter().try_for_each(|x| self.check_annot_rows(x, span)),
             _ => Ok(()),
         }
     }
@@ -185,6 +191,27 @@ impl Tc<'_> {
             .rev()
             .fold(base, |acc, l| EffRow::Extend(l, Box::new(acc)))
     }
+}
+
+// Predicativity at the source: a type-constructor argument ranges over
+// monotypes, so a polytype written directly as one (`List(forall a. ...)`) is
+// impredicative. Foralls nested under a function arrow (a rank-N argument or
+// result) or declared as a data field stay legal, since those are not a type
+// argument. The check is syntactic, so it fires before inference and points at
+// the annotation rather than surfacing later as a leaked rigid variable.
+fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), TypeError> {
+    if args.iter().any(|a| matches!(a, ast::Ty::Forall(..))) {
+        return Err(TypeError::Other {
+            span,
+            msg: format!(
+                "impredicative type: a polymorphic type cannot be a type argument to `{head}` \
+                 (a type parameter ranges over monomorphic types). Higher-rank types are \
+                 allowed as function arguments, results, and declared data fields; wrap the \
+                 polymorphic type in a data type with a polymorphic field to carry it here."
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {

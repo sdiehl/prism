@@ -22,5 +22,4 @@ fn main() =
   let t = l.thunk
   println(t())
   println(pick([\() -> 10, \() -> 20], 1))
-  tell() fn
-    println(force(\() -> 7))
+  tell(\() -> println(force(\() -> 7)))

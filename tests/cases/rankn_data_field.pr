@@ -1,0 +1,9 @@
+-- A constructor field may be a polymorphic function (rank-N data): the stored
+-- identity is used at Int after projection.
+type Wrap = Wrap(forall a. (a) -> a)
+
+fn useit(w : Wrap) : Int =
+  match w of
+    Wrap(f) => f(42)
+
+fn main() = println(useit(Wrap(\(x) -> x)))

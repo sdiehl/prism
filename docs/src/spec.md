@@ -134,6 +134,8 @@ The table gives the binding of each operator, loosest to tightest. Levels 1 to 8
 
 Prism infers types by the bidirectional, higher-rank inference algorithm of [Dunfield & Krishnaswami (2013)](bibliography.md#dunfield-krishnaswami-2013). An unannotated declaration infers its principal type; an annotated one is checked against the annotation. Annotations are required for rank-N polymorphism, since a nested `forall` cannot be inferred.
 
+Quantification is _predicative_: a type-constructor argument and an inferred type variable range over monomorphic types, so a `forall` may not be written directly as a type argument (`List(forall a. (a) -> a)` is rejected as impredicative). Higher-rank types are allowed wherever they are not a type argument, namely as a function parameter, a function result, and a declared data field; a polymorphic value can be carried through a generic container by wrapping it in a data type with a polymorphic field.
+
 ### 5.1 Types
 
 The scalar types are `Int` (arbitrary precision), `I64`, `U64`, `Float`, `Bool`, `Char`, `String`, and `Unit`. A type constructor applied to arguments is written `Con(t, ...)`; the list type has the sugar `[t]` for `List(t)`. A tuple type is `(t, ...)`. A function type is `(t, ...) -> u`, optionally carrying an effect row on `u`. A universally quantified type is `forall a. t`. Type variables are `varid`s.

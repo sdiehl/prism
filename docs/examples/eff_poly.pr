@@ -16,9 +16,7 @@ effect Say {
 fn twice(f : (Unit) -> Int ! {| e}) = f(()) + f(())
 
 -- e = {}: pure code needs no handler at all.
-fn pure_use() =
-  twice() fn(u)
-    21
+fn pure_use() = twice(\(u) -> 21)
 
 -- e = {Tick}: a counting handler hands out 1 then 2, so the same thunk
 -- answers differently per force.

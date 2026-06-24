@@ -1,0 +1,807 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_church.pr
+---
+== tokens ==
+VOpen Type UIdent("CNat") Eq UIdent("CNat") LParen Forall Ident("a") Dot LParen LParen Ident("a") RParen Arrow Ident("a") Comma Ident("a") RParen Arrow Ident("a") RParen VSemi Fn Ident("czero") LParen RParen Colon UIdent("CNat") Eq UIdent("CNat") LParen Lambda LParen Ident("f") Comma Ident("x") RParen Arrow Ident("x") RParen VSemi Fn Ident("csucc") LParen Ident("n") Colon UIdent("CNat") RParen Colon UIdent("CNat") Eq VOpen Match Ident("n") Of VOpen UIdent("CNat") LParen Ident("g") RParen FatArrow UIdent("CNat") LParen Lambda LParen Ident("f") Comma Ident("x") RParen Arrow Ident("f") LParen Ident("g") LParen Ident("f") Comma Ident("x") RParen RParen RParen VClose VClose VSemi Fn Ident("toInt") LParen Ident("n") Colon UIdent("CNat") RParen Colon KwInt Eq VOpen Match Ident("n") Of VOpen UIdent("CNat") LParen Ident("g") RParen FatArrow Ident("g") LParen Lambda LParen Ident("k") RParen Arrow Ident("k") Plus Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 0, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("toInt") LParen Ident("csucc") LParen Ident("csucc") LParen Ident("csucc") LParen Ident("czero") LParen RParen RParen RParen RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "CNat",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "CNat",
+                    args: [
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Fun(
+                                        [
+                                            Var(
+                                                "a",
+                                            ),
+                                        ],
+                                        Empty,
+                                        Var(
+                                            "a",
+                                        ),
+                                    ),
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 236..282,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "czero",
+            params: [],
+            ret: Some(
+                Con(
+                    "CNat",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "CNat",
+                        ),
+                        span: 304..308,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "f",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                    Param {
+                                        name: "x",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: Var(
+                                        "x",
+                                    ),
+                                    span: 320..321,
+                                },
+                            ),
+                            span: 309..321,
+                        },
+                    ],
+                ),
+                span: 304..322,
+            },
+            wheres: [],
+            span: 284..322,
+        },
+        Decl {
+            name: "csucc",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Con(
+                            "CNat",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "CNat",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 360..361,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "CNat",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "g",
+                                            ),
+                                            span: 374..375,
+                                        },
+                                    ],
+                                ),
+                                span: 369..376,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "CNat",
+                                        ),
+                                        span: 380..384,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Lam(
+                                                [
+                                                    Param {
+                                                        name: "f",
+                                                        ty: None,
+                                                        borrow: false,
+                                                        default: None,
+                                                    },
+                                                    Param {
+                                                        name: "x",
+                                                        ty: None,
+                                                        borrow: false,
+                                                        default: None,
+                                                    },
+                                                ],
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "f",
+                                                            ),
+                                                            span: 396..397,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Call(
+                                                                    Spanned {
+                                                                        node: Var(
+                                                                            "g",
+                                                                        ),
+                                                                        span: 398..399,
+                                                                    },
+                                                                    [
+                                                                        Spanned {
+                                                                            node: Var(
+                                                                                "f",
+                                                                            ),
+                                                                            span: 400..401,
+                                                                        },
+                                                                        Spanned {
+                                                                            node: Var(
+                                                                                "x",
+                                                                            ),
+                                                                            span: 403..404,
+                                                                        },
+                                                                    ],
+                                                                ),
+                                                                span: 398..405,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 396..406,
+                                                },
+                                            ),
+                                            span: 385..406,
+                                        },
+                                    ],
+                                ),
+                                span: 380..407,
+                            },
+                        },
+                    ],
+                ),
+                span: 354..407,
+            },
+            wheres: [],
+            span: 324..407,
+        },
+        Decl {
+            name: "toInt",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Con(
+                            "CNat",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 444..445,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "CNat",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "g",
+                                            ),
+                                            span: 458..459,
+                                        },
+                                    ],
+                                ),
+                                span: 453..460,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "g",
+                                        ),
+                                        span: 464..465,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Lam(
+                                                [
+                                                    Param {
+                                                        name: "k",
+                                                        ty: None,
+                                                        borrow: false,
+                                                        default: None,
+                                                    },
+                                                ],
+                                                Spanned {
+                                                    node: Bin(
+                                                        Add,
+                                                        Spanned {
+                                                            node: Var(
+                                                                "k",
+                                                            ),
+                                                            span: 474..475,
+                                                        },
+                                                        Spanned {
+                                                            node: Int(
+                                                                IntLit {
+                                                                    value: 1,
+                                                                    suffix: None,
+                                                                },
+                                                            ),
+                                                            span: 478..479,
+                                                        },
+                                                    ),
+                                                    span: 474..479,
+                                                },
+                                            ),
+                                            span: 466..479,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 0,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 481..482,
+                                        },
+                                    ],
+                                ),
+                                span: 464..483,
+                            },
+                        },
+                    ],
+                ),
+                span: 438..483,
+            },
+            wheres: [],
+            span: 409..483,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 497..504,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "toInt",
+                                    ),
+                                    span: 505..510,
+                                },
+                                [
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "csucc",
+                                                ),
+                                                span: 511..516,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "csucc",
+                                                            ),
+                                                            span: 517..522,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Call(
+                                                                    Spanned {
+                                                                        node: Var(
+                                                                            "csucc",
+                                                                        ),
+                                                                        span: 523..528,
+                                                                    },
+                                                                    [
+                                                                        Spanned {
+                                                                            node: Call(
+                                                                                Spanned {
+                                                                                    node: Var(
+                                                                                        "czero",
+                                                                                    ),
+                                                                                    span: 529..534,
+                                                                                },
+                                                                                [],
+                                                                            ),
+                                                                            span: 529..536,
+                                                                        },
+                                                                    ],
+                                                                ),
+                                                                span: 523..537,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 517..538,
+                                                },
+                                            ],
+                                        ),
+                                        span: 511..539,
+                                    },
+                                ],
+                            ),
+                            span: 505..540,
+                        },
+                    ],
+                ),
+                span: 497..541,
+            },
+            wheres: [],
+            span: 485..541,
+        },
+    ],
+}
+
+== types ==
+czero : () -> CNat
+csucc : (CNat) -> CNat
+toInt : (CNat) -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn czero() =
+  return thunk { \f x. return x } to t@0; return CNat(t@0)
+fn csucc(n) =
+  return n to t@1; case t@1 { CNat(g) => return thunk { \f x. return f to t@2; return x to t@3; return g to t@4; (force t@4)(t@2, t@3) to t@5; return f to t@6; (force t@6)(t@5) } to t@7; return CNat(t@7) }
+fn toInt(n) =
+  return n to t@8; case t@8 { CNat(g) => return thunk { \k. return k to t@9; return 1 to t@10; t@9 + t@10 } to t@11; return 0 to t@12; return g to t@13; (force t@13)(t@11, t@12) }
+fn main() =
+  czero() to t@14; csucc(t@14) to t@15; csucc(t@15) to t@16; csucc(t@16) to t@17; toInt(t@17) to t@18; print t@18 to t@19; print_nl
+
+== fbip (rc) ==
+fn czero() =
+  return thunk { \f x. drop f to _; return x } to t@0; return CNat(t@0)
+fn csucc(n) =
+  return n to t@1; case t@1 { CNat(g) => dup g to _; reuse_token t@1 to reuse#t@1; return thunk { \f x. dup f to _; return f to t@2; return x to t@3; dup g to _; return g to t@4; (force t@4)(t@2, t@3) to t@5; return f to t@6; (force t@6)(t@5) } to t@7; reuse reuse#t@1 as CNat(t@7) }
+fn toInt(n) =
+  return n to t@8; case t@8 { CNat(g) => dup g to _; drop t@8 to _; return thunk { \k. return k to t@9; return 1 to t@10; t@9 + t@10 } to t@11; return 0 to t@12; return g to t@13; (force t@13)(t@11, t@12) }
+fn main() =
+  czero() to t@14; csucc(t@14) to t@15; csucc(t@15) to t@16; csucc(t@16) to t@17; toInt(t@17) to t@18; print t@18 to t@19; drop t@19 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_czero() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call ptr @prism_alloc(i64 1)
+  %2 = ptrtoint ptr %t3 to i64
+  %3 = add i64 %2, 8
+  %t4 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t4, align 8
+  %4 = ptrtoint ptr %t3 to i64
+  %5 = add i64 %4, 24
+  %t5 = inttoptr i64 %5 to ptr
+  store i64 %t2, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t3 to i64
+  ret i64 %t6
+}
+
+declare ptr @prism_alloc(i64)
+
+define i64 @prism_csucc(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  %t6 = call i64 @prism_reuse_token(i64 %a0)
+  %t7 = call ptr @prism_alloc(i64 1)
+  %4 = ptrtoint ptr %t7 to i64
+  %5 = add i64 %4, 8
+  %t8 = inttoptr i64 %5 to ptr
+  store i64 1, ptr %t8, align 8
+  %6 = ptrtoint ptr %t7 to i64
+  %7 = add i64 %6, 24
+  %t9 = inttoptr i64 %7 to ptr
+  store i64 %t4, ptr %t9, align 8
+  %t10 = ptrtoint ptr %t7 to i64
+  %t11 = call ptr @prism_reuse_alloc(i64 %t6, i64 1)
+  %8 = ptrtoint ptr %t11 to i64
+  %9 = add i64 %8, 8
+  %t12 = inttoptr i64 %9 to ptr
+  store i64 0, ptr %t12, align 8
+  %10 = ptrtoint ptr %t11 to i64
+  %11 = add i64 %10, 24
+  %t13 = inttoptr i64 %11 to ptr
+  store i64 %t10, ptr %t13, align 8
+  %t14 = ptrtoint ptr %t11 to i64
+  ret i64 %t14
+
+b1:                                               ; preds = %entry
+  unreachable
+}
+
+declare void @prism_rc_inc(i64)
+
+declare i64 @prism_reuse_token(i64)
+
+declare ptr @prism_reuse_alloc(i64, i64)
+
+define i64 @prism_toInt(i64 %a0) {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t3 = inttoptr i64 %3 to ptr
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  %t7 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t7 to i64
+  %5 = add i64 %4, 8
+  %t8 = inttoptr i64 %5 to ptr
+  store i64 2, ptr %t8, align 8
+  %t9 = ptrtoint ptr %t7 to i64
+  %t10 = call i64 @prism_apply_2(i64 %t4, i64 %t9, i64 1)
+  call void @prism_rc_dec(i64 %t4)
+  ret i64 %t10
+
+b1:                                               ; preds = %entry
+  unreachable
+}
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_apply_2(i64 %_clos, i64 %_a0, i64 %_a1) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+    i64 1, label %_lam1
+    i64 2, label %_lam2
+    i64 3, label %_lam3
+    i64 4, label %_lam4
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0, i64 %_a1)
+  br label %_merge
+
+_lam1:                                            ; preds = %entry
+  %2 = ptrtoint ptr %_cp to i64
+  %3 = add i64 %2, 24
+  %_fp1_0 = inttoptr i64 %3 to ptr
+  %_fv1_0 = load i64, ptr %_fp1_0, align 8
+  %_r1 = call i64 @prism_lam_1(i64 %_fv1_0, i64 %_a0, i64 %_a1)
+  br label %_merge
+
+_lam2:                                            ; preds = %entry
+  %_i2 = call i64 @prism_lam_2(i64 %_a0)
+  %_r2 = call i64 @prism_apply_1(i64 %_i2, i64 %_a1)
+  call void @prism_rc_dec(i64 %_i2)
+  br label %_merge
+
+_lam3:                                            ; preds = %entry
+  %4 = ptrtoint ptr %_cp to i64
+  %5 = add i64 %4, 24
+  %_fp3_0 = inttoptr i64 %5 to ptr
+  %_fv3_0 = load i64, ptr %_fp3_0, align 8
+  %_i3 = call i64 @prism_lam_3(i64 %_fv3_0, i64 %_a0)
+  %_r3 = call i64 @prism_apply_1(i64 %_i3, i64 %_a1)
+  call void @prism_rc_dec(i64 %_i3)
+  br label %_merge
+
+_lam4:                                            ; preds = %entry
+  %6 = ptrtoint ptr %_cp to i64
+  %7 = add i64 %6, 24
+  %_fp4_0 = inttoptr i64 %7 to ptr
+  %_fv4_0 = load i64, ptr %_fp4_0, align 8
+  %8 = ptrtoint ptr %_cp to i64
+  %9 = add i64 %8, 32
+  %_fp4_1 = inttoptr i64 %9 to ptr
+  %_fv4_1 = load i64, ptr %_fp4_1, align 8
+  %_i4 = call i64 @prism_lam_4(i64 %_fv4_0, i64 %_fv4_1, i64 %_a0)
+  %_r4 = call i64 @prism_apply_1(i64 %_i4, i64 %_a1)
+  call void @prism_rc_dec(i64 %_i4)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ]
+  ret i64 %_result
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_czero()
+  %t1 = call i64 @prism_csucc(i64 %t0)
+  %t2 = call i64 @prism_csucc(i64 %t1)
+  %t3 = call i64 @prism_csucc(i64 %t2)
+  %t4 = call i64 @prism_toInt(i64 %t3)
+  call void @prism_print_int(i64 %t4)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0, i64 %_p1) {
+entry:
+  call void @prism_rc_dec(i64 %_p0)
+  ret i64 %_p1
+}
+
+define i64 @prism_lam_1(i64 %_fv0, i64 %_p0, i64 %_p1) {
+entry:
+  call void @prism_rc_inc(i64 %_p0)
+  call void @prism_rc_inc(i64 %_fv0)
+  %t2 = call i64 @prism_apply_2(i64 %_fv0, i64 %_p0, i64 %_p1)
+  call void @prism_rc_dec(i64 %_fv0)
+  %t3 = call i64 @prism_apply_1(i64 %_p0, i64 %t2)
+  call void @prism_rc_dec(i64 %_p0)
+  ret i64 %t3
+}
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+    i64 1, label %_lam1
+    i64 2, label %_lam2
+    i64 3, label %_lam3
+    i64 4, label %_lam4
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_ac0 = call ptr @prism_alloc(i64 1)
+  %2 = ptrtoint ptr %_ac0 to i64
+  %3 = add i64 %2, 8
+  %_atp0 = inttoptr i64 %3 to ptr
+  store i64 3, ptr %_atp0, align 8
+  %4 = ptrtoint ptr %_ac0 to i64
+  %5 = add i64 %4, 24
+  %_afp0_0 = inttoptr i64 %5 to ptr
+  store i64 %_a0, ptr %_afp0_0, align 8
+  %_r0 = ptrtoint ptr %_ac0 to i64
+  br label %_merge
+
+_lam1:                                            ; preds = %entry
+  %6 = ptrtoint ptr %_cp to i64
+  %7 = add i64 %6, 24
+  %_fp1_0 = inttoptr i64 %7 to ptr
+  %_fv1_0 = load i64, ptr %_fp1_0, align 8
+  call void @prism_rc_inc(i64 %_fv1_0)
+  %_ac1 = call ptr @prism_alloc(i64 2)
+  %8 = ptrtoint ptr %_ac1 to i64
+  %9 = add i64 %8, 8
+  %_atp1 = inttoptr i64 %9 to ptr
+  store i64 4, ptr %_atp1, align 8
+  %10 = ptrtoint ptr %_ac1 to i64
+  %11 = add i64 %10, 24
+  %_afp1_0 = inttoptr i64 %11 to ptr
+  store i64 %_fv1_0, ptr %_afp1_0, align 8
+  %12 = ptrtoint ptr %_ac1 to i64
+  %13 = add i64 %12, 32
+  %_afp1_1 = inttoptr i64 %13 to ptr
+  store i64 %_a0, ptr %_afp1_1, align 8
+  %_r1 = ptrtoint ptr %_ac1 to i64
+  br label %_merge
+
+_lam2:                                            ; preds = %entry
+  %_r2 = call i64 @prism_lam_2(i64 %_a0)
+  br label %_merge
+
+_lam3:                                            ; preds = %entry
+  %14 = ptrtoint ptr %_cp to i64
+  %15 = add i64 %14, 24
+  %_fp3_0 = inttoptr i64 %15 to ptr
+  %_fv3_0 = load i64, ptr %_fp3_0, align 8
+  %_r3 = call i64 @prism_lam_3(i64 %_fv3_0, i64 %_a0)
+  br label %_merge
+
+_lam4:                                            ; preds = %entry
+  %16 = ptrtoint ptr %_cp to i64
+  %17 = add i64 %16, 24
+  %_fp4_0 = inttoptr i64 %17 to ptr
+  %_fv4_0 = load i64, ptr %_fp4_0, align 8
+  %18 = ptrtoint ptr %_cp to i64
+  %19 = add i64 %18, 32
+  %_fp4_1 = inttoptr i64 %19 to ptr
+  %_fv4_1 = load i64, ptr %_fp4_1, align 8
+  %_r4 = call i64 @prism_lam_4(i64 %_fv4_0, i64 %_fv4_1, i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ]
+  ret i64 %_result
+}
+
+define i64 @prism_lam_2(i64 %_p0) {
+entry:
+  %t0 = and i64 %_p0, 3
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = ashr i64 %_p0, 1
+  %t5 = add i64 %t3, 1
+  %t6 = shl i64 %t5, 1
+  %t7 = ashr i64 %t6, 1
+  %t8 = icmp eq i64 %t7, %t5
+  br i1 %t8, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 3)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t9 = or i64 %t6, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 3)
+  ret i64 %t11
+}
+
+declare i64 @prism_rt_int_add(i64, i64)
+
+define i64 @prism_lam_3(i64 %_fv0, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t0 = call i64 @prism_lam_0(i64 %_fv0, i64 %_p0)
+  ret i64 %t0
+}
+
+define i64 @prism_lam_4(i64 %_fv0, i64 %_fv1, i64 %_p0) {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  call void @prism_rc_inc(i64 %_fv1)
+  %t0 = call i64 @prism_lam_1(i64 %_fv0, i64 %_fv1, i64 %_p0)
+  ret i64 %t0
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [3]
+result: ()

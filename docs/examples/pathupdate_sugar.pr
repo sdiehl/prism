@@ -1,4 +1,5 @@
 type Vec2 = Vec2 { x: Int, y: Int }
+
 type Line = Line { from: Vec2, to: Vec2 }
 
 fn main() =

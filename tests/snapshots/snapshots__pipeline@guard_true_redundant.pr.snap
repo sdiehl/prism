@@ -1,0 +1,137 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/guard_true_redundant.pr
+---
+== tokens ==
+VOpen Fn Ident("classify") LParen Ident("n") Colon KwInt RParen Colon KwInt Eq VOpen Match Ident("n") Of VOpen Ident("x") If True FatArrow Int(IntLit { value: 1, suffix: None }) VSemi Int(IntLit { value: 0, suffix: None }) FatArrow Int(IntLit { value: 2, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("classify") LParen Int(IntLit { value: 5, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "classify",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 176..177,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 185..186,
+                            },
+                            guard: Spanned {
+                                node: Bool(
+                                    true,
+                                ),
+                                span: 190..194,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 198..199,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 204..205,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 209..210,
+                            },
+                        },
+                    ],
+                ),
+                span: 170..210,
+            },
+            wheres: [],
+            span: 139..210,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "classify",
+                        ),
+                        span: 230..238,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 5,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 239..240,
+                        },
+                    ],
+                ),
+                span: 230..241,
+            },
+            wheres: [],
+            span: 212..241,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `classify`: unreachable match arm
+   ╭─[ <source>:6:5 ]
+   │
+ 6 │     0 => 2
+   │     ┬  
+   │     ╰── in `classify`: unreachable match arm
+───╯

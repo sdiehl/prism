@@ -2,7 +2,5 @@ fn twice(f : (Int) -> Int) = f(f(0))
 
 -- the trailing `fn (x) ...` block becomes twice's last argument
 fn main() =
-  let r =
-    twice() fn(x)
-      x + 10
+  let r = twice(\(x) -> x + 10)
   println(r)

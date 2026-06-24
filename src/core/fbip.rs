@@ -7,7 +7,7 @@ use crate::types::{CtorInfo, DeclInfo, Type};
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv::{comp as freev, pat_vars};
-use super::tailrec::{recursive_calls, scc_of, TailClass};
+use super::tailrec::{recursive_calls, scc_of, scc_of_calls, TailClass};
 
 // Perceus-style reference counting (Reinking et al.). Function parameters and
 // every let-bound result are owned; each owned value is consumed exactly once on
@@ -802,10 +802,14 @@ pub fn check_fip(
 // are exactly the shapes the backend would leave as real recursion.
 fn bounded_stack(f: &CoreFn, core: &Core, users: &BTreeSet<Sym>) -> Result<(), String> {
     let group = scc_of(core, users, f.name);
+    // The direct-call SCC is a subset used only to explain a rejection: a member
+    // missing from it sits in the group because a function flows as a value, not
+    // because of a real call cycle.
+    let call_group = scc_of_calls(core, users, f.name);
     let (mut cons, mut add, mut mutual) = (false, false, false);
     for (g, cls) in recursive_calls(&f.body, f.name, f.params.len(), &group) {
         match cls {
-            TailClass::NonTail => return Err(nontail_err(f.name.as_str())),
+            TailClass::NonTail => return Err(nontail_err(f.name.as_str(), g, &call_group)),
             TailClass::TrmcCons => cons = true,
             TailClass::TrmcAdd => add = true,
             TailClass::Tail => {}
@@ -831,12 +835,26 @@ fn bounded_stack(f: &CoreFn, core: &Core, users: &BTreeSet<Sym>) -> Result<(), S
     Ok(())
 }
 
-fn nontail_err(fname: &str) -> String {
-    format!(
+fn nontail_err(fname: &str, callee: Sym, call_group: &BTreeSet<Sym>) -> String {
+    let base = format!(
         "function `{fname}` is marked `fip` but recurses in non-tail position (one stack \
          frame per element); make the recursive call a tail call or a tail under a single \
          constructor / addition, or annotate it `fbip`"
-    )
+    );
+    // When the non-tail callee is in the recursion group only via a first-class
+    // reference (not a direct-call cycle), the discipline can feel surprising:
+    // capturing a function as a value, not calling it back, is what enlarged the
+    // group. Name that so the fix (drop the capture, or annotate `fbip`) is clear.
+    if callee != Sym::from(fname) && !call_group.contains(&callee) {
+        format!(
+            "{base}\nnote: `{callee}` is in `{fname}`'s tail-recursion group only because a \
+             function flows as a first-class value somewhere in the cycle, not through direct \
+             calls; if they do not actually recurse through each other, avoid capturing the \
+             function as a value (call it directly) or annotate `fbip`"
+        )
+    } else {
+        base
+    }
 }
 
 /// Verify the linearity of every `fip` function over the raw (pre-RC) core.
