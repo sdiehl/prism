@@ -12,7 +12,7 @@ use marginalia::Span;
 use super::sugar::expand_interp;
 use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
-use crate::names::{self, RET, UNIT_ARG};
+use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
     Arm, Core, Expr, HandlerArm, Marker, Param, Pattern, Qualifier, Sugar, SugarArm, Surface, S,
 };
@@ -441,11 +441,11 @@ fn rw_sugar(
         // bound name is unforgeable, so the synthesized lambda cannot capture.
         Sugar::Compose(forward, f, g) => {
             let (outer, inner) = if *forward { (g, f) } else { (f, g) };
-            let xv = evar(crate::names::COMPOSE, span);
+            let xv = evar(COMPOSE, span);
             let inner_call = call((**inner).clone(), vec![xv], span);
             let body = call((**outer).clone(), vec![inner_call], span);
             let param = Param {
-                name: crate::names::COMPOSE.into(),
+                name: COMPOSE.into(),
                 ty: None,
                 borrow: false,
                 default: None,

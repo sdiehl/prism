@@ -14,9 +14,10 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::{env, fs};
 
 fn cc() -> String {
-    std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
+    env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
 }
 
 fn have(tool: &str) -> bool {
@@ -30,18 +31,18 @@ fn have(tool: &str) -> bool {
 // runtime reports on the stderr line ending in `suffix` (`prism: N <suffix>`).
 fn stat(case: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(case);
-    let src = std::fs::read_to_string(&path).map_err(|e| format!("{case}: {e}"))?;
+    let src = fs::read_to_string(&path).map_err(|e| format!("{case}: {e}"))?;
     let full = prism::with_prelude(&src);
-    let bin = std::env::temp_dir().join(format!(
+    let bin = env::temp_dir().join(format!(
         "prism_perf_{}_{}",
         std::process::id(),
         case.replace(['/', '.'], "_")
     ));
     let cleanup = || {
         for ext in ["bc", "ll"] {
-            let _ = std::fs::remove_file(bin.with_extension(ext));
+            let _ = fs::remove_file(bin.with_extension(ext));
         }
-        let _ = std::fs::remove_file(&bin);
+        let _ = fs::remove_file(&bin);
     };
     if let Err(e) = prism::build(&full, &bin) {
         cleanup();

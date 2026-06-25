@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use marginalia::{BuiltinKind, Trivia, TriviaTable};
 
 use crate::error::Error;
@@ -32,11 +34,10 @@ enum Mode {
 // never destroy code, so a node neither printer can render is copied from the
 // original text unchanged.
 std::thread_local! {
-    static SOURCE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SOURCE: RefCell<String> = const { RefCell::new(String::new()) };
     // Comments and blank lines, so the offside-block printers can re-emit the
     // trivia that sits inside a function body, not just between declarations.
-    static TRIVIA: std::cell::RefCell<TriviaTable> =
-        const { std::cell::RefCell::new(TriviaTable::new()) };
+    static TRIVIA: RefCell<TriviaTable> = const { RefCell::new(TriviaTable::new()) };
 }
 
 fn verbatim(start: usize, end: usize) -> String {

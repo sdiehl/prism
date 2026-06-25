@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use marginalia::{Span, TriviaTable};
 
 use crate::error::{LexError, ParseError, SourceMap};
@@ -63,8 +65,8 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let mut patterns = Vec::new();
     let mut fns = Vec::new();
     let mut imports = Vec::new();
-    let mut exports = std::collections::BTreeSet::new();
-    let mut opaques = std::collections::BTreeSet::new();
+    let mut exports = BTreeSet::new();
+    let mut opaques = BTreeSet::new();
     for (vis, item) in items {
         if vis != Vis::Priv {
             if let Some(name) = export_name(&item) {

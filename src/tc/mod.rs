@@ -416,7 +416,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                         .iter()
                         .find(|(n, _)| n == &m.name)
                         .is_some_and(|(_, t)| {
-                            let mut rv = std::collections::BTreeSet::new();
+                            let mut rv = BTreeSet::new();
                             env::collect_row_vars(t, &mut rv);
                             !rv.is_empty()
                         })

@@ -5,6 +5,7 @@
 //! merges control flow with phi nodes, MLIR with block arguments, abstracted
 //! as `jump_merge`/`open_merge`.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(feature = "mlir")]
 use std::fmt::Write;
@@ -14,6 +15,7 @@ use crate::core::builtins::{builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
 use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, Value};
+use crate::names::{closure_cap, closure_rem};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
 
@@ -1133,11 +1135,9 @@ impl<I: Isa> Cg<'_, I> {
         let tag = self.lams.len();
         let m = self.lams[target].params.len();
         let free_vars = (0..target_fvs + n)
-            .map(|i| Sym::new(&crate::names::closure_cap(i)))
+            .map(|i| Sym::new(&closure_cap(i)))
             .collect();
-        let params = (0..m - n)
-            .map(|i| Sym::new(&crate::names::closure_rem(i)))
-            .collect();
+        let params = (0..m - n).map(|i| Sym::new(&closure_rem(i))).collect();
         self.lams.push(LamInfo {
             tag,
             params,
@@ -1164,13 +1164,13 @@ impl<I: Isa> Cg<'_, I> {
             let m = self.lams[tag].params.len();
             let fvs = self.lams[tag].free_vars.len();
             match m.cmp(&n) {
-                std::cmp::Ordering::Greater => {
+                Ordering::Greater => {
                     self.curry_adapter(tag, fvs, n);
                 }
-                std::cmp::Ordering::Less => {
+                Ordering::Less => {
                     self.used_apply.insert(n - m);
                 }
-                std::cmp::Ordering::Equal => {}
+                Ordering::Equal => {}
             }
         }
     }
@@ -1237,13 +1237,13 @@ impl<I: Isa> Cg<'_, I> {
             let r = format!("%_r{tag}");
 
             match m.cmp(&n) {
-                std::cmp::Ordering::Equal => {
+                Ordering::Equal => {
                     let mut call_args = captured;
                     call_args.extend(args);
                     self.isa
                         .call(&mut b, &r, &format!("prism_lam_{tag}"), &call_args);
                 }
-                std::cmp::Ordering::Greater => {
+                Ordering::Greater => {
                     // Under-application: capture (fvs ++ args) into an adapter
                     // closure expecting the remaining m-n. The fvs are still owned
                     // by `%_clos` (the caller drops it after this apply), so dup
@@ -1271,7 +1271,7 @@ impl<I: Isa> Cg<'_, I> {
                     }
                     self.isa.ptrtoint(&mut b, &r, &cp);
                 }
-                std::cmp::Ordering::Less => {
+                Ordering::Less => {
                     // Over-application: call with the first m args for the next
                     // closure, then apply the remaining n-m to it.
                     let mut call_args = captured;
@@ -1427,11 +1427,9 @@ fn str_builtin_kinds(sym: &str) -> (&'static [usize], &'static [usize], bool) {
 }
 
 fn partial_app_body(name: &str, n_given: usize, arity: usize) -> (Vec<Sym>, Vec<Sym>, Comp) {
-    let cap_names: Vec<Sym> = (0..n_given)
-        .map(|i| Sym::new(&crate::names::closure_cap(i)))
-        .collect();
+    let cap_names: Vec<Sym> = (0..n_given).map(|i| Sym::new(&closure_cap(i))).collect();
     let rem_names: Vec<Sym> = (0..arity - n_given)
-        .map(|i| Sym::new(&crate::names::closure_rem(i)))
+        .map(|i| Sym::new(&closure_rem(i)))
         .collect();
     let call_args = cap_names
         .iter()

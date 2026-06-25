@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use super::env::{collect_type_vars, convert_data, wrap_forall};
+use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
     ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted, Warning,
 };
 use crate::error::TypeError;
-use crate::names::dict_ctor;
+use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Program};
 use crate::types::ty::{EffRow, Type};
@@ -410,7 +410,7 @@ pub(super) fn build_classes(
             // effect-polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`)
             // is row-polymorphic rather than carrying a free row var.
             let mut rvars = BTreeSet::new();
-            super::env::collect_row_vars(&t, &mut rvars);
+            collect_row_vars(&t, &mut rvars);
             for rv in rvars {
                 scheme = Type::RowForall(rv, Box::new(scheme));
             }
@@ -443,7 +443,7 @@ pub(super) fn build_classes(
             tvars.remove(&param);
             let mut scheme = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), mt.clone());
             let mut rvars = BTreeSet::new();
-            super::env::collect_row_vars(mt, &mut rvars);
+            collect_row_vars(mt, &mut rvars);
             for rv in rvars {
                 scheme = Type::RowForall(rv, Box::new(scheme));
             }
@@ -621,9 +621,9 @@ pub(super) fn build_classes(
         // and (once packages and separate compilation land) an error across a
         // package boundary. Primitive heads count as prelude-defined.
         let inst_mod = i.module.as_str();
-        let class_mod = crate::names::module_of(&i.class);
+        let class_mod = module_of(&i.class);
         let head_mod = match &head {
-            Type::Con(n, _) => crate::names::module_of(n.as_str()),
+            Type::Con(n, _) => module_of(n.as_str()),
             _ => "",
         };
         if class_mod != inst_mod && head_mod != inst_mod {
@@ -684,7 +684,7 @@ pub(super) fn build_classes(
             continue;
         }
         warnings.push(Warning {
-            span: marginalia::Span::default(),
+            span: Span::default(),
             msg: format!(
                 "overlapping instances for {class}: {}; uses must disambiguate with f[name]",
                 provenance_list(&instances, names)

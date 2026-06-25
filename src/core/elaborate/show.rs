@@ -3,6 +3,10 @@ use super::{
     Locals, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
 };
 
+// Name prefix for a generated structural `show` function, completed by the
+// type's injective mangling.
+const SHOW_FN_PREFIX: &str = "_show_";
+
 impl Elab<'_> {
     // Like `local_ty`, but for printing: resolve the print-site type to a
     // concrete printable monotype, or None when the caller must fall back to the
@@ -145,7 +149,7 @@ impl Elab<'_> {
     ) -> Result<String, Error> {
         let mangled = mangle_con(name, args)
             .ok_or_else(|| unshowable(Some(&Type::Con(name.into(), args.to_vec())), span))?;
-        let fname = format!("_show_{mangled}");
+        let fname = format!("{SHOW_FN_PREFIX}{mangled}");
         if self.show_seen.contains(&fname) {
             return Ok(fname);
         }
@@ -235,7 +239,7 @@ impl Elab<'_> {
     pub(super) fn ensure_show_tuple(&mut self, tys: &[Type], span: Span) -> Result<String, Error> {
         let tup = Type::Tuple(tys.to_vec());
         let mangled = mangle_ty(&tup).ok_or_else(|| unshowable(Some(&tup), span))?;
-        let fname = format!("_show_{mangled}");
+        let fname = format!("{SHOW_FN_PREFIX}{mangled}");
         if self.show_seen.contains(&fname) {
             return Ok(fname);
         }

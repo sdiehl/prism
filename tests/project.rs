@@ -2,9 +2,12 @@
 //! `src/` root rather than from the entry file's own directory.
 
 use std::path::Path;
+use std::process::{self, Command};
+use std::{env, fs};
 
+use prism::eval::Rv;
 use prism::project::load_project;
-use prism::{interpret_at, with_prelude};
+use prism::{build_at, interpret_at, with_prelude};
 
 fn hello() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/projects/hello"))
@@ -25,19 +28,17 @@ fn assert_native_matches_interp(project_dir: &Path) {
         return;
     }
     let project = load_project(project_dir).expect("manifest loads");
-    let full = with_prelude(&std::fs::read_to_string(&project.entry).expect("entry reads"));
+    let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
     let want = interpret_at(&full, &project.src_dir)
         .expect("interprets")
         .term;
-    let bin = std::env::temp_dir().join(format!("prism_{}_{}", project.name, std::process::id()));
-    prism::build_at(&full, &project.src_dir, &bin).expect("native build");
-    let out = std::process::Command::new(&bin)
-        .output()
-        .expect("runs binary");
+    let bin = env::temp_dir().join(format!("prism_{}_{}", project.name, process::id()));
+    build_at(&full, &project.src_dir, &bin).expect("native build");
+    let out = Command::new(&bin).output().expect("runs binary");
     for ext in ["bc", "ll"] {
-        let _ = std::fs::remove_file(bin.with_extension(ext));
+        let _ = fs::remove_file(bin.with_extension(ext));
     }
-    let _ = std::fs::remove_file(&bin);
+    let _ = fs::remove_file(&bin);
     assert_eq!(String::from_utf8_lossy(&out.stdout), want);
 }
 
@@ -45,18 +46,18 @@ fn assert_native_matches_interp(project_dir: &Path) {
 fn project_resolves_modules_from_src_root() {
     let project = load_project(hello()).expect("manifest loads");
     assert_eq!(project.name, "hello");
-    let src = std::fs::read_to_string(&project.entry).expect("entry reads");
+    let src = fs::read_to_string(&project.entry).expect("entry reads");
     let run = interpret_at(&with_prelude(&src), &project.src_dir).expect("resolves and runs");
-    let out: Vec<String> = run.out.iter().map(prism::eval::Rv::show).collect();
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
     assert_eq!(out, ["42"]);
 }
 
 #[test]
 fn modlib_project_interprets() {
     let project = load_project(modlib()).expect("manifest loads");
-    let src = std::fs::read_to_string(&project.entry).expect("entry reads");
+    let src = fs::read_to_string(&project.entry).expect("entry reads");
     let run = interpret_at(&with_prelude(&src), &project.src_dir).expect("resolves and runs");
-    let out: Vec<String> = run.out.iter().map(prism::eval::Rv::show).collect();
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
     assert_eq!(out, ["42", "1", "0"]);
 }
 
@@ -66,11 +67,11 @@ fn loading_a_missing_manifest_errors() {
 }
 
 fn cc() -> String {
-    std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
+    env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
 }
 
 fn have_cc() -> bool {
-    std::process::Command::new(cc())
+    Command::new(cc())
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())

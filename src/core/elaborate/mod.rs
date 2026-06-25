@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::slice;
 
 use marginalia::Span;
+use num_bigint::Sign;
 
 use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
 use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
@@ -192,7 +193,7 @@ impl Elab<'_> {
             .enumerate()
             .map(|(i, (k, v))| {
                 let ty = v.clone().unwrap_or_else(|| {
-                    Type::Var(Sym::new(&crate::names::local_shadow(
+                    Type::Var(Sym::new(&names::local_shadow(
                         u32::try_from(i).unwrap_or(u32::MAX),
                     )))
                 });
@@ -869,7 +870,7 @@ fn small_int(n: &BigInt) -> Option<i64> {
     }
     let mag = n.iter_u64_digits().next().unwrap_or(0);
     #[allow(clippy::cast_possible_wrap)]
-    let v = if n.sign() == num_bigint::Sign::Minus {
+    let v = if n.sign() == Sign::Minus {
         (mag as i64).wrapping_neg()
     } else {
         mag as i64
@@ -879,7 +880,7 @@ fn small_int(n: &BigInt) -> Option<i64> {
 
 fn to_wrapped_u64(n: &BigInt) -> u64 {
     let low = n.iter_u64_digits().next().unwrap_or(0);
-    if n.sign() == num_bigint::Sign::Minus {
+    if n.sign() == Sign::Minus {
         low.wrapping_neg()
     } else {
         low

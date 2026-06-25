@@ -50,6 +50,8 @@ mod state;
 
 const PURE_TAG: usize = 0;
 const OP_TAG: usize = 1;
+// Type name carrying the free-monad result (its ctors are EPure/EOp).
+const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
 const EBIND: &str = "ebind";
@@ -58,6 +60,8 @@ const EBIND: &str = "ebind";
 // producer threads `Step S` and stops when `stake` yields `SDone`.
 const MORE_TAG: usize = 0;
 const DONE_TAG: usize = 1;
+// Type name carrying the early-termination step (its ctors are SMore/SDone).
+const STEP: &str = "Step";
 pub(super) const SMORE: &str = "SMore";
 pub(super) const SDONE: &str = "SDone";
 
@@ -187,8 +191,8 @@ pub fn lower(
     if let Some(lowered) = lo.try_lower_state(core) {
         let mut ctors = ctors.clone();
         if lo.early {
-            ctors.insert(SMORE.into(), synth_ctor("Step", MORE_TAG, 1));
-            ctors.insert(SDONE.into(), synth_ctor("Step", DONE_TAG, 1));
+            ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
+            ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
         }
         return Ok((lowered, ctors));
     }
@@ -219,15 +223,17 @@ pub fn lower(
             })
         })
         .collect::<Result<_, TypeError>>()?;
+    let gen_start = fns.len();
     fns.extend(lo.generated);
     fns.push(ebind_fn());
     if lo.full {
         check_monadified(&fns)?;
     }
+    debug_assert_templates_closed(&fns, gen_start);
 
     let mut ctors = ctors.clone();
-    ctors.insert(EPURE.into(), synth_ctor("Eff", PURE_TAG, 1));
-    ctors.insert(EOP.into(), synth_ctor("Eff", OP_TAG, 4));
+    ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
+    ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
 
     Ok((Core { fns }, ctors))
 }
@@ -715,7 +721,8 @@ impl Lowerer {
     // misses its equality match once and forwards with id - N.
     //
     // Closed top-level template: its binders are the fixed `names::*` set and it
-    // never nests another template's body, so the fixed binders cannot capture.
+    // never nests another template's body, so the fixed binders cannot capture
+    // (checked by `debug_assert_templates_closed`).
     fn mask_driver(&mut self, ops: &[Sym]) -> Result<Sym, TypeError> {
         let driver = self.fresh("mask");
         let resume = Value::Thunk(Box::new(Comp::Lam(
@@ -817,9 +824,10 @@ fn epure(v: Value) -> Comp {
 //   }
 //
 // Closed top-level template: its binders (`names::OP_ID`/`OP_ARG`/`CONT`/
-// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed by design. Templates refer to
-// one another by `Call`, never by lexical nesting, so the fixed binders cannot
-// capture across templates; do not emit one template's body inside another.
+// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed. Templates refer to one another
+// by `Call`, never by lexical nesting, so the fixed binders cannot capture across
+// templates; do not emit one template's body inside another. The closedness this
+// relies on is checked by `debug_assert_templates_closed`, not just argued here.
 fn ebind_fn() -> CoreFn {
     let pure_arm = (
         ctor_pat(EPURE, &[names::COMPOSE.into()]),
@@ -974,6 +982,39 @@ fn resume_in_thunk(c: &Comp, resume: Sym) -> bool {
     });
     each_subcomp(c, &mut |sc| found |= resume_in_thunk(sc, resume));
     found
+}
+
+// Template hygiene, mechanically. Every effect-dispatch template appended above
+// (`fns[gen_start..]`: the per-handler drivers, the mask drivers, and `ebind`) is
+// a closed top-level function. Its binders are the fixed `names::*` set plus its
+// own params and captured free vars; when a driver splices another template's
+// body it binds that body's free names as params. The hygiene the comments claim
+// is exactly: after removing a template's own params and binders, every name left
+// free is the name of another top-level function it calls, never a leftover
+// binder. `fv::comp_without` removes the params (it already discounts internal
+// lambda/let/case/handler binders), so the residue must be a subset of the
+// top-level names. A binder that captured a sub-template's free occurrence, or a
+// driver that failed to capture one, leaves a dangling name and trips this in
+// debug builds, instead of miscompiling silently at a distant call site. Release
+// builds skip it; the cost is debug-only.
+fn debug_assert_templates_closed(fns: &[CoreFn], gen_start: usize) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let known: BTreeSet<Sym> = fns.iter().map(|f| f.name).collect();
+    for t in &fns[gen_start..] {
+        let leaked: Vec<Sym> = fv::comp_without(&t.body, &t.params)
+            .into_iter()
+            .filter(|v| !known.contains(v))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "effect-lowering template `{}` is not hygienic: {leaked:?} are neither its \
+             binders nor top-level functions (a template binder captured a free occurrence \
+             or a driver failed to bind one)",
+            t.name,
+        );
+    }
 }
 
 // Escalation invariant: after whole-program monadification every function

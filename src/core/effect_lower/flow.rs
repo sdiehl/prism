@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{latent, Latent, MaskOp};
+use super::{each_value, latent, Latent, MaskOp};
 use crate::core::cbpv::{Comp, Core, Value};
 use crate::sym::Sym;
 
@@ -169,7 +169,7 @@ fn esc(c: &Comp, loc: &Loc, lat: &Latent, flow: &ThunkFlow) -> bool {
         }
         _ => {
             let mut found = false;
-            super::each_value(c, &mut |v| found |= in_thunk(v, loc, lat, flow));
+            each_value(c, &mut |v| found |= in_thunk(v, loc, lat, flow));
             found
         }
     }
@@ -299,7 +299,7 @@ fn props(
             Sig::new()
         }
         _ => {
-            super::each_value(c, &mut |v| visit_value(v, loc, lat, flow, upd));
+            each_value(c, &mut |v| visit_value(v, loc, lat, flow, upd));
             Sig::new()
         }
     }

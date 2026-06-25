@@ -11,5 +11,6 @@ fn tags() = [A, B, A, C, A]
 fn main() =
   let only_a = [t for t in sof(tags()), if t == A]
   println(length(only_a))
-  for t in sof(tags()), if t == C do
+  for t in sof(tags()),
+      if t == C do
     println(1)

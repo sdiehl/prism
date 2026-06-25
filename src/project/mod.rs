@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 
+/// The manifest filename a project is keyed by.
+const MANIFEST: &str = "prism.toml";
+
 /// A parsed `prism.toml`:
 ///
 /// ```toml
@@ -82,7 +85,7 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
         start
     };
     loop {
-        let candidate = dir.join("prism.toml");
+        let candidate = dir.join(MANIFEST);
         if candidate.is_file() {
             return Some(candidate);
         }
@@ -97,7 +100,7 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
 /// Fails when the manifest cannot be read or is malformed.
 pub fn load_project(arg: &Path) -> Result<Project, Error> {
     let manifest_path = if arg.is_dir() {
-        arg.join("prism.toml")
+        arg.join(MANIFEST)
     } else {
         arg.to_path_buf()
     };

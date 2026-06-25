@@ -3,10 +3,14 @@
 
 #![allow(clippy::format_push_string)]
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::{env, fs};
+
 #[test]
 fn pipeline() {
     insta::glob!("cases/*.pr", |path| {
-        let src = std::fs::read_to_string(path).unwrap();
+        let src = fs::read_to_string(path).unwrap();
         insta::assert_snapshot!(prism::report(&src));
     });
 }
@@ -34,7 +38,7 @@ fn prelude_type_checks() {
 #[test]
 fn var_stays_pure() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let src = std::fs::read_to_string(format!("{root}/tests/cases/run/fib_var.pr")).unwrap();
+    let src = fs::read_to_string(format!("{root}/tests/cases/run/fib_var.pr")).unwrap();
     let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
     let d = checked.decls.iter().find(|d| d.name == "fib2").unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
@@ -199,13 +203,13 @@ fn mask_reports_effect_in_both_engines() {
 // parity oracles cannot hold it. Assert stdout and the exit code via the CLI.
 #[test]
 fn exit_code_and_stdout() {
-    let path = std::env::temp_dir().join("prism_exit_case.pr");
-    std::fs::write(
+    let path = env::temp_dir().join("prism_exit_case.pr");
+    fs::write(
         &path,
         "fn main() =\n  println(1)\n  exit(7)\n  println(2)\n",
     )
     .unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_prism"))
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
         .arg("run")
         .arg(&path)
         .output()
@@ -218,15 +222,15 @@ fn exit_code_and_stdout() {
 // Spawned like the exit test so the nonzero exit code is observable.
 #[test]
 fn read_file_missing_fails_loudly() {
-    let missing = std::env::temp_dir().join("prism_no_such_file.txt");
-    let _ = std::fs::remove_file(&missing);
-    let prog = std::env::temp_dir().join("prism_read_missing.pr");
+    let missing = env::temp_dir().join("prism_no_such_file.txt");
+    let _ = fs::remove_file(&missing);
+    let prog = env::temp_dir().join("prism_read_missing.pr");
     let src = format!(
         "fn main() =\n  print(read_file(\"{}\"))\n",
         missing.display()
     );
-    std::fs::write(&prog, src).unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_prism"))
+    fs::write(&prog, src).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
         .arg("run")
         .arg(&prog)
         .output()
@@ -242,19 +246,15 @@ fn read_file_missing_fails_loudly() {
 // test: assert the nonzero exit and the named effect on each backend that runs.
 #[test]
 fn unhandled_effect_traps_both_backends() {
-    let prog = std::env::temp_dir().join("prism_unhandled_eff.pr");
-    std::fs::write(
+    let prog = env::temp_dir().join("prism_unhandled_eff.pr");
+    fs::write(
         &prog,
         "effect Ask { ctl ask() : Int }\nfn f() = ask()\nfn main() = println(f())\n",
     )
     .unwrap();
     let bin = env!("CARGO_BIN_EXE_prism");
 
-    let run = std::process::Command::new(bin)
-        .arg("run")
-        .arg(&prog)
-        .output()
-        .unwrap();
+    let run = Command::new(bin).arg("run").arg(&prog).output().unwrap();
     assert!(
         !run.status.success(),
         "interp must trap an unhandled effect"
@@ -268,8 +268,8 @@ fn unhandled_effect_traps_both_backends() {
 
     // Native: build then run. Skip only if the toolchain to produce a binary is
     // absent (mirrors the gate's tool-gating); never treat absence as a pass.
-    let nbin = std::env::temp_dir().join("prism_unhandled_eff.bin");
-    let built = std::process::Command::new(bin)
+    let nbin = env::temp_dir().join("prism_unhandled_eff.bin");
+    let built = Command::new(bin)
         .arg("build")
         .arg(&prog)
         .arg("-o")
@@ -277,7 +277,7 @@ fn unhandled_effect_traps_both_backends() {
         .output()
         .unwrap();
     if built.status.success() {
-        let nat = std::process::Command::new(&nbin).output().unwrap();
+        let nat = Command::new(&nbin).output().unwrap();
         assert!(
             !nat.status.success(),
             "native must trap an unhandled effect, not exit 0"
@@ -291,8 +291,8 @@ fn unhandled_effect_traps_both_backends() {
     }
 }
 
-fn interp_output(path: &std::path::Path) -> String {
-    let src = std::fs::read_to_string(path).unwrap();
+fn interp_output(path: &Path) -> String {
+    let src = fs::read_to_string(path).unwrap();
     let full = prism::with_prelude(&src);
     match prism::interpret(&full) {
         Ok(run) => format!("{}=> {}", run.term, run.value.show()),
@@ -321,15 +321,12 @@ fn print_kind_coverage() {
     let root = env!("CARGO_MANIFEST_DIR");
     let mut seen = std::collections::BTreeSet::new();
     for dir in ["tests/cases/run", "examples"] {
-        for e in std::fs::read_dir(format!("{root}/{dir}"))
-            .unwrap()
-            .flatten()
-        {
+        for e in fs::read_dir(format!("{root}/{dir}")).unwrap().flatten() {
             let path = e.path();
             if path.extension().and_then(|s| s.to_str()) != Some("pr") {
                 continue;
             }
-            let src = std::fs::read_to_string(&path).unwrap();
+            let src = fs::read_to_string(&path).unwrap();
             if let Ok(run) = prism::interpret(&prism::with_prelude(&src)) {
                 seen.extend(run.out.iter().map(prism::eval::Rv::kind));
             }
@@ -390,9 +387,9 @@ fn run_out(src: &str) -> String {
 fn cbpv_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/cbpv.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@cbpv.pr", out);
-    let src = std::fs::read_to_string(&path).unwrap();
+    let src = fs::read_to_string(&path).unwrap();
     insta::assert_snapshot!("cbpv_core", prism::dump("core", &src).unwrap());
 }
 
@@ -402,7 +399,7 @@ fn cbpv_example() {
 fn eff_poly_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/eff_poly.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@eff_poly.pr", out);
 }
 
@@ -413,9 +410,9 @@ fn eff_poly_example() {
 fn var_pure_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/var_pure.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@var_pure.pr", out);
-    let src = std::fs::read_to_string(&path).unwrap();
+    let src = fs::read_to_string(&path).unwrap();
     let checked = prism::check(prism::with_prelude(&src).as_str()).unwrap();
     let d = checked.decls.iter().find(|d| d.name == "fib_iter").unwrap();
     assert_eq!(d.ty.show(), "(Int) -> Int");
@@ -429,7 +426,7 @@ fn var_pure_example() {
 fn lenses_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/lenses.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@lenses.pr", out);
     let src = "type A = A { x: Int }\ntype B = B { a: A }\n\
                fn main() =\n  let b = B { a = A { x = 1 } }\n  print({ b | a.x = 2 }.a.x)\n";
@@ -444,7 +441,7 @@ fn lenses_example() {
 fn lens_derive_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/lens_derive.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@lens_derive.pr", out);
     let src = "type P = P { x: Int, y: Int } deriving (Lens)\n\
                fn main() =\n  print(with_x(P { x = 1, y = 2 }, 9).x)\n";
@@ -459,7 +456,7 @@ fn lens_derive_example() {
 fn class_pattern_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/class_pattern.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@class_pattern.pr", out);
 }
 
@@ -472,9 +469,9 @@ fn class_pattern_example() {
 fn stream_fuse_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/stream_fuse.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fuse.pr", out);
-    let src = std::fs::read_to_string(&path).unwrap();
+    let src = fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
@@ -494,9 +491,9 @@ fn stream_fuse_example() {
 fn stream_fold_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/stream_fold.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fold.pr", out);
-    let src = std::fs::read_to_string(&path).unwrap();
+    let src = fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
@@ -516,9 +513,9 @@ fn stream_fold_example() {
 fn streams_example() {
     let root = env!("CARGO_MANIFEST_DIR");
     let path = format!("{root}/examples/streams.pr");
-    let out = interp_output(std::path::Path::new(&path));
+    let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@streams.pr", out);
-    let src = std::fs::read_to_string(&path).unwrap();
+    let src = fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
         !lowered.contains("EOp") && !lowered.contains("ebind"),
@@ -534,13 +531,13 @@ fn streams_example() {
 fn rc_balanced() {
     let root = env!("CARGO_MANIFEST_DIR");
     for dir in ["tests/cases", "tests/cases/run", "examples"] {
-        let entries = std::fs::read_dir(format!("{root}/{dir}")).unwrap();
+        let entries = fs::read_dir(format!("{root}/{dir}")).unwrap();
         for e in entries.flatten() {
             let path = e.path();
             if path.extension().and_then(|s| s.to_str()) != Some("pr") {
                 continue;
             }
-            let src = std::fs::read_to_string(&path).unwrap();
+            let src = fs::read_to_string(&path).unwrap();
             let full = prism::with_prelude(&src);
             if prism::dump("core", &full).is_err() {
                 continue;
@@ -562,11 +559,11 @@ fn singleton_list_pattern() {
     assert_eq!(run.out[0].show(), "7");
 }
 
-fn corpus_files() -> impl Iterator<Item = std::path::PathBuf> {
+fn corpus_files() -> impl Iterator<Item = PathBuf> {
     let root = env!("CARGO_MANIFEST_DIR");
     ["tests/cases", "tests/cases/run", "examples", "lib"]
         .into_iter()
-        .flat_map(move |dir| std::fs::read_dir(format!("{root}/{dir}")).unwrap())
+        .flat_map(move |dir| fs::read_dir(format!("{root}/{dir}")).unwrap())
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("pr"))
@@ -575,7 +572,7 @@ fn corpus_files() -> impl Iterator<Item = std::path::PathBuf> {
 #[test]
 fn fmt_idempotent() {
     for path in corpus_files() {
-        let src = std::fs::read_to_string(&path).unwrap();
+        let src = fs::read_to_string(&path).unwrap();
         let Ok(once) = prism::format(&src) else {
             continue;
         };
@@ -590,7 +587,7 @@ fn fmt_idempotent() {
 #[test]
 fn fmt_preserves_core() {
     for path in corpus_files() {
-        let src = std::fs::read_to_string(&path).unwrap();
+        let src = fs::read_to_string(&path).unwrap();
         let Ok(core) = prism::dump("core", &prism::with_prelude(&src)) else {
             continue;
         };

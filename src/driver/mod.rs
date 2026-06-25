@@ -24,6 +24,7 @@ use crate::lex::lex;
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::resolve_modules;
+use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, Checked, CtorInfo};
@@ -151,14 +152,13 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
         let span = program
             .fns
             .iter()
-            .filter(|d| annots.contains_key(&crate::sym::Sym::from(&d.name)))
+            .filter(|d| annots.contains_key(&Sym::from(&d.name)))
             .find(|d| msg.contains(&format!("`{}`", d.name)))
             .map_or_else(marginalia::Span::default, |d| d.span);
         Error::Type(crate::error::TypeError::Other { span, msg })
     };
     let sigs = borrow_sigs(program);
-    let users: std::collections::BTreeSet<crate::sym::Sym> =
-        core.fns.iter().map(|f| f.name).collect();
+    let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
     check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
 }
@@ -365,7 +365,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 
 // Core function names contributed by the prelude alone, used to elide it from a
 // snippet's IR dump.
-fn prelude_fn_names() -> Result<std::collections::HashSet<crate::sym::Sym>, Error> {
+fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = frontend(PRELUDE, Path::new("."))?;
     Ok(core.fns.into_iter().map(|f| f.name).collect())
 }
