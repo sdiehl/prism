@@ -477,8 +477,8 @@ fn stream_fuse_example() {
     let src = std::fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
-        !lowered.contains("EOp"),
-        "stream chain must fuse away EOp cells"
+        !lowered.contains("EOp") && !lowered.contains("ebind"),
+        "stream chain must fuse away the free monad (no EOp cells, no ebind)"
     );
     assert!(
         !lowered.contains("handle"),
@@ -499,8 +499,8 @@ fn stream_fold_example() {
     let src = std::fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
     assert!(
-        !lowered.contains("EOp"),
-        "fold chain must fuse away EOp cells"
+        !lowered.contains("EOp") && !lowered.contains("ebind"),
+        "fold chain must fuse away the free monad (no EOp cells, no ebind)"
     );
     assert!(
         !lowered.contains("handle"),
@@ -520,7 +520,10 @@ fn streams_example() {
     insta::assert_snapshot!("interpreter@streams.pr", out);
     let src = std::fs::read_to_string(&path).unwrap();
     let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
-    assert!(!lowered.contains("EOp"), "streams must fuse away EOp cells");
+    assert!(
+        !lowered.contains("EOp") && !lowered.contains("ebind"),
+        "streams must fuse away the free monad (no EOp cells, no ebind)"
+    );
     assert!(
         !lowered.contains("handle"),
         "streams must inline its handlers"

@@ -1,0 +1,6 @@
+-- A private helper (`step` is not exported) called by a public function. Native
+-- linking must mangle the internal `Counter@step` to a valid symbol distinct
+-- from the public `Counter.bump`, with both reachable inside the module.
+fn step(n : Int) : Int = n + 1
+
+pub fn bump(n : Int) : Int = step(step(n))

@@ -1,0 +1,9 @@
+-- A type and its constructors crossing the module boundary, plus a derived `Eq`
+-- whose instance is elaborated here and dispatched from `main`. Native codegen
+-- must emit the qualified constructor tags and the derived equality so the
+-- comparison in another module links and runs.
+pub type Shape = Circle(Int) | Square(Int) deriving (Eq)
+
+pub fn circle(r : Int) : Shape = Circle(r)
+
+pub fn square(s : Int) : Shape = Square(s)

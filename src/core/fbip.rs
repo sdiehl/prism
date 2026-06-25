@@ -200,9 +200,15 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
 // Soundness net: along every root-to-leaf path the token is freed (ReuseToken)
 // and consumed (Reuse) the same number of times, so it never leaks or double
 // frees. Consumes hidden inside a Lam body run later and do not count here.
+// A divergent leaf (`Comp::Error`) aborts the process, which reclaims the held
+// shell, so reaching it with a live token discharges the obligation rather than
+// leaking: the path counts as balanced (false). Modelling divergence this way
+// keeps the analysis precise (a branch that consumes on one side and crashes on
+// the other still earns reuse) instead of conservatively declining.
 fn token_balanced(c: &Comp, tok: Sym) -> bool {
     fn walk(c: &Comp, tok: Sym, live: bool) -> Option<bool> {
         match c {
+            Comp::Error(_) => Some(false),
             Comp::Bind(m, x, n) => {
                 let live = if matches!(m.as_ref(), Comp::ReuseToken(_)) && *x == tok {
                     true
