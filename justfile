@@ -7,6 +7,9 @@ build:
 build-release:
     cargo build --release
 
+prism *ARGS:
+    cargo run -- {{ARGS}}
+
 run FILE:
     cargo run -- "{{FILE}}"
 

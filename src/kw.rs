@@ -1,7 +1,8 @@
-//! Canonical source spellings for every fixed token: keywords, operators, and
-//! punctuation. The lexer's `Token::text`, the formatter, and the core
-//! pretty-printer all read these, so a keyword's spelling lives in exactly one
-//! place.
+//! Canonical source spellings for every fixed token.
+//!
+//! Keywords, operators, and punctuation. The lexer's `Token::text`, the
+//! formatter, and the core pretty-printer all read these, so a keyword's
+//! spelling lives in exactly one place.
 
 // Keywords
 pub const FN: &str = "fn";

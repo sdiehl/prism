@@ -1,0 +1,79 @@
+-- Interaction by wiring polynomial dynamical systems together, the central
+-- story of Spivak and Niu, "Polynomial Functors: A Mathematical Theory of
+-- Interaction" (https://topos.site/poly-book.pdf). An open system is a lens
+-- S y^S -> O y^I: `read : S -> O` reports an output, `step : (S, I) -> S` takes
+-- an input. Wiring a controller to a plant so that each one's output is the
+-- other's input closes the diagram into a system S y^S -> y, which takes no
+-- input and just evolves -- a discrete dynamical system whose trajectory is its
+-- orbit. Both being Moore (output depends only on state) means there is no
+-- instantaneous loop to solve.
+--
+-- The loop is one record of closures, run forward
+-- into a list, and then read off with the very pipeline operators of ufcs.pr --
+-- |> threads the trajectory through list verbs, while a dot-chain fuses a stream
+-- of stateful handlers over it with no intermediate list. A bang-bang
+-- thermostat wired to a leaky room settles into a stable orbit around 20.
+--
+-- Expected output:
+--   [10, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 21, 20, 19, 18, 19, 20, 21, 22, 21]
+--   settles into [18, 22]
+--   peaks per window: 2
+--   time at or above setpoint: 9
+
+-- An open system: a lens S y^S -> O y^I.
+type Sys(s, i, o) = Sys { state: s, read: (s) -> o, step: (s, i) -> s }
+
+-- A closed system: a lens S y^S -> y. It still observes, but takes no input.
+type Closed(s, o) = Closed { cstate: s, observe: (s) -> o, tick: (s) -> s }
+
+-- One tick of the closed loop: each system steps on the output it can see this
+-- instant. Both are Moore, so the two reads happen before either update.
+fn loop_step(ctrl : Sys(cs, po, pi), plant : Sys(ps, pi, po), s : (cs, ps)) : (cs, ps) =
+  let u = (ctrl.read)(fst(s))
+  let y = (plant.read)(snd(s))
+  ((ctrl.step)(fst(s), y), (plant.step)(snd(s), u))
+
+-- Feedback wiring: route the plant's output into the controller and the
+-- controller's command into the plant, closing the diagram into one system.
+fn feedback(ctrl : Sys(cs, po, pi), plant : Sys(ps, pi, po)) : Closed((cs, ps), po) =
+  Closed { cstate = (ctrl.state, plant.state), observe = \(s) -> (plant.read)(snd(s)), tick = \(s) -> loop_step(ctrl, plant, s) }
+
+-- The orbit: iterate the closed system, observing at each step.
+fn orbit(c : Closed(s, o), s : s, n : Int) : List(o) =
+  if n == 0 then
+    Nil
+  else
+    Cons((c.observe)(s), orbit(c, (c.tick)(s), n - 1))
+
+fn run_closed(c : Closed(s, o), n : Int) : List(o) = orbit(c, c.cstate, n)
+
+-- Bang-bang thermostat: turn the heater on below 20, off above, else hold.
+fn ctrl_step(cmd : Int, temp : Int) : Int =
+  if temp < 20 then
+    1
+  elif temp > 20 then
+    0
+  else
+    cmd
+
+-- A leaky room: lose a degree each tick, gain two while the heater runs.
+fn plant_step(temp : Int, on : Int) : Int = temp + on * 2 - 1
+
+fn band(xs : List(Int)) : String =
+  let lo = show(unwrap_or(0, minimum(xs)))
+  let hi = show(unwrap_or(0, maximum(xs)))
+  concat("[", concat(str_join(", ", [lo, hi]), "]"))
+
+fn main() =
+  let thermostat = Sys { state = 0, read = \(c) -> c, step = ctrl_step }
+  let room = Sys { state = 10, read = \(t) -> t, step = plant_step }
+  let loop = feedback(thermostat, room)
+  let temps = run_closed(loop, 24)
+  println(show(temps))
+  -- |> pipeline: drop the warm-up, then read the steady-state band.
+  let steady = temps |> drop(12)
+  println(concat("settles into ", band(steady)))
+  -- another |> stage: count the peaks within the steady window.
+  println(concat("peaks per window: ", show(steady |> filter(\(t) -> t == 22) |> length)))
+  -- dot-chain: a fused stream of stateful handlers, no intermediate list.
+  println(concat("time at or above setpoint: ", show(sof(steady).skeep(\(t) -> t >= 20).smap(\(t) -> 1).ssum())))
