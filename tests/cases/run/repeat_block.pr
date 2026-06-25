@@ -1,5 +1,4 @@
 fn main() =
   println(1)
-  repeat(3) fn
-    println(7)
+  repeat(3, \() -> println(7))
   println(2)

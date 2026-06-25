@@ -3,7 +3,7 @@
 //! values, resume-tail shapes, and the substitution helpers that see through
 //! A-normal-form let-bindings.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::cbpv::{Comp, CorePat, Value};
 use crate::core::effect_lower::{SDONE, SMORE};
@@ -55,7 +55,7 @@ pub(super) fn tail_if(c: &Comp) -> Option<(&Comp, &Comp)> {
 // single argument value, following `return`-bindings so the head resolves to
 // `g`. None when the rest is not a unary application of `g`.
 pub(super) fn anf_app_arg(g: Sym, c: &Comp) -> Option<Value> {
-    let mut subst: std::collections::BTreeMap<Sym, Value> = std::collections::BTreeMap::new();
+    let mut subst: BTreeMap<Sym, Value> = BTreeMap::new();
     let mut cur = c;
     loop {
         match cur {
@@ -84,14 +84,14 @@ pub(super) fn anf_app_arg(g: Sym, c: &Comp) -> Option<Value> {
 }
 
 // Follow `return`-binding aliases to the underlying variable name.
-pub(super) fn anf_resolve(v: Sym, subst: &std::collections::BTreeMap<Sym, Value>) -> Sym {
+pub(super) fn anf_resolve(v: Sym, subst: &BTreeMap<Sym, Value>) -> Sym {
     match subst.get(&v) {
         Some(Value::Var(w)) => anf_resolve(*w, subst),
         _ => v,
     }
 }
 
-pub(super) fn anf_resolve_val(v: &Value, subst: &std::collections::BTreeMap<Sym, Value>) -> Value {
+pub(super) fn anf_resolve_val(v: &Value, subst: &BTreeMap<Sym, Value>) -> Value {
     match v {
         Value::Var(w) => subst
             .get(w)
@@ -115,7 +115,7 @@ pub(super) fn ctor_pat1(name: &str, var: Sym) -> CorePat {
 // application: `k(())` is its own ANF sub-block whose result is then applied to
 // the new accumulator `ns`. Returns None when the clause is not
 // state-tail-resumptive.
-pub(super) fn strip_state(c: &Comp, aliases: &std::collections::BTreeSet<Sym>) -> Option<Comp> {
+pub(super) fn strip_state(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
     match c {
         Comp::Bind(m, x, n) => {
             // Drop a rebinding of the resume (`return k to k'`).
@@ -182,7 +182,7 @@ pub(super) fn strip_state(c: &Comp, aliases: &std::collections::BTreeSet<Sym>) -
 // disjoint from the aliases: a unary application of an alias, allowing leading
 // pure binds and resume rebindings (the argument is discarded, so its binders
 // may be too).
-pub(super) fn resume_call(c: &Comp, aliases: &std::collections::BTreeSet<Sym>) -> bool {
+pub(super) fn resume_call(c: &Comp, aliases: &BTreeSet<Sym>) -> bool {
     match c {
         Comp::App(f, args) => {
             matches!(f.as_ref(), Comp::Force(Value::Var(k)) if aliases.contains(k))

@@ -577,6 +577,22 @@ impl Tc<'_> {
         Ok(self.apply(&tb))
     }
 
+    // The numeric defaulting rule, in one place: an ambiguous operand defaults
+    // to `Int`. `==`/`!=` invoke it for an unconstrained (existential) operand;
+    // the ordered and arithmetic operators invoke it for any operand that is not
+    // already a fixed-width integer. This is the only site the `Int` literal and
+    // its `subtype` decision live, so Eq and Ord share one rule.
+    fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
+        self.subtype(ty, &Type::Int).map_err(|e| {
+            e.or(TypeError::Mismatch {
+                span,
+                expected: Type::Int.show(),
+                found: ty.show(),
+            })
+        })?;
+        Ok(Type::Int)
+    }
+
     fn synth_bin(
         &mut self,
         env: &Env,
@@ -613,13 +629,7 @@ impl Tc<'_> {
                         self.fixed.insert(span, ta);
                     }
                     Type::Exist(_) => {
-                        self.subtype(&ta, &Type::Int).map_err(|e| {
-                            e.or(TypeError::Mismatch {
-                                span: a.span,
-                                expected: Type::Int.show(),
-                                found: ta.show(),
-                            })
-                        })?;
+                        self.default_numeric(&ta, a.span)?;
                     }
                     _ => self.wanted.push(Wanted {
                         span,
@@ -633,16 +643,7 @@ impl Tc<'_> {
                 let ta = self.apply(&ta);
                 let t = match ta {
                     Type::I64 | Type::U64 => ta,
-                    other => {
-                        self.subtype(&other, &Type::Int).map_err(|e| {
-                            e.or(TypeError::Mismatch {
-                                span: a.span,
-                                expected: Type::Int.show(),
-                                found: other.show(),
-                            })
-                        })?;
-                        Type::Int
-                    }
+                    other => self.default_numeric(&other, a.span)?,
                 };
                 self.check(env, b, &t)?;
                 if t != Type::Int {
@@ -793,12 +794,10 @@ impl Tc<'_> {
         Type::fun(params, ret)
     }
 
-    // The number of effect-type parameters of `eff`. A parametric effect carries
-    // them on its ops, so it is always found here. Not-found means zero, reachable
-    // two ways that are both correctly zero: a builtin effect (`IO`, `Exn`) has no
-    // parameters, and an undeclared effect a user named (e.g. `mask<Nope>`) flows
-    // through the latent row to here before the perform/mask existence check
-    // rejects it, so zero is a placeholder that the later check supersedes.
+    // Effect-type parameter count for `eff`. Not-found means zero, correct both
+    // ways: builtins (`IO`, `Exn`) have none, and an undeclared effect (e.g.
+    // `mask<Nope>`) reaches here before the perform/mask existence check rejects
+    // it, so zero is a superseded placeholder.
     fn eff_arity(&self, eff: Sym) -> usize {
         self.eff_ops
             .values()

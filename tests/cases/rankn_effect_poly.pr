@@ -1,0 +1,9 @@
+-- Rank-N over effect rows: `runEff` takes an argument that is polymorphic in its
+-- effect row (`forall e. (Int) -> Int ! {| e}`), so the same function can be run
+-- under any ambient effect. Higher-rank type and higher-rank row quantifiers
+-- compose through the same skolemization path.
+fn apply_io(g : (Int) -> Int ! {IO}) : !{IO} Int = g(1)
+
+fn runEff(k : forall e. (Int) -> Int ! {| e}) : !{IO} Int = apply_io(k)
+
+fn main() = println(runEff(\(x) -> x + 41))

@@ -8,6 +8,7 @@
 type Vec2 = Vec2 { x: Int, y: Int }
 
 type Particle = Particle { pos: Vec2, vel: Vec2 }
+
 fn add(a : Vec2, b : Vec2) : Vec2 = Vec2 { x = a.x + b.x, y = a.y + b.y }
 
 fn scale(k : Int, v : Vec2) : Vec2 = Vec2 { x = k * v.x, y = k * v.y }

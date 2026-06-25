@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/classes_effectful.pr
 ---
 == tokens ==
@@ -16,6 +16,7 @@ Program {
         ClassDecl {
             name: "Loud",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "loud",
@@ -88,6 +89,7 @@ Program {
                     span: 72..108,
                 },
             ],
+            module: "",
             span: 39..110,
         },
     ],

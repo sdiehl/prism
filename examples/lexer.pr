@@ -1,0 +1,56 @@
+-- A tiny tokenizer demonstrating O(1) byte access (byte_at/byte_len) and the
+-- prelude's character classifiers (is_digit/is_alpha/is_space). It scans a
+-- hard-coded arithmetic expression and produces a list of token strings,
+-- skipping whitespace. Runs of digits and runs of letters are grouped into a
+-- single token; every other character (operators and parens) is its own token.
+-- Tokens are sliced out of the input with `substring`, which is safe here
+-- because the input is pure ASCII (byte index == codepoint index).
+--
+-- Prints:
+--   9
+--   12
+--   +
+--   foo
+--   *
+--   (
+--   34
+--   -
+--   bar
+--   )
+
+-- Consume a run of bytes from `i` while `pred` holds; return the end index.
+fn scan(input : String, i : Int, pred) : Int =
+  if i < byte_len(input) && pred(byte_at(input, i)) then
+    scan(input, i + 1, pred)
+  else
+    i
+
+-- Tokenize from byte offset `i`, accumulating tokens in reverse.
+fn lex(input : String, i : Int, acc : List(String)) : List(String) =
+  if i >= byte_len(input) then
+    reverse(acc)
+  else
+    let c = byte_at(input, i)
+    if is_space(c) then
+      lex(input, i + 1, acc)
+    elif is_digit(c) then
+      let j = scan(input, i, \(b) -> is_digit(b))
+      lex(input, j, Cons(substring(input, i, j - i), acc))
+    elif is_alpha(c) then
+      let j = scan(input, i, \(b) -> is_alpha(b))
+      lex(input, j, Cons(substring(input, i, j - i), acc))
+    else
+      lex(input, i + 1, Cons(substring(input, i, 1), acc))
+
+fn print_each(toks : List(String)) : !{IO} Unit =
+  match toks of
+    Nil => ()
+    Cons(t, rest) =>
+      println(t)
+      print_each(rest)
+
+fn main() : !{IO} Unit =
+  let input = "12 + foo * (34 - bar)"
+  let toks = lex(input, 0, Nil)
+  println(show_int(length(toks)))
+  print_each(toks)

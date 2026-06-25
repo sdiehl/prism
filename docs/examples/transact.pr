@@ -1,0 +1,29 @@
+-- Transactional rollback. A purchase that fails on insufficient funds leaves
+-- balance and stock untouched, as if it never happened. The first buy succeeds.
+-- The second overspends, so `guard` fails inside the `transact` and both vars
+-- roll back to their pre-attempt values.
+fn main() =
+  var balance := 100
+  var stock := 5
+  let r1 =
+    transact
+      balance := balance - 40
+      stock := stock - 1
+      guard(balance >= 0)
+      1
+    else
+      0
+  println(balance)
+  println(stock)
+  println(r1)
+  let r2 =
+    transact
+      balance := balance - 90
+      stock := stock - 1
+      guard(balance >= 0)
+      1
+    else
+      0
+  println(balance)
+  println(stock)
+  println(r2)

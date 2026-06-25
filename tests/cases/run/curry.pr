@@ -2,8 +2,11 @@
 -- over-application, and incremental application of a closure passed to a
 -- higher-order function must all match the interpreter.
 fn add3(a, b, c) = a + b + c
+
 fn add(a, b) = a + b
+
 fn mk() = add
+
 fn twice(f, x) = f(f(x))
 
 fn main() =

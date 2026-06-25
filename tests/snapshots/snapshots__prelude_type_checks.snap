@@ -9,25 +9,41 @@ and_then : forall a b e0. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e
 and_then_result : forall a b c e0. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0} ! {}
 any : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Bool ! {e0} ! {}
 append : forall a. (List(a), List(a)) -> List(a) ! {}
+args : () -> List(String) ! {}
+args_go : (Int, Int) -> List(String) ! {}
+array_foldl : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0} ! {}
+array_foldl_go : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b), Int) -> a ! {e0} ! {}
+array_of_list : forall a. (List(a)) -> Array(a) ! {}
+array_to_list : forall a. (Array(a)) -> List(a) ! {}
+array_to_list_go : forall a. (Array(a), Int, List(a)) -> List(a) ! {}
+assoc_del : forall a. (List((String, a)), String) -> (List((String, a)), Int) ! {}
+assoc_get : forall a. (List((String, a)), String) -> Option(a) ! {}
+assoc_put : forall a. (List((String, a)), String, a) -> (List((String, a)), Int) ! {}
 at_list : forall a. (List(a), Int) -> a ! {Fail} ! {Fail}
 at_map : forall a b. (Map(a, b), a) -> b ! {Fail} ! {Fail}
 between : (Int, Int, Int) -> Bool ! {}
 both : forall a b. (Option(a), Option(b)) -> Option((a, b)) ! {}
+bucket_of : (String, Int) -> Int ! {}
+buckets_to_list : forall a. (Array(List(a)), Int, Int) -> List(a) ! {}
 chars : (String) -> List(Char) ! {}
 chars_from : (String, Int) -> List(Char) ! {}
 chunks_of : forall a. (Int, List(a)) -> List(List(a)) ! {}
 clamp : (Int, Int, Int) -> Int ! {}
 compose : forall a b c e0. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0} ! {}
+concat_all : (List(String)) -> String ! {}
 concat_map : forall a b e0. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0} ! {}
 const : forall a b. (a, b) -> a ! {}
+contains : (String, String) -> Bool ! {}
 count : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0} ! {}
 default : forall a e0. (() -> a ! {e0}, a) -> a ! {e0} ! {}
 drop : forall a. (Int, List(a)) -> List(a) ! {}
 drop_while : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0} ! {}
 e : Float ! {}
+ends_with : (String, String) -> Bool ! {}
 enum_from_then_to : (Int, Int, Int) -> List(Int) ! {}
 enum_from_to : (Int, Int) -> List(Int) ! {}
 enum_seq : (Int, Int, Int) -> List(Int) ! {}
+eprintln : (String) -> Unit ! {IO} ! {IO}
 even : (Int) -> Bool ! {}
 factorial : (Int) -> Int ! {}
 fib : (Int) -> Int ! {}
@@ -35,6 +51,7 @@ filter : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0} ! {}
 find : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Option(a) ! {e0} ! {}
 flatten : forall a. (List(List(a))) -> List(a) ! {}
 flip : forall a b c e0. ((b, c) -> a ! {e0}, c, b) -> a ! {e0} ! {}
+fnv_from : (String, Int, U64) -> U64 ! {}
 foldl : forall a b e0. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0} ! {}
 foldr : forall a b e0. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0} ! {}
 for_range : forall a e0. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0} ! {}
@@ -43,26 +60,52 @@ fst : forall a b. ((a, b)) -> a ! {}
 gcd : (Int, Int) -> Int ! {}
 guard : (Bool) -> Unit ! {Fail} ! {Fail}
 head : forall a. (List(a)) -> Option(a) ! {}
+hm_adjust : forall a e0. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0} ! {}
+hm_delete : forall a. (HashMap(a), String) -> HashMap(a) ! {}
+hm_from_list : forall a. (List((String, a))) -> HashMap(a) ! {}
+hm_from_list_go : forall a. (HashMap(a), List((String, a))) -> HashMap(a) ! {}
+hm_get_or : forall a. (a, HashMap(a), String) -> a ! {}
+hm_insert : forall a. (HashMap(a), String, a) -> HashMap(a) ! {}
+hm_keys : forall a. (HashMap(a)) -> List(String) ! {}
+hm_lookup : forall a. (HashMap(a), String) -> Option(a) ! {}
+hm_member : forall a. (HashMap(a), String) -> Bool ! {}
+hm_new : forall a. () -> HashMap(a) ! {}
+hm_put_raw : forall a. (HashMap(a), String, a) -> HashMap(a) ! {}
+hm_reinsert : forall a. (HashMap(a), List((String, a))) -> HashMap(a) ! {}
+hm_size : forall a. (HashMap(a)) -> Int ! {}
+hm_to_list : forall a. (HashMap(a)) -> List((String, a)) ! {}
+hm_values : forall a. (HashMap(a)) -> List(a) ! {}
 id : forall a. (a) -> a ! {}
+index_of : (String, String) -> Int ! {}
 index_of_from : (Int, String, Int) -> Int ! {}
+index_of_go : (String, String, Int) -> Int ! {}
 insert_by_ord : forall a. (a, List(a)) -> List(a) ! {}
 insert_sorted : (Int, List(Int)) -> List(Int) ! {}
 int_cmp : (Int, Int) -> Int ! {}
+is_alnum : (Int) -> Bool ! {}
+is_alpha : (Int) -> Bool ! {}
+is_digit : (Int) -> Bool ! {}
 is_err : forall a b. (Result(a, b)) -> Bool ! {}
+is_lower : (Int) -> Bool ! {}
 is_nil : forall a. (List(a)) -> Bool ! {}
 is_none : forall a. (Option(a)) -> Bool ! {}
 is_ok : forall a b. (Result(a, b)) -> Bool ! {}
 is_some : forall a. (Option(a)) -> Bool ! {}
+is_space : (Int) -> Bool ! {}
+is_upper : (Int) -> Bool ! {}
 last : forall a. (List(a)) -> Option(a) ! {}
 lcm : (Int, Int) -> Int ! {}
 length : forall a. (List(a)) -> Int ! {}
 lines_of : (List(String)) -> String ! {}
+list_ap : forall a b e0. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0} ! {}
 list_to_option : forall a. (List(a)) -> Option(a) ! {}
 log10 : (Float) -> Float ! {}
 log2 : (Float) -> Float ! {}
+ltrim_idx : (String, Int) -> Int ! {}
 map : forall a b e0. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0} ! {}
 map_balance : forall a b. (Map(a, b)) -> Map(a, b) ! {}
 map_bf : forall a b. (Map(a, b)) -> Int ! {}
+map_case : (String, Int, Array(Int), Bool) -> Array(Int) ! {}
 map_delete : forall a b. (a, Map(a, b)) -> Map(a, b) ! {}
 map_empty : forall k v. Map(k, v) ! {}
 map_from_list : forall a b. (List((a, b))) -> Map(a, b) ! {}
@@ -90,8 +133,12 @@ minimum : (List(Int)) -> Option(Int) ! {}
 mod : (Int, Int) -> Int ! {}
 not : (Bool) -> Bool ! {}
 nth : forall a. (Int, List(a)) -> Option(a) ! {}
+occurs_at : (String, String, Int, Int) -> Bool ! {}
 odd : (Int) -> Bool ! {}
 ok_of_option : forall a b. (a, Option(b)) -> Result(b, a) ! {}
+option_ap : forall a b e0. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0} ! {}
+option_bind : forall a b e0. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0} ! {}
+option_fold_r : forall a b e0. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0} ! {}
 option_of_result : forall a b. (Result(a, b)) -> Option(a) ! {}
 option_or : forall a. (Option(a), Option(a)) -> Option(a) ! {}
 option_to_list : forall a. (Option(a)) -> List(a) ! {}
@@ -99,13 +146,16 @@ optional : forall a e0. (() -> a ! {e0}) -> Option(a) ! {e0} ! {}
 or : (Bool, Bool) -> Bool ! {}
 pad_left : (String, Int) -> String ! {}
 pad_right : (String, Int) -> String ! {}
+pair_keys : forall a b. (List((a, b))) -> List(a) ! {}
 pair_map : forall a b c d e0. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, c) ! {e0} ! {}
+pair_values : forall a b. (List((a, b))) -> List(b) ! {}
 partition : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0} ! {}
 pi : Float ! {}
 position : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0} ! {}
 position_go : forall a e0. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0} ! {}
 pow : (Int, Int) -> Int ! {}
 product : (List(Int)) -> Int ! {}
+push_all : forall a. (Array(a), List(a)) -> Array(a) ! {}
 rand_below : (Int) -> Int ! {IO} ! {IO}
 rand_bool : () -> Bool ! {IO} ! {IO}
 rand_range : (Int, Int) -> Int ! {IO} ! {IO}
@@ -114,6 +164,7 @@ repeat : forall a e0. (Int, () -> a ! {e0}) -> Unit ! {e0} ! {}
 replicate : forall a. (Int, a) -> List(a) ! {}
 result_or : forall a b. (a, Result(a, b)) -> a ! {}
 reverse : forall a. (List(a)) -> List(a) ! {}
+rtrim_idx : (String, Int) -> Int ! {}
 scan_left : forall a b e0. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0} ! {}
 scollect : forall a b. ((Unit) -> a) -> List(b) ! {}
 set_delete : forall a. (a, Map(a, Unit)) -> Map(a, Unit) ! {}
@@ -128,6 +179,7 @@ signum : (Int) -> Int ! {}
 singleton : forall a. (a) -> List(a) ! {}
 skeep : forall a b c e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> (c) -> a ! {Emit(b), e0} ! {Emit}
 skeep_go : forall a b e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
+slice_bytes : (String, Int, Int, Array(Int)) -> Array(Int) ! {}
 smap : forall a b c d e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> (d) -> a ! {Emit(b), e0} ! {Emit}
 smap_go : forall a b c e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
 snd : forall a b. ((a, b)) -> b ! {}
@@ -143,6 +195,8 @@ srange_go : (Int, Int) -> Unit ! {Emit(Int)} ! {Emit}
 ssum : forall a. ((Unit) -> a) -> Int ! {}
 stake : forall a b c. ((Unit) -> b, Int) -> (c) -> Unit ! {Emit(a)} ! {Emit}
 stake_go : forall a b. ((Unit) -> b, Int) -> Unit ! {Emit(a)} ! {Emit}
+starts_with : (String, String) -> Bool ! {}
+str_hash : (String) -> U64 ! {}
 str_join : (String, List(String)) -> String ! {}
 str_of_char : (Char) -> String ! {}
 str_repeat : (String, Int) -> String ! {}
@@ -155,6 +209,11 @@ take : forall a. (Int, List(a)) -> List(a) ! {}
 take_while : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0} ! {}
 tan : (Float) -> Float ! {}
 tau : Float ! {}
+to_lower : (String) -> String ! {}
+to_lower_c : (Int) -> Int ! {}
+to_upper : (String) -> String ! {}
+to_upper_c : (Int) -> Int ! {}
+trim : (String) -> String ! {}
 unwrap_or : forall a. (a, Option(a)) -> a ! {}
 unzip : forall a b. (List((a, b))) -> (List(a), List(b)) ! {}
 while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} ! {}

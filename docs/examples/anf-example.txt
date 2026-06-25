@@ -1,0 +1,7 @@
+-- surface
+fn f(y) = Cons(g(y), Nil)
+
+-- core (every intermediate result is named by a Bind; arguments are values)
+Lam [y]
+  (Bind (Call g [Var y]) x
+        (Return (Ctor Cons 1 [Var x, Ctor Nil 0 []])))

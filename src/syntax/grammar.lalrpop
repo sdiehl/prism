@@ -9,6 +9,10 @@ extern {
     type Location = usize;
     type Error = (Span, String);
 
+    // The strings below are terminal aliases, not source spellings: the lexer
+    // (and so `src/kw.rs`) decides the actual text, and the grammar only consumes
+    // the mapped `Token` variant. Renaming a keyword therefore changes `kw`/the
+    // lexer, not these aliases (rename an alias only to keep it readable).
     enum Token {
         "fn"     => Token::Fn,
         "fip"    => Token::Fip,
@@ -174,7 +178,7 @@ Item: Item = {
 
 ImportD: ImportDecl = {
     <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> <ns:("(" <Comma<ImportName>> ")")?> <r:@R> =>
-        ImportDecl { path: p, alias: a, names: ns, span: Span::new(l, r) },
+        ImportDecl { path: p, alias: a, names: ns, reexport: false, span: Span::new(l, r) },
 };
 
 ModPath: Vec<String> = {
@@ -211,8 +215,8 @@ PatClause: (String, S<Expr>, Span) = {
 };
 
 ClassD: ClassDecl = {
-    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" "{" <methods:ClassSigs> "}" <r:@R> =>
-        ClassDecl { name, param, methods, span: Span::new(l, r) },
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> "{" <methods:ClassSigs> "}" <r:@R> =>
+        ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods, span: Span::new(l, r) },
 };
 
 ClassSigs: Vec<(String, Ty)> = {
@@ -226,7 +230,7 @@ ClassSig: (String, Ty) = {
 InstanceD: InstanceDecl = {
     <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?>
         "{" <methods:InstFns> "}" <r:@R> =>
-        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, span: Span::new(l, r) },
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, module: String::new(), span: Span::new(l, r) },
 };
 
 InstFns: Vec<Decl> = {
@@ -481,6 +485,7 @@ AType: Ty = {
     "Char"   => Ty::Char,
     "String" => Ty::Str,
     "[" <t:Type> "]" => Ty::Con("List".into(), vec![t]),
+    <v:"ident"> <args:CtorArgs> => Ty::App(v, args),
     <v:"ident"> => Ty::Var(v),
     <n:"uid"> <args:CtorArgs?> => Ty::Con(n, args.unwrap_or_default()),
     <q:"qual"> <args:CtorArgs?> => Ty::Con(q, args.unwrap_or_default()),
@@ -599,32 +604,10 @@ Pipe: S<Expr> = {
 };
 
 Compose: S<Expr> = {
-    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> => {
-        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
-        let inner = Spanned { synth: false,
-            node: Expr::Call(Box::new(f), vec![xvar.clone()]),
-            span: Span::new(l, r)
-        };
-        let outer = Spanned { synth: false,
-            node: Expr::Call(Box::new(g), vec![inner]),
-            span: Span::new(l, r)
-        };
-        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
-        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
-    },
-    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> => {
-        let xvar = Spanned { synth: false, node: Expr::Var(crate::names::COMPOSE.into()), span: Span::new(l, r) };
-        let inner = Spanned { synth: false,
-            node: Expr::Call(Box::new(g), vec![xvar.clone()]),
-            span: Span::new(l, r)
-        };
-        let outer = Spanned { synth: false,
-            node: Expr::Call(Box::new(f), vec![inner]),
-            span: Span::new(l, r)
-        };
-        let param = crate::syntax::ast::Param { name: crate::names::COMPOSE.into(), ty: None, borrow: false, default: None };
-        Spanned { synth: false, node: Expr::Lam(vec![param], Box::new(outer)), span: Span::new(l, r) }
-    },
+    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(true, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(false, Box::new(f), Box::new(g))), span: Span::new(l, r) },
     Or,
 };
 

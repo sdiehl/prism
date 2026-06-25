@@ -13,6 +13,22 @@ pub const FAIL_OP: &str = "fail";
 
 pub const DICT_PREFIX: &str = "_D";
 
+// The module path encoded in a canonical name: everything before the final `.`
+// (an exported name like `Data.Map.insert`) or `@` (a private name like
+// `Data.Map@helper`). A bare name belongs to the root module and yields "".
+#[must_use]
+pub fn module_of(canon: &str) -> &str {
+    canon.rsplit_once(['.', '@']).map_or("", |(m, _)| m)
+}
+
+// A module-private top-level name (e.g. `Data.Map@helper`). The `@` is
+// unforgeable in source so it cannot clash with a user name, and codegen
+// rewrites it to a dot. `module_of` is the inverse.
+#[must_use]
+pub fn private(module: &str, name: &str) -> String {
+    format!("{module}@{name}")
+}
+
 // Hygienic binders for synthesized handler and match arms.
 pub const CONT: &str = "k@";
 pub const STATE: &str = "s@";
@@ -21,6 +37,25 @@ pub const UNIT_ARG: &str = "u@";
 pub const RET: &str = "r@";
 pub const ERR: &str = "e@";
 pub const COMPOSE: &str = "x@";
+
+// Fixed binders of the free-monad driver templates (the per-handle driver,
+// `mask_driver`, `ebind`, and the resume thunks they emit). Each template is a
+// closed top-level function and the templates never nest one inside another, so
+// these fixed binders cannot capture across templates; the `@` keeps them clear
+// of user names. `CONT`/`RET`/`COMPOSE` above are reused for `k@`/`r@`/`x@`.
+pub const OP_ID: &str = "id@";
+pub const OP_SKIP: &str = "sk@";
+pub const OP_ARG: &str = "a@";
+pub const RESUME_VAL: &str = "y@";
+pub const RESUME_KONT: &str = "kr@";
+pub const FWD_SKIP: &str = "sk1@";
+pub const EBIND_FN: &str = "f@";
+
+// Evidence binder holding the active clause of the op with the given id.
+#[must_use]
+pub fn ev(id: i64) -> String {
+    format!("ev@{id}")
+}
 
 #[must_use]
 pub fn var_get(x: &str, n: u32) -> String {
@@ -74,6 +109,13 @@ pub fn is_var_runner(name: &str) -> bool {
 #[must_use]
 pub fn dict_ctor(class: &str) -> String {
     format!("{DICT_PREFIX}{class}")
+}
+
+// The top-level function lowered from instance `inst`'s method `method`
+// (e.g. `i@Show_Int@show`), called from that instance's dictionary thunks.
+#[must_use]
+pub fn instance_method(inst: &str, method: &str) -> String {
+    format!("i@{inst}@{method}")
 }
 
 // FBIP reuse token bound to the scrutinee variable it recycles.

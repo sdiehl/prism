@@ -186,6 +186,12 @@ pub enum Type {
     RowForall(Sym, Box<Self>),
     Fun(Vec<Self>, EffRow, Box<Self>),
     Con(Sym, Vec<Self>),
+    // Higher-kinded application of a not-yet-resolved head (a type variable or
+    // existential) to one argument: `f(a)` is `App(Var f, a)`, and `f(a, b)`
+    // curries to `App(App(Var f, a), b)`. The smart constructor `app` reduces an
+    // application the instant its head becomes a concrete `Con`, so a surviving
+    // `App` always has a flexible head.
+    App(Box<Self>, Box<Self>),
     Tuple(Vec<Self>),
 }
 
@@ -202,6 +208,39 @@ impl Type {
         Self::Char,
         Self::Str,
     ];
+
+    /// Apply a (possibly higher-kinded) type to one argument, reducing when the
+    /// head is a concrete constructor: `app(List, a) = List(a)`, but
+    /// `app(f, a) = App(f, a)` while `f` is still a variable/existential.
+    #[must_use]
+    pub fn app(head: Self, arg: Self) -> Self {
+        match head {
+            Self::Con(n, mut xs) => {
+                xs.push(arg);
+                Self::Con(n, xs)
+            }
+            other => Self::App(Box::new(other), Box::new(arg)),
+        }
+    }
+
+    /// Apply a head to several arguments left-to-right.
+    #[must_use]
+    pub fn apps(head: Self, args: Vec<Self>) -> Self {
+        args.into_iter().fold(head, Self::app)
+    }
+
+    // Flatten an application spine `App(App(h, a1), a2)` into `(h, [a1, a2])` so
+    // a higher-kinded application prints and reduces in its n-ary form.
+    fn spine(&self) -> (&Self, Vec<&Self>) {
+        let mut args = Vec::new();
+        let mut head = self;
+        while let Self::App(h, a) = head {
+            args.push(a.as_ref());
+            head = h;
+        }
+        args.reverse();
+        (head, args)
+    }
 
     #[must_use]
     pub fn fun(params: Vec<Self>, ret: Self) -> Self {
@@ -231,6 +270,10 @@ impl Type {
                     p.free_exist(acc);
                 }
             }
+            Self::App(h, a) => {
+                h.free_exist(acc);
+                a.free_exist(acc);
+            }
             _ => {}
         }
     }
@@ -250,6 +293,10 @@ impl Type {
                     p.free_exist_row(acc);
                 }
             }
+            Self::App(h, a) => {
+                h.free_exist_row(acc);
+                a.free_exist_row(acc);
+            }
             _ => {}
         }
     }
@@ -266,6 +313,8 @@ impl Type {
                 Box::new(r.subst_exist(v, with)),
             ),
             Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_exist(v, with)).collect()),
+            // Re-reduce after substitution: the head may have become concrete.
+            Self::App(h, a) => Self::app(h.subst_exist(v, with), a.subst_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_exist(v, with)).collect()),
             other => other.clone(),
         }
@@ -284,6 +333,7 @@ impl Type {
             Self::Con(n, ps) => {
                 Self::Con(*n, ps.iter().map(|p| p.subst_row_exist(v, with)).collect())
             }
+            Self::App(h, a) => Self::app(h.subst_row_exist(v, with), a.subst_row_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_row_exist(v, with)).collect()),
             other => other.clone(),
         }
@@ -301,6 +351,7 @@ impl Type {
                 Box::new(r.subst_var(name, with)),
             ),
             Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_var(name, with)).collect()),
+            Self::App(h, a) => Self::app(h.subst_var(name, with), a.subst_var(name, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_var(name, with)).collect()),
             other => other.clone(),
         }
@@ -321,6 +372,7 @@ impl Type {
             Self::Con(n, ps) => {
                 Self::Con(*n, ps.iter().map(|p| p.subst_row_var(name, with)).collect())
             }
+            Self::App(h, a) => Self::app(h.subst_row_var(name, with), a.subst_row_var(name, with)),
             Self::Tuple(ts) => {
                 Self::Tuple(ts.iter().map(|t| t.subst_row_var(name, with)).collect())
             }
@@ -335,6 +387,7 @@ impl Type {
                 ps.iter().all(Self::is_mono) && row.is_mono_row() && r.is_mono()
             }
             Self::Con(_, ps) | Self::Tuple(ps) => ps.iter().all(Self::is_mono),
+            Self::App(h, a) => h.is_mono() && a.is_mono(),
             _ => true,
         }
     }
@@ -368,6 +421,12 @@ impl Type {
                     format!(" ! {}", row.show())
                 };
                 format!("({}) -> {}{}", ps.join(", "), r.show(), row_s)
+            }
+            // A higher-kinded application spine prints in n-ary form `head(a, b)`.
+            Self::App(..) => {
+                let (head, args) = self.spine();
+                let args: Vec<_> = args.iter().map(|a| a.show()).collect();
+                format!("{}({})", head.show(), args.join(", "))
             }
             Self::Con(n, ps) if ps.is_empty() => n.to_string(),
             Self::Con(n, ps) => {

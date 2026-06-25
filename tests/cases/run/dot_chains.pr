@@ -19,5 +19,4 @@ fn main() =
   println(xs.over(\(x) -> x * x).keep(even).sum())
   println(xs.keep(odd).length())
   println(xs.append(range(8, 10)).length())
-  xs.over(\(x) -> x * 10).keep(\(x) -> x > 40).foreach fn(x)
-    println(x)
+  xs.over(\(x) -> x * 10).keep(\(x) -> x > 40).foreach(\(x) -> println(x))

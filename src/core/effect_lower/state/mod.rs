@@ -45,10 +45,10 @@
 //! at least one fold or take. Anything else returns None and falls back to the
 //! free monad.
 
-use super::evidence::ev_name;
 use super::flow::Loc;
 use super::Lowerer;
 use crate::core::cbpv::{Core, CoreFn};
+use crate::names::ev;
 use crate::sym::Sym;
 
 mod anf;
@@ -78,7 +78,7 @@ impl Lowerer {
                 .is_some_and(|s| s.iter().any(|m| m.id == op));
             let cf = if folds {
                 // A producer: thread the accumulator from trailing parameters.
-                let ev: Sym = ev_name(self.op_id(op).ok()?).into();
+                let ev: Sym = ev(self.op_id(op).ok()?).into();
                 let st: Sym = ST.into();
                 let mut params = f.params.clone();
                 params.push(ev);

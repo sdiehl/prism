@@ -1,0 +1,11 @@
+error NotFound(String)
+
+fn lookup(k : String) : !{NotFound} Int =
+  if k == "a" then
+    1
+  else
+    throw NotFound(k)
+
+fn main() =
+  println(try lookup("a") catch { NotFound(k) => 0 })
+  println(try lookup("z") catch { NotFound(k) => 0 })

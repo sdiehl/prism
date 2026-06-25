@@ -33,6 +33,35 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // Two application spines unify head-to-head, argument-to-argument.
+            (Type::App(h1, a1), Type::App(h2, a2)) => {
+                let h1 = self.apply(h1);
+                let h2 = self.apply(h2);
+                self.subtype(&h1, &h2)?;
+                let a1 = self.apply(a1);
+                let a2 = self.apply(a2);
+                self.subtype(&a1, &a2)
+            }
+            // Higher-kinded application versus a concrete constructor: peel the
+            // last argument off the saturated side and match the (`* -> *`) head
+            // against the partially-applied constructor. `f(a) ~ List(b)` gives
+            // `f := List, a := b`; deeper spines recurse.
+            (Type::App(h, a), Type::Con(m, ys)) if !ys.is_empty() => {
+                let (init, last) = ys.split_at(ys.len() - 1);
+                let h = self.apply(h);
+                self.subtype(&h, &Type::Con(*m, init.to_vec()))?;
+                let a = self.apply(a);
+                let last = self.apply(&last[0]);
+                self.subtype(&a, &last)
+            }
+            (Type::Con(m, ys), Type::App(h, a)) if !ys.is_empty() => {
+                let (init, last) = ys.split_at(ys.len() - 1);
+                let h = self.apply(h);
+                self.subtype(&Type::Con(*m, init.to_vec()), &h)?;
+                let a = self.apply(a);
+                let last = self.apply(&last[0]);
+                self.subtype(&last, &a)
+            }
             (Type::Fun(a1, eff1, r1), Type::Fun(a2, eff2, r2)) if a1.len() == a2.len() => {
                 for (x, y) in a1.iter().zip(a2) {
                     let x = self.apply(x);
@@ -142,6 +171,19 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // Articulate `ex` into an application `?h(?a)` of fresh existentials,
+            // each spliced to ex's left so the solution stays well-scoped, then
+            // solve them against the head and argument.
+            Type::App(h, a) => {
+                let he = self.fresh_id();
+                let ae = self.fresh_id();
+                let app = Type::App(Box::new(Type::Exist(he)), Box::new(Type::Exist(ae)));
+                self.splice_solved(ex, &[he, ae], app)?;
+                let h = self.apply(&h);
+                self.inst(he, &h, left)?;
+                let a = self.apply(&a);
+                self.inst(ae, &a, left)
+            }
             Type::Tuple(elems) => {
                 let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();
                 let tup = Type::Tuple(elem_exs.iter().map(|e| Type::Exist(*e)).collect());
@@ -201,6 +243,22 @@ impl Tc<'_> {
             (EffRow::Empty, EffRow::Empty) => Ok(()),
             (EffRow::Var(x), EffRow::Var(y)) if x == y => Ok(()),
             (EffRow::Exist(x), EffRow::Exist(y)) if x == y => Ok(()),
+            // Two row existentials: solve the younger (further right in context)
+            // to the older, so a solution only references entries to its left and
+            // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
+            (EffRow::Exist(x), EffRow::Exist(y)) => {
+                let xi = self
+                    .index_ex_row(*x)
+                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{x} not in context")))?;
+                let yi = self
+                    .index_ex_row(*y)
+                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{y} not in context")))?;
+                if xi > yi {
+                    self.solve_row(*x, EffRow::Exist(*y))
+                } else {
+                    self.solve_row(*y, EffRow::Exist(*x))
+                }
+            }
             (EffRow::Exist(x), other) | (other, EffRow::Exist(x)) => {
                 let mut fv = BTreeSet::new();
                 other.free_exist_row(&mut fv);
@@ -389,6 +447,7 @@ mod tests {
     fn tc<'a>(
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
+        classes: &'a BTreeMap<String, super::super::ClassInfo>,
         instances: &'a BTreeMap<String, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
     ) -> Tc<'a> {
@@ -403,6 +462,7 @@ mod tests {
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            classes,
             instances,
             inst_keys,
             constrained: BTreeMap::new(),
@@ -451,9 +511,10 @@ mod tests {
     fn rewrite_row_is_order_insensitive() {
         let ctors = BTreeMap::new();
         let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
         let instances = BTreeMap::new();
         let inst_keys = BTreeMap::new();
-        let mut t = tc(&ctors, &eff_ops, &instances, &inst_keys);
+        let mut t = tc(&ctors, &eff_ops, &classes, &instances, &inst_keys);
 
         let io = Label::bare("IO");
         let head = |a: &str, b: &str| {

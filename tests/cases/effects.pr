@@ -1,9 +1,11 @@
 effect Exn {
   ctl raise(Int) : Int
 }
+
 effect Ask {
   ctl ask(Unit) : Int
 }
+
 effect State {
   ctl get(Unit) : Int,
   ctl put(Int) : Unit

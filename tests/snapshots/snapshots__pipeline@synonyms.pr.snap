@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/synonyms.pr
 ---
 == tokens ==
@@ -48,13 +48,13 @@ Program {
                     ),
                 ],
             ),
-            span: 23..53,
+            span: 24..54,
         },
         SynonymDecl {
             name: "Count",
             params: [],
             ty: Int,
-            span: 54..71,
+            span: 56..73,
         },
     ],
     classes: [],
@@ -88,7 +88,7 @@ Program {
                         node: Var(
                             "p",
                         ),
-                        span: 111..112,
+                        span: 113..114,
                     },
                     [
                         Arm {
@@ -99,31 +99,31 @@ Program {
                                             node: Var(
                                                 "a",
                                             ),
-                                            span: 121..122,
+                                            span: 123..124,
                                         },
                                         Spanned {
                                             node: Var(
                                                 "b",
                                             ),
-                                            span: 124..125,
+                                            span: 126..127,
                                         },
                                     ],
                                 ),
-                                span: 120..126,
+                                span: 122..128,
                             },
                             body: Spanned {
                                 node: Var(
                                     "a",
                                 ),
-                                span: 130..131,
+                                span: 132..133,
                             },
                         },
                     ],
                 ),
-                span: 105..131,
+                span: 107..133,
             },
             wheres: [],
-            span: 73..131,
+            span: 75..133,
         },
         Decl {
             name: "quad",
@@ -160,17 +160,17 @@ Program {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 169..170,
+                                        span: 171..172,
                                     },
                                     Spanned {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 172..173,
+                                        span: 174..175,
                                     },
                                 ],
                             ),
-                            span: 168..174,
+                            span: 170..176,
                         },
                         Spanned {
                             node: Tuple(
@@ -179,24 +179,24 @@ Program {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 177..178,
+                                        span: 179..180,
                                     },
                                     Spanned {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 180..181,
+                                        span: 182..183,
                                     },
                                 ],
                             ),
-                            span: 176..182,
+                            span: 178..184,
                         },
                     ],
                 ),
-                span: 167..183,
+                span: 169..185,
             },
             wheres: [],
-            span: 133..183,
+            span: 135..185,
         },
         Decl {
             name: "main",
@@ -212,7 +212,7 @@ Program {
                                 node: Var(
                                     "quad",
                                 ),
-                                span: 205..209,
+                                span: 207..211,
                             },
                             [
                                 Spanned {
@@ -222,11 +222,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 210..211,
+                                    span: 212..213,
                                 },
                             ],
                         ),
-                        span: 205..212,
+                        span: 207..214,
                     },
                     [
                         Arm {
@@ -237,17 +237,17 @@ Program {
                                             node: Var(
                                                 "l",
                                             ),
-                                            span: 221..222,
+                                            span: 223..224,
                                         },
                                         Spanned {
                                             node: Var(
                                                 "r",
                                             ),
-                                            span: 224..225,
+                                            span: 226..227,
                                         },
                                     ],
                                 ),
-                                span: 220..226,
+                                span: 222..228,
                             },
                             body: Spanned {
                                 node: Call(
@@ -255,7 +255,7 @@ Program {
                                         node: Var(
                                             "print",
                                         ),
-                                        span: 230..235,
+                                        span: 232..237,
                                     },
                                     [
                                         Spanned {
@@ -264,30 +264,30 @@ Program {
                                                     node: Var(
                                                         "fst",
                                                     ),
-                                                    span: 236..239,
+                                                    span: 238..241,
                                                 },
                                                 [
                                                     Spanned {
                                                         node: Var(
                                                             "l",
                                                         ),
-                                                        span: 240..241,
+                                                        span: 242..243,
                                                     },
                                                 ],
                                             ),
-                                            span: 236..242,
+                                            span: 238..244,
                                         },
                                     ],
                                 ),
-                                span: 230..243,
+                                span: 232..245,
                             },
                         },
                     ],
                 ),
-                span: 199..243,
+                span: 201..245,
             },
             wheres: [],
-            span: 185..243,
+            span: 187..245,
         },
     ],
 }

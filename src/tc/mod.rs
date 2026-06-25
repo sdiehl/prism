@@ -74,6 +74,10 @@ pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
 pub enum Dict {
     Global(String, Vec<Self>),
     Param(usize),
+    // Project a superclass dictionary from a subclass dictionary: the `idx`-th
+    // leading (superclass) field of the dict cell for class `subclass`. Used to
+    // discharge `Eq(a)` from a `given Ord(a)` when `Ord` declares `Eq` a super.
+    Super(Box<Self>, String, usize),
 }
 
 // Spans are the identity of dispatch sites. Desugar must keep them unique per
@@ -84,6 +88,9 @@ pub type DictTable = BTreeMap<Span, Vec<Dict>>;
 #[derive(Clone, Debug)]
 pub struct ClassInfo {
     pub param: String,
+    // Superclass class names; each instance carries one resolved superclass
+    // dictionary per entry, stored as a leading field of its dict cell.
+    pub supers: Vec<String>,
     pub methods: Vec<(String, Type)>,
 }
 
@@ -91,12 +98,27 @@ pub struct ClassInfo {
 pub struct InstInfo {
     pub class: String,
     pub head: Type,
+    // The module that defines this instance (empty for root), for the orphan and
+    // overlap rules and for naming provenance in ambiguity diagnostics.
+    pub module: String,
     pub context: Vec<(String, Type)>,
+    // Resolved superclass obligations `(super_class, head)`, one per the class's
+    // declared supers, discharged at each use site and embedded in the dict cell.
+    pub supers: Vec<(String, Type)>,
 }
 
 // Per update path, the rebuild chain: one (ctor name, field index, arity)
 // step per path segment, resolved at the update expression's span.
 pub type PathRes = BTreeMap<Span, Vec<Vec<(String, usize, usize)>>>;
+
+/// A non-fatal diagnostic raised during checking (an orphan or overlapping
+/// instance). Carries a span so it can be rendered like an error but does not
+/// stop compilation.
+#[derive(Clone, Debug)]
+pub struct Warning {
+    pub span: Span,
+    pub msg: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct Checked {
@@ -117,6 +139,7 @@ pub struct Checked {
     pub constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     pub dicts: DictTable,
     pub seeds: u32,
+    pub warnings: Vec<Warning>,
 }
 
 // A subsumption failure. `Fail` is a plain mismatch the caller renders with its
@@ -182,6 +205,7 @@ struct Tc<'a> {
     fixed: BTreeMap<Span, Type>,
     span_types: BTreeMap<Span, Type>,
     pending: Vec<(Span, Type)>,
+    classes: &'a BTreeMap<String, ClassInfo>,
     instances: &'a BTreeMap<String, InstInfo>,
     inst_keys: &'a InstKeys,
     constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
@@ -238,7 +262,7 @@ fn concrete_effects(ty: &Type) -> Effects {
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
     let seeds = env::seed_var_states(&eff_ops);
-    let (classes, instances, inst_keys, methods, mut constrained) =
+    let (classes, instances, inst_keys, methods, mut constrained, warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
     let effects = effects::fixpoint(prog, &eff_ops);
@@ -286,6 +310,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            classes: &classes,
             instances: &instances,
             inst_keys: &inst_keys,
             constrained,
@@ -319,6 +344,13 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                 });
                 continue;
             }
+            // The set-pass result is a load-bearing *seed* for row inference,
+            // not a redundant parallel computation: it tells `infer_decl` which
+            // effect labels to place in this function's row prefix so direct
+            // `do op` and effect-op calls land in the row. Drop it and a function
+            // that performs `raise` infers as pure. So `effects.rs` cannot be
+            // collapsed into a pure row projection without first making effect-row
+            // inference fully principal (discovering labels on its own).
             let latent_set = effects.get(&d.name).cloned().unwrap_or_default();
             let latent = EffRow::from_set(&latent_set);
             let ty = tc
@@ -374,7 +406,26 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         }
         for inst in &prog.instances {
             for m in &inst.methods {
-                let effs = effects::of_decl(m, &effects, &eff_ops);
+                // A method whose class signature is effect-polymorphic (carries a
+                // row variable, like `fmap`) may perform the effects flowing
+                // through that row; `check_instance` verifies it against the
+                // signature. Only methods declared pure are held to the syntactic
+                // purity check.
+                let poly = classes.get(&inst.class).is_some_and(|c| {
+                    c.methods
+                        .iter()
+                        .find(|(n, _)| n == &m.name)
+                        .is_some_and(|(_, t)| {
+                            let mut rv = BTreeSet::new();
+                            env::collect_row_vars(t, &mut rv);
+                            !rv.is_empty()
+                        })
+                });
+                let effs = if poly {
+                    Effects::new()
+                } else {
+                    effects::of_decl(m, &effects, &eff_ops)
+                };
                 if !effs.is_empty() {
                     let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
                     return Err(TypeError::Other {
@@ -415,6 +466,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         constrained: constrained_final,
         dicts,
         seeds,
+        warnings,
     })
 }
 
@@ -465,6 +517,7 @@ fn infer_expr_full(
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
         pending: Vec::new(),
+        classes: &checked.classes,
         instances: &checked.instances,
         inst_keys: &checked.inst_keys,
         constrained: checked.constrained.clone(),

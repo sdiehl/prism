@@ -1,0 +1,337 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_effect_poly.pr
+---
+== tokens ==
+VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("runEff") LParen Ident("k") Colon Forall Ident("e") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("apply_io") LParen Ident("k") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("runEff") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "apply_io",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Fun(
+                            [
+                                Int,
+                            ],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "IO",
+                                        args: [],
+                                    },
+                                ],
+                                None,
+                            ),
+                            Int,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "g",
+                        ),
+                        span: 341..342,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 343..344,
+                        },
+                    ],
+                ),
+                span: 341..345,
+            },
+            wheres: [],
+            span: 290..345,
+        },
+        Decl {
+            name: "runEff",
+            params: [
+                Param {
+                    name: "k",
+                    ty: Some(
+                        Forall(
+                            [
+                                "e",
+                            ],
+                            Fun(
+                                [
+                                    Int,
+                                ],
+                                Cons(
+                                    [],
+                                    Some(
+                                        "e",
+                                    ),
+                                ),
+                                Int,
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "apply_io",
+                        ),
+                        span: 407..415,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "k",
+                            ),
+                            span: 416..417,
+                        },
+                    ],
+                ),
+                span: 407..418,
+            },
+            wheres: [],
+            span: 347..418,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 432..439,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "runEff",
+                                    ),
+                                    span: 440..446,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "x",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "x",
+                                                        ),
+                                                        span: 455..456,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 41,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 459..461,
+                                                    },
+                                                ),
+                                                span: 455..461,
+                                            },
+                                        ),
+                                        span: 447..461,
+                                    },
+                                ],
+                            ),
+                            span: 440..462,
+                        },
+                    ],
+                ),
+                span: 432..463,
+            },
+            wheres: [],
+            span: 420..463,
+        },
+    ],
+}
+
+== types ==
+apply_io : ((Int) -> Int ! {IO}) -> Int ! {IO}
+runEff : (forall e. (Int) -> Int ! {e}) -> Int ! {IO}
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn apply_io(g) =
+  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+fn runEff(k) =
+  return k to t@2; apply_io(t@2)
+fn main() =
+  return thunk { \x. return x to t@3; return 41 to t@4; t@3 + t@4 } to t@5; runEff(t@5) to t@6; print t@6 to t@7; print_nl
+
+== fbip (rc) ==
+fn apply_io(g) =
+  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+fn runEff(k) =
+  return k to t@2; apply_io(t@2)
+fn main() =
+  return thunk { \x. return x to t@3; return 41 to t@4; t@3 + t@4 } to t@5; runEff(t@5) to t@6; print t@6 to t@7; drop t@7 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_apply_io(i64 %a0) {
+entry:
+  %t0 = call i64 @prism_apply_1(i64 %a0, i64 3)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_runEff(i64 %a0) {
+entry:
+  %t0 = musttail call i64 @prism_apply_io(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call i64 @prism_runEff(i64 %t2)
+  call void @prism_print_int(i64 %t3)
+  call void @prism_rc_dec(i64 %t3)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  %t0 = and i64 %_p0, 83
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = ashr i64 %_p0, 1
+  %t5 = add i64 %t3, 41
+  %t6 = shl i64 %t5, 1
+  %t7 = ashr i64 %t6, 1
+  %t8 = icmp eq i64 %t7, %t5
+  br i1 %t8, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t9 = or i64 %t6, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  call void @prism_rc_dec(i64 %_p0)
+  call void @prism_rc_dec(i64 83)
+  ret i64 %t11
+}
+
+declare i64 @prism_rt_int_add(i64, i64)
+
+declare void @prism_apply_error()
+
+== run ==
+output: [42]
+result: ()

@@ -1,0 +1,343 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_relay.pr
+---
+== tokens ==
+VOpen Fn Ident("pick") LParen Ident("g") Colon Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen Colon KwInt Eq VOpen If Ident("g") LParen True RParen Then VOpen Ident("g") LParen Int(IntLit { value: 10, suffix: None }) RParen VClose VSemi Else VOpen Ident("g") LParen Int(IntLit { value: 20, suffix: None }) RParen VClose VClose VSemi Fn Ident("relay") LParen Ident("g") Colon Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen Colon KwInt Eq Ident("pick") LParen Ident("g") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("relay") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "pick",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: If(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "g",
+                                ),
+                                span: 232..233,
+                            },
+                            [
+                                Spanned {
+                                    node: Bool(
+                                        true,
+                                    ),
+                                    span: 234..238,
+                                },
+                            ],
+                        ),
+                        span: 232..239,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "g",
+                                ),
+                                span: 249..250,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 10,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 251..253,
+                                },
+                            ],
+                        ),
+                        span: 249..254,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "g",
+                                ),
+                                span: 266..267,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 20,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 268..270,
+                                },
+                            ],
+                        ),
+                        span: 266..271,
+                    },
+                ),
+                span: 229..271,
+            },
+            wheres: [],
+            span: 187..271,
+        },
+        Decl {
+            name: "relay",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "pick",
+                        ),
+                        span: 314..318,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "g",
+                            ),
+                            span: 319..320,
+                        },
+                    ],
+                ),
+                span: 314..321,
+            },
+            wheres: [],
+            span: 273..321,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 335..342,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "relay",
+                                    ),
+                                    span: 343..348,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "x",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Var(
+                                                    "x",
+                                                ),
+                                                span: 357..358,
+                                            },
+                                        ),
+                                        span: 349..358,
+                                    },
+                                ],
+                            ),
+                            span: 343..359,
+                        },
+                    ],
+                ),
+                span: 335..360,
+            },
+            wheres: [],
+            span: 323..360,
+        },
+    ],
+}
+
+== types ==
+pick : (forall a. (a) -> a) -> Int
+relay : (forall a. (a) -> a) -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn pick(g) =
+  return true to t@0; return g to t@1; (force t@1)(t@0) to t@6; if t@6 then (return 10 to t@2; return g to t@3; (force t@3)(t@2)) else (return 20 to t@4; return g to t@5; (force t@5)(t@4))
+fn relay(g) =
+  return g to t@7; pick(t@7)
+fn main() =
+  return thunk { \x. return x } to t@8; relay(t@8) to t@9; print t@9 to t@10; print_nl
+
+== fbip (rc) ==
+fn pick(g) =
+  dup g to _; return true to t@0; return g to t@1; (force t@1)(t@0) to t@6; if t@6 then (drop t@6 to _; return 10 to t@2; return g to t@3; (force t@3)(t@2)) else (drop t@6 to _; return 20 to t@4; return g to t@5; (force t@5)(t@4))
+fn relay(g) =
+  return g to t@7; pick(t@7)
+fn main() =
+  return thunk { \x. return x } to t@8; relay(t@8) to t@9; print t@9 to t@10; drop t@10 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_pick(i64 %a0) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  %t1 = call i64 @prism_apply_1(i64 %a0, i64 3)
+  call void @prism_rc_dec(i64 %a0)
+  %t2 = icmp ne i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t1)
+  %t4 = call i64 @prism_apply_1(i64 %a0, i64 21)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t4
+
+b1:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t1)
+  %t6 = call i64 @prism_apply_1(i64 %a0, i64 41)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t6
+}
+
+declare void @prism_rc_inc(i64)
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+declare void @prism_rc_dec(i64)
+
+define i64 @prism_relay(i64 %a0) {
+entry:
+  %t0 = musttail call i64 @prism_pick(i64 %a0)
+  ret i64 %t0
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  %t3 = call i64 @prism_relay(i64 %t2)
+  call void @prism_print_int(i64 %t3)
+  call void @prism_rc_dec(i64 %t3)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  ret i64 %_p0
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [10]
+result: ()

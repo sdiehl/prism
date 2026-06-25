@@ -17,8 +17,8 @@ mod state;
 // translation. A computation that may perform effects is reified into a value
 // of the result type:
 //
-//   EPure(v)            a finished computation returning v
-//   EOp(id, arg, k)     a suspended `do op(arg)` whose continuation is k
+//   EPure(v)              a finished computation returning v
+//   EOp(id, skip, arg, k) a suspended `do op(arg)` whose continuation is k
 //
 // `ebind` threads a continuation through this representation. Each `handle`
 // becomes a recursive driver that pattern-matches the result: EPure runs the
@@ -40,16 +40,18 @@ mod state;
 // EPure, trapping on an op that reaches the top like the interpreter's
 // unhandled-effect error.
 //
-// Mask invariant: with N distinct ops, an in-flight EOp carries id = base +
-// d*N where d counts the handlers of base's effect it must still skip. A mask
-// driver adds N to ids of its effect passing through it. A handler driver
-// whose equality match fails but whose id mod N matches one of its ops
-// forwards with id - N, consuming one skip level. Drivers match on raw
-// equality, so ids never reach a handler they should skip. Programs without
-// mask keep d = 0 everywhere and the stratified paths are never emitted.
+// Mask is an explicit depth, mirroring the interpreter's `skip` counter
+// (`eval/mod.rs`): an in-flight `EOp` carries `skip`, the number of matching
+// handlers it must still bypass. A mask driver increments `skip` on ops of its
+// effect passing through it. A handler driver matches purely on `id` equality;
+// when an op is its own but `skip > 0`, it forwards with `skip - 1`, consuming
+// one level, exactly as the interpreter decrements on a `Frame::Handle`
+// crossing. Fresh ops start at `skip = 0`.
 
 const PURE_TAG: usize = 0;
 const OP_TAG: usize = 1;
+// Type name carrying the free-monad result (its ctors are EPure/EOp).
+const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
 const EBIND: &str = "ebind";
@@ -58,6 +60,8 @@ const EBIND: &str = "ebind";
 // producer threads `Step S` and stops when `stake` yields `SDone`.
 const MORE_TAG: usize = 0;
 const DONE_TAG: usize = 1;
+// Type name carrying the early-termination step (its ctors are SMore/SDone).
+const STEP: &str = "Step";
 pub(super) const SMORE: &str = "SMore";
 pub(super) const SDONE: &str = "SDone";
 
@@ -80,8 +84,6 @@ type Env = BTreeMap<i64, Sym>;
 
 struct Lowerer {
     op_ids: BTreeMap<Sym, i64>,
-    op_count: i64,
-    has_mask: bool,
     eff: BTreeSet<Sym>,
     full: bool,
     arities: BTreeMap<Sym, usize>,
@@ -151,17 +153,9 @@ pub fn lower(
 
     let lat = latent_map(core);
     let (eff, full) = monadic_set(core, &lat);
-    let op_count = i64::try_from(op_ids.len())
-        .map_err(|_| TypeError::Ice {
-            msg: "more than i64::MAX effect ops".into(),
-        })?
-        .max(1);
-    let has_mask = core.fns.iter().any(|f| contains_mask(&f.body));
     let thunk_flow = flow::analyze(core, &lat);
     let mut lo = Lowerer {
         op_ids,
-        op_count,
-        has_mask,
         eff,
         full,
         arities: core.fns.iter().map(|f| (f.name, f.params.len())).collect(),
@@ -173,6 +167,20 @@ pub fn lower(
         early: false,
     };
 
+    // The two fusion paths and the free-monad fallback are three answer-type
+    // strategies for the same evidence translation, tried in order of how little
+    // they reify: the evidence path is the Identity answer (a clause is a plain
+    // thunk, `do op` is `force(ev)(args)`, resume is a direct return); the state
+    // path is the State answer (a clause is a transformer `\(args, acc) -> acc'`,
+    // producers thread an accumulator, and `stake` adds a `Step` short-circuit);
+    // the free monad reifies the continuation when neither answer fits. They are
+    // kept as separate passes deliberately: the Identity translation threads
+    // values through ordinary CBPV bind, while the State translation threads an
+    // explicit accumulator and splits consumer from producer, so the core `Bind`
+    // and `do op` handling genuinely differs rather than sharing one traversal.
+    // What they do share, the static eligibility prologue, is factored into
+    // [`Lowerer::fusion_handles`].
+    //
     // The evidence path subsumes the free monad whenever it applies: every
     // reachable handler tail-resumptive and every escaping effectful thunk
     // trackable to its force sites. It fully succeeds or returns None, falling
@@ -183,8 +191,8 @@ pub fn lower(
     if let Some(lowered) = lo.try_lower_state(core) {
         let mut ctors = ctors.clone();
         if lo.early {
-            ctors.insert(SMORE.into(), synth_ctor("Step", MORE_TAG, 1));
-            ctors.insert(SDONE.into(), synth_ctor("Step", DONE_TAG, 1));
+            ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
+            ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
         }
         return Ok((lowered, ctors));
     }
@@ -215,15 +223,17 @@ pub fn lower(
             })
         })
         .collect::<Result<_, TypeError>>()?;
+    let gen_start = fns.len();
     fns.extend(lo.generated);
     fns.push(ebind_fn());
     if lo.full {
         check_monadified(&fns)?;
     }
+    debug_assert_templates_closed(&fns, gen_start);
 
     let mut ctors = ctors.clone();
-    ctors.insert(EPURE.into(), synth_ctor("Eff", PURE_TAG, 1));
-    ctors.insert(EOP.into(), synth_ctor("Eff", OP_TAG, 3));
+    ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
+    ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
 
     Ok((Core { fns }, ctors))
 }
@@ -305,7 +315,10 @@ impl Lowerer {
                                 Comp::Return(Value::Var(x)),
                             ),
                             (
-                                ctor_pat(EOP, &["_fi".into(), "_fa".into(), "_fk".into()]),
+                                ctor_pat(
+                                    EOP,
+                                    &["_fi".into(), "_fs".into(), "_fa".into(), "_fk".into()],
+                                ),
                                 Comp::Error(Value::Str(
                                     "ICE: effect op escaped a closed handler".into(),
                                 )),
@@ -375,13 +388,13 @@ impl Lowerer {
                     )?),
                 };
                 let resume = Value::Thunk(Box::new(Comp::Lam(
-                    vec!["y@".into()],
-                    Box::new(epure(Value::Var("y@".into()))),
+                    vec![names::RESUME_VAL.into()],
+                    Box::new(epure(Value::Var(names::RESUME_VAL.into()))),
                 )));
                 Comp::Return(Value::Ctor(
                     EOP.into(),
                     OP_TAG,
-                    vec![Value::Int(id), arg, resume],
+                    vec![Value::Int(id), Value::Int(0), arg, resume],
                 ))
             }
             Comp::If(v, t, e) => {
@@ -503,13 +516,12 @@ impl Lowerer {
         let r = self.fresh("r");
         let x = self.fresh("x");
         let id = self.fresh("id");
-        let cmp = if self.has_mask { self.fresh("b") } else { id };
         let ops: Vec<(Sym, i64)> = self.op_ids.iter().map(|(n, i)| (*n, *i)).collect();
         let mut trap = Comp::Error(Value::Str("unhandled effect".into()));
         for (name, opid) in ops.into_iter().rev() {
             let t = self.fresh("t");
             trap = Comp::Bind(
-                Box::new(Comp::Prim(CoreOp::Eq, Value::Var(cmp), Value::Int(opid))),
+                Box::new(Comp::Prim(CoreOp::Eq, Value::Var(id), Value::Int(opid))),
                 t,
                 Box::new(Comp::If(
                     Value::Var(t),
@@ -518,17 +530,6 @@ impl Lowerer {
                     )))),
                     Box::new(trap),
                 )),
-            );
-        }
-        if self.has_mask {
-            trap = Comp::Bind(
-                Box::new(Comp::Prim(
-                    CoreOp::Rem,
-                    Value::Var(id),
-                    Value::Int(self.op_count),
-                )),
-                cmp,
-                Box::new(trap),
             );
         }
         Comp::Bind(
@@ -541,7 +542,10 @@ impl Lowerer {
                         ctor_pat(EPURE, slice::from_ref(&x)),
                         Comp::Return(Value::Var(x)),
                     ),
-                    (ctor_pat(EOP, &[id, "_ua".into(), "_uk".into()]), trap),
+                    (
+                        ctor_pat(EOP, &[id, "_us".into(), "_ua".into(), "_uk".into()]),
+                        trap,
+                    ),
                 ],
             )),
         )
@@ -595,69 +599,40 @@ impl Lowerer {
         };
         let pure_arm = (ctor_pat(EPURE, &[x]), pure_body);
 
-        // EOp(id, arg, k) => dispatch on id
+        // EOp(id, skip, arg, k) => dispatch on id
         let id = self.fresh("id");
+        let skip = self.fresh("sk");
         let arg = self.fresh("arg");
         let k = self.fresh("k");
 
-        let mut resume_args = vec![Value::Var("kr@".into())];
+        let mut resume_args = vec![Value::Var(names::RESUME_KONT.into())];
         resume_args.extend(fvs.iter().map(|v| Value::Var(*v)));
         let resume_thunk = Value::Thunk(Box::new(Comp::Lam(
-            vec!["y@".into()],
+            vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
                 Box::new(Comp::App(
                     Box::new(Comp::Force(Value::Var(k))),
-                    vec![Value::Var("y@".into())],
+                    vec![Value::Var(names::RESUME_VAL.into())],
                 )),
-                "kr@".into(),
+                names::RESUME_KONT.into(),
                 Box::new(Comp::Call(driver, resume_args)),
             )),
         )));
 
-        // Unhandled op: closed handlers cannot reach here, open handlers
-        // forward by re-emitting the EOp with a continuation that re-enters
-        // this driver, so an enclosing handler discharges it. With masks, a
-        // forwarded op congruent to one of ours sheds one skip level (id - N).
+        // Unhandled op (id not ours): closed handlers cannot reach here, open
+        // handlers forward by re-emitting the EOp unchanged with a continuation
+        // that re-enters this driver, so an enclosing handler discharges it.
         let mut dispatch = if open {
-            let fwd = Comp::Return(Value::Ctor(
+            Comp::Return(Value::Ctor(
                 EOP.into(),
                 OP_TAG,
-                vec![Value::Var(id), Value::Var(arg), resume_thunk.clone()],
-            ));
-            if self.has_mask {
-                let n = self.op_count;
-                let base = self.fresh("b");
-                let ids: Vec<i64> = ops
-                    .iter()
-                    .map(|op| self.op_id(op.name))
-                    .collect::<Result<_, _>>()?;
-                let rt = &resume_thunk;
-                // A forwarded op congruent to ours sheds one skip level: id - N.
-                let chain = self.build_op_chain(
-                    &Value::Var(base),
-                    &ids,
-                    |me, _| {
-                        let did = me.fresh("d");
-                        Ok(Comp::Bind(
-                            Box::new(Comp::Prim(CoreOp::Sub, Value::Var(id), Value::Int(n))),
-                            did,
-                            Box::new(Comp::Return(Value::Ctor(
-                                EOP.into(),
-                                OP_TAG,
-                                vec![Value::Var(did), Value::Var(arg), rt.clone()],
-                            ))),
-                        ))
-                    },
-                    fwd,
-                )?;
-                Comp::Bind(
-                    Box::new(Comp::Prim(CoreOp::Rem, Value::Var(id), Value::Int(n))),
-                    base,
-                    Box::new(chain),
-                )
-            } else {
-                fwd
-            }
+                vec![
+                    Value::Var(id),
+                    Value::Var(skip),
+                    Value::Var(arg),
+                    resume_thunk.clone(),
+                ],
+            ))
         } else {
             Comp::Error(Value::Str(
                 "ICE: unhandled effect op in closed handler dispatch".into(),
@@ -685,15 +660,40 @@ impl Lowerer {
                 // bind operation parameters from arg (tuple-unpacked when n-ary)
                 handler = bind_params(&op.params, arg, handler);
                 // bind resume
-                Ok(Comp::Bind(
+                let handle = Comp::Bind(
                     Box::new(Comp::Return(rt.clone())),
                     op.resume,
                     Box::new(handler),
+                );
+                // A closed handler's own ops always arrive at skip 0 (a masked
+                // op of its effect keeps the handler open, by `is_open`), so it
+                // handles directly. An open handler may receive one masked past
+                // it (skip > 0): forward with one fewer level and re-enter this
+                // driver on resume, mirroring the interpreter decrementing `skip`
+                // on a matching handler crossing.
+                if !open {
+                    return Ok(handle);
+                }
+                let sk1 = me.fresh("sk");
+                let forward = Comp::Bind(
+                    Box::new(Comp::Prim(CoreOp::Sub, Value::Var(skip), Value::Int(1))),
+                    sk1,
+                    Box::new(Comp::Return(Value::Ctor(
+                        EOP.into(),
+                        OP_TAG,
+                        vec![Value::Var(id), Value::Var(sk1), Value::Var(arg), rt.clone()],
+                    ))),
+                );
+                let z = me.fresh("z");
+                Ok(Comp::Bind(
+                    Box::new(Comp::Prim(CoreOp::Eq, Value::Var(skip), Value::Int(0))),
+                    z,
+                    Box::new(Comp::If(Value::Var(z), Box::new(handle), Box::new(forward))),
                 ))
             },
             dispatch,
         )?;
-        let op_arm = (ctor_pat(EOP, &[id, arg, k]), dispatch);
+        let op_arm = (ctor_pat(EOP, &[id, skip, arg, k]), dispatch);
 
         let body_case = Comp::Case(Value::Var(res), vec![pure_arm, op_arm]);
 
@@ -719,68 +719,80 @@ impl Lowerer {
     // mask<Eff> becomes a driver that handles nothing: it adds N to the id of
     // every Eff op flowing through it, so the next driver of that effect
     // misses its equality match once and forwards with id - N.
+    //
+    // Closed top-level template: its binders are the fixed `names::*` set and it
+    // never nests another template's body, so the fixed binders cannot capture
+    // (checked by `debug_assert_templates_closed`).
     fn mask_driver(&mut self, ops: &[Sym]) -> Result<Sym, TypeError> {
         let driver = self.fresh("mask");
-        let n = self.op_count;
         let resume = Value::Thunk(Box::new(Comp::Lam(
-            vec!["y@".into()],
+            vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
                 Box::new(Comp::App(
-                    Box::new(Comp::Force(Value::Var("k@".into()))),
-                    vec![Value::Var("y@".into())],
+                    Box::new(Comp::Force(Value::Var(names::CONT.into()))),
+                    vec![Value::Var(names::RESUME_VAL.into())],
                 )),
-                "kr@".into(),
-                Box::new(Comp::Call(driver, vec![Value::Var("kr@".into())])),
+                names::RESUME_KONT.into(),
+                Box::new(Comp::Call(
+                    driver,
+                    vec![Value::Var(names::RESUME_KONT.into())],
+                )),
             )),
         )));
-        let reemit = |idv: Value| {
+        let reemit = |skipv: Value| {
             Comp::Return(Value::Ctor(
                 EOP.into(),
                 OP_TAG,
-                vec![idv, Value::Var("a@".into()), resume.clone()],
+                vec![
+                    Value::Var(names::OP_ID.into()),
+                    skipv,
+                    Value::Var(names::OP_ARG.into()),
+                    resume.clone(),
+                ],
             ))
         };
+        // An op of the masked effect gains one skip level, so the next matching
+        // handler bypasses it once. Any other op passes through unchanged.
         let bump = Comp::Bind(
             Box::new(Comp::Prim(
                 CoreOp::Add,
-                Value::Var("id@".into()),
-                Value::Int(n),
+                Value::Var(names::OP_SKIP.into()),
+                Value::Int(1),
             )),
-            "bid@".into(),
-            Box::new(reemit(Value::Var("bid@".into()))),
+            names::FWD_SKIP.into(),
+            Box::new(reemit(Value::Var(names::FWD_SKIP.into()))),
         );
-        let fwd = reemit(Value::Var("id@".into()));
+        let fwd = reemit(Value::Var(names::OP_SKIP.into()));
         let ids: Vec<i64> = ops
             .iter()
             .map(|op| self.op_id(*op))
             .collect::<Result<_, _>>()?;
-        let chain = self.build_op_chain(
-            &Value::Var("base@".into()),
+        let dispatch = self.build_op_chain(
+            &Value::Var(names::OP_ID.into()),
             &ids,
             |_, _| Ok(bump.clone()),
             fwd,
         )?;
-        let dispatch = Comp::Bind(
-            Box::new(Comp::Prim(
-                CoreOp::Rem,
-                Value::Var("id@".into()),
-                Value::Int(n),
-            )),
-            "base@".into(),
-            Box::new(chain),
-        );
         let pure_arm = (
-            ctor_pat(EPURE, &["x@".into()]),
-            epure(Value::Var("x@".into())),
+            ctor_pat(EPURE, &[names::COMPOSE.into()]),
+            epure(Value::Var(names::COMPOSE.into())),
         );
         let op_arm = (
-            ctor_pat(EOP, &["id@".into(), "a@".into(), "k@".into()]),
+            ctor_pat(
+                EOP,
+                &[
+                    names::OP_ID.into(),
+                    names::OP_SKIP.into(),
+                    names::OP_ARG.into(),
+                    names::CONT.into(),
+                ],
+            ),
             dispatch,
         );
         self.generated.push(CoreFn {
             name: driver,
-            params: vec!["r@".into()],
-            body: Comp::Case(Value::Var("r@".into()), vec![pure_arm, op_arm]),
+            params: vec![names::RET.into()],
+            body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
         });
         Ok(driver)
     }
@@ -810,40 +822,62 @@ fn epure(v: Value) -> Comp {
 //     EPure(x)     => force(f)(x),
 //     EOp(id,a,k)  => EOp(id, a, \y. ebind(force(k)(y), f)),
 //   }
+//
+// Closed top-level template: its binders (`names::OP_ID`/`OP_ARG`/`CONT`/
+// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed. Templates refer to one another
+// by `Call`, never by lexical nesting, so the fixed binders cannot capture across
+// templates; do not emit one template's body inside another. The closedness this
+// relies on is checked by `debug_assert_templates_closed`, not just argued here.
 fn ebind_fn() -> CoreFn {
     let pure_arm = (
-        ctor_pat(EPURE, &["x@".into()]),
+        ctor_pat(EPURE, &[names::COMPOSE.into()]),
         Comp::App(
-            Box::new(Comp::Force(Value::Var("f@".into()))),
-            vec![Value::Var("x@".into())],
+            Box::new(Comp::Force(Value::Var(names::EBIND_FN.into()))),
+            vec![Value::Var(names::COMPOSE.into())],
         ),
     );
     let resume = Value::Thunk(Box::new(Comp::Lam(
-        vec!["y@".into()],
+        vec![names::RESUME_VAL.into()],
         Box::new(Comp::Bind(
             Box::new(Comp::App(
-                Box::new(Comp::Force(Value::Var("k@".into()))),
-                vec![Value::Var("y@".into())],
+                Box::new(Comp::Force(Value::Var(names::CONT.into()))),
+                vec![Value::Var(names::RESUME_VAL.into())],
             )),
-            "kr@".into(),
+            names::RESUME_KONT.into(),
             Box::new(Comp::Call(
                 EBIND.into(),
-                vec![Value::Var("kr@".into()), Value::Var("f@".into())],
+                vec![
+                    Value::Var(names::RESUME_KONT.into()),
+                    Value::Var(names::EBIND_FN.into()),
+                ],
             )),
         )),
     )));
     let op_arm = (
-        ctor_pat(EOP, &["id@".into(), "a@".into(), "k@".into()]),
+        ctor_pat(
+            EOP,
+            &[
+                names::OP_ID.into(),
+                names::OP_SKIP.into(),
+                names::OP_ARG.into(),
+                names::CONT.into(),
+            ],
+        ),
         Comp::Return(Value::Ctor(
             EOP.into(),
             OP_TAG,
-            vec![Value::Var("id@".into()), Value::Var("a@".into()), resume],
+            vec![
+                Value::Var(names::OP_ID.into()),
+                Value::Var(names::OP_SKIP.into()),
+                Value::Var(names::OP_ARG.into()),
+                resume,
+            ],
         )),
     );
     CoreFn {
         name: EBIND.into(),
-        params: vec!["r@".into(), "f@".into()],
-        body: Comp::Case(Value::Var("r@".into()), vec![pure_arm, op_arm]),
+        params: vec![names::RET.into(), names::EBIND_FN.into()],
+        body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
     }
 }
 
@@ -873,32 +907,17 @@ pub fn latent_ops(core: &Core) -> BTreeMap<Sym, BTreeSet<Sym>> {
 }
 
 fn latent_map(core: &Core) -> Latent {
-    let mut fl: Latent = core.fns.iter().map(|f| (f.name, BTreeSet::new())).collect();
-    // Non-termination backstop, not expected to trigger: this monotone fixpoint
-    // over a finite lattice converges in at most one pass per call-graph edge,
-    // well under fns.len() iterations on real programs. fns^2 is a generous
-    // ceiling; hitting it means a non-monotone bug, so stop with the last partial
-    // map rather than spin forever.
-    let cap = core
-        .fns
-        .len()
-        .saturating_mul(core.fns.len())
-        .saturating_add(1);
-    for _ in 0..cap {
-        let mut changed = false;
-        for f in &core.fns {
-            let mut s = BTreeSet::new();
-            latent(&f.body, &fl, &mut s);
-            if fl.get(&f.name) != Some(&s) {
-                fl.insert(f.name, s);
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    fl
+    // The latent ops of each function are a least fixpoint over the call graph:
+    // a function's set is the ops it performs directly plus those latent in its
+    // callees. `least_fixpoint` grows each set monotonically to convergence, so
+    // termination is structural (no iteration ceiling needed).
+    let seed: Latent = core.fns.iter().map(|f| (f.name, BTreeSet::new())).collect();
+    let bodies: BTreeMap<Sym, &Comp> = core.fns.iter().map(|f| (f.name, &f.body)).collect();
+    crate::fixpoint::least_fixpoint(seed, |name, cur| {
+        let mut s = BTreeSet::new();
+        latent(bodies[name], cur, &mut s);
+        s
+    })
 }
 
 // Selective mode monadifies only functions that perform or propagate an
@@ -963,6 +982,39 @@ fn resume_in_thunk(c: &Comp, resume: Sym) -> bool {
     });
     each_subcomp(c, &mut |sc| found |= resume_in_thunk(sc, resume));
     found
+}
+
+// Template hygiene, mechanically. Every effect-dispatch template appended above
+// (`fns[gen_start..]`: the per-handler drivers, the mask drivers, and `ebind`) is
+// a closed top-level function. Its binders are the fixed `names::*` set plus its
+// own params and captured free vars; when a driver splices another template's
+// body it binds that body's free names as params. The hygiene the comments claim
+// is exactly: after removing a template's own params and binders, every name left
+// free is the name of another top-level function it calls, never a leftover
+// binder. `fv::comp_without` removes the params (it already discounts internal
+// lambda/let/case/handler binders), so the residue must be a subset of the
+// top-level names. A binder that captured a sub-template's free occurrence, or a
+// driver that failed to capture one, leaves a dangling name and trips this in
+// debug builds, instead of miscompiling silently at a distant call site. Release
+// builds skip it; the cost is debug-only.
+fn debug_assert_templates_closed(fns: &[CoreFn], gen_start: usize) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let known: BTreeSet<Sym> = fns.iter().map(|f| f.name).collect();
+    for t in &fns[gen_start..] {
+        let leaked: Vec<Sym> = fv::comp_without(&t.body, &t.params)
+            .into_iter()
+            .filter(|v| !known.contains(v))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "effect-lowering template `{}` is not hygienic: {leaked:?} are neither its \
+             binders nor top-level functions (a template binder captured a free occurrence \
+             or a driver failed to bind one)",
+            t.name,
+        );
+    }
 }
 
 // Escalation invariant: after whole-program monadification every function

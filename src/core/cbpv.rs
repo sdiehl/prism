@@ -210,7 +210,7 @@ pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
     visited
 }
 
-fn calls_in_val(v: &Value, out: &mut Vec<Sym>) {
+pub(crate) fn calls_in_val(v: &Value, out: &mut Vec<Sym>) {
     match v {
         Value::Thunk(c) => calls_in(c, out),
         Value::Ctor(_, _, fs) | Value::Tuple(fs) => {
@@ -222,7 +222,7 @@ fn calls_in_val(v: &Value, out: &mut Vec<Sym>) {
     }
 }
 
-fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
+pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
     match c {
         Comp::Call(name, args) => {
             out.push(*name);

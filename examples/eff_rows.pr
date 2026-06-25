@@ -2,9 +2,11 @@ effect State {
   ctl get(Unit) : Int,
   ctl put(Int) : Unit
 }
+
 effect Exn {
   ctl raise(Int) : Int
 }
+
 -- Composing two effects: State and Exn.
 --
 -- accumulate() carries {State}, validate() carries {Exn}. Each is discharged

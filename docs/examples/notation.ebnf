@@ -1,0 +1,8 @@
+x  y      juxtaposition: x followed by y
+x | y     alternative: x or y
+[ x ]     option: zero or one x
+{ x }     repetition: zero or more x
+( x )     grouping
+"fn"      a terminal (literal token), in double quotes
+varid     a nonterminal, in lower case
+x , ...   a comma-separated list of one or more x

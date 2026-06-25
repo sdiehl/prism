@@ -2,6 +2,7 @@ effect Amb {
   ctl choose(Int) : Int,
   ctl reject(Unit) : Int
 }
+
 -- N-queens as pure nondeterminism, in the spirit of eff_amb.
 --
 -- choose(m) picks a column 0..m-1; reject() prunes a dead branch. The handler

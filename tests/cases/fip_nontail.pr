@@ -1,0 +1,9 @@
+-- `fip` now proves the third FP^2 property: bounded stack. A recursive call
+-- that is not in tail position keeps one frame alive per element, so it is
+-- rejected. `relay` is linear (each binding used exactly once, no duplication)
+-- yet its self-call sits under `wrap`, so it is non-tail and fails the new rule.
+-- Making the call a tail call, a tail under one constructor / addition, or
+-- annotating it `fbip` are the ways out the diagnostic names.
+fip fn wrap(x) = x
+
+fip fn relay(x) = wrap(relay(x))

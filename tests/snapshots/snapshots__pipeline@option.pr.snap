@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/option.pr
 ---
 == tokens ==
@@ -66,7 +66,7 @@ Program {
                         node: Var(
                             "o",
                         ),
-                        span: 55..56,
+                        span: 56..57,
                     },
                     [
                         Arm {
@@ -75,13 +75,13 @@ Program {
                                     "None",
                                     [],
                                 ),
-                                span: 64..68,
+                                span: 65..69,
                             },
                             body: Spanned {
                                 node: Var(
                                     "d",
                                 ),
-                                span: 72..73,
+                                span: 73..74,
                             },
                         },
                         Arm {
@@ -93,25 +93,25 @@ Program {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 83..84,
+                                            span: 84..85,
                                         },
                                     ],
                                 ),
-                                span: 78..85,
+                                span: 79..86,
                             },
                             body: Spanned {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 89..90,
+                                span: 90..91,
                             },
                         },
                     ],
                 ),
-                span: 49..90,
+                span: 50..91,
             },
             wheres: [],
-            span: 32..90,
+            span: 33..91,
         },
         Decl {
             name: "main",
@@ -125,7 +125,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 104..111,
+                        span: 105..112,
                     },
                     [
                         Spanned {
@@ -134,7 +134,7 @@ Program {
                                     node: Var(
                                         "get",
                                     ),
-                                    span: 112..115,
+                                    span: 113..116,
                                 },
                                 [
                                     Spanned {
@@ -144,7 +144,7 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 116..117,
+                                        span: 117..118,
                                     },
                                     Spanned {
                                         node: Call(
@@ -152,7 +152,7 @@ Program {
                                                 node: Var(
                                                     "Some",
                                                 ),
-                                                span: 119..123,
+                                                span: 120..124,
                                             },
                                             [
                                                 Spanned {
@@ -162,22 +162,22 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 124..126,
+                                                    span: 125..127,
                                                 },
                                             ],
                                         ),
-                                        span: 119..127,
+                                        span: 120..128,
                                     },
                                 ],
                             ),
-                            span: 112..128,
+                            span: 113..129,
                         },
                     ],
                 ),
-                span: 104..129,
+                span: 105..130,
             },
             wheres: [],
-            span: 92..129,
+            span: 93..130,
         },
     ],
 }

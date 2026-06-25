@@ -1,0 +1,78 @@
+-- Moore machines as polynomial lenses, after Spivak and Niu, "Polynomial
+-- Functors: A Mathematical Theory of Interaction" (https://topos.site/poly-book.pdf).
+-- A Moore machine with states S, inputs A, outputs B is exactly a lens
+-- S y^S -> B y^A: the forward map on positions is the readout S -> B, and the
+-- backward map on directions is the update (S, A) -> S. So `out` and `step`
+-- below are literally the two halves of that lens.
+--
+-- The same machine is run two ways that must agree: directly (fold the update
+-- over the inputs) and as an algebraic effect, where the machine performs
+-- push/pull and a handler supplies the inputs. Input exhaustion is the handler
+-- declining to resume the continuation -- the machine simply halts. Finally,
+-- `series` and `parallel` are wiring diagrams: each builds one machine from two,
+-- which is again just a lens between the tensored interfaces.
+--
+-- Expected output:
+--   [0, 1, 3, 6, 10]
+--   [0, 1, 3, 6, 10]
+--   [0, 0, 1, 1, 1]
+--   [(0, 0), (1, 1), (3, 0), (6, 0)]
+
+type Moore(s, i, o) = Moore { init: s, step: (s, i) -> s, out: (s) -> o }
+
+-- Direct run: emit the readout of every visited state, threading update.
+fn trace(m : Moore(s, i, o), st : s, ins : List(i)) : List(o) =
+  match ins of
+    Nil => Cons((m.out)(st), Nil)
+    Cons(x, rest) => Cons((m.out)(st), trace(m, (m.step)(st, x), rest))
+
+fn run(m : Moore(s, i, o), ins : List(i)) : List(o) = trace(m, m.init, ins)
+
+-- The interaction interface as an effect: pull the next input, push an output.
+effect Drive {
+  ctl pull(Unit) : Int,
+  ctl push(Int) : Unit
+}
+
+fn drive(m : Moore(Int, Int, Int), st : Int) : !{Drive} Unit =
+  push((m.out)(st))
+  let x = pull(())
+  drive(m, (m.step)(st, x))
+
+-- The handler is the environment the machine interacts with: it owns the input
+-- list and the output log. When the inputs run out it returns the log instead
+-- of resuming k, so dropping the continuation is how the run terminates.
+fn run_eff(m : Moore(Int, Int, Int), ins : List(Int)) : List(Int) =
+  let prog =
+    handle drive(m, m.init) with
+      push(b, k) => \(rem, acc) -> k(())(rem, Cons(b, acc))
+      pull(u, k) =>
+        \(rem, acc) -> match rem of { Nil => reverse(acc), Cons(x, rest) => k(x)(rest, acc) }
+      return r => \(rem, acc) -> reverse(acc)
+  prog(ins, Nil)
+
+-- Parallel wiring (the tensor): both machines run on paired inputs.
+fn parallel(m1 : Moore(s1, i1, o1), m2 : Moore(s2, i2, o2)) : Moore((s1, s2), (i1, i2), (o1, o2)) =
+  Moore { init = (m1.init, m2.init), step = \(s, a) -> ((m1.step)(fst(s), fst(a)), (m2.step)(snd(s), snd(a))), out = \(s) -> ((m1.out)(fst(s)), (m2.out)(snd(s))) }
+
+-- Series wiring: m1's current readout is the input fed to m2 this tick.
+fn series_step(m1 : Moore(s1, i1, o1), m2 : Moore(s2, o1, o2), s : (s1, s2), a : i1) : (s1, s2) =
+  let ns1 = (m1.step)(fst(s), a)
+  let bridge = (m1.out)(fst(s))
+  (ns1, (m2.step)(snd(s), bridge))
+
+fn series(m1 : Moore(s1, i1, o1), m2 : Moore(s2, o1, o2)) : Moore((s1, s2), i1, o2) =
+  Moore { init = (m1.init, m2.init), step = \(s, a) -> series_step(m1, m2, s, a), out = \(s) -> (m2.out)(snd(s)) }
+
+fn main() : !{IO} Unit =
+  -- Running total and running-total-mod-3, both Moore(Int, Int, Int).
+  let summer = Moore { init = 0, step = \(s, a) -> s + a, out = \(s) -> s }
+  let mod3 =
+    Moore { init = 0, step = \(s, a) -> mod(s + a, 3), out = \(s) -> s }
+  -- The lens run and the effectful run produce the same trace.
+  println(show(run(summer, [1, 2, 3, 4])))
+  println(show(run_eff(summer, [1, 2, 3, 4])))
+  -- Series: feed the running total into the mod-3 machine.
+  println(show(run(series(summer, mod3), [1, 2, 3, 4])))
+  -- Parallel: drive both at once on paired inputs.
+  println(show(run(parallel(summer, mod3), [(1, 1), (2, 2), (3, 3)])))

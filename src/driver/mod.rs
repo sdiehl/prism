@@ -14,8 +14,8 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Sigs};
 use crate::core::{
-    balanced, check_fip, elaborate, fip_annots, insert_rc, lower_effects, pp_core, pp_core_pretty,
-    reuse, Core,
+    balanced, check_fip, check_fip_linear, elaborate, fip_annots, insert_rc, lower_effects,
+    pp_core, pp_core_pretty, reuse, Core,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -24,6 +24,7 @@ use crate::lex::lex;
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::resolve_modules;
+use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, Checked, CtorInfo};
@@ -42,8 +43,8 @@ pub fn with_prelude(src: &str) -> String {
 
 /// # Examples
 /// ```
-/// let src = tiny_prism::with_prelude("fn double(x : Int) : Int = x * 2");
-/// let checked = tiny_prism::check(&src).unwrap();
+/// let src = prism::with_prelude("fn double(x : Int) : Int = x * 2");
+/// let checked = prism::check(&src).unwrap();
 /// let double = checked.decls.iter().find(|d| d.name == "double").unwrap();
 /// assert_eq!(double.ty.show(), "(Int) -> Int");
 /// ```
@@ -62,7 +63,21 @@ pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
-    Ok(typecheck(&program)?)
+    let checked = typecheck(&program)?;
+    emit_warnings(src, &checked);
+    Ok(checked)
+}
+
+// Surface non-fatal checker diagnostics (orphan/overlapping instances) on stderr,
+// with a source caret when the warning points into this source. Errors abort
+// earlier, so this only runs once a program type checks.
+fn emit_warnings(src: &str, checked: &Checked) {
+    for w in &checked.warnings {
+        eprint!(
+            "{}",
+            crate::error::render_warning(src, "<source>", &w.span, &w.msg, true)
+        );
+    }
 }
 
 fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core), Error> {
@@ -70,8 +85,9 @@ fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core
     let program = resolve_modules(program, base)?;
     let program = desugar(program)?;
     let checked = typecheck(&program)?;
+    emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
-    fip_check(&program, &core)?;
+    fip_check(&program, &checked, &core)?;
     reconcile_effects(&checked, &core)?;
     Ok((program, checked, core))
 }
@@ -115,36 +131,42 @@ fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
     Ok(())
 }
 
-// Check the FP^2 discipline of every `fip`/`fbip`-annotated function over the
-// reuse-lowered core. Runs on every check/build/interpret (shared `frontend`).
-// Pure annotated functions are unaffected by effect lowering, so checking the
-// un-effect-lowered reuse core matches `dump fbip`.
-fn fip_check(program: &Program<CorePhase>, core: &Core) -> Result<(), Error> {
+// Check the FP^2 discipline of every `fip`/`fbip`-annotated function. Linearity
+// is a property of the SOURCE term, so it is checked on the raw elaborated core
+// (`check_fip_linear`), using the typechecker's param/field types to exempt
+// scalars (a `dup` on an immediate is a runtime no-op). Zero-allocation, the
+// callee closure, and bounded stack are properties of the COMPILED term, so they
+// are checked on the reuse-lowered core (`check_fip`). Runs on every
+// check/build/interpret (shared `frontend`); pure annotated functions are
+// unaffected by effect lowering, so this un-effect-lowered core matches
+// `dump fbip`.
+fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Result<(), Error> {
     let annots = fip_annots(program);
     if annots.is_empty() {
         return Ok(());
     }
-    let sigs = borrow_sigs(program);
-    let users: std::collections::BTreeSet<crate::sym::Sym> =
-        core.fns.iter().map(|f| f.name).collect();
-    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(|msg| {
+    let to_err = |msg: String| {
         // Point the diagnostic at the offending annotated function: its name
         // appears backtick-quoted in the message, so the first annotated decl
         // whose name occurs there owns the span.
         let span = program
             .fns
             .iter()
-            .filter(|d| annots.contains_key(&crate::sym::Sym::from(&d.name)))
+            .filter(|d| annots.contains_key(&Sym::from(&d.name)))
             .find(|d| msg.contains(&format!("`{}`", d.name)))
             .map_or_else(marginalia::Span::default, |d| d.span);
         Error::Type(crate::error::TypeError::Other { span, msg })
-    })
+    };
+    let sigs = borrow_sigs(program);
+    let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
+    check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
+    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
 }
 
 /// # Examples
 /// ```
-/// let src = tiny_prism::with_prelude("fn main() = print(1 + 2)");
-/// let run = tiny_prism::interpret(&src).unwrap();
+/// let src = prism::with_prelude("fn main() = print(1 + 2)");
+/// let run = prism::interpret(&src).unwrap();
 /// assert_eq!(run.out[0].show(), "3");
 /// ```
 ///
@@ -343,7 +365,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 
 // Core function names contributed by the prelude alone, used to elide it from a
 // snippet's IR dump.
-fn prelude_fn_names() -> Result<std::collections::HashSet<crate::sym::Sym>, Error> {
+fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = frontend(PRELUDE, Path::new("."))?;
     Ok(core.fns.into_iter().map(|f| f.name).collect())
 }
@@ -548,7 +570,7 @@ pub fn report_at(src: &str, base: &Path) -> String {
     };
     section(&mut out, "core (cbpv)", pp_core(&core).trim_end());
 
-    if let Err(e) = fip_check(&program, &core) {
+    if let Err(e) = fip_check(&program, &checked, &core) {
         section(&mut out, "fip", &render(e));
         return out;
     }

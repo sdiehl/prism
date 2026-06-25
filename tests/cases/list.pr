@@ -1,4 +1,5 @@
 type List(a) = Nil | Cons(a, List(a))
+
 fn length(xs) =
   match xs of
     Nil => 0

@@ -5,7 +5,9 @@
 -- the integer printer; the blind spot was a corpus that only ever wrote
 -- `println(show(x))`, never bare `println(x)`.
 type Color = Red | Green | Blue
+
 type Tree = Leaf | Node(Tree, Int, Tree)
+
 fn main() =
   println(Green)
   println([1, 2, 3])

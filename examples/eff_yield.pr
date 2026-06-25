@@ -1,6 +1,7 @@
 effect Gen {
   ctl yield(Int) : Unit
 }
+
 -- Generators from a yield effect.
 --
 -- produce() yields a sequence without knowing what consumes it. A consumer is

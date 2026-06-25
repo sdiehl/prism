@@ -1,0 +1,5 @@
+-- A polymorphic value in result position: `mkid` returns a `forall a. (a) -> a`,
+-- which the caller instantiates at Int.
+fn mkid() : forall a. (a) -> a = \(x) -> x
+
+fn main() = println(mkid()(7))

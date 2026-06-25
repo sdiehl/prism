@@ -4,4 +4,5 @@ fn loop(n, acc) =
     acc
   else
     loop(n - 1, acc + n)
+
 fn main() = println(loop(1000000, 0))

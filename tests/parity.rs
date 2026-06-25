@@ -20,11 +20,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::{env, fs, thread};
 
-use tiny_prism::error::Error;
+use prism::error::Error;
 
 fn cc() -> String {
-    std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
+    env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
 }
 
 fn have(tool: &str) -> bool {
@@ -35,14 +36,14 @@ fn have(tool: &str) -> bool {
 }
 
 fn source(path: &Path) -> String {
-    tiny_prism::with_prelude(&std::fs::read_to_string(path).unwrap())
+    prism::with_prelude(&fs::read_to_string(path).unwrap())
 }
 
 // The interpreter's real terminal output, byte-for-byte what a native binary's
 // stdout must equal. `term` (not a join over `out`) preserves the print/println
 // distinction: a bare `print` adds no newline.
 fn interpreted(full: &str) -> String {
-    tiny_prism::interpret(full).unwrap().term
+    prism::interpret(full).unwrap().term
 }
 
 // The runnable corpus: every example/run-case the interpreter executes cleanly
@@ -54,15 +55,15 @@ fn corpus() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut out = Vec::new();
     for dir in ["examples", "tests/cases/run"] {
-        for entry in std::fs::read_dir(root.join(dir)).unwrap().flatten() {
+        for entry in fs::read_dir(root.join(dir)).unwrap().flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("pr") {
                 continue;
             }
             let full = source(&path);
             let on_platform =
-                tiny_prism::off_platform_builtins(&full, root).is_ok_and(|ops| ops.is_empty());
-            if on_platform && tiny_prism::interpret(&full).is_ok() {
+                prism::off_platform_builtins(&full, root).is_ok_and(|ops| ops.is_empty());
+            if on_platform && prism::interpret(&full).is_ok() {
                 out.push(path);
             }
         }
@@ -78,13 +79,12 @@ fn check_parity(
 ) -> Result<(), String> {
     let full = source(case);
     let stem = case.file_stem().unwrap().to_string_lossy();
-    let bin =
-        std::env::temp_dir().join(format!("prism_parity_{tag}_{}_{stem}", std::process::id()));
+    let bin = env::temp_dir().join(format!("prism_parity_{tag}_{}_{stem}", std::process::id()));
     let fail = |msg: String| {
         for ext in ["bc", "ll"] {
-            let _ = std::fs::remove_file(bin.with_extension(ext));
+            let _ = fs::remove_file(bin.with_extension(ext));
         }
-        let _ = std::fs::remove_file(&bin);
+        let _ = fs::remove_file(&bin);
         Err(msg)
     };
     if let Err(e) = build(&full, &bin) {
@@ -95,9 +95,9 @@ fn check_parity(
         Err(e) => return fail(format!("{}: spawn failed: {e}", case.display())),
     };
     for ext in ["bc", "ll"] {
-        let _ = std::fs::remove_file(bin.with_extension(ext));
+        let _ = fs::remove_file(bin.with_extension(ext));
     }
-    let _ = std::fs::remove_file(&bin);
+    let _ = fs::remove_file(&bin);
     // A program whose `main` returns a non-Unit value exits with that value as
     // its code (factorial(5) exits 120), so the exit status is not asserted; a
     // crash instead truncates stdout and is caught by the output diff below.
@@ -133,10 +133,10 @@ fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync
     );
     let next = AtomicUsize::new(0);
     let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    let threads = std::thread::available_parallelism()
+    let threads = thread::available_parallelism()
         .map_or(4, std::num::NonZeroUsize::get)
         .min(cases.len());
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         for _ in 0..threads {
             s.spawn(|| loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
@@ -166,7 +166,7 @@ fn native_matches_interpreter() {
         );
         return;
     }
-    run_corpus("llvm", tiny_prism::build);
+    run_corpus("llvm", prism::build);
 }
 
 #[cfg(feature = "mlir")]
@@ -176,5 +176,5 @@ fn mlir_matches_interpreter() {
         eprintln!("skipping mlir parity: clang or mlir-translate not found");
         return;
     }
-    run_corpus("mlir", tiny_prism::build_mlir);
+    run_corpus("mlir", prism::build_mlir);
 }

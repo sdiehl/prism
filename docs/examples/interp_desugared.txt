@@ -1,0 +1,5 @@
+-- A string with holes becomes a concatenation of its literal pieces and the
+-- `show` of each hole expression.
+"hello {name}, n = {n}"
+  ==>
+concat("hello ", concat(show(name), concat(", n = ", show(n))))

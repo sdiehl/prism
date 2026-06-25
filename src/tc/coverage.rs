@@ -4,7 +4,13 @@ use marginalia::Span;
 
 use super::Tc;
 use crate::error::TypeError;
-use crate::syntax::ast::{Arm, BigInt, Core, Pattern, S};
+use crate::syntax::ast::{Arm, BigInt, Core, Expr, Pattern, S};
+
+// A guard that always matches: absent, or the literal `True`. Such an arm covers
+// its pattern for exhaustiveness exactly like an unguarded one.
+fn irrefutable_guard(guard: Option<&S<Expr<Core>>>) -> bool {
+    guard.is_none_or(|g| matches!(g.node, Expr::Bool(true)))
+}
 
 #[derive(Clone, PartialEq)]
 enum Head {
@@ -244,9 +250,11 @@ impl Tc<'_> {
         None
     }
 
-    // A guarded arm may fail at runtime, so its row never enters the matrix: it
-    // contributes nothing to exhaustiveness and shadows no later arm. An arm is
-    // unreachable only when earlier unguarded rows already cover it.
+    // A fallible guard may fail at runtime, so its row never enters the matrix:
+    // it contributes nothing to exhaustiveness and shadows no later arm. An
+    // irrefutable guard (`| True`) always matches, so its arm covers like an
+    // unguarded one. An arm is unreachable only when earlier covering rows
+    // already subsume it.
     pub(super) fn check_coverage(&self, arms: &[Arm<Core>], span: Span) -> Result<(), TypeError> {
         let mut matrix: Vec<Row> = Vec::new();
         for arm in arms {
@@ -257,7 +265,7 @@ impl Tc<'_> {
                     msg: "unreachable match arm".into(),
                 });
             }
-            if arm.guard.is_none() {
+            if irrefutable_guard(arm.guard.as_ref()) {
                 matrix.push(row);
             }
         }

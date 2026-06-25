@@ -1,0 +1,6 @@
+-- The predicativity check is not special-cased to `List`: a polymorphic type
+-- written as an argument to any type constructor (here `Option`) is rejected as
+-- impredicative, naming the constructor.
+fn boxed() : Option(forall a. (a) -> a) = Some(\(x) -> x)
+
+fn main() : Int = 0

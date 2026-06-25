@@ -1,0 +1,111 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/fbip_callee.pr
+---
+== tokens ==
+VOpen Fn Ident("plain") LParen Ident("x") RParen Eq Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VSemi Fbip Fn Ident("caller") LParen Ident("x") RParen Eq Ident("plain") LParen Ident("x") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "plain",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 293..294,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 297..298,
+                    },
+                ),
+                span: 293..298,
+            },
+            wheres: [],
+            span: 279..298,
+        },
+        Decl {
+            name: "caller",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "plain",
+                        ),
+                        span: 320..325,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 326..327,
+                        },
+                    ],
+                ),
+                span: 320..328,
+            },
+            wheres: [],
+            fip: Fbip,
+            span: 300..328,
+        },
+    ],
+}
+
+== types ==
+plain : (Int) -> Int
+caller : (Int) -> Int
+
+== core (cbpv) ==
+fn plain(x) =
+  return x to t@0; return 1 to t@1; t@0 + t@1
+fn caller(x) =
+  return x to t@2; plain(t@2)
+
+== fip ==
+Type Error: a `fbip` function may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+   ╭─[ <source>:7:1 ]
+   │
+ 7 │ fbip fn caller(x) = plain(x)
+   │ ──────────────┬─────────────  
+   │               ╰─────────────── a `fbip` function may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+───╯

@@ -1,0 +1,7 @@
+-- A `fip` function may call only other `fip` functions. An `fbip` callee proves
+-- zero allocation and linearity but is allowed unbounded stack, so calling it
+-- from a `fip` function would break the caller's bounded-stack guarantee. (An
+-- `fbip` caller may still call either discipline; the restriction is `fip`-only.)
+fip fn use_it(x) = helper(x)
+
+fbip fn helper(x) = x

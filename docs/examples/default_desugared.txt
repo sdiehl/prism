@@ -1,0 +1,7 @@
+-- `a ?? b` runs `a` under a Fail handler; if `a` performs fail(), the handler
+-- drops the continuation and yields `b`. (`fail` is the anonymous failure op.)
+a ?? b
+  ==>
+handle a with
+  final ctl fail(_) => b
+  return r => r

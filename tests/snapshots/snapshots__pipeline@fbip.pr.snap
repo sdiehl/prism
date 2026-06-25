@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/fbip.pr
 ---
 == tokens ==
@@ -50,7 +50,7 @@ Program {
                                 node: Var(
                                     "Pair",
                                 ),
-                                span: 60..64,
+                                span: 61..65,
                             },
                             [
                                 Spanned {
@@ -60,7 +60,7 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 65..66,
+                                    span: 66..67,
                                 },
                                 Spanned {
                                     node: Int(
@@ -69,11 +69,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 68..69,
+                                    span: 69..70,
                                 },
                             ],
                         ),
-                        span: 60..70,
+                        span: 61..71,
                     },
                     Spanned {
                         node: Let(
@@ -84,7 +84,7 @@ Program {
                                         node: Var(
                                             "Pair",
                                         ),
-                                        span: 84..88,
+                                        span: 85..89,
                                     },
                                     [
                                         Spanned {
@@ -94,7 +94,7 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 89..90,
+                                            span: 90..91,
                                         },
                                         Spanned {
                                             node: Int(
@@ -103,11 +103,11 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 92..93,
+                                            span: 93..94,
                                         },
                                     ],
                                 ),
-                                span: 84..94,
+                                span: 85..95,
                             },
                             Spanned {
                                 node: Match(
@@ -115,7 +115,7 @@ Program {
                                         node: Var(
                                             "shared",
                                         ),
-                                        span: 103..109,
+                                        span: 104..110,
                                     },
                                     [
                                         Arm {
@@ -127,17 +127,17 @@ Program {
                                                             node: Var(
                                                                 "a",
                                                             ),
-                                                            span: 122..123,
+                                                            span: 123..124,
                                                         },
                                                         Spanned {
                                                             node: Var(
                                                                 "b",
                                                             ),
-                                                            span: 125..126,
+                                                            span: 126..127,
                                                         },
                                                     ],
                                                 ),
-                                                span: 117..127,
+                                                span: 118..128,
                                             },
                                             body: Spanned {
                                                 node: Match(
@@ -145,7 +145,7 @@ Program {
                                                         node: Var(
                                                             "shared",
                                                         ),
-                                                        span: 143..149,
+                                                        span: 144..150,
                                                     },
                                                     [
                                                         Arm {
@@ -157,17 +157,17 @@ Program {
                                                                             node: Var(
                                                                                 "c",
                                                                             ),
-                                                                            span: 166..167,
+                                                                            span: 167..168,
                                                                         },
                                                                         Spanned {
                                                                             node: Var(
                                                                                 "d",
                                                                             ),
-                                                                            span: 169..170,
+                                                                            span: 170..171,
                                                                         },
                                                                     ],
                                                                 ),
-                                                                span: 161..171,
+                                                                span: 162..172,
                                                             },
                                                             body: Spanned {
                                                                 node: Bin(
@@ -182,53 +182,53 @@ Program {
                                                                                         node: Var(
                                                                                             "a",
                                                                                         ),
-                                                                                        span: 175..176,
+                                                                                        span: 176..177,
                                                                                     },
                                                                                     Spanned {
                                                                                         node: Var(
                                                                                             "b",
                                                                                         ),
-                                                                                        span: 179..180,
+                                                                                        span: 180..181,
                                                                                     },
                                                                                 ),
-                                                                                span: 175..180,
+                                                                                span: 176..181,
                                                                             },
                                                                             Spanned {
                                                                                 node: Var(
                                                                                     "c",
                                                                                 ),
-                                                                                span: 183..184,
+                                                                                span: 184..185,
                                                                             },
                                                                         ),
-                                                                        span: 175..184,
+                                                                        span: 176..185,
                                                                     },
                                                                     Spanned {
                                                                         node: Var(
                                                                             "d",
                                                                         ),
-                                                                        span: 187..188,
+                                                                        span: 188..189,
                                                                     },
                                                                 ),
-                                                                span: 175..188,
+                                                                span: 176..189,
                                                             },
                                                         },
                                                     ],
                                                 ),
-                                                span: 137..188,
+                                                span: 138..189,
                                             },
                                         },
                                     ],
                                 ),
-                                span: 97..188,
+                                span: 98..189,
                             },
                         ),
-                        span: 73..188,
+                        span: 74..189,
                     },
                 ),
-                span: 47..188,
+                span: 48..189,
             },
             wheres: [],
-            span: 27..188,
+            span: 28..189,
         },
     ],
 }

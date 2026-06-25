@@ -12,7 +12,7 @@ use marginalia::Span;
 use super::sugar::expand_interp;
 use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
-use crate::names::{self, RET, UNIT_ARG};
+use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
     Arm, Core, Expr, HandlerArm, Marker, Param, Pattern, Qualifier, Sugar, SugarArm, Surface, S,
 };
@@ -341,7 +341,7 @@ fn rw_sugar(
         // producer, run the qualifier-folded body per element via a tail-
         // resumptive emit clause, result Unit.
         Sugar::For(x, s, quals, body) => {
-            let inner = fold_quals(quals, (**body).clone(), span);
+            let inner = fold_quals(quals, (**body).clone(), span, cx);
             let run = call((**s).clone(), vec![sp(Expr::Unit, s.span)], s.span);
             let arms = vec![
                 HandlerArm::Sugar(SugarArm::Fun("emit".into(), vec![x.clone()], inner)),
@@ -437,7 +437,37 @@ fn rw_sugar(
             args.push((**hi).clone());
             rw(&call(evar(f, span), args, span), env, cx)
         }
+        // `f >> g` lowers to `\x -> g(f(x))`, `f << g` to `\x -> f(g(x))`. The
+        // bound name is unforgeable, so the synthesized lambda cannot capture.
+        Sugar::Compose(forward, f, g) => {
+            let (outer, inner) = if *forward { (g, f) } else { (f, g) };
+            let xv = evar(COMPOSE, span);
+            let inner_call = call((**inner).clone(), vec![xv], span);
+            let body = call((**outer).clone(), vec![inner_call], span);
+            let param = Param {
+                name: COMPOSE.into(),
+                ty: None,
+                borrow: false,
+                default: None,
+            };
+            rw(&sp(Expr::Lam(vec![param], Box::new(body)), span), env, cx)
+        }
     }
+}
+
+// Dictionary resolution keys on span (like derive.rs's `SpanAlloc`). The head of
+// a synthesized call to a monomorphic prelude helper must not reuse a real source
+// span: if a comprehension guard `g` is itself an overloaded operator (say
+// `t == A` for a derived `Eq`), the checker records that instance at `g.span`,
+// and reusing it for the synthesized `guard`/`succeeds` head would make
+// elaboration thread the dictionary into that helper, over-applying it and
+// crashing monadification. Minting zero-width spans from a high reserved band no
+// real offset can occupy (and above derive's lower band, so the two never alias)
+// keeps these heads off every dispatch site.
+const SYNTH_SPAN_BASE: usize = usize::MAX / 4 * 3;
+
+const fn synth_span(cx: &mut Cx) -> Span {
+    Span::empty(SYNTH_SPAN_BASE + cx.next.bump() as usize)
 }
 
 // Fold a comprehension's qualifiers inside-out around its body. A `Guard` keeps
@@ -446,15 +476,15 @@ fn rw_sugar(
 // back to a `Bool`, so the element is pruned rather than the failure escaping.
 // Pure and failable guards share this rule, since `succeeds` discharges the
 // `Fail` either way. A `Bind` becomes `let y = e in acc`.
-fn fold_quals(quals: &[Qualifier], body: S<Expr>, span: Span) -> S<Expr> {
+fn fold_quals(quals: &[Qualifier], body: S<Expr>, span: Span, cx: &mut Cx) -> S<Expr> {
     // Builds a sugar-free surface tree that `rw` consumes; phase stays Surface.
     let mut acc = body;
     for q in quals.iter().rev() {
         acc = match q {
             Qualifier::Guard(g) => {
-                let guarded = call(evar("guard", g.span), vec![g.clone()], g.span);
+                let guarded = call(evar("guard", synth_span(cx)), vec![g.clone()], g.span);
                 let thunk = sp(Expr::Lam(Vec::new(), Box::new(guarded)), g.span);
-                let test = call(evar("succeeds", g.span), vec![thunk], g.span);
+                let test = call(evar("succeeds", synth_span(cx)), vec![thunk], g.span);
                 sp(
                     Expr::If(
                         Box::new(test),

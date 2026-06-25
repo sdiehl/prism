@@ -3,6 +3,7 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/fip.pr
 ---
+10
 14
 22
 => ()

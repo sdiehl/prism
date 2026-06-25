@@ -3,9 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::names::reuse_token;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program};
+use crate::types::{CtorInfo, DeclInfo, Type};
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv::{comp as freev, pat_vars};
+use super::tailrec::{recursive_calls, scc_of, scc_of_calls, TailClass};
 
 // Perceus-style reference counting (Reinking et al.). Function parameters and
 // every let-bound result are owned; each owned value is consumed exactly once on
@@ -198,9 +200,15 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
 // Soundness net: along every root-to-leaf path the token is freed (ReuseToken)
 // and consumed (Reuse) the same number of times, so it never leaks or double
 // frees. Consumes hidden inside a Lam body run later and do not count here.
+// A divergent leaf (`Comp::Error`) aborts the process, which reclaims the held
+// shell, so reaching it with a live token discharges the obligation rather than
+// leaking: the path counts as balanced (false). Modelling divergence this way
+// keeps the analysis precise (a branch that consumes on one side and crashes on
+// the other still earns reuse) instead of conservatively declining.
 fn token_balanced(c: &Comp, tok: Sym) -> bool {
     fn walk(c: &Comp, tok: Sym, live: bool) -> Option<bool> {
         match c {
+            Comp::Error(_) => Some(false),
             Comp::Bind(m, x, n) => {
                 let live = if matches!(m.as_ref(), Comp::ReuseToken(_)) && *x == tok {
                     true
@@ -705,18 +713,31 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
     }
 }
 
-// FP^2 static check (Lorenzen/Leijen/Swierstra, ICFP 2023): an annotated `fn` has
-// its zero-allocation (fbip) and linearity (fip) discipline PROVEN over the
-// reuse-lowered core, turning the opportunistic reuse pass into a checked
-// guarantee. A bare `Value::Ctor`/`Value::Tuple` is a fresh heap cell in this
-// runtime (`prism_alloc(0)` mallocs and bumps the live count even for a nullary
-// constructor), so the only allocation-free way to build is `Comp::Reuse` over a
-// dropped cell. The check is intraprocedural plus a call-graph closure: an
-// annotated function may only call annotated functions (`fip` may call `fip` or
-// `fbip`) or allocation-free prims/builtins, else an unannotated callee's
-// allocation would silently break the caller's guarantee. Constant-stack is NOT
-// checked: `fip` as implemented guarantees zero-allocation and linearity, not yet
-// bounded stack. TRMC eligibility is decided later in codegen.
+// FP^2 static check (Lorenzen/Leijen/Swierstra, ICFP 2023). The three properties
+// are PROVEN at the phase each is a property of:
+//
+// - Zero-allocation + call-graph closure (both `fip` and `fbip`), over the
+//   reuse-lowered core (`check_fip` below). A bare `Value::Ctor`/`Value::Tuple`
+//   is a fresh heap cell here (`prism_alloc(0)` mallocs and bumps the live count
+//   even for a nullary constructor), so the only allocation-free way to build is
+//   `Comp::Reuse` over a dropped cell. An annotated function may only call
+//   annotated functions or allocation-free prims, else an unannotated callee's
+//   allocation would silently break the guarantee: `fbip` may call `fip` or
+//   `fbip`; `fip` may call only `fip`, since an `fbip` callee is allowed
+//   unbounded stack.
+// - Linearity (`fip` only), over the RAW pre-RC core (`check_fip_linear`):
+//   each owned, non-immediate binder is consumed at most once per path.
+//   Linearity is a property of the source program; the dup/drop the RC pass
+//   later inserts to REALIZE linear consumption over a unique cell are an
+//   implementation detail and are not counted against it. A scalar binder is
+//   exempt (a `dup` on an immediate is a runtime no-op).
+// - Bounded stack (`fip` only): every recursive call within the call-graph SCC
+//   must be a tail call or a TRMC-eligible tail (modulo one constructor field or
+//   one addition), classified by the shared `core::tailrec` so acceptance never
+//   outruns what codegen loops.
+//
+// `fbip` is the weaker discipline: zero allocation and the callee closure only,
+// so it may duplicate, recurse non-tail, and run in unbounded stack.
 
 pub type Fips = BTreeMap<Sym, Fip>;
 
@@ -770,8 +791,299 @@ pub fn check_fip(
             }
         }
         fip_comp(&f.body, want, f.name.as_str(), fips, users)?;
+        if want == Fip::Fip {
+            bounded_stack(f, core, users)?;
+        }
     }
     Ok(())
+}
+
+// Bounded-stack rule (the third FP^2 property): a `fip` function runs in O(1)
+// stack iff every recursive call inside its own frame is a loop, not a frame.
+// Compute the SCC (mutual recursion counts) and classify each in-group call
+// with the shared `tailrec`: a `NonTail` recursive call grows the stack one
+// frame per element and is rejected. Codegen lowers at most one TRMC shape per
+// function and only for direct self-recursion, so a body mixing cons- and
+// add-TRMC, or one that pairs TRMC with a mutual call, is rejected too: those
+// are exactly the shapes the backend would leave as real recursion.
+fn bounded_stack(f: &CoreFn, core: &Core, users: &BTreeSet<Sym>) -> Result<(), String> {
+    let group = scc_of(core, users, f.name);
+    // The direct-call SCC is a subset used only to explain a rejection: a member
+    // missing from it sits in the group because a function flows as a value, not
+    // because of a real call cycle.
+    let call_group = scc_of_calls(core, users, f.name);
+    let (mut cons, mut add, mut mutual) = (false, false, false);
+    for (g, cls) in recursive_calls(&f.body, f.name, f.params.len(), &group) {
+        match cls {
+            TailClass::NonTail => return Err(nontail_err(f.name.as_str(), g, &call_group)),
+            TailClass::TrmcCons => cons = true,
+            TailClass::TrmcAdd => add = true,
+            TailClass::Tail => {}
+        }
+        mutual |= g != f.name;
+    }
+    if cons && add {
+        return Err(format!(
+            "function `{}` is marked `fip` but mixes tail-modulo-constructor and \
+             tail-modulo-addition recursion; codegen loops only one shape per function, \
+             so split it or annotate it `fbip`",
+            f.name
+        ));
+    }
+    if (cons || add) && mutual {
+        return Err(format!(
+            "function `{}` is marked `fip` but pairs tail-modulo-constructor/addition \
+             recursion with a mutually recursive call; codegen loops only direct self-TRMC, \
+             so make the mutual call a plain tail call or annotate it `fbip`",
+            f.name
+        ));
+    }
+    Ok(())
+}
+
+fn nontail_err(fname: &str, callee: Sym, call_group: &BTreeSet<Sym>) -> String {
+    let base = format!(
+        "function `{fname}` is marked `fip` but recurses in non-tail position (one stack \
+         frame per element); make the recursive call a tail call or a tail under a single \
+         constructor / addition, or annotate it `fbip`"
+    );
+    // When the non-tail callee is in the recursion group only via a first-class
+    // reference (not a direct-call cycle), the discipline can feel surprising:
+    // capturing a function as a value, not calling it back, is what enlarged the
+    // group. Name that so the fix (drop the capture, or annotate `fbip`) is clear.
+    if callee != Sym::from(fname) && !call_group.contains(&callee) {
+        format!(
+            "{base}\nnote: `{callee}` is in `{fname}`'s tail-recursion group only because a \
+             function flows as a first-class value somewhere in the cycle, not through direct \
+             calls; if they do not actually recurse through each other, avoid capturing the \
+             function as a value (call it directly) or annotate `fbip`"
+        )
+    } else {
+        base
+    }
+}
+
+/// Verify the linearity of every `fip` function over the raw (pre-RC) core.
+///
+/// Linearity is a property of the SOURCE term: each owned, non-immediate binder
+/// (parameter, pattern field, let result) is consumed at most once on any
+/// control path. `dup`/`drop` on an immediate (`Int`, `Bool`, ...) is a runtime
+/// no-op under pointer tagging, so scalars are unrestricted, matching the FP^2
+/// discipline (linearity constrains heap, not machine words). The RC pass later
+/// inserts the dup/drop that REALIZE this linear consumption over a unique cell;
+/// those are an implementation detail of a linear program and are not re-counted
+/// against it (which is why this runs pre-RC, not on the `check_fip` core).
+///
+/// # Errors
+/// Fails when a `fip` function uses an owned heap value more than once.
+pub fn check_fip_linear(
+    core: &Core,
+    fips: &Fips,
+    decls: &[DeclInfo],
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<(), String> {
+    for f in &core.fns {
+        if fips.get(&f.name) != Some(&Fip::Fip) {
+            continue;
+        }
+        let arrow = decls
+            .iter()
+            .find(|d| d.name == f.name.as_str())
+            .and_then(|d| arrow_args(&d.ty));
+        // Hidden dictionary params would misalign the arrow against `f.params`,
+        // so trust a per-position type only when the counts match; otherwise
+        // treat every param as heap (require linear), which never under-rejects.
+        let param_imm = |i: usize| {
+            arrow
+                .filter(|a| a.len() == f.params.len())
+                .and_then(|a| a.get(i))
+                .is_some_and(is_immediate)
+        };
+        for (i, p) in f.params.iter().enumerate() {
+            if !param_imm(i) && max_uses(*p, &f.body) > 1 {
+                return Err(dup_err(f.name.as_str()));
+            }
+        }
+        lin_comp(&f.body, f.name.as_str(), ctors)?;
+    }
+    Ok(())
+}
+
+const fn is_immediate(t: &Type) -> bool {
+    matches!(
+        t,
+        Type::Unit | Type::Int | Type::I64 | Type::U64 | Type::Bool | Type::Float | Type::Char
+    )
+}
+
+fn arrow_args(t: &Type) -> Option<&[Type]> {
+    match t {
+        Type::Forall(_, b) | Type::RowForall(_, b) => arrow_args(b),
+        Type::Fun(args, _, _) => Some(args.as_slice()),
+        _ => None,
+    }
+}
+
+fn dup_err(fname: &str) -> String {
+    format!("function `{fname}` is marked `fip` but is not linear (duplicates a value)")
+}
+
+// A let/match binder is immediate when its RHS provably yields a scalar: a
+// primitive (arithmetic/comparison) or a scalar literal. Anything else (a call,
+// a constructor, an unknown variable) is treated as heap and must be linear.
+const fn binds_immediate(m: &Comp) -> bool {
+    match m {
+        Comp::Prim(..) => true,
+        Comp::Return(v) => matches!(
+            v,
+            Value::Int(_)
+                | Value::I64(_)
+                | Value::U64(_)
+                | Value::Bool(_)
+                | Value::Float(_)
+                | Value::Unit
+        ),
+        _ => false,
+    }
+}
+
+// Walk binders introduced inside the body, checking each non-immediate one is
+// used at most once on any path through its scope.
+fn lin_comp(c: &Comp, fname: &str, ctors: &BTreeMap<String, CtorInfo>) -> Result<(), String> {
+    let recur = |c: &Comp| lin_comp(c, fname, ctors);
+    match c {
+        Comp::Bind(m, x, n) => {
+            recur(m)?;
+            if !binds_immediate(m) && max_uses(*x, n) > 1 {
+                return Err(dup_err(fname));
+            }
+            recur(n)
+        }
+        Comp::If(_, t, e) => {
+            recur(t)?;
+            recur(e)
+        }
+        Comp::Case(_, arms) => arms.iter().try_for_each(|(p, body)| {
+            check_fields(p, body, fname, ctors)?;
+            recur(body)
+        }),
+        Comp::Lam(ps, b) => {
+            // Closure params have no recorded type here, so require them linear.
+            if ps.iter().any(|p| max_uses(*p, b) > 1) {
+                return Err(dup_err(fname));
+            }
+            recur(b)
+        }
+        Comp::App(f, _) => recur(f),
+        Comp::Mask(_, b) => recur(b),
+        Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            recur(body)?;
+            if let Some(rb) = return_body {
+                recur(rb)?;
+            }
+            ops.iter().try_for_each(|op| recur(&op.body))
+        }
+        _ => Ok(()),
+    }
+}
+
+// Pattern-bound fields: a field with a concrete immediate type (e.g. the `Int`
+// field of a monomorphic constructor) is unrestricted; a heap or generic field
+// must be used at most once in the arm.
+fn check_fields(
+    p: &CorePat,
+    body: &Comp,
+    fname: &str,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<(), String> {
+    let (arg_types, fields): (Option<&[Type]>, &[Option<Sym>]) = match p {
+        CorePat::Ctor(name, fs) => (ctors.get(name.as_str()).map(|ci| ci.args.as_slice()), fs),
+        CorePat::Tuple(fs) => (None, fs),
+        _ => (None, &[]),
+    };
+    for (i, fld) in fields.iter().enumerate() {
+        let Some(x) = fld else { continue };
+        let imm = arg_types.and_then(|a| a.get(i)).is_some_and(is_immediate);
+        if !imm && max_uses(*x, body) > 1 {
+            return Err(dup_err(fname));
+        }
+    }
+    Ok(())
+}
+
+// The maximum number of consuming occurrences of `x` along any single path. The
+// two arms of an `if`/`case` are different paths (take the max); a bind chain is
+// one path (sum). A binder that shadows `x` ends its scope. Occurrences inside a
+// thunk count once (the capture).
+fn max_uses(x: Sym, c: &Comp) -> usize {
+    let occ = |v: &Value| {
+        let mut m = BTreeMap::new();
+        count_val(v, &mut m);
+        m.get(&x).copied().unwrap_or(0)
+    };
+    match c {
+        Comp::Return(v)
+        | Comp::Force(v)
+        | Comp::Print(v)
+        | Comp::PrintF(v)
+        | Comp::PrintS(v)
+        | Comp::Error(v)
+        | Comp::Srand(v)
+        | Comp::FloatBuiltin(_, v)
+        | Comp::Dup(v)
+        | Comp::Drop(v)
+        | Comp::ReuseToken(v) => occ(v),
+        Comp::Reuse(t, v) => occ(t) + occ(v),
+        Comp::Prim(_, a, b) => occ(a) + occ(b),
+        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+            args.iter().map(occ).sum()
+        }
+        Comp::Bind(m, y, n) => max_uses(x, m) + if *y == x { 0 } else { max_uses(x, n) },
+        Comp::If(v, t, e) => occ(v) + max_uses(x, t).max(max_uses(x, e)),
+        Comp::Case(v, arms) => {
+            occ(v)
+                + arms
+                    .iter()
+                    .map(|(p, b)| {
+                        let mut pv = Set::new();
+                        pat_vars(p, &mut pv);
+                        if pv.contains(&x) {
+                            0
+                        } else {
+                            max_uses(x, b)
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0)
+        }
+        Comp::App(f, args) => max_uses(x, f) + args.iter().map(occ).sum::<usize>(),
+        Comp::Lam(ps, b) => {
+            if ps.contains(&x) {
+                0
+            } else {
+                max_uses(x, b)
+            }
+        }
+        Comp::Mask(_, b) => max_uses(x, b),
+        // Pure `fip` functions never reach a handler; a conservative sum over its
+        // clauses only over-counts, which stays on the safe (over-reject) side.
+        Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            max_uses(x, body)
+                + return_body.as_ref().map_or(0, |rb| max_uses(x, rb))
+                + ops.iter().map(|op| max_uses(x, &op.body)).sum::<usize>()
+        }
+        Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => 0,
+    }
 }
 
 fn fip_comp(
@@ -785,16 +1097,24 @@ fn fip_comp(
     let val = |v: &Value| fip_value(v, want, fname, fips, users);
     match c {
         Comp::Reuse(_, v) => fip_value_under_reuse(v, want, fname, fips, users),
-        Comp::Dup(_) if want == Fip::Fip => Err(format!(
-            "function `{fname}` is marked `fip` but is not linear (duplicates a value)"
-        )),
         Comp::Call(g, args) => {
             if users.contains(g) {
-                if !matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)) {
-                    return Err(format!(
-                        "a `{}` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`",
-                        kw(want)
-                    ));
+                // `fbip` may call either discipline; `fip` may call only `fip`,
+                // because an `fbip` callee is allowed unbounded stack and would
+                // break the caller's bounded-stack guarantee.
+                let ok = match want {
+                    Fip::Fip => matches!(fips.get(g), Some(Fip::Fip)),
+                    Fip::Fbip | Fip::No => matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)),
+                };
+                if !ok {
+                    return Err(match want {
+                        Fip::Fip => format!(
+                            "a `fip` function may only call `fip` functions (bounded stack), but `{fname}` calls `{g}`"
+                        ),
+                        Fip::Fbip | Fip::No => format!(
+                            "a `fbip` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`"
+                        ),
+                    });
                 }
             } else if !alloc_free_prim(g.as_str()) {
                 return Err(format!(
@@ -916,4 +1236,252 @@ fn merge(
         out.insert(k, va);
     }
     Ok(())
+}
+
+// Direct coverage of `bounded_stack`'s rules. The strict no-`Dup` linearity pass
+// rejects every recursive heap function before this check is reached end-to-end,
+// so the mixed-mode and mutual-plus-TRMC paths can only be exercised on
+// hand-built core (the linearity and allocation passes are bypassed here, which
+// is exactly what isolates the stack rule).
+#[cfg(test)]
+mod tests {
+    use super::super::cbpv::CoreOp;
+    use super::*;
+
+    fn users(names: &[&str]) -> BTreeSet<Sym> {
+        names.iter().map(|n| Sym::from(*n)).collect()
+    }
+
+    fn one(name: &str, arity: usize, body: Comp) -> CoreFn {
+        CoreFn {
+            name: name.into(),
+            params: (0..arity)
+                .map(|i| Sym::from(format!("p{i}").as_str()))
+                .collect(),
+            body,
+        }
+    }
+
+    // `f(x) to t; <k>` — the recursive-call-feeding-continuation shape.
+    fn rec(k: Comp) -> Comp {
+        Comp::Bind(
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+            "t".into(),
+            Box::new(k),
+        )
+    }
+
+    fn cons_tail() -> Comp {
+        rec(Comp::Return(Value::Ctor(
+            "Cons".into(),
+            1,
+            vec![Value::Var("h".into()), Value::Var("t".into())],
+        )))
+    }
+
+    fn add_tail() -> Comp {
+        rec(Comp::Prim(
+            CoreOp::Add,
+            Value::Int(1),
+            Value::Var("t".into()),
+        ))
+    }
+
+    #[test]
+    fn nontail_self_call_is_rejected() {
+        let f = one(
+            "f",
+            1,
+            rec(Comp::Prim(
+                CoreOp::Mul,
+                Value::Var("t".into()),
+                Value::Var("x".into()),
+            )),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f"])).unwrap_err();
+        assert!(err.contains("non-tail position"), "{err}");
+    }
+
+    #[test]
+    fn plain_tail_and_one_trmc_mode_is_accepted() {
+        // A cons-TRMC tail beside a plain self tail-call: codegen loops both.
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+        );
+        let f = one("f", 1, body);
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(bounded_stack(&f, &core, &users(&["f"])).is_ok());
+    }
+
+    #[test]
+    fn mixed_cons_and_add_is_rejected() {
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(add_tail()),
+        );
+        let f = one("f", 1, body);
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f"])).unwrap_err();
+        assert!(err.contains("mixes"), "{err}");
+    }
+
+    #[test]
+    fn trmc_paired_with_mutual_call_is_rejected() {
+        // f cons-TRMCs itself but also tail-calls g (its SCC partner); codegen
+        // loops only direct self-TRMC, so the mutual call would grow the stack.
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(cons_tail()),
+            Box::new(Comp::Call("g".into(), vec![Value::Var("x".into())])),
+        );
+        let f = one("f", 1, body);
+        let g = one("g", 1, Comp::Call("f".into(), vec![Value::Var("x".into())]));
+        let core = Core {
+            fns: vec![f.clone(), g],
+        };
+        let err = bounded_stack(&f, &core, &users(&["f", "g"])).unwrap_err();
+        assert!(err.contains("mutually recursive"), "{err}");
+    }
+
+    #[test]
+    fn nonrecursive_is_trivially_bounded() {
+        let f = one(
+            "f",
+            2,
+            Comp::Prim(
+                CoreOp::Add,
+                Value::Var("p0".into()),
+                Value::Var("p1".into()),
+            ),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        assert!(bounded_stack(&f, &core, &users(&["f"])).is_ok());
+    }
+
+    // --- type-aware linearity (`check_fip_linear`) ---
+
+    fn decl(name: &str, params: Vec<Type>) -> DeclInfo {
+        DeclInfo {
+            name: name.into(),
+            params: (0..params.len()).map(|i| format!("p{i}")).collect(),
+            ty: Type::fun(params, Type::Int),
+            effects: Set::new(),
+        }
+    }
+
+    fn linfn(name: &str, params: &[&str], body: Comp) -> CoreFn {
+        CoreFn {
+            name: name.into(),
+            params: params.iter().map(|p| Sym::from(*p)).collect(),
+            body,
+        }
+    }
+
+    fn fip_of(f: &CoreFn) -> Fips {
+        std::iter::once((f.name, Fip::Fip)).collect()
+    }
+
+    fn use_var_twice(x: &str) -> Comp {
+        Comp::Prim(CoreOp::Add, Value::Var(x.into()), Value::Var(x.into()))
+    }
+
+    #[test]
+    fn heap_param_used_twice_is_rejected() {
+        // `Str` is a boxed value, so two uses need a real dup.
+        let f = linfn("f", &["s"], use_var_twice("s"));
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let decls = [decl("f", vec![Type::Str])];
+        let err = check_fip_linear(&core, &fip_of(&f), &decls, &BTreeMap::new()).unwrap_err();
+        assert!(err.contains("not linear"), "{err}");
+    }
+
+    #[test]
+    fn immediate_param_used_twice_is_allowed() {
+        // `Int` is an immediate; `dup` is a runtime no-op, so `x + x` is linear.
+        let f = linfn("f", &["x"], use_var_twice("x"));
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let decls = [decl("f", vec![Type::Int])];
+        assert!(check_fip_linear(&core, &fip_of(&f), &decls, &BTreeMap::new()).is_ok());
+    }
+
+    fn pair_ctors(field0: Type, field1: Type) -> BTreeMap<String, CtorInfo> {
+        std::iter::once((
+            "Pair".to_string(),
+            CtorInfo {
+                type_name: "P".into(),
+                params: vec![],
+                args: vec![field0, field1],
+                tag: 0,
+                fields: vec!["a".into(), "b".into()],
+            },
+        ))
+        .collect()
+    }
+
+    fn match_pair(field_used_twice: &str) -> Comp {
+        Comp::Case(
+            Value::Var("p".into()),
+            vec![(
+                CorePat::Ctor("Pair".into(), vec![Some("a".into()), Some("b".into())]),
+                use_var_twice(field_used_twice),
+            )],
+        )
+    }
+
+    #[test]
+    fn immediate_ctor_field_used_twice_is_allowed() {
+        // Field `a` is a concrete `Int`, so reusing it is fine.
+        let f = linfn("f", &["p"], match_pair("a"));
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let decls = [decl("f", vec![Type::Con("P".into(), vec![])])];
+        let ctors = pair_ctors(Type::Int, Type::Str);
+        assert!(check_fip_linear(&core, &fip_of(&f), &decls, &ctors).is_ok());
+    }
+
+    #[test]
+    fn heap_ctor_field_used_twice_is_rejected() {
+        // Field `b` is a boxed `Str`, so two uses need a dup.
+        let f = linfn("f", &["p"], match_pair("b"));
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let decls = [decl("f", vec![Type::Con("P".into(), vec![])])];
+        let ctors = pair_ctors(Type::Int, Type::Str);
+        let err = check_fip_linear(&core, &fip_of(&f), &decls, &ctors).unwrap_err();
+        assert!(err.contains("not linear"), "{err}");
+    }
+
+    #[test]
+    fn branches_are_distinct_paths() {
+        // `s` used once per arm is once per path: linear despite two textual uses.
+        let body = Comp::If(
+            Value::Bool(true),
+            Box::new(Comp::Return(Value::Var("s".into()))),
+            Box::new(Comp::Return(Value::Var("s".into()))),
+        );
+        let f = linfn("f", &["s"], body);
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let decls = [decl("f", vec![Type::Str])];
+        assert!(check_fip_linear(&core, &fip_of(&f), &decls, &BTreeMap::new()).is_ok());
+    }
 }

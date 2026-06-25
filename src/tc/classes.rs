@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use super::env::{collect_type_vars, convert_data, wrap_forall};
-use super::{ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted};
+use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
+use super::{
+    ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted, Warning,
+};
 use crate::error::TypeError;
-use crate::names::dict_ctor;
+use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Program};
 use crate::types::ty::{EffRow, Type};
@@ -131,6 +133,20 @@ impl Tc<'_> {
                     return Ok(Dict::Param(i));
                 }
             }
+            // No direct constraint, but a `given D(t)` whose class D has `class`
+            // among its (transitive) superclasses entails it: project the super
+            // dictionary out of D's param dict cell.
+            for (i, (cclass, cty)) in cur_constraints.iter().enumerate() {
+                if self.apply(cty) == *t {
+                    if let Some(path) = self.super_path(cclass, class) {
+                        let mut d = Dict::Param(i);
+                        for (sub, idx) in path {
+                            d = Dict::Super(Box::new(d), sub, idx);
+                        }
+                        return Ok(d);
+                    }
+                }
+            }
             let key = Self::head_key(class, t, span)?;
             match self
                 .inst_keys
@@ -139,14 +155,25 @@ impl Tc<'_> {
             {
                 Some([one]) => one.clone(),
                 Some(many @ [_, _, ..]) => {
+                    // Name the defining module of each candidate when they span
+                    // more than one; for purely root-local named instances the
+                    // bare list is clearer (and keeps the message stable).
+                    let cross_module = many
+                        .iter()
+                        .filter_map(|n| self.instances.get(n))
+                        .any(|i| !i.module.is_empty());
+                    let listed = if cross_module {
+                        provenance_list(self.instances, many)
+                    } else {
+                        many.join(", ")
+                    };
                     return Err(TypeError::Other {
                         span,
                         msg: format!(
-                            "ambiguous instance for {class}({}): {}; select one with f[name]",
+                            "ambiguous instance for {class}({}): {listed}; select one with f[name]",
                             t.show(),
-                            many.join(", ")
                         ),
-                    })
+                    });
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -186,7 +213,45 @@ impl Tc<'_> {
             let ct = self.apply(&ct);
             ctx_dicts.push(self.resolve(cclass, &ct, span, None, depth + 1)?);
         }
+        // Superclass dictionaries follow the declared context, in the same order
+        // the instance constructor lays them out as leading dict-cell fields.
+        for (sclass, sty) in &info.supers {
+            let mut st = sty.clone();
+            for (n, x) in &subs {
+                st = st.subst_var(*n, x);
+            }
+            let st = self.apply(&st);
+            ctx_dicts.push(self.resolve(sclass, &st, span, None, depth + 1)?);
+        }
         Ok(Dict::Global(inst_name, ctx_dicts))
+    }
+
+    // The field-index path projecting class `want` out of a `from` dictionary
+    // via superclasses, or `None` if `want` is not a superclass of `from`. Each
+    // step names the class whose dict cell is being projected and the leading
+    // field index of the superclass within it.
+    fn super_path(&self, from: &str, want: &str) -> Option<Vec<(String, usize)>> {
+        self.super_path_d(from, want, 0)
+    }
+
+    // `build_classes` already rejects superclass cycles, so this never loops in
+    // practice; the depth bound is a defensive backstop that degrades to `None`
+    // rather than overflowing if a cycle ever slips through.
+    fn super_path_d(&self, from: &str, want: &str, depth: usize) -> Option<Vec<(String, usize)>> {
+        if depth > MAX_INSTANCE_DEPTH {
+            return None;
+        }
+        let info = self.classes.get(from)?;
+        for (idx, s) in info.supers.iter().enumerate() {
+            if s == want {
+                return Some(vec![(from.to_string(), idx)]);
+            }
+            if let Some(mut rest) = self.super_path_d(s, want, depth + 1) {
+                rest.insert(0, (from.to_string(), idx));
+                return Some(rest);
+            }
+        }
+        None
     }
 
     fn head_key(class: &str, t: &Type, span: Span) -> Result<HeadKey, TypeError> {
@@ -211,6 +276,7 @@ type BuildClassResult = (
     InstKeys,
     BTreeMap<String, (String, usize)>,
     BTreeMap<String, (Type, Vec<(String, Type)>)>,
+    Vec<Warning>,
 );
 
 const fn head_name(t: &Type) -> Option<HeadKey> {
@@ -228,6 +294,67 @@ const fn head_name(t: &Type) -> Option<HeadKey> {
     }
 }
 
+// Reject a cyclic superclass hierarchy (`class A given B`, `class B given A`)
+// with a readable path instead of letting `super_path` overflow the stack at the
+// first use site. Three-color DFS; a gray (on-stack) target is a back edge.
+fn check_superclass_cycles(
+    classes: &BTreeMap<String, ClassInfo>,
+    decls: &[ast::ClassDecl],
+) -> Result<(), TypeError> {
+    fn dfs<'a>(
+        node: &'a str,
+        classes: &'a BTreeMap<String, ClassInfo>,
+        color: &mut BTreeMap<&'a str, u8>,
+        path: &mut Vec<&'a str>,
+    ) -> Option<Vec<String>> {
+        color.insert(node, 1);
+        path.push(node);
+        if let Some(info) = classes.get(node) {
+            for s in &info.supers {
+                let Some((skey, _)) = classes.get_key_value(s.as_str()) else {
+                    continue;
+                };
+                match color.get(skey.as_str()).copied().unwrap_or(0) {
+                    1 => {
+                        let from = path.iter().position(|p| *p == skey.as_str()).unwrap_or(0);
+                        let mut cyc: Vec<String> =
+                            path[from..].iter().map(|p| (*p).to_string()).collect();
+                        cyc.push(skey.clone());
+                        return Some(cyc);
+                    }
+                    0 => {
+                        if let Some(cyc) = dfs(skey, classes, color, path) {
+                            return Some(cyc);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        path.pop();
+        color.insert(node, 2);
+        None
+    }
+    let mut color: BTreeMap<&str, u8> = BTreeMap::new();
+    for start in classes.keys() {
+        if color.get(start.as_str()).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let mut path = Vec::new();
+        if let Some(cyc) = dfs(start, classes, &mut color, &mut path) {
+            let span = decls
+                .iter()
+                .find(|d| cyc.contains(&d.name))
+                .map_or_else(Span::default, |d| d.span);
+            return Err(TypeError::Other {
+                span,
+                msg: format!("superclass cycle: {}", cyc.join(" -> ")),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn build_classes(
     prog: &Program<Core>,
     data: &mut BTreeMap<String, DataInfo>,
@@ -238,6 +365,7 @@ pub(super) fn build_classes(
     let mut classes: BTreeMap<String, ClassInfo> = BTreeMap::new();
     let mut instances: BTreeMap<String, InstInfo> = BTreeMap::new();
     let mut inst_keys = InstKeys::new();
+    let mut warnings: Vec<Warning> = Vec::new();
     let mut methods: BTreeMap<String, (String, usize)> = BTreeMap::new();
     let mut constrained: BTreeMap<String, (Type, Vec<(String, Type)>)> = BTreeMap::new();
     for c in &prog.classes {
@@ -277,7 +405,15 @@ pub(super) fn build_classes(
                 });
             }
             let sorted: Vec<Sym> = vars.into_iter().collect();
-            let scheme = wrap_forall(&sorted, t.clone());
+            let mut scheme = wrap_forall(&sorted, t.clone());
+            // Generalize over the method's effect-row variables too, so an
+            // effect-polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`)
+            // is row-polymorphic rather than carrying a free row var.
+            let mut rvars = BTreeSet::new();
+            collect_row_vars(&t, &mut rvars);
+            for rv in rvars {
+                scheme = Type::RowForall(rv, Box::new(scheme));
+            }
             env.insert(Sym::from(mname), scheme.clone());
             methods.insert(mname.clone(), (c.name.clone(), idx));
             constrained.insert(
@@ -290,10 +426,33 @@ pub(super) fn build_classes(
             infos.push((mname.clone(), t));
         }
         let dname = dict_ctor(&c.name);
+        // The dictionary cell is structurally typed, not a row of placeholders:
+        // a leading field per superclass (that class's dictionary over the same
+        // parameter), then one field per method carrying the method's own type
+        // generalized over its type/row variables, with the class parameter left
+        // free as the dictionary's parameter.
+        let param = Sym::from(&c.param);
+        let mut dict_args: Vec<Type> = c
+            .supers
+            .iter()
+            .map(|s| Type::Con(Sym::from(&dict_ctor(s)), vec![Type::Var(param)]))
+            .collect();
+        for (_, mt) in &infos {
+            let mut tvars = BTreeSet::new();
+            collect_type_vars(mt, &mut tvars);
+            tvars.remove(&param);
+            let mut scheme = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), mt.clone());
+            let mut rvars = BTreeSet::new();
+            collect_row_vars(mt, &mut rvars);
+            for rv in rvars {
+                scheme = Type::RowForall(rv, Box::new(scheme));
+            }
+            dict_args.push(scheme);
+        }
         data.insert(
             dname.clone(),
             DataInfo {
-                params: vec![],
+                params: vec![c.param.clone()],
                 ctors: vec![dname.clone()],
             },
         );
@@ -301,8 +460,8 @@ pub(super) fn build_classes(
             dname.clone(),
             CtorInfo {
                 type_name: Sym::from(&dname),
-                params: vec![],
-                args: vec![Type::Int; infos.len()],
+                params: vec![param],
+                args: dict_args,
                 tag: 0,
                 fields: vec![],
             },
@@ -311,10 +470,15 @@ pub(super) fn build_classes(
             c.name.clone(),
             ClassInfo {
                 param: c.param.clone(),
+                supers: c.supers.clone(),
                 methods: infos,
             },
         );
     }
+    // Superclass edges may point forward, so the cycle check waits until every
+    // class is registered. A cyclic hierarchy would otherwise send `super_path`
+    // into unbounded recursion at the first use site.
+    check_superclass_cycles(&classes, &prog.classes)?;
     for i in &prog.instances {
         let class = classes.get(&i.class).ok_or_else(|| TypeError::Other {
             span: i.span,
@@ -440,6 +604,53 @@ pub(super) fn build_classes(
                 ),
             });
         }
+        // Each declared superclass of the class becomes an obligation `S(head)`
+        // discharged at every use site and embedded as a leading dict field.
+        let mut supers = Vec::new();
+        for s in &class.supers {
+            if !classes.contains_key(s) {
+                return Err(TypeError::Other {
+                    span: i.span,
+                    msg: format!("class {} names unknown superclass {s}", i.class),
+                });
+            }
+            supers.push((s.clone(), head.clone()));
+        }
+        // Orphan rule: an instance must be anchored to the module that defines
+        // its class or its head type. Anywhere else it is an orphan, warned now
+        // and (once packages and separate compilation land) an error across a
+        // package boundary. Primitive heads count as prelude-defined.
+        let inst_mod = i.module.as_str();
+        let class_mod = module_of(&i.class);
+        let head_mod = match &head {
+            Type::Con(n, _) => module_of(n.as_str()),
+            _ => "",
+        };
+        if class_mod != inst_mod && head_mod != inst_mod {
+            let where_ = if inst_mod.is_empty() {
+                "this program".to_string()
+            } else {
+                format!("module `{inst_mod}`")
+            };
+            // A root-program instance's span indexes the entry source, so it can
+            // carry a caret; an imported module's span belongs to another file,
+            // so leave it empty and the warning renders as a plain line.
+            let span = if inst_mod.is_empty() {
+                i.span
+            } else {
+                Span::default()
+            };
+            warnings.push(Warning {
+                span,
+                msg: format!(
+                    "orphan instance `{}` for {}({}): neither the class nor the type is \
+                     defined in {where_}; define it alongside the class or the type",
+                    i.name,
+                    i.class,
+                    head.show()
+                ),
+            });
+        }
         inst_keys
             .entry((i.class.clone(), key))
             .or_default()
@@ -449,9 +660,57 @@ pub(super) fn build_classes(
             InstInfo {
                 class: i.class.clone(),
                 head,
+                module: i.module.clone(),
                 context,
+                supers,
             },
         );
     }
-    Ok((classes, instances, inst_keys, methods, constrained))
+    // Overlap: two or more instances for the same (class, head) are allowed (the
+    // use site disambiguates with `f[name]`), but when they come from different
+    // modules the conflict is invisible at definition time, so flag it. Instances
+    // from a single module (or all root-local, the deliberate named-instance
+    // case) are left alone.
+    for ((class, _key), names) in &inst_keys {
+        if names.len() < 2 {
+            continue;
+        }
+        let mods: BTreeSet<&str> = names
+            .iter()
+            .filter_map(|n| instances.get(n))
+            .map(|i| i.module.as_str())
+            .collect();
+        if mods.len() < 2 {
+            continue;
+        }
+        warnings.push(Warning {
+            span: Span::default(),
+            msg: format!(
+                "overlapping instances for {class}: {}; uses must disambiguate with f[name]",
+                provenance_list(&instances, names)
+            ),
+        });
+    }
+    Ok((
+        classes,
+        instances,
+        inst_keys,
+        methods,
+        constrained,
+        warnings,
+    ))
+}
+
+/// Render a list of instance names with their defining module, for overlap and
+/// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
+/// program) ``.
+fn provenance_list(instances: &BTreeMap<String, InstInfo>, names: &[String]) -> String {
+    names
+        .iter()
+        .map(|n| match instances.get(n).map(|i| i.module.as_str()) {
+            Some(m) if !m.is_empty() => format!("`{n}` (module `{m}`)"),
+            _ => format!("`{n}` (this program)"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

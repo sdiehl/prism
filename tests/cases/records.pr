@@ -1,4 +1,5 @@
 type Point = Point { x: Int, y: Int }
+
 fn make(a : Int, b : Int) : Point = Point { x = a, y = b }
 
 fn sum_coords(p : Point) : Int =

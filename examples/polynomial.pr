@@ -1,0 +1,115 @@
+-- Polynomial functors, after Spivak and Niu, "Polynomial Functors: A
+-- Mathematical Theory of Interaction" (https://topos.site/poly-book.pdf). A
+-- polynomial functor p(y) = sum over i in p(1) of y^p[i] is a sum of pure-power
+-- terms, so up to isomorphism it is just the multiset of its exponents: each
+-- position contributes one term y^(its number of directions). Hence [2, 1, 1, 0]
+-- is y^2 + 2y + 1. The book's three operations -- sum (p + q), the Dirichlet
+-- (parallel) product (p (x) q), and substitution (p <| q = p after q) -- are a
+-- few lines each. We check each against the functor it denotes by evaluating at
+-- a finite set: p applied to a set of size n has sum over positions of n^arity
+-- elements, and that count is a sum/product/composition homomorphism.
+--
+-- Expected output:
+--   y^2 + y + 1
+--   y + 1
+--   y^2 + 2y + 2
+--   y^3 + 2y^2 + 2y + 1
+--   y^2 + 3y + 3
+--   17 17
+--   52 52
+--   21 21
+--   y is the unit of <|: 1 1
+
+-- A polynomial as the multiset of its position arities (directions per position).
+type Poly = Poly { arities: List(Int) }
+
+fn monomial(coef : Int, exp : Int) : Poly =
+  Poly { arities = replicate(coef, exp) }
+
+fn y() : Poly = monomial(1, 1)
+
+-- Sum: positions of p and q sit side by side.
+fn psum(p : Poly, q : Poly) : Poly =
+  Poly { arities = append(p.arities, q.arities) }
+
+-- Dirichlet product: positions pair up, their direction sets multiply, so the
+-- exponents add. (p (x) q)(X) = p(X) * q(X).
+fn pmul(p : Poly, q : Poly) : Poly =
+  Poly { arities = concat_map(\(a) -> map(\(b) -> a + b, q.arities), p.arities) }
+
+-- Substitution p <| q = p(q(y)). At a position of p each of its directions
+-- independently picks a position of q, and the resulting arity is the sum of the
+-- chosen arities. (p <| q)(X) = p(q(X)).
+fn subst_pos(a : Int, qs : List(Int)) : List(Int) =
+  if a == 0 then
+    Cons(0, Nil)
+  else
+    concat_map(\(rest) -> map(\(q) -> q + rest, qs), subst_pos(a - 1, qs))
+
+fn pcompose(p : Poly, q : Poly) : Poly =
+  Poly { arities = concat_map(\(a) -> subst_pos(a, q.arities), p.arities) }
+
+-- p as an actual functor evaluated at a finite set of size n.
+fn eval(p : Poly, n : Int) : Int = sum(map(\(a) -> pow(n, a), p.arities))
+
+-- Pretty-print the multiset as a polynomial expression, high powers first.
+fn term(coef : Int, exp : Int) : String =
+  if exp == 0 then
+    show(coef)
+  elif exp == 1 then
+    if coef == 1 then
+      "y"
+    else
+      concat(show(coef), "y")
+  else
+    let pe = concat("y^", show(exp))
+    if coef == 1 then
+      pe
+    else
+      concat(show(coef), pe)
+
+fn terms_from(arities : List(Int), exp : Int) : List(String) =
+  if exp < 0 then
+    Nil
+  else
+    let c = count(\(x) -> x == exp, arities)
+    let rest = terms_from(arities, exp - 1)
+    if c == 0 then
+      rest
+    else
+      Cons(term(c, exp), rest)
+
+fn show_poly(p : Poly) : String =
+  match p.arities of
+    Nil => "0"
+    Cons(_, _) =>
+      str_join(" + ", terms_from(p.arities, unwrap_or(0, maximum(p.arities))))
+
+-- Show "lhs rhs" so the two sides of each homomorphism line up visibly.
+fn pair_str(label : String, a : Int, b : Int) : String =
+  concat(label, concat(show(a), concat(" ", show(b))))
+
+fn main() : !{IO} Unit =
+  let p = Poly { arities = [2, 1, 0] }
+  let q = Poly { arities = [1, 0] }
+  println(show_poly(p))
+  println(show_poly(q))
+  println(show_poly(psum(p, q)))
+  println(show_poly(pmul(p, q)))
+  println(show_poly(pcompose(p, q)))
+  -- Evaluate both sides at n = 3 and watch + (x) <| become + * (after).
+  println(pair_str("", eval(psum(p, q), 3), eval(p, 3) + eval(q, 3)))
+  println(pair_str("", eval(pmul(p, q), 3), eval(p, 3) * eval(q, 3)))
+  println(pair_str("", eval(pcompose(p, q), 3), eval(p, eval(q, 3))))
+  -- y is the identity for substitution: p <| y == y <| p == p.
+  let lhs =
+    if eval(pcompose(p, y()), 4) == eval(p, 4) then
+      1
+    else
+      0
+  let rhs =
+    if eval(pcompose(y(), p), 4) == eval(p, 4) then
+      1
+    else
+      0
+  println(pair_str("y is the unit of <|: ", lhs, rhs))

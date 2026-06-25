@@ -1,0 +1,6 @@
+-- A trailing `fn (params) <block>` after a call is appended as the call's last
+-- argument: an ordinary lambda.
+twice() fn(x)
+  x + 10
+  ==>
+twice(\(x) -> x + 10)

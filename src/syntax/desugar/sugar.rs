@@ -8,6 +8,10 @@ use crate::error::TypeError;
 use crate::names;
 use crate::syntax::ast::{Arm, Core, Expr, Marker, Param, Pattern, PatternDecl, Spanned, S};
 
+// The `view` clause keyword of a `pattern` decl (the only single-parameter
+// clause); any other keyword is the optional `make` clause.
+const VIEW_KW: &str = "view";
+
 #[must_use]
 const fn with_sentinel(l: usize, r: usize) -> S<Expr> {
     Spanned {
@@ -314,17 +318,17 @@ pub fn pattern_decl(
             Expr::Lam(ps, _) => ps.len(),
             // A bare identifier in a `view` clause names a class method, resolved
             // against the `for` class in lower_patterns (class-dispatched view).
-            Expr::Var(_) if kw == "view" => 1,
+            Expr::Var(_) if kw == VIEW_KW => 1,
             _ => return Err((cspan, format!("`{kw}` clause must be a lambda"))),
         };
-        let want = if kw == "view" { 1 } else { params.len() };
+        let want = if kw == VIEW_KW { 1 } else { params.len() };
         if arity != want {
             return Err((
                 cspan,
                 format!("`{kw}` for pattern `{name}` must take {want} argument(s), this lambda takes {arity}"),
             ));
         }
-        let slot = if kw == "view" { &mut view } else { &mut make };
+        let slot = if kw == VIEW_KW { &mut view } else { &mut make };
         if slot.replace(e).is_some() {
             return Err((
                 cspan,

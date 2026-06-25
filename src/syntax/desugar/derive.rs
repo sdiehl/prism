@@ -157,6 +157,9 @@ fn inst_skel(d: &DataDecl, class: &str, prefix: &str, method: Decl, z: Span) -> 
             })
             .collect(),
         methods: vec![method],
+        // The data type's canonical name carries its defining module, so a
+        // derived instance is anchored to the same module as its type.
+        module: crate::names::module_of(&d.name).to_string(),
         span: z,
     }
 }

@@ -26,6 +26,7 @@ pub enum Rv {
     Thunk(Cmp, Env),
     Data(Sym, Fields),
     Tuple(Fields),
+    Array(Fields),
     Resume(Rc<[Frame]>),
 }
 
@@ -237,6 +238,7 @@ impl Rv {
             Self::Thunk(..) => "Thunk",
             Self::Data(..) => "Data",
             Self::Tuple(_) => "Tuple",
+            Self::Array(_) => "Array",
             Self::Resume(_) => "Resume",
         }
     }
@@ -266,6 +268,10 @@ impl Rv {
             Self::Tuple(fs) => {
                 let fs: Vec<_> = fs.iter().map(Self::show).collect();
                 format!("({})", fs.join(", "))
+            }
+            Self::Array(es) => {
+                let es: Vec<_> = es.iter().map(Self::show).collect();
+                format!("[|{}|]", es.join(", "))
             }
         }
     }
@@ -786,6 +792,22 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         // `exit` is intercepted in `step` (it sets the machine's exit status
         // and unwinds), so it never reaches the value-returning builtin path.
         (B::Exit, _) => Err("exit: unexpected argument".into()),
+        // Run a shell command, returning its exit code (-1 on spawn failure or
+        // signal death), matching the C runtime's `WEXITSTATUS(system(..))`.
+        (B::System, [Rv::Str(cmd)]) => Ok(Rv::Int(i64::from(
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .status()
+                .ok()
+                .and_then(|s| s.code())
+                .unwrap_or(-1),
+        ))),
+        (B::Eprint, [Rv::Str(s)]) => {
+            eprint!("{s}");
+            let _ = std::io::stderr().flush();
+            Ok(Rv::Unit)
+        }
         (B::ArgsCount, []) => Ok(Rv::Int(i64::try_from(env::args().count()).unwrap_or(0))),
         (B::Arg, [Rv::Int(i)]) => Ok(Rv::Str(
             usize::try_from(*i)
@@ -793,9 +815,9 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
                 .and_then(|k| env::args().nth(k))
                 .unwrap_or_default(),
         )),
-        (B::I64Add, [a, b]) => fixed2(a, b, u64::wrapping_add),
-        (B::I64Sub, [a, b]) => fixed2(a, b, u64::wrapping_sub),
-        (B::I64Mul, [a, b]) => fixed2(a, b, u64::wrapping_mul),
+        (B::I64Add | B::U64Add, [a, b]) => fixed2(a, b, u64::wrapping_add),
+        (B::I64Sub | B::U64Sub, [a, b]) => fixed2(a, b, u64::wrapping_sub),
+        (B::I64Mul | B::U64Mul, [a, b]) => fixed2(a, b, u64::wrapping_mul),
         (B::I64Div | B::I64Rem, [_, Rv::I64(0)]) | (B::U64Div | B::U64Rem, [_, Rv::U64(0)]) => {
             Err("division by zero".into())
         }
@@ -805,6 +827,85 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         (B::U64Rem, [Rv::U64(x), Rv::U64(y)]) => Ok(Rv::U64(x % y)),
         (B::I64Cmp, [Rv::I64(x), Rv::I64(y)]) => Ok(ord(x.cmp(y))),
         (B::U64Cmp, [Rv::U64(x), Rv::U64(y)]) => Ok(ord(x.cmp(y))),
+        (B::ArrayNew, [Rv::Int(n), init]) => {
+            let k = usize::try_from(*n).map_err(|_| "array_new: negative length".to_string())?;
+            Ok(Rv::Array(vec![init.clone(); k].into()))
+        }
+        (B::ArrayEmpty, []) => Ok(Rv::Array(Vec::new().into())),
+        (B::ArrayPush, [Rv::Array(v), x]) => {
+            let mut next = v.to_vec();
+            next.push(x.clone());
+            Ok(Rv::Array(next.into()))
+        }
+        (B::ArrayPop, [Rv::Array(v)]) => {
+            if v.is_empty() {
+                return Err("array_pop: empty array".to_string());
+            }
+            let mut next = v.to_vec();
+            next.pop();
+            Ok(Rv::Array(next.into()))
+        }
+        (B::ByteLen, [Rv::Str(s)]) => Ok(Rv::Int(i64::try_from(s.len()).unwrap_or(0))),
+        (B::ByteAt, [Rv::Str(s), Rv::Int(i)]) => Ok(Rv::Int(
+            usize::try_from(*i)
+                .ok()
+                .and_then(|k| s.as_bytes().get(k))
+                .map_or(-1, |b| i64::from(*b)),
+        )),
+        (B::StringOfBytes, [Rv::Array(v)]) => {
+            let bytes: Vec<u8> = v
+                .iter()
+                .map(|e| {
+                    if let Rv::Int(n) = e {
+                        u8::try_from(*n & 0xFF).unwrap_or(0)
+                    } else {
+                        0
+                    }
+                })
+                .collect();
+            Ok(Rv::Str(String::from_utf8_lossy(&bytes).into_owned()))
+        }
+        (B::ArrayLen, [Rv::Array(v)]) => Ok(Rv::Int(i64::try_from(v.len()).unwrap_or(0))),
+        (B::StringOfArray, [Rv::Array(v)]) => {
+            let mut s = String::new();
+            for e in v.iter() {
+                let Rv::Str(t) = e else {
+                    return Err("string_of_array: non-string element".to_string());
+                };
+                s.push_str(t);
+            }
+            Ok(Rv::Str(s))
+        }
+        (B::ArrayGet, [Rv::Array(v), Rv::Int(i)]) => usize::try_from(*i)
+            .ok()
+            .and_then(|k| v.get(k).cloned())
+            .ok_or_else(|| "array index out of bounds".to_string()),
+        (B::ArraySet, [Rv::Array(v), Rv::Int(i), x]) => {
+            let k = usize::try_from(*i).map_err(|_| "array index out of bounds".to_string())?;
+            if k >= v.len() {
+                return Err("array index out of bounds".to_string());
+            }
+            let mut next = v.to_vec();
+            next[k] = x.clone();
+            Ok(Rv::Array(next.into()))
+        }
+        (B::I64And | B::U64And, [a, b]) => fixed2(a, b, |x, y| x & y),
+        (B::I64Or | B::U64Or, [a, b]) => fixed2(a, b, |x, y| x | y),
+        (B::I64Xor | B::U64Xor, [a, b]) => fixed2(a, b, |x, y| x ^ y),
+        // Shift counts are masked to 0..64; `i64_shr` is arithmetic (signed),
+        // `u64_shr` logical, matching the C runtime's signed/unsigned `>>`.
+        (B::I64Shl, [Rv::I64(x), Rv::I64(y)]) => {
+            Ok(Rv::I64(x.wrapping_shl(u32::try_from(*y & 63).unwrap_or(0))))
+        }
+        (B::I64Shr, [Rv::I64(x), Rv::I64(y)]) => {
+            Ok(Rv::I64(x.wrapping_shr(u32::try_from(*y & 63).unwrap_or(0))))
+        }
+        (B::U64Shl, [Rv::U64(x), Rv::U64(y)]) => {
+            Ok(Rv::U64(x.wrapping_shl(u32::try_from(*y & 63).unwrap_or(0))))
+        }
+        (B::U64Shr, [Rv::U64(x), Rv::U64(y)]) => {
+            Ok(Rv::U64(x.wrapping_shr(u32::try_from(*y & 63).unwrap_or(0))))
+        }
         (B::ShowU64, [Rv::U64(n)]) => Ok(Rv::Str(n.to_string())),
         (B::ToI64, [v]) => Ok(Rv::I64(low64(v)?.cast_signed())),
         (B::ToU64, [v]) => Ok(Rv::U64(low64(v)?)),

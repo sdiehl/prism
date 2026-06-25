@@ -22,6 +22,7 @@ extern void *mi_calloc(size_t, size_t);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 
 /* Object layout: { i64 refcount, i64 tag, i64 arity, i64 fields[n] }
  * arity is the field count, letting prism_rc_dec recurse into children.
@@ -228,11 +229,11 @@ __attribute__((destructor)) static void prism_reuse_report(void) {
     }
 }
 
-/* Effect-op allocation tax (DESIGN.md s4 Phase 0): every EOp cell the
- * free-monad lowering builds for a `do op` bumps this. With PRISM_EFFOP_STATS
- * set a destructor reports the total to stderr, leaving stdout (the
- * parity-checked channel) untouched, so the count can be ratcheted down as
- * the tail-resumptive direct-call fast path lands. */
+/* Effect-op allocation counter: every EOp cell the free-monad lowering builds
+ * for a `do op` bumps this. With PRISM_EFFOP_STATS set a destructor reports the
+ * total to stderr, leaving stdout (the parity-checked channel) untouched, so a
+ * fused pipeline can be asserted to allocate zero EOp cells while a genuinely
+ * escaping effect's fallback count stays observable. */
 static long prism_effop_allocs = 0;
 
 __attribute__((destructor)) static void prism_effop_report(void) {
@@ -338,6 +339,15 @@ long prism_str_len(long a) {
     for (long i = 0; i < nb; i++)
         if (((unsigned char)d[i] & 0xC0) != 0x80) n++;
     return n;
+}
+
+long prism_byte_len(long s) {
+    return prism_str_len_bytes(s); /* raw byte count; the call site retags it */
+}
+
+long prism_byte_at(long s, long i) {
+    if (i < 0 || i >= prism_str_len_bytes(s)) return -1;
+    return (long)(unsigned char)prism_str_data(s)[i];
 }
 
 long prism_str_eq(long a, long b) {
@@ -1084,6 +1094,41 @@ long prism_u64_cmp(long a, long b) {
     return x < y ? -1 : x > y ? 1 : 0;
 }
 
+/* Wrapping add/sub/mul share a bit pattern across signedness, so the u64 lane
+   reuses the i64 wraparound. */
+long prism_u64_add(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) + (unsigned long)prism_unbox(b)));
+}
+long prism_u64_sub(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) - (unsigned long)prism_unbox(b)));
+}
+long prism_u64_mul(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) * (unsigned long)prism_unbox(b)));
+}
+
+/* Fixed-width bitwise/shift. and/or/xor are bit-pattern identical across lanes;
+   shifts mask the count to 0..64. i64_shr is arithmetic (signed >>), u64_shr
+   logical (unsigned >>). */
+long prism_i64_and(long a, long b) { return prism_box(prism_unbox(a) & prism_unbox(b)); }
+long prism_i64_or(long a, long b) { return prism_box(prism_unbox(a) | prism_unbox(b)); }
+long prism_i64_xor(long a, long b) { return prism_box(prism_unbox(a) ^ prism_unbox(b)); }
+long prism_u64_and(long a, long b) { return prism_box(prism_unbox(a) & prism_unbox(b)); }
+long prism_u64_or(long a, long b) { return prism_box(prism_unbox(a) | prism_unbox(b)); }
+long prism_u64_xor(long a, long b) { return prism_box(prism_unbox(a) ^ prism_unbox(b)); }
+
+long prism_i64_shl(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) << (prism_unbox(b) & 63)));
+}
+long prism_i64_shr(long a, long b) {
+    return prism_box(prism_unbox(a) >> (prism_unbox(b) & 63)); /* arithmetic */
+}
+long prism_u64_shl(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) << (prism_unbox(b) & 63)));
+}
+long prism_u64_shr(long a, long b) {
+    return prism_box((long)((unsigned long)prism_unbox(a) >> (prism_unbox(b) & 63))); /* logical */
+}
+
 long prism_show_i64(long p) {
     char buf[32];
     int k = snprintf(buf, sizeof buf, "%ld", prism_unbox(p));
@@ -1181,6 +1226,166 @@ long prism_file_exists(long path) {
 
 long prism_remove_file(long path) {
     remove(prism_str_data(path));
+    return 0;
+}
+
+void prism_array_oob(void) {
+    fprintf(stderr, "fatal: array index out of bounds\n");
+    exit(1);
+}
+
+/* Growable polymorphic array as an ordinary cell
+   { rc, tag=0, arity=cap+1, len, elem0..elem_{cap-1} }, so prism_rc_dec already
+   recurses into it: the length word is stored odd-tagged (skipped as an
+   immediate), live slots hold elements, spare slots hold 0 (also skipped). All
+   ops BORROW their cell args (the call site drops them afterward), so each
+   retains a ref by inc-ing what it stores or returns. Indices arrive raw. */
+#define PRISM_ARR_ELEM0 (PRISM_HDR_WORDS + 1)
+static long arr_len(long *p) { return p[PRISM_HDR_WORDS] >> 1; }
+static void arr_setlen(long *p, long l) { p[PRISM_HDR_WORDS] = (l << 1) | 1; }
+static long arr_cap(long *p) { return p[PRISM_ARITY_W] - 1; }
+
+long prism_array_empty(void) {
+    long *p = prism_alloc(1); /* cap 0: just the length word */
+    arr_setlen(p, 0);
+    return (long)p;
+}
+
+long prism_array_new(long n, long init) {
+    long *p = prism_alloc(n + 1); /* cap = len = n */
+    arr_setlen(p, n);
+    for (long i = 0; i < n; i++) {
+        prism_rc_inc(init);
+        p[PRISM_ARR_ELEM0 + i] = init;
+    }
+    return (long)p;
+}
+
+long prism_array_len(long a) {
+    return arr_len((long *)a); /* raw count; the call site retags it */
+}
+
+long prism_array_get(long a, long i) {
+    long *p = (long *)a;
+    if (i < 0 || i >= arr_len(p)) prism_array_oob();
+    long e = p[PRISM_ARR_ELEM0 + i];
+    prism_rc_inc(e); /* returned ref; the borrowed array is dropped by the caller */
+    return e;
+}
+
+long prism_array_set(long a, long i, long x) {
+    long *p = (long *)a;
+    long len = arr_len(p);
+    if (i < 0 || i >= len) prism_array_oob();
+    if (p[PRISM_RC_W] == 1) { /* uniquely owned: write in place (FBIP) */
+        prism_rc_dec(p[PRISM_ARR_ELEM0 + i]);
+        prism_rc_inc(x);
+        p[PRISM_ARR_ELEM0 + i] = x;
+        prism_rc_inc(a); /* survive the caller's drop of the borrowed arg */
+        return a;
+    }
+    long *q = prism_alloc(len + 1); /* shared: copy compactly then set */
+    arr_setlen(q, len);
+    for (long j = 0; j < len; j++) {
+        long e = p[PRISM_ARR_ELEM0 + j];
+        prism_rc_inc(e);
+        q[PRISM_ARR_ELEM0 + j] = e;
+    }
+    prism_rc_dec(q[PRISM_ARR_ELEM0 + i]);
+    prism_rc_inc(x);
+    q[PRISM_ARR_ELEM0 + i] = x;
+    return (long)q;
+}
+
+long prism_array_push(long a, long x) {
+    long *p = (long *)a;
+    long len = arr_len(p), cap = arr_cap(p);
+    if (p[PRISM_RC_W] == 1 && len < cap) { /* room and unique: append in place */
+        prism_rc_inc(x);
+        p[PRISM_ARR_ELEM0 + len] = x;
+        arr_setlen(p, len + 1);
+        prism_rc_inc(a); /* survive the caller's drop */
+        return a;
+    }
+    /* full (grow, doubling) or shared (copy): one fresh array of the new size */
+    long ncap = len < cap ? cap : (cap < 1 ? 1 : cap * 2);
+    long *q = prism_alloc(ncap + 1);
+    arr_setlen(q, len + 1);
+    for (long j = 0; j < len; j++) {
+        long e = p[PRISM_ARR_ELEM0 + j];
+        prism_rc_inc(e);
+        q[PRISM_ARR_ELEM0 + j] = e;
+    }
+    prism_rc_inc(x);
+    q[PRISM_ARR_ELEM0 + len] = x;
+    for (long j = len + 1; j < ncap; j++) q[PRISM_ARR_ELEM0 + j] = 0; /* skip-safe spare */
+    return (long)q;
+}
+
+long prism_array_pop(long a) {
+    long *p = (long *)a;
+    long len = arr_len(p);
+    if (len <= 0) prism_array_oob();
+    if (p[PRISM_RC_W] == 1) { /* uniquely owned: drop the last in place */
+        prism_rc_dec(p[PRISM_ARR_ELEM0 + len - 1]);
+        p[PRISM_ARR_ELEM0 + len - 1] = 0; /* skip-safe spare */
+        arr_setlen(p, len - 1);
+        prism_rc_inc(a);
+        return a;
+    }
+    long *q = prism_alloc(len); /* shared: copy len-1 elements */
+    arr_setlen(q, len - 1);
+    for (long j = 0; j < len - 1; j++) {
+        long e = p[PRISM_ARR_ELEM0 + j];
+        prism_rc_inc(e);
+        q[PRISM_ARR_ELEM0 + j] = e;
+    }
+    return (long)q;
+}
+
+/* Concatenate every string in an array into one fresh string with a single
+   allocation. Borrows the array (the caller drops it and its elements). */
+long prism_string_of_array(long arr) {
+    long *p = (long *)arr;
+    long n = arr_len(p);
+    long total = 0;
+    for (long i = 0; i < n; i++) total += prism_str_len_bytes(p[PRISM_ARR_ELEM0 + i]);
+    long *out = prism_str_alloc(total);
+    char *o = (char *)(out + PRISM_HDR_WORDS);
+    long off = 0;
+    for (long i = 0; i < n; i++) {
+        long s = p[PRISM_ARR_ELEM0 + i];
+        long len = prism_str_len_bytes(s);
+        memcpy(o + off, prism_str_data(s), (size_t)len);
+        off += len;
+    }
+    o[total] = 0;
+    return (long)out;
+}
+
+/* Build a string from an array of byte values (each a small Int 0..255, stored
+   tagged so `>> 1` recovers it). Borrows the array. */
+long prism_string_of_bytes(long arr) {
+    long *p = (long *)arr;
+    long n = arr_len(p);
+    long *out = prism_str_alloc(n);
+    char *o = (char *)(out + PRISM_HDR_WORDS);
+    for (long i = 0; i < n; i++) o[i] = (char)((p[PRISM_ARR_ELEM0 + i] >> 1) & 0xFF);
+    o[n] = 0;
+    return (long)out;
+}
+
+/* Run a shell command, returning its exit code (-1 on spawn failure or signal
+   death). The result is a raw int the call site retags as an Int. */
+long prism_system(long cmd) {
+    int rc = system(prism_str_data(cmd));
+    if (rc == -1 || !WIFEXITED(rc)) return -1;
+    return WEXITSTATUS(rc);
+}
+
+/* Write a string to stderr (no trailing newline). Returns unit. */
+long prism_eprint(long s) {
+    fputs(prism_str_data(s), stderr);
     return 0;
 }
 

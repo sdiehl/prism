@@ -1,0 +1,1 @@
+pub fn map(x : Int) : Int = x * 2

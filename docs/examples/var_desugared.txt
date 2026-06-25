@@ -1,0 +1,17 @@
+-- Conceptual desugaring. Each `var` becomes a private two-operation effect
+-- (a get and a set), and a handler that threads the value is wrapped around the
+-- body in the same pass. Reads become `do get_*`, assignments `do set_*`.
+fn fib_iter(n) =
+  handle
+    do set_a(0)
+    do set_b(1)
+    repeat(n) fn
+      let t = do get_a() + do get_b()
+      do set_a(do get_b())
+      do set_b(t)
+    do get_a()
+  with
+    get_a(u, k) => \(s) -> k(s)(s)     -- resume with s; state unchanged
+    set_a(v, k) => \(s) -> k(())(v)    -- resume with (); new state is v
+    return r    => \(s) -> r           -- discard final state; return the answer
+  -- a second, identical handler for `b` wraps this one (elided)

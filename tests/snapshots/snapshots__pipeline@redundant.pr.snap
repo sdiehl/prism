@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/redundant.pr
 ---
 == tokens ==
@@ -59,7 +59,7 @@ Program {
                         node: Var(
                             "c",
                         ),
-                        span: 53..54,
+                        span: 54..55,
                     },
                     [
                         Arm {
@@ -68,7 +68,7 @@ Program {
                                     "Red",
                                     [],
                                 ),
-                                span: 62..65,
+                                span: 63..66,
                             },
                             body: Spanned {
                                 node: Int(
@@ -77,13 +77,13 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 69..70,
+                                span: 70..71,
                             },
                         },
                         Arm {
                             pat: Spanned {
                                 node: Wild,
-                                span: 75..76,
+                                span: 76..77,
                             },
                             body: Spanned {
                                 node: Int(
@@ -92,7 +92,7 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 80..81,
+                                span: 81..82,
                             },
                         },
                         Arm {
@@ -101,7 +101,7 @@ Program {
                                     "Blue",
                                     [],
                                 ),
-                                span: 86..90,
+                                span: 87..91,
                             },
                             body: Spanned {
                                 node: Int(
@@ -110,15 +110,15 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 94..95,
+                                span: 95..96,
                             },
                         },
                     ],
                 ),
-                span: 47..95,
+                span: 48..96,
             },
             wheres: [],
-            span: 32..95,
+            span: 33..96,
         },
         Decl {
             name: "main",
@@ -132,7 +132,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 108..115,
+                        span: 110..117,
                     },
                     [
                         Spanned {
@@ -141,34 +141,34 @@ Program {
                                     node: Var(
                                         "name",
                                     ),
-                                    span: 116..120,
+                                    span: 118..122,
                                 },
                                 [
                                     Spanned {
                                         node: Var(
                                             "Blue",
                                         ),
-                                        span: 121..125,
+                                        span: 123..127,
                                     },
                                 ],
                             ),
-                            span: 116..126,
+                            span: 118..128,
                         },
                     ],
                 ),
-                span: 108..127,
+                span: 110..129,
             },
             wheres: [],
-            span: 96..127,
+            span: 98..129,
         },
     ],
 }
 
 == types ==
 Type Error: in `name`: unreachable match arm
-   ╭─[ <source>:6:5 ]
+   ╭─[ <source>:7:5 ]
    │
- 6 │     Blue => 3
+ 7 │     Blue => 3
    │     ──┬─  
    │       ╰─── in `name`: unreachable match arm
 ───╯

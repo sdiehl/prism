@@ -1,0 +1,58 @@
+-- Uniform function call: x |> f is just f(x), so any function reads as a method
+-- on its first-class data. Two surface forms thread a value through a chain of
+-- verbs instead of nesting calls inside-out, and they desugar in dual ways:
+--
+--   x |> f(args)   appends x as the LAST argument:   xs |> map(f) == map(f, xs)
+--   x.f(args)      prepends x as the FIRST argument:  s.smap(f)   == smap(s, f)
+--
+-- so |> pairs with collection-last prelude functions (map, filter, sum) while
+-- dot-chains pair with receiver-first APIs (the s-prefixed stream combinators).
+
+fn double(x) = x * 2
+
+fn square(x) = x * x
+
+fn inc(x) = x + 1
+
+fn is_big(x) = x > 10
+
+-- A pipe stage is a partially applied function; the data leads, the verbs follow.
+fn pipeline(xs) = xs |> filter(odd) |> map(square) |> map(inc) |> sum
+
+fn main() =
+  -- nested calls vs. the same thing piped left to right
+  println(sum(map(square, filter(odd, range(1, 6)))))
+  println(range(1, 6) |> filter(odd) |> map(square) |> sum)
+  -- 1 + 9 + 25 = 35 both ways
+  println(pipeline(range(1, 11)))
+  -- >> composes forward: (f >> g)(x) = g(f(x)). << composes backward like the
+  -- mathematical f . g: (f << g)(x) = f(g(x)). No argument is ever named.
+  let transform = double >> inc >> square
+  let transform_back = square << inc << double
+  println(transform(3))
+  -- square(inc(double(3))) = square(7) = 49
+  println(transform_back(3))
+  -- same chain, written right to left: 49
+
+  -- A |> chain threads a value through stages; a >> chain composes the SAME
+  -- stages into one reusable point-free function. The two are duals:
+  let process = filter(odd) >> map(square) >> sum
+  println(range(1, 11) |> process)
+  println(process(range(1, 11)))
+  -- both 165: 1 + 9 + 25 + 49 + 81
+
+  -- Compositions compose: build a stage once, reuse it, extend it.
+  let odd_squares = filter(odd) >> map(square)
+  let report = odd_squares >> filter(is_big) >> sum
+  println(range(1, 11) |> report)
+  -- keep odd squares over 10: 25 + 49 + 81 = 155
+
+  -- Dot-UFCS chains the receiver-first stream combinators with no intermediate
+  -- lists: srange -> smap -> skeep -> stake -> ssum fuse into a single loop.
+  println(srange(1, 20).smap(square).skeep(is_big).stake(3).ssum())
+  -- first three squares over 10: 16 + 25 + 36 = 77
+
+  -- A pipe stage can itself be a composition; |> binds looser than >>.
+  println(10 |> transform)
+  println(5 |> inc >> double)
+-- (5+1)*2 = 12

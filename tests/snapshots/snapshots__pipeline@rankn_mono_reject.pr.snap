@@ -1,0 +1,154 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_mono_reject.pr
+---
+== tokens ==
+VOpen Fn Ident("pick") LParen Ident("g") Colon Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen Colon KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("pick") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 1, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "pick",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "g",
+                        ),
+                        span: 343..344,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 345..346,
+                        },
+                    ],
+                ),
+                span: 343..347,
+            },
+            wheres: [],
+            span: 303..347,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 361..368,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "pick",
+                                    ),
+                                    span: 369..373,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "x",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "x",
+                                                        ),
+                                                        span: 382..383,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 386..387,
+                                                    },
+                                                ),
+                                                span: 382..387,
+                                            },
+                                        ),
+                                        span: 374..387,
+                                    },
+                                ],
+                            ),
+                            span: 369..388,
+                        },
+                    ],
+                ),
+                span: 361..389,
+            },
+            wheres: [],
+            span: 349..389,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: type mismatch: expected Int, got a
+   ╭─[ <source>:7:34 ]
+   │
+ 7 │ fn main() = println(pick(\(x) -> x + 1))
+   │                                  ┬  
+   │                                  ╰── in `main`: type mismatch: expected Int, got a
+───╯

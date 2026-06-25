@@ -1,0 +1,4 @@
+-- A `fip` function must own all its parameters: a borrowed parameter is retained
+-- by the caller and dup'd before use, which is non-linear. The check rejects the
+-- borrow outright, before inspecting the body.
+fip fn keep(borrow x) = x

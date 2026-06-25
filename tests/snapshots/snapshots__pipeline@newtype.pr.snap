@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/newtype.pr
 ---
 == tokens ==
@@ -52,7 +52,7 @@ Program {
             ],
             deriving: [],
             newtype: true,
-            span: 49..74,
+            span: 50..75,
         },
     ],
     effects: [],
@@ -89,7 +89,7 @@ Program {
                         node: Var(
                             "w",
                         ),
-                        span: 117..118,
+                        span: 118..119,
                     },
                     [
                         Arm {
@@ -101,25 +101,25 @@ Program {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 131..132,
+                                            span: 132..133,
                                         },
                                     ],
                                 ),
-                                span: 126..133,
+                                span: 127..134,
                             },
                             body: Spanned {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 137..138,
+                                span: 138..139,
                             },
                         },
                     ],
                 ),
-                span: 111..138,
+                span: 112..139,
             },
             wheres: [],
-            span: 76..138,
+            span: 77..139,
         },
         Decl {
             name: "main",
@@ -136,7 +136,7 @@ Program {
                                 node: Var(
                                     "UserId",
                                 ),
-                                span: 162..168,
+                                span: 163..169,
                             },
                             [
                                 Spanned {
@@ -146,11 +146,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 169..170,
+                                    span: 170..171,
                                 },
                             ],
                         ),
-                        span: 162..171,
+                        span: 163..172,
                     },
                     Spanned {
                         node: Let(
@@ -161,7 +161,7 @@ Program {
                                         node: Var(
                                             "print",
                                         ),
-                                        span: 174..179,
+                                        span: 175..180,
                                     },
                                     [
                                         Spanned {
@@ -171,7 +171,7 @@ Program {
                                                     node: Var(
                                                         "u",
                                                     ),
-                                                    span: 180..181,
+                                                    span: 181..182,
                                                 },
                                                 Spanned {
                                                     node: Call(
@@ -179,7 +179,7 @@ Program {
                                                             node: Var(
                                                                 "UserId",
                                                             ),
-                                                            span: 185..191,
+                                                            span: 186..192,
                                                         },
                                                         [
                                                             Spanned {
@@ -189,18 +189,18 @@ Program {
                                                                         suffix: None,
                                                                     },
                                                                 ),
-                                                                span: 192..193,
+                                                                span: 193..194,
                                                             },
                                                         ],
                                                     ),
-                                                    span: 185..194,
+                                                    span: 186..195,
                                                 },
                                             ),
-                                            span: 180..194,
+                                            span: 181..195,
                                         },
                                     ],
                                 ),
-                                span: 174..195,
+                                span: 175..196,
                             },
                             Spanned {
                                 node: Call(
@@ -208,7 +208,7 @@ Program {
                                         node: Var(
                                             "print",
                                         ),
-                                        span: 198..203,
+                                        span: 199..204,
                                     },
                                     [
                                         Spanned {
@@ -217,7 +217,7 @@ Program {
                                                     node: Var(
                                                         "unwrap",
                                                     ),
-                                                    span: 204..210,
+                                                    span: 205..211,
                                                 },
                                                 [
                                                     Spanned {
@@ -226,7 +226,7 @@ Program {
                                                                 node: Var(
                                                                     "Wrap",
                                                                 ),
-                                                                span: 211..215,
+                                                                span: 212..216,
                                                             },
                                                             [
                                                                 Spanned {
@@ -235,7 +235,7 @@ Program {
                                                                             node: Var(
                                                                                 "unwrap",
                                                                             ),
-                                                                            span: 216..222,
+                                                                            span: 217..223,
                                                                         },
                                                                         [
                                                                             Spanned {
@@ -244,7 +244,7 @@ Program {
                                                                                         node: Var(
                                                                                             "Wrap",
                                                                                         ),
-                                                                                        span: 223..227,
+                                                                                        span: 224..228,
                                                                                     },
                                                                                     [
                                                                                         Spanned {
@@ -254,36 +254,36 @@ Program {
                                                                                                     suffix: None,
                                                                                                 },
                                                                                             ),
-                                                                                            span: 228..229,
+                                                                                            span: 229..230,
                                                                                         },
                                                                                     ],
                                                                                 ),
-                                                                                span: 223..230,
+                                                                                span: 224..231,
                                                                             },
                                                                         ],
                                                                     ),
-                                                                    span: 216..231,
+                                                                    span: 217..232,
                                                                 },
                                                             ],
                                                         ),
-                                                        span: 211..232,
+                                                        span: 212..233,
                                                     },
                                                 ],
                                             ),
-                                            span: 204..233,
+                                            span: 205..234,
                                         },
                                     ],
                                 ),
-                                span: 198..234,
+                                span: 199..235,
                             },
                         ),
-                        span: 174..234,
+                        span: 175..235,
                     },
                 ),
-                span: 154..234,
+                span: 155..235,
             },
             wheres: [],
-            span: 140..234,
+            span: 141..235,
         },
     ],
 }

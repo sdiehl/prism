@@ -1,0 +1,15 @@
+-- Numeric defaulting for == / != / ordered ops lives in one rule. A bare `==`
+-- and a bare `<` default an unconstrained operand to Int; Str and Float
+-- operands keep their primitive compare.
+
+-- Unconstrained operands: both default to Int.
+fn eqp(x, y) = x == y
+
+fn ltp(x, y) = x < y
+
+fn main() =
+  println(1 == 1)
+  println("a" == "b")
+  println(1.0 == 2.0)
+  println(eqp(2, 2))
+  println(ltp(1, 2))

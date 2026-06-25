@@ -1,0 +1,70 @@
+/* Inline "Run" / "Open in Playground" controls for ```prism blocks
+   (see theme/prism-run.js). Both are green icon-buttons of the same family. */
+.prism-run-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -0.4rem 0 0.6rem 0;
+}
+
+.prism-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font: inherit;
+  font-size: 0.82em;
+  line-height: 1.4;
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px solid #2c8a5d;
+  border-radius: 6px;
+  padding: 0.2rem 0.7rem;
+  background: #2f6f4f;
+  color: #fff;
+}
+.prism-run-btn:hover {
+  background: #37865f;
+}
+.prism-run-btn:active {
+  background: #296446;
+}
+.prism-run-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* "Open in Playground": same green family, slightly lighter to distinguish.
+   Anchor needs link-state selectors to outrank the mdbook theme's a:link. */
+.prism-run-open,
+.prism-run-open:link,
+.prism-run-open:visited,
+.prism-run-open:hover {
+  color: #fff !important;
+  text-decoration: none;
+}
+.prism-run-open {
+  background: #2a6147;
+}
+.prism-run-open:hover {
+  background: #34795a;
+}
+
+.prism-run-ico {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.prism-run-out {
+  margin: 0 0 1rem 0;
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid #2f6f4f;
+  background: var(--sidebar-bg, #14191f);
+  color: var(--sidebar-fg, #c8c9db);
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  border-radius: 0 4px 4px 0;
+}
+.prism-run-out.prism-run-err {
+  border-left-color: #c0392b;
+  color: #e88;
+}

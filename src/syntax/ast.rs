@@ -149,6 +149,9 @@ pub struct ImportDecl {
     pub path: Vec<String>,
     pub alias: Option<String>,
     pub names: Option<Vec<String>>,
+    // A `pub import` re-exports the imported names from this module, so a
+    // downstream importer can reach them through this module too.
+    pub reexport: bool,
     pub span: Span,
 }
 
@@ -166,8 +169,7 @@ pub enum Item {
     Fn(Decl),
 }
 
-// The parser only ever builds `Surface` items, so `Item` stays non-generic and
-// refers to the default-phase decls above.
+// The parser only builds `Surface` items, so `Item` stays non-generic.
 
 // `pattern Polar(r, t) for Complex = view \(c) -> ... make \(r, t) -> ...`:
 // a Scala-style extractor. `view` deconstructs in match position, `make`
@@ -237,6 +239,10 @@ pub enum AliasRhs {
 pub struct ClassDecl {
     pub name: String,
     pub param: String,
+    // Superclass class names, each a constraint over `param` (`class Ord(a)
+    // given Eq(a)` records `["Eq"]`). Every instance of this class then carries
+    // a resolved superclass dictionary, projectable from a `given` constraint.
+    pub supers: Vec<String>,
     pub methods: Vec<(String, Ty)>,
     pub span: Span,
 }
@@ -248,6 +254,10 @@ pub struct InstanceDecl<P: Phase = Surface> {
     pub head: Ty,
     pub context: Vec<Constraint>,
     pub methods: Vec<Decl<P>>,
+    // The module that defines this instance, for the orphan/overlap rules and
+    // provenance diagnostics. Empty for a root-program instance. A user instance
+    // is tagged by the renamer; a derived one by its data type's canonical name.
+    pub module: String,
     pub span: Span,
 }
 
@@ -354,6 +364,9 @@ pub enum Ty {
     Char,
     Str,
     Var(String),
+    // Higher-kinded application of a type variable: `f(a)`, `t(a, b)`. The head is
+    // always a (lowercase) variable; a constructor head parses as `Con` instead.
+    App(String, Vec<Self>),
     // A `var x := e` state cell, lowered straight to the pinned existential
     // `Exist(n)` so every read/write/handler of one var unifies through it. Only
     // desugar produces it. It never appears in source or surviving annotations.
@@ -395,6 +408,39 @@ pub enum BinOp {
     Lef,
     Gtf,
     Gef,
+}
+
+impl BinOp {
+    /// The canonical source spelling of this operator.
+    #[must_use]
+    pub const fn spelling(self) -> &'static str {
+        use crate::kw;
+        match self {
+            Self::Add => kw::PLUS,
+            Self::Sub => kw::MINUS,
+            Self::Mul => kw::STAR,
+            Self::Div => kw::SLASH,
+            Self::Rem => kw::PERCENT,
+            Self::Eq => kw::EQ_EQ,
+            Self::Ne => kw::NE,
+            Self::Lt => kw::LT,
+            Self::Le => kw::LE,
+            Self::Gt => kw::GT,
+            Self::Ge => kw::GE,
+            Self::And => kw::AMP_AMP,
+            Self::Or => kw::PIPE_PIPE,
+            Self::Addf => kw::PLUS_DOT,
+            Self::Subf => kw::MINUS_DOT,
+            Self::Mulf => kw::STAR_DOT,
+            Self::Divf => kw::SLASH_DOT,
+            Self::Eqf => kw::EQ_DOT,
+            Self::Nef => kw::NE_DOT,
+            Self::Ltf => kw::LT_DOT,
+            Self::Lef => kw::LE_DOT,
+            Self::Gtf => kw::GT_DOT,
+            Self::Gef => kw::GE_DOT,
+        }
+    }
 }
 
 // The compilation phase an expression tree belongs to. `Surface` is the parsed
@@ -487,6 +533,10 @@ pub enum Sugar<P: Phase> {
     // (one or more exprs) sets the start and, from its first two, the step;
     // desugars to prelude `enum_from_to` / `enum_from_then_to`.
     Range(Vec<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // Point-free function composition `f >> g` (forward, `true`) or `f << g`
+    // (backward, `false`). Kept as sugar so the surface operator survives
+    // formatting; desugar lowers it to `\x -> g(f(x))` / `\x -> f(g(x))`.
+    Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
 }
 
 #[derive(Clone, Debug)]

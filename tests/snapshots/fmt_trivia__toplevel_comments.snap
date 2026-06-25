@@ -4,6 +4,7 @@ expression: "fmt(\"-- module header\\n\\\n     fn first() : Int = 1\\n\\\n     -
 ---
 -- module header
 fn first() : Int = 1
+
 -- between declarations
 fn second() : Int = 2
 -- dangling tail comment

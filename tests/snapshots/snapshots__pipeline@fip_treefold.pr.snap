@@ -1,0 +1,209 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/fip_treefold.pr
+---
+== tokens ==
+VOpen Type UIdent("Tree") Eq UIdent("Leaf") Bar UIdent("Node") LParen UIdent("Tree") Comma KwInt Comma UIdent("Tree") RParen VSemi Fip Fn Ident("relabel") LParen Ident("t") RParen Eq VOpen Match Ident("t") Of VOpen UIdent("Leaf") FatArrow UIdent("Leaf") VSemi UIdent("Node") LParen Ident("l") Comma Ident("x") Comma Ident("r") RParen FatArrow UIdent("Node") LParen Ident("relabel") LParen Ident("l") RParen Comma Ident("x") Plus Ident("x") Comma Ident("relabel") LParen Ident("r") RParen RParen VClose VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Tree",
+            params: [],
+            ctors: [
+                Ctor {
+                    name: "Leaf",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Node",
+                    args: [
+                        Con(
+                            "Tree",
+                            [],
+                        ),
+                        Int,
+                        Con(
+                            "Tree",
+                            [],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 526..566,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "relabel",
+            params: [
+                Param {
+                    name: "t",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "t",
+                        ),
+                        span: 596..597,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Leaf",
+                                    [],
+                                ),
+                                span: 605..609,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "Leaf",
+                                ),
+                                span: 613..617,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Node",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "l",
+                                            ),
+                                            span: 627..628,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 630..631,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 633..634,
+                                        },
+                                    ],
+                                ),
+                                span: 622..635,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "Node",
+                                        ),
+                                        span: 639..643,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "relabel",
+                                                    ),
+                                                    span: 644..651,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "l",
+                                                        ),
+                                                        span: 652..653,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 644..654,
+                                        },
+                                        Spanned {
+                                            node: Bin(
+                                                Add,
+                                                Spanned {
+                                                    node: Var(
+                                                        "x",
+                                                    ),
+                                                    span: 656..657,
+                                                },
+                                                Spanned {
+                                                    node: Var(
+                                                        "x",
+                                                    ),
+                                                    span: 660..661,
+                                                },
+                                            ),
+                                            span: 656..661,
+                                        },
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "relabel",
+                                                    ),
+                                                    span: 663..670,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "r",
+                                                        ),
+                                                        span: 671..672,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 663..673,
+                                        },
+                                    ],
+                                ),
+                                span: 639..674,
+                            },
+                        },
+                    ],
+                ),
+                span: 590..674,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 568..674,
+        },
+    ],
+}
+
+== types ==
+relabel : (Tree) -> Tree
+
+== core (cbpv) ==
+fn relabel(t) =
+  return t to t@0; case t@0 { Leaf => return Leaf | Node(l, x, r) => return l to t@1; relabel(t@1) to t@2; return x to t@3; return x to t@4; t@3 + t@4 to t@5; return r to t@6; relabel(t@6) to t@7; return Node(t@2, t@5, t@7) }
+
+== fip ==
+Type Error: function `relabel` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+    ╭─[ <source>:10:1 ]
+    │
+ 10 │ ╭─▶ fip fn relabel(t) =
+    ┆ ┆   
+ 13 │ ├─▶     Node(l, x, r) => Node(relabel(l), x + x, relabel(r))
+    │ │                                                              
+    │ ╰────────────────────────────────────────────────────────────── function `relabel` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+────╯

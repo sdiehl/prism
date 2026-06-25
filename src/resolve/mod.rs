@@ -3,9 +3,12 @@
 //! A program with no imports is a single module (the user's source plus the
 //! implicit prelude); resolution is then the identity on names and only
 //! validates the export table. With imports, [`resolve_modules`] loads the
-//! referenced files, renames each imported module's private names to a
-//! collision-proof canonical form, resolves qualified references, and merges
-//! everything into one flat [`Program`] for the rest of the pipeline.
+//! referenced files and assigns every top-level name in each imported module a
+//! canonical symbol (`Data.Map.insert` for exports, `Data.Map@helper` for
+//! privates), rewrites every reference in each module against its own import
+//! scope, and merges everything into one flat [`Program`] keyed by those
+//! globally unique symbols. Two modules may export the same short name and
+//! coexist, since references reach the disjoint canonical symbols.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -20,6 +23,19 @@ use crate::syntax::ast::{
 
 mod load;
 pub use load::{load, Module};
+
+/// Bare names a selective import binds in unqualified scope, each mapped to the
+/// canonical symbol it resolves to.
+type Unqualified = BTreeMap<String, String>;
+
+/// A qualifier (alias, else last path component) mapped to the loaded modules it
+/// names; an entry has more than one index only when imports share a qualifier.
+type Quals = BTreeMap<String, Vec<usize>>;
+
+/// A module's exported names mapped to the canonical symbol each resolves to.
+/// For an own definition that is `Module.name`; for a `pub import` re-export it
+/// is the original definition's canonical symbol.
+type Exports = BTreeMap<String, String>;
 
 /// Every name a program binds at the top level: the universe a `pub` export or
 /// an importer may refer to (type and constructor names, effects, errors,
@@ -42,9 +58,9 @@ pub fn binders(p: &Program) -> BTreeSet<String> {
 }
 
 /// The names a module makes visible to importers: every `pub` item, plus the
-/// constructors of every `pub` data type (exported transparently). An `opaque`
-/// type exports its name only; its constructors stay module-private, so the
-/// existing private-namespacing machinery hides them from importers.
+/// constructors of every transparent `pub` data type. An `opaque` type exports
+/// its name only; its constructors stay module-private, so their absence from
+/// this set hides them from importers.
 fn exports_of(p: &Program) -> BTreeSet<String> {
     let mut e = p.exports.clone();
     for d in &p.types {
@@ -73,10 +89,11 @@ pub fn resolve(program: Program) -> Result<Program, TypeError> {
     Ok(program)
 }
 
-/// A loaded module's identity and the bare names it exports.
-struct ModExports {
+/// A loaded module's identity and the canonical symbol each exported name
+/// resolves to (its own definitions plus any `pub import` re-exports).
+struct ModInfo {
     path: String,
-    exports: BTreeSet<String>,
+    exports: Exports,
 }
 
 /// Resolve a program that may import other modules, loading them under `base`.
@@ -92,81 +109,76 @@ pub fn resolve_modules(root: Program, base: &Path) -> Result<Program, Error> {
     }
 
     let mut modules = load(&root, base)?;
-    let mods: Vec<ModExports> = modules
+    let mut mods: Vec<ModInfo> = modules
         .iter()
-        .map(|m| ModExports {
-            path: m.path.join("."),
-            exports: exports_of(&m.prog),
+        .map(|m| {
+            let path = m.path.join(".");
+            let exports = exports_of(&m.prog)
+                .into_iter()
+                .map(|n| {
+                    let canon = format!("{path}.{n}");
+                    (n, canon)
+                })
+                .collect();
+            ModInfo { path, exports }
         })
         .collect();
-    let by_path: BTreeMap<&str, usize> = mods
+    let by_path: BTreeMap<String, usize> = mods
         .iter()
         .enumerate()
-        .map(|(i, m)| (m.path.as_str(), i))
+        .map(|(i, m)| (m.path.clone(), i))
         .collect();
+    add_reexports(&mut mods, &modules, &by_path)?;
 
-    eager_unique(&root, &mods)?;
-
-    let no_privates = BTreeMap::new();
-    let root_quals = build_quals(&root.imports, &by_path, &mods)?;
+    // The root is the empty-path module: its own names (and the prelude prepended
+    // to it) stay bare, so `main` and the prelude keep their global symbols.
+    let root_own = canon_of(&root, None);
+    let (root_unqual, root_quals) = build_scope(&root.imports, &by_path, &mods)?;
     let mut root = root;
-    Rw::new(&no_privates, &root_quals, &mods).program(&mut root)?;
+    Rw::new("", &root_own, &root_unqual, &root_quals, &mods).program(&mut root)?;
 
     for m in &mut modules {
         let path = m.path.join(".");
-        let privates = module_privates(&m.prog, &path);
-        let quals = build_quals(&m.prog.imports, &by_path, &mods)?;
-        Rw::new(&privates, &quals, &mods).program(&mut m.prog)?;
+        let own = canon_of(&m.prog, Some(&path));
+        let (unqual, quals) = build_scope(&m.prog.imports, &by_path, &mods)?;
+        Rw::new(&path, &own, &unqual, &quals, &mods).program(&mut m.prog)?;
     }
 
     Ok(merge(root, modules))
 }
 
-/// Exported names must be globally unique: no two modules may export the same
-/// bare name, and none may shadow a name the root (prelude included) binds.
-/// Private names are namespaced separately, so they never participate.
-fn eager_unique(root: &Program, mods: &[ModExports]) -> Result<(), Error> {
-    let root_binders = binders(root);
-    let mut owner: BTreeMap<&str, &str> = BTreeMap::new();
-    for b in &root_binders {
-        owner.insert(b, "(this program)");
-    }
-    for m in mods {
-        for n in &m.exports {
-            if let Some(prev) = owner.insert(n, &m.path) {
-                return Err(Error::Resolve(format!(
-                    "name `{n}` exported by module `{}` clashes with `{prev}`",
-                    m.path
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// A module's private top-level names mapped to collision-proof canonical names
-/// (`Data.Map@helper`); the `@` is unforgeable in source and codegen rewrites it
-/// back to a dot for a valid symbol.
-fn module_privates(p: &Program, path: &str) -> BTreeMap<String, String> {
+/// Map every top-level name a module binds to its canonical form. An exported
+/// name becomes `Data.Map.insert` (dotted, the symbol an importer reaches); a
+/// private name becomes `Data.Map@helper` (the `@` is unforgeable in source and
+/// codegen rewrites it to a dot). The root module (`path == None`) is the
+/// empty-path module: its names stay bare.
+fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, String> {
     let exports = exports_of(p);
     binders(p)
         .into_iter()
-        .filter(|n| !exports.contains(n))
         .map(|n| {
-            let canon = format!("{path}@{n}");
+            let canon = match path {
+                None => n.clone(),
+                Some(path) if exports.contains(&n) => format!("{path}.{n}"),
+                Some(path) => crate::names::private(path, &n),
+            };
             (n, canon)
         })
         .collect()
 }
 
-/// Map each import's qualifier (its alias, else the last path component) to the
-/// modules it names, validating selective import lists against their exports.
-fn build_quals(
+/// Build a module's import scope: the unqualified bindings a selective import
+/// brings into bare scope (each mapped to its canonical symbol), and the
+/// qualifier table mapping a qualifier (alias, else last path component) to the
+/// modules it names. A selective import also registers its qualifier, so
+/// `import M (a)` admits both bare `a` and `M.a`.
+fn build_scope(
     imports: &[ImportDecl],
-    by_path: &BTreeMap<&str, usize>,
-    mods: &[ModExports],
-) -> Result<BTreeMap<String, Vec<usize>>, Error> {
-    let mut quals: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    by_path: &BTreeMap<String, usize>,
+    mods: &[ModInfo],
+) -> Result<(Unqualified, Quals), Error> {
+    let mut unqualified: Unqualified = BTreeMap::new();
+    let mut quals: Quals = BTreeMap::new();
     for imp in imports {
         let path = imp.path.join(".");
         let idx = *by_path
@@ -174,20 +186,78 @@ fn build_quals(
             .ok_or_else(|| Error::Resolve(format!("cannot resolve import of module `{path}`")))?;
         if let Some(names) = &imp.names {
             for n in names {
-                if !mods[idx].exports.contains(n) {
+                let Some(canon) = mods[idx].exports.get(n) else {
                     return Err(Error::Resolve(format!(
                         "module `{path}` does not export `{n}`"
                     )));
+                };
+                let canon = canon.clone();
+                if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
+                    if prev != canon {
+                        return Err(Error::Resolve(format!(
+                            "`{n}` is ambiguous: brought unqualified by `{prev}` and `{canon}`"
+                        )));
+                    }
                 }
             }
         }
-        let qual = imp
+        // The full module path is always a valid qualifier (`Geo.Util.one`); the
+        // short name (alias, else last component) is the convenient one
+        // (`Util.one`). Register both, skipping the short when it equals the path.
+        let short = imp
             .alias
             .clone()
             .unwrap_or_else(|| imp.path.last().cloned().unwrap_or_default());
-        quals.entry(qual).or_default().push(idx);
+        quals.entry(path.clone()).or_default().push(idx);
+        if short != path {
+            quals.entry(short).or_default().push(idx);
+        }
     }
-    Ok(quals)
+    Ok((unqualified, quals))
+}
+
+/// Propagate `pub import` re-exports: a module that `pub import`s names from
+/// another adds them to its own export table, each pointing at the original
+/// definition's canonical symbol. Iterated to a fixpoint so a chain of
+/// re-exports (A re-exports from B, which re-exports from C) fully resolves. An
+/// own definition shadows a re-export of the same name. A `pub import` with no
+/// name list re-exports everything the source currently exports.
+fn add_reexports(
+    mods: &mut [ModInfo],
+    modules: &[Module],
+    by_path: &BTreeMap<String, usize>,
+) -> Result<(), Error> {
+    loop {
+        let snapshot: Vec<Exports> = mods.iter().map(|m| m.exports.clone()).collect();
+        let mut changed = false;
+        for (ti, m) in modules.iter().enumerate() {
+            for imp in m.prog.imports.iter().filter(|i| i.reexport) {
+                let path = imp.path.join(".");
+                let si = *by_path.get(path.as_str()).ok_or_else(|| {
+                    Error::Resolve(format!("cannot resolve import of module `{path}`"))
+                })?;
+                let src = &snapshot[si];
+                let names: Vec<String> = imp
+                    .names
+                    .as_ref()
+                    .map_or_else(|| src.keys().cloned().collect(), Clone::clone);
+                for n in names {
+                    if let Some(canon) = src.get(&n) {
+                        if let std::collections::btree_map::Entry::Vacant(e) =
+                            mods[ti].exports.entry(n)
+                        {
+                            e.insert(canon.clone());
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Concatenate the rewritten modules into the root, producing one flat program.
@@ -209,26 +279,34 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
     root
 }
 
-/// A scope-aware rewriter for one module. References to the module's own private
-/// top-level names become their canonical form; qualified references resolve to
-/// the bare exported name; local bindings (params, let/var, match vars, ...) are
-/// never rewritten.
+/// A scope-aware rewriter for one module. References to the module's own
+/// top-level names (and a selective import's unqualified names) become their
+/// canonical form; a qualified reference resolves to the imported module's
+/// canonical symbol; local bindings (params, let/var, match vars, ...) are never
+/// rewritten. A bare name in no scope is left unchanged, so builtins, effect-op
+/// names, and prelude names flow through untouched.
 struct Rw<'a> {
-    privates: &'a BTreeMap<String, String>,
+    module: &'a str,
+    own: &'a BTreeMap<String, String>,
+    unqualified: &'a BTreeMap<String, String>,
     quals: &'a BTreeMap<String, Vec<usize>>,
-    mods: &'a [ModExports],
+    mods: &'a [ModInfo],
     locals: Vec<String>,
     err: Option<TypeError>,
 }
 
 impl<'a> Rw<'a> {
     const fn new(
-        privates: &'a BTreeMap<String, String>,
+        module: &'a str,
+        own: &'a BTreeMap<String, String>,
+        unqualified: &'a BTreeMap<String, String>,
         quals: &'a BTreeMap<String, Vec<usize>>,
-        mods: &'a [ModExports],
+        mods: &'a [ModInfo],
     ) -> Self {
         Self {
-            privates,
+            module,
+            own,
+            unqualified,
             quals,
             mods,
             locals: Vec::new(),
@@ -283,6 +361,7 @@ impl<'a> Rw<'a> {
             }
         }
         for inst in &mut p.instances {
+            inst.module = self.module.to_string();
             inst.class = self.value(&inst.class, inst.span);
             self.ty(&mut inst.head);
             for con in &mut inst.context {
@@ -492,7 +571,7 @@ impl<'a> Rw<'a> {
 
     fn sugar(&mut self, s: &mut Sugar<Surface>, span: Span) {
         match s {
-            Sugar::Default(a, b) | Sugar::Transact(a, b) => {
+            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
                 self.expr(a);
                 self.expr(b);
             }
@@ -615,27 +694,32 @@ impl<'a> Rw<'a> {
         }
     }
 
-    /// Canonicalize a top-level definition name (private -> namespaced).
+    /// Canonicalize a top-level definition name to its module-qualified form.
     fn canon(&self, name: &str) -> String {
-        self.privates
+        self.own
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_string())
     }
 
-    /// Resolve a referenced name: locals untouched, `Q.n` resolved through the
-    /// qualifier table, own privates rewritten, everything else left bare.
+    /// Resolve a referenced name: locals untouched; `Q.n` resolved through the
+    /// qualifier table; the module's own names and any unqualified imports
+    /// rewritten to canonical form; everything else (builtins, effect ops,
+    /// prelude) left bare for later phases.
     fn value(&mut self, name: &str, span: Span) -> String {
         if self.locals.iter().any(|l| l == name) {
             return name.to_string();
         }
-        if let Some((q, n)) = name.split_once('.') {
+        // Split on the LAST dot, so a multi-segment qualifier (`Geo.Util.one`)
+        // resolves as (`Geo.Util`, `one`) and a single one (`Map.insert`) as
+        // (`Map`, `insert`).
+        if let Some((q, n)) = name.rsplit_once('.') {
             return self.qualified(q, n, name, span);
         }
-        self.privates
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_string())
+        if let Some(canon) = self.own.get(name).or_else(|| self.unqualified.get(name)) {
+            return canon.clone();
+        }
+        name.to_string()
     }
 
     fn qualified(&mut self, q: &str, n: &str, full: &str, span: Span) -> String {
@@ -646,21 +730,26 @@ impl<'a> Rw<'a> {
             );
             return full.to_string();
         };
-        let hits: Vec<&str> = idxs
+        let hits: Vec<&ModInfo> = idxs
             .iter()
-            .filter(|&&i| self.mods[i].exports.contains(n))
-            .map(|&i| self.mods[i].path.as_str())
+            .filter(|&&i| self.mods[i].exports.contains_key(n))
+            .map(|&i| &self.mods[i])
             .collect();
         match hits.as_slice() {
             [] => {
                 self.record(span, format!("module `{q}` does not export `{n}`"));
                 full.to_string()
             }
-            [_] => n.to_string(),
+            [m] => m
+                .exports
+                .get(n)
+                .cloned()
+                .unwrap_or_else(|| full.to_string()),
             many => {
+                let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
                 self.record(
                     span,
-                    format!("`{full}` is ambiguous: exported by {}", many.join(", ")),
+                    format!("`{full}` is ambiguous: exported by {}", paths.join(", ")),
                 );
                 full.to_string()
             }

@@ -1,4 +1,4 @@
-import init, { run } from "../pkg/tiny_prism.js";
+import init, { run } from "../pkg/prism.js";
 
 interface WorkerScope {
   onmessage: ((e: MessageEvent<string>) => void) | null;

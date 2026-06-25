@@ -12,6 +12,7 @@
 type Color = R | B
 
 type RB = E | T(Color, RB, Int, RB)
+
 fn balance(c, l, x, r) : ! RB =
   match T(c, l, x, r) of
     T(B, T(R, T(R, a, xv, b), yv, cc), zv, d) =>

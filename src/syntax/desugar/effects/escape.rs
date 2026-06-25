@@ -69,7 +69,9 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::VarDecl(x, v, b) => fr(v).or_else(|| free_resume(b, x == RESUME)),
         Sugar::NamedHandle(_, b, arms) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
         Sugar::Assign(_, b) | Sugar::OptChain(b, _) => fr(b),
-        Sugar::Default(a, b) | Sugar::Transact(a, b) => fr(a).or_else(|| fr(b)),
+        Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+            fr(a).or_else(|| fr(b))
+        }
         Sugar::Throw(_, args) => args.iter().find_map(fr),
         Sugar::TryCatch(b, arms) => fr(b).or_else(|| {
             arms.iter()

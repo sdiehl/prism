@@ -11,6 +11,10 @@ type Ops = BTreeMap<String, EffOpInfo>;
 // effect row: annotated higher-order parameters. Applying one performs its row.
 type Locals = BTreeMap<String, Effects>;
 
+// This set-pass is not a redundant twin of the DK row unifier: its result seeds
+// each function's row prefix in `infer_decl`, so the unifier knows which labels
+// to expect. It cannot be dropped in favour of projecting the inferred row until
+// effect-row inference becomes fully principal on its own.
 pub(crate) fn fixpoint(prog: &Program<Core>, ops: &Ops) -> BTreeMap<String, Effects> {
     let mut map: BTreeMap<String, Effects> = prog
         .fns
@@ -21,10 +25,8 @@ pub(crate) fn fixpoint(prog: &Program<Core>, ops: &Ops) -> BTreeMap<String, Effe
         let mut changed = false;
         for d in &prog.fns {
             let e = of_decl(d, &map, ops);
-            // A lookup is not a panic: the map was seeded from prog.fns, but an
-            // absent function legitimately means "no effects" (the same
-            // Effects::new() the map starts with), so fall back rather than
-            // asserting presence.
+            // An absent function legitimately means "no effects" (the
+            // Effects::new() the map starts with), so fall back, never panic.
             let slot = map.entry(d.name.clone()).or_default();
             if e != *slot {
                 *slot = e;

@@ -1,4 +1,5 @@
 type Tree = Leaf | Node(Int, Tree, Tree)
+
 fn insert(x, t) : ! Tree =
   match t of
     Leaf => Node(x, Leaf, Leaf)

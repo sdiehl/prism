@@ -1,0 +1,4 @@
+fn main() =
+  let name = "Prism"
+  let n = 42
+  println("hello {name}, n = {n}")

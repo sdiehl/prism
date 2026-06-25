@@ -1,0 +1,13 @@
+fn half(n) =
+  if even(n) then
+    Ok(n / 2)
+  else
+    Err("odd")
+
+-- `half(n)?` unwraps Ok and short-circuits the chain on the first Err.
+fn quarter(n) =
+  let h = half(n)?
+  let q = half(h)?
+  Ok(q)
+
+fn main() = println(result_or(0 - 1, quarter(8)))

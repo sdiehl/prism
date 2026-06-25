@@ -86,6 +86,12 @@ impl Tc<'_> {
             .position(|e| matches!(e, Entry::Ex(w) | Entry::Solved(w, _) if *w == v))
     }
 
+    pub(super) fn index_ex_row(&self, v: u32) -> Option<usize> {
+        self.ctx
+            .iter()
+            .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
+    }
+
     fn solved(&self, v: u32) -> Option<Type> {
         self.ctx.iter().find_map(|e| match e {
             Entry::Solved(w, t) if *w == v => Some(t.clone()),
@@ -141,6 +147,8 @@ impl Tc<'_> {
                 self.apply_row(row),
                 Box::new(self.apply(r)),
             ),
+            // Re-reduce an application once its head existential resolves.
+            Type::App(h, a) => Type::app(self.apply(h), self.apply(a)),
             Type::Con(n, ps) => Type::Con(*n, ps.iter().map(|p| self.apply(p)).collect()),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.apply(t)).collect()),
             other => other.clone(),

@@ -1,0 +1,5 @@
+-- Rank-3: `rank3` takes a function that is itself rank-2 (its first parameter
+-- is a polymorphic identity). The argument lambda applies that inner identity.
+fn rank3(g : forall a. (forall b. (b) -> b, a) -> a) : Int = g(\(x) -> x, 0)
+
+fn main() = println(rank3(\(f, y) -> f(y)))

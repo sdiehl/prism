@@ -7,6 +7,7 @@ use marginalia::pretty::{
 };
 
 use super::{fmt_char, fmt_float, INDENT, LINE_WIDTH};
+use crate::kw;
 use crate::syntax::ast::{Pattern, S};
 
 fn pat_doc(p: &S<Pattern>) -> Doc {
@@ -29,7 +30,7 @@ fn pat_doc(p: &S<Pattern>) -> Doc {
                 .map(|(f, sub)| concat([text(format!("{f} = ")), pat_doc(sub)]))
                 .collect();
             if *spread {
-                items.push(text(".."));
+                items.push(text(kw::DOT_DOT));
             }
             let style = Block::default().padded();
             let style = if *spread { style } else { style.trailing() };

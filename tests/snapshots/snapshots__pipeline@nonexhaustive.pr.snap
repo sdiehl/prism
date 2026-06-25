@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/nonexhaustive.pr
 ---
 == tokens ==
@@ -59,7 +59,7 @@ Program {
                         node: Var(
                             "c",
                         ),
-                        span: 53..54,
+                        span: 54..55,
                     },
                     [
                         Arm {
@@ -68,7 +68,7 @@ Program {
                                     "Red",
                                     [],
                                 ),
-                                span: 62..65,
+                                span: 63..66,
                             },
                             body: Spanned {
                                 node: Int(
@@ -77,7 +77,7 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 69..70,
+                                span: 70..71,
                             },
                         },
                         Arm {
@@ -86,7 +86,7 @@ Program {
                                     "Green",
                                     [],
                                 ),
-                                span: 75..80,
+                                span: 76..81,
                             },
                             body: Spanned {
                                 node: Int(
@@ -95,15 +95,15 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 84..85,
+                                span: 85..86,
                             },
                         },
                     ],
                 ),
-                span: 47..85,
+                span: 48..86,
             },
             wheres: [],
-            span: 32..85,
+            span: 33..86,
         },
         Decl {
             name: "main",
@@ -117,7 +117,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 98..105,
+                        span: 100..107,
                     },
                     [
                         Spanned {
@@ -126,36 +126,36 @@ Program {
                                     node: Var(
                                         "name",
                                     ),
-                                    span: 106..110,
+                                    span: 108..112,
                                 },
                                 [
                                     Spanned {
                                         node: Var(
                                             "Red",
                                         ),
-                                        span: 111..114,
+                                        span: 113..116,
                                     },
                                 ],
                             ),
-                            span: 106..115,
+                            span: 108..117,
                         },
                     ],
                 ),
-                span: 98..116,
+                span: 100..118,
             },
             wheres: [],
-            span: 86..116,
+            span: 88..118,
         },
     ],
 }
 
 == types ==
 Type Error: in `name`: non-exhaustive match: missing Blue
-   ╭─[ <source>:3:3 ]
+   ╭─[ <source>:4:3 ]
    │
- 3 │ ╭─▶   match c of
+ 4 │ ╭─▶   match c of
    ┆ ┆   
- 5 │ ├─▶     Green => 2
+ 6 │ ├─▶     Green => 2
    │ │                    
    │ ╰──────────────────── in `name`: non-exhaustive match: missing Blue
 ───╯

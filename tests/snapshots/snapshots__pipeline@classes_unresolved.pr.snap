@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/classes_unresolved.pr
 ---
 == tokens ==
@@ -41,6 +41,7 @@ Program {
         ClassDecl {
             name: "Eq2",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "eq2",
@@ -109,6 +110,7 @@ Program {
                     span: 105..126,
                 },
             ],
+            module: "",
             span: 74..128,
         },
     ],

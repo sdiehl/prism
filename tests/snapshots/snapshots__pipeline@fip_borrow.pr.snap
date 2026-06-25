@@ -1,0 +1,58 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/fip_borrow.pr
+---
+== tokens ==
+VOpen Fip Fn Ident("keep") LParen Borrow Ident("x") RParen Eq Ident("x") VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "keep",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: true,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Var(
+                    "x",
+                ),
+                span: 236..237,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 212..237,
+        },
+    ],
+}
+
+== types ==
+keep : forall a. (a) -> a
+
+== core (cbpv) ==
+fn keep(x) =
+  return x
+
+== fip ==
+Type Error: function `keep` is marked `fip` but is not linear (has a borrowed parameter)
+   ╭─[ <source>:4:1 ]
+   │
+ 4 │ fip fn keep(borrow x) = x
+   │ ────────────┬────────────  
+   │             ╰────────────── function `keep` is marked `fip` but is not linear (has a borrowed parameter)
+───╯

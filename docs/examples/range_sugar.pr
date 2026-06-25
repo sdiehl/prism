@@ -1,0 +1,3 @@
+fn main() =
+  println(sum([1..5]))
+  println(sum([1, 3..9]))

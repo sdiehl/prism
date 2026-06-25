@@ -1,0 +1,200 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/rankn_return.pr
+---
+== tokens ==
+VOpen Fn Ident("mkid") LParen RParen Colon Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") Eq Lambda LParen Ident("x") RParen Arrow Ident("x") VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("mkid") LParen RParen LParen Int(IntLit { value: 7, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "mkid",
+            params: [],
+            ret: Some(
+                Forall(
+                    [
+                        "a",
+                    ],
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Empty,
+                        Var(
+                            "a",
+                        ),
+                    ),
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Lam(
+                    [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 164..165,
+                    },
+                ),
+                span: 156..165,
+            },
+            wheres: [],
+            span: 123..165,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 179..186,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "mkid",
+                                            ),
+                                            span: 187..191,
+                                        },
+                                        [],
+                                    ),
+                                    span: 187..193,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 7,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 194..195,
+                                    },
+                                ],
+                            ),
+                            span: 187..196,
+                        },
+                    ],
+                ),
+                span: 179..197,
+            },
+            wheres: [],
+            span: 167..197,
+        },
+    ],
+}
+
+== types ==
+mkid : () -> forall a. (a) -> a
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn mkid() =
+  return thunk { \x. return x }
+fn main() =
+  return 7 to t@0; mkid() to t@1; (force t@1)(t@0) to t@2; print t@2 to t@3; print_nl
+
+== fbip (rc) ==
+fn mkid() =
+  return thunk { \x. return x }
+fn main() =
+  return 7 to t@0; mkid() to t@1; (force t@1)(t@0) to t@2; print t@2 to t@3; drop t@3 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_mkid() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  ret i64 %t2
+}
+
+declare ptr @prism_alloc(i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_mkid()
+  %t1 = call i64 @prism_apply_1(i64 %t0, i64 15)
+  call void @prism_rc_dec(i64 %t0)
+  call void @prism_print_int(i64 %t1)
+  call void @prism_rc_dec(i64 %t1)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+declare void @prism_rc_dec(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  ret i64 %_p0
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [7]
+result: ()

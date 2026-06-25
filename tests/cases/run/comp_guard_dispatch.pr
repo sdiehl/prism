@@ -1,0 +1,16 @@
+-- An overloaded operator inside a comprehension or for-loop guard. The derived
+-- `Eq(Tag)` that `t == A` needs is keyed by the comparison's span; the guard
+-- desugars to `succeeds(thunk { guard(t == A) })`, so those synthesized wrapper
+-- calls must not share the comparison's span or the dictionary leaks into them
+-- and over-applies the monomorphic `guard`/`succeeds`. Both the comprehension
+-- and the statement `for` exercise the failable-guard path.
+type Tag = A | B | C deriving (Eq)
+
+fn tags() = [A, B, A, C, A]
+
+fn main() =
+  let only_a = [t for t in sof(tags()), if t == A]
+  println(length(only_a))
+  for t in sof(tags()),
+      if t == C do
+    println(1)

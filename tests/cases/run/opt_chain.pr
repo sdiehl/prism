@@ -3,6 +3,7 @@
 -- path yields its leaf; a `None` anywhere prunes to the fallback.
 
 type Leaf = Leaf { n: Int }
+
 type Node = Node { kid: Option(Leaf) }
 
 fn main() =

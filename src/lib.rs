@@ -18,11 +18,15 @@ pub mod core;
 pub mod driver;
 pub mod error;
 pub mod eval;
+pub mod fixpoint;
 pub mod fmt;
 pub mod fresh;
+pub mod kw;
 pub mod lex;
 pub mod names;
 pub mod parse;
+#[cfg(feature = "native")]
+pub mod project;
 #[cfg(feature = "native")]
 pub mod repl;
 pub mod resolve;

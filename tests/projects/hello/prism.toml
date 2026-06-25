@@ -1,0 +1,5 @@
+[package]
+name = "hello"
+
+[bin]
+entry = "src/main.pr"

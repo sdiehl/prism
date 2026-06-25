@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/nonexhaustive_int.pr
 ---
 == tokens ==
@@ -96,7 +96,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 63..70,
+                        span: 64..71,
                     },
                     [
                         Spanned {
@@ -105,7 +105,7 @@ Program {
                                     node: Var(
                                         "small",
                                     ),
-                                    span: 71..76,
+                                    span: 72..77,
                                 },
                                 [
                                     Spanned {
@@ -115,18 +115,18 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 77..78,
+                                        span: 78..79,
                                     },
                                 ],
                             ),
-                            span: 71..79,
+                            span: 72..80,
                         },
                     ],
                 ),
-                span: 63..80,
+                span: 64..81,
             },
             wheres: [],
-            span: 51..80,
+            span: 52..81,
         },
     ],
 }

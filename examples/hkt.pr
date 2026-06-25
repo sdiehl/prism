@@ -1,0 +1,32 @@
+-- Higher-kinded type classes over the language's own data types: the class
+-- parameter ranges over a type constructor (kind * -> *), applied as `f(a)` in
+-- the method signatures. The Functor/Applicative/Monad/Foldable/Traversable
+-- tower is in the prelude with instances for List and Option, resolved by the
+-- head constructor of each instance. `fmap`/`traverse` are effect-polymorphic:
+-- the per-element effect row threads through instead of an Applicative wrapper,
+-- so effectful traversal needs no monad and no do-notation.
+--
+-- Prints:
+--   [2, 3, 4]
+--   Some(42)
+--   10
+--   [2, 3, 10, 20]
+--   Some(15)
+--   [1, 1, 2, 2, 3, 3]
+--   Some(9)
+--   [10, 20, 30]
+
+fn main() : !{IO} Unit =
+  -- Functor: map over either container with one `fmap`.
+  println(show(fmap(\(x) -> x + 1, [1, 2, 3])))
+  println(show(fmap(\(x) -> x * 2, Some(21))))
+  -- Foldable: an effect-polymorphic right fold.
+  println(show(fold_r(\(x, acc) -> x + acc, 0, [1, 2, 3, 4])))
+  -- Applicative: `ap` is cartesian on List, positional on Option.
+  println(show(ap([\(x) -> x + 1, \(x) -> x * 10], [1, 2])))
+  println(show(ap(Some(\(x) -> x + 5), Some(10))))
+  -- Monad: structural `bind` (List is nondeterminism, Option is failure).
+  println(show(bind([1, 2, 3], \(x) -> [x, x])))
+  println(show(bind(Some(3), \(x) -> Some(x * x))))
+  -- Traversable: effectful map (here the effect is none).
+  println(show(traverse(\(x) -> x * 10, [1, 2, 3])))

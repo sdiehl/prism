@@ -47,9 +47,15 @@ impl Tc<'_> {
                 }
                 self.check_annot_rows(r, span)
             }
-            ast::Ty::Con(_, ts) | ast::Ty::Tuple(ts) => {
+            ast::Ty::Con(n, ts) => {
+                no_polytype_args(ts, n, span)?;
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
+            ast::Ty::App(v, ts) => {
+                no_polytype_args(ts, v, span)?;
+                ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
+            }
+            ast::Ty::Tuple(ts) => ts.iter().try_for_each(|x| self.check_annot_rows(x, span)),
             _ => Ok(()),
         }
     }
@@ -141,6 +147,14 @@ impl Tc<'_> {
                 Sym::from(n),
                 args.iter().map(|x| self.convert_annot(x, a)).collect(),
             ),
+            ast::Ty::App(v, args) => {
+                // The head is a type variable (rigid or to-be-unified), applied.
+                let head = self.convert_annot(&ast::Ty::Var(v.clone()), a);
+                Type::apps(
+                    head,
+                    args.iter().map(|x| self.convert_annot(x, a)).collect(),
+                )
+            }
             ast::Ty::Tuple(ts) => {
                 Type::Tuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
             }
@@ -177,6 +191,27 @@ impl Tc<'_> {
             .rev()
             .fold(base, |acc, l| EffRow::Extend(l, Box::new(acc)))
     }
+}
+
+// Predicativity at the source: a type-constructor argument ranges over
+// monotypes, so a polytype written directly as one (`List(forall a. ...)`) is
+// impredicative. Foralls nested under a function arrow (a rank-N argument or
+// result) or declared as a data field stay legal, since those are not a type
+// argument. The check is syntactic, so it fires before inference and points at
+// the annotation rather than surfacing later as a leaked rigid variable.
+fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), TypeError> {
+    if args.iter().any(|a| matches!(a, ast::Ty::Forall(..))) {
+        return Err(TypeError::Other {
+            span,
+            msg: format!(
+                "impredicative type: a polymorphic type cannot be a type argument to `{head}` \
+                 (a type parameter ranges over monomorphic types). Higher-rank types are \
+                 allowed as function arguments, results, and declared data fields; wrap the \
+                 polymorphic type in a data type with a polymorphic field to carry it here."
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
@@ -237,6 +272,10 @@ pub(super) fn convert_data(t: &ast::Ty) -> Type {
             convert_data(r),
         ),
         ast::Ty::Con(n, args) => Type::Con(Sym::from(n), args.iter().map(convert_data).collect()),
+        ast::Ty::App(v, args) => Type::apps(
+            Type::Var(Sym::from(v)),
+            args.iter().map(convert_data).collect(),
+        ),
         ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(convert_data).collect()),
     }
 }
@@ -265,6 +304,38 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
                 collect_type_vars(p, out);
             }
         }
+        Type::App(h, a) => {
+            collect_type_vars(h, out);
+            collect_type_vars(a, out);
+        }
+        _ => {}
+    }
+}
+
+// Free effect-row variables in a type, so a class method's signature can be
+// generalized over its row variables (an effect-polymorphic method like `fmap`).
+pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
+    match t {
+        Type::Fun(ps, row, r) => {
+            for p in ps {
+                collect_row_vars(p, out);
+            }
+            if let EffRow::Var(v) = row.tail() {
+                out.insert(*v);
+            }
+            row.for_each_arg(&mut |a| collect_row_vars(a, out));
+            collect_row_vars(r, out);
+        }
+        Type::Con(_, ps) | Type::Tuple(ps) => {
+            for p in ps {
+                collect_row_vars(p, out);
+            }
+        }
+        Type::App(h, a) => {
+            collect_row_vars(h, out);
+            collect_row_vars(a, out);
+        }
+        Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
         _ => {}
     }
 }
@@ -348,12 +419,47 @@ const BUILTINS: &[(&str, &str)] = &[
     ("append_file", "(String, String) -> Result(Unit, String)"),
     ("remove_file", "(String) -> Unit"),
     ("exit", "forall a. (Int) -> a"),
+    ("system", "(String) -> Int ! {IO}"),
+    ("eprint", "(String) -> Unit ! {IO}"),
     ("args_count", "() -> Int"),
     ("arg", "(Int) -> String"),
     ("to_i64", "(Int) -> I64"),
     ("to_u64", "(Int) -> U64"),
     ("int_of_i64", "(I64) -> Int"),
     ("int_of_u64", "(U64) -> Int"),
+    ("i64_and", "(I64, I64) -> I64"),
+    ("i64_or", "(I64, I64) -> I64"),
+    ("i64_xor", "(I64, I64) -> I64"),
+    ("i64_shl", "(I64, I64) -> I64"),
+    ("i64_shr", "(I64, I64) -> I64"),
+    ("u64_and", "(U64, U64) -> U64"),
+    ("u64_or", "(U64, U64) -> U64"),
+    ("u64_xor", "(U64, U64) -> U64"),
+    ("u64_shl", "(U64, U64) -> U64"),
+    ("u64_shr", "(U64, U64) -> U64"),
+    ("array_new", "forall a. (Int, a) -> Array(a)"),
+    ("array_empty", "forall a. () -> Array(a)"),
+    ("array_len", "forall a. (Array(a)) -> Int"),
+    ("array_get", "forall a. (Array(a), Int) -> a"),
+    ("array_set", "forall a. (Array(a), Int, a) -> Array(a)"),
+    ("array_push", "forall a. (Array(a), a) -> Array(a)"),
+    ("array_pop", "forall a. (Array(a)) -> Array(a)"),
+    ("string_of_array", "(Array(String)) -> String"),
+    ("string_of_bytes", "(Array(Int)) -> String"),
+    ("byte_at", "(String, Int) -> Int"),
+    ("byte_len", "(String) -> Int"),
+    ("i64_add", "(I64, I64) -> I64"),
+    ("i64_sub", "(I64, I64) -> I64"),
+    ("i64_mul", "(I64, I64) -> I64"),
+    ("u64_add", "(U64, U64) -> U64"),
+    ("u64_sub", "(U64, U64) -> U64"),
+    ("u64_mul", "(U64, U64) -> U64"),
+    ("i64_div", "(I64, I64) -> I64"),
+    ("i64_rem", "(I64, I64) -> I64"),
+    ("i64_cmp", "(I64, I64) -> Int"),
+    ("u64_div", "(U64, U64) -> U64"),
+    ("u64_rem", "(U64, U64) -> U64"),
+    ("u64_cmp", "(U64, U64) -> Int"),
 ];
 
 // A builtin signature carries its latent effects on the arrow. The row feeds
@@ -417,6 +523,15 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     let mut data = BTreeMap::new();
     let mut ctors = BTreeMap::new();
     let mut env = base_env()?;
+    // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface
+    // constructors, manipulated only through the `array_*` builtins.
+    data.insert(
+        "Array".to_string(),
+        DataInfo {
+            params: vec!["a".to_string()],
+            ctors: vec![],
+        },
+    );
     for dd in &prog.types {
         data.insert(
             dd.name.clone(),
@@ -534,7 +649,8 @@ mod tests {
         for (name, sig) in super::BUILTINS {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
             let want: &[&str] = match *name {
-                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" => &["IO"],
+                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" | "system"
+                | "eprint" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

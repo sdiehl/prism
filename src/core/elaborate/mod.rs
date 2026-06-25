@@ -2,12 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::slice;
 
 use marginalia::Span;
+use num_bigint::Sign;
 
 use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
 use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
-use crate::names::{self, dict_ctor};
+use crate::names::{self, dict_ctor, instance_method};
 use crate::sym::Sym;
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, Pattern, Program, Spanned,
@@ -192,7 +193,7 @@ impl Elab<'_> {
             .enumerate()
             .map(|(i, (k, v))| {
                 let ty = v.clone().unwrap_or_else(|| {
-                    Type::Var(Sym::new(&crate::names::local_shadow(
+                    Type::Var(Sym::new(&names::local_shadow(
                         u32::try_from(i).unwrap_or(u32::MAX),
                     )))
                 });
@@ -869,7 +870,7 @@ fn small_int(n: &BigInt) -> Option<i64> {
     }
     let mag = n.iter_u64_digits().next().unwrap_or(0);
     #[allow(clippy::cast_possible_wrap)]
-    let v = if n.sign() == num_bigint::Sign::Minus {
+    let v = if n.sign() == Sign::Minus {
         (mag as i64).wrapping_neg()
     } else {
         mag as i64
@@ -879,7 +880,7 @@ fn small_int(n: &BigInt) -> Option<i64> {
 
 fn to_wrapped_u64(n: &BigInt) -> u64 {
     let low = n.iter_u64_digits().next().unwrap_or(0);
-    if n.sign() == num_bigint::Sign::Minus {
+    if n.sign() == Sign::Minus {
         low.wrapping_neg()
     } else {
         low
@@ -955,7 +956,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     for inst in &prog.instances {
         let info = &checked.instances[&inst.name];
         let class = &checked.classes[&info.class];
-        let dps: Vec<String> = (0..info.context.len()).map(|i| format!("_c{i}")).collect();
+        // Dict params: the declared context first (so method bodies' `_c{i}`
+        // indices are unchanged), then one per superclass obligation.
+        let nctx = info.context.len();
+        let dps: Vec<String> = (0..(nctx + info.supers.len()))
+            .map(|i| format!("_c{i}"))
+            .collect();
         for m in &inst.methods {
             let sig = &class
                 .methods
@@ -980,12 +986,18 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             let mut params = dps.clone();
             params.extend(m.params.iter().map(|p| p.name.clone()));
             fns.push(CoreFn {
-                name: format!("i@{}@{}", inst.name, m.name).into(),
+                name: instance_method(&inst.name, &m.name).into(),
                 body: elab.elab(&m.body, &locals)?,
                 params: params.into_iter().map(Sym::from).collect(),
             });
         }
         let mut fields = Vec::new();
+        // Leading superclass-dictionary fields (the trailing dict params), then
+        // one thunk per method. `Dict::Super` and method projection index past
+        // these leading fields.
+        for j in 0..info.supers.len() {
+            fields.push(Value::Var(format!("_c{}", nctx + j).into()));
+        }
         for (mname, sig) in &class.methods {
             let arity = match sig {
                 Type::Fun(d, _, _) => d.len(),
@@ -994,7 +1006,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
             let mut args: Vec<Value> = dps.iter().map(|d| Value::Var(d.clone().into())).collect();
             args.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
-            let call = Comp::Call(format!("i@{}@{mname}", inst.name).into(), args);
+            let call = Comp::Call(instance_method(&inst.name, mname).into(), args);
             fields.push(Value::Thunk(Box::new(Comp::Lam(
                 ps.into_iter().map(Sym::from).collect(),
                 Box::new(call),

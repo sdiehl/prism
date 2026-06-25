@@ -1,3 +1,9 @@
 # Summary
 
-- [Prism in one page](./intro.md)
+- [Prism](./intro.md)
+- [Language Specification](./spec.md)
+- [Compiler](./compiler.md)
+
+---
+
+- [Bibliography](./bibliography.md)

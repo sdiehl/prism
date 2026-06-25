@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::dump(\"core\", &src).unwrap()"
+expression: "prism::dump(\"core\", &src).unwrap()"
 ---
 fn noisy(x) =
   return x to t@0

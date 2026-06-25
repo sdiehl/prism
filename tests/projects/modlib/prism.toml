@@ -1,0 +1,5 @@
+[package]
+name = "modlib"
+
+[bin]
+entry = "src/main.pr"

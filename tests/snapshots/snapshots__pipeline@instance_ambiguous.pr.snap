@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "tiny_prism::report(&src)"
+expression: "prism::report(&src)"
 input_file: tests/cases/instance_ambiguous.pr
 ---
 == tokens ==
@@ -16,6 +16,7 @@ Program {
         ClassDecl {
             name: "Ord",
             param: "a",
+            supers: [],
             methods: [
                 (
                     "cmp",
@@ -122,6 +123,7 @@ Program {
                     span: 71..112,
                 },
             ],
+            module: "",
             span: 40..114,
         },
         InstanceDecl {
@@ -209,6 +211,7 @@ Program {
                     span: 147..188,
                 },
             ],
+            module: "",
             span: 116..190,
         },
     ],

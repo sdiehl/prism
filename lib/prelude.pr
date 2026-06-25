@@ -5,6 +5,7 @@ type Result(a, e) = Ok(a) | Err(e) deriving (Eq)
 type List(a) = Nil | Cons(a, List(a)) deriving (Eq)
 
 type Map(k, v) = Tip | Bin(Int, k, v, Map(k, v), Map(k, v))
+
 fn id(x) = x
 
 fn const(x, y) = x
@@ -562,9 +563,7 @@ fn sfold(s, z, f) =
       return r => \(acc) -> acc
   g(z)
 
-fn ssum(s) =
-  sfold(s, 0) fn(acc, x)
-    acc + x
+fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 
@@ -595,6 +594,294 @@ fn pad_right(s, w) =
     concat(s, str_repeat(" ", pad))
 
 fn lines_of(xs) = str_join("\n", xs)
+
+fn eprintln(s) = eprint(concat(s, "\n"))
+
+fn push_all(arr, xs) =
+  match xs of
+    Nil => arr
+    Cons(h, t) => push_all(array_push(arr, h), t)
+
+fn array_of_list(xs : List(a)) : Array(a) = push_all(array_empty(), xs)
+
+-- Join a list of strings into one with a single allocation: the O(n) builder
+-- that replaces a right-nested chain of `concat`.
+fn concat_all(xs : List(String)) : String = string_of_array(array_of_list(xs))
+
+-- A separate-chaining hash table with String keys, built on the growable Array:
+-- each bucket is an association list, and the table doubles its bucket count when
+-- the load factor passes 1. Keys hash by a modular DJB2 over their codepoints, so
+-- the hash (and thus iteration order) is a pure function of the inserts, identical
+-- across the interpreter and native backends.
+
+type HashMap(v) = HM { buckets: Array(List((String, v))), size: Int }
+
+-- FNV-1a, a real fixed-width hash written in the language: fold each byte in with
+-- xor, then a wrapping 64-bit multiply by the FNV prime. `byte_at` is O(1), so
+-- this is O(length); the U64 lane wraps instead of promoting to a bignum.
+fn fnv_from(s, i, h) =
+  if i >= byte_len(s) then
+    h
+  else
+    fnv_from(s, i + 1, u64_mul(u64_xor(h, to_u64(byte_at(s, i))), 1099511628211u64))
+
+fn str_hash(s : String) : U64 = fnv_from(s, 0, 14695981039346656037u64)
+
+fn bucket_of(k : String, n : Int) : Int =
+  int_of_u64(u64_rem(str_hash(k), to_u64(n)))
+
+fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
+
+-- These pattern-match each (key, value) pair rather than calling `fst`/`snd`, so
+-- the table keeps working in a program that defines its own `fst`/`snd`.
+fn assoc_get(pairs, k) =
+  match pairs of
+    Nil => None
+    Cons(p, rest) =>
+      match p of
+        (key, value) =>
+          if str_eq(key, k) then
+            Some(value)
+          else
+            assoc_get(rest, k)
+
+fn hm_lookup(hm : HashMap(v), k : String) : Option(v) =
+  let bs = hm.buckets
+  assoc_get(array_get(bs, bucket_of(k, array_len(bs))), k)
+
+fn hm_member(hm : HashMap(v), k : String) : Bool =
+  match hm_lookup(hm, k) of
+    Some(_) => true
+    None => false
+
+fn hm_get_or(d, hm : HashMap(v), k : String) : v =
+  match hm_lookup(hm, k) of
+    Some(x) => x
+    None => d
+
+-- Replace the value for `k` in an association list, or add it. Returns the new
+-- chain and 1 if the key was new, 0 if it replaced an existing binding.
+fn assoc_put(pairs, k, x) =
+  match pairs of
+    Nil => (Cons((k, x), Nil), 1)
+    Cons(p, rest) =>
+      match p of
+        (key, _) =>
+          if str_eq(key, k) then
+            (Cons((k, x), rest), 0)
+          else
+            match assoc_put(rest, k, x) of
+              (chain, added) => (Cons(p, chain), added)
+
+fn hm_put_raw(hm : HashMap(v), k : String, x : v) : HashMap(v) =
+  let bs = hm.buckets
+  let i = bucket_of(k, array_len(bs))
+  match assoc_put(array_get(bs, i), k, x) of
+    (chain, added) =>
+      HM { buckets = array_set(bs, i, chain), size = hm.size + added }
+
+fn buckets_to_list(bs, i, n) =
+  if i >= n then
+    Nil
+  else
+    append(array_get(bs, i), buckets_to_list(bs, i + 1, n))
+
+fn hm_to_list(hm : HashMap(v)) : List((String, v)) =
+  buckets_to_list(hm.buckets, 0, array_len(hm.buckets))
+
+fn pair_keys(ps) =
+  match ps of
+    Nil => Nil
+    Cons(p, rest) =>
+      match p of
+        (k, _) => Cons(k, pair_keys(rest))
+
+fn hm_keys(hm : HashMap(v)) : List(String) = pair_keys(hm_to_list(hm))
+
+fn hm_size(hm : HashMap(v)) : Int = hm.size
+
+fn hm_reinsert(hm, pairs) =
+  match pairs of
+    Nil => hm
+    Cons(p, rest) =>
+      match p of
+        (k, x) => hm_reinsert(hm_put_raw(hm, k, x), rest)
+
+-- Insert, doubling the bucket count and rehashing once the load factor exceeds 1.
+fn hm_insert(hm : HashMap(v), k : String, x : v) : HashMap(v) =
+  let next = hm_put_raw(hm, k, x)
+  if next.size > array_len(next.buckets) then
+    hm_reinsert(HM { buckets = array_new(array_len(next.buckets) * 2, Nil), size = 0 }, hm_to_list(next))
+  else
+    next
+
+fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
+  let bs = hm.buckets
+  let i = bucket_of(k, array_len(bs))
+  match assoc_del(array_get(bs, i), k) of
+    (chain, removed) =>
+      HM { buckets = array_set(bs, i, chain), size = hm.size - removed }
+
+fn assoc_del(pairs, k) =
+  match pairs of
+    Nil => (Nil, 0)
+    Cons(p, rest) =>
+      match p of
+        (key, _) =>
+          if str_eq(key, k) then
+            (rest, 1)
+          else
+            match assoc_del(rest, k) of
+              (r, removed) => (Cons(p, r), removed)
+
+fn pair_values(ps) =
+  match ps of
+    Nil => Nil
+    Cons(p, rest) =>
+      match p of
+        (_, value) => Cons(value, pair_values(rest))
+
+fn hm_values(hm : HashMap(v)) : List(v) = pair_values(hm_to_list(hm))
+
+fn hm_from_list_go(hm, ps) =
+  match ps of
+    Nil => hm
+    Cons(p, rest) =>
+      match p of
+        (k, x) => hm_from_list_go(hm_insert(hm, k, x), rest)
+
+fn hm_from_list(ps : List((String, v))) : HashMap(v) =
+  hm_from_list_go(hm_new(), ps)
+
+fn hm_adjust(f, hm : HashMap(v), k : String) : HashMap(v) =
+  match hm_lookup(hm, k) of
+    None => hm
+    Some(x) => hm_insert(hm, k, f(x))
+
+-- Array folds and conversion to a list.
+fn array_foldl_go(f, acc, arr, i) =
+  if i >= array_len(arr) then
+    acc
+  else
+    array_foldl_go(f, f(acc, array_get(arr, i)), arr, i + 1)
+
+fn array_foldl(f, acc, arr) = array_foldl_go(f, acc, arr, 0)
+
+fn array_to_list_go(arr, i, acc) =
+  if i < 0 then
+    acc
+  else
+    array_to_list_go(arr, i - 1, Cons(array_get(arr, i), acc))
+
+fn array_to_list(arr : Array(a)) : List(a) =
+  array_to_list_go(arr, array_len(arr) - 1, Nil)
+
+-- Command-line arguments as a list.
+fn args_go(i, n) =
+  if i >= n then
+    Nil
+  else
+    Cons(arg(i), args_go(i + 1, n))
+
+fn args() : List(String) = args_go(0, args_count())
+
+-- Character classification on the byte/codepoint returned by byte_at/char_at.
+fn is_digit(c : Int) : Bool = c >= 48 && c <= 57
+
+fn is_upper(c : Int) : Bool = c >= 65 && c <= 90
+
+fn is_lower(c : Int) : Bool = c >= 97 && c <= 122
+
+fn is_alpha(c : Int) : Bool = is_upper(c) || is_lower(c)
+
+fn is_alnum(c : Int) : Bool = is_alpha(c) || is_digit(c)
+
+fn is_space(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
+
+fn to_lower_c(c : Int) : Int =
+  if is_upper(c) then
+    c + 32
+  else
+    c
+
+fn to_upper_c(c : Int) : Int =
+  if is_lower(c) then
+    c - 32
+  else
+    c
+
+-- Byte-level substring queries (ASCII-oriented: byte index equals codepoint index
+-- for ASCII text). `occurs_at` tests whether `needle` sits at offset j in s.
+fn occurs_at(needle, s, j, k) =
+  if k >= byte_len(needle) then
+    true
+  elif j + k >= byte_len(s) then
+    false
+  elif byte_at(needle, k) == byte_at(s, j + k) then
+    occurs_at(needle, s, j, k + 1)
+  else
+    false
+
+fn starts_with(prefix : String, s : String) : Bool = occurs_at(prefix, s, 0, 0)
+
+fn ends_with(suffix : String, s : String) : Bool =
+  let d = byte_len(s) - byte_len(suffix)
+  if d < 0 then
+    false
+  else
+    occurs_at(suffix, s, d, 0)
+
+fn index_of_go(needle, s, j) =
+  if j + byte_len(needle) > byte_len(s) then
+    0 - 1
+  elif occurs_at(needle, s, j, 0) then
+    j
+  else
+    index_of_go(needle, s, j + 1)
+
+fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
+
+fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
+
+-- ASCII case mapping and whitespace trimming, rebuilt byte-accurately.
+fn map_case(s, i, arr, up) =
+  if i >= byte_len(s) then
+    arr
+  else
+    let c = byte_at(s, i)
+    map_case(s, i + 1, array_push(arr, if up then to_upper_c(c) else to_lower_c(c)), up)
+
+fn to_upper(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), true))
+
+fn to_lower(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), false))
+
+fn ltrim_idx(s, i) =
+  if i < byte_len(s) && is_space(byte_at(s, i)) then
+    ltrim_idx(s, i + 1)
+  else
+    i
+
+fn rtrim_idx(s, i) =
+  if i > 0 && is_space(byte_at(s, i - 1)) then
+    rtrim_idx(s, i - 1)
+  else
+    i
+
+fn slice_bytes(s, lo, hi, arr) =
+  if lo >= hi then
+    arr
+  else
+    slice_bytes(s, lo + 1, hi, array_push(arr, byte_at(s, lo)))
+
+fn trim(s : String) : String =
+  let lo = ltrim_idx(s, 0)
+  let hi = rtrim_idx(s, byte_len(s))
+  if lo >= hi then
+    ""
+  else
+    string_of_bytes(slice_bytes(s, lo, hi, array_empty()))
 
 fn index_of_from(c, s, i) =
   if i >= str_len(s) then
@@ -776,7 +1063,7 @@ class Eq(a) {
   eq : (a, a) -> Bool
 }
 
-class Ord(a) {
+class Ord(a) given Eq(a) {
   cmp : (a, a) -> Int
 }
 
@@ -866,6 +1153,95 @@ instance showStr : Show(String) {
 
 instance showChar : Show(Char) {
   fn show_c(x) = show_char(x)
+}
+
+-- Higher-kinded classes: the parameter ranges over a type constructor (kind
+-- * -> *), applied in the method signatures as `f(a)`. `fmap` is effect-
+-- polymorphic, so mapping an effectful function threads its row `e` through.
+class Functor(f) {
+  fmap : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
+}
+
+instance functorList : Functor(List) {
+  fn fmap(g, xs) = map(g, xs)
+}
+
+instance functorOption : Functor(Option) {
+  fn fmap(g, o) = map_option(g, o)
+}
+
+-- Foldable: collapse a container with an effect-polymorphic right fold.
+class Foldable(t) {
+  fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
+}
+
+fn option_fold_r(g, z, o) =
+  match o of
+    None => z
+    Some(x) => g(x, z)
+
+instance foldableList : Foldable(List) {
+  fn fold_r(g, z, xs) = foldr(g, z, xs)
+}
+
+instance foldableOption : Foldable(Option) {
+  fn fold_r(g, z, o) = option_fold_r(g, z, o)
+}
+
+-- Applicative: a Functor with `pure` and application `ap` inside the structure.
+class Applicative(f) given Functor(f) {
+  pure : (a) -> f(a),
+  ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
+}
+
+fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)
+
+fn option_ap(fo, xo) =
+  match fo of
+    None => None
+    Some(g) => map_option(g, xo)
+
+instance applicativeList : Applicative(List) {
+  fn pure(x) = singleton(x),
+  fn ap(fs, xs) = list_ap(fs, xs)
+}
+
+instance applicativeOption : Applicative(Option) {
+  fn pure(x) = Some(x),
+  fn ap(fo, xo) = option_ap(fo, xo)
+}
+
+-- Monad: structural sequencing via `bind`. Effects ride the effect system, so
+-- there is no do-notation; this is for List/Option-style structure.
+class Monad(m) given Applicative(m) {
+  bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
+}
+
+fn option_bind(o, g) =
+  match o of
+    None => None
+    Some(x) => g(x)
+
+instance monadList : Monad(List) {
+  fn bind(xs, g) = concat_map(g, xs)
+}
+
+instance monadOption : Monad(Option) {
+  fn bind(o, g) = option_bind(o, g)
+}
+
+-- Traversable: an effect-polymorphic traversal. The per-element effect row `e`
+-- replaces the classic `Applicative` parameter; `traverse` is effectful map.
+class Traversable(t) given Functor(t), Foldable(t) {
+  traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}
+}
+
+instance traversableList : Traversable(List) {
+  fn traverse(g, xs) = map(g, xs)
+}
+
+instance traversableOption : Traversable(Option) {
+  fn traverse(g, o) = map_option(g, o)
 }
 
 fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =

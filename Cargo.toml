@@ -1,6 +1,6 @@
 [package]
-name = "tiny-prism"
-version = "0.1.0"
+name = "prism"
+version = "0.2.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -8,7 +8,7 @@ edition = "2021"
 keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/sdiehl/tiny-prism"
+repository = "https://github.com/sdiehl/prism"
 description = "An effect-typed functional language with a call-by-push-value core that compiles to native code through LLVM."
 
 [dependencies]
@@ -25,6 +25,7 @@ num-bigint = "0.4"
 offsides = "0.2"
 rustyline = { version = "18.0", optional = true }
 thiserror = "2.0"
+toml = { version = "0.8", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [build-dependencies]
@@ -39,7 +40,7 @@ insta = { version = "1.41", features = ["glob"] }
 #   cargo build --target wasm32-unknown-unknown --no-default-features --features wasm
 [features]
 default = ["native"]
-native = ["dep:inkwell", "dep:clap", "dep:rustyline", "dep:glob"]
+native = ["dep:inkwell", "dep:clap", "dep:rustyline", "dep:glob", "dep:toml"]
 mlir = ["native"]
 wasm = ["dep:wasm-bindgen"]
 # Opt-in: route the native C runtime allocator through mimalloc. The mi_*
@@ -47,7 +48,7 @@ wasm = ["dep:wasm-bindgen"]
 mimalloc = ["dep:libmimalloc-sys"]
 
 [lib]
-name = "tiny_prism"
+name = "prism"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 

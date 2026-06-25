@@ -1,0 +1,15 @@
+type Vec2 = Vec2 { x: Int, y: Int }
+
+-- a bidirectional pattern synonym: matches when y == 0, binding x
+pattern OnXAxis(x) for Vec2 =
+  view \(v) -> if v.y == 0 then Some(v.x) else None
+  make \(x) -> Vec2 { x = x, y = 0 }
+
+fn describe(v) =
+  match v of
+    OnXAxis(x) => x
+    _ => 0 - 1
+
+fn main() =
+  println(describe(Vec2 { x = 5, y = 0 }))
+  println(describe(Vec2 { x = 5, y = 3 }))

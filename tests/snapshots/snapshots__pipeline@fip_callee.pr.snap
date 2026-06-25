@@ -1,0 +1,97 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/fip_callee.pr
+---
+== tokens ==
+VOpen Fip Fn Ident("use_it") LParen Ident("x") RParen Eq Ident("helper") LParen Ident("x") RParen VSemi Fbip Fn Ident("helper") LParen Ident("x") RParen Eq Ident("x") VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "use_it",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "helper",
+                        ),
+                        span: 341..347,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 348..349,
+                        },
+                    ],
+                ),
+                span: 341..350,
+            },
+            wheres: [],
+            fip: Fip,
+            span: 322..350,
+        },
+        Decl {
+            name: "helper",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Var(
+                    "x",
+                ),
+                span: 372..373,
+            },
+            wheres: [],
+            fip: Fbip,
+            span: 352..373,
+        },
+    ],
+}
+
+== types ==
+use_it : forall a b. (a) -> b
+helper : forall a. (a) -> a
+
+== core (cbpv) ==
+fn use_it(x) =
+  return x to t@0; helper(t@0)
+fn helper(x) =
+  return x
+
+== fip ==
+Type Error: a `fip` function may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ fip fn use_it(x) = helper(x)
+   │ ──────────────┬─────────────  
+   │               ╰─────────────── a `fip` function may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+───╯

@@ -1,0 +1,7 @@
+-- The call-graph closure: an annotated function may only call other annotated
+-- functions, else an unannotated callee's allocation would silently break the
+-- caller's zero-allocation guarantee. `caller` is `fbip` but `plain` carries no
+-- annotation, so the call is rejected.
+fn plain(x) = x + 1
+
+fbip fn caller(x) = plain(x)

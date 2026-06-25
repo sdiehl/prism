@@ -32,33 +32,29 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build wasm bundle
-        run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+      - name: Install mdbook + mdbook-tabs
+        run: cargo install mdbook mdbook-tabs
 
-      - name: Bake examples
-        run: bash scripts/gen-playground-examples.sh
-
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Build web bundle
-        working-directory: web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
+      # One script builds the wasm once and stitches the docs (at /) and the
+      # playground (at /play/) into a single site.
+      - name: Build unified site
+        run: docs/scripts/build-site.sh public
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
-          path: web/dist
+          path: public
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

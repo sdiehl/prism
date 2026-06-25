@@ -13,6 +13,7 @@
 --   -1
 
 type Tier = Tier { off: Int }
+
 type Customer = Customer { tier: Option(Tier) }
 
 fn charge(price, qty := 1, off := 0) = (price - off) * qty

@@ -1,0 +1,22 @@
+-- Word-frequency counting with the prelude hash table (HashMap). Each word maps
+-- to its running count; `hm_insert` over `hm_get_or` bumps it. The table is built
+-- on the growable Array and rehashes into a larger bucket array as it fills.
+--
+-- Prints:
+--   3
+--   2
+--   1
+--   5
+
+fn tally(m : HashMap(Int), ws : List(String)) : HashMap(Int) =
+  match ws of
+    Nil => m
+    Cons(w, rest) => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
+
+fn main() : !{IO} Unit =
+  let words = ["the", "cat", "sat", "on", "the", "mat", "the", "cat"]
+  let freq = tally(hm_new(), words)
+  println(hm_get_or(0, freq, "the"))
+  println(hm_get_or(0, freq, "cat"))
+  println(hm_get_or(0, freq, "mat"))
+  println(hm_size(freq))

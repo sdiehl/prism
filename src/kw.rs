@@ -1,0 +1,114 @@
+//! Canonical source spellings for every fixed token.
+//!
+//! Keywords, operators, and punctuation. The lexer's `Token::text`, the
+//! formatter, and the core pretty-printer all read these, so a keyword's
+//! spelling lives in exactly one place.
+
+// Keywords
+pub const FN: &str = "fn";
+pub const FIP: &str = "fip";
+pub const FBIP: &str = "fbip";
+pub const PUB: &str = "pub";
+pub const IMPORT: &str = "import";
+pub const AS: &str = "as";
+pub const TYPE: &str = "type";
+pub const NEWTYPE: &str = "newtype";
+pub const OPAQUE: &str = "opaque";
+pub const EFFECT: &str = "effect";
+pub const ERROR: &str = "error";
+pub const THROW: &str = "throw";
+pub const TRY: &str = "try";
+pub const CATCH: &str = "catch";
+pub const TRANSACT: &str = "transact";
+pub const ALIAS: &str = "alias";
+pub const CLASS: &str = "class";
+pub const INSTANCE: &str = "instance";
+pub const PATTERN: &str = "pattern";
+pub const DERIVING: &str = "deriving";
+pub const WHERE: &str = "where";
+pub const GIVEN: &str = "given";
+pub const HANDLE: &str = "handle";
+pub const WITH: &str = "with";
+pub const HANDLER: &str = "handler";
+pub const MASK: &str = "mask";
+pub const CTL: &str = "ctl";
+pub const FINAL: &str = "final";
+pub const FUN: &str = "fun";
+pub const VAL: &str = "val";
+pub const RETURN: &str = "return";
+pub const LET: &str = "let";
+pub const VAR: &str = "var";
+pub const BORROW: &str = "borrow";
+pub const IN: &str = "in";
+pub const FOR: &str = "for";
+pub const DO: &str = "do";
+pub const IF: &str = "if";
+pub const THEN: &str = "then";
+pub const ELSE: &str = "else";
+pub const ELIF: &str = "elif";
+pub const MATCH: &str = "match";
+pub const OF: &str = "of";
+pub const FORALL: &str = "forall";
+pub const TRUE: &str = "true";
+pub const FALSE: &str = "false";
+
+// Built-in type names
+pub const TY_INT: &str = "Int";
+pub const TY_BOOL: &str = "Bool";
+pub const TY_UNIT: &str = "Unit";
+pub const TY_FLOAT: &str = "Float";
+pub const TY_CHAR: &str = "Char";
+pub const TY_STRING: &str = "String";
+pub const TY_I64: &str = "I64";
+pub const TY_U64: &str = "U64";
+
+// Operators and multi-character punctuation
+pub const ARROW: &str = "->";
+pub const LARROW: &str = "<-";
+pub const FAT_ARROW: &str = "=>";
+pub const EQ_DOT: &str = "==.";
+pub const NE_DOT: &str = "/=.";
+pub const LE_DOT: &str = "<=.";
+pub const GE_DOT: &str = ">=.";
+pub const LT_DOT: &str = "<.";
+pub const GT_DOT: &str = ">.";
+pub const EQ_EQ: &str = "==";
+pub const NE: &str = "/=";
+pub const LE: &str = "<=";
+pub const GE: &str = ">=";
+pub const LT: &str = "<";
+pub const GT: &str = ">";
+pub const EQ: &str = "=";
+pub const AMP_AMP: &str = "&&";
+pub const PIPE_PIPE: &str = "||";
+pub const PIPE_RIGHT: &str = "|>";
+pub const COMP_RIGHT: &str = ">>";
+pub const COMP_LEFT: &str = "<<";
+pub const BAR: &str = "|";
+pub const LAMBDA: &str = "\\";
+pub const PLUS_DOT: &str = "+.";
+pub const MINUS_DOT: &str = "-.";
+pub const PLUS: &str = "+";
+pub const MINUS: &str = "-";
+pub const STAR_DOT: &str = "*.";
+pub const STAR: &str = "*";
+pub const SLASH_DOT: &str = "/.";
+pub const SLASH: &str = "/";
+pub const PERCENT: &str = "%";
+pub const COLON_EQ: &str = ":=";
+pub const COLON: &str = ":";
+pub const BANG: &str = "!";
+pub const DOT_DOT: &str = "..";
+pub const DOT: &str = ".";
+pub const QUESTION_QUESTION: &str = "??";
+pub const QUESTION_DOT: &str = "?.";
+pub const QUESTION: &str = "?";
+
+// Single-character delimiters
+pub const LPAREN: &str = "(";
+pub const RPAREN: &str = ")";
+pub const LBRACE: &str = "{";
+pub const RBRACE: &str = "}";
+pub const LBRACKET: &str = "[";
+pub const RBRACKET: &str = "]";
+pub const COMMA: &str = ",";

@@ -1,0 +1,8 @@
+-- After effect lowering. The state handler is tail-resumptive, so evidence
+-- passing turns it into threaded arguments; the loop is a self tail call, so it
+-- lowers to a constant-stack loop with no allocation. The get/set effect is gone.
+fn fib_iter(n) = loop(n, 0, 1)            -- (count, a, b) as plain arguments
+
+fn loop(n, a, b) =
+  if n == 0 then a
+  else loop(n - 1, b, a + b)

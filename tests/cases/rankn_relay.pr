@@ -1,0 +1,12 @@
+-- A polymorphic parameter stays polymorphic when relayed to another rank-2
+-- function: `relay` passes its `forall a` argument straight to `pick`, which
+-- uses it at both Bool and Int.
+fn pick(g : forall a. (a) -> a) : Int =
+  if g(true) then
+    g(10)
+  else
+    g(20)
+
+fn relay(g : forall a. (a) -> a) : Int = pick(g)
+
+fn main() = println(relay(\(x) -> x))

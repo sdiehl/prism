@@ -2,10 +2,11 @@
 //! transformers, and structurally rewrite non-producer code so producer thunk
 //! values gain their evidence/accumulator parameters.
 
-use super::super::evidence::{ev_name, resume_set, strip_resume};
+use super::super::evidence::{resume_set, strip_resume};
 use super::super::flow::{self, Loc};
 use super::super::Lowerer;
 use crate::core::cbpv::{Comp, Value};
+use crate::names::ev;
 use crate::sym::Sym;
 
 use super::anf::{smore, strip_state};
@@ -23,7 +24,7 @@ impl Lowerer {
         let [clause] = ops.as_slice() else {
             return None;
         };
-        let ev: Sym = ev_name(self.op_id(op).ok()?).into();
+        let ev: Sym = ev(self.op_id(op).ok()?).into();
 
         // Evidence: \(p.., acc) -> <clause body with k(())(ns) -> return ns>.
         let Comp::Return(Value::Thunk(t)) = &clause.body else {
@@ -90,7 +91,7 @@ impl Lowerer {
         let [clause] = ops.as_slice() else {
             return None;
         };
-        let ev: Sym = ev_name(self.op_id(op).ok()?).into();
+        let ev: Sym = ev(self.op_id(op).ok()?).into();
 
         // Evidence: run the clause's side effects, then return the state.
         let stripped = strip_resume(&clause.body, &resume_set(clause.resume))?;
@@ -209,7 +210,7 @@ impl Lowerer {
         Some(match v {
             Value::Thunk(c) => match c.as_ref() {
                 Comp::Lam(ps, b) if self.folds(b, op) => {
-                    let ev: Sym = ev_name(self.op_id(op).ok()?).into();
+                    let ev: Sym = ev(self.op_id(op).ok()?).into();
                     let st: Sym = super::ST.into();
                     let mut loc2 = loc.clone();
                     for p in ps {

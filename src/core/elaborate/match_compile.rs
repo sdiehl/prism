@@ -27,8 +27,7 @@ fn field_binder(p: &S<Pattern>) -> Option<Sym> {
     }
 }
 
-// Fresh field binders that all bind (used when destructuring a ctor/tuple whose
-// fields feed the next match column).
+// Field binders that all bind (none ignored).
 fn binders(fvs: &[String]) -> Vec<Option<Sym>> {
     fvs.iter().map(|n| Some(Sym::from(n))).collect()
 }
@@ -340,8 +339,7 @@ impl Elab<'_> {
         Ok(acc)
     }
 
-    // A ctor/tuple column becomes a Case: one arm per ctor binding fresh field
-    // vars, then either a tuple arm or a wildcard default closes it out.
+    // Emit a Case: one arm per ctor, then a tuple arm or wildcard default.
     pub(super) fn emit_case_column(
         &mut self,
         part: &ArmPartition,

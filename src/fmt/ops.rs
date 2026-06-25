@@ -1,7 +1,7 @@
 //! Operator spelling, precedence, and the parenthesization rules that keep a
 //! reprinted binary-operator tree parsing back to the same shape.
 
-use crate::syntax::ast::{BinOp, Expr};
+use crate::syntax::ast::{BinOp, Expr, Sugar};
 
 pub(super) const fn binop_prec(op: BinOp) -> u8 {
     match op {
@@ -24,7 +24,12 @@ pub(super) const fn binop_prec(op: BinOp) -> u8 {
 pub(super) const fn low_prec_operand(child: &Expr) -> bool {
     matches!(
         child,
-        Expr::Match(..) | Expr::If(..) | Expr::Let(..) | Expr::Lam(..) | Expr::Pipe(..)
+        Expr::Match(..)
+            | Expr::If(..)
+            | Expr::Let(..)
+            | Expr::Lam(..)
+            | Expr::Pipe(..)
+            | Expr::Sugar(Sugar::Compose(..))
     )
 }
 
@@ -71,33 +76,5 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
                     ))
         }
         _ => low_prec_operand(child),
-    }
-}
-
-pub(super) const fn fmt_binop(op: BinOp) -> &'static str {
-    match op {
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Rem => "%",
-        BinOp::And => "&&",
-        BinOp::Or => "||",
-        BinOp::Addf => "+.",
-        BinOp::Subf => "-.",
-        BinOp::Mulf => "*.",
-        BinOp::Divf => "/.",
-        BinOp::Eq => "==",
-        BinOp::Ne => "/=",
-        BinOp::Lt => "<",
-        BinOp::Le => "<=",
-        BinOp::Gt => ">",
-        BinOp::Ge => ">=",
-        BinOp::Eqf => "==.",
-        BinOp::Nef => "/=.",
-        BinOp::Ltf => "<.",
-        BinOp::Lef => "<=.",
-        BinOp::Gtf => ">.",
-        BinOp::Gef => ">=.",
     }
 }

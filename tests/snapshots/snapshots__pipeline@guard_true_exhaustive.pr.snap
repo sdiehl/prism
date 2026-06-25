@@ -1,0 +1,234 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/guard_true_exhaustive.pr
+---
+== tokens ==
+VOpen Fn Ident("classify") LParen Ident("n") Colon KwInt RParen Colon KwInt Eq VOpen Match Ident("n") Of VOpen Int(IntLit { value: 0, suffix: None }) FatArrow Int(IntLit { value: 0, suffix: None }) VSemi Ident("x") If True FatArrow Int(IntLit { value: 1, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("classify") LParen Int(IntLit { value: 5, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "classify",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "n",
+                        ),
+                        span: 186..187,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 195..196,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 200..201,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 206..207,
+                            },
+                            guard: Spanned {
+                                node: Bool(
+                                    true,
+                                ),
+                                span: 211..215,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 219..220,
+                            },
+                        },
+                    ],
+                ),
+                span: 180..220,
+            },
+            wheres: [],
+            span: 149..220,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "classify",
+                        ),
+                        span: 240..248,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 5,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 249..250,
+                        },
+                    ],
+                ),
+                span: 240..251,
+            },
+            wheres: [],
+            span: 222..251,
+        },
+    ],
+}
+
+== types ==
+classify : (Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn classify(n) =
+  return n to t@0; t@0 == 0 to t@3; if t@3 then (return 0) else (return t@0 to t@1; return t@1 to x; return true to t@2; if t@2 then (return t@1 to x; return 1) else (case t@0 { _ => error "ICE: guarded match fell through" }))
+fn main() =
+  return 5 to t@4; classify(t@4)
+
+== fbip (rc) ==
+fn classify(n) =
+  return n to t@0; dup t@0 to _; t@0 == 0 to t@3; if t@3 then (drop t@3 to _; drop t@0 to _; return 0) else (drop t@3 to _; dup t@0 to _; return t@0 to t@1; dup t@1 to _; return t@1 to x; drop x to _; return true to t@2; if t@2 then (drop t@2 to _; drop t@0 to _; return t@1 to x; drop x to _; return 1) else (case t@0 { _ => drop t@2 to _; drop t@1 to _; drop t@0 to _; error "ICE: guarded match fell through" }))
+fn main() =
+  return 5 to t@4; classify(t@4)
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@.str0 = private constant [32 x i8] c"ICE: guarded match fell through\00"
+
+define i64 @prism_classify(i64 %a0) {
+entry:
+  call void @prism_rc_inc(i64 %a0)
+  %t1 = and i64 %a0, 1
+  %t2 = and i64 %t1, 1
+  %t3 = icmp eq i64 %t2, 1
+  br i1 %t3, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t4 = icmp eq i64 %a0, 1
+  %t5 = zext i1 %t4 to i64
+  %t6 = shl i64 %t5, 1
+  %t7 = or i64 %t6, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t8 = call i64 @prism_rt_int_cmp(i64 %a0, i64 1)
+  %t9 = icmp eq i64 %t8, 0
+  %t10 = zext i1 %t9 to i64
+  %t11 = shl i64 %t10, 1
+  %t12 = or i64 %t11, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t13 = phi i64 [ %t7, %b0 ], [ %t12, %b1 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 1)
+  %t14 = icmp ne i64 %t13, 1
+  br i1 %t14, label %b3, label %b4
+
+b3:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t13)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 1
+
+b4:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t13)
+  call void @prism_rc_inc(i64 %a0)
+  call void @prism_rc_inc(i64 %a0)
+  call void @prism_rc_dec(i64 %a0)
+  br i1 true, label %b5, label %b6
+
+b5:                                               ; preds = %b4
+  call void @prism_rc_dec(i64 3)
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 3
+
+b6:                                               ; preds = %b4
+  %t25 = inttoptr i64 %a0 to ptr
+  br label %b9
+
+b9:                                               ; preds = %b8, %b6
+  call void @prism_rc_dec(i64 3)
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %a0)
+  %t29 = call i64 @prism_str_lit(ptr @.str0, i64 31)
+  call void @prism_fatal(i64 %t29)
+  ret i64 0
+
+b8:                                               ; No predecessors!
+  br label %b9
+}
+
+declare void @prism_rc_inc(i64)
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+declare void @prism_rc_dec(i64)
+
+declare i64 @prism_str_lit(ptr, i64)
+
+declare void @prism_fatal(i64)
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_classify(i64 11)
+  ret i64 %t0
+}
+
+== run ==
+output: []
+result: 1

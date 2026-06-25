@@ -10,19 +10,23 @@ Prism is an impure functional programming language whose type system tracks side
 
 The [`examples/`](./examples) directory contains a tour of most advanced features.
 
+Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/play/).
+
+Read the [language specification](https://sdiehl.github.io/prism/spec.html) and the [compiler documentation](https://sdiehl.github.io/prism/compiler.html).
+
 ## Install
 
 The compiler links against LLVM 22, so the dev libraries must be present:
 
 ```shell
-brew install llvm             # macOS
-sudo apt install llvm-22-dev  # Debian/Ubuntu
+brew install llvm                    # macOS
+sudo apt install llvm-22-dev         # Debian/Ubuntu
 ```
 
 Then build with:
 
 ```shell
-LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/tiny-prism
+LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/prism
 ```
 
 This builds the `prism` binary. Native compilation also needs `clang` on `$PATH` (override with `PRISM_CC`).

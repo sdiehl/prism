@@ -1,0 +1,78 @@
+-- Exceptions tour, four idioms from fatal to fully recoverable.
+--
+-- 1. Built-in Exn row: `error(code)` aborts the process, uncatchable. Any
+--    caller carries `!{Exn}`. checked_div sees only safe input here.
+-- 2. `?` propagation over Result: `half(n)?` unwraps Ok and short-circuits
+--    the chain on the first Err. report matches the outcome at the boundary.
+-- 3. Recovery is a plain match on Ok/Err (or result_or for a default).
+-- 4. Custom exception effect via a `final ctl` clause: abort never resumes,
+--    the continuation is discarded, and the clause's value becomes the
+--    result. Cheap throws, no Result plumbing in the throwing code.
+--
+-- Expected output:
+--   42
+--   3
+--   odd
+--   3
+--   0
+--   pass
+--   fail
+--   invalid: negative
+--   invalid: too big
+
+fn checked_div(n, d) : !{Exn} Int =
+  if d == 0 then
+    error(1)
+  else
+    n / d
+
+fn half(n) =
+  if even(n) then
+    Ok(n / 2)
+  else
+    Err("odd")
+
+fn quarter(n) =
+  let h = half(n)?
+  let q = half(h)?
+  Ok(q)
+
+fn report(r) =
+  match r of
+    Ok(v) => println(v)
+    Err(e) => println(e)
+
+fn quarter_or_zero(n) =
+  match quarter(n) of
+    Ok(v) => v
+    Err(_) => 0
+
+effect Abort {
+  ctl abort(String) : Unit
+}
+
+fn grade(n) : !{Abort} String =
+  if n < 0 then
+    abort("negative")
+  if n > 100 then
+    abort("too big")
+  if n >= 60 then
+    "pass"
+  else
+    "fail"
+
+fn safe_grade(n) =
+  handle grade(n) with
+    final ctl abort(msg) => concat("invalid: ", msg)
+    return r => r
+
+fn main() =
+  println(checked_div(84, 2))
+  report(quarter(12))
+  report(quarter(6))
+  println(quarter_or_zero(12))
+  println(quarter_or_zero(6))
+  println(safe_grade(72))
+  println(safe_grade(40))
+  println(safe_grade(0 - 5))
+  println(safe_grade(200))

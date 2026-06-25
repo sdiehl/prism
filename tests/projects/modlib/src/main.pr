@@ -1,0 +1,8 @@
+import Counter
+
+import Shape
+
+fn main() =
+  println(Counter.bump(40))
+  println(if Shape.circle(3) == Shape.circle(3) then 1 else 0)
+  println(if Shape.circle(3) == Shape.square(3) then 1 else 0)
