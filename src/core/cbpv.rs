@@ -134,8 +134,24 @@ pub enum Comp {
     StrBuiltin(Builtin, Vec<Value>),
     Dup(Value),
     Drop(Value),
-    ReuseToken(Value),
-    Reuse(Value, Value),
+    // Free `freed` (a cell the matched scrutinee owned and that is now dead) and
+    // bind its shell as a reuse `token` scoped over `body`. The token is a binder,
+    // so the cell is freed at exactly one point; only `Reuse` can name the token,
+    // and it spends it building a constructor in place. Freed-once and
+    // spent-at-an-allocation are thus structural properties of the term, not a
+    // post-hoc check. Built by the reuse pass from a `drop` paired with a later
+    // allocation; lowers to the same `prism_reuse_token` call the threaded form
+    // did (it is just the `drop`+`bind` fused into one scoped node).
+    WithReuse {
+        token: Sym,
+        freed: Value,
+        body: Box<Self>,
+    },
+    // Build `ctor` in place over the cell held by reuse `token` (a binder of an
+    // enclosing `WithReuse`). Allocation-free: it overwrites the freed shell
+    // instead of calling the allocator. The token is the only operand position
+    // that may name a reuse token.
+    Reuse(Sym, Value),
 }
 
 impl Comp {
@@ -167,7 +183,7 @@ impl Comp {
             Self::StrBuiltin(..) => "StrBuiltin",
             Self::Dup(_) => "Dup",
             Self::Drop(_) => "Drop",
-            Self::ReuseToken(_) => "ReuseToken",
+            Self::WithReuse { .. } => "WithReuse",
             Self::Reuse(..) => "Reuse",
         }
     }
@@ -242,8 +258,12 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
-        | Comp::ReuseToken(v) => {
+        | Comp::Reuse(_, v) => {
             calls_in_val(v, out);
+        }
+        Comp::WithReuse { freed, body, .. } => {
+            calls_in_val(freed, out);
+            calls_in(body, out);
         }
         Comp::Bind(m, _, n) => {
             calls_in(m, out);
@@ -270,10 +290,6 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         Comp::Prim(_, a, b) => {
             calls_in_val(a, out);
             calls_in_val(b, out);
-        }
-        Comp::Reuse(t, v) => {
-            calls_in_val(t, out);
-            calls_in_val(v, out);
         }
         Comp::StrBuiltin(_, args) | Comp::Do(_, args) => {
             for a in args {

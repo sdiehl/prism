@@ -71,6 +71,51 @@ impl Tc<'_> {
     }
 
     pub(super) fn resolve_all(&mut self) -> Result<(), TypeError> {
+        // Resolve deferred indexed reads/writes before everything else: by now a
+        // `var`'s state existential is solved by its initializer, so the
+        // receiver's head type is known. Dispatch it, constrain the key/element
+        // (and value, for a write), and solve the read's result existential.
+        for op in std::mem::take(&mut self.index_ops) {
+            let recv = self.apply(&op.recv);
+            let Some((kty, elem, writable)) = super::infer::index_container(&recv) else {
+                return Err(TypeError::Other {
+                    span: op.recv_span,
+                    msg: format!("type `{}` is not indexable with `[]`", recv.show()),
+                });
+            };
+            let elem = self.apply(&elem);
+            self.subtype(&op.key, &kty).map_err(|e| e.at(op.span))?;
+            self.subtype(&Type::Exist(op.result), &elem)
+                .map_err(|e| e.at(op.span))?;
+            if let Some(val) = op.val {
+                if !writable {
+                    return Err(TypeError::Other {
+                        span: op.recv_span,
+                        msg: format!(
+                            "type `{}` does not support indexed assignment `a[i] := v`",
+                            recv.show()
+                        ),
+                    });
+                }
+                self.subtype(&val, &elem).map_err(|e| e.at(op.span))?;
+            }
+        }
+        // Resolve deferred numeric operands next, so dictionary resolution below
+        // sees their final types. An operand a later use already pinned to a
+        // fixed-width lane is recorded; one still ambiguous defaults to `Int`; a
+        // `Float` or non-numeric one (an int operator on a float) is rejected.
+        for (span, t) in std::mem::take(&mut self.num_default) {
+            let t = self.apply(&t);
+            match &t {
+                Type::Int => {}
+                Type::I64 | Type::U64 => {
+                    self.fixed.insert(span, t);
+                }
+                other => {
+                    self.default_numeric(other, span)?;
+                }
+            }
+        }
         let wanted = std::mem::take(&mut self.wanted);
         for w in wanted {
             let mut ds = Vec::new();

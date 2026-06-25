@@ -1,8 +1,9 @@
 -- Tagless-final: one description, many interpretations. A Sym instance is a
 -- dictionary of three constructors. The term expr() is written once against
--- that interface, polymorphic in the carrier r. Picking expr[evalSym] folds
--- it to an Int; expr[showSym] folds the same shape to its pretty string. No
--- intermediate tree, no tags: the interpreter is the dictionary you select.
+-- that interface, polymorphic in the carrier r. Picking expr(using evalSym)
+-- folds it to an Int; expr(using showSym) folds the same shape to its pretty
+-- string. No intermediate tree, no tags: the interpreter is the dictionary you
+-- select.
 
 class Sym(r) {
   lit : (Int) -> r,
@@ -26,5 +27,5 @@ instance showSym : Sym(String) {
 fn expr() : r given Sym(r) = add(lit(1), mul(lit(2), lit(3)))
 
 fn main() : !{IO} Unit =
-  println(show_int(expr[evalSym]()))
-  println(expr[showSym]())
+  println(show_int(expr(using evalSym)))
+  println(expr(using showSym))

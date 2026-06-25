@@ -52,9 +52,9 @@ fn main() =
   println(describe(cfg, "http"))
   let port =
     try
-      try port_of(cfg, "gopher") catch { Malformed(s) => 0 }
+      try port_of(cfg, "gopher") catch { Malformed(_s) => 0 }
     catch
-      NotFound(k) => 80
+      NotFound(_k) => 80
   println("default {show(port)}")
   println(describe(cfg, "smtp"))
   println(describe(cfg, "https"))

@@ -137,6 +137,24 @@ fn of_expr(
         }
         Expr::FieldAccess(e, _) => of_expr(e, fns, ops, locals),
         Expr::Inst(f, _) | Expr::Ann(f, _) => of_expr(f, fns, ops, locals),
+        // An indexed read performs `Fail` (out of range / absent key), on top of
+        // any effects of the receiver and key.
+        Expr::Index(recv, key) => {
+            let s = union(
+                of_expr(recv, fns, ops, locals),
+                &of_expr(key, fns, ops, locals),
+            );
+            union(s, &once(Sym::from(crate::names::FAIL_EFFECT)))
+        }
+        // A functional indexed write is total; its effects are just those of the
+        // receiver, key, and value sub-expressions.
+        Expr::IndexSet(recv, key, val) => {
+            let s = union(
+                of_expr(recv, fns, ops, locals),
+                &of_expr(key, fns, ops, locals),
+            );
+            union(s, &of_expr(val, fns, ops, locals))
+        }
         Expr::RecordCreate(_, fields) => {
             let mut acc = Effects::new();
             for (_, e) in fields {

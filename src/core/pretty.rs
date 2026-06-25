@@ -121,6 +121,13 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
                 pp_block(b, depth + 1)
             )
         }
+        // Flatten the scoped reuse like a bind: the token statement, then the
+        // body's sequence carrying the same result binder.
+        Comp::WithReuse { token, freed, body } => format!(
+            "{pad}reuse_token {} to {token}\n{}",
+            pp_value(freed),
+            pp_seq(body, depth, binder)
+        ),
         other => {
             let s = pp_comp(other);
             binder.map_or_else(|| format!("{pad}{s}"), |x| format!("{pad}{s} to {x}"))
@@ -205,8 +212,14 @@ pub fn pp_comp(c: &Comp) -> String {
         Comp::FloatBuiltin(op, v) => format!("{}({})", op.name(), pp_value(v)),
         Comp::Dup(v) => format!("dup {}", pp_value(v)),
         Comp::Drop(v) => format!("drop {}", pp_value(v)),
-        Comp::ReuseToken(v) => format!("reuse_token {}", pp_value(v)),
-        Comp::Reuse(t, v) => format!("reuse {} as {}", pp_value(t), pp_value(v)),
+        Comp::WithReuse { token, freed, body } => {
+            format!(
+                "reuse_token {} to {token}; {}",
+                pp_value(freed),
+                pp_comp(body)
+            )
+        }
+        Comp::Reuse(tok, v) => format!("reuse {tok} as {}", pp_value(v)),
         Comp::Do(op, args) => {
             let args: Vec<_> = args.iter().map(pp_value).collect();
             format!("do {op}({})", args.join(", "))

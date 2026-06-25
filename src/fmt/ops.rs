@@ -30,7 +30,9 @@ pub(super) const fn low_prec_operand(child: &Expr) -> bool {
             | Expr::Let(..)
             | Expr::Lam(..)
             | Expr::Pipe(..)
-            | Expr::Sugar(Sugar::Compose(..))
+            // `??` binds looser than arithmetic, so `(a ?? b) + c` must keep its
+            // parens (e.g. the counter idiom `m[k] := (m[k] ?? 0) + 1`).
+            | Expr::Sugar(Sugar::Compose(..) | Sugar::Default(..))
     )
 }
 

@@ -36,7 +36,7 @@ example :
   .head (.caseMatch rfl) .refl
 
 example : Step emptyΓ (.drop (.int 7)) (.ret .unit) := .dropStep
-example : Step emptyΓ (.reuse .unit (.ctor "Cons" 0 [.int 1, .unit])) (.ret (.ctor "Cons" 0 [.int 1, .unit])) :=
+example : Step emptyΓ (.reuse "tok" (.ctor "Cons" 0 [.int 1, .unit])) (.ret (.ctor "Cons" 0 [.int 1, .unit])) :=
   .reuseStep
 
 example {b c : Comp} (h1 : Step emptyΓ (.prim .add (.int 2) (.int 3)) b)
@@ -61,7 +61,7 @@ example :
     Steps emptyΓ
       (.case (.ctor "Vec2" 0 [.int 3, .int 4])
              [(.ctor "Vec2" [.var "x", .var "y"],
-               .reuse .unit (.ctor "Vec2" 0 [.int 9, .var "y"]))])
+               .reuse "tok" (.ctor "Vec2" 0 [.int 9, .var "y"]))])
       (.ret (.ctor "Vec2" 0 [.int 9, .int 4])) :=
   .head (.caseMatch rfl) (.head .reuseStep .refl)
 

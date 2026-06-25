@@ -6,7 +6,7 @@ Prism is a strict, impure functional language in the ML family whose type system
 
 A Prism program is a set of modules, each a file of declarations. The surface language elaborates to a strict, call-by-push-value core ([Levy, 2004](bibliography.md#levy-2004)) in A-normal form (the companion [Compiler](./compiler.md) document), compiles to native code through LLVM, and is managed by deterministic reference counting rather than a garbage collector.
 
-Two things distinguish Prism from its ML and Haskell ancestors. Side effects are inferred, extensible _effect rows_ (Section [7](#7-effects-and-handlers)) that combine structurally across calls instead of through monads, and they track observability: an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure. The same reference-count discipline both frees memory and performs fully-in-place (FBIP) update (Section [10](#10-declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [Compiler](./compiler.md#10-reference-counting-and-fbip-reuse)).
+Two things distinguish Prism from its ML and Haskell ancestors. Side effects are inferred, extensible _effect rows_ ([Section 7](#7-effects-and-handlers)) that combine structurally across calls instead of through monads, and they track observability: an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure. The same reference-count discipline both frees memory and performs fully-in-place (FBIP) update ([Section 10](#10-declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [Compiler](./compiler.md#10-reference-counting-and-fbip-reuse)).
 
 This specification proceeds in dependency order: notation, lexical structure, grammar, types, then the constructs the grammar describes.
 
@@ -18,11 +18,11 @@ Grammar is given in the following EBNF. A _terminal_ is a literal token written 
 {{#include ../examples/notation.ebnf}}
 ```
 
-Identifiers in productions name the tokens defined in [3](#3-lexical-structure) (`varid`, `conid`, `qualid`, `integer`, `float`, `char`, `string`) and the character classes defined just above. Layout (Section [3.6](#36-layout)) inserts block delimiters that the grammar then treats as ordinary terminals.
+Identifiers in productions name the tokens defined in [3](#3-lexical-structure) (`varid`, `conid`, `qualid`, `integer`, `float`, `char`, `string`) and the character classes defined just above. Layout ([Section 3.6](#36-layout)) inserts block delimiters that the grammar then treats as ordinary terminals.
 
 ## 3. Lexical Structure
 
-Source text is UTF-8. Tokens are lexed by longest match, then the stream is rewritten by the layout algorithm of Section [3.6](#36-layout). Whitespace and comments separate tokens and are otherwise insignificant except as layout boundaries.
+Source text is UTF-8. Tokens are lexed by longest match, then the stream is rewritten by the layout algorithm of [Section 3.6](#36-layout). Whitespace and comments separate tokens and are otherwise insignificant except as layout boundaries.
 
 ```text
 {{#include ../examples/lexical.ebnf}}
@@ -48,12 +48,13 @@ The following are reserved and may not be used as identifiers.
 | `for`      | `do`    | `if`       | `then`    | `else`     |
 | `elif`     | `match` | `of`       | `forall`  | `true`     |
 | `false`    | `while` | `loop`     | `break`   | `continue` |
+| `using`    |         |            |           |            |
 
 The built-in type names `Int`, `I64`, `U64`, `Bool`, `Unit`, `Float`, `Char`, and `String` are also reserved.
 
 ### 3.3 Operators and Punctuation
 
-The operator set is fixed; the language has no user-defined operators. Every comparison operator, and every arithmetic operator except `%` and `^`, also has a floating-point form suffixed with a dot. Exponentiation `^` is a single operator over both `Int` and `Float` (Section [8.4](#84-exponentiation)).
+The operator set is fixed; the language has no user-defined operators. Every comparison operator, and every arithmetic operator except `%` and `^`, also has a floating-point form suffixed with a dot. Exponentiation `^` is a single operator over both `Int` and `Float` ([Section 8.4](#84-exponentiation)).
 
 | Class      | Operators                                                               |
 | ---------- | ----------------------------------------------------------------------- |
@@ -76,11 +77,11 @@ The escape sequences `\n`, `\t`, `\r`, `\\`, `\"`, `\{`, and `\}` are recognized
 
 ### 3.5 String Interpolation
 
-Within a string, an unescaped `{ expr }` is an interpolation hole. The hole text is re-lexed at its source position and elaborated as an expression whose `Show` value is spliced into the string. A hole runs to its matching `}`, balancing nested braces and string literals, so a hole may itself contain a string with braces. A literal brace outside a hole is written `\{` or `\}`. An empty hole, an unterminated hole, and an unterminated string are each lexical errors. The catch arms of the error example in Section [7.5](#75-errors-and-failure) use interpolation, as in `"no such key: {k}"`.
+Within a string, an unescaped `{ expr }` is an interpolation hole. The hole text is re-lexed at its source position and elaborated as an expression whose `Show` value is spliced into the string. A hole runs to its matching `}`, balancing nested braces and string literals, so a hole may itself contain a string with braces. A literal brace outside a hole is written `\{` or `\}`. An empty hole, an unterminated hole, and an unterminated string are each lexical errors. The catch arms of the error example in [Section 7.5](#75-errors-and-failure) use interpolation, as in `"no such key: {k}"`.
 
 ### 3.6 Layout
 
-Prism uses the offside rule: indentation, not explicit braces, delimits a block. A layout block opens after any of the keywords or symbols `=`, `then`, `else`, `=>`, `of`, `with`, `handler`, `do`, `where`, `try`, `catch`, `transact`, `loop`, and after `fn` (a `while` block opens at its `do`). The first token after such an opener sets the block's indentation column; a later line at that column starts a new item in the block, and a line indented less closes the block. Explicit `{` `}` override layout and may always be used in place of an implicit block, as in the brace-delimited handler arms of the masking example (Section [7.3](#73-masking)).
+Prism uses the offside rule: indentation, not explicit braces, delimits a block. A layout block opens after any of the keywords or symbols `=`, `then`, `else`, `=>`, `of`, `with`, `handler`, `do`, `where`, `try`, `catch`, `transact`, `loop`, and after `fn` (a `while` block opens at its `do`). The first token after such an opener sets the block's indentation column; a later line at that column starts a new item in the block, and a line indented less closes the block. Explicit `{` `}` override layout and may always be used in place of an implicit block, as in the brace-delimited handler arms of the masking example ([Section 7.3](#73-masking)).
 
 ## 4. Surface Grammar
 
@@ -94,13 +95,13 @@ A program is a layout-delimited sequence of top-level declarations.
 {{#include ../examples/grammar-decls.ebnf}}
 ```
 
-Type syntax. A function type carries an optional effect _row_ on its codomain (Section [7](#7-effects-and-handlers)); the row binds to a function type only.
+Type syntax. A function type carries an optional effect _row_ on its codomain ([Section 7](#7-effects-and-handlers)); the row binds to a function type only.
 
 ```text
 {{#include ../examples/grammar-types.ebnf}}
 ```
 
-Expressions, patterns, and the handler block of `handle`/`try` (used in Section [7](#7-effects-and-handlers)).
+Expressions, patterns, and the handler block of `handle`/`try` (used in [Section 7](#7-effects-and-handlers)).
 
 ```text
 {{#include ../examples/grammar-expr.ebnf}}
@@ -129,7 +130,7 @@ The table gives the binding of each operator, loosest to tightest. Levels 1 to 9
 | 7     | `+` `-` (and float forms)                     | left          |
 | 8     | `*` `/` `%`, and float `*.` `/.`              | left          |
 | 9     | `^`                                           | right         |
-| 10    | `f(...)` `f[...]` `.field` `?.field` `?`      | left          |
+| 10    | `f(...)` `a[i]` `.field` `?.field` `?`        | left          |
 
 ## 5. Types and Kinds
 
@@ -143,11 +144,11 @@ The scalar types are `Int` (arbitrary precision), `I64`, `U64`, `Float`, `Bool`,
 
 ### 5.2 Kinds
 
-A type has kind `*` (a type of values) or `* -> *` (a type constructor awaiting one argument), and so on; `List` has kind `* -> *`, since `List(Int)` is a type only once `Int` is supplied. A class parameter may range over a constructor of kind `* -> *`, applied as `f(a)` in method signatures; see Section [6](#6-type-classes). There is no explicit kind-checking phase: well-kindedness is enforced during unification, which requires a constructor and its arguments to agree in arity.
+A type has kind `*` (a type of values) or `* -> *` (a type constructor awaiting one argument), and so on; `List` has kind `* -> *`, since `List(Int)` is a type only once `Int` is supplied. A class parameter may range over a constructor of kind `* -> *`, applied as `f(a)` in method signatures; see [Section 6](#6-type-classes). There is no explicit kind-checking phase: well-kindedness is enforced during unification, which requires a constructor and its arguments to agree in arity.
 
 ### 5.3 Inference, Generalization, and Defaulting
 
-A row is built from _labels_, the effect names of Section [7](#7-effects-and-handlers) (a parametric effect's label carries type arguments). It is _closed_ when it ends in a fixed set of labels and _open_ when it ends in a row variable (`! {L | r}`), which stands for further labels the caller may add. An unannotated binding is generalized over its free type and row variables not fixed by the surrounding scope. Two cases default rather than generalize. An otherwise-unconstrained numeric operand defaults to `Int`. An open row left unconstrained at a monomorphic declaration (one with no remaining free row variable) defaults to empty (pure); an effect-polymorphic declaration keeps its row variable, as `traverse` does in the prelude (Section [12](#12-the-standard-prelude)).
+A row is built from _labels_, the effect names of [Section 7](#7-effects-and-handlers) (a parametric effect's label carries type arguments). It is _closed_ when it ends in a fixed set of labels and _open_ when it ends in a row variable (`! {L | r}`), which stands for further labels the caller may add. An unannotated binding is generalized over its free type and row variables not fixed by the surrounding scope. Two cases default rather than generalize, both resolved in one pass at generalization. A numeric operand of an arithmetic or comparison operator left otherwise unconstrained defaults to `Int`; because the default is deferred to that pass rather than applied at the operator, a later use that fixes the operand to a fixed-width lane (`I64`/`U64`) takes precedence, so `x + y` followed by an `i64` use of `x` is fixed-width, not `Int`. An open row left unconstrained at a monomorphic declaration (one with no remaining free row variable) defaults to empty (pure); an effect-polymorphic declaration keeps its row variable, as `traverse` does in the prelude ([Section 12](#12-the-standard-prelude)).
 
 ### 5.4 Subsumption and Row Equivalence
 
@@ -169,17 +170,17 @@ Effect rows are compared up to reordering: `! {A, B}` and `! {B, A}` are the sam
 
 ### 5.6 Algebraic Data Types
 
-A `type` declaration introduces an algebraic data type: a _sum_ of constructors, each a _product_ of fields. A constructor is named with an upper-case identifier and applied like a function to build a value; a `match` (Section [9](#9-patterns)) destructures a value by constructor. A type may take type parameters and may be recursive, including mutually so.
+A `type` declaration introduces an algebraic data type: a _sum_ of constructors, each a _product_ of fields. A constructor is named with an upper-case identifier and applied like a function to build a value; a `match` ([Section 9](#9-patterns)) destructures a value by constructor. A type may take type parameters and may be recursive, including mutually so.
 
 ```prism
 {{#include ../examples/adt.pr}}
 ```
 
-A `newtype` is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. A `deriving (C, ...)` clause generates the named instances structurally (Section [6](#6-type-classes)); `Eq`, `Ord`, `Show`, and `Lens` are derivable.
+A `newtype` is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. A `deriving (C, ...)` clause generates the named instances structurally ([Section 6](#6-type-classes)); `Eq`, `Ord`, `Show`, and `Lens` are derivable.
 
 ### 5.7 Records
 
-A constructor may instead take _named_ fields, `C { f : T, ... }`, making the type a record. A field is read with `e.f`; records are built and updated by the expressions of Section [8.2](#82-records). `deriving (Lens)` synthesizes a getter `f_of` and a setter `with_f` per field.
+A constructor may instead take _named_ fields, `C { f : T, ... }`, making the type a record. A field is read with `e.f`; records are built and updated by the expressions of [Section 8.2](#82-records). `deriving (Lens)` synthesizes a getter `f_of` and a setter `with_f` per field.
 
 ```prism
 {{#include ../examples/record.pr}}
@@ -195,7 +196,7 @@ A class declares a single-parameter constraint and a set of method signatures. A
 
 ### 6.1 Resolution and Ambiguity
 
-An instance is selected by the head constructor of the constraint type (the outermost constructor, for example `List` in `List(Int)`). When two instances match one head, resolution is ambiguous and the program must pick one explicitly with the postfix form `f[instanceName]`, as `sort_by_ord[ordDesc]` does above. Resolution recurses through instance contexts up to a fixed depth.
+An instance is selected by the head constructor of the constraint type (the outermost constructor, for example `List` in `List(Int)`). When two instances match one head, resolution is ambiguous and the program must pick one explicitly by passing the instance as a trailing `using` argument in the call, `f(args, using instanceName)`, as `sort_by_ord(xs, using ordDesc)` does above. (This is the same `using` form reserved for first-class dictionary passing.) Resolution recurses through instance contexts up to a fixed depth.
 
 ### 6.2 Superclasses
 
@@ -207,7 +208,7 @@ A class may require another as a superclass with `given`. Each instance then sto
 
 ### 6.3 Higher-Kinded Classes
 
-A class parameter may be a type constructor of kind `* -> *`, applied as `f(a)` in method signatures and resolved on the head constructor of each instance. The prelude's `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` tower is built this way. Its methods are _effect-polymorphic_ (defined in Section [7.6](#76-effect-polymorphism)): a per-element effect row threads through in place of an `Applicative` wrapper, so effectful traversal needs no monad and no do-notation.
+A class parameter may be a type constructor of kind `* -> *`, applied as `f(a)` in method signatures and resolved on the head constructor of each instance. The prelude's `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` tower is built this way. Its methods are _effect-polymorphic_ (defined in [Section 7.6](#76-effect-polymorphism)): a per-element effect row threads through in place of an `Applicative` wrapper, so effectful traversal needs no monad and no do-notation.
 
 ```prism
 {{#include ../examples/hkt.pr}}
@@ -223,11 +224,11 @@ An `effect` declares a set of operations; each `ctl` operation has an argument l
 {{#include ../examples/eff_state.pr}}
 ```
 
-A `handle e with` block discharges operations; its grammar is the `handler` nonterminal of Section [4](#4-surface-grammar). Each operation clause names an operation and binds its arguments and the resumption `k` (the captured continuation, explained below); calling `k(v)` resumes the suspended computation with `v`, and `k` may be called zero times (abort), once (the common case), or many times (multishot). A `return r` clause transforms the final value. The handler in `eff_state.pr` interprets `get`/`put` by threading a state parameter, so `counter`, which only performs the operations, never mentions a state value.
+A `handle e with` block discharges operations; its grammar is the `handler` nonterminal of [Section 4](#4-surface-grammar). Each operation clause names an operation and binds its arguments and the resumption `k` (the captured continuation, explained below); calling `k(v)` resumes the suspended computation with `v`, and `k` may be called zero times (abort), once (the common case), or many times (multishot). A `return r` clause transforms the final value. The handler in `eff_state.pr` interprets `get`/`put` by threading a state parameter, so `counter`, which only performs the operations, never mentions a state value.
 
 Operations and handlers are delimited control: the `handle` block is the _delimiter_ (a prompt), and the resumption `k` is the _delimited continuation_ it captures, the slice of computation between the perform site and the handler. Being first-class, `k` reinstalls that slice under the same handler when invoked. This is the typed, named generalization of `shift`/`reset`: a single prompt with one anonymous continuation becomes a row of named operations, each with its own clause, and the effect row is the static record of which delimiters a computation still requires.
 
-A clause may invoke `k` any number of times; more than once makes the continuation _multishot_: each call re-runs the captured slice from the perform site with a different result, so one handler can pursue several futures of the same computation. This is how nondeterminism or search handlers explore alternatives (an `amb` operation whose clause calls `k` once per choice and combines the outcomes) and how generators yield and continue. Never invoking `k` discards the captured slice, which is exactly how `raise` (Section [7.1](#71-observability)) and a `final ctl` clause abort.
+A clause may invoke `k` any number of times; more than once makes the continuation _multishot_: each call re-runs the captured slice from the perform site with a different result, so one handler can pursue several futures of the same computation. This is how nondeterminism or search handlers explore alternatives (an `amb` operation whose clause calls `k` once per choice and combines the outcomes) and how generators yield and continue. Never invoking `k` discards the captured slice, which is exactly how `raise` ([Section 7.1](#71-observability)) and a `final ctl` clause abort.
 
 ### 7.1 Observability
 
@@ -245,7 +246,7 @@ Two clause forms abbreviate common shapes. `fun op(x) => e` is tail-resumptive s
 {{#include ../examples/handlers_funval.pr}}
 ```
 
-A `final ctl op(x) => e` clause is non-resumable: it discards the continuation. This is the shape that `error`, `throw`, `try`, and `catch` desugar to (Section [7.5](#75-errors-and-failure)).
+A `final ctl op(x) => e` clause is non-resumable: it discards the continuation. This is the shape that `error`, `throw`, `try`, and `catch` desugar to ([Section 7.5](#75-errors-and-failure)).
 
 ### 7.3 Masking
 
@@ -259,7 +260,7 @@ A `final ctl op(x) => e` clause is non-resumable: it discards the continuation. 
 
 A `var` mutates, yet the function holding it stays pure. `fib_iter` below updates two locals in a loop but has type `(Int) -> Int` with an empty row, so it is accepted where only a pure function is allowed. Prism has no mutation primitive; `var` is sugar over the effect system.
 
-A `var x := e` desugars to a private two-operation effect (a get and a set); each read of `x` becomes a perform of get, each `x := v` a perform of set. In the same pass, a handler that threads the value as a hidden parameter is wrapped around the block. That handler discharges the get and set labels (Section [7.1](#71-observability)), so they never reach the function's type: the state is implemented but not observable. Effect lowering then turns the tail-resumptive handler into threaded arguments and the loop into a constant-stack loop, so the lowered code allocates nothing.
+A `var x := e` desugars to a private two-operation effect (a get and a set); each read of `x` becomes a perform of get, each `x := v` a perform of set. In the same pass, a handler that threads the value as a hidden parameter is wrapped around the block. That handler discharges the get and set labels ([Section 7.1](#71-observability)), so they never reach the function's type: the state is implemented but not observable. Effect lowering then turns the tail-resumptive handler into threaded arguments and the loop into a constant-stack loop, so the lowered code allocates nothing.
 
 {{#tabs }}
 
@@ -293,7 +294,7 @@ An escape analysis keeps the purity honest: the compiler rejects any closure or 
 
 ### 7.5 Errors and Failure
 
-Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of Section [7.2](#72-clause-sugar).
+Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of [Section 7.2](#72-clause-sugar).
 
 **Extensible errors.** An `error N(t)` declaration introduces a one-operation effect whose operation never resumes; `throw N(x)` performs it. A function's error row is exactly the set of errors it may raise and has not caught, and distinct `error` declarations union structurally as functions compose, with no umbrella sum type and no conversion glue: `find_port` carrying `{NotFound}` and `parse_port` carrying `{Malformed}` compose to `{NotFound, Malformed}`. `try e catch { ... }` is subtractive handler sugar (one nested `final ctl` per arm): a partial catch discharges the labels it names and lets the rest flow to an enclosing handler, and an uncaught error is an unhandled-effect error naming exactly the labels that remain. Each catch arm names an error and binds its fields to variables.
 
@@ -301,13 +302,13 @@ Prism has no built-in exception type. Errors and failure are two related mechani
 {{#include ../examples/errors.pr}}
 ```
 
-These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `error(code)` and uncatchable (it aborts); `Result` with the postfix `e?` propagation of Section [8](#8-expressions); a plain `match` on `Ok`/`Err`; and a custom non-resumable effect.
+These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `error(code)` and uncatchable (it aborts); `Result` with the postfix `e?` propagation of [Section 8](#8-expressions); a plain `match` on `Ok`/`Err`; and a custom non-resumable effect.
 
 ```prism
 {{#include ../examples/exceptions.pr}}
 ```
 
-**The failure axis.** Beyond named errors, Prism has an anonymous, recoverable `fail()`, the deterministic-functional-logic failure of the Verse calculus ([Augustsson et al., 2023](bibliography.md#augustsson-verse-2023)). `guard(b)` fails when `b` is false; `a ?? b` runs `a` under a failure handler and falls back to `b`; `e?.field` chains through options, failing on `None`; `optional`/`succeeds`/`default` reify a failing computation as an `Option`, a `Bool`, or a default; and a comprehension guard may itself fail, pruning the element (Section [8](#8-expressions)). `transact body else fallback` snapshots every live `var`, runs the body under a failure handler, and restores the snapshots on failure, so an aborted attempt leaves observable state unchanged. The whole axis is `final ctl` handlers over a `Fail` effect, so an unhandled `fail()` is the ordinary unhandled-effect error, and "failable only in a failure context" falls out of the row discipline for free.
+**The failure axis.** Beyond named errors, Prism has an anonymous, recoverable `fail()`, the deterministic-functional-logic failure of the Verse calculus ([Augustsson et al., 2023](bibliography.md#augustsson-verse-2023)). `guard(b)` fails when `b` is false; `a ?? b` runs `a` under a failure handler and falls back to `b`; `e?.field` chains through options, failing on `None`; `optional`/`succeeds`/`default` reify a failing computation as an `Option`, a `Bool`, or a default; and a comprehension guard may itself fail, pruning the element ([Section 8](#8-expressions)). `transact body else fallback` snapshots every live `var`, runs the body under a failure handler, and restores the snapshots on failure, so an aborted attempt leaves observable state unchanged. The whole axis is `final ctl` handlers over a `Fail` effect, so an unhandled `fail()` is the ordinary unhandled-effect error, and "failable only in a failure context" falls out of the row discipline for free.
 
 ```prism
 {{#include ../examples/transact.pr}}
@@ -315,7 +316,7 @@ These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `e
 
 ### 7.6 Effect Polymorphism
 
-A function can be generic over the effects of a thunk it is given by quantifying over a row variable in the argument's type. Below, `twice` accepts any `(Unit) -> Int` thunk and adds an open row `{| e}` for whatever that thunk performs; each call unifies `e` with the actual row (empty, `{Tick}`, or `{Say}`), and a handler discharges only the label it names, leaving the rest in `e`. This is the mechanism the prelude's `fmap` and `traverse` use to thread a per-element effect (Section [6.3](#63-higher-kinded-classes)), so an effectful traversal needs no `Applicative` wrapper.
+A function can be generic over the effects of a thunk it is given by quantifying over a row variable in the argument's type. Below, `twice` accepts any `(Unit) -> Int` thunk and adds an open row `{| e}` for whatever that thunk performs; each call unifies `e` with the actual row (empty, `{Tick}`, or `{Say}`), and a handler discharges only the label it names, leaving the rest in `e`. This is the mechanism the prelude's `fmap` and `traverse` use to thread a per-element effect ([Section 6.3](#63-higher-kinded-classes)), so an effectful traversal needs no `Applicative` wrapper.
 
 ```prism
 {{#include ../examples/eff_poly.pr}}
@@ -323,13 +324,13 @@ A function can be generic over the effects of a thunk it is given by quantifying
 
 ## 8. Expressions
 
-The expression grammar is in Section [4](#4-surface-grammar) and the effect and failure forms are in Section [7](#7-effects-and-handlers); the forms below are those the grammar alone does not settle.
+The expression grammar is in [Section 4](#4-surface-grammar) and the effect and failure forms are in [Section 7](#7-effects-and-handlers); the forms below are those the grammar alone does not settle.
 
 A method call `e.m(args)` is uniform-function-call sugar for `m(e, args)`. A trailing block argument, `e.m(args) fn (x) { body }`, appends a lambda as the last argument; this is how the stream consumers in [streams.pr](./compiler.md#9-effect-lowering) chain. Field access is `e.field`.
 
 ### 8.1 Comprehensions
 
-A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qualifier `q` is a guard `if g` or a binder `let y = e`. A guard is evaluated in a failure context, so an element is pruned both when `g` is false and when computing `g` fails: a failable accessor such as `at_list` (a prelude lookup, Section [12](#12-the-standard-prelude)) past the end of a list prunes that element rather than aborting. The statement form `for x in s, q, ... do body` runs `body` per survivor. Both desugar to the prelude's stream combinators (the `Emit` effect of Section [12](#12-the-standard-prelude)), so they fuse without building an intermediate list.
+A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qualifier `q` is a guard `if g` or a binder `let y = e`. A guard is evaluated in a failure context, so an element is pruned both when `g` is false and when computing `g` fails: a failable accessor such as `at_list` (a prelude lookup, [Section 12](#12-the-standard-prelude)) past the end of a list prunes that element rather than aborting. The statement form `for x in s, q, ... do body` runs `body` per survivor. Both desugar to the prelude's stream combinators (the `Emit` effect of [Section 12](#12-the-standard-prelude)), so they fuse without building an intermediate list.
 
 ```prism
 {{#include ../examples/comprehension.pr}}
@@ -337,7 +338,7 @@ A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qual
 
 ### 8.2 Records
 
-Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the records of Section [5.7](#57-records); each is an in-place write on a uniquely owned value. The `deriving (Lens)` getters and setters compose with them for deeper access.
+Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the records of [Section 5.7](#57-records); each is an in-place write on a uniquely owned value. The `deriving (Lens)` getters and setters compose with them for deeper access.
 
 ```prism
 {{#include ../examples/lens_derive.pr}}
@@ -345,7 +346,7 @@ Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`,
 
 ### 8.3 Imperative control flow
 
-Loops and early exit are surface sugar over tail recursion and effects, so they cost nothing beyond what an explicit recursion would. `while cond do body` and `loop body` (an unconditional loop) lower to a tail-recursive driver applied to the condition and body as thunks; because a `var` is a State effect (Section [12](#12-the-standard-prelude)) the body mutates freely and the loop runs in constant stack with no per-iteration allocation. `break` and `continue` (valid inside `while`, `loop`, and `for`) and statement-form `return e` (which exits the enclosing function) compile to non-resumable performs of internal, fully-handled control effects, installed only for the keyword a body actually uses; a nested loop captures its own `break`/`continue`. Because each control effect is discharged at its loop or function boundary, none appears in the surfaced effect row: a loop is as pure as its body, and a function using `return` infers the same row as the equivalent recursion. Compound assignment `x += e` (and `-=`, `*=`, `%=`) on a `var` is shorthand for `x := x <op> e`.
+Loops and early exit are surface sugar over tail recursion and effects, so they cost nothing beyond what an explicit recursion would. `while cond do body` and `loop body` (an unconditional loop) lower to a tail-recursive driver applied to the condition and body as thunks; because a `var` is a State effect ([Section 12](#12-the-standard-prelude)) the body mutates freely and the loop runs in constant stack with no per-iteration allocation. `break` and `continue` (valid inside `while`, `loop`, and `for`) and statement-form `return e` (which exits the enclosing function) compile to non-resumable performs of internal, fully-handled control effects, installed only for the keyword a body actually uses; a nested loop captures its own `break`/`continue`. Because each control effect is discharged at its loop or function boundary, none appears in the surfaced effect row: a loop is as pure as its body, and a function using `return` infers the same row as the equivalent recursion. Compound assignment `x += e` (and `-=`, `*=`, `%=`) on a `var` is shorthand for `x := x <op> e`.
 
 Each form desugars to an existing construct:
 
@@ -364,11 +365,17 @@ Each form desugars to an existing construct:
 
 ### 8.4 Exponentiation
 
-`a ^ b` raises `a` to the power `b`. It binds tighter than `*` and is right-associative, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`. It is the method of the `Pow` class (Section [12](#12-the-standard-prelude)) with `Int` and `Float` instances, so it desugars to `pow(a, b)`: over `Int` it is bignum-correct (the instance multiplies), over `Float` it is a `pow_float` call. A mixed `Int ^ Float` is a type error, resolved by an explicit `to_float`, exactly as `2 + 3.0` is (Prism never coerces between `Int` and `Float` implicitly).
+`a ^ b` raises `a` to the power `b`. It binds tighter than `*` and is right-associative, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`. It is the method of the `Pow` class ([Section 12](#12-the-standard-prelude)) with `Int` and `Float` instances, so it desugars to `pow(a, b)`: over `Int` it is bignum-correct (the instance multiplies), over `Float` it is a `pow_float` call. A mixed `Int ^ Float` is a type error, resolved by an explicit `to_float`, exactly as `2 + 3.0` is (Prism never coerces between `Int` and `Float` implicitly).
+
+### 8.5 Indexing
+
+`a[i]` reads, `a[i] := v` writes, and `a[i] += e` updates an indexed container. The form is dispatched on the receiver's type (not a class, so no inference change): `Array` is indexed by `Int`, `HashMap` by `String`, `String` by `Int` (yielding the byte), and `List` by `Int`. `Array` and `HashMap` are writable; `String` and `List` are read-only.
+
+A read is _failable_: a missing index or key performs the `Fail` effect ([Section 7.5](#75-errors-and-failure)), so `a[i]` has type `Elem ! {Fail}` and the partiality surfaces in the row rather than in an `Option` wrapper. It therefore composes with `??`, `?.`, `default`, and the rest of the failure axis: `a[i] ?? d` supplies a default, and the counter idiom is `m[k] := (m[k] ?? 0) + 1`, honest that an absent key starts at zero. A plain write `a[i] := v` is total; `a[i] += e` reads first, so it is `! {Fail}`. Writes rebind the underlying `var` and rewrite the cell in place when it is uniquely owned (FBIP, [Section 10](#10-declarations-and-programs)); nested `grid[i][j] := v` composes the same way. `a[i] := v` requires `a` to be an assignable `var`.
 
 ## 9. Patterns
 
-Patterns appear in `match` arms, `let` bindings, lambda and function parameters, and `catch` arms; their grammar is the `pattern` nonterminal of Section [4](#4-surface-grammar). A constructor pattern destructures a value of the algebraic data type that built it (Section [5.6](#56-algebraic-data-types)), binding its fields; literal, tuple, wildcard, and record patterns match the remaining forms.
+Patterns appear in `match` arms, `let` bindings, lambda and function parameters, and `catch` arms; their grammar is the `pattern` nonterminal of [Section 4](#4-surface-grammar). A constructor pattern destructures a value of the algebraic data type that built it ([Section 5.6](#56-algebraic-data-types)), binding its fields; literal, tuple, wildcard, and record patterns match the remaining forms.
 
 A `match` arm may carry a guard, `pat if cond => body`; when the guard is false, control falls through to the next arm. Matches are checked for exhaustiveness and redundancy by the usefulness algorithm of [Maranget (2007)](bibliography.md#maranget-2007): an unreachable arm is an error, and a non-exhaustive match is an error naming a missing pattern. A guarded arm does not count toward exhaustiveness, since its guard may fail at run time.
 
@@ -376,7 +383,7 @@ A `match` arm may carry a guard, `pat if cond => body`; when the guard is false,
 {{#include ../examples/guards.pr}}
 ```
 
-A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional pattern synonym: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, Section [12](#12-the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a _prism_ (a composable view-and-build pair); one with only `view` is a view pattern.
+A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional pattern synonym: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, [Section 12](#12-the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a _prism_ (a composable view-and-build pair); one with only `view` is a view pattern.
 
 ```prism
 {{#include ../examples/pattern_syn_sugar.pr}}

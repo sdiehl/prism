@@ -19,6 +19,9 @@ array_to_list_go : forall a. (Array(a), Int, List(a)) -> List(a) ! {}
 assoc_del : forall a. (List((String, a)), String) -> (List((String, a)), Int) ! {}
 assoc_get : forall a. (List((String, a)), String) -> Option(a) ! {}
 assoc_put : forall a. (List((String, a)), String, a) -> (List((String, a)), Int) ! {}
+at_array : forall a. (Array(a), Int) -> a ! {Fail} ! {Fail}
+at_byte : (String, Int) -> Int ! {Fail} ! {Fail}
+at_hashmap : forall a. (HashMap(a), String) -> a ! {Fail} ! {Fail}
 at_list : forall a. (List(a), Int) -> a ! {Fail} ! {Fail}
 at_map : forall a b. (Map(a, b), a) -> b ! {Fail} ! {Fail}
 between : (Int, Int, Int) -> Bool ! {}

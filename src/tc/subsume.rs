@@ -134,12 +134,14 @@ impl Tc<'_> {
                 // to the older one, so a solution only references entries to its
                 // left and survives later truncation at a marker. Every live
                 // existential is in the context, so absence means it escaped scope.
+                // A live existential is always in the context: `solve` only ever
+                // records a solution referencing entries to its left (asserted
+                // there), so truncation never strands a referenced var. Absence is
+                // therefore a compiler bug, not user-reachable.
                 let oi = self
                     .index_ex(other)
-                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{other} not in context")))?;
-                let ei = self
-                    .index_ex(ex)
-                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{ex} not in context")))?;
+                    .expect("inst: existential escaped scope");
+                let ei = self.index_ex(ex).expect("inst: existential escaped scope");
                 if oi > ei {
                     self.solve(other, Type::Exist(ex));
                 } else {
@@ -151,7 +153,7 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(ex, &arg_exs, row, ret)?;
+                self.articulate(ex, &arg_exs, row, ret);
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, !left)?;
@@ -164,7 +166,7 @@ impl Tc<'_> {
             Type::Con(name, args) => {
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
                 let con = Type::Con(name, arg_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &arg_exs, con)?;
+                self.splice_solved(ex, &arg_exs, con);
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, left)?;
@@ -178,7 +180,7 @@ impl Tc<'_> {
                 let he = self.fresh_id();
                 let ae = self.fresh_id();
                 let app = Type::App(Box::new(Type::Exist(he)), Box::new(Type::Exist(ae)));
-                self.splice_solved(ex, &[he, ae], app)?;
+                self.splice_solved(ex, &[he, ae], app);
                 let h = self.apply(&h);
                 self.inst(he, &h, left)?;
                 let a = self.apply(&a);
@@ -187,7 +189,7 @@ impl Tc<'_> {
             Type::Tuple(elems) => {
                 let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();
                 let tup = Type::Tuple(elem_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &elem_exs, tup)?;
+                self.splice_solved(ex, &elem_exs, tup);
                 for (e, elem) in elem_exs.iter().zip(&elems) {
                     let elem = self.apply(elem);
                     self.inst(*e, &elem, left)?;
@@ -247,6 +249,9 @@ impl Tc<'_> {
             // to the older, so a solution only references entries to its left and
             // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
             (EffRow::Exist(x), EffRow::Exist(y)) => {
+                // Unlike the type context, the row context does not keep every
+                // solution strictly left-referencing, so absence here is not
+                // provably dead: keep it a defensive ICE rather than a panic.
                 let xi = self
                     .index_ex_row(*x)
                     .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{x} not in context")))?;
@@ -468,6 +473,8 @@ mod tests {
             constrained: BTreeMap::new(),
             cur_self: None,
             wanted: Vec::new(),
+            num_default: Vec::new(),
+            index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,

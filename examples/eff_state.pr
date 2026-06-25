@@ -28,8 +28,8 @@ fn run_counter(init) =
   let f =
     handle counter() with
       get(u, k) => \(s) -> k(s)(s)
-      put(s2, k) => \(s) -> k(())(s2)
-      return r => \(s) -> r
+      put(s2, k) => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
   f(init)
 
 fn main() = println(run_counter(0))

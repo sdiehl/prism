@@ -4,9 +4,12 @@ A formal model of the Prism call-by-push-value core, mirroring
 variant at a time; the dynamics are a substitution-based small step over
 the computational core (force, beta, sequencing, branching, prims, named
 calls, pattern matching). The reference-counting and FBIP-reuse markers
-reduce by erasure (`dup`/`drop`/`reuseToken` are observationally unit,
-`reuse tok v` yields the rebuilt value), so the RC-instrumented program
-keeps the meaning of the pure one. Effects and handlers are syntax only:
+reduce by erasure (`dup`/`drop` are observationally unit; `withReuse tok freed
+body` binds the freed shell's token, erased to unit, over `body`; `reuse tok v`
+yields the rebuilt value), so the RC-instrumented program keeps the meaning of
+the pure one. The reuse token is a scoped binder of `withReuse` and the only
+operand `reuse` names, so it is freed once and spent at an allocation by
+construction. Effects and handlers are syntax only:
 the free-monad lowering erases them before this core runs. The relation is
 proved deterministic (`Step.deterministic`), so a closed computation has at
 most one normal form.
@@ -75,8 +78,8 @@ mutual
     | strBuiltin (name : String) (args : List Value)
     | dup (v : Value)
     | drop (v : Value)
-    | reuseToken (v : Value)
-    | reuse (tok : Value) (v : Value)
+    | withReuse (tok : String) (freed : Value) (body : Comp)
+    | reuse (tok : String) (v : Value)
 end
 
 structure CoreFn where
@@ -135,8 +138,9 @@ mutual
     | .strBuiltin n args => .strBuiltin n (substVL x w args)
     | .dup v => .dup (substV x w v)
     | .drop v => .drop (substV x w v)
-    | .reuseToken v => .reuseToken (substV x w v)
-    | .reuse t v => .reuse (substV x w t) (substV x w v)
+    | .withReuse tok freed body =>
+        .withReuse tok (substV x w freed) (if x = tok then body else substC x w body)
+    | .reuse tok v => .reuse tok (substV x w v)
 
   def substArms (x : String) (w : Value) : List (Pat × Comp) → List (Pat × Comp)
     | [] => []
@@ -219,7 +223,7 @@ inductive Step (Γ : Core) : Comp → Comp → Prop where
   | caseMatch : matchArms scrut arms = some c → Step Γ (.case scrut arms) c
   | dupStep : Step Γ (.dup v) (.ret .unit)
   | dropStep : Step Γ (.drop v) (.ret .unit)
-  | reuseTokenStep : Step Γ (.reuseToken v) (.ret .unit)
+  | withReuseStep : Step Γ (.withReuse tok freed body) (substC tok .unit body)
   | reuseStep : Step Γ (.reuse tok v) (.ret v)
 
 inductive Steps (Γ : Core) : Comp → Comp → Prop where
@@ -260,7 +264,7 @@ theorem Step.deterministic {Γ : Core} {a b c : Comp}
   | caseMatch h => cases h2 with | caseMatch h' => rw [h] at h'; exact Option.some.inj h'
   | dupStep => cases h2 with | dupStep => rfl
   | dropStep => cases h2 with | dropStep => rfl
-  | reuseTokenStep => cases h2 with | reuseTokenStep => rfl
+  | withReuseStep => cases h2 with | withReuseStep => rfl
   | reuseStep => cases h2 with | reuseStep => rfl
 
 end Prism

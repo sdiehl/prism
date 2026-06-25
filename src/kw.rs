@@ -55,6 +55,7 @@ pub const OF: &str = "of";
 pub const FORALL: &str = "forall";
 pub const TRUE: &str = "true";
 pub const FALSE: &str = "false";
+pub const USING: &str = "using";
 
 // Built-in type names
 pub const TY_INT: &str = "Int";

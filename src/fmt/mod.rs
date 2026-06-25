@@ -193,6 +193,26 @@ fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>
     }
 }
 
+// The index analogue of `as_compound_assign`: an `IndexAssign` whose value is a
+// synth `Bin(op, Index(..), rhs)` (the shape `compound_stmt` builds), so the
+// formatter restores `a[i] <op>= rhs`. A hand-written `a[i] := a[i] + e` (a
+// non-synth `Bin`) keeps its explicit `:=` form.
+fn as_index_compound(v: &S<Expr>) -> Option<(BinOp, &S<Expr>)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::Bin(op, lhs, rhs) = &v.node else {
+        return None;
+    };
+    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
+        && matches!(&lhs.node, Expr::Index(..))
+    {
+        Some((*op, rhs))
+    } else {
+        None
+    }
+}
+
 // One offside statement and where the chain continues. `prev` is the byte offset
 // the next statement's leading trivia begins at; `next` is the rest of the
 // chain. `None` means `cur` is the block's trailing result expression.
@@ -768,6 +788,28 @@ impl Fmt<'_> {
                         .collect();
                     return rest_s.map(|a| format!("{recv_s}.{name}({})", a.join(", ")));
                 }
+                // Explicit instance selection: the callee is an `Expr::Inst`, so
+                // fold its names back into a trailing `using` clause on this call.
+                if let Expr::Inst(inner, names) = &f.node {
+                    let inner_s = self.fmt_expr_inline(inner, mode)?;
+                    let inner_s = if callee_parens(&inner.node) {
+                        format!("({inner_s})")
+                    } else {
+                        inner_s
+                    };
+                    let args: Option<Vec<_>> = args
+                        .iter()
+                        .map(|a| self.fmt_expr_inline(a, Mode::Flat))
+                        .collect();
+                    return args.map(|a| {
+                        let using = format!("{} {}", kw::USING, names.join(", "));
+                        if a.is_empty() {
+                            format!("{inner_s}({using})")
+                        } else {
+                            format!("{inner_s}({}, {using})", a.join(", "))
+                        }
+                    });
+                }
                 let f_s = self.fmt_expr_inline(f, mode)?;
                 let f_s = if callee_parens(&f.node) {
                     format!("({f_s})")
@@ -831,6 +873,24 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{e_s}.{field}"))
             }
+            Expr::Index(recv, key) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let recv_s = if callee_parens(&recv.node) {
+                    format!("({recv_s})")
+                } else {
+                    recv_s
+                };
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                Some(format!("{recv_s}[{key_s}]"))
+            }
+            // Only produced by desugar, so the surface formatter never sees it;
+            // a faithful fallback for completeness.
+            Expr::IndexSet(recv, key, val) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                let val_s = self.fmt_expr_inline(val, Mode::Flat)?;
+                Some(format!("{recv_s}[{key_s}] {} {val_s}", kw::COLON_EQ))
+            }
             Expr::RecordCreate(name, fields) => {
                 let fs: Option<Vec<_>> = fields
                     .iter()
@@ -863,9 +923,11 @@ impl Fmt<'_> {
                     .collect();
                 us.map(|us| format!("{{ {base_s} | {} }}", us.join(", ")))
             }
+            // An `Inst` not wrapped in a call (rare): the parser only produces it
+            // as a call callee, so this prints the bare zero-argument form.
             Expr::Inst(f, names) => {
                 let f_s = self.fmt_expr_inline(f, mode)?;
-                Some(format!("{f_s}[{}]", names.join(", ")))
+                Some(format!("{f_s}({} {})", kw::USING, names.join(", ")))
             }
             Expr::Ann(inner, ty) => {
                 let s = self.fmt_expr_inline(inner, Mode::Flat)?;
@@ -911,6 +973,22 @@ impl Fmt<'_> {
                 } else {
                     let v_s = self.fmt_expr_inline(v, mode)?;
                     Some(format!("{x} {} {v_s}", kw::COLON_EQ))
+                }
+            }
+            Sugar::IndexAssign(recv, key, value) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let recv_s = if callee_parens(&recv.node) {
+                    format!("({recv_s})")
+                } else {
+                    recv_s
+                };
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                if let Some((op, rhs)) = as_index_compound(value) {
+                    let rhs_s = self.fmt_expr_inline(rhs, mode)?;
+                    Some(format!("{recv_s}[{key_s}] {}= {rhs_s}", op.spelling()))
+                } else {
+                    let v_s = self.fmt_expr_inline(value, mode)?;
+                    Some(format!("{recv_s}[{key_s}] {} {v_s}", kw::COLON_EQ))
                 }
             }
             Sugar::Throw(name, args) => {

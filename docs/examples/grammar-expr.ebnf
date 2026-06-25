@@ -17,8 +17,9 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
 
 opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
          |  appexpr
-appexpr ->  appexpr "(" [ expr , ... ] ")"           -- application
-         |  appexpr "[" iname , ... "]"              -- instance selection f[inst]
+appexpr ->  appexpr "(" [ expr , ... ] [ "using" iname , ... ] ")"
+                                                     -- application; `using` selects instances
+         |  appexpr "[" expr "]"                      -- indexed read a[i]
          |  appexpr "." varid                         -- field access
          |  appexpr "." varid "(" [ expr , ... ] ")" -- method call (UFCS)
          |  appexpr "?." varid                        -- optional chaining

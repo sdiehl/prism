@@ -36,8 +36,8 @@ fn run(xs) =
   let f =
     handle accumulate(xs) with
       get(u, k) => \(s) -> k(s)(s)
-      put(s2, k) => \(s) -> k(())(s2)
-      return r => \(s) -> r
+      put(s2, k) => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
   let total = f(0)
   handle validate(total) with
     raise(code, k) => code

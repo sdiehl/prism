@@ -517,6 +517,10 @@ pub enum Sugar<P: Phase> {
     NamedHandle(String, Box<S<Expr<P>>>, Vec<HandlerArm<P>>),
     VarDecl(String, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
     Assign(String, Box<S<Expr<P>>>),
+    // `recv[key] := value` on a `var`: a functional indexed write that rebinds
+    // the root variable. Desugars to `root := index_set(...)` (nested for
+    // `grid[i][j] := v`); the formatter restores this surface form.
+    IndexAssign(Box<S<Expr<P>>>, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
     Throw(String, Vec<S<Expr<P>>>),
     TryCatch(Box<S<Expr<P>>>, Vec<CatchArm<P>>),
     // `for x in s, <quals> do body`: the generator drives an emit-consumer. The
@@ -583,6 +587,14 @@ pub enum Expr<P: Phase = Surface> {
     Handle(Box<S<Self>>, Vec<HandlerArm<P>>),
     Mask(String, Box<S<Self>>),
     Inst(Box<S<Self>>, Vec<String>),
+    // `recv[key]`: a failable indexed read, dispatched at elaboration on the
+    // head type of `recv` (Array/HashMap/String/List) to a builtin accessor.
+    // Reads perform `Fail` when the index or key is absent.
+    Index(Box<S<Self>>, Box<S<Self>>),
+    // A functional indexed write `index_set(recv, key, val)` returning the new
+    // container, dispatched at elaboration on `recv`'s head type to the in-place
+    // (FBIP) setter. Produced by desugaring `recv[key] := val`, never written.
+    IndexSet(Box<S<Self>>, Box<S<Self>>, Box<S<Self>>),
     Ann(Box<S<Self>>, Ty),
     // A compiler-synthesized parse-time marker, never a source variable. Each is
     // consumed (or rejected) by desugar; the formatter restores its surface form.

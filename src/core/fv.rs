@@ -66,10 +66,16 @@ fn free_comp(c: &Comp, out: &mut Set) {
         | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
-        | Comp::Drop(v)
-        | Comp::ReuseToken(v) => free_val(v, out),
-        Comp::Reuse(t, v) => {
-            free_val(t, out);
+        | Comp::Drop(v) => free_val(v, out),
+        // `token` is bound over `body`; the freed cell is named in the enclosing
+        // scope, so it stays free here.
+        Comp::WithReuse { token, freed, body } => {
+            free_val(freed, out);
+            out.extend(comp_without(body, [token]));
+        }
+        // The token is a free reference resolved to the `WithReuse` binder.
+        Comp::Reuse(tok, v) => {
+            out.insert(*tok);
             free_val(v, out);
         }
         Comp::Bind(m, x, n) => {

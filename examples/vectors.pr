@@ -2,7 +2,7 @@
 -- A norm collapses a vector to one Float, but there is no single right way to do
 -- it: Euclidean length and Manhattan distance disagree. So Norm is a class with
 -- two NAMED instances over Vec3, and the caller picks which yardstick to use by
--- writing norm[l1] vs the default. Only ==/= are overloaded, so add/scale/dot/
+-- writing norm(u, using l1) vs the default. Only ==/= are overloaded, so add/scale/dot/
 -- cross are ordinary named functions and we lean on UFCS dot-chains to read them.
 
 type Vec3 = V(Float, Float, Float) deriving (Show, Eq)
@@ -56,5 +56,5 @@ fn main() : !{IO} Unit =
   println("dot(u, v) = {dot(u, v)}")
   println("cross(u, v) = {cross(u, v)}")
   -- Two instances at one head are ambiguous, so name each yardstick explicitly.
-  println("l2 norm of u = {norm[l2](u)}")
-  println("l1 norm of u = {norm[l1](u)}")
+  println("l2 norm of u = {norm(u, using l2)}")
+  println("l1 norm of u = {norm(u, using l1)}")

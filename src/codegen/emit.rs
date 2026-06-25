@@ -608,12 +608,15 @@ impl<'a, I: Isa> Cg<'a, I> {
                 self.isa.call_void(&mut self.b, "prism_rc_dec", &[r]);
                 Ok(self.isa.fresh_zero(&mut self.b))
             }
-            Comp::ReuseToken(v) => {
-                let r = self.value(regs, v)?;
-                Ok(self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r))))
+            Comp::WithReuse { token, freed, body } => {
+                let r = self.value(regs, freed)?;
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let mut r2 = regs.clone();
+                r2.insert(*token, t);
+                self.lower(&r2, body)
             }
             Comp::Reuse(tok, ctor) => {
-                let t = self.value(regs, tok)?;
+                let t = self.value(regs, &Value::Var(*tok))?;
                 let (tag, fields) = match ctor {
                     Value::Ctor(_, tg, fs) => (idx64(*tg), fs),
                     Value::Tuple(fs) => (0, fs),
@@ -642,6 +645,16 @@ impl<'a, I: Isa> Cg<'a, I> {
             }
             Comp::If(v, t, e) => self.lower_if(regs, v, t, e, true).map(|_| ()),
             Comp::Case(val, arms) => self.lower_case(regs, val, arms, true).map(|_| ()),
+            // Free the cell into a token, bind it, then lower the body in tail
+            // position so a `Reuse`-shaped TRMC tail inside it still loops. Same
+            // instruction sequence the threaded `bind (reuse_token ..)` emitted.
+            Comp::WithReuse { token, freed, body } => {
+                let r = self.value(regs, freed)?;
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let mut r2 = regs.clone();
+                r2.insert(*token, t);
+                self.lower_tail(&r2, body)
+            }
             Comp::Call(name, args) => {
                 if let Some(t) = self.trmc.clone() {
                     if *name == t.name && args.len() == t.arity {

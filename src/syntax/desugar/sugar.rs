@@ -301,6 +301,67 @@ pub fn let_stmt(x: String, v: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<E
     }
 }
 
+// `lvalue := value`: assign to a `var` (`Sugar::Assign`) or an index target
+// `a[i]` (`Sugar::IndexAssign`). Any other left side is a parse error.
+/// # Errors
+/// Fails when the left side is neither a variable nor an index.
+pub fn assign_stmt(
+    lhs: S<Expr>,
+    value: S<Expr>,
+    l: usize,
+    r: usize,
+) -> Result<S<Expr>, (Span, String)> {
+    let span = Span::new(l, r);
+    match lhs.node {
+        Expr::Var(name) => Ok(sp(Expr::Sugar(Sugar::Assign(name, Box::new(value))), span)),
+        Expr::Index(recv, key) => Ok(sp(
+            Expr::Sugar(Sugar::IndexAssign(recv, key, Box::new(value))),
+            span,
+        )),
+        _ => Err((
+            lhs.span,
+            "the left side of `:=` must be a variable or an index `a[i]`".into(),
+        )),
+    }
+}
+
+// `lvalue <op>= e` on a `var` or index target. The index form reads the element
+// with a synth `Index` so the formatter restores the `a[i] <op>= e` surface.
+/// # Errors
+/// Fails when the left side is neither a variable nor an index.
+pub fn compound_stmt(
+    lhs: S<Expr>,
+    op: BinOp,
+    value: S<Expr>,
+    l: usize,
+    r: usize,
+) -> Result<S<Expr>, (Span, String)> {
+    let span = Span::new(l, r);
+    match lhs.node {
+        Expr::Var(name) => Ok(compound_assign(name, op, value, l, r)),
+        Expr::Index(recv, key) => {
+            let read = Spanned {
+                synth: true,
+                node: Expr::Index(recv.clone(), key.clone()),
+                span,
+            };
+            let rhs = Spanned {
+                synth: true,
+                node: Expr::Bin(op, Box::new(read), Box::new(value)),
+                span,
+            };
+            Ok(sp(
+                Expr::Sugar(Sugar::IndexAssign(recv, key, Box::new(rhs))),
+                span,
+            ))
+        }
+        _ => Err((
+            lhs.span,
+            "the left side of a compound assignment must be a variable or an index `a[i]`".into(),
+        )),
+    }
+}
+
 // `x <op>= e` is sugar for `x := x <op> e`. The synthesized RHS `Bin` is marked
 // `synth` so the formatter restores the compound surface, while a hand-written
 // `x := x + e` (a non-synth `Bin`) keeps its explicit form.

@@ -21,7 +21,9 @@ use crate::syntax::ast::{
     Sugar, SugarArm, Surface, Ty, S,
 };
 
+mod lints;
 mod load;
+pub use lints::lint_bindings;
 pub use load::{load, Module};
 
 /// Bare names a selective import binds in unqualified scope, each mapped to the
@@ -551,6 +553,15 @@ impl<'a> Rw<'a> {
                     *t = self.value(t, span);
                 }
             }
+            Expr::Index(recv, key) => {
+                self.expr(recv);
+                self.expr(key);
+            }
+            Expr::IndexSet(recv, key, val) => {
+                self.expr(recv);
+                self.expr(key);
+                self.expr(val);
+            }
             Expr::Ann(x, t) => {
                 self.expr(x);
                 self.ty(t);
@@ -593,6 +604,11 @@ impl<'a> Rw<'a> {
                 }
             }
             Sugar::Assign(_, v) => self.expr(v),
+            Sugar::IndexAssign(recv, key, v) => {
+                self.expr(recv);
+                self.expr(key);
+                self.expr(v);
+            }
             Sugar::Throw(name, args) => {
                 *name = self.value(name, span);
                 for a in args {

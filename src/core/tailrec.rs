@@ -82,7 +82,7 @@ fn ctor_shape<'a>(v: &'a Value, x: &str, token: Option<&'a Sym>) -> Option<TrmcS
 pub fn trmc_shape<'a>(k: &'a Comp, x: &str) -> Option<TrmcShape<'a>> {
     match k {
         Comp::Return(v) => ctor_shape(v, x, None),
-        Comp::Reuse(Value::Var(tok), v) if *tok != x => ctor_shape(v, x, Some(tok)),
+        Comp::Reuse(tok, v) if *tok != x => ctor_shape(v, x, Some(tok)),
         Comp::Prim(CoreOp::Add, a, b) => match (occurs(a, x), occurs(b, x)) {
             (1, 0) if matches!(a, Value::Var(_)) => Some(TrmcShape::Acc(b)),
             (0, 1) if matches!(b, Value::Var(_)) => Some(TrmcShape::Acc(a)),
@@ -115,6 +115,9 @@ fn scan_trmc(c: &Comp, name: &str, arity: usize, ctor: &mut bool, acc: &mut bool
                 scan_trmc(b, name, arity, ctor, acc);
             }
         }
+        // A reuse scope is transparent to TRMC: its body holds the recursive
+        // tail (the freed cell is what the `Reuse` constructor spends).
+        Comp::WithReuse { body, .. } => scan_trmc(body, name, arity, ctor, acc),
         _ => {}
     }
 }
@@ -148,6 +151,12 @@ pub fn reassoc(c: &Comp) -> Comp {
             v.clone(),
             arms.iter().map(|(p, b)| (p.clone(), reassoc(b))).collect(),
         ),
+        // Flatten inside the reuse scope too, so its TRMC tail is exposed.
+        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
+            token: *token,
+            freed: freed.clone(),
+            body: Box::new(reassoc(body)),
+        },
         other => other.clone(),
     }
 }
@@ -247,6 +256,9 @@ fn walk(
             };
             out.push((*g, cls));
         }
+        // The reuse scope's body inherits this site's tail-ness: its result is
+        // the scope's result.
+        Comp::WithReuse { body, .. } => recur(body, tail, out),
         _ => {}
     }
 }
@@ -395,7 +407,7 @@ mod tests {
         let body = bind_call(
             vec![Value::Var("x".into())],
             Comp::Reuse(
-                Value::Var("tok".into()),
+                "tok".into(),
                 Value::Ctor(
                     "Cons".into(),
                     1,

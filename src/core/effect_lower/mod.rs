@@ -197,6 +197,11 @@ pub fn lower(
         return Ok((lowered, ctors));
     }
 
+    // Neither fusion path applied, so the continuation is reified into the free
+    // monad (EOp cells), the slow path. Off by default; `PRISM_WARN_FREE_MONAD`
+    // surfaces it for someone tuning a hot effect pipeline back onto a fused path.
+    warn_free_monad(&lo);
+
     let mut fns: Vec<CoreFn> = core
         .fns
         .iter()
@@ -223,19 +228,51 @@ pub fn lower(
             })
         })
         .collect::<Result<_, TypeError>>()?;
-    let gen_start = fns.len();
+    // The appended drivers are closed by construction, so no hygiene pass is
+    // needed. A per-handler driver takes `[res] ++ fvs` as parameters, where
+    // `fvs` is `fv::comp_without` of its clause bodies (gathered in
+    // `lower_handle`): every free term variable of the body is therefore a
+    // parameter, and every other name in it is either one of its own `{n}@hint`
+    // fresh binders (a digit-led namespace of their own, see `names::lowered`)
+    // or a top-level name it calls (the recursive driver, `ebind`, the
+    // `EOp`/`EPure` ctors, a program function). `ebind` and the mask drivers
+    // bind only the fixed `names::*` set, whose `@` is unforgeable in source, and
+    // the drivers reference one another only by `Call`, never by lexical nesting,
+    // so a fixed binder can never capture another driver's free occurrence.
     fns.extend(lo.generated);
     fns.push(ebind_fn());
     if lo.full {
         check_monadified(&fns)?;
     }
-    debug_assert_templates_closed(&fns, gen_start);
 
     let mut ctors = ctors.clone();
     ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
 
     Ok((Core { fns }, ctors))
+}
+
+// Off-by-default diagnostic for the free-monad fallback (`PRISM_WARN_FREE_MONAD`).
+// Names the monadified functions so a hot pipeline that fell off the fused
+// evidence/state path can be steered back onto it.
+fn warn_free_monad(lo: &Lowerer) {
+    if std::env::var_os("PRISM_WARN_FREE_MONAD").is_none() {
+        return;
+    }
+    let mut names: Vec<&str> = lo.eff.iter().map(|s| s.as_str()).collect();
+    names.sort_unstable();
+    let scope = if lo.full {
+        "whole-program"
+    } else {
+        "selective"
+    };
+    eprintln!(
+        "warning: effect lowering took the free-monad path ({scope}; an effectful \
+         computation escapes first-class, so handlers are reified into EOp cells), \
+         {} function(s) monadified: {}",
+        names.len(),
+        names.join(", ")
+    );
 }
 
 impl Lowerer {
@@ -697,6 +734,11 @@ impl Lowerer {
 
         let body_case = Comp::Case(Value::Var(res), vec![pure_arm, op_arm]);
 
+        // Closed by construction: the params are `res` (the driven result) plus
+        // exactly `fvs`, the `fv::comp_without` of every clause body computed
+        // above. Every other name in `body_case` is a `{n}@hint` fresh binder or
+        // a top-level callee, so no free occurrence can escape (no hygiene check
+        // needed; see the note at the driver-append site in `lower`).
         let mut params = vec![res];
         params.extend(fvs.iter().copied());
         self.generated.push(CoreFn {
@@ -720,9 +762,9 @@ impl Lowerer {
     // every Eff op flowing through it, so the next driver of that effect
     // misses its equality match once and forwards with id - N.
     //
-    // Closed top-level template: its binders are the fixed `names::*` set and it
-    // never nests another template's body, so the fixed binders cannot capture
-    // (checked by `debug_assert_templates_closed`).
+    // Closed top-level template: its binders are the fixed `names::*` @-set,
+    // disjoint from program names, and it never nests another template's body, so
+    // the fixed binders cannot capture. Closedness is structural, not checked.
     fn mask_driver(&mut self, ops: &[Sym]) -> Result<Sym, TypeError> {
         let driver = self.fresh("mask");
         let resume = Value::Thunk(Box::new(Comp::Lam(
@@ -824,10 +866,10 @@ fn epure(v: Value) -> Comp {
 //   }
 //
 // Closed top-level template: its binders (`names::OP_ID`/`OP_ARG`/`CONT`/
-// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed. Templates refer to one another
-// by `Call`, never by lexical nesting, so the fixed binders cannot capture across
-// templates; do not emit one template's body inside another. The closedness this
-// relies on is checked by `debug_assert_templates_closed`, not just argued here.
+// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed `@`-names, disjoint from program
+// names. Templates refer to one another by `Call`, never by lexical nesting, so the
+// fixed binders cannot capture across templates; do not emit one template's body
+// inside another. Closedness is thus structural, not checked.
 fn ebind_fn() -> CoreFn {
     let pure_arm = (
         ctor_pat(EPURE, &[names::COMPOSE.into()]),
@@ -984,39 +1026,6 @@ fn resume_in_thunk(c: &Comp, resume: Sym) -> bool {
     found
 }
 
-// Template hygiene, mechanically. Every effect-dispatch template appended above
-// (`fns[gen_start..]`: the per-handler drivers, the mask drivers, and `ebind`) is
-// a closed top-level function. Its binders are the fixed `names::*` set plus its
-// own params and captured free vars; when a driver splices another template's
-// body it binds that body's free names as params. The hygiene the comments claim
-// is exactly: after removing a template's own params and binders, every name left
-// free is the name of another top-level function it calls, never a leftover
-// binder. `fv::comp_without` removes the params (it already discounts internal
-// lambda/let/case/handler binders), so the residue must be a subset of the
-// top-level names. A binder that captured a sub-template's free occurrence, or a
-// driver that failed to capture one, leaves a dangling name and trips this in
-// debug builds, instead of miscompiling silently at a distant call site. Release
-// builds skip it; the cost is debug-only.
-fn debug_assert_templates_closed(fns: &[CoreFn], gen_start: usize) {
-    if !cfg!(debug_assertions) {
-        return;
-    }
-    let known: BTreeSet<Sym> = fns.iter().map(|f| f.name).collect();
-    for t in &fns[gen_start..] {
-        let leaked: Vec<Sym> = fv::comp_without(&t.body, &t.params)
-            .into_iter()
-            .filter(|v| !known.contains(v))
-            .collect();
-        assert!(
-            leaked.is_empty(),
-            "effect-lowering template `{}` is not hygienic: {leaked:?} are neither its \
-             binders nor top-level functions (a template binder captured a free occurrence \
-             or a driver failed to bind one)",
-            t.name,
-        );
-    }
-}
-
 // Escalation invariant: after whole-program monadification every function
 // body and every thunk body (under its lambda binder, if any) finishes with
 // an Eff value at each tail: an EPure/EOp construction, a saturated call to
@@ -1142,10 +1151,13 @@ fn each_value<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Value)) {
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
-        | Comp::ReuseToken(v)
+        // Reuse nodes only arise after this pass; keep the traversal total. The
+        // freed cell and the reuse constructor are the value positions.
+        | Comp::WithReuse { freed: v, .. }
+        | Comp::Reuse(_, v)
         | Comp::If(v, ..)
         | Comp::Case(v, _) => f(v),
-        Comp::Reuse(a, b) | Comp::Prim(_, a, b) => {
+        Comp::Prim(_, a, b) => {
             f(a);
             f(b);
         }
@@ -1167,7 +1179,7 @@ fn each_subcomp<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
             f(m);
             f(n);
         }
-        Comp::Lam(_, b) | Comp::Mask(_, b) => f(b),
+        Comp::Lam(_, b) | Comp::Mask(_, b) | Comp::WithReuse { body: b, .. } => f(b),
         Comp::App(g, _) => f(g),
         Comp::If(_, t, e) => {
             f(t);

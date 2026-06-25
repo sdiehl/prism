@@ -386,6 +386,8 @@ impl Elab<'_> {
                 };
                 self.constrained_value(x, e.span)?
             }
+            Expr::Index(recv, key) => self.elab_index(recv, key, locals)?,
+            Expr::IndexSet(recv, key, val) => self.elab_index_set(recv, key, val, locals)?,
             Expr::Ann(inner, _) => self.elab(inner, locals)?,
             Expr::Bin(BinOp::And, a, b) => {
                 let ca = self.elab(a, locals)?;
@@ -782,6 +784,77 @@ impl Elab<'_> {
             }
         };
         Ok(wrap_binds(binds, body))
+    }
+
+    // `recv[key]`: dispatch on the receiver's checked head type to the failable
+    // accessor for that container, the type-directed pattern of `show_dispatch`.
+    // tc already proved the receiver indexable, so an unresolved or unexpected
+    // type here is a compiler bug.
+    fn elab_index(
+        &mut self,
+        recv: &S<Expr<CorePhase>>,
+        key: &S<Expr<CorePhase>>,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let accessor = match self.checked.span_types.get(&recv.span) {
+            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "at_array",
+            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "at_hashmap",
+            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "at_list",
+            Some(Type::Str) => "at_byte",
+            other => {
+                return Err(Error::Ice(format!(
+                    "indexing receiver is not a known container at {:?}: {other:?}",
+                    recv.span
+                )))
+            }
+        };
+        let cr = self.elab(recv, locals)?;
+        let vr = self.fresh();
+        let ck = self.elab(key, locals)?;
+        let vk = self.fresh();
+        let body = Comp::Call(
+            accessor.into(),
+            vec![Value::Var(vr.clone().into()), Value::Var(vk.clone().into())],
+        );
+        Ok(wrap_binds(vec![(cr, vr), (ck, vk)], body))
+    }
+
+    // `recv[key] := val`: dispatch on the receiver's head type to the in-place
+    // (FBIP) setter builtin. tc restricts writes to `Array`/`HashMap`.
+    fn elab_index_set(
+        &mut self,
+        recv: &S<Expr<CorePhase>>,
+        key: &S<Expr<CorePhase>>,
+        val: &S<Expr<CorePhase>>,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let setter = match self.checked.span_types.get(&recv.span) {
+            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "array_set",
+            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "hm_insert",
+            other => {
+                return Err(Error::Ice(format!(
+                    "indexed assignment target is not a writable container at {:?}: {other:?}",
+                    recv.span
+                )))
+            }
+        };
+        let cr = self.elab(recv, locals)?;
+        let vr = self.fresh();
+        let ck = self.elab(key, locals)?;
+        let vk = self.fresh();
+        let cv = self.elab(val, locals)?;
+        let vv = self.fresh();
+        // `array_set` is a builtin, `hm_insert` a prelude function; `head_call`
+        // emits the right form (StrBuiltin vs Call) for each.
+        let body = Self::head_call(
+            setter,
+            vec![
+                Value::Var(vr.clone().into()),
+                Value::Var(vk.clone().into()),
+                Value::Var(vv.clone().into()),
+            ],
+        )?;
+        Ok(wrap_binds(vec![(cr, vr), (ck, vk), (cv, vv)], body))
     }
 }
 

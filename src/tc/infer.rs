@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::env::{collect_type_vars, Annot};
-use super::{ClassInfo, Entry, Env, InstInfo, RowScope, SelfRef, Tc, Wanted};
+use super::{ClassInfo, Entry, Env, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted};
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, S};
@@ -238,7 +238,7 @@ impl Tc<'_> {
                 let Expr::Var(x) = &f.node else {
                     return Err(TypeError::Other {
                         span,
-                        msg: "explicit instance application `f[..]` requires a named function"
+                        msg: "explicit instance selection `f(using ..)` requires a named function"
                             .into(),
                     });
                 };
@@ -269,6 +269,8 @@ impl Tc<'_> {
                     }),
                 }
             }
+            Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
+            Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
             Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, span),
             Expr::If(c, t, e2) => {
                 self.check(env, c, &Type::Bool)?;
@@ -582,7 +584,92 @@ impl Tc<'_> {
     // the ordered and arithmetic operators invoke it for any operand that is not
     // already a fixed-width integer. This is the only site the `Int` literal and
     // its `subtype` decision live, so Eq and Ord share one rule.
-    fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
+    // `recv[key]`: a failable read dispatched on `recv`'s head. Dispatch eagerly
+    // when the receiver type is already a concrete container; defer it (to
+    // `resolve_all`) when the receiver is still an unsolved existential, since a
+    // `var`'s state type is only fixed once its initializer is checked.
+    fn synth_index(
+        &mut self,
+        env: &Env,
+        recv: &S<Expr<Core>>,
+        key: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let recv_ty = self.synth(env, recv)?;
+        let recv_ty = self.apply(&recv_ty);
+        let fail = Label {
+            name: Sym::from(crate::names::FAIL_EFFECT),
+            args: vec![],
+        };
+        self.absorb_row(&EffRow::Extend(fail, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
+        if let Some((kty, elem, _)) = index_container(&recv_ty) {
+            self.check(env, key, &kty)?;
+            Ok(self.apply(&elem))
+        } else if matches!(recv_ty, Type::Exist(_)) {
+            let key_ty = self.synth(env, key)?;
+            let result = self.push_ex();
+            self.index_ops.push(IndexOp {
+                span,
+                recv_span: recv.span,
+                recv: recv_ty,
+                key: key_ty,
+                result,
+                val: None,
+            });
+            Ok(Type::Exist(result))
+        } else {
+            Err(TypeError::Other {
+                span: recv.span,
+                msg: format!("type `{}` is not indexable with `[]`", recv_ty.show()),
+            })
+        }
+    }
+
+    // `recv[key] := val`: a total in-place write returning the container. Same
+    // eager/deferred split as `synth_index`; only `Array`/`HashMap` are writable.
+    fn synth_index_set(
+        &mut self,
+        env: &Env,
+        recv: &S<Expr<Core>>,
+        key: &S<Expr<Core>>,
+        val: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let recv_ty = self.synth(env, recv)?;
+        let recv_ty = self.apply(&recv_ty);
+        match index_container(&recv_ty) {
+            Some((kty, elem, true)) => {
+                self.check(env, key, &kty)?;
+                let elem = self.apply(&elem);
+                self.check(env, val, &elem)?;
+                Ok(recv_ty)
+            }
+            None if matches!(recv_ty, Type::Exist(_)) => {
+                let key_ty = self.synth(env, key)?;
+                let val_ty = self.synth(env, val)?;
+                let result = self.push_ex();
+                self.index_ops.push(IndexOp {
+                    span,
+                    recv_span: recv.span,
+                    recv: recv_ty.clone(),
+                    key: key_ty,
+                    result,
+                    val: Some(val_ty),
+                });
+                Ok(recv_ty)
+            }
+            _ => Err(TypeError::Other {
+                span: recv.span,
+                msg: format!(
+                    "type `{}` does not support indexed assignment `a[i] := v`",
+                    recv_ty.show()
+                ),
+            }),
+        }
+    }
+
+    pub(super) fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
         self.subtype(ty, &Type::Int).map_err(|e| {
             e.or(TypeError::Mismatch {
                 span,
@@ -628,9 +715,9 @@ impl Tc<'_> {
                     Type::I64 | Type::U64 | Type::Float | Type::Bool | Type::Str => {
                         self.fixed.insert(span, ta);
                     }
-                    Type::Exist(_) => {
-                        self.default_numeric(&ta, a.span)?;
-                    }
+                    // Defer like the arithmetic arm: a later use may still pin
+                    // this to a fixed-width lane before the `Int` default applies.
+                    Type::Exist(_) => self.num_default.push((span, ta)),
                     _ => self.wanted.push(Wanted {
                         span,
                         items: vec![(EQ_CLASS.into(), ta, None)],
@@ -641,14 +728,43 @@ impl Tc<'_> {
             _ => {
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                let t = match ta {
-                    Type::I64 | Type::U64 => ta,
-                    other => self.default_numeric(&other, a.span)?,
+                // A concrete or rigid left operand drives the operator, exactly as
+                // before: a fixed-width lane fixes both sides, and a non-numeric
+                // one is rejected at its own span (good blame). The new case is an
+                // unsolved existential left operand: rather than defaulting it to
+                // `Int` here, check the right operand against it (so the right can
+                // pin the lane) and, if both stay ambiguous, defer to one pass at
+                // `resolve_all` where a later use can still fix the width. This is
+                // what lets `y + x` with `x : I64` type when `y` was left open.
+                let t = match &ta {
+                    Type::I64 | Type::U64 => {
+                        self.check(env, b, &ta)?;
+                        self.fixed.insert(span, ta.clone());
+                        ta
+                    }
+                    Type::Int => {
+                        self.check(env, b, &ta)?;
+                        ta
+                    }
+                    Type::Exist(_) => {
+                        self.check(env, b, &ta)?;
+                        let t = self.apply(&ta);
+                        match &t {
+                            Type::I64 | Type::U64 => {
+                                self.fixed.insert(span, t.clone());
+                            }
+                            Type::Int => {}
+                            Type::Exist(_) => self.num_default.push((span, t.clone())),
+                            other => {
+                                self.default_numeric(other, b.span)?;
+                            }
+                        }
+                        t
+                    }
+                    // Float belongs to the dotted operators; anything else is not
+                    // numeric. `default_numeric` rejects both, blaming the left.
+                    other => self.default_numeric(other, a.span)?,
                 };
-                self.check(env, b, &t)?;
-                if t != Type::Int {
-                    self.fixed.insert(span, t.clone());
-                }
                 Ok(if is_cmp(op) { Type::Bool } else { t })
             }
         }
@@ -676,8 +792,7 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(*a, &arg_exs, row, ret)
-                    .map_err(|e| e.at(span))?;
+                self.articulate(*a, &arg_exs, row, ret);
                 for (ex, arg) in arg_exs.iter().zip(args) {
                     self.check(env, arg, &Type::Exist(*ex))?;
                 }
@@ -851,6 +966,8 @@ impl Tc<'_> {
     ) -> Result<Type, TypeError> {
         self.reset_ctx();
         self.wanted.clear();
+        self.num_default.clear();
+        self.index_ops.clear();
         for p in &d.params {
             if let Some(ann) = &p.ty {
                 self.check_annot_rows(ann, d.span)?;
@@ -987,6 +1104,8 @@ impl Tc<'_> {
     pub(super) fn infer_const(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
         self.reset_ctx();
         self.wanted.clear();
+        self.num_default.clear();
+        self.index_ops.clear();
         let ty = if let Some(ann) = &d.ret {
             self.check_annot_rows(ann, d.span)?;
             let mut ty_ex = BTreeMap::new();
@@ -1015,6 +1134,8 @@ impl Tc<'_> {
         for m in &inst.methods {
             self.reset_ctx();
             self.wanted.clear();
+            self.num_default.clear();
+            self.index_ops.clear();
             let (_, sig) = class
                 .methods
                 .iter()
@@ -1063,6 +1184,25 @@ fn default_open_rows(ty: &Type) -> Type {
         out = out.subst_row_exist(*r, &EffRow::Empty);
     }
     out
+}
+
+// For a known indexable container head, the (expected key type, element type,
+// writable) triple; `None` for any other (or not-yet-resolved) type. `Array`/
+// `HashMap` are writable; `List`/`String` are read-only.
+pub(super) fn index_container(ty: &Type) -> Option<(Type, Type, bool)> {
+    match ty {
+        Type::Con(n, args) if n.as_str() == "Array" && args.len() == 1 => {
+            Some((Type::Int, args[0].clone(), true))
+        }
+        Type::Con(n, args) if n.as_str() == "HashMap" && args.len() == 1 => {
+            Some((Type::Str, args[0].clone(), true))
+        }
+        Type::Con(n, args) if n.as_str() == LIST && args.len() == 1 => {
+            Some((Type::Int, args[0].clone(), false))
+        }
+        Type::Str => Some((Type::Int, Type::Int, false)),
+        _ => None,
+    }
 }
 
 const fn is_cmp(op: BinOp) -> bool {

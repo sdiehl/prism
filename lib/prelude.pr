@@ -253,6 +253,19 @@ fn force(o) =
     Some(x) => x
     None => fail()
 
+-- Indexing accessors backing `a[i]` / `m[k]` / `s[i]`: a bounds- or
+-- membership-failure is a `fail()`, so `a[i] ?? d` defaults through `??`.
+fn at_array(a : Array(e), i : Int) : e =
+  if i >= 0 && i < array_len(a) then array_get(a, i) else fail()
+
+fn at_hashmap(m : HashMap(v), k : String) : v =
+  match hm_lookup(m, k) of
+    Some(x) => x
+    None => fail()
+
+fn at_byte(s : String, i : Int) : Int =
+  if i >= 0 && i < byte_len(s) then byte_at(s, i) else fail()
+
 fn singleton(x) = Cons(x, Nil)
 
 fn is_nil(xs) =

@@ -72,15 +72,24 @@ pub fn check(src: &str) -> Result<Checked, Error> {
 pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules(program, base)?;
+    let lints = lint_surface(src, &program);
     let program = desugar(program)?;
-    let checked = typecheck(&program)?;
+    let mut checked = typecheck(&program)?;
+    checked.warnings.extend(lints);
     emit_warnings(src, &checked);
     Ok(checked)
 }
 
-// Surface non-fatal checker diagnostics (orphan/overlapping instances) on stderr,
-// with a source caret when the warning points into this source. Errors abort
-// earlier, so this only runs once a program type checks.
+// Unused-binding and shadowed-name lints over the resolved surface program,
+// scoped to the user's own source (the prepended prelude is excluded by offset).
+fn lint_surface(src: &str, prog: &Program) -> Vec<crate::tc::Warning> {
+    let user_start = crate::error::SourceMap::new(src).prelude_len();
+    crate::resolve::lint_bindings(prog, user_start)
+}
+
+// Surface non-fatal checker diagnostics (orphan/overlapping instances, unused or
+// shadowed bindings) on stderr, with a source caret when the warning points into
+// this source. Errors abort earlier, so this only runs once a program type checks.
 fn emit_warnings(src: &str, checked: &Checked) {
     for w in &checked.warnings {
         eprint!(
@@ -93,8 +102,10 @@ fn emit_warnings(src: &str, checked: &Checked) {
 fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core), Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules(program, base)?;
+    let lints = lint_surface(src, &program);
     let program = desugar(program)?;
-    let checked = typecheck(&program)?;
+    let mut checked = typecheck(&program)?;
+    checked.warnings.extend(lints);
     emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &checked, &core)?;
@@ -314,8 +325,12 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
             | Comp::FloatBuiltin(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
-            | Comp::ReuseToken(v) => scan_val(v, out),
-            Comp::Reuse(a, b) | Comp::Prim(_, a, b) => {
+            | Comp::Reuse(_, v) => scan_val(v, out),
+            Comp::WithReuse { freed, body, .. } => {
+                scan_val(freed, out);
+                scan_comp(body, out);
+            }
+            Comp::Prim(_, a, b) => {
                 scan_val(a, out);
                 scan_val(b, out);
             }

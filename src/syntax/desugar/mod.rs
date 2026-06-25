@@ -29,8 +29,8 @@ use effects::{rw, wrap_return, Binding, Vars};
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    compound_assign, dot_call, interp_lit, let_pat, let_stmt, open_if, pattern_decl, seq_stmt,
-    try_mark, with_rest, with_stmt, IfTail,
+    assign_stmt, compound_assign, compound_stmt, dot_call, interp_lit, let_pat, let_stmt, open_if,
+    pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.

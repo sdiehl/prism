@@ -1,7 +1,7 @@
 -- Typeclasses with Lean-style named instances. A class declares a dictionary
 -- shape, instances are named values, and constrained functions take hidden
 -- dictionaries resolved at the call site. Two instances at one head make
--- resolution ambiguous, so pick one explicitly with f[instName].
+-- resolution ambiguous, so pick one explicitly with f(args, using instName).
 
 fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
   match xs of
@@ -29,8 +29,8 @@ fn join_shown(xs : List(a)) : String given Show(a) =
 
 fn main() : !{IO} Unit =
   let xs = [3, 1, 4, 1, 5, 9, 2, 6]
-  println(join_shown(sort_by_ord[ordInt](xs)))
-  println(join_shown(sort_by_ord[ordDesc](xs)))
-  println(unwrap_or(0, maximum_by_ord[ordInt](xs)))
-  println(unwrap_or(0, maximum_by_ord[ordDesc](xs)))
+  println(join_shown(sort_by_ord(xs, using ordInt)))
+  println(join_shown(sort_by_ord(xs, using ordDesc)))
+  println(unwrap_or(0, maximum_by_ord(xs, using ordInt)))
+  println(unwrap_or(0, maximum_by_ord(xs, using ordDesc)))
   println(join_shown(sort_by_ord(["pear", "apple", "quince"])))

@@ -76,4 +76,4 @@ fn main() =
   -- another |> stage: count the peaks within the steady window.
   println(concat("peaks per window: ", show(steady |> filter(\(t) -> t == 22) |> length)))
   -- dot-chain: a fused stream of stateful handlers, no intermediate list.
-  println(concat("time at or above setpoint: ", show(sof(steady).skeep(\(t) -> t >= 20).smap(\(t) -> 1).ssum())))
+  println(concat("time at or above setpoint: ", show(sof(steady).skeep(\(t) -> t >= 20).smap(\(_t) -> 1).ssum())))

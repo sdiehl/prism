@@ -1,6 +1,6 @@
 use marginalia::Span;
 use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, compound_assign, IfTail};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
 grammar;
@@ -64,6 +64,7 @@ extern {
         "forall" => Token::Forall,
         "true"   => Token::True,
         "false"  => Token::False,
+        "using"  => Token::Using,
         "Int"    => Token::KwInt,
         "Bool"   => Token::KwBool,
         "Unit"   => Token::KwUnit,
@@ -531,10 +532,13 @@ pub Expr: S<Expr> = {
         Spanned { synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
     <l:@L> "return" <e:Expr> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
-    <l:@L> <x:"ident"> ":=" <v:Expr> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Assign(x, Box::new(v))), span: Span::new(l, r) },
-    <l:@L> <x:"ident"> <op:CompoundOp> <v:Expr> <r:@R> =>
-        compound_assign(x, op, v, l, r),
+    // The left side is parsed as a general `Call` so an index target `a[i]`
+    // (an `Expr::Index`) is accepted alongside a bare `var`; `assign_stmt`/
+    // `compound_stmt` dispatch on its shape and reject a non-assignable one.
+    <l:@L> <lhs:Call> ":=" <v:Expr> <r:@R> =>?
+        assign_stmt(lhs, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
+    <l:@L> <lhs:Call> <op:CompoundOp> <v:Expr> <r:@R> =>?
+        compound_stmt(lhs, op, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
     Default,
 };
 
@@ -788,17 +792,26 @@ Call: S<Expr> = {
 };
 
 CallTight: S<Expr> = {
-    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> ")" <r:@R> =>
-        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) },
+    // An optional trailing `using name, ...` clause selects explicit instances
+    // for the call, wrapping the callee in `Expr::Inst` (the same node the old
+    // `f[name]` form produced, so everything downstream is unchanged).
+    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> <inst:("using" <CommaPlus<"ident">>)?> ")" <r:@R> => {
+        let span = Span::new(l, r);
+        let callee = match inst {
+            Some(names) => Spanned { synth: false, node: Expr::Inst(Box::new(f), names), span },
+            None => f,
+        };
+        Spanned { synth: false, node: Expr::Call(Box::new(callee), a), span }
+    },
     <l:@L> <f:CallTight> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
         let span = Span::new(l, r);
         a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span });
         Spanned { synth: false, node: Expr::Call(Box::new(f), a), span }
     },
-    <l:@L> <f:CallTight> "[" <first:"ident"> <rest:("," <"ident">)*> "]" <r:@R> => {
-        let mut is = vec![first]; is.extend(rest);
-        Spanned { synth: false, node: Expr::Inst(Box::new(f), is), span: Span::new(l, r) }
-    },
+    // Indexed read `recv[key]` (a single index expression). Nested indexing is
+    // `a[i][j]`; multiple comma-separated indices are not a form.
+    <l:@L> <f:CallTight> "[" <k:Expr> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
     <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
         dot_call(e, m, a, l, r),
     <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {

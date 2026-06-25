@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/indexing_ops.pr
+---
+15
+30
+102
+=> ()

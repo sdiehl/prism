@@ -193,10 +193,10 @@ fn node(c: &Comp) -> Node {
         })),
         Comp::Mask(ops, b) => Node::Mask(Rc::from(ops.as_slice()), lower(b)),
         Comp::StrBuiltin(n, args) => Node::StrBuiltin(*n, args.iter().map(atom_of).collect()),
-        // The interpreter runs un-lowered core; Dup/Drop/ReuseToken/Reuse are
+        // The interpreter runs un-lowered core; Dup/Drop/WithReuse/Reuse are
         // injected only by codegen-side RC lowering and must never reach here.
         // Masking them to a silent sink would hide the invariant breaking.
-        Comp::Dup(_) | Comp::Drop(_) | Comp::ReuseToken(_) | Comp::Reuse(..) => {
+        Comp::Dup(_) | Comp::Drop(_) | Comp::WithReuse { .. } | Comp::Reuse(..) => {
             unreachable!("RC reuse node reached the interpreter; it runs un-lowered core")
         }
     }

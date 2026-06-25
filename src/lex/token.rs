@@ -319,6 +319,8 @@ pub enum Token {
     True,
     #[token("false")]
     False,
+    #[token("using")]
+    Using,
     #[token("Int")]
     KwInt,
     #[token("Bool")]
@@ -537,6 +539,7 @@ impl Token {
             Self::Forall => kw::FORALL,
             Self::True => kw::TRUE,
             Self::False => kw::FALSE,
+            Self::Using => kw::USING,
             Self::KwInt => kw::TY_INT,
             Self::KwBool => kw::TY_BOOL,
             Self::KwUnit => kw::TY_UNIT,

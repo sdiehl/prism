@@ -6,5 +6,5 @@ fn fact(n) =
 
 fn main() =
   let r = fact(5)
-  let u = println(r)
+  println(r)
   r

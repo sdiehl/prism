@@ -194,6 +194,20 @@ struct Wanted {
     items: Vec<(String, Type, Option<String>)>,
 }
 
+// A deferred indexed read/write, resolved by head-type dispatch at the end of
+// the declaration. `recv`/`key` are the synthed operand types (applied at
+// resolution); `result` is the element existential to solve (and the read's
+// result type); `val` is `Some(value type)` for a write (checked against the
+// element type), `None` for a read (which also performs `Fail`).
+struct IndexOp {
+    span: Span,
+    recv_span: Span,
+    recv: Type,
+    key: Type,
+    result: u32,
+    val: Option<Type>,
+}
+
 struct Tc<'a> {
     ctx: Vec<Entry>,
     next: u32,
@@ -215,6 +229,17 @@ struct Tc<'a> {
     // and the non-nesting invariant enforceable by save/restore.
     cur_self: Option<SelfRef>,
     wanted: Vec<Wanted>,
+    // Numeric operands left ambiguous at an arithmetic/comparison operator: each
+    // (span, operand type) is resolved in one pass at the end of the declaration
+    // (`resolve_all`), so a later use can fix the type to a fixed-width lane
+    // before the otherwise-`Int` default applies. Symmetric in the two operands.
+    num_default: Vec<(Span, Type)>,
+    // Indexed reads/writes (`a[i]`, `a[i] := v`) whose receiver type was not yet
+    // resolved at synth (a `var`'s state existential is solved only once its
+    // initializer is checked). Each is dispatched on the receiver's head type in
+    // one pass at the end of the declaration (`resolve_all`, before `num_default`
+    // so an index's element type is known to numeric defaulting).
+    index_ops: Vec<IndexOp>,
     dicts: BTreeMap<Span, Vec<Dict>>,
     // Innermost-last instantiation scopes for parametric effects: each entry
     // ties an effect name to the type args in force (handler or latent row).
@@ -316,6 +341,8 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             constrained,
             cur_self: None,
             wanted: Vec::new(),
+            num_default: Vec::new(),
+            index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,
@@ -523,6 +550,8 @@ fn infer_expr_full(
         constrained: checked.constrained.clone(),
         cur_self: None,
         wanted: Vec::new(),
+        num_default: Vec::new(),
+        index_ops: Vec::new(),
         dicts: BTreeMap::new(),
         row_ctx: Vec::new(),
         cur_row: None,

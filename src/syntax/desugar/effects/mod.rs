@@ -278,6 +278,14 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             Expr::RecordUpdatePath(Box::new(b2), ups2?)
         }
         Expr::Inst(f, ns) => Expr::Inst(Box::new(rw(f, env, cx)?), ns.clone()),
+        Expr::Index(recv, key) => {
+            Expr::Index(Box::new(rw(recv, env, cx)?), Box::new(rw(key, env, cx)?))
+        }
+        Expr::IndexSet(recv, key, val) => Expr::IndexSet(
+            Box::new(rw(recv, env, cx)?),
+            Box::new(rw(key, env, cx)?),
+            Box::new(rw(val, env, cx)?),
+        ),
         Expr::Ann(a, t) => Expr::Ann(Box::new(rw(a, env, cx)?), t.clone()),
         Expr::Mask(eff, b) => Expr::Mask(eff.clone(), Box::new(rw(b, env, cx)?)),
         Expr::Sugar(s) => return rw_sugar(s, span, env, cx),
@@ -294,6 +302,36 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
 // Each surface-only form rebuilds a sugar-free surface tree (a handler, a
 // stream, a field access) and re-runs `rw` on it, except `var`/named-handler
 // which have their own driver; nothing here returns sugar.
+// `recv[key] := value` rebinds the root variable as `root := index_set(..)`,
+// nesting one `IndexSet` per level for `grid[i][j] := v`. The base must be a
+// variable; returns the equivalent `Sugar::Assign` surface expr to rewrite.
+fn index_to_var_set(
+    recv: &S<Expr>,
+    key: &S<Expr>,
+    value: S<Expr>,
+    span: Span,
+) -> Result<S<Expr>, TypeError> {
+    let set = sp(
+        Expr::IndexSet(
+            Box::new(recv.clone()),
+            Box::new(key.clone()),
+            Box::new(value),
+        ),
+        span,
+    );
+    match &recv.node {
+        Expr::Var(name) => Ok(sp(
+            Expr::Sugar(Sugar::Assign(name.clone(), Box::new(set))),
+            span,
+        )),
+        Expr::Index(inner_recv, inner_key) => index_to_var_set(inner_recv, inner_key, set, span),
+        _ => Err(TypeError::Other {
+            span: recv.span,
+            msg: "the base of an indexed assignment must be a variable".into(),
+        }),
+    }
+}
+
 fn rw_sugar(
     s: &Sugar<Surface>,
     span: Span,
@@ -312,6 +350,13 @@ fn rw_sugar(
                     msg: format!("cannot assign to `{x}`: declare it with `var {x} := ...`"),
                 }),
             }
+        }
+        // `recv[key] := value` rebinds the root `var`; recover the equivalent
+        // `root := index_set(..)` surface form and rewrite that, so var-read
+        // rewriting and the `put` emission go through the `Assign` path above.
+        Sugar::IndexAssign(recv, key, value) => {
+            let assign = index_to_var_set(recv, key, (**value).clone(), span)?;
+            rw(&assign, env, cx)
         }
         Sugar::Throw(name, args) => {
             if !cx.errors.contains(name) {
@@ -681,6 +726,11 @@ impl CtlScan {
                 self.go(b);
             }
             Sugar::Assign(_, v) | Sugar::OptChain(v, _) => self.go(v),
+            Sugar::IndexAssign(recv, key, v) => {
+                self.go(recv);
+                self.go(key);
+                self.go(v);
+            }
             Sugar::NamedHandle(_, b, arms) => {
                 self.go(b);
                 for a in arms {
@@ -750,6 +800,15 @@ impl CtlScan {
             }
             Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => {
                 self.go(b);
+            }
+            Expr::Index(recv, key) => {
+                self.go(recv);
+                self.go(key);
+            }
+            Expr::IndexSet(recv, key, val) => {
+                self.go(recv);
+                self.go(key);
+                self.go(val);
             }
             Expr::RecordCreate(_, fs) => {
                 for (_, v) in fs {
