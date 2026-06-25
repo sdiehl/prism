@@ -21,6 +21,7 @@ pub mod eval;
 pub mod fixpoint;
 pub mod fmt;
 pub mod fresh;
+pub mod kw;
 pub mod lex;
 pub mod names;
 pub mod parse;

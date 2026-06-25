@@ -9,6 +9,10 @@ extern {
     type Location = usize;
     type Error = (Span, String);
 
+    // The strings below are terminal aliases, not source spellings: the lexer
+    // (and so `src/kw.rs`) decides the actual text, and the grammar only consumes
+    // the mapped `Token` variant. Renaming a keyword therefore changes `kw`/the
+    // lexer, not these aliases (rename an alias only to keep it readable).
     enum Token {
         "fn"     => Token::Fn,
         "fip"    => Token::Fip,

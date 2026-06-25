@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use super::cbpv::{Comp, Core, CoreOp, CorePat, Value};
+use crate::kw;
 use crate::sym::Sym;
 
 fn join_syms(syms: &[Sym]) -> String {
@@ -14,7 +15,7 @@ fn join_syms(syms: &[Sym]) -> String {
 pub fn pp_core(core: &Core) -> String {
     let mut out = String::new();
     for f in &core.fns {
-        writeln!(out, "fn {}({}) =", f.name, join_syms(&f.params)).unwrap();
+        writeln!(out, "{} {}({}) =", kw::FN, f.name, join_syms(&f.params)).unwrap();
         writeln!(out, "  {}", pp_comp(&f.body)).unwrap();
     }
     out
@@ -28,7 +29,7 @@ const STEP: &str = "  ";
 pub fn pp_core_pretty(core: &Core) -> String {
     let mut out = String::new();
     for f in &core.fns {
-        writeln!(out, "fn {}({}) =", f.name, join_syms(&f.params)).unwrap();
+        writeln!(out, "{} {}({}) =", kw::FN, f.name, join_syms(&f.params)).unwrap();
         out.push_str(&pp_block(&f.body, 1));
         out.push('\n');
     }
@@ -53,9 +54,12 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             format!("{}\n{}", pp_seq(m, depth, bx), pp_seq(n, depth, binder))
         }
         Comp::If(v, t, e) if binder.is_none() => format!(
-            "{pad}if {} then\n{}\n{pad}else\n{}",
+            "{pad}{} {} {}\n{}\n{pad}{}\n{}",
+            kw::IF,
             pp_value(v),
+            kw::THEN,
             pp_block(t, depth + 1),
+            kw::ELSE,
             pp_block(e, depth + 1)
         ),
         Comp::Case(v, arms) if binder.is_none() => {
@@ -78,7 +82,12 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             return_body,
             ops,
         } if binder.is_none() => {
-            let mut s = format!("{pad}handle\n{}\n{pad}with", pp_block(body, depth + 1));
+            let mut s = format!(
+                "{pad}{}\n{}\n{pad}{}",
+                kw::HANDLE,
+                pp_block(body, depth + 1),
+                kw::WITH
+            );
             for op in ops {
                 let mut ps = op.params.clone();
                 ps.push(op.resume);
@@ -95,8 +104,9 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             if let (Some(rv), Some(rb)) = (return_var, return_body) {
                 write!(
                     s,
-                    "\n{}return {rv} =>\n{}",
+                    "\n{}{} {rv} =>\n{}",
                     STEP.repeat(depth + 1),
+                    kw::RETURN,
                     pp_block(rb, depth + 2)
                 )
                 .unwrap();
@@ -104,7 +114,12 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             s
         }
         Comp::Mask(ops, b) if binder.is_none() => {
-            format!("{pad}mask<{}>\n{}", join_syms(ops), pp_block(b, depth + 1))
+            format!(
+                "{pad}{}<{}>\n{}",
+                kw::MASK,
+                join_syms(ops),
+                pp_block(b, depth + 1)
+            )
         }
         other => {
             let s = pp_comp(other);
@@ -139,7 +154,7 @@ pub fn pp_value(v: &Value) -> String {
 
 pub fn pp_comp(c: &Comp) -> String {
     match c {
-        Comp::Return(v) => format!("return {}", pp_value(v)),
+        Comp::Return(v) => format!("{} {}", kw::RETURN, pp_value(v)),
         Comp::Bind(m, x, n) => format!("{} to {x}; {}", pp_comp(m), pp_comp(n)),
         Comp::Force(v) => format!("force {}", pp_value(v)),
         Comp::Lam(ps, b) => format!(
@@ -153,9 +168,12 @@ pub fn pp_comp(c: &Comp) -> String {
         }
         Comp::If(v, t, e) => {
             format!(
-                "if {} then ({}) else ({})",
+                "{} {} {} ({}) {} ({})",
+                kw::IF,
                 pp_value(v),
+                kw::THEN,
                 pp_comp(t),
+                kw::ELSE,
                 pp_comp(e)
             )
         }
@@ -208,15 +226,17 @@ pub fn pp_comp(c: &Comp) -> String {
                 })
                 .collect();
             if let (Some(rv), Some(rb)) = (return_var, return_body) {
-                arms.push(format!("return {rv} => {}", pp_comp(rb)));
+                arms.push(format!("{} {rv} => {}", kw::RETURN, pp_comp(rb)));
             }
             format!(
-                "handle {{ {} }} with {{ {} }}",
+                "{} {{ {} }} {} {{ {} }}",
+                kw::HANDLE,
                 pp_comp(body),
+                kw::WITH,
                 arms.join(", ")
             )
         }
-        Comp::Mask(ops, b) => format!("mask<{}> {{ {} }}", join_syms(ops), pp_comp(b)),
+        Comp::Mask(ops, b) => format!("{}<{}> {{ {} }}", kw::MASK, join_syms(ops), pp_comp(b)),
     }
 }
 
@@ -239,26 +259,26 @@ fn pp_pat(p: &CorePat) -> String {
 
 const fn pp_op(op: CoreOp) -> &'static str {
     match op {
-        CoreOp::Add => "+",
-        CoreOp::Sub => "-",
-        CoreOp::Mul => "*",
-        CoreOp::Div => "/",
-        CoreOp::Rem => "%",
-        CoreOp::Addf => "+.",
-        CoreOp::Subf => "-.",
-        CoreOp::Mulf => "*.",
-        CoreOp::Divf => "/.",
-        CoreOp::Eq => "==",
-        CoreOp::Ne => "/=",
-        CoreOp::Lt => "<",
-        CoreOp::Le => "<=",
-        CoreOp::Gt => ">",
-        CoreOp::Ge => ">=",
-        CoreOp::Eqf => "==.",
-        CoreOp::Nef => "/=.",
-        CoreOp::Ltf => "<.",
-        CoreOp::Lef => "<=.",
-        CoreOp::Gtf => ">.",
-        CoreOp::Gef => ">=.",
+        CoreOp::Add => kw::PLUS,
+        CoreOp::Sub => kw::MINUS,
+        CoreOp::Mul => kw::STAR,
+        CoreOp::Div => kw::SLASH,
+        CoreOp::Rem => kw::PERCENT,
+        CoreOp::Addf => kw::PLUS_DOT,
+        CoreOp::Subf => kw::MINUS_DOT,
+        CoreOp::Mulf => kw::STAR_DOT,
+        CoreOp::Divf => kw::SLASH_DOT,
+        CoreOp::Eq => kw::EQ_EQ,
+        CoreOp::Ne => kw::NE,
+        CoreOp::Lt => kw::LT,
+        CoreOp::Le => kw::LE,
+        CoreOp::Gt => kw::GT,
+        CoreOp::Ge => kw::GE,
+        CoreOp::Eqf => kw::EQ_DOT,
+        CoreOp::Nef => kw::NE_DOT,
+        CoreOp::Ltf => kw::LT_DOT,
+        CoreOp::Lef => kw::LE_DOT,
+        CoreOp::Gtf => kw::GT_DOT,
+        CoreOp::Gef => kw::GE_DOT,
     }
 }

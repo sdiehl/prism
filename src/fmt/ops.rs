@@ -78,31 +78,3 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
         _ => low_prec_operand(child),
     }
 }
-
-pub(super) const fn fmt_binop(op: BinOp) -> &'static str {
-    match op {
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Rem => "%",
-        BinOp::And => "&&",
-        BinOp::Or => "||",
-        BinOp::Addf => "+.",
-        BinOp::Subf => "-.",
-        BinOp::Mulf => "*.",
-        BinOp::Divf => "/.",
-        BinOp::Eq => "==",
-        BinOp::Ne => "/=",
-        BinOp::Lt => "<",
-        BinOp::Le => "<=",
-        BinOp::Gt => ">",
-        BinOp::Ge => ">=",
-        BinOp::Eqf => "==.",
-        BinOp::Nef => "/=.",
-        BinOp::Ltf => "<.",
-        BinOp::Lef => "<=.",
-        BinOp::Gtf => ">.",
-        BinOp::Gef => ">=.",
-    }
-}

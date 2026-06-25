@@ -410,6 +410,39 @@ pub enum BinOp {
     Gef,
 }
 
+impl BinOp {
+    /// The canonical source spelling of this operator.
+    #[must_use]
+    pub const fn spelling(self) -> &'static str {
+        use crate::kw;
+        match self {
+            Self::Add => kw::PLUS,
+            Self::Sub => kw::MINUS,
+            Self::Mul => kw::STAR,
+            Self::Div => kw::SLASH,
+            Self::Rem => kw::PERCENT,
+            Self::Eq => kw::EQ_EQ,
+            Self::Ne => kw::NE,
+            Self::Lt => kw::LT,
+            Self::Le => kw::LE,
+            Self::Gt => kw::GT,
+            Self::Ge => kw::GE,
+            Self::And => kw::AMP_AMP,
+            Self::Or => kw::PIPE_PIPE,
+            Self::Addf => kw::PLUS_DOT,
+            Self::Subf => kw::MINUS_DOT,
+            Self::Mulf => kw::STAR_DOT,
+            Self::Divf => kw::SLASH_DOT,
+            Self::Eqf => kw::EQ_DOT,
+            Self::Nef => kw::NE_DOT,
+            Self::Ltf => kw::LT_DOT,
+            Self::Lef => kw::LE_DOT,
+            Self::Gtf => kw::GT_DOT,
+            Self::Gef => kw::GE_DOT,
+        }
+    }
+}
+
 // The compilation phase an expression tree belongs to. `Surface` is the parsed
 // sugar-bearing AST; `Core` is desugar's output, where the sugar payloads become
 // the uninhabited `Never` so every sugar variant is statically impossible and

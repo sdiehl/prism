@@ -5,6 +5,7 @@
 //! can call back into them, while the purely structural printers stay free.
 
 use super::{block_trailing_call, forces_break, Fmt, Mode, INDENT, LINE_WIDTH};
+use crate::kw;
 use crate::syntax::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
     InstanceDecl, Param, PatternDecl, Row, Ty, S,
@@ -12,10 +13,14 @@ use crate::syntax::ast::{
 
 pub(super) fn fmt_import(i: &ImportDecl) -> String {
     use std::fmt::Write as _;
-    let kw = if i.reexport { "pub import" } else { "import" };
-    let mut s = format!("{kw} {}", i.path.join("."));
+    let key = if i.reexport {
+        format!("{} {}", kw::PUB, kw::IMPORT)
+    } else {
+        kw::IMPORT.to_string()
+    };
+    let mut s = format!("{key} {}", i.path.join("."));
     if let Some(a) = &i.alias {
-        write!(s, " as {a}").unwrap();
+        write!(s, " {} {a}", kw::AS).unwrap();
     }
     if let Some(names) = &i.names {
         write!(s, " ({})", names.join(", ")).unwrap();
@@ -30,7 +35,8 @@ pub(super) fn fmt_effect(e: &EffectDecl) -> String {
         .map(|op| {
             let params: Vec<String> = op.params.iter().map(fmt_ty).collect();
             format!(
-                "  ctl {}({}) : {}",
+                "  {} {}({}) : {}",
+                kw::CTL,
                 op.name,
                 params.join(", "),
                 fmt_ty(&op.ret)
@@ -42,7 +48,7 @@ pub(super) fn fmt_effect(e: &EffectDecl) -> String {
     } else {
         format!("({})", e.params.join(", "))
     };
-    format!("effect {}{} {{\n{}\n}}", e.name, params, ops.join(",\n"))
+    format!("{} {}{} {{\n{}\n}}", kw::EFFECT, e.name, params, ops.join(",\n"))
 }
 
 pub(super) fn fmt_label(l: &EffLabel) -> String {
@@ -73,10 +79,11 @@ pub(super) fn fmt_class(c: &ClassDecl) -> String {
             .iter()
             .map(|s| format!("{s}({})", c.param))
             .collect();
-        format!(" given {}", parts.join(", "))
+        format!(" {} {}", kw::GIVEN, parts.join(", "))
     };
     format!(
-        "class {}({}){sup} {{\n{}\n}}",
+        "{} {}({}){sup} {{\n{}\n}}",
+        kw::CLASS,
         c.name,
         c.param,
         sigs.join(",\n")
@@ -88,7 +95,7 @@ pub(super) fn fmt_constraints(cs: &[Constraint]) -> String {
         .iter()
         .map(|c| format!("{}({})", c.class, fmt_ty(&c.ty)))
         .collect();
-    format!(" given {}", parts.join(", "))
+    format!(" {} {}", kw::GIVEN, parts.join(", "))
 }
 
 pub(super) fn indent_block(s: &str) -> String {
@@ -115,10 +122,10 @@ pub(super) fn fmt_data(d: &DataDecl) -> String {
         String::new()
     } else {
         let names: Vec<&str> = d.deriving.iter().map(|(n, _)| n.as_str()).collect();
-        format!(" deriving ({})", names.join(", "))
+        format!(" {} ({})", kw::DERIVING, names.join(", "))
     };
-    let kw = if d.newtype { "newtype" } else { "type" };
-    format!("{kw} {}{} = {}{der}", d.name, params, ctors.join(" | "))
+    let key = if d.newtype { kw::NEWTYPE } else { kw::TYPE };
+    format!("{key} {}{} = {}{der}", d.name, params, ctors.join(" | "))
 }
 
 pub(super) fn fmt_ctor(c: &Ctor) -> String {
@@ -143,14 +150,14 @@ pub(super) fn fmt_ctor(c: &Ctor) -> String {
 
 pub(super) fn fmt_ty(t: &Ty) -> String {
     match t {
-        Ty::Int => "Int".into(),
-        Ty::I64 => "I64".into(),
-        Ty::U64 => "U64".into(),
-        Ty::Bool => "Bool".into(),
-        Ty::Unit => "Unit".into(),
-        Ty::Float => "Float".into(),
-        Ty::Char => "Char".into(),
-        Ty::Str => "String".into(),
+        Ty::Int => kw::TY_INT.into(),
+        Ty::I64 => kw::TY_I64.into(),
+        Ty::U64 => kw::TY_U64.into(),
+        Ty::Bool => kw::TY_BOOL.into(),
+        Ty::Unit => kw::TY_UNIT.into(),
+        Ty::Float => kw::TY_FLOAT.into(),
+        Ty::Char => kw::TY_CHAR.into(),
+        Ty::Str => kw::TY_STRING.into(),
         Ty::Var(x) => x.clone(),
         Ty::App(v, args) => {
             let args: Vec<String> = args.iter().map(fmt_ty).collect();
@@ -163,7 +170,7 @@ pub(super) fn fmt_ty(t: &Ty) -> String {
                 vs.extend(more.iter().cloned());
                 cur = inner;
             }
-            format!("forall {}. {}", vs.join(" "), fmt_ty(cur))
+            format!("{} {}. {}", kw::FORALL, vs.join(" "), fmt_ty(cur))
         }
         Ty::Fun(args, row, ret) => {
             let args: Vec<String> = args.iter().map(fmt_ty).collect();
@@ -213,7 +220,8 @@ impl Fmt<'_> {
             .map(|m| indent_block(&self.fmt_fn(m, Mode::Flat)))
             .collect();
         format!(
-            "instance {} : {}({}){wh} {{\n{}\n}}",
+            "{} {} : {}({}){wh} {{\n{}\n}}",
+            kw::INSTANCE,
             i.name,
             i.class,
             fmt_ty(&i.head),
@@ -222,16 +230,18 @@ impl Fmt<'_> {
     }
 
     pub(super) fn fmt_pattern_decl(&self, p: &PatternDecl) -> String {
-        let clause = |kw: &str, e: &S<Expr>| {
+        let clause = |key: &str, e: &S<Expr>| {
             let s = self
                 .fmt_expr_inline(e, Mode::Flat)
                 .unwrap_or_else(|| self.fmt_expr_break(e, 1, Mode::Flat));
-            format!("{INDENT}{kw} {s}")
+            format!("{INDENT}{key} {s}")
         };
         let mut out = format!(
-            "pattern {}({}) for {} =\n{}",
+            "{} {}({}) {} {} =\n{}",
+            kw::PATTERN,
             p.name,
             p.params.join(", "),
+            kw::FOR,
             p.for_ty,
             clause("view", &p.view)
         );
@@ -243,13 +253,17 @@ impl Fmt<'_> {
     }
 
     pub(super) fn fmt_param(&self, p: &Param) -> String {
-        let pre = if p.borrow { "borrow " } else { "" };
+        let pre = if p.borrow {
+            format!("{} ", kw::BORROW)
+        } else {
+            String::new()
+        };
         let base = p.ty.as_ref().map_or_else(
             || format!("{pre}{}", p.name),
             |t| format!("{pre}{} : {}", p.name, fmt_ty(t)),
         );
         match &p.default {
-            Some(d) => format!("{base} := {}", self.fmt_expr(d, 0, Mode::Flat)),
+            Some(d) => format!("{base} {} {}", kw::COLON_EQ, self.fmt_expr(d, 0, Mode::Flat)),
             None => base,
         }
     }
@@ -260,7 +274,7 @@ impl Fmt<'_> {
                 .ret
                 .as_ref()
                 .map_or_else(String::new, |t| format!(" : {}", fmt_ty(t)));
-            let sig = format!("let {}{ann} =", d.name);
+            let sig = format!("{} {}{ann} =", kw::LET, d.name);
             let bodied = self.has_comments(d.span.start, d.body.span.end);
             if !bodied && (mode == Mode::Flat || !forces_break(&d.body)) {
                 if let Some(body) = self.fmt_expr_inline(&d.body, mode) {
@@ -303,12 +317,12 @@ impl Fmt<'_> {
         } else {
             fmt_constraints(&d.constraints)
         };
-        let kw = match d.fip {
-            Fip::No => "fn",
-            Fip::Fbip => "fbip fn",
-            Fip::Fip => "fip fn",
+        let key = match d.fip {
+            Fip::No => kw::FN.to_string(),
+            Fip::Fbip => format!("{} {}", kw::FBIP, kw::FN),
+            Fip::Fip => format!("{} {}", kw::FIP, kw::FN),
         };
-        let sig = format!("{kw} {}({}){}{} =", d.name, params.join(", "), ret_ann, wh);
+        let sig = format!("{key} {}({}){}{} =", d.name, params.join(", "), ret_ann, wh);
 
         // A body carrying comments cannot collapse onto the signature line; only the
         // laid-out path has room to re-emit them. A trailing-lambda call is tried
@@ -349,7 +363,7 @@ impl Fmt<'_> {
             return String::new();
         }
         let ind = INDENT.repeat(2);
-        let mut s = format!("\n{INDENT}where");
+        let mut s = format!("\n{INDENT}{}", kw::WHERE);
         for (n, v) in wheres {
             if let Some(inl) = self.fmt_expr_inline(v, Mode::Layout) {
                 let line = format!("{ind}{n} = {inl}");
