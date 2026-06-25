@@ -256,7 +256,10 @@ fn force(o) =
 -- Indexing accessors backing `a[i]` / `m[k]` / `s[i]`: a bounds- or
 -- membership-failure is a `fail()`, so `a[i] ?? d` defaults through `??`.
 fn at_array(a : Array(e), i : Int) : e =
-  if i >= 0 && i < array_len(a) then array_get(a, i) else fail()
+  if i >= 0 && i < array_len(a) then
+    array_get(a, i)
+  else
+    fail()
 
 fn at_hashmap(m : HashMap(v), k : String) : v =
   match hm_lookup(m, k) of
@@ -264,7 +267,10 @@ fn at_hashmap(m : HashMap(v), k : String) : v =
     None => fail()
 
 fn at_byte(s : String, i : Int) : Int =
-  if i >= 0 && i < byte_len(s) then byte_at(s, i) else fail()
+  if i >= 0 && i < byte_len(s) then
+    byte_at(s, i)
+  else
+    fail()
 
 fn singleton(x) = Cons(x, Nil)
 
@@ -502,15 +508,13 @@ fn repeat_while(cond, body) =
   if cond() then
     body()
     repeat_while(cond, body)
-  else
-    ()
 
 -- The driver an unconditional `loop body` with no `break` desugars to: it never
 -- returns, so its result type is fully polymorphic (a bottom), letting such a
 -- loop stand as the body of a function of any return type whose only exits are
 -- early `return`s. Tail-recursive, so it too runs in constant stack.
 fn forever(body) =
-  let _ = body()
+  body()
   forever(body)
 
 fn repeat(n, body) =
