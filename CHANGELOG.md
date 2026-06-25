@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 - Fixed-width bitwise and shift builtins on the I64/U64 lanes: `i64_and`/`i64_or`/`i64_xor`/`i64_shl`/`i64_shr` and their `u64_*` counterparts. and/or/xor share one bit pattern across lanes; `i64_shr` is arithmetic, `u64_shr` logical; shift counts are taken modulo 64.
 - `system(String) -> Int` runs a shell command and returns its exit code, and `eprint`/`eprintln` write to stderr, so a program can drive external tools and emit diagnostics off the stdout stream.

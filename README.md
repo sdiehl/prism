@@ -10,7 +10,9 @@ Prism is an impure functional programming language whose type system tracks side
 
 The [`examples/`](./examples) directory contains a tour of most advanced features.
 
-Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/).
+Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/play/).
+
+Read the [language specification](https://sdiehl.github.io/prism/spec.html) and the [compiler documentation](https://sdiehl.github.io/prism/compiler.html).
 
 ## Install
 
