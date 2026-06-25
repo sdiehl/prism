@@ -67,8 +67,8 @@ fn band(xs : List(Int)) : String =
 fn main() =
   let thermostat = Sys { state = 0, read = \(c) -> c, step = ctrl_step }
   let room = Sys { state = 10, read = \(t) -> t, step = plant_step }
-  let loop = feedback(thermostat, room)
-  let temps = run_closed(loop, 24)
+  let system = feedback(thermostat, room)
+  let temps = run_closed(system, 24)
   println(show(temps))
   -- |> pipeline: drop the warm-up, then read the steady-state band.
   let steady = temps |> drop(12)

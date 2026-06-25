@@ -43,7 +43,8 @@ pub use driver::{build, build_at, emit_ir};
 pub use driver::{build_mlir, build_mlir_at};
 pub use driver::{
     check, check_at, core_ir, core_ir_full, dump, dump_at, interpret, interpret_at,
-    interpret_io_at, off_platform_builtins, rc_balanced, report, report_at, with_prelude,
+    interpret_io_at, off_platform_builtins, rc_balanced, report, report_at, with_custom_prelude,
+    with_prelude,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use fmt::{format, format_check};

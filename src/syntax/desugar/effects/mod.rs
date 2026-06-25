@@ -14,7 +14,8 @@ use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
-    Arm, Core, Expr, HandlerArm, Marker, Param, Pattern, Qualifier, Sugar, SugarArm, Surface, S,
+    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, Pattern, Qualifier, Sugar, SugarArm,
+    Surface, S,
 };
 
 mod defaults;
@@ -27,6 +28,14 @@ use defaults::fill_call;
 use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
+
+// The tail-recursive prelude drivers `while`/`loop` desugar to: `repeat_while`
+// for a loop that can fall through, `forever` for a provably-infinite `loop`.
+const WHILE_LOOP: &str = "repeat_while";
+const FOREVER: &str = "forever";
+
+// `a ^ b` is the `Pow` class method `pow(a, b)`.
+const POW_METHOD: &str = "pow";
 
 // Lambda parameters carry no defaults in source (only top-level `fn`s do), so a
 // surface lambda param maps to a core one unchanged but for the dropped slot.
@@ -148,6 +157,19 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             let (arms2, vals) = rw_arms(arms, env, cx)?;
             let handled = sp(Expr::Handle(Box::new(b2), arms2), span);
             return Ok(wrap_vals(vals, handled, span));
+        }
+        // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head takes a
+        // reserved-band span so the dictionary it carries never aliases a real
+        // dispatch site (see `synth_span`). Lowering through the class keeps int
+        // exponentiation bignum-correct (its `Int` instance multiplies) and float
+        // exponentiation a `pow_float` call.
+        Expr::Bin(BinOp::Pow, a, b) => {
+            let head = evar(POW_METHOD, synth_span(cx));
+            return rw(
+                &call(head, vec![(**a).clone(), (**b).clone()], span),
+                env,
+                cx,
+            );
         }
         Expr::Bin(op, a, b) => Expr::Bin(*op, Box::new(rw(a, env, cx)?), Box::new(rw(b, env, cx)?)),
         Expr::If(c, t, f) => Expr::If(
@@ -339,16 +361,50 @@ fn rw_sugar(
         }
         // `for x in s, <quals> do body`: install a consumer handler over the
         // producer, run the qualifier-folded body per element via a tail-
-        // resumptive emit clause, result Unit.
+        // resumptive emit clause, result Unit. `break`/`continue` retrofit the
+        // same way as `while`: a `continue` handler wraps each element's body so
+        // the emit clause resumes to the next element, and a `break` handler wraps
+        // the whole consumer so it abandons the producer (its suspended
+        // continuation drops the same way a `??`/`fail` escape does).
         Sugar::For(x, s, quals, body) => {
-            let inner = fold_quals(quals, (**body).clone(), span, cx);
+            let (has_break, has_continue) = loop_ctl_used(body);
+            let mut inner = fold_quals(quals, (**body).clone(), span, cx);
+            if has_continue {
+                inner = loop_ctl_handler(names::CONTINUE_OP, inner, span);
+            }
             let run = call((**s).clone(), vec![sp(Expr::Unit, s.span)], s.span);
             let arms = vec![
                 HandlerArm::Sugar(SugarArm::Fun("emit".into(), vec![x.clone()], inner)),
                 HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
             ];
-            rw(&sp(Expr::Handle(Box::new(run), arms), span), env, cx)
+            let consumer = sp(Expr::Handle(Box::new(run), arms), span);
+            let full = if has_break {
+                loop_ctl_handler(names::BREAK_OP, consumer, span)
+            } else {
+                consumer
+            };
+            rw(&full, env, cx)
         }
+        Sugar::While(cond, body) => rw_while(cond.as_deref(), body, span, env, cx),
+        // `break` / `continue`: non-resumable performs of the internal loop-control
+        // effects, caught by the handlers `rw_while` installs around the loop.
+        Sugar::Break => rw(
+            &call(evar(names::BREAK_OP, span), Vec::new(), span),
+            env,
+            cx,
+        ),
+        Sugar::Continue => rw(
+            &call(evar(names::CONTINUE_OP, span), Vec::new(), span),
+            env,
+            cx,
+        ),
+        // `return e`: perform the internal `Return` op carrying `e`, caught by the
+        // handler `wrap_return` installs around the enclosing function body.
+        Sugar::Return(e) => rw(
+            &call(evar(names::RETURN_OP, span), vec![(**e).clone()], span),
+            env,
+            cx,
+        ),
         // `[ head for x in s, <quals> ]`: re-emit the head from a thunk-stream
         // and collect the emits into a list with `scollect`.
         Sugar::Comp(head, x, s, quals) => {
@@ -451,6 +507,284 @@ fn rw_sugar(
                 default: None,
             };
             rw(&sp(Expr::Lam(vec![param], Box::new(body)), span), env, cx)
+        }
+    }
+}
+
+// `while cond do body` / `loop body` desugar to the tail-recursive prelude
+// `while_loop(cond, body)`. The condition and body are each wrapped in a thunk so
+// they re-run per iteration; the thunks close over the ambient `var` State effect,
+// so mutations thread through the enclosing var handlers, and `loop` passes a
+// constant-`true` condition. `while_loop`'s self-call is in tail position, so the
+// loop runs in constant stack with no per-iteration allocation, and because
+// `while_loop` is unconstrained and effect-polymorphic, a break/continue-free loop
+// adds no effect of its own (pay-as-you-go). The call head takes a reserved-band
+// span so it never aliases a real dispatch site.
+fn rw_while(
+    cond: Option<&S<Expr>>,
+    body: &S<Expr>,
+    span: Span,
+    env: &Vars,
+    cx: &mut Cx,
+) -> Result<S<Expr<Core>>, TypeError> {
+    // Pay-as-you-go: a loop adds a control handler only for the keyword it uses.
+    // `continue` ends the current iteration, so its handler wraps each body run;
+    // `break` exits the loop, so its handler wraps the whole driver call. `break`
+    // performed in the body forwards through the continue handler (a different
+    // effect) out to the break handler. Both are `final ctl`, so neither label
+    // surfaces. A nested loop captures its own break/continue, so the scan stops
+    // at one.
+    let (has_break, has_continue) = loop_ctl_used(body);
+    let body = if has_continue {
+        loop_ctl_handler(names::CONTINUE_OP, body.clone(), span)
+    } else {
+        body.clone()
+    };
+    let body_thunk = sp(Expr::Lam(Vec::new(), Box::new(body)), span);
+    // An unconditional `loop` that cannot `break` never returns, so it lowers to
+    // the bottom-typed `forever` and can stand as the body of a function of any
+    // result type whose only exits are early `return`s. Every other loop can fall
+    // through (a false `while` condition, or a `break`), so it lowers to the
+    // Unit-typed `repeat_while`.
+    let driver = if cond.is_none() && !has_break {
+        let head = evar(FOREVER, synth_span(cx));
+        call(head, vec![body_thunk], span)
+    } else {
+        let cond_expr = cond.cloned().unwrap_or_else(|| sp(Expr::Bool(true), span));
+        let cond_thunk = sp(Expr::Lam(Vec::new(), Box::new(cond_expr)), span);
+        let head = evar(WHILE_LOOP, synth_span(cx));
+        call(head, vec![cond_thunk, body_thunk], span)
+    };
+    let full = if has_break {
+        loop_ctl_handler(names::BREAK_OP, driver, span)
+    } else {
+        driver
+    };
+    rw(&full, env, cx)
+}
+
+// A `final ctl` handler that catches one loop-control op and yields `()`: as a
+// final clause the continuation is dropped, so catching `break` abandons the loop
+// and catching `continue` abandons the current iteration. The return arm also
+// yields `()`, so the handled block has type Unit either way (the driver ignores
+// the body's value and the loop itself yields Unit).
+fn loop_ctl_handler(op: &str, body: S<Expr>, span: Span) -> S<Expr> {
+    let arms = vec![
+        HandlerArm::Sugar(SugarArm::Final(op.into(), Vec::new(), sp(Expr::Unit, span))),
+        HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
+    ];
+    sp(Expr::Handle(Box::new(body), arms), span)
+}
+
+// Wrap a function body in a `final ctl` handler for the internal `Return` effect
+// when it uses `return`, so `return e` exits the function with `e`. The op arm
+// binds the carried value and yields it; the return arm passes the normal result
+// through. Both have the function's result type, the effect is fully discharged,
+// and a return-free body is returned untouched (pay-as-you-go).
+pub(super) fn wrap_return(body: S<Expr>, cx: &mut Cx) -> S<Expr> {
+    if !CtlScan::returns(&body) {
+        return body;
+    }
+    let span = body.span;
+    let v = format!("{}{}", names::VAL, cx.next.bump());
+    let arms = vec![
+        HandlerArm::Sugar(SugarArm::Final(
+            names::RETURN_OP.into(),
+            vec![v.clone()],
+            evar(&v, span),
+        )),
+        HandlerArm::Return(RET.into(), evar(RET, span)),
+    ];
+    sp(Expr::Handle(Box::new(body), arms), span)
+}
+
+// Loop-control keywords a body performs at this loop's level: `(break, continue)`.
+fn loop_ctl_used(e: &S<Expr>) -> (bool, bool) {
+    let f = CtlScan::scan(e, false, true);
+    (f.0, f.1)
+}
+
+// Read-only scan for the control keywords a body performs at its own level.
+// `descend_loops`/`descend_lambdas` set the boundaries: loop control
+// (`break`/`continue`) stops at a nested loop but enters lambdas, while `return`
+// stops at a nested lambda (a new function) but enters loops. Everything else (the
+// other sugar, `if`, `match`, handler arms) is always entered, matching the
+// dynamic scope of the handler the desugar installs.
+struct CtlScan {
+    descend_loops: bool,
+    descend_lambdas: bool,
+    found: (bool, bool, bool),
+}
+
+impl CtlScan {
+    fn scan(e: &S<Expr>, descend_loops: bool, descend_lambdas: bool) -> (bool, bool, bool) {
+        let mut s = Self {
+            descend_loops,
+            descend_lambdas,
+            found: (false, false, false),
+        };
+        s.go(e);
+        s.found
+    }
+
+    fn returns(e: &S<Expr>) -> bool {
+        Self::scan(e, true, false).2
+    }
+
+    fn arm(&mut self, a: &HandlerArm) {
+        match a {
+            HandlerArm::Return(_, b)
+            | HandlerArm::Op(_, _, _, b)
+            | HandlerArm::Sugar(
+                SugarArm::Fun(_, _, b) | SugarArm::Final(_, _, b) | SugarArm::Val(_, b),
+            ) => self.go(b),
+        }
+    }
+
+    fn quals(&mut self, quals: &[Qualifier]) {
+        for q in quals {
+            match q {
+                Qualifier::Guard(g) => self.go(g),
+                Qualifier::Bind(_, e) => self.go(e),
+            }
+        }
+    }
+
+    fn sugar(&mut self, s: &Sugar<Surface>) {
+        match s {
+            Sugar::Break => self.found.0 = true,
+            Sugar::Continue => self.found.1 = true,
+            Sugar::Return(e) => {
+                self.found.2 = true;
+                self.go(e);
+            }
+            Sugar::While(c, b) if self.descend_loops => {
+                if let Some(c) = c {
+                    self.go(c);
+                }
+                self.go(b);
+            }
+            Sugar::For(_, s, quals, b) if self.descend_loops => {
+                self.go(s);
+                self.quals(quals);
+                self.go(b);
+            }
+            Sugar::Comp(h, _, s, quals) if self.descend_loops => {
+                self.go(h);
+                self.go(s);
+                self.quals(quals);
+            }
+            // A nested loop/comprehension captures its own break/continue.
+            Sugar::While(..) | Sugar::For(..) | Sugar::Comp(..) => {}
+            Sugar::VarDecl(_, v, b) => {
+                self.go(v);
+                self.go(b);
+            }
+            Sugar::Assign(_, v) | Sugar::OptChain(v, _) => self.go(v),
+            Sugar::NamedHandle(_, b, arms) => {
+                self.go(b);
+                for a in arms {
+                    self.arm(a);
+                }
+            }
+            Sugar::Throw(_, args) => {
+                for a in args {
+                    self.go(a);
+                }
+            }
+            Sugar::TryCatch(b, arms) => {
+                self.go(b);
+                for a in arms {
+                    self.go(&a.body);
+                }
+            }
+            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+                self.go(a);
+                self.go(b);
+            }
+            Sugar::Range(pre, hi) => {
+                for x in pre {
+                    self.go(x);
+                }
+                self.go(hi);
+            }
+        }
+    }
+
+    fn go(&mut self, e: &S<Expr>) {
+        match &e.node {
+            Expr::Sugar(s) => self.sugar(s),
+            Expr::Bin(_, a, b) | Expr::Pipe(a, b) => {
+                self.go(a);
+                self.go(b);
+            }
+            Expr::If(c, t, f) => {
+                self.go(c);
+                self.go(t);
+                self.go(f);
+            }
+            Expr::Let(_, v, b) => {
+                self.go(v);
+                self.go(b);
+            }
+            Expr::Lam(_, b) if self.descend_lambdas => self.go(b),
+            Expr::Call(f, args) => {
+                self.go(f);
+                for a in args {
+                    self.go(a);
+                }
+            }
+            Expr::Match(s, arms) => {
+                self.go(s);
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        self.go(g);
+                    }
+                    self.go(&a.body);
+                }
+            }
+            Expr::List(es) | Expr::Tuple(es) => {
+                for x in es {
+                    self.go(x);
+                }
+            }
+            Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => {
+                self.go(b);
+            }
+            Expr::RecordCreate(_, fs) => {
+                for (_, v) in fs {
+                    self.go(v);
+                }
+            }
+            Expr::RecordUpdate(b, _, fs) => {
+                self.go(b);
+                for (_, v) in fs {
+                    self.go(v);
+                }
+            }
+            Expr::RecordUpdatePath(b, ups) => {
+                self.go(b);
+                for (_, v) in ups {
+                    self.go(v);
+                }
+            }
+            Expr::Handle(b, arms) => {
+                self.go(b);
+                for a in arms {
+                    self.arm(a);
+                }
+            }
+            // A lambda whose body is not descended into (return stops at a nested
+            // function), the leaves, and markers carry no control keyword.
+            Expr::Lam(..)
+            | Expr::Int(_)
+            | Expr::Float(_)
+            | Expr::Char(_)
+            | Expr::Bool(_)
+            | Expr::Unit
+            | Expr::Str(_)
+            | Expr::Var(_)
+            | Expr::Marker(_) => {}
         }
     }
 }

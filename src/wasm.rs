@@ -135,33 +135,49 @@ fn json_escape(s: &str) -> String {
 /// Compiler diagnostics for `src` as JSON.
 ///
 /// Each entry is `{s,e,line,col,endLine,endCol,kind,msg}` with spans in the
-/// snippet's own coordinates (the prepended prelude is subtracted). Empty when
-/// the snippet compiles. The front-end stops at the first error, so this
-/// carries at most one entry today.
+/// snippet's own coordinates (the prepended prelude is subtracted). A hard
+/// error aborts the front-end at the first one, so on failure this carries a
+/// single `*Error` entry; on success it carries the type checker's non-fatal
+/// `Warning`s (orphan/overlapping instances), of which there may be several.
 #[wasm_bindgen]
 #[must_use]
 pub fn diagnostics(src: &str) -> String {
     let full = with_prelude(src);
     let pre = with_prelude("").len();
-    let Err(e) = check(&full) else {
-        return "[]".into();
-    };
-    let (raw_s, raw_e) = e
-        .primary_span()
-        .map_or((full.len(), full.len()), |r| (r.start, r.end));
-    if raw_e < pre {
-        return "[]".into();
-    }
     let user = &full[pre..];
-    let s = raw_s.saturating_sub(pre).min(user.len());
-    let end = raw_e.saturating_sub(pre).max(s + 1).min(user.len()).max(s);
-    let (line, col) = line_col(user, s);
-    let (eline, ecol) = line_col(user, end);
-    format!(
-        r#"[{{"s":{s},"e":{end},"line":{line},"col":{col},"endLine":{eline},"endCol":{ecol},"kind":"{}","msg":"{}"}}]"#,
-        json_escape(e.kind()),
-        json_escape(&e.to_string()),
-    )
+    // Render one diagnostic object for a raw `[raw_s, raw_e)` span into `full`,
+    // rebased into the snippet's own coordinates. Spans that land entirely in
+    // the prepended prelude have no place to point and are dropped.
+    let entry = |raw_s: usize, raw_e: usize, kind: &str, msg: &str| -> Option<String> {
+        if raw_e < pre {
+            return None;
+        }
+        let s = raw_s.saturating_sub(pre).min(user.len());
+        let end = raw_e.saturating_sub(pre).max(s + 1).min(user.len()).max(s);
+        let (line, col) = line_col(user, s);
+        let (eline, ecol) = line_col(user, end);
+        Some(format!(
+            r#"{{"s":{s},"e":{end},"line":{line},"col":{col},"endLine":{eline},"endCol":{ecol},"kind":"{}","msg":"{}"}}"#,
+            json_escape(kind),
+            json_escape(msg),
+        ))
+    };
+    let objs: Vec<String> = match check(&full) {
+        Err(e) => {
+            let (raw_s, raw_e) = e
+                .primary_span()
+                .map_or((full.len(), full.len()), |r| (r.start, r.end));
+            entry(raw_s, raw_e, e.kind(), &e.to_string())
+                .into_iter()
+                .collect()
+        }
+        Ok(checked) => checked
+            .warnings
+            .iter()
+            .filter_map(|w| entry(w.span.start, w.span.end, "Warning", &w.msg))
+            .collect(),
+    };
+    format!("[{}]", objs.join(","))
 }
 
 /// The fully lowered CBPV core IR of the snippet's own functions (prelude

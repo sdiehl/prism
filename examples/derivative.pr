@@ -41,13 +41,13 @@ fn deriv(c, r) : Re =
     Star(a) => Seq(deriv(c, a), Star(a))
 
 -- Fold deriv over s's codepoints, then test for empty-string membership.
-fn go(re, s, i) : Bool =
-  if i >= str_len(s) then
-    nullable(re)
-  else
-    go(deriv(char_at(s, i), re), s, i + 1)
-
-fn matches(re, s) : Bool = go(re, s, 0)
+fn matches(re, s) : Bool =
+  var r := re
+  var i := 0
+  while i < str_len(s) do
+    r := deriv(char_at(s, i), r)
+    i += 1
+  nullable(r)
 
 fn main() : !{IO} Unit =
   -- (a|b)* c

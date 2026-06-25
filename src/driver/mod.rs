@@ -41,6 +41,16 @@ pub fn with_prelude(src: &str) -> String {
     format!("{PRELUDE}\n{src}")
 }
 
+/// Prepend a caller-supplied prelude instead of the built-in one.
+///
+/// A project that sets `[package] prelude` opts into its own always-on
+/// definitions; the built-in prelude is not added on top, so the project's
+/// prelude is the whole base.
+#[must_use]
+pub fn with_custom_prelude(prelude: &str, src: &str) -> String {
+    format!("{prelude}\n{src}")
+}
+
 /// # Examples
 /// ```
 /// let src = prism::with_prelude("fn double(x : Int) : Int = x * 2");

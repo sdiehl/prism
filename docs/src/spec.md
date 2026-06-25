@@ -47,23 +47,23 @@ The following are reserved and may not be used as identifiers.
 | `return`   | `let`   | `var`      | `borrow`  | `in`       |
 | `for`      | `do`    | `if`       | `then`    | `else`     |
 | `elif`     | `match` | `of`       | `forall`  | `true`     |
-| `false`    |         |            |           |            |
+| `false`    | `while` | `loop`     | `break`   | `continue` |
 
 The built-in type names `Int`, `I64`, `U64`, `Bool`, `Unit`, `Float`, `Char`, and `String` are also reserved.
 
 ### 3.3 Operators and Punctuation
 
-The operator set is fixed; the language has no user-defined operators. Every comparison operator, and every arithmetic operator except `%`, also has a floating-point form suffixed with a dot.
+The operator set is fixed; the language has no user-defined operators. Every comparison operator, and every arithmetic operator except `%` and `^`, also has a floating-point form suffixed with a dot. Exponentiation `^` is a single operator over both `Int` and `Float` (Section [8.4](#84-exponentiation)).
 
 | Class      | Operators                                                               |
 | ---------- | ----------------------------------------------------------------------- |
-| Arithmetic | `+` `-` `*` `/` `%` and float `+.` `-.` `*.` `/.`                       |
+| Arithmetic | `+` `-` `*` `/` `%` `^` and float `+.` `-.` `*.` `/.`                   |
 | Comparison | `==` `/=` `<` `<=` `>` `>=` and float `==.` `/=.` `<.` `<=.` `>.` `>=.` |
 | Logical    | `&&` `\|\|`                                                             |
 | Pipeline   | `\|>` `>>` `<<`                                                         |
 | Failure    | `??` `?.` `?`                                                           |
 | Arrows     | `->` `<-` `=>`                                                          |
-| Binding    | `=` `:=` `:`                                                            |
+| Binding    | `=` `:=` `:` and compound `+=` `-=` `*=` `%=`                           |
 | Effect     | `!`                                                                     |
 | Brackets   | `(` `)` `{` `}` `[` `]`                                                 |
 | Other      | `,` `.` `..` `\|` `\`                                                   |
@@ -80,7 +80,7 @@ Within a string, an unescaped `{ expr }` is an interpolation hole. The hole text
 
 ### 3.6 Layout
 
-Prism uses the offside rule: indentation, not explicit braces, delimits a block. A layout block opens after any of the keywords or symbols `=`, `then`, `else`, `=>`, `of`, `with`, `handler`, `do`, `where`, `try`, `catch`, `transact`, and after `fn`. The first token after such an opener sets the block's indentation column; a later line at that column starts a new item in the block, and a line indented less closes the block. Explicit `{` `}` override layout and may always be used in place of an implicit block, as in the brace-delimited handler arms of the masking example (Section [7.3](#73-masking)).
+Prism uses the offside rule: indentation, not explicit braces, delimits a block. A layout block opens after any of the keywords or symbols `=`, `then`, `else`, `=>`, `of`, `with`, `handler`, `do`, `where`, `try`, `catch`, `transact`, `loop`, and after `fn` (a `while` block opens at its `do`). The first token after such an opener sets the block's indentation column; a later line at that column starts a new item in the block, and a line indented less closes the block. Explicit `{` `}` override layout and may always be used in place of an implicit block, as in the brace-delimited handler arms of the masking example (Section [7.3](#73-masking)).
 
 ## 4. Surface Grammar
 
@@ -116,7 +116,7 @@ Expressions, patterns, and the handler block of `handle`/`try` (used in Section 
 
 ### 4.1 Operator Precedence
 
-The table gives the binding of each operator, loosest to tightest. Levels 1 to 8 are the `binop` operators of the grammar; level 9 is application, field access, and the postfix failure operators, which bind tighter than every `binop`.
+The table gives the binding of each operator, loosest to tightest. Levels 1 to 9 are the `binop` operators of the grammar; level 10 is application, field access, and the postfix failure operators, which bind tighter than every `binop`.
 
 | Level | Operators                                     | Associativity |
 | ----- | --------------------------------------------- | ------------- |
@@ -128,7 +128,8 @@ The table gives the binding of each operator, loosest to tightest. Levels 1 to 8
 | 6     | `==` `/=` `<` `<=` `>` `>=` (and float forms) | none          |
 | 7     | `+` `-` (and float forms)                     | left          |
 | 8     | `*` `/` `%`, and float `*.` `/.`              | left          |
-| 9     | `f(...)` `f[...]` `.field` `?.field` `?`      | left          |
+| 9     | `^`                                           | right         |
+| 10    | `f(...)` `f[...]` `.field` `?.field` `?`      | left          |
 
 ## 5. Types and Kinds
 
@@ -342,6 +343,29 @@ Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`,
 {{#include ../examples/lens_derive.pr}}
 ```
 
+### 8.3 Imperative control flow
+
+Loops and early exit are surface sugar over tail recursion and effects, so they cost nothing beyond what an explicit recursion would. `while cond do body` and `loop body` (an unconditional loop) lower to a tail-recursive driver applied to the condition and body as thunks; because a `var` is a State effect (Section [12](#12-the-standard-prelude)) the body mutates freely and the loop runs in constant stack with no per-iteration allocation. `break` and `continue` (valid inside `while`, `loop`, and `for`) and statement-form `return e` (which exits the enclosing function) compile to non-resumable performs of internal, fully-handled control effects, installed only for the keyword a body actually uses; a nested loop captures its own `break`/`continue`. Because each control effect is discharged at its loop or function boundary, none appears in the surfaced effect row: a loop is as pure as its body, and a function using `return` infers the same row as the equivalent recursion. Compound assignment `x += e` (and `-=`, `*=`, `%=`) on a `var` is shorthand for `x := x <op> e`.
+
+Each form desugars to an existing construct:
+
+| Surface                         | Desugaring                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| `x += e` (and `-=`, `*=`, `%=`) | `x := x <op> e`                                                                      |
+| `while cond do body`            | `repeat_while(\() -> cond, \() -> body)`                                             |
+| `loop body` (reachable `break`) | `repeat_while(\() -> true, \() -> body)`                                             |
+| `loop body` (no `break`)        | `forever(\() -> body)`, whose result is a bottom type                                |
+| `break` / `continue`            | a `final ctl` perform of an internal `Break`/`Continue` effect handled at the loop   |
+| `return e`                      | a `final ctl` perform of an internal `Return(a)` effect handled at the function body |
+
+```prism
+{{#include ../examples/imperative.pr}}
+```
+
+### 8.4 Exponentiation
+
+`a ^ b` raises `a` to the power `b`. It binds tighter than `*` and is right-associative, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`. It is the method of the `Pow` class (Section [12](#12-the-standard-prelude)) with `Int` and `Float` instances, so it desugars to `pow(a, b)`: over `Int` it is bignum-correct (the instance multiplies), over `Float` it is a `pow_float` call. A mixed `Int ^ Float` is a type error, resolved by an explicit `to_float`, exactly as `2 + 3.0` is (Prism never coerces between `Int` and `Float` implicitly).
+
 ## 9. Patterns
 
 Patterns appear in `match` arms, `let` bindings, lambda and function parameters, and `catch` arms; their grammar is the `pattern` nonterminal of Section [4](#4-surface-grammar). A constructor pattern destructures a value of the algebraic data type that built it (Section [5.6](#56-algebraic-data-types)), binding its fields; literal, tuple, wildcard, and record patterns match the remaining forms.
@@ -385,7 +409,7 @@ The prelude in `lib/prelude.pr` is in scope in every module. It is ordinary Pris
 - **Data types.** `Option(a)`, `Result(a, e)`, `List(a)`, the balanced-tree `Map(k, v)`, and the hash table `HashMap(v)`. A set is a `Map(k, Unit)`, with a `set_*` API rather than a distinct type.
 - **List combinators.** `map`, `filter`, `foldl`, `foldr`, `length`, `append`, `reverse`, `zip`/`unzip`, `take`/`drop`, `sort`, `range`, and the rest of the usual vocabulary.
 - **Option and Result combinators.** `map_option`, `and_then`, `unwrap_or`, `map_result`, `and_then_result`, `result_or`, and conversions between the two.
-- **The class tower.** `Eq`, `Ord` (with `Eq` as superclass), `Show`, and the higher-kinded `Functor`, `Applicative`, `Monad`, `Foldable`, `Traversable`, with instances for `List` and `Option`.
+- **The class tower.** `Eq`, `Ord` (with `Eq` as superclass), `Show`, `Pow` (exponentiation `^`, with `Int` and `Float` instances), and the higher-kinded `Functor`, `Applicative`, `Monad`, `Foldable`, `Traversable`, with instances for `List` and `Option`.
 - **Strings and characters.** Classifiers (`is_digit`, `is_alpha`, ...), case mapping, `starts_with`/`ends_with`/`contains`/`index_of`, `split`, `trim`, `chars`, and single-allocation joining.
 - **Arrays and maps.** The growable `Array(a)` API (`array_new`, `array_get`, `array_set`, `array_push`, with in-place update on unique ownership), the AVL `Map` and `set_*` API, and the `HashMap` API over string keys.
 - **Streams.** The `Emit(a)` effect and the producer/transformer/consumer combinators `srange`, `sof`, `smap`, `skeep`, `stake`, `sfold`, `ssum`, `scollect`, which fuse without intermediate collections.

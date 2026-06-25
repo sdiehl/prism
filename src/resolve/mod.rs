@@ -631,6 +631,14 @@ impl<'a> Rw<'a> {
                 }
                 self.expr(hi);
             }
+            Sugar::While(cond, body) => {
+                if let Some(c) = cond {
+                    self.expr(c);
+                }
+                self.expr(body);
+            }
+            Sugar::Break | Sugar::Continue => {}
+            Sugar::Return(e) => self.expr(e),
         }
     }
 

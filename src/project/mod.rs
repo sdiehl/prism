@@ -28,6 +28,9 @@ pub struct Manifest {
     pub entry: PathBuf,
     /// Module root, relative to the project root (`[package] src`, default `src`).
     pub src_dir: PathBuf,
+    /// Optional `[package] prelude`, a path (relative to the root) whose contents
+    /// replace the built-in prelude for this project. Absent uses the built-in.
+    pub prelude: Option<PathBuf>,
 }
 
 impl Manifest {
@@ -57,10 +60,15 @@ impl Manifest {
             .get("src")
             .and_then(toml::Value::as_str)
             .unwrap_or("src");
+        let prelude = pkg
+            .get("prelude")
+            .and_then(toml::Value::as_str)
+            .map(PathBuf::from);
         Ok(Self {
             name,
             entry: PathBuf::from(entry),
             src_dir: PathBuf::from(src_dir),
+            prelude,
         })
     }
 }
@@ -74,6 +82,9 @@ pub struct Project {
     pub src_dir: PathBuf,
     /// The program to compile (`root/<entry>`).
     pub entry: PathBuf,
+    /// A project-supplied prelude file (`root/<prelude>`) that replaces the
+    /// built-in one, or `None` to use the built-in prelude.
+    pub prelude: Option<PathBuf>,
 }
 
 /// Walk up from `start` looking for the nearest enclosing `prism.toml`.
@@ -112,6 +123,7 @@ pub fn load_project(arg: &Path) -> Result<Project, Error> {
     Ok(Project {
         src_dir: root.join(&manifest.src_dir),
         entry: root.join(&manifest.entry),
+        prelude: manifest.prelude.map(|p| root.join(p)),
         name: manifest.name,
         root,
     })
@@ -128,6 +140,19 @@ mod tests {
         assert_eq!(m.name, "demo");
         assert_eq!(m.entry.to_str(), Some("src/main.pr"));
         assert_eq!(m.src_dir.to_str(), Some("src"));
+        assert_eq!(m.prelude, None);
+    }
+
+    #[test]
+    fn parses_prelude_override() {
+        let m = Manifest::parse(
+            "[package]\nname = \"demo\"\nprelude = \"src/Prelude.pr\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            m.prelude.as_deref().and_then(|p| p.to_str()),
+            Some("src/Prelude.pr")
+        );
     }
 
     #[test]

@@ -59,7 +59,9 @@ impl CoreOp {
             BinOp::Lef => Self::Lef,
             BinOp::Gtf => Self::Gtf,
             BinOp::Gef => Self::Gef,
-            BinOp::And | BinOp::Or => return None,
+            // `And`/`Or` short-circuit and `Pow` lowers to a class method call;
+            // none is a primitive core op.
+            BinOp::And | BinOp::Or | BinOp::Pow => return None,
         })
     }
 }

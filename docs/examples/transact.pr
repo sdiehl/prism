@@ -7,8 +7,8 @@ fn main() =
   var stock := 5
   let r1 =
     transact
-      balance := balance - 40
-      stock := stock - 1
+      balance -= 40
+      stock -= 1
       guard(balance >= 0)
       1
     else
@@ -18,8 +18,8 @@ fn main() =
   println(r1)
   let r2 =
     transact
-      balance := balance - 90
-      stock := stock - 1
+      balance -= 90
+      stock -= 1
       guard(balance >= 0)
       1
     else

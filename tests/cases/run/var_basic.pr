@@ -1,6 +1,6 @@
 fn count_to(limit : Int) : Int =
   var i := 0
-  while(\() -> i < limit) fn
+  while i < limit do
     i := i + 1
   i
 

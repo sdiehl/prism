@@ -1,0 +1,38 @@
+-- Imperative control flow recovered from effects and tail recursion: `while`,
+-- `loop`, `break`, `continue`, early `return`, and compound assignment, all
+-- desugaring to the existing core. `var` is a State effect, so loop bodies mutate
+-- freely yet each function below stays observably pure `(Int) -> Int`.
+fn sum_evens(limit : Int) : Int =
+  var total := 0
+  var i := 0
+  while i < limit do
+    i += 1
+    if i % 2 == 1 then
+      continue
+    total += i
+  total
+
+fn first_factor(n : Int) : Int =
+  var d := 2
+  loop
+    if d * d > n then
+      return n
+    if n % d == 0 then
+      return d
+    d += 1
+
+fn countdown(start : Int) : Int =
+  var n := start
+  var ticks := 0
+  loop
+    if n <= 0 then
+      break
+    n -= 1
+    ticks += 1
+  ticks
+
+fn main() : !{IO} Unit =
+  println(show_int(sum_evens(10)))
+  println(show_int(first_factor(91)))
+  println(show_int(first_factor(97)))
+  println(show_int(countdown(5)))

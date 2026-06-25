@@ -50,7 +50,7 @@ fn pcompose(p : Poly, q : Poly) : Poly =
   Poly { arities = concat_map(\(a) -> subst_pos(a, q.arities), p.arities) }
 
 -- p as an actual functor evaluated at a finite set of size n.
-fn eval(p : Poly, n : Int) : Int = sum(map(\(a) -> pow(n, a), p.arities))
+fn eval(p : Poly, n : Int) : Int = sum(map(\(a) -> n ^ a, p.arities))
 
 -- Pretty-print the multiset as a polynomial expression, high powers first.
 fn term(coef : Int, exp : Int) : String =

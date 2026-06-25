@@ -291,6 +291,14 @@ pub enum Token {
     In,
     #[token("for")]
     For,
+    #[token("while")]
+    While,
+    #[token("loop")]
+    Loop,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     #[token("do")]
     Do,
     #[token("if")]
@@ -378,6 +386,17 @@ pub enum Token {
     PlusDot,
     #[token("-.")]
     MinusDot,
+    // Compound assignment on a `var` (desugars to `x := x <op> e`). No `/=`
+    // form: `/=` is already not-equal. Longest-match keeps these distinct from
+    // the bare operators and the float-dot operators above.
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("%=")]
+    PercentEq,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -392,6 +411,8 @@ pub enum Token {
     Slash,
     #[token("%")]
     Percent,
+    #[token("^")]
+    Caret,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -502,6 +523,10 @@ impl Token {
             Self::Borrow => kw::BORROW,
             Self::In => kw::IN,
             Self::For => kw::FOR,
+            Self::While => kw::WHILE,
+            Self::Loop => kw::LOOP,
+            Self::Break => kw::BREAK,
+            Self::Continue => kw::CONTINUE,
             Self::Do => kw::DO,
             Self::If => kw::IF,
             Self::Then => kw::THEN,
@@ -545,6 +570,10 @@ impl Token {
             Self::Lambda => kw::LAMBDA,
             Self::PlusDot => kw::PLUS_DOT,
             Self::MinusDot => kw::MINUS_DOT,
+            Self::PlusEq => kw::PLUS_EQ,
+            Self::MinusEq => kw::MINUS_EQ,
+            Self::StarEq => kw::STAR_EQ,
+            Self::PercentEq => kw::PERCENT_EQ,
             Self::Plus => kw::PLUS,
             Self::Minus => kw::MINUS,
             Self::StarDot => kw::STAR_DOT,
@@ -552,6 +581,7 @@ impl Token {
             Self::SlashDot => kw::SLASH_DOT,
             Self::Slash => kw::SLASH,
             Self::Percent => kw::PERCENT,
+            Self::Caret => kw::CARET,
             Self::LParen => kw::LPAREN,
             Self::RParen => kw::RPAREN,
             Self::LBrace => kw::LBRACE,

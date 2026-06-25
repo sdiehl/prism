@@ -1,0 +1,24 @@
+-- `break` / `continue` retrofitted onto the stream `for` loop. `break` abandons
+-- the producer (its suspended continuation must drop leak-free); `continue` skips
+-- to the next element. Both stay off the surfaced row, so the functions are pure.
+fn first_n(n : Int) : Int =
+  var taken := 0
+  var sum := 0
+  for x in srange(1, 100) do
+    if taken >= n then
+      break
+    sum += x
+    taken += 1
+  sum
+
+fn skip_threes(hi : Int) : Int =
+  var kept := 0
+  for x in srange(1, hi) do
+    if x % 3 == 0 then
+      continue
+    kept += 1
+  kept
+
+fn main() =
+  println(first_n(5))
+  println(skip_threes(10))

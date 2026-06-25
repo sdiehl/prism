@@ -126,6 +126,21 @@ button.toggle.active {
   background: var(--accent);
   border-color: var(--accent);
 }
+/* A toolbar link styled like a control button (the docs link beside Core IR). */
+.controls a.ctl-link {
+  font-family: var(--ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 11px;
+  text-decoration: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.controls a.ctl-link:hover {
+  border-color: #c7c7c7;
+}
 
 main {
   flex: 1;
@@ -212,9 +227,36 @@ main.show-sigs .sigpane {
   color: var(--muted);
   text-align: right;
 }
+.gutter .ln {
+  position: relative;
+}
 .gutter .ln.err {
   color: #a4362f;
   font-weight: 600;
+}
+.gutter .ln.warn {
+  color: #996a00;
+  font-weight: 600;
+}
+/* A dot flush against the gutter's left edge marks lines carrying a
+   diagnostic, independent of the line number's width: red for errors,
+   amber for warnings. */
+.gutter .ln.err::before,
+.gutter .ln.warn::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+}
+.gutter .ln.err::before {
+  background: #d23;
+}
+.gutter .ln.warn::before {
+  background: #e0a200;
 }
 .codewrap {
   position: relative;
@@ -244,6 +286,10 @@ main.show-sigs .sigpane {
 }
 .hl .squig {
   text-decoration: #d23 wavy underline;
+  text-decoration-skip-ink: none;
+}
+.hl .warn-squig {
+  text-decoration: #e0a200 wavy underline;
   text-decoration-skip-ink: none;
 }
 .tip {

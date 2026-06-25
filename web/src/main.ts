@@ -59,8 +59,15 @@ let diags: Diag[] = [];
 function paint(): void {
   const text = src.value;
   const toks: Tok[] = ready ? JSON.parse(tokens(text)) : [];
-  const errs = diags.map((d) => [d.s, d.e]).filter(([s, e]) => e > s);
-  const cuts = [...new Set([0, text.length, ...toks.flatMap((t) => [t.s, t.e]), ...errs.flat()])]
+  const marks = diags.filter((d) => d.e > d.s);
+  const cuts = [
+    ...new Set([
+      0,
+      text.length,
+      ...toks.flatMap((t) => [t.s, t.e]),
+      ...marks.flatMap((d) => [d.s, d.e]),
+    ]),
+  ]
     .filter((p) => p >= 0 && p <= text.length)
     .sort((a, b) => a - b);
   let html = "";
@@ -69,10 +76,12 @@ function paint(): void {
     const b = cuts[i + 1];
     if (b <= a) continue;
     const tk = toks.find((t) => t.s <= a && t.e >= b);
-    const bad = errs.some(([s, e]) => s <= a && e >= b);
-    const cls = [tk && tk.c !== "id" ? `tk-${tk.c}` : "", bad ? "squig" : ""]
-      .filter(Boolean)
-      .join(" ");
+    // An error span wins over a warning span when both cover this slice.
+    const mk =
+      marks.find((d) => d.s <= a && d.e >= b && !isWarn(d)) ??
+      marks.find((d) => d.s <= a && d.e >= b);
+    const sq = mk ? (isWarn(mk) ? "warn-squig" : "squig") : "";
+    const cls = [tk && tk.c !== "id" ? `tk-${tk.c}` : "", sq].filter(Boolean).join(" ");
     const seg = esc(text.slice(a, b));
     html += cls ? `<span class="${cls}">${seg}</span>` : seg;
   }
@@ -81,15 +90,24 @@ function paint(): void {
   sync();
 }
 
+// The checker reports warnings under the "Warning" kind; everything else is a
+// hard "*Error". Severity drives colour: red for errors, amber for warnings.
+const isWarn = (d: Diag): boolean => d.kind === "Warning";
+
 // Diagnostic messages keyed by 1-based source line, shared by the gutter (native
-// title) and the hover tooltip over the code itself.
+// title) and the hover tooltip over the code itself, plus the per-line severity
+// that colours the gutter (an error on a line outranks a warning).
 let errLines = new Map<number, string>();
+let lineSev = new Map<number, "err" | "warn">();
 function buildErrLines(): void {
   errLines = new Map();
+  lineSev = new Map();
   for (const d of diags) {
+    const sev = isWarn(d) ? "warn" : "err";
     for (let l = d.line; l <= d.endLine; l++) {
       const m = `${d.kind}: ${d.msg}`;
       errLines.set(l, errLines.has(l) ? `${errLines.get(l)} | ${m}` : m);
+      if (lineSev.get(l) !== "err") lineSev.set(l, sev);
     }
   }
 }
@@ -99,8 +117,9 @@ function paintGutter(text: string): void {
   let h = "";
   for (let i = 1; i <= total; i++) {
     const m = errLines.get(i);
+    const sev = lineSev.get(i);
     const title = m ? ` title="${esc(m).replace(/"/g, "&quot;")}"` : "";
-    h += `<div class="ln${m ? " err" : ""}"${title}>${i}</div>`;
+    h += `<div class="ln${sev ? ` ${sev}` : ""}"${title}>${i}</div>`;
   }
   gutter.innerHTML = h;
 }

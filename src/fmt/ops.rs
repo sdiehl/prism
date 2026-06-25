@@ -18,6 +18,7 @@ pub(super) const fn binop_prec(op: BinOp) -> u8 {
         | BinOp::Gef => 4,
         BinOp::Add | BinOp::Sub | BinOp::Addf | BinOp::Subf => 5,
         BinOp::Mul | BinOp::Div | BinOp::Rem | BinOp::Mulf | BinOp::Divf => 6,
+        BinOp::Pow => 7,
     }
 }
 
@@ -58,7 +59,13 @@ const fn is_cmp(op: BinOp) -> bool {
 pub(super) const fn needs_left_paren(child: &Expr, parent_op: BinOp, parent_prec: u8) -> bool {
     match child {
         Expr::Bin(op, ..) if is_cmp(*op) && is_cmp(parent_op) => true,
-        Expr::Bin(op, ..) => binop_prec(*op) < parent_prec,
+        Expr::Bin(op, ..) => {
+            let cp = binop_prec(*op);
+            // `^` is right-associative, so a same-precedence left operand (another
+            // `^`) must be parenthesized to keep `(a ^ b) ^ c` from reparsing as
+            // `a ^ (b ^ c)`.
+            cp < parent_prec || (cp == parent_prec && matches!(parent_op, BinOp::Pow))
+        }
         _ => low_prec_operand(child),
     }
 }

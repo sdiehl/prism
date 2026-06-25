@@ -11,6 +11,24 @@ pub const ENTRY_POINT: &str = "main";
 pub const FAIL_EFFECT: &str = "Fail";
 pub const FAIL_OP: &str = "fail";
 
+// The internal loop-control effects. `break`/`continue` desugar to non-resumable
+// performs of these, discharged by the loop's own handlers so the labels never
+// surface. The effect names follow the error convention (clean, for a row that
+// should never leak); the op names are `@`-mangled so no source program can
+// perform or handle them directly. Injected only when a program uses the keywords.
+pub const BREAK_EFFECT: &str = "Break";
+pub const CONTINUE_EFFECT: &str = "Continue";
+pub const BREAK_OP: &str = "loop@break";
+pub const CONTINUE_OP: &str = "loop@continue";
+
+// Early `return e` desugars to a non-resumable perform of this one-op effect,
+// discharged by a handler the fn-body desugar installs, so it never surfaces. The
+// op carries the returned value: a polymorphic param (`RETURN_VAL`, instantiated
+// to the function's result type per site) and a never-resume result (THROW_RET).
+pub const RETURN_EFFECT: &str = "Return";
+pub const RETURN_OP: &str = "fn@return";
+pub const RETURN_VAL: &str = "a@retval";
+
 pub const DICT_PREFIX: &str = "_D";
 
 // The module path encoded in a canonical name: everything before the final `.`

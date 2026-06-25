@@ -25,12 +25,12 @@ mod synonyms;
 
 use aliases::expand_aliases;
 use derive::derive_instances;
-use effects::{rw, Binding, Vars};
+use effects::{rw, wrap_return, Binding, Vars};
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    dot_call, interp_lit, let_pat, let_stmt, open_if, pattern_decl, seq_stmt, try_mark, with_rest,
-    with_stmt, IfTail,
+    compound_assign, dot_call, interp_lit, let_pat, let_stmt, open_if, pattern_decl, seq_stmt,
+    try_mark, with_rest, with_stmt, IfTail,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -68,6 +68,51 @@ fn inject_fail(prog: &mut Program) {
         ops: vec![EffOp {
             name: names::FAIL_OP.into(),
             params: Vec::new(),
+            ret: Ty::Var(THROW_RET.into()),
+        }],
+        span: Span::empty(0),
+    });
+}
+
+// `break` / `continue` desugar to non-resumable performs of these one-op effects,
+// each discharged by a handler the loop desugar installs, so neither ever appears
+// in a surfaced row. Always in scope (like `fail`), reusing THROW_RET so the
+// checker instantiates the op's result fresh per site and pins it to `final ctl`.
+fn inject_loop_effects(prog: &mut Program) {
+    for (eff, op) in [
+        (names::BREAK_EFFECT, names::BREAK_OP),
+        (names::CONTINUE_EFFECT, names::CONTINUE_OP),
+    ] {
+        prog.effects.push(EffectDecl {
+            name: eff.into(),
+            params: Vec::new(),
+            ops: vec![EffOp {
+                name: op.into(),
+                params: Vec::new(),
+                ret: Ty::Var(THROW_RET.into()),
+            }],
+            span: Span::empty(0),
+        });
+    }
+}
+
+// `return e` desugars to a non-resumable perform of this one-op effect, caught by
+// a handler the fn-body desugar wraps around a function that uses it. The op
+// carries the value: a polymorphic param (instantiated to the function's result
+// type at each `return`) and a never-resume result, so `return` type-checks in any
+// position and the surfaced row stays clean.
+fn inject_return_effect(prog: &mut Program) {
+    // `Return(a)` is parametric in the carried value `a`: a handler picks one `a`
+    // for its scope, so every `return` in the same function unifies its value with
+    // that one type (the function's result type), exactly as `Emit(a)` ties a
+    // stream's element type. The op result is the never-resume var, freshened and
+    // restricted to `final ctl` per site.
+    prog.effects.push(EffectDecl {
+        name: names::RETURN_EFFECT.into(),
+        params: vec![names::RETURN_VAL.into()],
+        ops: vec![EffOp {
+            name: names::RETURN_OP.into(),
+            params: vec![Ty::Var(names::RETURN_VAL.into())],
             ret: Ty::Var(THROW_RET.into()),
         }],
         span: Span::empty(0),
@@ -304,6 +349,8 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
 pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     shadow_fns(&mut prog);
     inject_fail(&mut prog);
+    inject_loop_effects(&mut prog);
+    inject_return_effect(&mut prog);
     check_effect_dups(&prog)?;
     let errors = lower_errors(&mut prog);
     expand_synonyms(&mut prog)?;
@@ -391,7 +438,10 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
 // `where`s are already folded, and parameter defaults (consumed by the call
 // rewrite) drop, so no surface expression survives.
 fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
-    let body = rw(&d.body, &seed(&d.params), cx)?;
+    // A `return` in the body desugars to a perform discharged by a handler wrapped
+    // here, at the function boundary, so the early exit cannot leak past the fn.
+    let src = wrap_return(d.body, cx);
+    let body = rw(&src, &seed(&d.params), cx)?;
     let params = d
         .params
         .into_iter()

@@ -1,6 +1,6 @@
 use marginalia::Span;
 use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, IfTail};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, compound_assign, IfTail};
 use crate::lex::Token;
 
 grammar;
@@ -50,6 +50,10 @@ extern {
         "borrow" => Token::Borrow,
         "in"     => Token::In,
         "for"    => Token::For,
+        "while"  => Token::While,
+        "loop"   => Token::Loop,
+        "break"  => Token::Break,
+        "continue" => Token::Continue,
         "do"     => Token::Do,
         "if"     => Token::If,
         "then"   => Token::Then,
@@ -85,6 +89,10 @@ extern {
         "\\"    => Token::Lambda,
         "+."    => Token::PlusDot,
         "-."    => Token::MinusDot,
+        "+="    => Token::PlusEq,
+        "-="    => Token::MinusEq,
+        "*="    => Token::StarEq,
+        "%="    => Token::PercentEq,
         "+"     => Token::Plus,
         "-"     => Token::Minus,
         "*."    => Token::StarDot,
@@ -92,6 +100,7 @@ extern {
         "/."    => Token::SlashDot,
         "/"     => Token::Slash,
         "%"     => Token::Percent,
+        "^"     => Token::Caret,
         "==."   => Token::EqDot,
         "/=."   => Token::NeDot,
         "<."    => Token::LtDot,
@@ -516,9 +525,26 @@ pub Expr: S<Expr> = {
         Spanned { synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
     <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "while" <c:Expr> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "return" <e:Expr> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
     <l:@L> <x:"ident"> ":=" <v:Expr> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::Assign(x, Box::new(v))), span: Span::new(l, r) },
+    <l:@L> <x:"ident"> <op:CompoundOp> <v:Expr> <r:@R> =>
+        compound_assign(x, op, v, l, r),
     Default,
+};
+
+// `x <op>= e` is sugar for `x := x <op> e` on a `var`. `/=` is omitted (it is
+// not-equal); float vars use the explicit `x := x +. e` form.
+CompoundOp: BinOp = {
+    "+=" => BinOp::Add,
+    "-=" => BinOp::Sub,
+    "*=" => BinOp::Mul,
+    "%=" => BinOp::Rem,
 };
 
 // `a ?? b`: failable fallback. Right-associative and looser than comparison so
@@ -725,16 +751,27 @@ Add: S<Expr> = {
 };
 
 Mul: S<Expr> = {
-    <l:@L> <la:Mul> "*" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "*" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "/" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "%" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "%" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "*." <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "*." <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/." <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "/." <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Pow,
+};
+
+// Exponentiation binds tighter than multiplication and is right-associative, so
+// `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)`. One operator spans Int and Float (and
+// mixed, which promotes to Float); the type-directed lowering in elaboration
+// picks integer or floating power and coerces an Int operand when the result is
+// Float.
+Pow: S<Expr> = {
+    <l:@L> <base:Call> "^" <exp:Pow> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
     Call,
 };
 
@@ -804,6 +841,10 @@ Atom: S<Expr> = {
         Spanned { synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
     <l:@L> "false" <r:@R> =>
         Spanned { synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
+    <l:@L> "break" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Break), span: Span::new(l, r) },
+    <l:@L> "continue" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
     <l:@L> "(" ")" <r:@R> =>
         Spanned { synth: false, node: Expr::Unit, span: Span::new(l, r) },
     <l:@L> <id:"ident"> <r:@R> =>

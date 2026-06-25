@@ -98,7 +98,15 @@ fn resolve_input(arg: &Path) -> Result<(String, PathBuf, String), (Error, String
             .map_err(|e| (e, String::new(), arg.display().to_string()))?;
         let src =
             read(&project.entry).map_err(|e| (e, String::new(), file_name(&project.entry)))?;
-        let full = prism::with_prelude(&src);
+        // A project may replace the built-in prelude with its own (`[package]
+        // prelude`); otherwise the built-in one is prepended as usual.
+        let full = match &project.prelude {
+            Some(p) => {
+                let prelude = read(p).map_err(|e| (e, String::new(), file_name(p)))?;
+                prism::with_custom_prelude(&prelude, &src)
+            }
+            None => prism::with_prelude(&src),
+        };
         Ok((full, project.src_dir, file_name(&project.entry)))
     } else {
         let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;

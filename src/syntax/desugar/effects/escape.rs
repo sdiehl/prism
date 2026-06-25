@@ -80,6 +80,9 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::For(_, s, _, b) => fr(s).or_else(|| fr(b)),
         Sugar::Comp(h, _, s, _) => fr(h).or_else(|| fr(s)),
         Sugar::Range(pre, hi) => pre.iter().find_map(fr).or_else(|| fr(hi)),
+        Sugar::While(cond, b) => cond.as_deref().and_then(fr).or_else(|| fr(b)),
+        Sugar::Break | Sugar::Continue => None,
+        Sugar::Return(e) => fr(e),
     }
 }
 

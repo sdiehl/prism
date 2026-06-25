@@ -8,3 +8,5 @@ This book has two parts:
 
 - **[Language Specification](./spec.md)** defines the surface language: lexical structure, grammar, types, effects, and evaluation.
 - **[Compiler](./compiler.md)** documents the implementation: the pipeline, the core calculus, effect lowering, reference counting, the backends, and the verification harness.
+
+Use the **[Playground](https://sdiehl.github.io/prism/play/)** to edit, run, and inspect Core IR for Prism in your browser, all compiled to WebAssembly.

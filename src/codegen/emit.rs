@@ -577,7 +577,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 if !matches!(builtin(b.name()), Some((_, BuiltinKind::Str))) {
                     self.used_rt.insert(sym.clone(), args.len());
                 }
-                let (imm_args, float_args, imm_res) = str_builtin_kinds(&sym);
+                let (imm_args, float_args, imm_res) = b.abi();
                 let mut avs = Vec::new();
                 let mut owned = Vec::new();
                 for (i, a) in args.iter().enumerate() {
@@ -1401,31 +1401,6 @@ pub(super) fn escape_str(s: &str) -> String {
     escaped
 }
 
-/// Argument and result conventions for a runtime-call builtin. `imm_args` are
-/// pointer-tagged immediates (int/bool) untagged before the call, `float_args`
-/// are boxed doubles. Every other argument is passed raw (string cell, boxed
-/// 64-bit cell, or tagged Int word). `imm_res` is true when the result is a
-/// bare integer to retag; false results are already cells or tagged words.
-fn str_builtin_kinds(sym: &str) -> (&'static [usize], &'static [usize], bool) {
-    match sym {
-        "prism_str_len" | "prism_str_eq" | "prism_str_cmp" | "prism_args_count"
-        | "prism_i64_cmp" | "prism_u64_cmp" | "prism_file_exists" | "prism_system"
-        | "prism_array_len" | "prism_byte_len" => (&[], &[], true),
-        "prism_char_at" | "prism_byte_at" => (&[1], &[], true),
-        // Index/count args are raw integers; the element/array args and the
-        // result (cell or polymorphic value) pass through unchanged.
-        "prism_array_get" | "prism_array_set" => (&[1], &[], false),
-        "prism_show_bool" | "prism_show_char" | "prism_arg" | "prism_exit" | "prism_array_new" => {
-            (&[0], &[], false)
-        }
-        "prism_show_float" => (&[], &[0], false),
-        "prism_show_float_prec" => (&[1], &[0], false),
-        "prism_pow_float" => (&[], &[0, 1], false),
-        "prism_substring" => (&[1, 2], &[], false),
-        _ => (&[], &[], false),
-    }
-}
-
 fn partial_app_body(name: &str, n_given: usize, arity: usize) -> (Vec<Sym>, Vec<Sym>, Comp) {
     let cap_names: Vec<Sym> = (0..n_given).map(|i| Sym::new(&closure_cap(i))).collect();
     let rem_names: Vec<Sym> = (0..arity - n_given)
@@ -1494,78 +1469,32 @@ mod tests {
         );
     }
 
-    // `str_builtin_kinds` is a hand-maintained mirror of the per-arg calling
-    // convention, which `BUILTINS` does not carry. Pin it to the one table so
-    // adding, removing, or re-arity-ing a string builtin (or keying an arm on a
-    // symbol no `Builtin` emits) fails loudly rather than drifting into a silent
-    // runtime mismatch.
+    // `Builtin::abi` is exhaustive (no wildcard), so the compiler already forces
+    // every variant to declare its convention and rejects a symbol that no
+    // `Builtin` produces. This pins the remaining well-formedness invariant the
+    // type system cannot: every tagged arg index stays within the builtin's
+    // arity and no arg is both immediate and float, so re-arity-ing a builtin
+    // trips here rather than mis-tagging a call at runtime.
     #[test]
-    fn str_builtin_kinds_agree_with_table() {
+    fn builtin_abi_within_arity() {
         use crate::core::builtins::{Builtin, BuiltinKind, BUILTINS};
 
-        // Every surface string builtin's tagged-arg convention must stay within
-        // its arity from the one table, so shrinking arity (or re-typing an arg)
-        // trips a bound rather than mis-tagging a call at runtime.
         for &(name, arity, kind) in BUILTINS {
             if kind != BuiltinKind::Str {
                 continue;
             }
-            let sym = Builtin::from_name(name)
-                .expect("str builtin in BUILTINS has no Builtin variant")
-                .sym();
-            let (imm, float, _) = super::str_builtin_kinds(&sym);
+            let b =
+                Builtin::from_name(name).expect("str builtin in BUILTINS has no Builtin variant");
+            let (imm, float, _) = b.abi();
             for i in imm {
                 assert!(
                     !float.contains(i),
-                    "{sym} arg {i} is both immediate and float"
+                    "{name} arg {i} is both immediate and float"
                 );
             }
             for i in imm.iter().chain(float) {
-                assert!(*i < arity, "{sym} tags arg {i} but arity is {arity}");
+                assert!(*i < arity, "{name} tags arg {i} but arity is {arity}");
             }
         }
-
-        // No arm may key on a symbol that no Builtin produces: a rename in the
-        // enum without a matching rename here would leave such an arm dead and
-        // the builtin silently on the default convention.
-        for sym in STR_BUILTIN_KINDS_KEYS {
-            let resolved = if *sym == "prism_str_concat" {
-                Some(Builtin::Concat)
-            } else {
-                sym.strip_prefix("prism_").and_then(Builtin::from_name)
-            };
-            assert!(
-                resolved.is_some_and(|b| &b.sym() == sym),
-                "str_builtin_kinds arm `{sym}` is not produced by any Builtin"
-            );
-        }
     }
-
-    // The symbols `str_builtin_kinds` matches on explicitly, kept beside it so
-    // the dead-arm check above stays exhaustive when an arm is added.
-    const STR_BUILTIN_KINDS_KEYS: &[&str] = &[
-        "prism_str_len",
-        "prism_str_eq",
-        "prism_str_cmp",
-        "prism_args_count",
-        "prism_i64_cmp",
-        "prism_u64_cmp",
-        "prism_file_exists",
-        "prism_system",
-        "prism_show_bool",
-        "prism_show_char",
-        "prism_arg",
-        "prism_exit",
-        "prism_show_float",
-        "prism_show_float_prec",
-        "prism_pow_float",
-        "prism_substring",
-        "prism_char_at",
-        "prism_array_len",
-        "prism_array_new",
-        "prism_array_get",
-        "prism_array_set",
-        "prism_byte_len",
-        "prism_byte_at",
-    ];
 }

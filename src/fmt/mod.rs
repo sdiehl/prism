@@ -4,8 +4,8 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, CatchArm, Expr, HandlerArm, Marker, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
-    S,
+    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, Pattern, Program, Qualifier, Sugar, SugarArm,
+    Surface, S,
 };
 
 mod decl;
@@ -99,7 +99,7 @@ const fn callee_parens(e: &Expr) -> bool {
 const fn forces_break(e: &S<Expr>) -> bool {
     matches!(
         e.node,
-        Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..))
+        Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..) | Sugar::While(..))
     ) && !e.synth
 }
 
@@ -127,6 +127,7 @@ fn block_trailing_call(e: &S<Expr>) -> bool {
                     | Sugar::Throw(..)
                     | Sugar::TryCatch(..)
                     | Sugar::For(..)
+                    | Sugar::While(..)
                     | Sugar::Transact(..)
                     | Sugar::NamedHandle(..)
             )
@@ -169,6 +170,27 @@ fn escape_str(s: &str) -> String {
         }
     }
     out
+}
+
+// Recognize the compound-assignment shape `compound_assign` produces: a `var`
+// assignment whose RHS is a synth `Bin(op, Var(x), rhs)` with a matching target
+// and a compound-eligible op. Returns the op and right operand so the formatter
+// restores `x <op>= rhs`. A hand-written `x := x + e` (non-synth `Bin`) returns
+// `None` and keeps its explicit `:=` form.
+fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::Bin(op, lhs, rhs) = &v.node else {
+        return None;
+    };
+    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
+        && matches!(&lhs.node, Expr::Var(n) if n == x)
+    {
+        Some((*op, rhs))
+    } else {
+        None
+    }
 }
 
 // One offside statement and where the chain continues. `prev` is the byte offset
@@ -883,8 +905,13 @@ impl Fmt<'_> {
                 Some(format!("{e_s}{}{field}", kw::QUESTION_DOT))
             }
             Sugar::Assign(x, v) => {
-                let v_s = self.fmt_expr_inline(v, mode)?;
-                Some(format!("{x} {} {v_s}", kw::COLON_EQ))
+                if let Some((op, rhs)) = as_compound_assign(x, v) {
+                    let rhs_s = self.fmt_expr_inline(rhs, mode)?;
+                    Some(format!("{x} {}= {rhs_s}", op.spelling()))
+                } else {
+                    let v_s = self.fmt_expr_inline(v, mode)?;
+                    Some(format!("{x} {} {v_s}", kw::COLON_EQ))
+                }
             }
             Sugar::Throw(name, args) => {
                 if args.is_empty() {
@@ -948,6 +975,21 @@ impl Fmt<'_> {
                     pre.iter().map(|e| self.fmt_expr_inline(e, mode)).collect();
                 let hi_s = self.fmt_expr_inline(hi, mode)?;
                 parts.map(|p| format!("[{}..{hi_s}]", p.join(", ")))
+            }
+            Sugar::While(cond, body) => {
+                let b = self.fmt_expr_inline(body, Mode::Flat)?;
+                if let Some(c) = cond {
+                    let c_s = self.fmt_expr_inline(c, Mode::Flat)?;
+                    Some(format!("{} {c_s} {} {b}", kw::WHILE, kw::DO))
+                } else {
+                    Some(format!("{} {b}", kw::LOOP))
+                }
+            }
+            Sugar::Break => Some(kw::BREAK.to_string()),
+            Sugar::Continue => Some(kw::CONTINUE.to_string()),
+            Sugar::Return(e) => {
+                let e_s = self.fmt_expr_inline(e, mode)?;
+                Some(format!("{} {e_s}", kw::RETURN))
             }
             Sugar::VarDecl(..) | Sugar::NamedHandle(..) => None,
         }
@@ -1096,16 +1138,27 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::Transact(body, fallback)), Mode::Layout) => {
                 self.fmt_transact_layout(e, body, fallback, indent)
             }
+            (Expr::Sugar(Sugar::While(cond, body)), Mode::Layout) => {
+                self.fmt_while_layout(cond.as_deref(), body, indent)
+            }
             (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => self
                 .fmt_block(e, indent, e.span.start)
                 .trim_start()
                 .to_string(),
             (Expr::Sugar(Sugar::Assign(x, v)), _) => {
-                format!(
-                    "{x} {} {}",
-                    kw::COLON_EQ,
-                    self.fmt_expr(v, indent, Mode::Flat)
-                )
+                if let Some((op, rhs)) = as_compound_assign(x, v) {
+                    format!(
+                        "{x} {}= {}",
+                        op.spelling(),
+                        self.fmt_expr(rhs, indent, Mode::Flat)
+                    )
+                } else {
+                    format!(
+                        "{x} {} {}",
+                        kw::COLON_EQ,
+                        self.fmt_expr(v, indent, Mode::Flat)
+                    )
+                }
             }
             (Expr::Handle(body, arms), _) => self.fmt_handle_flat(body, arms, indent, mode),
             _ => self
@@ -1337,6 +1390,21 @@ impl Fmt<'_> {
             kw::DO,
             self.fmt_block(body, indent + 1, from)
         )
+    }
+
+    // `while cond do <block>` / `loop <block>`: the header closes (`do` for
+    // `while`, nothing for `loop`) and the body follows as an offside block.
+    fn fmt_while_layout(&self, cond: Option<&S<Expr>>, body: &S<Expr>, indent: usize) -> String {
+        let (header, from) = cond.map_or_else(
+            || (kw::LOOP.to_string(), body.span.start),
+            |c| {
+                (
+                    format!("{} {} {}", kw::WHILE, self.fmt_head(c, indent), kw::DO),
+                    c.span.end,
+                )
+            },
+        );
+        format!("{header}\n{}", self.fmt_block(body, indent + 1, from))
     }
 
     fn fmt_transact_layout(

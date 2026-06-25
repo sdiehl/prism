@@ -408,6 +408,11 @@ pub enum BinOp {
     Lef,
     Gtf,
     Gef,
+    // Exponentiation, one operator over Int and Float. Unlike the other
+    // arithmetic ops it has no single primitive: elaboration lowers it to an
+    // integer or floating power call by the operand types, promoting a mixed pair
+    // to Float. Not a `CoreOp`.
+    Pow,
 }
 
 impl BinOp {
@@ -439,6 +444,7 @@ impl BinOp {
             Self::Lef => kw::LE_DOT,
             Self::Gtf => kw::GT_DOT,
             Self::Gef => kw::GE_DOT,
+            Self::Pow => kw::CARET,
         }
     }
 }
@@ -516,6 +522,17 @@ pub enum Sugar<P: Phase> {
     // `for x in s, <quals> do body`: the generator drives an emit-consumer. The
     // qualifiers (guards, binders) fold inside-out around the body.
     For(String, Box<S<Expr<P>>>, Vec<Qualifier<P>>, Box<S<Expr<P>>>),
+    // `while cond do body` (`Some(cond)`) or `loop body` (`None`, an unconditional
+    // loop). Desugars to the tail-recursive prelude `repeat_while`; `break`/
+    // `continue` in the body add internal, fully-handled `Break`/`Continue` effects.
+    While(Option<Box<S<Expr<P>>>>, Box<S<Expr<P>>>),
+    // `break` / `continue` inside a loop body: non-resumable performs of the
+    // internal loop-control effects, caught by the enclosing loop's handlers.
+    Break,
+    Continue,
+    // `return e`: a non-resumable perform of the internal `Return` effect, caught
+    // by the handler wrapped around the enclosing function's body.
+    Return(Box<S<Expr<P>>>),
     // `[ head for x in s, <quals> ]`: the comprehension. Lowers to a stream that
     // emits `head` per surviving element, collected with `scollect`.
     Comp(Box<S<Expr<P>>>, String, Box<S<Expr<P>>>, Vec<Qualifier<P>>),

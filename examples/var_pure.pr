@@ -22,7 +22,7 @@ fn fib_iter(n : Int) : Int =
 fn sum_squares(n : Int) : Int =
   var total := 0
   for i in srange(1, n + 1) do
-    total := total + i * i
+    total += i * i
   total
 
 -- twice(fib_iter) typechecks because the mutation is invisible outside:

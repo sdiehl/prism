@@ -6,7 +6,9 @@ use super::effects::{rw, Vars};
 use super::{call, evar, sp, sp_sugar, Cx};
 use crate::error::TypeError;
 use crate::names;
-use crate::syntax::ast::{Arm, Core, Expr, Marker, Param, Pattern, PatternDecl, Spanned, S};
+use crate::syntax::ast::{
+    Arm, BinOp, Core, Expr, Marker, Param, Pattern, PatternDecl, Spanned, Sugar, S,
+};
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
 // clause); any other keyword is the optional `make` clause.
@@ -297,6 +299,21 @@ pub fn let_stmt(x: String, v: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<E
         Ok(scrut) => try_stmt(Some(x), scrut, rest, l),
         Err(v) => sp(Expr::Let(x, Box::new(v), Box::new(rest)), Span::new(l, r)),
     }
+}
+
+// `x <op>= e` is sugar for `x := x <op> e`. The synthesized RHS `Bin` is marked
+// `synth` so the formatter restores the compound surface, while a hand-written
+// `x := x + e` (a non-synth `Bin`) keeps its explicit form.
+#[must_use]
+pub fn compound_assign(x: String, op: BinOp, v: S<Expr>, l: usize, r: usize) -> S<Expr> {
+    let span = Span::new(l, r);
+    let lhs = sp(Expr::Var(x.clone()), span);
+    let rhs = Spanned {
+        synth: true,
+        node: Expr::Bin(op, Box::new(lhs), Box::new(v)),
+        span,
+    };
+    sp(Expr::Sugar(Sugar::Assign(x, Box::new(rhs))), span)
 }
 
 // Assemble a `pattern` declaration from its parsed clauses: exactly one

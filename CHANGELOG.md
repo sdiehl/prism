@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+New surface syntax, every form sugar over the existing core (so the triple-backend parity and leak gates hold unchanged):
+
+| Sugar                           | Desugars to                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `x += e` (and `-=`, `*=`, `%=`) | `x := x <op> e`                                                                                |
+| `while cond do <block>`         | `repeat_while(\() -> cond, \() -> <block>)`                                                    |
+| `loop <block>` (may `break`)    | `repeat_while(\() -> true, \() -> <block>)`                                                    |
+| `loop <block>` (no `break`)     | `forever(\() -> <block>)` (bottom-typed: never returns)                                        |
+| `break` / `continue`            | `final ctl` perform of an internal `Break`/`Continue` effect, handled at the loop              |
+| `return e`                      | `final ctl` perform of an internal `Return(a)` effect, handled at the function body            |
+| `a ^ b`                         | `pow(a, b)`, the `Pow` class method (`Int` instance bignum-multiplies, `Float` is `pow_float`) |
+
+- Imperative control-flow sugar. `while cond do <block>` and `loop <block>` lower to a tail-recursive prelude driver, so a loop runs in constant stack with no per-iteration allocation; the loop body's mutations thread through the ambient `var` State effect, so a loop stays as pure as its body. An unconditional `loop` with no `break` lowers to the bottom-typed `forever`, so it can be the body of a function of any return type. The prelude's prior `while` combinator was renamed `repeat_while`.
+- `break` and `continue` inside `while`/`loop`/`for`, compiled as non-resumable performs of internal, fully-handled `Break`/`Continue` effects: a `continue` handler wraps each iteration's body, a `break` handler wraps the whole loop, and a `break` forwards through to it. Pay-as-you-go: a loop installs a handler only for the keyword it uses, and a nested loop captures its own `break`/`continue`. The internal effects never appear in a function's surfaced row.
+- Early `return e` exits the enclosing function, compiled as a non-resumable perform of an internal parametric `Return(a)` effect handled at the function boundary, so a function using `return` infers the same effect row as the equivalent recursion (a return-free function pays nothing).
+- Compound assignment `x += e`, `x -= e`, `x *= e`, `x %= e` on a `var`, a pure desugar over `x := x <op> e` that `prism fmt` restores. (`/=` is not added: it is already not-equal.)
+- A power operator `^`, right-associative and binding tighter than `*`. It is the method of a new `Pow` class with `Int` and `Float` instances, so `2 ^ 10` is `Int` (bignum-correct, since the `Int` instance multiplies through `*`) and `2.0 ^ 10.0` is `Float` (a `pow_float` call). A mixed `Int ^ Float` is a type error, resolved by an explicit `to_float`, consistent with the rest of Prism's arithmetic (`2 + 3.0` is likewise an error). The prelude's prior integer `pow` is now `int_pow`, the `Pow(Int)` instance.
+- The `Set` API is completed with `set_union`, `set_intersection`, `set_difference` over the ordered `Map(k, Unit)` representation, with deterministic iteration order.
+- A project may replace the built-in prelude with its own via `[package] prelude = "..."` in `prism.toml`; compiler builtins remain available.
+- Hardening: the bignum cell allocator is now overflow-checked like every other cell (`prism_big_alloc` routes through `prism_cell_bytes`), and the per-argument calling convention of each runtime builtin is derived from an exhaustive method on the `Builtin` enum rather than a hand-maintained string-keyed table, so a new builtin cannot ship without declaring its ABI (a compile error replaces a silent codegen/runtime desync).
+
 ## 0.2.0
 
 - Fixed-width bitwise and shift builtins on the I64/U64 lanes: `i64_and`/`i64_or`/`i64_xor`/`i64_shl`/`i64_shr` and their `u64_*` counterparts. and/or/xor share one bit pattern across lanes; `i64_shr` is arithmetic, `u64_shr` logical; shift counts are taken modulo 64.

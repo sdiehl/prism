@@ -18,29 +18,33 @@
 --   bar
 --   )
 
--- Consume a run of bytes from `i` while `pred` holds; return the end index.
-fn scan(input : String, i : Int, pred) : Int =
-  if i < byte_len(input) && pred(byte_at(input, i)) then
-    scan(input, i + 1, pred)
-  else
-    i
+-- Consume a run of bytes from `start` while `pred` holds; return the end index.
+fn scan(input : String, start : Int, pred) : Int =
+  var i := start
+  while i < byte_len(input) && pred(byte_at(input, i)) do
+    i += 1
+  i
 
--- Tokenize from byte offset `i`, accumulating tokens in reverse.
-fn lex(input : String, i : Int, acc : List(String)) : List(String) =
-  if i >= byte_len(input) then
-    reverse(acc)
-  else
+-- Tokenize, scanning byte offsets left to right and pushing each token.
+fn lex(input : String) : List(String) =
+  var i := 0
+  var acc := Nil
+  while i < byte_len(input) do
     let c = byte_at(input, i)
     if is_space(c) then
-      lex(input, i + 1, acc)
+      i += 1
     elif is_digit(c) then
       let j = scan(input, i, \(b) -> is_digit(b))
-      lex(input, j, Cons(substring(input, i, j - i), acc))
+      acc := Cons(substring(input, i, j - i), acc)
+      i := j
     elif is_alpha(c) then
       let j = scan(input, i, \(b) -> is_alpha(b))
-      lex(input, j, Cons(substring(input, i, j - i), acc))
+      acc := Cons(substring(input, i, j - i), acc)
+      i := j
     else
-      lex(input, i + 1, Cons(substring(input, i, 1), acc))
+      acc := Cons(substring(input, i, 1), acc)
+      i += 1
+  reverse(acc)
 
 fn print_each(toks : List(String)) : !{IO} Unit =
   match toks of
@@ -51,6 +55,6 @@ fn print_each(toks : List(String)) : !{IO} Unit =
 
 fn main() : !{IO} Unit =
   let input = "12 + foo * (34 - bar)"
-  let toks = lex(input, 0, Nil)
+  let toks = lex(input)
   println(show_int(length(toks)))
   print_each(toks)

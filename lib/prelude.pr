@@ -72,11 +72,13 @@ fn gcd(a, b) =
 
 fn lcm(a, b) = a / gcd(a, b) * b
 
-fn pow(base, n) =
+-- Integer exponentiation (the `Pow(Int)` instance): bignum-correct because `*`
+-- promotes past 63 bits. `a ^ b` over ints lowers here through the `Pow` class.
+fn int_pow(base, n) =
   if n == 0 then
     1
   else
-    base * pow(base, n - 1)
+    base * int_pow(base, n - 1)
 
 fn factorial(n) =
   if n == 0 then
@@ -478,10 +480,25 @@ fn for_range(lo, hi, f, s) =
   else
     for_range(lo + 1, hi, f, f(lo, s))
 
-fn while(cond, body) =
+-- The driver `while c do body`, and `loop body` when the body can exit via
+-- `break`, desugar to. The condition and body are thunks re-run each iteration;
+-- both close over the ambient `var` State effect, so loop-body mutations thread
+-- through the enclosing var handlers. The recursive call is in tail position, so
+-- the loop runs in constant stack.
+fn repeat_while(cond, body) =
   if cond() then
     body()
-    while(cond, body)
+    repeat_while(cond, body)
+  else
+    ()
+
+-- The driver an unconditional `loop body` with no `break` desugars to: it never
+-- returns, so its result type is fully polymorphic (a bottom), letting such a
+-- loop stand as the body of a function of any return type whose only exits are
+-- early `return`s. Tail-recursive, so it too runs in constant stack.
+fn forever(body) =
+  let _ = body()
+  forever(body)
 
 fn repeat(n, body) =
   if n > 0 then
@@ -1059,6 +1076,18 @@ fn set_to_list(s) = map_keys(s)
 fn set_from_list(xs : List(k)) : Map(k, Unit) given Ord(k) =
   foldl(\(acc, x) -> set_insert(x, acc), set_empty, xs)
 
+-- Set algebra over the ordered `Map(k, Unit)` representation. Union folds one
+-- set's elements into the other; intersection and difference filter one set by
+-- membership in the other, so all three stay O(n log n) and keep iteration order.
+fn set_union(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+  foldl(\(acc, x) -> set_insert(x, acc), s1, set_to_list(s2))
+
+fn set_intersection(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+  set_from_list(filter(\(x) -> set_member(x, s2), set_to_list(s1)))
+
+fn set_difference(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+  set_from_list(filter(\(x) -> not(set_member(x, s2)), set_to_list(s1)))
+
 class Eq(a) {
   eq : (a, a) -> Bool
 }
@@ -1069,6 +1098,13 @@ class Ord(a) given Eq(a) {
 
 class Show(a) {
   show_c : (a) -> String
+}
+
+-- Exponentiation, the class `a ^ b` desugars to via its method `pow`. Int and
+-- Float instances cover homogeneous powers; a mixed `Int ^ Float` is a type error,
+-- resolved by an explicit `to_float`, exactly like the rest of Prism's arithmetic.
+class Pow(a) {
+  pow : (a, a) -> a
 }
 
 instance eqInt : Eq(Int) {
@@ -1153,6 +1189,14 @@ instance showStr : Show(String) {
 
 instance showChar : Show(Char) {
   fn show_c(x) = show_char(x)
+}
+
+instance powInt : Pow(Int) {
+  fn pow(b, e) = int_pow(b, e)
+}
+
+instance powFloat : Pow(Float) {
+  fn pow(b, e) = pow_float(b, e)
 }
 
 -- Higher-kinded classes: the parameter ranges over a type constructor (kind

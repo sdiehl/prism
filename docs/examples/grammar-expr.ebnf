@@ -8,7 +8,11 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
          |  "try" expr "catch" { catcharm }
          |  "transact" expr "else" expr
          |  "for" gen { "," qual } "do" expr
+         |  "while" expr "do" expr                    -- while loop
+         |  "loop" expr                               -- unconditional loop
+         |  "return" expr                             -- early return
          |  varid ":=" expr                          -- assignment
+         |  varid ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment
          |  opexpr
 
 opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
@@ -21,6 +25,7 @@ appexpr ->  appexpr "(" [ expr , ... ] ")"           -- application
          |  appexpr "?"                               -- try marker
          |  atom
 atom    ->  integer | float | char | string | "true" | "false" | "(" ")"
+         |  "break" | "continue"                      -- loop control
          |  varid | conid | qualid
          |  "(" expr ")" | "(" expr ":" type ")"
          |  "(" expr "," expr , ... ")"               -- tuple
@@ -40,6 +45,6 @@ fieldval ->  varid "=" expr                          -- a record field binding
 path     ->  varid { "." varid }                     -- a nested field path
 binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
          |  "==" | "/=" | "<" | "<=" | ">" | ">="
-         |  "+" | "-" | "*" | "/" | "%"
+         |  "+" | "-" | "*" | "/" | "%" | "^"
          |  "==." | "/=." | "<." | "<=." | ">." | ">=."
          |  "+." | "-." | "*." | "/."

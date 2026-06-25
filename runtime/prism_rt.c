@@ -443,7 +443,10 @@ long prism_str_cmp(long a, long b) {
 }
 
 static long *prism_big_alloc(long nlimbs) {
-    long *p = malloc((PRISM_HDR_WORDS + nlimbs) * 8);
+    /* Same overflow-checked sizing as ordinary cells: a hostile or computed
+     * limb count must never under-allocate and let the limb stores below write
+     * out of bounds. */
+    long *p = malloc(prism_cell_bytes(nlimbs));
     if (!p) abort();
     p[PRISM_RC_W] = 1;
     p[PRISM_TAG_W] = PRISM_BIG_TAG;

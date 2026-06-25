@@ -1,6 +1,6 @@
 fn looptest() =
   var i := 10
-  while(\() -> i >= 1) fn
+  while i >= 1 do
     println(i)
     i := i - 1
 

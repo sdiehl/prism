@@ -1,0 +1,6 @@
+[package]
+name = "customprelude"
+prelude = "src/Prelude.pr"
+
+[bin]
+entry = "src/main.pr"

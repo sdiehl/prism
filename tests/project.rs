@@ -7,10 +7,17 @@ use std::{env, fs};
 
 use prism::eval::Rv;
 use prism::project::load_project;
-use prism::{build_at, interpret_at, with_prelude};
+use prism::{build_at, interpret_at, with_custom_prelude, with_prelude};
 
 fn hello() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/projects/hello"))
+}
+
+fn customprelude() -> &'static Path {
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/projects/customprelude"
+    ))
 }
 
 fn modlib() -> &'static Path {
@@ -48,6 +55,20 @@ fn project_resolves_modules_from_src_root() {
     assert_eq!(project.name, "hello");
     let src = fs::read_to_string(&project.entry).expect("entry reads");
     let run = interpret_at(&with_prelude(&src), &project.src_dir).expect("resolves and runs");
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
+    assert_eq!(out, ["42"]);
+}
+
+#[test]
+fn project_prelude_override_replaces_builtin() {
+    let project = load_project(customprelude()).expect("manifest loads");
+    let prelude_path = project.prelude.as_ref().expect("prelude override set");
+    let prelude = fs::read_to_string(prelude_path).expect("prelude reads");
+    let src = fs::read_to_string(&project.entry).expect("entry reads");
+    // The custom prelude defines `triple`; the built-in prelude is not prepended,
+    // yet compiler builtins (`show_int`) still resolve.
+    let run = interpret_at(&with_custom_prelude(&prelude, &src), &project.src_dir)
+        .expect("resolves and runs");
     let out: Vec<String> = run.out.iter().map(Rv::show).collect();
     assert_eq!(out, ["42"]);
 }

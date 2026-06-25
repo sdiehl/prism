@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/set_ops.pr
+---
+6
+2
+2
+21
+7
+3
+=> ()

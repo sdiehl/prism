@@ -1,0 +1,2 @@
+fn main() : !{IO} Unit =
+  println(show_int(triple(14)))
