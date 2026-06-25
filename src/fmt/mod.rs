@@ -596,7 +596,9 @@ impl Fmt<'_> {
         }
         // A trailing-lambda call with a simple body prints inline as `f(\x -> e)`;
         // one with a statement-shaped body keeps the offside `f() fn(x)` block.
-        if !block_trailing_call(e) && !forces_break(e) && !self.has_comments(e.span.start, e.span.end)
+        if !block_trailing_call(e)
+            && !forces_break(e)
+            && !self.has_comments(e.span.start, e.span.end)
         {
             if let Some(s) = self.fmt_expr_inline(e, Mode::Layout) {
                 if indent * INDENT.len() + s.len() <= LINE_WIDTH {
@@ -623,7 +625,11 @@ impl Fmt<'_> {
                 }
             }
         }
-        format!("{ind}{} {x} =\n{}", kw::LET, self.fmt_block(v, indent + 1, from))
+        format!(
+            "{ind}{} {x} =\n{}",
+            kw::LET,
+            self.fmt_block(v, indent + 1, from)
+        )
     }
 
     fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
@@ -771,7 +777,12 @@ impl Fmt<'_> {
                 }
                 let ps: Vec<_> = ps.iter().map(|p| self.fmt_param(p)).collect();
                 let body = self.fmt_expr_inline(body, Mode::Flat)?;
-                Some(format!("{}({}) {} {body}", kw::LAMBDA, ps.join(", "), kw::ARROW))
+                Some(format!(
+                    "{}({}) {} {body}",
+                    kw::LAMBDA,
+                    ps.join(", "),
+                    kw::ARROW
+                ))
             }
             Expr::Match(s, arms) => {
                 // The sugar marker flags pattern-let and `?` desugars. Only the
@@ -792,8 +803,7 @@ impl Fmt<'_> {
                         Some(format!("{p}{g} {} {b}", kw::FAT_ARROW))
                     })
                     .collect();
-                arm_strs
-                    .map(|a| format!("{} {s} {} {{ {} }}", kw::MATCH, kw::OF, a.join(", ")))
+                arm_strs.map(|a| format!("{} {s} {} {{ {} }}", kw::MATCH, kw::OF, a.join(", ")))
             }
             Expr::FieldAccess(e, field) => {
                 let e_s = self.fmt_expr_inline(e, mode)?;
@@ -861,7 +871,11 @@ impl Fmt<'_> {
             Sugar::Compose(forward, f, g) => {
                 let f_s = self.fmt_expr_inline(f, mode)?;
                 let g_s = self.fmt_expr_inline(g, mode)?;
-                let op = if *forward { kw::COMP_RIGHT } else { kw::COMP_LEFT };
+                let op = if *forward {
+                    kw::COMP_RIGHT
+                } else {
+                    kw::COMP_LEFT
+                };
                 Some(format!("{f_s} {op} {g_s}"))
             }
             Sugar::OptChain(e, field) => {
@@ -891,7 +905,12 @@ impl Fmt<'_> {
                             if a.binders.is_empty() {
                                 format!("{} {} {s}", a.name, kw::FAT_ARROW)
                             } else {
-                                format!("{}({}) {} {s}", a.name, a.binders.join(", "), kw::FAT_ARROW)
+                                format!(
+                                    "{}({}) {} {s}",
+                                    a.name,
+                                    a.binders.join(", "),
+                                    kw::FAT_ARROW
+                                )
                             }
                         })
                     })
@@ -1015,7 +1034,13 @@ impl Fmt<'_> {
                     format!("{ind}{}({}) {}", name, ps.join(", "), kw::FAT_ARROW)
                 }
                 HandlerArm::Sugar(SugarArm::Fun(name, params, _)) => {
-                    format!("{ind}{} {}({}) {}", kw::FUN, name, params.join(", "), kw::FAT_ARROW)
+                    format!(
+                        "{ind}{} {}({}) {}",
+                        kw::FUN,
+                        name,
+                        params.join(", "),
+                        kw::FAT_ARROW
+                    )
                 }
                 HandlerArm::Sugar(SugarArm::Final(name, params, _)) => format!(
                     "{ind}{} {} {}({}) {}",
@@ -1071,11 +1096,16 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::Transact(body, fallback)), Mode::Layout) => {
                 self.fmt_transact_layout(e, body, fallback, indent)
             }
-            (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => {
-                self.fmt_block(e, indent, e.span.start).trim_start().to_string()
-            }
+            (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => self
+                .fmt_block(e, indent, e.span.start)
+                .trim_start()
+                .to_string(),
             (Expr::Sugar(Sugar::Assign(x, v)), _) => {
-                format!("{x} {} {}", kw::COLON_EQ, self.fmt_expr(v, indent, Mode::Flat))
+                format!(
+                    "{x} {} {}",
+                    kw::COLON_EQ,
+                    self.fmt_expr(v, indent, Mode::Flat)
+                )
             }
             (Expr::Handle(body, arms), _) => self.fmt_handle_flat(body, arms, indent, mode),
             _ => self
@@ -1143,7 +1173,12 @@ impl Fmt<'_> {
                 format!("{ind1}{p} {}\n{ind2}{b_break}{trail}", kw::FAT_ARROW)
             })
             .collect();
-        format!("{} {s} {} {{\n{}\n{ind}}}", kw::MATCH, kw::OF, arm_strs.join("\n"))
+        format!(
+            "{} {s} {} {{\n{}\n{ind}}}",
+            kw::MATCH,
+            kw::OF,
+            arm_strs.join("\n")
+        )
     }
 
     fn fmt_if_layout(&self, c: &S<Expr>, t: &S<Expr>, el: &S<Expr>, indent: usize) -> String {
@@ -1191,10 +1226,22 @@ impl Fmt<'_> {
             .unwrap_or_else(|| self.fmt_expr(c, indent, mode));
         let t = self.fmt_expr(t, indent + 1, mode);
         let el = self.fmt_expr(el, indent + 1, mode);
-        format!("{} {c}\n{ind1}{} {t}\n{ind1}{} {el}", kw::IF, kw::THEN, kw::ELSE)
+        format!(
+            "{} {c}\n{ind1}{} {t}\n{ind1}{} {el}",
+            kw::IF,
+            kw::THEN,
+            kw::ELSE
+        )
     }
 
-    fn fmt_let_break(&self, x: &str, v: &S<Expr>, b: &S<Expr>, indent: usize, mode: Mode) -> String {
+    fn fmt_let_break(
+        &self,
+        x: &str,
+        v: &S<Expr>,
+        b: &S<Expr>,
+        indent: usize,
+        mode: Mode,
+    ) -> String {
         let ind = INDENT.repeat(indent);
         let v = self.fmt_expr(v, indent, mode);
         let b = self.fmt_expr(b, indent, mode);
@@ -1242,7 +1289,12 @@ impl Fmt<'_> {
             let head = if a.binders.is_empty() {
                 format!("{ind1}{} {}", a.name, kw::FAT_ARROW)
             } else {
-                format!("{ind1}{}({}) {}", a.name, a.binders.join(", "), kw::FAT_ARROW)
+                format!(
+                    "{ind1}{}({}) {}",
+                    a.name,
+                    a.binders.join(", "),
+                    kw::FAT_ARROW
+                )
             };
             let arm_body = self.fmt_arm_body(&a.body, indent + 1, head.len(), a.body.span.start);
             arm_strs.push(format!("{lead}{head}{arm_body}"));

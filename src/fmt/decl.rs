@@ -48,7 +48,13 @@ pub(super) fn fmt_effect(e: &EffectDecl) -> String {
     } else {
         format!("({})", e.params.join(", "))
     };
-    format!("{} {}{} {{\n{}\n}}", kw::EFFECT, e.name, params, ops.join(",\n"))
+    format!(
+        "{} {}{} {{\n{}\n}}",
+        kw::EFFECT,
+        e.name,
+        params,
+        ops.join(",\n")
+    )
 }
 
 pub(super) fn fmt_label(l: &EffLabel) -> String {
@@ -263,7 +269,11 @@ impl Fmt<'_> {
             |t| format!("{pre}{} : {}", p.name, fmt_ty(t)),
         );
         match &p.default {
-            Some(d) => format!("{base} {} {}", kw::COLON_EQ, self.fmt_expr(d, 0, Mode::Flat)),
+            Some(d) => format!(
+                "{base} {} {}",
+                kw::COLON_EQ,
+                self.fmt_expr(d, 0, Mode::Flat)
+            ),
             None => base,
         }
     }
@@ -346,7 +356,10 @@ impl Fmt<'_> {
         let wheres = self.fmt_wheres(&d.wheres);
         let bi = if d.wheres.is_empty() { 1 } else { 2 };
         match mode {
-            Mode::Layout => format!("{sig}\n{}{wheres}", self.fmt_block(&d.body, bi, d.span.start)),
+            Mode::Layout => format!(
+                "{sig}\n{}{wheres}",
+                self.fmt_block(&d.body, bi, d.span.start)
+            ),
             Mode::Flat => format!(
                 "{sig}\n{}{}{wheres}",
                 INDENT.repeat(bi),
