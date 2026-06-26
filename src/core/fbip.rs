@@ -197,6 +197,17 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
                 .collect();
             hit.then(|| Comp::Case(scrut.clone(), arms))
         }
+        // A nested pattern's inner arm reuses first, wrapping its body in a
+        // `WithReuse` that the outer scrutinee's `drop` now sits inside. Keep
+        // searching through it, then rewrap with the inner token untouched.
+        Comp::WithReuse { token, freed, body } => {
+            let body2 = try_reuse(body, s, tok, cap)?;
+            Some(Comp::WithReuse {
+                token: *token,
+                freed: freed.clone(),
+                body: Box::new(body2),
+            })
+        }
         _ => None,
     }
 }
@@ -239,6 +250,16 @@ fn consume_alloc(c: &Comp, tok: Sym, cap: usize) -> Option<Comp> {
                 .map(|(p, b)| Some((p.clone(), consume_alloc(b, tok, cap)?)))
                 .collect::<Option<Vec<_>>>()?;
             Some(Comp::Case(scrut.clone(), arms))
+        }
+        // The fitting allocation may live past an inner reuse's `WithReuse` (a
+        // deeper-nested pattern); walk into it so the credit can reach the tail.
+        Comp::WithReuse { token, freed, body } => {
+            let body2 = consume_alloc(body, tok, cap)?;
+            Some(Comp::WithReuse {
+                token: *token,
+                freed: freed.clone(),
+                body: Box::new(body2),
+            })
         }
         _ => None,
     }
