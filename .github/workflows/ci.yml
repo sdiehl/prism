@@ -42,13 +42,31 @@ jobs:
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
             | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -qq
-          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22 clang-tidy-22
 
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      # The C runtime is held to the same zero-warning bar as the Rust (clippy
+      # -D warnings). A broad warning set under -Werror; -Wmissing-prototypes is
+      # the one omission, since the prism_* functions are the runtime ABI called
+      # from generated IR and have no header to declare them.
+      - name: C runtime warnings (-Werror)
+        run: |
+          ${PRISM_CC:-clang} -std=c11 -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow \
+            -Wstrict-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align \
+            -Wpointer-arith -Wwrite-strings -Wfloat-equal -Wundef -Wredundant-decls \
+            -Wvla -Wdouble-promotion -Wformat=2 -fsyntax-only runtime/prism_rt.c
+
+      # clang-tidy is the C analog of clippy: the checkset and its targeted
+      # opt-outs live in runtime/.clang-tidy, with WarningsAsErrors so any new
+      # finding fails CI. Path-sensitive memory safety is gated dynamically by
+      # the ASan+UBSan parity run below; this is the static pass.
+      - name: C runtime clang-tidy
+        run: clang-tidy-22 runtime/prism_rt.c --quiet -- -std=c11 -O2
 
       # No stub markers slip into a release: a left-behind todo!/unimplemented!
       # would panic at runtime, and a broad allow(dead_code) hides real rot.

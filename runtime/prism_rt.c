@@ -400,6 +400,107 @@ long prism_taq_uncons(long q) {
     return prism_ctor(1, 2, fields); /* TQCons(head, tail) */
 }
 
+/* Heap-allocated continuation frames for the native effect machine: the pending
+ * work that the interpreter keeps in a `Vec<Frame>` lives here as a chain of
+ * counted cells so object-program recursion across an effect boundary never
+ * grows the C stack. Field 0 is always `next`, the link to the frame below
+ * (toward the handler); a chain whose deepest frame links to 0 is a delimited
+ * slice. Because `next` is an ordinary field, `prism_rc_dec` frees a whole
+ * abandoned continuation through its existing iterative worklist, in O(1) C
+ * stack regardless of depth.
+ *
+ *   Bind(next, kfn, env)    a sequencing frame: resume the value into `kfn`
+ *                           under `env` (the analogue of `Frame::Bind`/`Args`).
+ *   Handle(next, table, env) a prompt: `table` carries the handler clauses,
+ *                           `env` their closure environment.
+ *   Mask(next, ops)         skips `ops` for one capture, so an inner handler
+ *                           does not intercept an effect meant for an outer one.
+ *
+ * Constructors borrow their arguments and retain (rc_inc) what they store, the
+ * same convention as the queue cells above, so a codegen call site rc_decs the
+ * borrowed operands afterward. Distinct tags keep the cells self-describing when
+ * a capture walks the chain. */
+#define PRISM_FRAME_BIND 0x46524d42L   /* 'FRMB' */
+#define PRISM_FRAME_HANDLE 0x46524d48L /* 'FRMH' */
+#define PRISM_FRAME_MASK 0x46524d4dL   /* 'FRMM' */
+
+long prism_frame_bind(long next, long kfn, long env) {
+    long *p = prism_alloc(3);
+    p[PRISM_TAG_W] = PRISM_FRAME_BIND;
+    prism_rc_inc(next);
+    prism_rc_inc(kfn);
+    prism_rc_inc(env);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = kfn;
+    p[PRISM_HDR_WORDS + 2] = env;
+    return (long)p;
+}
+
+long prism_frame_handle(long next, long table, long env) {
+    long *p = prism_alloc(3);
+    p[PRISM_TAG_W] = PRISM_FRAME_HANDLE;
+    prism_rc_inc(next);
+    prism_rc_inc(table);
+    prism_rc_inc(env);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = table;
+    p[PRISM_HDR_WORDS + 2] = env;
+    return (long)p;
+}
+
+long prism_frame_mask(long next, long ops) {
+    long *p = prism_alloc(2);
+    p[PRISM_TAG_W] = PRISM_FRAME_MASK;
+    prism_rc_inc(next);
+    prism_rc_inc(ops);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = ops;
+    return (long)p;
+}
+
+/* Splice a copy of the delimited slice `top` (a `next`-chain ending at 0) on top
+ * of `base`, returning the new top. Resuming a captured continuation re-pushes a
+ * clone so it can be entered again (multishot); a fresh copy also lets `base`
+ * differ from the stack the slice was captured on. The slice itself is never
+ * mutated, so a still-live capture is unaffected. The copy is built in one
+ * forward pass (each new cell links to the previously built one, leaving the
+ * clone in reverse order) and then reversed in place; both passes run in O(1) C
+ * stack, so a deep continuation splices without recursion. Stored payloads are
+ * rc_inc'd into the clone; `base` is retained once, as the deepest frame's
+ * `next`. `top` and `base` are borrowed. */
+long prism_kont_splice(long top, long base) {
+    prism_rc_inc(base);
+    if (!top) return base; /* empty slice resumes straight into base */
+    long rev = 0;          /* clone, accumulated in reverse (deepest first) */
+    long cur = top;
+    while (cur) {
+        long *src = (long *)cur;
+        long n = src[PRISM_ARITY_W];
+        long *cp = prism_alloc(n);
+        cp[PRISM_TAG_W] = src[PRISM_TAG_W];
+        cp[PRISM_HDR_WORDS] = rev; /* link toward the deepest clone so far */
+        for (long i = 1; i < n; i++) {
+            long f = src[PRISM_HDR_WORDS + i];
+            prism_rc_inc(f);
+            cp[PRISM_HDR_WORDS + i] = f;
+        }
+        rev = (long)cp;
+        cur = src[PRISM_HDR_WORDS]; /* original next */
+    }
+    /* `rev` heads the clone in reverse (the slice's deepest frame). Reverse it
+     * in place so the original top heads it again, and link the deepest frame's
+     * `next` to `base`. */
+    long prev = base, node = rev;
+    while (node) {
+        long *np = (long *)node;
+        long nxt = np[PRISM_HDR_WORDS];
+        np[PRISM_HDR_WORDS] = prev;
+        prev = node;
+        node = nxt;
+    }
+    return prev;
+}
+
 long prism_read_int(void) {
     long n = 0;
     if (scanf("%ld", &n) != 1) {
@@ -839,7 +940,7 @@ static long big_norm(long b) {
 }
 
 static long int_as_big(long w, int *fresh) {
-    *fresh = w & 1;
+    *fresh = (int)(w & 1);
     return *fresh ? prism_big_from_int(w >> 1) : w;
 }
 

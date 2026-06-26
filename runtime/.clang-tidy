@@ -1,0 +1,53 @@
+# C runtime lint gate, kept as strict as the Rust `clippy -D warnings` gate.
+# Every enabled check is an error (WarningsAsErrors: '*'), so a new warning
+# fails CI rather than scrolling past.
+#
+# The disabled checks are not laziness: each fights a deliberate, load-bearing
+# property of this runtime, the same way the crate carries targeted clippy
+# allows. Justifications:
+#
+#   misc-use-internal-linkage      - the prism_* functions are the runtime ABI,
+#                                    called from generated LLVM IR; they cannot
+#                                    be `static`.
+#   performance-no-int-to-ptr      - the whole heap model is tagged words; long
+#                                    <-> pointer punning is the design, not a smell.
+#   bugprone-easily-swappable-parameters - stylistic, not a defect.
+#   bugprone-command-processor / cert-env33-c - prism_system is the language's
+#                                    shell-exec builtin; system() is the point.
+#   *-unchecked-string-to-number-conversion / cert-err34-c - the numeric parsers
+#                                    validate their input span before strto*.
+#   cert-err33-c                   - diagnostic fprintf/puts returns are
+#                                    intentionally unchecked.
+#   misc-include-cleaner           - single translation unit, no public header.
+#   clang-analyzer-security.insecureAPI.* - wants C11 Annex K (_s) functions that
+#                                    are not portably available.
+#   clang-analyzer-core.* / clang-analyzer-security.ArrayBound /
+#   clang-analyzer-unix.cstring.NullArg - path-sensitive findings that cannot
+#                                    model the count-then-fill buffers, the
+#                                    paired list spine-walks, or the bignum cell
+#                                    header; all are false positives here, and
+#                                    real heap safety is gated dynamically by the
+#                                    ASan+UBSan parity run. clang-analyzer-deadcode
+#                                    and the rest of the family stay on.
+Checks: >
+  bugprone-*,
+  cert-*,
+  performance-*,
+  portability-*,
+  misc-*,
+  clang-analyzer-*,
+  -misc-use-internal-linkage,
+  -misc-include-cleaner,
+  -performance-no-int-to-ptr,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-command-processor,
+  -bugprone-unchecked-string-to-number-conversion,
+  -cert-env33-c,
+  -cert-err33-c,
+  -cert-err34-c,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-core.NullDereference,
+  -clang-analyzer-core.CallAndMessage,
+  -clang-analyzer-security.ArrayBound,
+  -clang-analyzer-unix.cstring.NullArg
+WarningsAsErrors: '*'
