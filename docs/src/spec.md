@@ -15,7 +15,7 @@ This specification proceeds in dependency order: notation, lexical structure, gr
 Grammar is given in the following EBNF. A _terminal_ is a literal token written in double quotes; a _nonterminal_ is a lower-case name. The character classes are the ASCII letters (`letter`), the two cases (`lower`, `upper`), the decimal digits (`digit`), any printable character (`graphic`), and any character other than `"`, `\`, or a newline (`strchar`). These are primitives, not grammar nonterminals.
 
 ```text
-{{#include ../examples/notation.ebnf}}
+{{#include ../../models/grammar.ebnf:notation}}
 ```
 
 Identifiers in productions name the tokens defined in [3](#3-lexical-structure) (`varid`, `conid`, `qualid`, `integer`, `float`, `char`, `string`) and the character classes defined just above. Layout ([Section 3.6](#36-layout)) inserts block delimiters that the grammar then treats as ordinary terminals.
@@ -25,7 +25,7 @@ Identifiers in productions name the tokens defined in [3](#3-lexical-structure) 
 Source text is UTF-8. Tokens are lexed by longest match, then the stream is rewritten by the layout algorithm of [Section 3.6](#36-layout). Whitespace and comments separate tokens and are otherwise insignificant except as layout boundaries.
 
 ```text
-{{#include ../examples/lexical.ebnf}}
+{{#include ../../models/grammar.ebnf:lexical}}
 ```
 
 ### 3.1 Identifiers
@@ -88,31 +88,31 @@ Prism uses the offside rule: indentation, not explicit braces, delimits a block.
 A program is a layout-delimited sequence of top-level declarations.
 
 ```text
-{{#include ../examples/grammar-program.ebnf}}
+{{#include ../../models/grammar.ebnf:program}}
 ```
 
 ```text
-{{#include ../examples/grammar-decls.ebnf}}
+{{#include ../../models/grammar.ebnf:decls}}
 ```
 
 Type syntax. A function type carries an optional effect _row_ on its codomain ([Section 7](#7-effects-and-handlers)); the row binds to a function type only.
 
 ```text
-{{#include ../examples/grammar-types.ebnf}}
+{{#include ../../models/grammar.ebnf:types}}
 ```
 
 Expressions, patterns, and the handler block of `handle`/`try` (used in [Section 7](#7-effects-and-handlers)).
 
 ```text
-{{#include ../examples/grammar-expr.ebnf}}
+{{#include ../../models/grammar.ebnf:expr}}
 ```
 
 ```text
-{{#include ../examples/grammar-pattern.ebnf}}
+{{#include ../../models/grammar.ebnf:pattern}}
 ```
 
 ```text
-{{#include ../examples/grammar-handler.ebnf}}
+{{#include ../../models/grammar.ebnf:handler}}
 ```
 
 ### 4.1 Operator Precedence

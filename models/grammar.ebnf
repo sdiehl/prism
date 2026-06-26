@@ -1,331 +1,200 @@
-(* Prism grammar reference.
-   This EBNF is hand-written documentation that mirrors the real parser in
-   src/syntax/grammar.lalrpop. It is not machine-checked, so treat the lalrpop
-   file as the source of truth where the two ever disagree. Terminal spellings
-   come from src/lex/token.rs and AST node names from src/syntax/ast.rs.
+(* Prism surface grammar -- the single source of truth.
+
+   This is hand-written documentation that mirrors the real parser in
+   src/syntax/grammar.lalrpop (terminal spellings from src/lex/token.rs, AST
+   node names from src/syntax/ast.rs). It is not machine-checked: treat the
+   lalrpop file as authoritative for fine precedence detail where the two ever
+   disagree. The reference manual (docs/src/spec.md) renders the sections below
+   by mdbook anchor include, so this file is the one place each rule lives.
 
    Layout / offside: the lexer feeds the parser, then an offside pass inserts the
-   virtual layout tokens `vopen` (v{), `vclose` (v}) and `vsep` (v;) around and
-   between items that share an indentation column. They are the only way blocks
-   and statement separators are formed; there are no literal braces for blocks
-   (record/handler/match braces are real `{` `}`). A `vsep` between two
-   constructs is therefore a newline at the same column, and `vopen ... vclose`
-   is an indented region. *)
-
-(* --- Lexical terminals (from src/lex/token.rs) --- *)
-
-ident       = ? /[a-z_][A-Za-z0-9_]* / ? ;             (* lowercase: vars, fields, params *)
-uid         = ? /[A-Z][A-Za-z0-9_]* / ? ;              (* uppercase: types, ctors, classes, effects *)
-qual        = ? /[A-Z]\w*(\.[A-Za-z_]\w*)+ / ? ;       (* dotted path led uppercase: Map.insert, Data.Map *)
-int         = ? /[0-9]+(i64|u64)? / ? ;                (* optional fixed-width suffix i64 or u64 *)
-float       = ? /[0-9]+\.[0-9]+([eE][+-]?[0-9]+)? | [0-9]+[eE][+-]?[0-9]+ / ? ;
-char        = ? /'(\\.|[^'\\\n])' / ? ;
-str         = ? /"..."/ ? ;                            (* with escapes \n \t \r \" \\ \{ \} ; no holes *)
-comment     = ? /--[^\n]* / ? ;                        (* line comment, lexed as trivia *)
-
-(* An interpolated string "a{e}b{e}c" is lexed into the istart/imid/iend pieces,
-   each carrying its literal segment; the holes are re-lexed as expressions. *)
-istart      = ? /"... up to the first {/ ? ;
-imid        = ? /} ...text... {/ ? ;
-iend        = ? /} ...text..."/ ? ;
-
-(* Virtual tokens synthesized by the offside layout pass; no source spelling. *)
-vopen       = ? v{ ? ;
-vclose      = ? v} ? ;
-vsep        = ? v; ? ;
-
-(* --- Grammar (from src/syntax/grammar.lalrpop) --- *)
-
-program     = vopen , items , vclose ;
-
-items       = [ pubitem , { vsep , pubitem } , [ vsep ] ] ;
-
-pubitem     = "opaque" , opaqueitem
-            | "pub" , item
-            | item ;
-
-opaqueitem  = data | newtype ;
-
-item        = import | data | newtype | effectdecl | errordecl
-            | aliasorsynonym | classdecl | instancedecl | patterndecl | constdecl | fn ;
-
-import      = "import" , modpath , [ "as" , uid ] , [ "(" , [ importname , { "," , importname } , [ "," ] ] , ")" ] ;
-
-modpath     = uid | qual ;
-
-importname  = ident | uid ;
-
-patterndecl = "pattern" , uid , "(" , [ ident , { "," , ident } , [ "," ] ] , ")" , "for" , uid , "=" , patclauses ;
-
-patclauses  = patclause
-            | vopen , { patclause , vsep } , [ patclause ] , vclose ;
-
-patclause   = ( "view" | "make" ) , expr ;
-
-classdecl   = "class" , uid , "(" , ident , ")" , "{" , classsigs , "}" ;
-
-classsigs   = [ classsig , { armsep , classsig } , [ classsig ] ] ;
-
-classsig    = ident , ":" , type ;
-
-instancedecl = "instance" , ident , ":" , uid , "(" , type , ")" , [ givenclause ] , "{" , instfns , "}" ;
-
-instfns     = [ fn , { armsep , fn } , [ fn ] ] ;
-
-givenclause = "given" , constraint , { "," , constraint } ;
-
-constraint  = uid , "(" , type , ")" ;
-
-(* Haskell-style trailing definitions; non-recursive, let*-scoped. *)
-whereblock  = "where" , vopen , { wherebind , vsep } , [ wherebind ] , vclose ;
-
-wherebind   = ident , "=" , exprorblock ;
-
-data        = "type" , uid , [ typarams ] , "=" , ctorsrhs ;
-
-newtype     = "newtype" , uid , [ typarams ] , "=" , ctor , [ derives ] ;
-
-ctorsrhs    = ctors , [ derives ]
-            | vopen , ctor , { [ vsep ] , "|" , ctor } , [ [ vsep ] , derives ] , vclose ;
-
-ctors       = ctor , { "|" , ctor } ;
-
-ctor        = uid , [ ctorargs ]
-            | uid , "{" , [ recordfield , { "," , recordfield } , [ "," ] ] , "}" ;
-
-ctorargs    = "(" , [ type , { "," , type } , [ "," ] ] , ")" ;
-
-recordfield = ident , ":" , type ;
-
-derives     = "deriving" , "(" , [ uid , { "," , uid } , [ "," ] ] , ")" ;
-
-typarams    = "(" , [ ident , { "," , ident } , [ "," ] ] , ")" ;
-
-errordecl   = "error" , uid , [ ctorargs ] ;
-
-aliasorsynonym = "alias" , uid , [ typarams ] , "=" , aliasrhs ;
-
-aliasrhs    = "{" , [ efflabel , { "," , efflabel } , [ "," ] ] , "}"
-            | type ;
-
-effectdecl  = "effect" , uid , [ typarams ] , "{" , effoplist , "}" ;
-
-effoplist   = [ effop , { effopsep , effop } , [ effopsep ] , [ effop ] ] ;
-
-effopsep    = "," | vsep ;
-
-effop       = "ctl" , ident , "(" , [ effopparam , { "," , effopparam } , [ "," ] ] , ")" , ":" , type ;
-
-effopparam  = type | ident , ":" , type ;
-
-(* A leading `fip`/`fbip` requests the FP^2 in-place check (zero allocation,
-   and for `fip` also linearity), proven over the reuse-lowered core. *)
-fn          = [ "fip" | "fbip" ] , "fn" , ident , "(" , [ param , { "," , param } , [ "," ] ] , ")" , retann , [ givenclause ] , "=" , exprorblock , [ whereblock ] ;
-
-(* A top-level immutable constant. References inline its value, with no call. *)
-constdecl   = "let" , ident , [ ":" , type ] , "=" , exprorblock ;
-
-retann      = ":" , "!" , "{" , [ efflabel , { "," , efflabel } , [ "," ] ] , "}" , type
-            | ":" , "!" , type
-            | ":" , type
-            | ;
-
-exprorblock = expr | blockexpr ;
-
-blockexpr   = vopen , stmts , vclose ;
-
-stmts       = expr
-            | expr , vsep , stmts
-            | "if" , expr , "then" , exprorblock , openiftail
-            | "let" , ident , "=" , expr , [ "in" ] , vsep , stmts
-            | "let" , ident , "=" , blockexpr , vsep , stmts
-            | "let" , letpat , "=" , expr , [ "in" ] , vsep , stmts
-            | "let" , letpat , "=" , blockexpr , vsep , stmts
-            | "var" , ident , ":=" , expr , vsep , stmts
-            | "with" , ident , "<-" , "handler" , handlearms , [ vsep , stmts ]
-            | "with" , ident , "<-" , call , [ vsep , stmts ]
-            | "with" , call , [ vsep , stmts ]
-            | "with" , "handler" , handlearms , [ vsep , stmts ] ;
-
-openiftail  =
-            | vsep , stmts
-            | [ vsep ] , "elif" , expr , "then" , exprorblock , openiftail ;
-
-efflabel    = ident
-            | uid , [ ctorargs ] ;
-
-param       = [ "borrow" ] , ident , [ ann ] , [ ":=" , expr ] ;
-(* A default is honored only on top-level `fn` parameters. A call argument of
-   the form `ident ":=" expr` is a named argument (it reuses the assign
-   syntax), letting a call fill parameters by name and omit defaulted ones. *)
-
-ann         = ":" , type ;
-
-type        = "forall" , ident , { ident } , "." , type
-            | arrow , [ arroweff ] ;
-
-arrow       = "(" , ")" , "->" , arrow
-            | atype , "->" , arrow
-            | atype ;
-
-arroweff    = "!" , "{" , [ efflabel , { "," , efflabel } , [ "," ] ] , [ "|" , ident ] , "}"
-            | "!" ;
-
-atype       = "Int" | "I64" | "U64" | "Bool" | "Unit" | "Float" | "Char" | "String"
-            | "[" , type , "]"
-            | ident
-            | uid , [ ctorargs ]
-            | qual , [ ctorargs ]
-            | "(" , type , ")"
-            | "(" , type , "," , [ type , { "," , type } , [ "," ] ] , ")" ;
-
-expr        = "if" , expr , "then" , exprorblock , ifelse
-            | "let" , ident , "=" , expr , "in" , expr
-            | "let" , letpat , "=" , expr , "in" , expr
-            | "\\" , "(" , [ param , { "," , param } , [ "," ] ] , ")" , "->" , expr
-            | "match" , pipe , "of" , matcharms
-            | "handle" , expr , "with" , handlearms
-            | "throw" , uid , [ "(" , [ expr , { "," , expr } , [ "," ] ] , ")" ]
-            | "try" , exprorblock , [ vsep ] , "catch" , catcharms
-            | "transact" , exprorblock , [ vsep ] , "else" , exprorblock
-            | "for" , ident , "in" , pipe , { "," , compqual } , "do" , exprorblock
-            | ident , ":=" , expr
-            | default ;
-
-(* `a ?? b`: failable fallback, right-associative, looser than comparison. *)
-default     = pipe , "??" , default
-            | pipe ;
-
-(* Comprehension / for-loop qualifier: an extra binding or a filter guard. *)
-compqual    = "let" , ident , "=" , pipe
-            | "if" , pipe ;
-
-ifelse      = [ vsep ] , "else" , exprorblock
-            | [ vsep ] , "elif" , expr , "then" , exprorblock , ifelse ;
-
-letpat      = uid , [ patargs ]
-            | qual , [ patargs ]
-            | "(" , pattern , "," , [ pattern , { "," , pattern } , [ "," ] ] , ")" ;
-
-matcharms   = "{" , arms , "}"
-            | vopen , arms , vclose ;
-
-handlearms  = "{" , [ handlerarm , { "," , handlerarm } , [ "," ] ] , "}"
-            | vopen , [ handlerarm , { armsep , handlerarm } , [ handlerarm ] ] , vclose ;
-
-catcharms   = "{" , [ catcharm , { "," , catcharm } , [ "," ] ] , "}"
-            | vopen , [ catcharm , { armsep , catcharm } , [ catcharm ] ] , vclose ;
-
-catcharm    = uid , [ "(" , [ ident , { "," , ident } , [ "," ] ] , ")" ] , "=>" , exprorblock ;
-
-handlerarm  = "return" , ident , "=>" , exprorblock
-            | ident , "(" , { ident , "," } , ident , ")" , "=>" , exprorblock
-            | "fun" , ident , "(" , [ ident , { "," , ident } , [ "," ] ] , ")" , "=>" , exprorblock
-            | "final" , "ctl" , ident , "(" , [ ident , { "," , ident } , [ "," ] ] , ")" , "=>" , exprorblock
-            | "val" , ident , "=" , exprorblock ;
-
-arms        = [ arm , { armsep , arm } , [ arm ] ] ;
-
-armsep      = "," | vsep ;
-
-arm         = pattern , "=>" , exprorblock
-            | pattern , "if" , expr , "=>" , exprorblock ;
-
-pipe        = pipe , "|>" , compose
-            | compose ;
-
-compose     = compose , ">>" , or
-            | compose , "<<" , or
-            | or ;
-
-or          = or , "||" , and
-            | and ;
-
-and         = and , "&&" , cmp
-            | cmp ;
-
-cmp         = add , cmpop , add
-            | add ;
-
-cmpop       = "==" | "/=" | "<" | "<=" | ">" | ">="
-            | "==." | "/=." | "<." | "<=." | ">." | ">=." ;
-
-add         = add , "+" , mul
-            | add , "-" , mul
-            | add , "+." , mul
-            | add , "-." , mul
-            | mul ;
-
-mul         = mul , "*" , call
-            | mul , "/" , call
-            | mul , "%" , call
-            | mul , "*." , call
-            | mul , "/." , call
-            | call ;
-
-call        = call , "." , ident
-            | call , "?." , ident
-            | call , "?"
-            | calltight ;
-
-calltight   = calltight , "(" , [ expr , { "," , expr } , [ "," ] ] , ")"
-            | calltight , "(" , [ expr , { "," , expr } , [ "," ] ] , ")" , "fn" , trailerparams , blockexpr
-            | calltight , "[" , ident , { "," , ident } , "]"
-            | call , "." , ident , "(" , [ expr , { "," , expr } , [ "," ] ] , ")"
-            | call , "." , ident , "(" , [ expr , { "," , expr } , [ "," ] ] , ")" , "fn" , trailerparams , blockexpr
-            | call , "." , ident , "fn" , trailerparams , blockexpr
-            | atom ;
-
-trailerparams =
-            | "(" , param , { "," , param } , ")" ;
-
-atom        = "mask" , "<" , uid , ">" , "(" , expr , ")"
-            | "error" , "(" , [ expr , { "," , expr } , [ "," ] ] , ")"
-            | int
-            | float
-            | char
-            | str
-            | istart , expr , { imid , expr } , iend
-            | "true"
-            | "false"
-            | "(" , ")"
-            | ident
-            | uid
-            | qual
-            | "(" , expr , ")"
-            | "(" , expr , ":" , type , ")"
-            | "(" , expr , "," , [ expr , { "," , expr } , [ "," ] ] , ")"
-            | "[" , "]"
-            | "[" , expr , { "," , expr } , [ "," ] , "]"
-            | "[" , expr , { "," , expr } , ".." , expr , "]"   (* arithmetic sequence *)
-            | "[" , pipe , "for" , ident , "in" , pipe , { "," , compqual } , "]"
-            | uid , "{" , [ recordexprfield , { "," , recordexprfield } , [ "," ] ] , "}"
-            | uid , "{" , ".." , expr , { "," , recordexprfield } , "}"
-            | "{" , expr , "|" , pathupdate , { "," , pathupdate } , "}" ;
-
-pathupdate  = ident , { "." , ident } , "=" , expr ;
-
-recordexprfield = ident , "=" , expr ;
-
-pattern     = uid , [ patargs ]
-            | qual , [ patargs ]
-            | uid , "{" , recordpatfields , "}"
-            | patatom ;
-
-recordpatfields = { recordpatfield , "," } , ".."
-            | [ recordpatfield , { "," , recordpatfield } , [ "," ] ] ;
-
-recordpatfield = ident , "=" , pattern
-            | ident ;
-
-patatom     = ident
-            | int
-            | float
-            | char
-            | "true"
-            | "false"
-            | "[" , "]"
-            | "[" , pattern , { "," , pattern } , [ "," ] , "]"
-            | "(" , pattern , "," , [ pattern , { "," , pattern } , [ "," ] ] , ")" ;
-
-patargs     = "(" , [ pattern , { "," , pattern } , [ "," ] ] , ")" ;
+   virtual layout tokens vopen (v{), vclose (v}) and vsep (v;) around and between
+   items that share an indentation column. They are the only way blocks and
+   statement separators are formed; there are no literal braces for blocks
+   (record / handler / match braces are real { }). A vsep between two constructs
+   is a newline at the same column, and vopen ... vclose is an indented region. *)
+
+(* ANCHOR: notation *)
+x  y      juxtaposition: x followed by y
+x | y     alternative: x or y
+[ x ]     option: zero or one x
+{ x }     repetition: zero or more x
+( x )     grouping
+"fn"      a terminal (literal token), in double quotes
+varid     a nonterminal, in lower case
+x , ...   a comma-separated list of one or more x
+(* ANCHOR_END: notation *)
+
+(* ANCHOR: lexical *)
+varid    ->  (lower | "_") { idchar }
+conid    ->  upper { idchar }
+qualid   ->  conid "." ident { "." ident }
+ident    ->  varid | conid
+idchar   ->  letter | digit | "_"
+
+integer  ->  digit { digit } [ "i64" | "u64" ]
+float    ->  digit { digit } "." digit { digit } [ exponent ]
+          |  digit { digit } exponent
+exponent ->  ( "e" | "E" ) [ "+" | "-" ] digit { digit }
+char     ->  "'" ( graphic | escape | "\\'" ) "'"
+string   ->  "\"" { strchar | escape | interp } "\""
+interp   ->  "{" expr "}"
+escape   ->  "\\" ( "n" | "t" | "r" | "\\" | "{" | "}" | "\"" )
+comment  ->  "--" { any character other than newline }
+
+-- An interpolated string "a{e}b{e}c" is lexed into the pieces below, each
+-- carrying its literal segment; the holes are re-lexed as expressions.
+istart   ->  "\"" { strchar } "{"
+imid     ->  "}" { strchar } "{"
+iend     ->  "}" { strchar } "\""
+
+-- Virtual layout tokens, synthesized by the offside pass; no source spelling.
+vopen    ->  "v{"   -- start of an indented block
+vclose   ->  "v}"   -- end of an indented block
+vsep     ->  "v;"   -- a newline at the same column (item / statement separator)
+(* ANCHOR_END: lexical *)
+
+(* ANCHOR: program *)
+program   ->  { topdecl }                       -- separated by layout
+
+topdecl   ->  [ "pub" | "opaque" ] item
+item      ->  import | datatype | newtype | synonym | rowalias
+           |  classdecl | instancedecl | effectdecl | errordecl
+           |  patterndecl | constdecl | fundecl
+
+import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
+           |  "pub" "import" modpath [ "(" name , ... ")" ]
+modpath   ->  conid { "." conid }
+name      ->  varid | conid
+
+datatype  ->  "type" conid [ tyvars ] "=" ctor { "|" ctor } [ deriving ]
+newtype   ->  "newtype" conid [ tyvars ] "=" ctor [ deriving ]
+synonym   ->  "alias" conid [ tyvars ] "=" type
+rowalias  ->  "alias" conid "=" "{" [ label , ... ] "}"
+tyvars    ->  "(" varid , ... ")"
+ctor      ->  conid [ "(" type , ... ")" ]
+           |  conid "{" field , ... "}"
+field     ->  varid ":" type
+deriving  ->  "deriving" "(" conid , ... ")"
+
+constdecl ->  "let" varid [ ":" type ] "=" expr
+fundecl   ->  [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
+                [ retann ] [ given ] "=" expr [ wheres ]
+param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
+retann    ->  ":" "!" "{" [ label , ... ] "}" type
+           |  ":" "!" type
+           |  ":" type
+given     ->  "given" constraint , ...
+constraint -> conid "(" type ")"
+wheres    ->  "where" "{" { varid "=" expr } "}"
+(* ANCHOR_END: program *)
+
+(* ANCHOR: decls *)
+classdecl    ->  "class" conid "(" varid ")" [ given ] "{" sig , ... "}"
+instancedecl ->  "instance" varid ":" conid "(" type ")" [ given ]
+                   "{" fundecl , ... "}"
+sig          ->  varid ":" type
+
+effectdecl   ->  "effect" conid [ tyvars ] "{" effop , ... "}"
+effop        ->  "ctl" varid "(" [ type , ... ] ")" ":" type
+errordecl    ->  "error" conid [ "(" type , ... ")" ]
+
+patterndecl  ->  "pattern" conid "(" [ varid , ... ] ")" "for" conid "="
+                   "view" expr [ "make" expr ]
+(* ANCHOR_END: decls *)
+
+(* ANCHOR: types *)
+type    ->  "forall" varid { varid } "." type
+         |  arrow [ row ]                       -- row applies to a function type
+arrow   ->  "(" [ type , ... ] ")" "->" arrow   -- n-ary domain
+         |  atype "->" arrow                     -- single domain
+         |  atype
+atype   ->  scalar
+         |  "[" type "]"                          -- List(type)
+         |  conid [ "(" type , ... ")" ]          -- type constructor
+         |  varid [ "(" type , ... ")" ]          -- variable, possibly applied
+         |  "(" type ")"
+         |  "(" type "," type , ... ")"           -- tuple
+scalar  ->  "Int" | "I64" | "U64" | "Bool" | "Unit" | "Float" | "Char" | "String"
+
+row     ->  "!" "{" [ label , ... ] [ "|" varid ] "}"
+         |  "!"                                   -- empty row, effectful position
+label   ->  conid [ "(" type , ... ")" ]
+(* ANCHOR_END: types *)
+
+(* ANCHOR: expr *)
+expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
+         |  "let" pattern "=" expr  expr            -- bind, then continue
+         |  "var" varid ":=" expr  expr             -- local mutable, then continue
+         |  "\\" "(" [ varid , ... ] ")" "->" expr  -- lambda
+         |  "match" expr "of" { arm }
+         |  "handle" expr "with" handler
+         |  "throw" conid [ "(" expr , ... ")" ]
+         |  "try" expr "catch" { catcharm }
+         |  "transact" expr "else" expr
+         |  "for" gen { "," qual } "do" expr
+         |  "while" expr "do" expr                    -- while loop
+         |  "loop" expr                               -- unconditional loop
+         |  "return" expr                             -- early return
+         |  varid ":=" expr                          -- assignment
+         |  varid ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment
+         |  opexpr
+
+opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
+         |  appexpr
+appexpr ->  appexpr "(" [ expr , ... ] [ "using" iname , ... ] ")"
+                                                     -- application; `using` selects instances
+         |  appexpr "[" expr "]"                      -- indexed read a[i]
+         |  appexpr "." varid                         -- field access
+         |  appexpr "." varid "(" [ expr , ... ] ")" -- method call (UFCS)
+         |  appexpr "?." varid                        -- optional chaining
+         |  appexpr "?"                               -- try marker
+         |  atom
+atom    ->  integer | float | char | string | "true" | "false" | "(" ")"
+         |  "break" | "continue"                      -- loop control
+         |  varid | conid | qualid
+         |  "(" expr ")" | "(" expr ":" type ")"
+         |  "(" expr "," expr , ... ")"               -- tuple
+         |  "[" [ expr , ... ] "]"                    -- list
+         |  "[" expr ".." expr "]"                    -- range
+         |  "[" expr "for" gen { "," qual } "]"       -- comprehension
+         |  conid "{" fieldval , ... "}"              -- record
+         |  conid "{" ".." expr "," fieldval , ... "}" -- record update
+         |  "{" expr "|" path "=" expr , ... "}"      -- path update
+         |  "mask" "<" conid ">" "(" expr ")"
+
+arm      ->  pattern [ "if" expr ] "=>" expr
+gen      ->  varid "in" expr
+qual     ->  "if" expr | "let" varid "=" expr
+iname    ->  varid | qualid                          -- an instance name
+fieldval ->  varid "=" expr                          -- a record field binding
+path     ->  varid { "." varid }                     -- a nested field path
+binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
+         |  "==" | "/=" | "<" | "<=" | ">" | ">="
+         |  "+" | "-" | "*" | "/" | "%" | "^"
+         |  "==." | "/=." | "<." | "<=." | ">." | ">=."
+         |  "+." | "-." | "*." | "/."
+(* ANCHOR_END: expr *)
+
+(* ANCHOR: pattern *)
+pattern  ->  conid [ "(" pattern , ... ")" ]        -- constructor
+          |  conid "{" fieldpat , ... "}"            -- record, ".." allowed
+          |  varid                                    -- variable binding
+          |  "_"                                      -- wildcard
+          |  integer | float | char | "true" | "false"
+          |  "[" [ pattern , ... ] "]"                -- list
+          |  "(" pattern "," pattern , ... ")"        -- tuple
+fieldpat ->  varid "=" pattern  |  ".."
+(* ANCHOR_END: pattern *)
+
+(* ANCHOR: handler *)
+handler   ->  "{" hclause , ... "}"  |  hclause { hclause }   -- braces or layout
+
+hclause   ->  "return" varid "=>" expr                 -- result transform
+           |  varid "(" [ varid , ... ] "," varid ")" "=>" expr  -- op, last arg is resume
+           |  "fun" varid "(" [ varid , ... ] ")" "=>" expr      -- tail-resumptive sugar
+           |  "final" "ctl" varid "(" [ varid , ... ] ")" "=>" expr  -- non-resumable
+           |  "val" varid "=" expr                     -- install-time constant
+
+catcharm  ->  conid [ "(" varid , ... ")" ] "=>" expr
+(* ANCHOR_END: handler *)

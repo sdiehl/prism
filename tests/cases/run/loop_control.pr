@@ -1,0 +1,56 @@
+-- `break`/`continue`/`return` composed and nested, erased to direct control flow.
+-- A single loop using all three threads one combined disposition; a `return`
+-- crosses any nesting depth while each loop still captures its own break/continue.
+-- All functions stay pure `(Int..) -> Int`, so the whole program is allocation-free.
+
+-- All three in one loop: skip evens (continue), stop once past `k` (break), and
+-- bail early once the running sum passes 50 (return).
+fn sum_odds_capped(k : Int) : Int =
+  var s := 0
+  var i := 0
+  while i < 100 do
+    i += 1
+    if i % 2 == 0 then
+      continue
+    if i > k then
+      break
+    if s > 50 then
+      return s
+    s += i
+  s
+
+-- Nested loops; the inner `return` crosses the outer loop to exit the function.
+fn grid_scan(rows : Int, cols : Int) : Int =
+  var seen := 0
+  var r := 0
+  while r < rows do
+    var c := 0
+    while c < cols do
+      seen += 1
+      if r * cols + c == 7 then
+        return seen
+      c += 1
+    r += 1
+  seen
+
+-- An inner `break` is local to the inner loop; the outer loop's `return` exits the
+-- function across it.
+fn inner_break(n : Int) : Int =
+  var total := 0
+  var i := 0
+  while i < n do
+    var j := 0
+    while j < n do
+      if j > i then
+        break
+      total += 1
+      j += 1
+    if total > 6 then
+      return total
+    i += 1
+  total
+
+fn main() =
+  println(sum_odds_capped(20))
+  println(grid_scan(3, 4))
+  println(inner_break(5))

@@ -19,7 +19,6 @@ examples/effects.pr: selective-free-monad
 examples/errors.pr: selective-free-monad
 examples/exceptions.pr: selective-free-monad
 examples/handlers_funval.pr: evidence
-examples/imperative.pr: whole-program-free-monad
 examples/indexing.pr: whole-program-free-monad
 examples/interaction.pr: state-fusion
 examples/lambda.pr: selective-free-monad
@@ -50,7 +49,6 @@ tests/cases/run/comp_guard_dispatch.pr: whole-program-free-monad
 tests/cases/run/comp_guards.pr: whole-program-free-monad
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/default_or.pr: selective-free-monad
-tests/cases/run/early_return.pr: whole-program-free-monad
 tests/cases/run/eff_closure_arg.pr: whole-program-free-monad
 tests/cases/run/eff_eta_thunk.pr: whole-program-free-monad
 tests/cases/run/eff_fn_list.pr: whole-program-free-monad
@@ -71,7 +69,6 @@ tests/cases/run/interp_effects.pr: evidence
 tests/cases/run/interp_show.pr: evidence
 tests/cases/run/local_mono_combined.pr: local-partial
 tests/cases/run/local_mono_escape.pr: whole-program-free-monad
-tests/cases/run/loop_break.pr: whole-program-free-monad
 tests/cases/run/mask.pr: whole-program-free-monad
 tests/cases/run/named_handlers.pr: selective-free-monad
 tests/cases/run/open_nontail.pr: selective-free-monad

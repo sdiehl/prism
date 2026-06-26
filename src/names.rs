@@ -21,6 +21,18 @@ pub const CONTINUE_EFFECT: &str = "Continue";
 pub const BREAK_OP: &str = "loop@break";
 pub const CONTINUE_OP: &str = "loop@continue";
 
+// Recognizers for the loop-control ops, used by `erase_control` to match the
+// handler templates the desugar emits (op names only; binders are alpha-renamed).
+#[must_use]
+pub fn is_break_op(name: &str) -> bool {
+    name == BREAK_OP
+}
+
+#[must_use]
+pub fn is_continue_op(name: &str) -> bool {
+    name == CONTINUE_OP
+}
+
 // Early `return e` desugars to a non-resumable perform of this one-op effect,
 // discharged by a handler the fn-body desugar installs, so it never surfaces. The
 // op carries the returned value: a polymorphic param (`RETURN_VAL`, instantiated
@@ -28,6 +40,11 @@ pub const CONTINUE_OP: &str = "loop@continue";
 pub const RETURN_EFFECT: &str = "Return";
 pub const RETURN_OP: &str = "fn@return";
 pub const RETURN_VAL: &str = "a@retval";
+
+#[must_use]
+pub fn is_return_op(name: &str) -> bool {
+    name == RETURN_OP
+}
 
 pub const DICT_PREFIX: &str = "_D";
 

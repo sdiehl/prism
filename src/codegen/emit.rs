@@ -1050,6 +1050,12 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.cur_arity = f.params.len();
         let header = self.isa.fn_define(&Self::sym(f.name.as_str()), &params);
         self.isa.open_entry(&mut self.b);
+        // Count one driver work-step per entry to a free-monad driver (stderr-only
+        // under PRISM_DRIVE_STATS, so stdout is untouched). This is the counter
+        // whose asymptotics track the trampoline's actual work.
+        if crate::core::effect_lower::is_free_monad_driver(f.name.as_str()) {
+            self.isa.call_void(&mut self.b, "prism_drive_step", &[]);
+        }
         self.lower_tail(&regs, &body)?;
         Ok(format!("{header}{}{}", self.b.body, self.isa.fn_close()))
     }

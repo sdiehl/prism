@@ -196,6 +196,7 @@ declare ptr @prism_alloc(i64)
 
 define i64 @prism_ebind(i64 %a0, i64 %a1) {
 entry:
+  call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
   %0 = ptrtoint ptr %t0 to i64
   %1 = add i64 %0, 8
@@ -396,6 +397,8 @@ declare void @prism_rc_dec(i64)
 declare i64 @prism_rt_int_cmp(i64, i64)
 
 declare void @prism_fatal(i64)
+
+declare void @prism_drive_step()
 
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
 entry:

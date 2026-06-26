@@ -271,6 +271,23 @@ __attribute__((destructor)) static void prism_effop_report(void) {
 
 void prism_effop_alloc(void) { prism_effop_allocs++; }
 
+/* Driver work-step counter: every structural reduction turn of the residual
+ * free-monad driver (an `ebind`/handler/mask driver entry) bumps this. With
+ * PRISM_DRIVE_STATS set a destructor reports the total to stderr (stdout, the
+ * parity-checked channel, stays untouched). Unlike the allocation counter this
+ * tracks the driver's actual *work*, so it scales ~n on a deep non-tail effectful
+ * recursion when the trampoline is linear and flips to ~n^2 when it is not (the
+ * EBounce-class re-association blowup that allocation counts are blind to). */
+static long prism_drive_steps = 0;
+
+__attribute__((destructor)) static void prism_drive_report(void) {
+    if (getenv("PRISM_DRIVE_STATS")) {
+        fprintf(stderr, "prism: %ld drive steps\n", prism_drive_steps);
+    }
+}
+
+void prism_drive_step(void) { prism_drive_steps++; }
+
 long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
     long *p = (long *)v;

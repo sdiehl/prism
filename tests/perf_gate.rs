@@ -171,6 +171,13 @@ fn allocation_is_flat_for_constant_space_programs() {
             "var for-loop accumulator",
             "fn run(n : Int) : Int =\n  var t := 0\n  for i in srange(1, n + 1) do\n    t += i\n  t\nfn main() = println(run({N}))\n",
         ),
+        (
+            // Early `return` out of a loop: the return-aware driver builds an
+            // SMore(ctl) cell per iteration, which the FBIP reuse pass recycles in
+            // place, so allocation stays flat and never reifies into the free monad.
+            "early-return loop",
+            "fn run(n : Int) : Int =\n  var i := 0\n  var s := 0\n  while i < n do\n    i += 1\n    s += i\n    if i == n then\n      return s\n  0 - 1\nfn main() = println(run({N}))\n",
+        ),
     ];
     let (small, big) = (1000_i64, 10_000_i64);
     let mut fails = Vec::new();
@@ -297,16 +304,13 @@ fn loops_run_in_constant_stack() {
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
 
-// The companion gate for loops still on the free monad: imperative loops using
-// `break`/`continue`/early `return`, and hand-rolled parameter-passing effect
-// loops. Their loop control reifies into the free monad, whose resumption is a
-// first-class closure apply (not a tail call), so the native stack grows O(n) and
-// they overflow at scale. The fix is the free-monad trampoline (run the reified
-// computation in a constant-stack driver loop); until it lands these crash at a
-// million iterations. Ignored so the suite is green while the gap is documented;
-// un-ignore when the trampoline lands.
+// Imperative loops using `break`/`continue`/early `return`. Their loop control
+// used to reify into the free monad, whose resumption is a first-class closure
+// apply (not a tail call), so the native stack grew O(n) and they overflowed at
+// scale. `erase_control` now rewrites them to direct control flow (a `ctl:Int`
+// thread plus, for `break`/`return`, a `musttail` driver), so they run in constant
+// stack like any `var` loop. A million iterations under a 2048KB stack proves it.
 #[test]
-#[ignore = "needs the free-monad trampoline (break/continue/return and parameter-passing effect loops still grow the stack)"]
 fn free_monad_loops_run_in_constant_stack() {
     if !have(&cc()) {
         eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
@@ -323,22 +327,18 @@ fn free_monad_loops_run_in_constant_stack() {
             ),
         ),
         (
+            "break while loop",
+            format!(
+                "fn run(k : Int) : Int =\n  var s := 0\n  var i := 0\n  while true do\n    \
+                 if i >= k then\n      break\n    i += 1\n    s += i\n  s\n\
+                 fn main() = println(run({n}))\n"
+            ),
+        ),
+        (
             "early-return loop",
             format!(
                 "fn run(k : Int) : Int =\n  var i := 0\n  loop\n    if i >= k then\n      \
                  return i\n    i += 1\nfn main() = println(run({n}))\n"
-            ),
-        ),
-        (
-            "parameter-passing state loop",
-            format!(
-                "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
-                 fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
-                 spin(k)\n  else\n    rd(())\n\
-                 fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
-                 rd(u, r) => \\(s) -> r(s)(s)\n      wr(v, r) => \\(_s) -> r(())(v)\n      \
-                 return x => \\(_s) -> x\n  f(0)\n\
-                 fn main() = println(run({n}))\n"
             ),
         ),
     ];
@@ -349,4 +349,73 @@ fn free_monad_loops_run_in_constant_stack() {
         }
     }
     assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+// The loop still on the free monad: a hand-rolled parameter-passing effect loop.
+// Its handler is not tail-resumptive (`r(s)(s)`), so it cannot be erased to a
+// `var` cell, and its resumption is a closure apply, so the native stack grows
+// O(n). The fix is Phase B's free-monad trampoline (drive the reified computation
+// in a constant-stack loop); until it lands this overflows at a million
+// iterations. Ignored so the suite is green while the gap is documented;
+// un-ignore when the trampoline lands.
+#[test]
+#[ignore = "needs Phase B (the free-monad trampoline): a parameter-passing effect loop still grows the stack"]
+fn param_passing_effect_loop_runs_in_constant_stack() {
+    if !have(&cc()) {
+        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        return;
+    }
+    let n = 1_000_000;
+    let src = format!(
+        "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
+         fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
+         spin(k)\n  else\n    rd(())\n\
+         fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
+         rd(u, r) => \\(s) -> r(s)(s)\n      wr(v, r) => \\(_s) -> r(())(v)\n      \
+         return x => \\(_s) -> x\n  f(0)\n\
+         fn main() = println(run({n}))\n"
+    );
+    runs_in_bounded_stack(&prism::with_prelude(&src), "parameter-passing state loop", 2048)
+        .unwrap_or_else(|e| panic!("{e}"));
+}
+
+// Asymptotic-work gate: the counter that would have caught the EBounce regression.
+// A deep non-tail effectful recursion (`deep_abort`: N nested frames each holding a
+// live cons cell, an abort at the bottom) is *honestly* O(N) allocation under both
+// a linear and a quadratic trampoline, so allocation counts cannot tell them apart
+// -- only the driver's actual work-step count does. Run at N and 4N and assert the
+// growth ratio is sub-octic: a linear driver does ~4x the steps, a quadratic one
+// (the EBounce re-association that re-walks the left-nested spine each bounce) does
+// ~16x. Ignored in Phase A (the free-monad driver is unchanged here); the permanent
+// ratchet arms in Phase B, where the trampoline this guards is introduced.
+#[test]
+#[ignore = "ratchets in Phase B, where the residual-driver trampoline is introduced"]
+fn driver_work_is_linear_on_deep_nontail_recursion() {
+    if !have(&cc()) {
+        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        return;
+    }
+    let prog = |n: i64| {
+        prism::with_prelude(&format!(
+            "effect Abort {{\n  ctl abort(Int) : Int\n}}\n\
+             fn first(xs) =\n  match xs of\n    Nil => 0\n    Cons(x, _) => x\n\
+             fn probe(n : Int, acc) : !{{Abort}} Int =\n  if n == 0 then\n    abort(length(acc))\n  \
+             else\n    let cell = Cons(n, acc)\n    let r = probe(n - 1, cell)\n    r + first(cell)\n\
+             fn deep_abort(n : Int) =\n  handle probe(n, Nil) with\n    final ctl abort(code) => code\n    \
+             return r => r\n\
+             fn main() = println(deep_abort({n}))\n"
+        ))
+    };
+    let small = 2000_i64;
+    let big = 4 * small;
+    let steps_small = stat_src(&prog(small), "drive_small", "PRISM_DRIVE_STATS", "drive steps")
+        .unwrap_or_else(|e| panic!("{e}"));
+    let steps_big = stat_src(&prog(big), "drive_big", "PRISM_DRIVE_STATS", "drive steps")
+        .unwrap_or_else(|e| panic!("{e}"));
+    // Integer ratio test (no float): linear work quadruples (4x), quadratic ~16x.
+    assert!(
+        steps_small > 0 && steps_big < 8 * steps_small,
+        "driver work is super-linear: {steps_small} steps at n={small}, {steps_big} at n={big}; \
+         a >= 8x growth means the trampoline re-associates quadratically (the EBounce regression)"
+    );
 }

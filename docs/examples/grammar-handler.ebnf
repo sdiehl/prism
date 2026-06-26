@@ -1,9 +1,0 @@
-handler   ->  "{" hclause , ... "}"  |  hclause { hclause }   -- braces or layout
-
-hclause   ->  "return" varid "=>" expr                 -- result transform
-           |  varid "(" [ varid , ... ] "," varid ")" "=>" expr  -- op, last arg is resume
-           |  "fun" varid "(" [ varid , ... ] ")" "=>" expr      -- tail-resumptive sugar
-           |  "final" "ctl" varid "(" [ varid , ... ] ")" "=>" expr  -- non-resumable
-           |  "val" varid "=" expr                     -- install-time constant
-
-catcharm  ->  conid [ "(" varid , ... ")" ] "=>" expr

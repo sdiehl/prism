@@ -680,6 +680,10 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
             let (_, _, core) = frontend(src, base)?;
             Ok(pp_core_pretty(&core))
         }
+        "core-json" => {
+            let (_, _, core) = frontend(src, base)?;
+            Ok(crate::core::core_to_json(&core))
+        }
         "fbip" => {
             let (program, _, core) = frontend(src, base)?;
             let sigs = borrow_sigs(&program);

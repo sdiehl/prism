@@ -9,6 +9,7 @@ use crate::names::{self, ENTRY_POINT};
 use crate::sym::Sym;
 use crate::types::{CtorInfo, Type};
 
+mod erase_control;
 mod erase_var;
 mod evidence;
 mod flow;
@@ -56,6 +57,17 @@ const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
 const EBIND: &str = "ebind";
+
+/// Whether `name` is one of the residual free-monad driver templates: `ebind`, a
+/// per-handle driver (`{n}@handle`), or a mask driver (`{n}@mask`). Each entry to
+/// one is a structural reduction turn the `prism_drive_step` counter tracks (so
+/// codegen emits the bump at its head). The names are minted here, so the
+/// predicate lives here. The erased-loop drivers (`{n}@loopdrv`) are direct,
+/// constant-stack control flow, not the free-monad driver, so they are excluded.
+#[must_use]
+pub(crate) fn is_free_monad_driver(name: &str) -> bool {
+    name == EBIND || name.ends_with("@handle") || name.ends_with("@mask")
+}
 
 // Step constructors for the state path's early-termination protocol: a fused
 // producer threads `Step S` and stops when `stake` yields `SDone`.
@@ -162,7 +174,26 @@ fn lower_impl(
     // and a var+effect program becomes a strictly smaller effect problem for the
     // strategies below (the var was forcing the free monad).
     let erased = erase_var::erase_local_vars(core);
+    // Erase loop-control effects (break/continue/return) to direct control flow
+    // next, so a recognized loop's control ops are gone before the strategy
+    // cascade classifies the residual: a pure imperative loop then classifies
+    // "pure" rather than reifying into the free monad.
+    let (erased, used_step) = erase_control::erase_control(&erased);
     let core = &erased;
+    // The `SMore`/`SDone` constructors the `return` erasure threads must be on the
+    // constructor table for every return path below, including the `"pure"` one
+    // (codegen must see them wherever the threaded body flows). Merge them into a
+    // base table that shadows the input and feeds all paths.
+    let base_ctors;
+    let ctors = if used_step {
+        let mut c = ctors.clone();
+        c.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
+        c.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
+        base_ctors = c;
+        &base_ctors
+    } else {
+        ctors
+    };
     if !core.fns.iter().any(|f| raw_effects(&f.body)) {
         return Ok((core.clone(), ctors.clone(), "pure"));
     }
@@ -1766,6 +1797,76 @@ fn each_subcomp<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
             }
         }
         _ => {}
+    }
+}
+
+// Rebuild `c`, applying `g` to every immediate sub-computation and to every
+// thunk body in immediate values: the single structural recursion the
+// recognize-or-leave Core passes (`erase_var`, `erase_control`) share.
+pub(super) fn map_kids<G: FnMut(&Comp) -> Comp>(c: &Comp, g: &mut G) -> Comp {
+    let vals = |args: &[Value], g: &mut G| args.iter().map(|a| map_val(a, g)).collect();
+    match c {
+        Comp::Bind(m, x, n) => Comp::Bind(Box::new(g(m)), *x, Box::new(g(n))),
+        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(g(b))),
+        Comp::App(f, args) => Comp::App(Box::new(g(f)), vals(args, g)),
+        Comp::If(v, t, e) => Comp::If(map_val(v, g), Box::new(g(t)), Box::new(g(e))),
+        Comp::Case(v, arms) => {
+            let v = map_val(v, g);
+            Comp::Case(v, arms.iter().map(|(p, b)| (p.clone(), g(b))).collect())
+        }
+        Comp::Mask(ops, b) => Comp::Mask(ops.clone(), Box::new(g(b))),
+        Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        } => Comp::Handle {
+            body: Box::new(g(body)),
+            return_var: *return_var,
+            return_body: return_body.as_ref().map(|rb| Box::new(g(rb))),
+            ops: ops
+                .iter()
+                .map(|op| HandleOp {
+                    name: op.name,
+                    params: op.params.clone(),
+                    resume: op.resume,
+                    body: g(&op.body),
+                })
+                .collect(),
+        },
+        Comp::Return(v) => Comp::Return(map_val(v, g)),
+        Comp::Force(v) => Comp::Force(map_val(v, g)),
+        Comp::Print(v) => Comp::Print(map_val(v, g)),
+        Comp::PrintF(v) => Comp::PrintF(map_val(v, g)),
+        Comp::PrintS(v) => Comp::PrintS(map_val(v, g)),
+        Comp::Error(v) => Comp::Error(map_val(v, g)),
+        Comp::Srand(v) => Comp::Srand(map_val(v, g)),
+        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, map_val(v, g)),
+        Comp::Dup(v) => Comp::Dup(map_val(v, g)),
+        Comp::Drop(v) => Comp::Drop(map_val(v, g)),
+        Comp::Prim(op, a, b) => Comp::Prim(*op, map_val(a, g), map_val(b, g)),
+        Comp::Call(n, args) => Comp::Call(*n, vals(args, g)),
+        Comp::Do(op, args) => Comp::Do(*op, vals(args, g)),
+        Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, vals(args, g)),
+        Comp::RefNew(v) => Comp::RefNew(map_val(v, g)),
+        Comp::RefGet(v) => Comp::RefGet(map_val(v, g)),
+        Comp::RefSet(a, b) => Comp::RefSet(map_val(a, g), map_val(b, g)),
+        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
+            token: *token,
+            freed: map_val(freed, g),
+            body: Box::new(g(body)),
+        },
+        Comp::Reuse(tok, v) => Comp::Reuse(*tok, map_val(v, g)),
+        Comp::PrintNl | Comp::ReadInt | Comp::ReadLine | Comp::Rand => c.clone(),
+    }
+}
+
+pub(super) fn map_val<G: FnMut(&Comp) -> Comp>(v: &Value, g: &mut G) -> Value {
+    match v {
+        Value::Thunk(c) => Value::Thunk(Box::new(g(c))),
+        Value::Ctor(n, t, fs) => Value::Ctor(*n, *t, fs.iter().map(|f| map_val(f, g)).collect()),
+        Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| map_val(f, g)).collect()),
+        _ => v.clone(),
     }
 }
 

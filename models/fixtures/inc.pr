@@ -1,0 +1,2 @@
+fn inc(n : Int) : Int = n + 1
+fn main() : Int = inc(41)

@@ -73,7 +73,7 @@ impl Eraser {
                 )),
             );
         }
-        map_kids(c, &mut |k| self.erase(k))
+        super::map_kids(c, &mut |k| self.erase(k))
     }
 }
 
@@ -178,7 +178,7 @@ fn erase_ops(c: &Comp, get: Sym, set: Sym, cell: Sym) -> Comp {
             let v = args.first().cloned().unwrap_or(Value::Unit);
             Comp::RefSet(Value::Var(cell), v)
         }
-        _ => map_kids(c, &mut |k| erase_ops(k, get, set, cell)),
+        _ => super::map_kids(c, &mut |k| erase_ops(k, get, set, cell)),
     }
 }
 
@@ -236,71 +236,3 @@ fn each_subterm<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
     });
 }
 
-// Rebuild `c`, applying `g` to every immediate sub-computation and to every thunk
-// body in immediate values. The single structural recursion both passes share.
-fn map_kids<G: FnMut(&Comp) -> Comp>(c: &Comp, g: &mut G) -> Comp {
-    let vals = |args: &[Value], g: &mut G| args.iter().map(|a| map_val(a, g)).collect();
-    match c {
-        Comp::Bind(m, x, n) => Comp::Bind(Box::new(g(m)), *x, Box::new(g(n))),
-        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(g(b))),
-        Comp::App(f, args) => Comp::App(Box::new(g(f)), vals(args, g)),
-        Comp::If(v, t, e) => Comp::If(map_val(v, g), Box::new(g(t)), Box::new(g(e))),
-        Comp::Case(v, arms) => {
-            let v = map_val(v, g);
-            Comp::Case(v, arms.iter().map(|(p, b)| (p.clone(), g(b))).collect())
-        }
-        Comp::Mask(ops, b) => Comp::Mask(ops.clone(), Box::new(g(b))),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: Box::new(g(body)),
-            return_var: *return_var,
-            return_body: return_body.as_ref().map(|rb| Box::new(g(rb))),
-            ops: ops
-                .iter()
-                .map(|op| HandleOp {
-                    name: op.name,
-                    params: op.params.clone(),
-                    resume: op.resume,
-                    body: g(&op.body),
-                })
-                .collect(),
-        },
-        Comp::Return(v) => Comp::Return(map_val(v, g)),
-        Comp::Force(v) => Comp::Force(map_val(v, g)),
-        Comp::Print(v) => Comp::Print(map_val(v, g)),
-        Comp::PrintF(v) => Comp::PrintF(map_val(v, g)),
-        Comp::PrintS(v) => Comp::PrintS(map_val(v, g)),
-        Comp::Error(v) => Comp::Error(map_val(v, g)),
-        Comp::Srand(v) => Comp::Srand(map_val(v, g)),
-        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, map_val(v, g)),
-        Comp::Dup(v) => Comp::Dup(map_val(v, g)),
-        Comp::Drop(v) => Comp::Drop(map_val(v, g)),
-        Comp::Prim(op, a, b) => Comp::Prim(*op, map_val(a, g), map_val(b, g)),
-        Comp::Call(n, args) => Comp::Call(*n, vals(args, g)),
-        Comp::Do(op, args) => Comp::Do(*op, vals(args, g)),
-        Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, vals(args, g)),
-        Comp::RefNew(v) => Comp::RefNew(map_val(v, g)),
-        Comp::RefGet(v) => Comp::RefGet(map_val(v, g)),
-        Comp::RefSet(a, b) => Comp::RefSet(map_val(a, g), map_val(b, g)),
-        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
-            token: *token,
-            freed: map_val(freed, g),
-            body: Box::new(g(body)),
-        },
-        Comp::Reuse(tok, v) => Comp::Reuse(*tok, map_val(v, g)),
-        Comp::PrintNl | Comp::ReadInt | Comp::ReadLine | Comp::Rand => c.clone(),
-    }
-}
-
-fn map_val<G: FnMut(&Comp) -> Comp>(v: &Value, g: &mut G) -> Value {
-    match v {
-        Value::Thunk(c) => Value::Thunk(Box::new(g(c))),
-        Value::Ctor(n, t, fs) => Value::Ctor(*n, *t, fs.iter().map(|f| map_val(f, g)).collect()),
-        Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| map_val(f, g)).collect()),
-        _ => v.clone(),
-    }
-}

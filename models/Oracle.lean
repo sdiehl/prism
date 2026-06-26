@@ -2,6 +2,7 @@ import Prism
 import CEK
 import Dynamics
 import Meta
+import Json
 
 /-
 Executable demonstration + example module for the Prism core model. This is the
@@ -147,7 +148,7 @@ example {m n : Comp}
     (tm : Terminal m) (tn : Terminal n) : m = n :=
   Steps.unique_normal hm hn tm tn
 
-/- ===== Executable entry point: run the CEK oracle and print results ===== -/
+/- ===== Rendering: match the Rust interpreter's `Rv::show` byte for byte ===== -/
 
 mutual
   def showRv : Rv → String
@@ -155,12 +156,13 @@ mutual
     | .float f => toString f
     | .bool b => toString b
     | .unit => "()"
-    | .str s => "\"" ++ s ++ "\""
-    | .closure _ _ _ => "<closure>"
-    | .thunk _ _ => "<thunk>"
+    | .str s => s
+    | .closure _ _ _ => "<function>"
+    | .thunk _ _ => "<function>"
+    | .data n _ [] => n
     | .data n _ args => n ++ "(" ++ showRvs args ++ ")"
     | .tuple args => "(" ++ showRvs args ++ ")"
-    | .resume _ => "<resume>"
+    | .resume _ => "<continuation>"
   def showRvs : List Rv → String
     | [] => ""
     | [x] => showRv x
@@ -175,6 +177,20 @@ def showState : MState → String
 def eval (Γ : Core) (fuel : Nat) (c : Comp) : String :=
   showState (run fuel Γ (load c)).1
 
+/- ===== JSON core-IR bridge endpoint =====
+   Decode a `prism dump core-json` program (via `Json.lean`) and run its `main`,
+   exactly as the interpreter does (`eval::run_io` evaluates the `main` function).
+   This is the differential endpoint: feed it the same core the Rust interpreter
+   runs and compare the rendered value. -/
+
+/-- Evaluate the `main` function of a decoded core program. -/
+def evalMain (Γ : Core) : String := eval Γ 100000 (.call "main" [])
+
+def evalCoreJson (src : String) : Except String String :=
+  Json.coreOfJson src |>.map evalMain
+
+/- ===== Executable entry point ===== -/
+
 def cases : List (String × Core × Comp) :=
   [ ("inc 41",          incΓ,    incCall),
     ("(\\x. x) 7",       emptyΓ,  betaProg),
@@ -184,11 +200,19 @@ def cases : List (String × Core × Comp) :=
     ("handle abort",     emptyΓ,  abortProg),
     ("flip (multishot)", emptyΓ,  flipProg) ]
 
-def run! : IO Unit := do
+def demo : IO Unit := do
   IO.println "Prism CEK oracle"
   for (name, Γ, prog) in cases do
     IO.println s!"  {name}  =>  {eval Γ 200 prog}"
 
 end Prism
 
-def main : IO Unit := Prism.run!
+def main (argv : List String) : IO UInt32 := do
+  match argv with
+  | ["eval", file] =>
+      let src ← if file = "-" then (← IO.getStdin).readToEnd else IO.FS.readFile file
+      match Prism.evalCoreJson src with
+      | .ok v => IO.println v; return 0
+      | .error e => IO.eprintln s!"oracle: {e}"; return 1
+  | [] => Prism.demo; return 0
+  | _ => IO.eprintln "usage: oracle [eval <file.json|->]"; return 1

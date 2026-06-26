@@ -50,7 +50,7 @@ enum Cmd {
     },
     /// Type-check and print inferred signatures and effects
     Check { file: PathBuf },
-    /// Print one pipeline artifact: tokens, ast, types, core, fbip, lowered, llvm, mlir
+    /// Print one pipeline artifact: tokens, ast, types, core, core-json, fbip, lowered, llvm, mlir
     Dump { phase: String, file: PathBuf },
     /// Print every pipeline phase for a program
     Report { file: PathBuf },

@@ -786,6 +786,7 @@ dependencies = [
  "num-bigint",
  "offsides",
  "rustyline",
+ "serde_json",
  "thiserror",
  "toml",
  "wasm-bindgen",
