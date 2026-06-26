@@ -18,7 +18,7 @@ fn syms(ss: &[Sym]) -> J {
     J::Array(ss.iter().map(|s| json!(s.as_str())).collect())
 }
 
-fn op_name(op: CoreOp) -> &'static str {
+const fn op_name(op: CoreOp) -> &'static str {
     use CoreOp::{
         Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
         Sub, Subf,
@@ -73,9 +73,11 @@ fn values(vs: &[Value]) -> J {
 fn binders(args: &[Option<Sym>]) -> J {
     J::Array(
         args.iter()
-            .map(|o| match o {
-                Some(x) => json!({"p": "var", "x": x.as_str()}),
-                None => json!({"p": "wild"}),
+            .map(|o| {
+                o.as_ref().map_or_else(
+                    || json!({"p": "wild"}),
+                    |x| json!({"p": "var", "x": x.as_str()}),
+                )
             })
             .collect(),
     )

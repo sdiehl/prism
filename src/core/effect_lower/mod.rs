@@ -136,10 +136,12 @@ struct Lowerer {
     // Set by the state path when a `stake`-style early-terminating handler is
     // present: producers then thread `Step S` and check it after each emit.
     early: bool,
-    // Opt-in (PRISM_NATIVE_EFFECTS): drive eligible closed handlers with a
-    // self-recursive `{n}@region` loop whose tail-resume is a queue plus `EResume`
-    // instead of a continuation thunk that re-enters a mutually-recursive driver,
-    // so the resumed continuation is driven by a musttail self-call.
+    // Default on (opt out with `PRISM_NATIVE_EFFECTS=0`): drive eligible closed
+    // handlers with a self-recursive `{n}@region` loop -- a tail resume becomes a
+    // queue plus `EResume`, a function-answer state handler threads its state in an
+    // accumulator -- instead of a continuation thunk re-entering a mutually
+    // recursive driver, so the resumed continuation is driven by a musttail
+    // self-call and a parameter-passing loop runs in constant stack.
     native: bool,
     // Set while lowering a native clause body: a resume application then yields
     // `EResume(queue, value)` for the `{n}@region` loop to drive.
@@ -268,7 +270,7 @@ fn lower_impl(
         fresh: Fresh::new(),
         generated: Vec::new(),
         early: false,
-        native: std::env::var_os("PRISM_NATIVE_EFFECTS").is_some(),
+        native: std::env::var("PRISM_NATIVE_EFFECTS").map_or(true, |v| v != "0"),
         native_resume: false,
         used_resume: false,
     };

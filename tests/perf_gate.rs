@@ -259,68 +259,6 @@ fn runs_in_bounded_stack(full: &str, tag: &str, stack_kb: u32) -> Result<(), Str
     }
 }
 
-// Like `runs_in_bounded_stack`, but compiles `src` (raw program text; the binary
-// adds the prelude) through the `prism` binary with `PRISM_NATIVE_EFFECTS` set on
-// the child only, so the env opt-in cannot leak into the other (in-process) builds
-// running in parallel. Used by the gate whose constant-stack behavior the native
-// effect runtime delivers.
-fn runs_in_bounded_stack_native(src: &str, tag: &str, stack_kb: u32) -> Result<(), String> {
-    let dir = env::temp_dir();
-    let stem = format!(
-        "prism_natscale_{}_{}",
-        std::process::id(),
-        tag.replace([' ', '/', '.'], "_")
-    );
-    let src_path = dir.join(format!("{stem}.pr"));
-    let bin = dir.join(&stem);
-    let cleanup = || {
-        for ext in ["bc", "ll", "pr"] {
-            let _ = fs::remove_file(bin.with_extension(ext));
-        }
-        let _ = fs::remove_file(&bin);
-    };
-    if let Err(e) = fs::write(&src_path, src) {
-        cleanup();
-        return Err(format!("{tag}: write failed: {e}"));
-    }
-    let status = Command::new(env!("CARGO_BIN_EXE_prism"))
-        .arg(&src_path)
-        .arg("-o")
-        .arg(&bin)
-        .env("PRISM_NATIVE_EFFECTS", "1")
-        .env("PRISM_QUIET", "1")
-        .output();
-    match status {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            cleanup();
-            return Err(format!(
-                "{tag}: build failed: {}",
-                String::from_utf8_lossy(&o.stderr)
-            ));
-        }
-        Err(e) => {
-            cleanup();
-            return Err(format!("{tag}: build spawn failed: {e}"));
-        }
-    }
-    let out = Command::new("sh")
-        .arg("-c")
-        .arg(format!("ulimit -s {stack_kb}; exec {}", bin.display()))
-        .output();
-    cleanup();
-    let out = out.map_err(|e| format!("{tag}: spawn failed: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{tag}: did not complete in a {stack_kb}KB stack (status {:?}); it grows the \
-             native stack per iteration instead of running as a constant-stack loop",
-            out.status.code()
-        ))
-    }
-}
-
 // Scale + bounded-stack gate. A loop must run in CONSTANT native stack, so it
 // completes a million iterations under a tight stack limit. This catches the
 // stack-overflow cliff (an O(n)-deep non-tail recursion) that a small-input test
@@ -422,11 +360,11 @@ fn free_monad_loops_run_in_constant_stack() {
 // A hand-rolled parameter-passing effect loop: the handler answer is a function
 // `S -> A` threaded as state, and the clause applies the resumption's *result* to
 // the new state (`r(s)(s)`), so each iteration would leave a pending-apply frame
-// on the native stack. The native effect runtime drives such a closed handler with
-// a self-tail-recursive `{n}@region` loop that threads the state in an accumulator
-// and `musttail`s on the resumed continuation, so the loop runs in constant stack.
-// Built through the `prism` binary with that runtime selected; the in-process
-// default still reifies into the free monad and overflows this input.
+// on the native stack. The native effect runtime (the default) drives such a closed
+// handler with a self-tail-recursive `{n}@region` loop that threads the state in an
+// accumulator and `musttail`s on the resumed continuation, so the loop runs in
+// constant stack. Opting out (`PRISM_NATIVE_EFFECTS=0`) reifies into the free monad
+// and overflows this input instead.
 #[test]
 fn param_passing_effect_loop_runs_in_constant_stack() {
     if !have(&cc()) {
@@ -446,8 +384,12 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
          return x => \\(_s) -> x\n  f(0)\n\
          fn main() = println(run({n}))\n"
     );
-    runs_in_bounded_stack_native(&src, "parameter-passing state loop", 2048)
-        .unwrap_or_else(|e| panic!("{e}"));
+    runs_in_bounded_stack(
+        &prism::with_prelude(&src),
+        "parameter-passing state loop",
+        2048,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
 }
 
 // Asymptotic-work gate: the counter that would have caught the EBounce regression.
