@@ -471,7 +471,9 @@ impl Tc<'_> {
             }
             Expr::Mask(eff, body) => {
                 let eff_sym = Sym::from(eff);
-                if !self.eff_ops.values().any(|i| i.effect_name == eff_sym) {
+                if !self.eff_ops.values().any(|i| i.effect_name == eff_sym)
+                    && !super::env::is_builtin_effect(eff)
+                {
                     return Err(TypeError::Other {
                         span,
                         msg: format!("unknown effect `{eff}` in mask"),

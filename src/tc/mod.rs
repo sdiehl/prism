@@ -213,6 +213,7 @@ struct Tc<'a> {
     next: u32,
     seeds: u32,
     ctors: &'a BTreeMap<String, CtorInfo>,
+    data: &'a BTreeMap<String, DataInfo>,
     eff_ops: &'a BTreeMap<String, EffOpInfo>,
     field_res: BTreeMap<Span, (String, usize, usize)>,
     path_res: PathRes,
@@ -287,7 +288,7 @@ fn concrete_effects(ty: &Type) -> Effects {
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
     let seeds = env::seed_var_states(&eff_ops);
-    let (classes, instances, inst_keys, methods, mut constrained, warnings) =
+    let (classes, instances, inst_keys, methods, mut constrained, mut warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
     let effects = effects::fixpoint(prog, &eff_ops);
@@ -329,6 +330,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             next: seeds,
             seeds,
             ctors: &ctors,
+            data: &data,
             eff_ops: &eff_ops,
             field_res: BTreeMap::new(),
             path_res: PathRes::new(),
@@ -418,6 +420,21 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                             span: d.body.span,
                             msg: format!(
                                 "in `{}`: effect `{eff}` not declared in annotation",
+                                d.name
+                            ),
+                        });
+                    }
+                }
+                // The reverse direction is sound (a pure body satisfies an
+                // effectful annotation by subsumption) but the annotation then
+                // disagrees with the inferred row, so warn rather than reject:
+                // a declared effect the body never performs is dead weight.
+                for eff in &declared_set {
+                    if !inferred.contains(eff) {
+                        warnings.push(Warning {
+                            span: d.span,
+                            msg: format!(
+                                "in `{}`: effect `{eff}` declared in the annotation but never performed",
                                 d.name
                             ),
                         });
@@ -538,6 +555,7 @@ fn infer_expr_full(
         next: checked.seeds,
         seeds: checked.seeds,
         ctors: &checked.ctors,
+        data: &checked.data,
         eff_ops: &checked.eff_ops,
         field_res: BTreeMap::new(),
         path_res: PathRes::new(),

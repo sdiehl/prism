@@ -451,6 +451,7 @@ mod tests {
     // A bare Tc with empty environments, enough to drive row rewriting.
     fn tc<'a>(
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
+        data: &'a BTreeMap<String, super::super::DataInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
         classes: &'a BTreeMap<String, super::super::ClassInfo>,
         instances: &'a BTreeMap<String, super::super::InstInfo>,
@@ -461,6 +462,7 @@ mod tests {
             next: 0,
             seeds: 0,
             ctors,
+            data,
             eff_ops,
             field_res: BTreeMap::new(),
             path_res: PathRes::new(),
@@ -517,11 +519,12 @@ mod tests {
     #[test]
     fn rewrite_row_is_order_insensitive() {
         let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
         let eff_ops = BTreeMap::new();
         let classes = BTreeMap::new();
         let instances = BTreeMap::new();
         let inst_keys = BTreeMap::new();
-        let mut t = tc(&ctors, &eff_ops, &classes, &instances, &inst_keys);
+        let mut t = tc(&ctors, &data, &eff_ops, &classes, &instances, &inst_keys);
 
         let io = Label::bare("IO");
         let head = |a: &str, b: &str| {

@@ -38,6 +38,7 @@ examples/transact.pr: selective-free-monad
 examples/ufcs.pr: state-fusion
 examples/validate.pr: whole-program-free-monad
 examples/var_pure.pr: evidence
+tests/cases/annot_effect_unused.pr: evidence
 tests/cases/effect_rows.pr: selective-free-monad
 tests/cases/effects.pr: selective-free-monad
 tests/cases/errors_unhandled.pr: selective-free-monad

@@ -34,6 +34,31 @@ fn prelude_type_checks() {
     insta::assert_snapshot!(lines.join("\n"));
 }
 
+// A real effect annotation the body never performs is sound (a pure body
+// satisfies it by subsumption) but non-tight, so the checker warns rather than
+// rejecting it. A performed effect is tight and stays quiet.
+#[test]
+fn nontight_effect_annotation_warns() {
+    let warns = |src: &str| -> Vec<String> {
+        prism::check(prism::with_prelude(src).as_str())
+            .unwrap()
+            .warnings
+            .into_iter()
+            .map(|w| w.msg)
+            .collect()
+    };
+    let loose = warns("effect Eff {\n  ctl op(Unit) : Int\n}\nfn f() : !{Eff} Int = 1\n");
+    assert!(
+        loose.iter().any(|m| m.contains("never performed")),
+        "expected a non-tight effect-annotation warning, got {loose:?}"
+    );
+    let tight = warns("effect Eff {\n  ctl op(Unit) : Int\n}\nfn f() : !{Eff} Int = op(())\n");
+    assert!(
+        tight.iter().all(|m| !m.contains("never performed")),
+        "a performed effect should not warn, got {tight:?}"
+    );
+}
+
 // Local `var` state must discharge: fib2 uses two vars yet keeps a pure row.
 #[test]
 fn var_stays_pure() {

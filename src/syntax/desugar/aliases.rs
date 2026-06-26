@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use crate::error::TypeError;
+use crate::names;
 use crate::syntax::ast::{Decl, EffLabel, Program, Row, Ty};
 
 type AliasMap = BTreeMap<String, Vec<EffLabel>>;
@@ -17,7 +18,7 @@ pub(super) fn expand_aliases(prog: &mut Program) -> Result<(), TypeError> {
         return Ok(());
     }
     let mut known: BTreeSet<String> = prog.effects.iter().map(|e| e.name.clone()).collect();
-    known.extend(["IO".into(), "Exn".into()]);
+    known.extend([names::IO_EFFECT.into(), names::EXN_EFFECT.into()]);
     let mut map = AliasMap::new();
     for a in &prog.aliases {
         resolve_alias(&a.name, prog, &known, &mut map, &mut Vec::new())?;

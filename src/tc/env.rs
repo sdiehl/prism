@@ -5,10 +5,23 @@ use marginalia::Span;
 use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
 use crate::error::TypeError;
 use crate::lex::lex_raw;
+use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
 use crate::types::ty::{EffRow, Effects, Label, Type};
+
+// Effects the compiler knows without an `effect` declaration: the IO/Exn
+// builtins, the indexing/`??` `Fail`, and the internal loop/return control
+// effects desugaring injects. Anything else named in a row must be declared.
+pub(super) fn is_builtin_effect(name: &str) -> bool {
+    name == names::IO_EFFECT
+        || name == names::EXN_EFFECT
+        || name == names::FAIL_EFFECT
+        || name == names::BREAK_EFFECT
+        || name == names::CONTINUE_EFFECT
+        || name == names::RETURN_EFFECT
+}
 
 pub(super) struct Annot<'a> {
     ty_ex: &'a mut BTreeMap<String, u32>,
@@ -48,7 +61,16 @@ impl Tc<'_> {
                 self.check_annot_rows(r, span)
             }
             ast::Ty::Con(n, ts) => {
+                // Impredicativity is a structural property of the written type,
+                // independent of whether the head constructor is declared, so it
+                // is reported before the existence check.
                 no_polytype_args(ts, n, span)?;
+                if !self.data.contains_key(n) {
+                    return Err(TypeError::Other {
+                        span,
+                        msg: format!("unknown type `{n}`"),
+                    });
+                }
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
             ast::Ty::App(v, ts) => {
@@ -71,18 +93,27 @@ impl Tc<'_> {
                 .values()
                 .find(|i| i.effect_name == l.name)
                 .map(|i| i.eff_params.len());
-            if let Some(want) = known {
-                if !l.args.is_empty() && l.args.len() != want {
+            match known {
+                Some(want) => {
+                    if !l.args.is_empty() && l.args.len() != want {
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!(
+                                "effect `{}` expects {} type argument(s), got {}",
+                                l.name,
+                                want,
+                                l.args.len()
+                            ),
+                        });
+                    }
+                }
+                None if !is_builtin_effect(&l.name) => {
                     return Err(TypeError::Other {
                         span,
-                        msg: format!(
-                            "effect `{}` expects {} type argument(s), got {}",
-                            l.name,
-                            want,
-                            l.args.len()
-                        ),
+                        msg: format!("unknown effect `{}`", l.name),
                     });
                 }
+                None => {}
             }
             for arg in &l.args {
                 self.check_annot_rows(arg, span)?;

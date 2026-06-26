@@ -5,6 +5,11 @@
 
 pub const ENTRY_POINT: &str = "main";
 
+// The two ambient builtin effects, available without an `effect` declaration:
+// console I/O and the `error`/`throw` exception channel.
+pub const IO_EFFECT: &str = "IO";
+pub const EXN_EFFECT: &str = "Exn";
+
 // The builtin failure effect: `fail()` is the anonymous, recoverable twin of an
 // `error`. Reserved surface names (not `@`-mangled), so `fail()` is an ordinary
 // call and the row tracks it as `Fail`. User redeclaration is rejected.
