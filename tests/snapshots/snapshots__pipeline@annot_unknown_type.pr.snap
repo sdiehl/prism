@@ -1,0 +1,85 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/annot_unknown_type.pr
+---
+== tokens ==
+VOpen Fn Ident("g") LParen RParen Colon UIdent("Quux") Eq Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("g") LParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "g",
+            params: [],
+            ret: Some(
+                Con(
+                    "Quux",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 1,
+                        suffix: None,
+                    },
+                ),
+                span: 16..17,
+            },
+            wheres: [],
+            span: 0..17,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 31..38,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "g",
+                                    ),
+                                    span: 39..40,
+                                },
+                                [],
+                            ),
+                            span: 39..42,
+                        },
+                    ],
+                ),
+                span: 31..43,
+            },
+            wheres: [],
+            span: 19..43,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `g`: unknown type `Quux`
+   ╭─[ <source>:1:1 ]
+   │
+ 1 │ fn g() : Quux = 1
+   │ ────────┬────────  
+   │         ╰────────── in `g`: unknown type `Quux`
+───╯

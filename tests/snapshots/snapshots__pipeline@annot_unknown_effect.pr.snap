@@ -1,0 +1,179 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/annot_unknown_effect.pr
+---
+== tokens ==
+VOpen Fn Ident("fact") LParen Ident("n") RParen Colon Bang LBrace UIdent("Foo") RBrace KwInt Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then Int(IntLit { value: 1, suffix: None }) Else Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "fact",
+            params: [
+                Param {
+                    name: "n",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Foo",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: If(
+                    Spanned {
+                        node: Bin(
+                            Eq,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 31..32,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 36..37,
+                            },
+                        ),
+                        span: 31..37,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 43..44,
+                    },
+                    Spanned {
+                        node: Bin(
+                            Mul,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 50..51,
+                            },
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "fact",
+                                        ),
+                                        span: 54..58,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Bin(
+                                                Sub,
+                                                Spanned {
+                                                    node: Var(
+                                                        "n",
+                                                    ),
+                                                    span: 59..60,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 63..64,
+                                                },
+                                            ),
+                                            span: 59..64,
+                                        },
+                                    ],
+                                ),
+                                span: 54..65,
+                            },
+                        ),
+                        span: 50..65,
+                    },
+                ),
+                span: 28..65,
+            },
+            wheres: [],
+            span: 0..65,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 79..86,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "fact",
+                                    ),
+                                    span: 87..91,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 5,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 92..93,
+                                    },
+                                ],
+                            ),
+                            span: 87..94,
+                        },
+                    ],
+                ),
+                span: 79..95,
+            },
+            wheres: [],
+            span: 67..95,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `fact`: unknown effect `Foo`
+   ╭─[ <source>:1:1 ]
+   │
+ 1 │ ╭─▶ fn fact(n) : !{Foo} Int =
+ 2 │ ├─▶   if n == 0 then 1 else n * fact(n - 1)
+   │ │                                             
+   │ ╰───────────────────────────────────────────── in `fact`: unknown effect `Foo`
+───╯
