@@ -18,7 +18,7 @@ Compilation is a pipeline from source text to a native binary. Each phase is a t
 | [Reference count](#10-reference-counting-and-fbip-reuse) | insert `dup`/`drop`, then reuse                                                                                   | `src/core/fbip.rs`                         |
 | [Codegen](#11-backends)                                  | core to interpreter, LLVM, or MLIR                                                                                | `src/eval/`, `src/codegen/`                |
 
-The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
+The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `core-json` (the core as a JSON tree the Lean model reads, [Section 13](#13-verification)), `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
 
 ## 2. Lexing and Layout
 
@@ -440,7 +440,7 @@ For example, a constructor applied to a call elaborates so the call is named bef
 {{#include ../examples/anf-example.txt}}
 ```
 
-A subset of this calculus is modeled in `models/Prism.lean` (Lean 4; [de Moura & Ullrich, 2021](bibliography.md#demoura-ullrich-2021)), which mirrors the core one variant at a time and proves a small-step determinism theorem (`Step.deterministic`).
+This calculus is modeled in Lean 4 ([de Moura & Ullrich, 2021](bibliography.md#demoura-ullrich-2021)): `models/Prism.lean` mirrors the core one variant at a time with a substitution small-step relation, on top of which the model adds an executable abstract machine that mirrors the interpreter and is proved to agree with it. [Section 13](#13-verification) describes the model and how it is run as a third differential oracle.
 
 ## 8. Pattern-Match Compilation
 
@@ -571,6 +571,16 @@ The runtime provides the impure builtins. `read_int` and `read_line` read stdin;
 Two test gates hold the implementation to its claims. The parity harness (`tests/parity.rs`) is differential testing with the interpreter as the reference: it runs every example on the interpreter and each native backend and asserts byte-identical output, and with `PRISM_CHECK_LEAKS` set, zero leaked cells.
 
 The performance gate (`tests/perf_gate.rs`) asserts that the optimizations actually fire, so a regression that leaves output unchanged is still caught. With `PRISM_EFFOP_STATS` set, it requires zero free-monad cells allocated on the fusion corpus (the stream and multi-handler programs such as `streams.pr`), confirming that the evidence and state paths of [Section 9](#9-effect-lowering) reify nothing. It also pins local monadification: a program that pairs an escaping effectful closure with an unrelated fused pipeline must allocate no more cells than the escape alone, so the pipeline stays fused despite the escape. With `PRISM_REUSE_STATS` set, it requires in-place reuse to fire on the reuse corpus (`list.pr`), confirming the reuse pass of [Section 10](#10-reference-counting-and-fbip-reuse) rewrites drops into in-place updates.
+
+### 13.1 The Lean Model
+
+Beyond the differential gates, the core calculus is mechanized in Lean 4 (the `models/` directory, built with `lake`). `Prism.lean` defines the syntax and a substitution-based small-step relation `Step` with its determinism theorem (`Step.deterministic`). `CEK.lean` then defines the abstract machine the compiler actually runs ([Section 11.1](#111-the-interpreter)): an environment machine with a continuation stack, `Rv` runtime values carrying closures and thunks, curried application, and the deep, mask-aware handler capture that makes `resume` multishot. The machine is a total, executable `step` function, so it is deterministic by construction and runnable.
+
+The model's central theorem connects the two. A big-step natural semantics specifies what a program evaluates to, and `bigstep_runs` proves the machine implements it (a forward simulation under any continuation stack), so the abstract machine is a faithful realization of the specification rather than an independent artifact. `Meta.lean` adds the supporting metatheory: a unique-normal-form corollary, substitution lemmas, and a progress trichotomy (every computation is a value, takes a step, or is an explicit `Stuck` error, with `stuckNoStep` confirming the classification is a genuine partition). `Dynamics.lean` covers the effect machinery, proving the machine reaches a handler exactly when one is in scope (`effect_progress`) and is stuck on an unhandled operation otherwise (`effect_unhandled`). Every theorem is `sorry`-free; the proofs depend only on `propext`/`Quot.sound`, with `Classical.choice` added only where the model evaluates IEEE floats (whose arithmetic Lean defines non-constructively).
+
+### 13.2 The Model as a Differential Oracle
+
+The Lean machine is run as a third oracle alongside the interpreter and native backends. `prism dump core-json <file>` serializes the elaborated core to a JSON tree (`src/core/json.rs`), which `models/Json.lean` decodes back into the Lean syntax, and the `oracle` executable (`models/Oracle.lean`) runs the verified machine on it and prints the result, rendering floats through a port of the runtime's `fmt_g` so output is byte-identical. `models/diff_against_rust.sh` pipes each fixture through `prism dump core-json | oracle` and compares against `prism run`, so the verified model is checked against the interpreter on the compiler's actual core, not a hand-transcription. `models/Certificates.lean` records the same agreements as kernel-checked `rfl` theorems for the curated set. The grammar in [the specification](spec.md) is itself single-sourced from `models/grammar.ebnf`.
 
 ## 14. The Interactive Shell
 
