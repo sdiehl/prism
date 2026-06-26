@@ -34,7 +34,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::core::cbpv::{Comp, CoreFn, CoreOp, CorePat, Core, Value};
+use crate::core::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, Value};
 use crate::core::fv;
 use crate::fresh::Fresh;
 use crate::names;
@@ -221,7 +221,11 @@ impl Eraser {
     fn step_guard_int(&mut self, ctl: Sym, cont: Comp) -> Comp {
         let t = self.fresh("t");
         Comp::Bind(
-            Box::new(Comp::Prim(CoreOp::Eq, Value::Var(ctl), Value::Int(CTL_NORMAL))),
+            Box::new(Comp::Prim(
+                CoreOp::Eq,
+                Value::Var(ctl),
+                Value::Int(CTL_NORMAL),
+            )),
             t,
             Box::new(Comp::If(
                 Value::Var(t),
@@ -253,7 +257,11 @@ impl Eraser {
                     let cont = self.thread_fn_return(&r)?;
                     let s = self.fresh("s");
                     let w = self.fresh("w");
-                    Comp::Bind(Box::new(call), s, Box::new(self.guard_fn_return(s, w, cont)))
+                    Comp::Bind(
+                        Box::new(call),
+                        s,
+                        Box::new(self.guard_fn_return(s, w, cont)),
+                    )
                 }
             });
         }
@@ -334,7 +342,10 @@ impl Eraser {
                         Box::new(Comp::Case(
                             Value::Var(s),
                             vec![
-                                (ctor_pat1(SMORE, w), Comp::Return(smore(Value::Int(CTL_NORMAL)))),
+                                (
+                                    ctor_pat1(SMORE, w),
+                                    Comp::Return(smore(Value::Int(CTL_NORMAL))),
+                                ),
                                 (ctor_pat1(SDONE, v), Comp::Return(sdone(Value::Var(v)))),
                             ],
                         )),
@@ -342,7 +353,11 @@ impl Eraser {
                 }
                 Some(r) => {
                     let cont = self.thread_loop_combined(&r)?;
-                    Comp::Bind(Box::new(call), s, Box::new(self.guard_fn_return(s, w, cont)))
+                    Comp::Bind(
+                        Box::new(call),
+                        s,
+                        Box::new(self.guard_fn_return(s, w, cont)),
+                    )
                 }
             });
         }
@@ -411,7 +426,11 @@ impl Eraser {
         let t = self.fresh("t");
         let v = self.fresh("v");
         let smore_arm = Comp::Bind(
-            Box::new(Comp::Prim(CoreOp::Eq, Value::Var(ctl), Value::Int(CTL_NORMAL))),
+            Box::new(Comp::Prim(
+                CoreOp::Eq,
+                Value::Var(ctl),
+                Value::Int(CTL_NORMAL),
+            )),
             t,
             Box::new(Comp::If(
                 Value::Var(t),
@@ -468,7 +487,12 @@ impl Eraser {
     // `musttail` => constant native stack). `return_aware` selects the disposition:
     // a plain `Int` body returning Unit, or a `Step` body returning `Step` so a
     // `return` propagates. None when the body cannot be threaded.
-    fn build_driver(&mut self, cond: Option<&Comp>, body: &Comp, return_aware: bool) -> Option<Comp> {
+    fn build_driver(
+        &mut self,
+        cond: Option<&Comp>,
+        body: &Comp,
+        return_aware: bool,
+    ) -> Option<Comp> {
         // Threading may emit nested drivers; on a bail, drop them so no orphan
         // function is left in the program.
         let mark = self.generated.len();
@@ -566,7 +590,11 @@ impl Eraser {
             Box::new(threaded),
             ctl,
             Box::new(Comp::Bind(
-                Box::new(Comp::Prim(CoreOp::Eq, Value::Var(ctl), Value::Int(CTL_BREAK))),
+                Box::new(Comp::Prim(
+                    CoreOp::Eq,
+                    Value::Var(ctl),
+                    Value::Int(CTL_BREAK),
+                )),
                 z,
                 Box::new(Comp::If(
                     Value::Var(z),
@@ -585,7 +613,11 @@ impl Eraser {
         let z = self.fresh("z");
         let v = self.fresh("v");
         let smore_arm = Comp::Bind(
-            Box::new(Comp::Prim(CoreOp::Eq, Value::Var(ctl), Value::Int(CTL_BREAK))),
+            Box::new(Comp::Prim(
+                CoreOp::Eq,
+                Value::Var(ctl),
+                Value::Int(CTL_BREAK),
+            )),
             z,
             Box::new(Comp::If(
                 Value::Var(z),

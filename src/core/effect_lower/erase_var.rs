@@ -235,4 +235,3 @@ fn each_subterm<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
         }
     });
 }
-

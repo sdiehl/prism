@@ -58,7 +58,9 @@ fn value(v: &Value) -> J {
         Value::Unit => json!({"v": "unit"}),
         Value::Str(s) => json!({"v": "str", "s": s}),
         Value::Thunk(c) => json!({"v": "thunk", "c": comp(c)}),
-        Value::Ctor(n, tag, args) => json!({"v": "ctor", "name": n.as_str(), "tag": tag, "args": values(args)}),
+        Value::Ctor(n, tag, args) => {
+            json!({"v": "ctor", "name": n.as_str(), "tag": tag, "args": values(args)})
+        }
         Value::Tuple(args) => json!({"v": "tuple", "args": values(args)}),
     }
 }
@@ -100,12 +102,19 @@ fn comp(c: &Comp) -> J {
         Comp::Lam(xs, b) => json!({"c": "lam", "xs": syms(xs), "body": comp(b)}),
         Comp::App(f, args) => json!({"c": "app", "f": comp(f), "args": values(args)}),
         Comp::If(v, t, e) => json!({"c": "ite", "cond": value(v), "t": comp(t), "e": comp(e)}),
-        Comp::Prim(op, a, b) => json!({"c": "prim", "op": op_name(*op), "a": value(a), "b": value(b)}),
+        Comp::Prim(op, a, b) => {
+            json!({"c": "prim", "op": op_name(*op), "a": value(a), "b": value(b)})
+        }
         Comp::Call(n, args) => json!({"c": "call", "name": n.as_str(), "args": values(args)}),
         Comp::Case(v, arms) => json!({"c": "case", "scrut": value(v),
             "arms": J::Array(arms.iter().map(|(p, b)| json!({"pat": pat(p), "body": comp(b)})).collect())}),
         Comp::Do(op, args) => json!({"c": "doOp", "name": op.as_str(), "args": values(args)}),
-        Comp::Handle { body, return_var, return_body, ops } => {
+        Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        } => {
             let mut m = Map::new();
             m.insert("c".into(), json!("handle"));
             m.insert("body".into(), comp(body));
@@ -129,12 +138,17 @@ fn comp(c: &Comp) -> J {
         Comp::Rand => json!({"c": "rand"}),
         Comp::Srand(v) => json!({"c": "srand", "v": value(v)}),
         Comp::Error(v) => json!({"c": "err", "v": value(v)}),
-        Comp::FloatBuiltin(op, v) => json!({"c": "floatBuiltin", "name": format!("{op:?}"), "v": value(v)}),
-        Comp::StrBuiltin(b, args) => json!({"c": "strBuiltin", "name": format!("{b:?}"), "args": values(args)}),
+        Comp::FloatBuiltin(op, v) => {
+            json!({"c": "floatBuiltin", "name": format!("{op:?}"), "v": value(v)})
+        }
+        Comp::StrBuiltin(b, args) => {
+            json!({"c": "strBuiltin", "name": format!("{b:?}"), "args": values(args)})
+        }
         Comp::Dup(v) => json!({"c": "dup", "v": value(v)}),
         Comp::Drop(v) => json!({"c": "drop", "v": value(v)}),
-        Comp::WithReuse { token, freed, body } =>
-            json!({"c": "withReuse", "tok": token.as_str(), "freed": value(freed), "body": comp(body)}),
+        Comp::WithReuse { token, freed, body } => {
+            json!({"c": "withReuse", "tok": token.as_str(), "freed": value(freed), "body": comp(body)})
+        }
         Comp::Reuse(tok, v) => json!({"c": "reuse", "tok": tok.as_str(), "v": value(v)}),
         Comp::RefNew(v) => json!({"c": "refNew", "v": value(v)}),
         Comp::RefGet(v) => json!({"c": "refGet", "v": value(v)}),

@@ -268,7 +268,10 @@ fn runs_in_bounded_stack(full: &str, tag: &str, stack_kb: u32) -> Result<(), Str
 #[test]
 fn loops_run_in_constant_stack() {
     if !have(&cc()) {
-        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        eprintln!(
+            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
+            cc()
+        );
         return;
     }
     let n = 1_000_000;
@@ -313,7 +316,10 @@ fn loops_run_in_constant_stack() {
 #[test]
 fn free_monad_loops_run_in_constant_stack() {
     if !have(&cc()) {
-        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        eprintln!(
+            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
+            cc()
+        );
         return;
     }
     let n = 1_000_000;
@@ -362,7 +368,10 @@ fn free_monad_loops_run_in_constant_stack() {
 #[ignore = "needs Phase B (the free-monad trampoline): a parameter-passing effect loop still grows the stack"]
 fn param_passing_effect_loop_runs_in_constant_stack() {
     if !have(&cc()) {
-        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        eprintln!(
+            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
+            cc()
+        );
         return;
     }
     let n = 1_000_000;
@@ -375,8 +384,12 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
          return x => \\(_s) -> x\n  f(0)\n\
          fn main() = println(run({n}))\n"
     );
-    runs_in_bounded_stack(&prism::with_prelude(&src), "parameter-passing state loop", 2048)
-        .unwrap_or_else(|e| panic!("{e}"));
+    runs_in_bounded_stack(
+        &prism::with_prelude(&src),
+        "parameter-passing state loop",
+        2048,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
 }
 
 // Asymptotic-work gate: the counter that would have caught the EBounce regression.
@@ -392,7 +405,10 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 #[ignore = "ratchets in Phase B, where the residual-driver trampoline is introduced"]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
     if !have(&cc()) {
-        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
+        eprintln!(
+            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
+            cc()
+        );
         return;
     }
     let prog = |n: i64| {
@@ -408,8 +424,13 @@ fn driver_work_is_linear_on_deep_nontail_recursion() {
     };
     let small = 2000_i64;
     let big = 4 * small;
-    let steps_small = stat_src(&prog(small), "drive_small", "PRISM_DRIVE_STATS", "drive steps")
-        .unwrap_or_else(|e| panic!("{e}"));
+    let steps_small = stat_src(
+        &prog(small),
+        "drive_small",
+        "PRISM_DRIVE_STATS",
+        "drive steps",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let steps_big = stat_src(&prog(big), "drive_big", "PRISM_DRIVE_STATS", "drive steps")
         .unwrap_or_else(|e| panic!("{e}"));
     // Integer ratio test (no float): linear work quadruples (4x), quadratic ~16x.
