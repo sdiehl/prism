@@ -2,6 +2,13 @@
  * Uses __attribute__((destructor)) for the leak/reuse/effop report hooks and
  * __builtin_add_overflow/sub/mul for checked arithmetic. */
 
+/* getline is POSIX.1-2008; under -std=c11 glibc hides it unless a feature-test
+ * macro requests it. macOS exposes it regardless, so this only bites on Linux.
+ * Must precede every system header (including mimalloc's <stddef.h> below). */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard feature-test macro */
+#endif
+
 /* Opt-in mimalloc (cargo --features mimalloc): route every libc allocation
  * through mi_* so alloc/free pairing flips together. Must precede any use. The
  * symbols come from the libmimalloc-sys crate; declare them here so no mimalloc

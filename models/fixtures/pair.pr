@@ -1,4 +1,5 @@
 fn swap(p : (Int, Int)) : (Int, Int) =
   match p of
     (a, b) => (b, a)
+
 fn main() : (Int, Int) = swap((1, 2))

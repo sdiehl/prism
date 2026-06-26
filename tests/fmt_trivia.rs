@@ -185,7 +185,7 @@ trivia_case!(
 // A trailing-lambda call whose block body carries comments.
 trivia_case!(
     trailing_lambda_comments,
-    "fn each(xs : List(Int)) : Unit =\n\
+    "fn walk(xs : List(Int)) : Unit =\n\
      \x20 xs.foreach() fn(x)\n\
      \x20   -- handle one item\n\
      \x20   println(show(x))\n"

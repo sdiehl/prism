@@ -1,2 +1,3 @@
 fn twice(f, x) = f(f(x))
+
 fn main() : Int = twice(\(n) -> n + 1, 5)

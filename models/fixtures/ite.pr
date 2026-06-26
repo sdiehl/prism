@@ -1,1 +1,5 @@
-fn main() : Int = if true then 1 else 2
+fn main() : Int =
+  if true then
+    1
+  else
+    2

@@ -1,0 +1,227 @@
+---
+source: tests/snapshots.rs
+assertion_line: 14
+expression: "prism::report(&src)"
+input_file: tests/cases/annot_effect_unused.pr
+---
+== tokens ==
+VOpen Effect UIdent("State") LBrace Ctl Ident("get") LParen KwUnit RParen Colon KwInt RBrace VSemi Fn Ident("h") LParen RParen Colon Bang LBrace UIdent("State") RBrace KwInt Eq Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Handle Ident("h") LParen RParen With LBrace Ident("get") LParen Ident("u") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 0, suffix: None }) RParen Comma Return Ident("x") FatArrow Ident("x") RBrace RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "State",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get",
+                    params: [
+                        Unit,
+                    ],
+                    ret: Int,
+                },
+            ],
+            span: 0..38,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "h",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "State",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 1,
+                        suffix: None,
+                    },
+                ),
+                span: 64..65,
+            },
+            wheres: [],
+            span: 40..65,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 81..88,
+                    },
+                    [
+                        Spanned {
+                            node: Handle(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "h",
+                                            ),
+                                            span: 96..97,
+                                        },
+                                        [],
+                                    ),
+                                    span: 96..99,
+                                },
+                                [
+                                    Op(
+                                        "get",
+                                        [
+                                            "u",
+                                        ],
+                                        "k",
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "k",
+                                                    ),
+                                                    span: 124..125,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 0,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 126..127,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 124..128,
+                                        },
+                                    ),
+                                    Return(
+                                        "x",
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 146..147,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 89..151,
+                        },
+                    ],
+                ),
+                span: 81..152,
+            },
+            wheres: [],
+            span: 67..152,
+        },
+    ],
+}
+
+== types ==
+h : () -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn h() =
+  return 1
+fn main() =
+  handle { h() } with { get(u, k) => return 0 to t@0; return k to t@1; (force t@1)(t@0), return x => return x } to t@2; print t@2 to t@3; print_nl
+
+== fbip (rc) ==
+fn h() =
+  return 1
+fn main() =
+  handle { h() } with { get(u, k) => drop u to _; return 0 to t@0; return k to t@1; (force t@1)(t@0), return x => return x } to t@2; print t@2 to t@3; drop t@3 to _; print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_h() {
+entry:
+  ret i64 3
+}
+
+define i64 @prism_main() {
+entry:
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  call void @prism_rc_dec(i64 %t2)
+  %t4 = call i64 @prism_h()
+  call void @prism_print_int(i64 %t4)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+declare ptr @prism_alloc(i64)
+
+declare void @prism_rc_dec(i64)
+
+declare void @prism_print_int(i64)
+
+declare void @prism_print_nl()
+
+define i64 @prism_lam_0(i64 %_p0) {
+entry:
+  call void @prism_rc_dec(i64 %_p0)
+  ret i64 1
+}
+
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %0 = ptrtoint ptr %_cp to i64
+  %1 = add i64 %0, 8
+  %_tp = inttoptr i64 %1 to ptr
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 0, label %_lam0
+  ]
+
+_lam0:                                            ; preds = %entry
+  %_r0 = call i64 @prism_lam_0(i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
+  ret i64 %_result
+}
+
+declare void @prism_apply_error()
+
+== run ==
+output: [1]
+result: ()

@@ -4,4 +4,8 @@ effect State {
 
 fn h() : !{State} Int = 1
 
-fn main() = println(handle h() with { get(u, k) => k(0), return x => x })
+fn main() =
+  println(handle h() with {
+    get(u, k) => k(0),
+    return x => x
+  })

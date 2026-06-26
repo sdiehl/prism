@@ -354,7 +354,11 @@ fn map(f, xs) =
 fn list_set(xs, i, v) =
   match xs of
     Nil => Nil
-    Cons(x, rest) => if i == 0 then Cons(v, rest) else Cons(x, list_set(rest, i - 1, v))
+    Cons(x, rest) =>
+      if i == 0 then
+        Cons(v, rest)
+      else
+        Cons(x, list_set(rest, i - 1, v))
 
 fn filter(p, xs) =
   match xs of
