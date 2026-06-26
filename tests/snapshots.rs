@@ -369,8 +369,9 @@ fn unhandled_effect_traps_both_backends() {
     // Native: build then run. Skip only if the toolchain to produce a binary is
     // absent (mirrors the gate's tool-gating); never treat absence as a pass.
     let nbin = env::temp_dir().join("prism_unhandled_eff.bin");
+    // Bare `prism <file>` compiles a single file to a native binary; `-o` sets
+    // the output path (`prism build` is the project-only verb).
     let built = Command::new(bin)
-        .arg("build")
         .arg(&prog)
         .arg("-o")
         .arg(&nbin)

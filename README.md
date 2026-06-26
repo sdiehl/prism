@@ -33,8 +33,10 @@ This builds the `prism` binary. Native compilation also needs `clang` on `$PATH`
 
 ```shell
 prism                                # interactive shell
-prism run program.pr                 # interpret
-prism build program.pr -o program    # compile to a native binary
+prism program.pr                     # compile to a native binary named `program`
+prism program.pr -o out              # ...with a custom output path
+prism run program.pr                 # interpret instead of compiling
+prism build                          # compile the enclosing project (needs a prism.toml)
 prism check program.pr               # type check only
 prism fmt program.pr                 # format source
 prism dump core program.pr           # inspect a phase: tokens|ast|types|core|fbip|llvm

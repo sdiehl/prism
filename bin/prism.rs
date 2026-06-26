@@ -16,20 +16,34 @@ use prism::error::Error;
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
-    /// A file or project to run; `prism <path>` is shorthand for `prism run
-    /// <path>`. A directory or a `prism.toml` is run as a project.
+    /// A `.pr` file to compile to a native binary named after it (a directory or
+    /// `prism.toml` compiles the whole project). With no path the REPL starts.
+    /// Override the output with `-o`; interpret instead with `prism run`.
     file: Option<PathBuf>,
+    /// Output path for the compiled binary (default: the source file's stem, or
+    /// the project's package name)
+    #[arg(short, long)]
+    out: Option<PathBuf>,
+    /// Lower through the MLIR backend instead of the textual LLVM emitter
+    #[arg(long)]
+    mlir: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
     /// Type-check and run a program in the interpreter
     Run { file: PathBuf },
-    /// Compile a program to a native executable through LLVM
+    /// Compile the enclosing project (the nearest `prism.toml`) to a native
+    /// executable; fails outside a project. Compile a single file with
+    /// `prism <file.pr>`.
     Build {
-        file: PathBuf,
-        #[arg(short, long, default_value = "a.out")]
-        out: PathBuf,
+        /// Where to start the search for the project's `prism.toml` (default: the
+        /// current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output path for the compiled binary (default: the project's package name)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
         /// Lower through the MLIR backend instead of the textual LLVM emitter
         #[arg(long)]
         mlir: bool,
@@ -59,15 +73,17 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let cmd = match (cli.cmd, cli.file) {
-        (Some(cmd), _) => cmd,
-        (None, Some(file)) => Cmd::Run { file },
+    let result = match (cli.cmd, cli.file) {
+        (Some(cmd), _) => dispatch(cmd),
+        // Bare `prism <path>` compiles to a native binary (rustc-style: the
+        // output is named after the source); with no path, the REPL opens.
+        (None, Some(file)) => build_input(&file, cli.out, cli.mlir),
         (None, None) => {
             prism::repl::repl(true);
             return ExitCode::SUCCESS;
         }
     };
-    match dispatch(cmd) {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err((e, src, name)) => {
             eprint!("{}", e.render(&src, &name));
@@ -87,11 +103,18 @@ fn base_of(file: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
+// A resolved CLI input: source with prelude prepended, the module-resolution
+// base, a display name for diagnostics, and the default binary name a bare build
+// would write.
+type Resolved = (String, PathBuf, String, PathBuf);
+
 // Resolve a CLI argument into the source to compile, the module-resolution base,
-// and a display name. A directory or a `prism.toml` is a project: the entry comes
-// from the manifest and modules resolve from the project's `src/`. A `.pr` file
-// is a single-file program whose imports resolve relative to its own directory.
-fn resolve_input(arg: &Path) -> Result<(String, PathBuf, String), (Error, String, String)> {
+// a display name, and the default binary name a bare build would write. A
+// directory or a `prism.toml` is a project: the entry comes from the manifest,
+// modules resolve from the project's `src/`, and the default binary is the
+// package name. A `.pr` file is a single-file program whose imports resolve
+// relative to its own directory and whose default binary is its stem.
+fn resolve_input(arg: &Path) -> Result<Resolved, (Error, String, String)> {
     let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == "prism.toml");
     if is_project {
         let project = prism::project::load_project(arg)
@@ -107,18 +130,38 @@ fn resolve_input(arg: &Path) -> Result<(String, PathBuf, String), (Error, String
             }
             None => prism::with_prelude(&src),
         };
-        Ok((full, project.src_dir, file_name(&project.entry)))
+        let out = PathBuf::from(&project.name);
+        Ok((full, project.src_dir, file_name(&project.entry), out))
     } else {
         let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;
         let full = prism::with_prelude(&src);
-        Ok((full, base_of(arg), file_name(arg)))
+        // `factorial.pr` -> `factorial`; an extensionless arg falls back to `a.out`.
+        let out = arg
+            .file_stem()
+            .map_or_else(|| PathBuf::from("a.out"), PathBuf::from);
+        Ok((full, base_of(arg), file_name(arg), out))
     }
+}
+
+// Compile `arg` to a native binary, the shared body of bare `prism <file>` and
+// `prism build`. `out` overrides the default name (source stem for a file, the
+// package name for a project).
+fn build_input(
+    arg: &Path,
+    out: Option<PathBuf>,
+    mlir: bool,
+) -> Result<(), (Error, String, String)> {
+    let (full, base, name, default_out) = resolve_input(arg)?;
+    let out = out.unwrap_or(default_out);
+    build_dispatch(mlir, &full, &base, &out).map_err(|e| (e, full, name))?;
+    println!("wrote {}", out.display());
+    Ok(())
 }
 
 fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
     match cmd {
         Cmd::Run { file } => {
-            let (full, base, name) = resolve_input(&file)?;
+            let (full, base, name, _) = resolve_input(&file)?;
             // Stream `print` to the terminal and read from real stdin so the CLI
             // behaves like a normal program. `exit(n)` maps to a real process
             // exit with that code, skipping the `=> value` trailer.
@@ -136,14 +179,27 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             println!("=> {}", run.value.show());
             Ok(())
         }
-        Cmd::Build { file, out, mlir } => {
-            let (full, base, name) = resolve_input(&file)?;
-            build_dispatch(mlir, &full, &base, &out).map_err(|e| (e, full, name))?;
-            println!("wrote {}", out.display());
-            Ok(())
+        Cmd::Build { path, out, mlir } => {
+            // `build` is the project verb: locate the nearest enclosing
+            // `prism.toml` and compile it. A single file compiles via
+            // `prism <file.pr>`. Canonicalize first so the default `.` has real
+            // parent components to walk up through.
+            let start = path.canonicalize().unwrap_or(path);
+            let manifest = prism::project::find_manifest(&start).ok_or_else(|| {
+                (
+                    Error::Resolve(
+                        "no prism.toml found: `prism build` compiles a project; \
+                         compile a single file with `prism <file.pr>`"
+                            .into(),
+                    ),
+                    String::new(),
+                    start.display().to_string(),
+                )
+            })?;
+            build_input(&manifest, out, mlir)
         }
         Cmd::Check { file } => {
-            let (full, base, name) = resolve_input(&file)?;
+            let (full, base, name, _) = resolve_input(&file)?;
             let checked = prism::check_at(&full, &base).map_err(|e| (e, full, name))?;
             for d in &checked.decls {
                 println!("{} : {}", d.name, d.ty.show());
@@ -151,13 +207,13 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             Ok(())
         }
         Cmd::Dump { phase, file } => {
-            let (full, base, name) = resolve_input(&file)?;
+            let (full, base, name, _) = resolve_input(&file)?;
             let out = prism::dump_at(&phase, &full, &base).map_err(|e| (e, full, name))?;
             println!("{out}");
             Ok(())
         }
         Cmd::Report { file } => {
-            let (full, base, _name) = resolve_input(&file)?;
+            let (full, base, _name, _) = resolve_input(&file)?;
             print!("{}", prism::report_at(&full, &base));
             Ok(())
         }

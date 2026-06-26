@@ -18,7 +18,7 @@ Compilation is a pipeline from source text to a native binary. Each phase is a t
 | [Reference count](#10-reference-counting-and-fbip-reuse) | insert `dup`/`drop`, then reuse                                                                                   | `src/core/fbip.rs`                         |
 | [Codegen](#11-backends)                                  | core to interpreter, LLVM, or MLIR                                                                                | `src/eval/`, `src/codegen/`                |
 
-The driver (`src/driver/`) exposes these as subcommands: `prism run` interprets, `prism build` compiles to a native binary, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
+The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
 
 ## 2. Lexing and Layout
 

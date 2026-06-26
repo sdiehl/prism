@@ -86,7 +86,7 @@ jobs:
         run: |
           for f in examples/*.pr; do
             echo "== $f"
-            ./target/release/prism build "$f" -o /tmp/example_bin
+            ./target/release/prism "$f" -o /tmp/example_bin
           done
 
   web:

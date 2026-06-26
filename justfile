@@ -11,7 +11,7 @@ prism *ARGS:
     cargo run -- {{ARGS}}
 
 run FILE:
-    cargo run -- "{{FILE}}"
+    cargo run -- run "{{FILE}}"
 
 check FILE:
     cargo run -- check "{{FILE}}"
@@ -55,5 +55,5 @@ web-build:
     cd web && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
 smoke: build
-    # for f in examples/*.pr; do ./target/debug/prism "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
-    for f in examples/*.pr; do ./target/debug/prism "$f" || echo "FAIL: $f"; done
+    # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
+    for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done
