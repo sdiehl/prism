@@ -219,11 +219,20 @@ function sharedSource(): string | null {
   }
 }
 
+// Placeholder shown when the editor holds custom code (e.g. loaded from a
+// `#code=` link or hand-edited) that matches no named example.
+const custom = document.createElement("option");
+custom.value = "";
+custom.textContent = "--";
+custom.hidden = true;
+sel.prepend(custom);
+
 const start = examples.factorial ? "factorial" : (names[0] ?? "");
-sel.value = start;
 const shared = sharedSource();
+sel.value = shared != null ? "" : start;
 src.value = shared ?? examples[start] ?? "";
 sel.onchange = () => {
+  if (sel.value === "") return;
   src.value = examples[sel.value] ?? "";
   out.textContent = "";
   recheck();
