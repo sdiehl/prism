@@ -466,8 +466,12 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
     let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
     let rt = out.with_extension("prism_rt.c");
     fs::write(&rt, RUNTIME)?;
+    // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
+    // the corpus runs under UBSan and any new runtime UB aborts the program.
+    let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
     let res = Command::new(&cc)
         .args(["-O2", "-flto=thin", "-Wno-override-module"])
+        .args(extra.split_whitespace())
         .arg(ir)
         .arg(&rt)
         .arg("-lm")

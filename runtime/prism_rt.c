@@ -726,7 +726,10 @@ long prism_big_show(long a) {
 #define PRISM_IMM_MIN (-(1L << 62))
 
 static long int_imm(long v) {
-    return (v << 1) | 1;
+    /* Shift in unsigned: a signed left-shift of a negative value is UB in C
+     * (works at -O2, but UBSan flags it). This wraps mod 2^64, matching the
+     * codegen side's wrapping_shl(1) | 1 (src/codegen/emit.rs). */
+    return (long)(((unsigned long)v << 1) | 1UL);
 }
 
 static long big_norm(long b) {
