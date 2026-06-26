@@ -321,6 +321,85 @@ long prism_field(void *p, long i) {
     return ((long *)p)[PRISM_HDR_WORDS + i];
 }
 
+/* Type-aligned continuation queue (the Freer representation of an EOp's
+ * continuation). A queue is a persistent binary tree of Kleisli arrows (thunks):
+ * the empty queue is 0 (unit, rc-skipped), a Leaf holds one arrow, a Node joins
+ * two non-empty queues. snoc and concat are O(1) (one Node); uncons walks the
+ * left spine, re-associating Node(Node(a,b),c) -> Node(a,Node(b,c)) so a queue
+ * built by repeated snoc drains in amortized O(1) per element -- the exact
+ * re-association the old EBounce trampoline redid on every bounce (O(n^2)), done
+ * here once. The tree is never mutated, only rebuilt sharing its leaves, so a
+ * captured continuation is cloneable for multishot; rc is the existing Perceus
+ * discipline (a retained child is rc_inc'd; the runtime-call wrapper rc_decs the
+ * borrowed args). Leaf/Node carry distinct tags so rc_dec still frees them
+ * field-recursively; the TQNil/TQCons results uncons returns are ordinary
+ * constructor cells (tags 0/1) the Core `qApply` template pattern-matches. */
+#define PRISM_TAQ_LEAF 0x5441514cL /* 'TAQL' */
+#define PRISM_TAQ_NODE 0x5441514eL /* 'TAQN' */
+
+static long prism_taq_leaf(long arrow) {
+    long *p = prism_alloc(1);
+    p[PRISM_TAG_W] = PRISM_TAQ_LEAF;
+    prism_rc_inc(arrow);
+    p[PRISM_HDR_WORDS] = arrow;
+    return (long)p;
+}
+
+/* Build a Node taking ownership of l and r (no rc_inc; the caller transfers its
+ * references in). */
+static long prism_taq_node_own(long l, long r) {
+    long *p = prism_alloc(2);
+    p[PRISM_TAG_W] = PRISM_TAQ_NODE;
+    p[PRISM_HDR_WORDS] = l;
+    p[PRISM_HDR_WORDS + 1] = r;
+    return (long)p;
+}
+
+/* snoc(Q, arrow): append one arrow at the right. Q and arrow are borrowed. */
+long prism_taq_snoc(long q, long arrow) {
+    long leaf = prism_taq_leaf(arrow);
+    if (!q) return leaf;
+    prism_rc_inc(q);
+    return prism_taq_node_own(q, leaf);
+}
+
+/* concat(Q1, Q2): O(1) join. Both borrowed. */
+long prism_taq_concat(long q1, long q2) {
+    if (!q1) {
+        prism_rc_inc(q2);
+        return q2;
+    }
+    if (!q2) {
+        prism_rc_inc(q1);
+        return q1;
+    }
+    prism_rc_inc(q1);
+    prism_rc_inc(q2);
+    return prism_taq_node_own(q1, q2);
+}
+
+/* uncons(Q): the leftmost arrow and the remaining queue, as TQCons(head, tail);
+ * the empty queue gives TQNil. Q is borrowed and never mutated -- the result
+ * shares Q's leaves (rc_inc'd) and rebuilds only the spine -- so unconsing a
+ * shared queue leaves the original intact for another resumption. */
+long prism_taq_uncons(long q) {
+    if (!q) return prism_ctor(0, 0, 0); /* TQNil */
+    long cur = q;
+    long acc = 0; /* accumulated right tail (owned) */
+    while (prism_tag((void *)cur) == PRISM_TAQ_NODE) {
+        long l = prism_field((void *)cur, 0);
+        long r = prism_field((void *)cur, 1);
+        prism_rc_inc(r);
+        acc = acc ? prism_taq_node_own(r, acc) : r;
+        cur = l;
+    }
+    /* cur is a Leaf */
+    long head = prism_field((void *)cur, 0);
+    prism_rc_inc(head);
+    long fields[2] = {head, acc};
+    return prism_ctor(1, 2, fields); /* TQCons(head, tail) */
+}
+
 long prism_read_int(void) {
     long n = 0;
     if (scanf("%ld", &n) != 1) {

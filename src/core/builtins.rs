@@ -167,6 +167,14 @@ pub enum Builtin {
     // instance. Not surface-callable; emitted only by the elaborator. Args are
     // `(kind, list)` where kind selects the key (see `prism_sort_prim`).
     SortPrim,
+    // Type-aligned continuation queue ops, the Freer representation of an `EOp`'s
+    // continuation. Emitted only by the free-monad effect lowering; never
+    // surface-callable. `snoc(q, arrow)` appends, `concat(q1, q2)` joins, both
+    // O(1); `uncons(q)` returns `TQNil`/`TQCons(head, tail)` for the Core `qApply`
+    // template to match. The empty queue is `Unit`.
+    TaqSnoc,
+    TaqConcat,
+    TaqUncons,
 }
 
 impl Builtin {
@@ -237,6 +245,9 @@ impl Builtin {
         Self::ArrayPush,
         Self::StringOfArray,
         Self::SortPrim,
+        Self::TaqSnoc,
+        Self::TaqConcat,
+        Self::TaqUncons,
     ];
 
     #[must_use]
@@ -308,6 +319,9 @@ impl Builtin {
             Self::ArrayPush => "array_push",
             Self::StringOfArray => "string_of_array",
             Self::SortPrim => "sort_prim",
+            Self::TaqSnoc => "taq_snoc",
+            Self::TaqConcat => "taq_concat",
+            Self::TaqUncons => "taq_uncons",
         }
     }
 
@@ -408,7 +422,12 @@ impl Builtin {
             | Self::ArrayEmpty
             | Self::ArrayPush
             | Self::StringOfArray
-            | Self::SortPrim => (&[], &[], false),
+            | Self::SortPrim
+            // Queue ops: arguments (queue cells, the Unit-typed empty, arrow
+            // thunks) pass raw, result is a cell.
+            | Self::TaqSnoc
+            | Self::TaqConcat
+            | Self::TaqUncons => (&[], &[], false),
         }
     }
 

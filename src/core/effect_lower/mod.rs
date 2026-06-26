@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::slice;
 
+use super::builtins::Builtin;
 use super::cbpv::{reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use super::fv;
 use crate::error::TypeError;
@@ -57,6 +58,16 @@ const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
 const EBIND: &str = "ebind";
+// The queue-application driver: runs an `EOp`'s type-aligned continuation queue.
+const QAPPLY: &str = "qApply";
+
+// The result of `taq_uncons`: `TQNil` (empty queue) or `TQCons(head, tail)`. Its
+// own small ADT so `qApply` can pattern-match the C primitive's return.
+const TQ: &str = "TQ";
+const TQNIL: &str = "TQNil";
+const TQCONS: &str = "TQCons";
+const TQNIL_TAG: usize = 0;
+const TQCONS_TAG: usize = 1;
 
 /// Whether `name` is one of the residual free-monad driver templates: `ebind`, a
 /// per-handle driver (`{n}@handle`), or a mask driver (`{n}@mask`). Each entry to
@@ -66,7 +77,7 @@ const EBIND: &str = "ebind";
 /// constant-stack control flow, not the free-monad driver, so they are excluded.
 #[must_use]
 pub(crate) fn is_free_monad_driver(name: &str) -> bool {
-    name == EBIND || name.ends_with("@handle") || name.ends_with("@mask")
+    name == EBIND || name == QAPPLY || name.ends_with("@handle") || name.ends_with("@mask")
 }
 
 // Step constructors for the state path's early-termination protocol: a fused
@@ -300,6 +311,7 @@ fn lower_impl(
     // so a fixed binder can never capture another driver's free occurrence.
     fns.extend(std::mem::take(&mut lo.generated));
     fns.push(ebind_fn());
+    fns.push(qapply_fn());
     let monadic: BTreeSet<Sym> = if lo.full {
         fns.iter().map(|f| f.name).collect()
     } else {
@@ -311,6 +323,8 @@ fn lower_impl(
     let mut ctors = ctors.clone();
     ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
+    ctors.insert(TQNIL.into(), synth_ctor(TQ, TQNIL_TAG, 0));
+    ctors.insert(TQCONS.into(), synth_ctor(TQ, TQCONS_TAG, 2));
 
     let strat = if lo.full {
         "whole-program-free-monad"
@@ -558,14 +572,12 @@ impl Lowerer {
                     >>(
                     )?),
                 };
-                let resume = Value::Thunk(Box::new(Comp::Lam(
-                    vec![names::RESUME_VAL.into()],
-                    Box::new(epure(Value::Var(names::RESUME_VAL.into()))),
-                )));
+                // A fresh op's continuation queue is empty (Unit): `qApply(empty,
+                // v) = EPure(v)`. `ebind` snocs onto it as the op propagates.
                 Comp::Return(Value::Ctor(
                     EOP.into(),
                     OP_TAG,
-                    vec![Value::Int(id), Value::Int(0), arg, resume],
+                    vec![Value::Int(id), Value::Int(0), arg, Value::Unit],
                 ))
             }
             Comp::If(v, t, e) => {
@@ -850,8 +862,10 @@ impl Lowerer {
         let mut full_style: BTreeSet<Sym> = region.clone();
         full_style.extend(generated.iter().map(|f| f.name));
         full_style.insert(EBIND.into());
+        full_style.insert(QAPPLY.into());
         fns.extend(generated);
         fns.push(ebind_fn());
+        fns.push(qapply_fn());
 
         // Boundary rail over the full-style region (functions, drivers, ebind).
         // The fused rest is a different convention and excluded. A failure here
@@ -868,11 +882,29 @@ impl Lowerer {
         let mut ctors = base_ctors.clone();
         ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
         ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
+        ctors.insert(TQNIL.into(), synth_ctor(TQ, TQNIL_TAG, 0));
+        ctors.insert(TQCONS.into(), synth_ctor(TQ, TQCONS_TAG, 2));
         if early {
             ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
             ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
         }
         Ok(Some((Core { fns }, ctors)))
+    }
+
+    // Emit an op outward: `EOp(id, skip, arg, taq_snoc(Unit, resume))` -- a fresh
+    // singleton queue holding `resume`, the continuation that re-enters the
+    // forwarding driver. The empty queue is `Unit`.
+    fn forward_eop(&mut self, id: Value, skip: Value, arg: Value, resume: Value) -> Comp {
+        let q = self.fresh("q");
+        Comp::Bind(
+            Box::new(Comp::StrBuiltin(Builtin::TaqSnoc, vec![Value::Unit, resume])),
+            q,
+            Box::new(Comp::Return(Value::Ctor(
+                EOP.into(),
+                OP_TAG,
+                vec![id, skip, arg, Value::Var(q)],
+            ))),
+        )
     }
 
     fn lower_handle(&mut self, c: &Comp) -> Result<Comp, TypeError> {
@@ -931,12 +963,14 @@ impl Lowerer {
 
         let mut resume_args = vec![Value::Var(names::RESUME_KONT.into())];
         resume_args.extend(fvs.iter().map(|v| Value::Var(*v)));
+        // resume = \v -> drive(qApply(Q, v), fvs): run the op's continuation queue
+        // `k` on `v`, then re-drive the result through this handler.
         let resume_thunk = Value::Thunk(Box::new(Comp::Lam(
             vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
-                Box::new(Comp::App(
-                    Box::new(Comp::Force(Value::Var(k))),
-                    vec![Value::Var(names::RESUME_VAL.into())],
+                Box::new(Comp::Call(
+                    QAPPLY.into(),
+                    vec![Value::Var(k), Value::Var(names::RESUME_VAL.into())],
                 )),
                 names::RESUME_KONT.into(),
                 Box::new(Comp::Call(driver, resume_args)),
@@ -944,19 +978,16 @@ impl Lowerer {
         )));
 
         // Unhandled op (id not ours): closed handlers cannot reach here, open
-        // handlers forward by re-emitting the EOp unchanged with a continuation
-        // that re-enters this driver, so an enclosing handler discharges it.
+        // handlers forward by re-emitting the EOp with a singleton queue holding a
+        // continuation that re-enters this driver, so an enclosing handler
+        // discharges it.
         let mut dispatch = if open {
-            Comp::Return(Value::Ctor(
-                EOP.into(),
-                OP_TAG,
-                vec![
-                    Value::Var(id),
-                    Value::Var(skip),
-                    Value::Var(arg),
-                    resume_thunk.clone(),
-                ],
-            ))
+            self.forward_eop(
+                Value::Var(id),
+                Value::Var(skip),
+                Value::Var(arg),
+                resume_thunk.clone(),
+            )
         } else {
             Comp::Error(Value::Str(
                 "ICE: unhandled effect op in closed handler dispatch".into(),
@@ -999,14 +1030,16 @@ impl Lowerer {
                     return Ok(handle);
                 }
                 let sk1 = me.fresh("sk");
+                let reemit = me.forward_eop(
+                    Value::Var(id),
+                    Value::Var(sk1),
+                    Value::Var(arg),
+                    rt.clone(),
+                );
                 let forward = Comp::Bind(
                     Box::new(Comp::Prim(CoreOp::Sub, Value::Var(skip), Value::Int(1))),
                     sk1,
-                    Box::new(Comp::Return(Value::Ctor(
-                        EOP.into(),
-                        OP_TAG,
-                        vec![Value::Var(id), Value::Var(sk1), Value::Var(arg), rt.clone()],
-                    ))),
+                    Box::new(reemit),
                 );
                 let z = me.fresh("z");
                 Ok(Comp::Bind(
@@ -1054,12 +1087,19 @@ impl Lowerer {
     // the fixed binders cannot capture. Closedness is structural, not checked.
     fn mask_driver(&mut self, ops: &[Sym]) -> Result<Sym, TypeError> {
         let driver = self.fresh("mask");
+        // Queue binder for the re-emitted op (a `{n}@q` fresh name: unforgeable and
+        // unique, so the template stays closed). The bump and forward arms are
+        // mutually exclusive, so reusing one binder across both is sound.
+        let qb = self.fresh("q");
         let resume = Value::Thunk(Box::new(Comp::Lam(
             vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
-                Box::new(Comp::App(
-                    Box::new(Comp::Force(Value::Var(names::CONT.into()))),
-                    vec![Value::Var(names::RESUME_VAL.into())],
+                Box::new(Comp::Call(
+                    QAPPLY.into(),
+                    vec![
+                        Value::Var(names::CONT.into()),
+                        Value::Var(names::RESUME_VAL.into()),
+                    ],
                 )),
                 names::RESUME_KONT.into(),
                 Box::new(Comp::Call(
@@ -1069,16 +1109,23 @@ impl Lowerer {
             )),
         )));
         let reemit = |skipv: Value| {
-            Comp::Return(Value::Ctor(
-                EOP.into(),
-                OP_TAG,
-                vec![
-                    Value::Var(names::OP_ID.into()),
-                    skipv,
-                    Value::Var(names::OP_ARG.into()),
-                    resume.clone(),
-                ],
-            ))
+            Comp::Bind(
+                Box::new(Comp::StrBuiltin(
+                    Builtin::TaqSnoc,
+                    vec![Value::Unit, resume.clone()],
+                )),
+                qb,
+                Box::new(Comp::Return(Value::Ctor(
+                    EOP.into(),
+                    OP_TAG,
+                    vec![
+                        Value::Var(names::OP_ID.into()),
+                        skipv,
+                        Value::Var(names::OP_ARG.into()),
+                        Value::Var(qb),
+                    ],
+                ))),
+            )
         };
         // An op of the masked effect gains one skip level, so the next matching
         // handler bypasses it once. Any other op passes through unchanged.
@@ -1148,12 +1195,16 @@ fn epure(v: Value) -> Comp {
 
 // fn ebind(r, f) =
 //   case r {
-//     EPure(x)     => force(f)(x),
-//     EOp(id,a,k)  => EOp(id, a, \y. ebind(force(k)(y), f)),
+//     EPure(x)        => force(f)(x),
+//     EOp(id,sk,a,q)  => EOp(id, sk, a, taq_snoc(q, f)),
 //   }
 //
-// Closed top-level template: its binders (`names::OP_ID`/`OP_ARG`/`CONT`/
-// `EBIND_FN`/`RESUME_VAL`/`RESUME_KONT`) are fixed `@`-names, disjoint from program
+// The Freer monad: binding a continuation onto a suspended op is one O(1) queue
+// snoc -- no spine re-walk, no nested closure tree. `CONT` binds the op's queue
+// (its 4th field); `f` (`EBIND_FN`) is the new Kleisli arrow.
+//
+// Closed top-level template: its binders (`names::OP_ID`/`OP_SKIP`/`OP_ARG`/
+// `CONT`/`EBIND_FN`/`RESUME_KONT`) are fixed `@`-names, disjoint from program
 // names. Templates refer to one another by `Call`, never by lexical nesting, so the
 // fixed binders cannot capture across templates; do not emit one template's body
 // inside another. Closedness is thus structural, not checked.
@@ -1165,23 +1216,7 @@ fn ebind_fn() -> CoreFn {
             vec![Value::Var(names::COMPOSE.into())],
         ),
     );
-    let resume = Value::Thunk(Box::new(Comp::Lam(
-        vec![names::RESUME_VAL.into()],
-        Box::new(Comp::Bind(
-            Box::new(Comp::App(
-                Box::new(Comp::Force(Value::Var(names::CONT.into()))),
-                vec![Value::Var(names::RESUME_VAL.into())],
-            )),
-            names::RESUME_KONT.into(),
-            Box::new(Comp::Call(
-                EBIND.into(),
-                vec![
-                    Value::Var(names::RESUME_KONT.into()),
-                    Value::Var(names::EBIND_FN.into()),
-                ],
-            )),
-        )),
-    )));
+    let q = Sym::from(names::RESUME_KONT);
     let op_arm = (
         ctor_pat(
             EOP,
@@ -1192,21 +1227,101 @@ fn ebind_fn() -> CoreFn {
                 names::CONT.into(),
             ],
         ),
-        Comp::Return(Value::Ctor(
-            EOP.into(),
-            OP_TAG,
-            vec![
-                Value::Var(names::OP_ID.into()),
-                Value::Var(names::OP_SKIP.into()),
-                Value::Var(names::OP_ARG.into()),
-                resume,
-            ],
-        )),
+        Comp::Bind(
+            Box::new(Comp::StrBuiltin(
+                Builtin::TaqSnoc,
+                vec![
+                    Value::Var(names::CONT.into()),
+                    Value::Var(names::EBIND_FN.into()),
+                ],
+            )),
+            q,
+            Box::new(Comp::Return(Value::Ctor(
+                EOP.into(),
+                OP_TAG,
+                vec![
+                    Value::Var(names::OP_ID.into()),
+                    Value::Var(names::OP_SKIP.into()),
+                    Value::Var(names::OP_ARG.into()),
+                    Value::Var(q),
+                ],
+            ))),
+        ),
     );
     CoreFn {
         name: EBIND.into(),
         params: vec![names::RET.into(), names::EBIND_FN.into()],
         body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
+    }
+}
+
+// fn qApply(q, v) =
+//   case taq_uncons(q) {
+//     TQNil          => EPure(v),
+//     TQCons(g, qr)  => case force(g)(v) {
+//       EPure(w)         => qApply(qr, w),                       -- musttail
+//       EOp(id,sk,a,q2)  => EOp(id, sk, a, taq_concat(q2, qr)),  -- splice, O(1)
+//     }
+//   }
+//
+// Runs an op's continuation queue on a resumption value. Every arrow is dequeued
+// once and concat never re-walks a passed prefix, so driving an n-snoc queue is
+// O(n). The `EPure` self-call is in tail position (codegen `musttail` => O(1)
+// native stack). Closed template (fixed `@`-binders), like `ebind`.
+fn qapply_fn() -> CoreFn {
+    let g = Sym::from(names::CONT); // head arrow
+    let qr = Sym::from(names::RESUME_KONT); // tail queue
+    let w = Sym::from(names::COMPOSE);
+    let id = Sym::from(names::OP_ID);
+    let sk = Sym::from(names::OP_SKIP);
+    let a = Sym::from(names::OP_ARG);
+    let q2 = Sym::from(names::FWD_SKIP);
+    let spliced = Sym::from(names::RESUME_VAL);
+    let v = Sym::from(names::RET);
+    let qparam = Sym::from(names::EBIND_FN);
+    let u = Sym::from(names::ERR);
+
+    // case applied { EPure(w) => qApply(qr, w), EOp(..) => EOp(.., concat(q2, qr)) }
+    let applied = Comp::App(
+        Box::new(Comp::Force(Value::Var(g))),
+        vec![Value::Var(v)],
+    );
+    let on_op = Comp::Bind(
+        Box::new(Comp::StrBuiltin(
+            Builtin::TaqConcat,
+            vec![Value::Var(q2), Value::Var(qr)],
+        )),
+        spliced,
+        Box::new(Comp::Return(Value::Ctor(
+            EOP.into(),
+            OP_TAG,
+            vec![Value::Var(id), Value::Var(sk), Value::Var(a), Value::Var(spliced)],
+        ))),
+    );
+    let inner = Comp::Bind(
+        Box::new(applied),
+        Sym::from(names::STATE),
+        Box::new(Comp::Case(
+            Value::Var(Sym::from(names::STATE)),
+            vec![
+                (
+                    ctor_pat(EPURE, &[w]),
+                    Comp::Call(QAPPLY.into(), vec![Value::Var(qr), Value::Var(w)]),
+                ),
+                (ctor_pat(EOP, &[id, sk, a, q2]), on_op),
+            ],
+        )),
+    );
+    let cons_arm = (ctor_pat(TQCONS, &[g, qr]), inner);
+    let nil_arm = (ctor_pat(TQNIL, &[]), epure(Value::Var(v)));
+    CoreFn {
+        name: QAPPLY.into(),
+        params: vec![qparam, v],
+        body: Comp::Bind(
+            Box::new(Comp::StrBuiltin(Builtin::TaqUncons, vec![Value::Var(qparam)])),
+            u,
+            Box::new(Comp::Case(Value::Var(u), vec![nil_arm, cons_arm])),
+        ),
     }
 }
 

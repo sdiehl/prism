@@ -358,14 +358,15 @@ fn free_monad_loops_run_in_constant_stack() {
 }
 
 // The loop still on the free monad: a hand-rolled parameter-passing effect loop.
-// Its handler is not tail-resumptive (`r(s)(s)`), so it cannot be erased to a
-// `var` cell, and its resumption is a closure apply, so the native stack grows
-// O(n). The fix is Phase B's free-monad trampoline (drive the reified computation
-// in a constant-stack loop); until it lands this overflows at a million
-// iterations. Ignored so the suite is green while the gap is documented;
-// un-ignore when the trampoline lands.
+// Its handler is not tail-resumptive (`r(s)(s)`): the clause applies the
+// resumption's *result* to the state, so each iteration leaves a pending-apply
+// frame on the native stack. Phase B's type-aligned dequeue makes the driver's
+// time linear (no spine re-walk) but cannot collapse that answer-type-function
+// tower -- that is exactly what Phase C's explicit handler stack does (a `do`
+// captures the native continuation, including the pending applications, into a
+// heap kont, so the machine stack does not grow). Ignored until Phase C lands.
 #[test]
-#[ignore = "needs Phase B (the free-monad trampoline): a parameter-passing effect loop still grows the stack"]
+#[ignore = "needs Phase C (explicit handler stack): a parameter-passing handler applies the resumption result, leaving a pending-apply frame per iteration that the continuation dequeue cannot remove"]
 fn param_passing_effect_loop_runs_in_constant_stack() {
     if !have(&cc()) {
         eprintln!(
@@ -399,10 +400,11 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 // -- only the driver's actual work-step count does. Run at N and 4N and assert the
 // growth ratio is sub-octic: a linear driver does ~4x the steps, a quadratic one
 // (the EBounce re-association that re-walks the left-nested spine each bounce) does
-// ~16x. Ignored in Phase A (the free-monad driver is unchanged here); the permanent
-// ratchet arms in Phase B, where the trampoline this guards is introduced.
+// ~16x. Phase B's type-aligned dequeue replaced `EOp`'s nested-closure
+// continuation with an O(1)-snoc queue, so `ebind` no longer re-walks the spine;
+// this is the permanent ratchet that pins that in (and would catch its
+// reintroduction, the EBounce regression -- see the rehearsal note in DEMONAD.md).
 #[test]
-#[ignore = "ratchets in Phase B, where the residual-driver trampoline is introduced"]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
     if !have(&cc()) {
         eprintln!(
