@@ -1233,24 +1233,101 @@ mod tests {
         assert_eq!(fmt_g(f64::NEG_INFINITY), "-inf");
     }
 
-    fn runtime_src() -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/prism_rt.c");
-        std::fs::read_to_string(path).expect("read runtime/prism_rt.c")
+    // Compile the C runtime with a small `prism_main` body and run it, returning
+    // the lines it prints. The C runtime is the native backend's source of truth,
+    // so executing it pins behavior here directly: a divergence fails because the
+    // streams differ, not because a magic substring went missing. That survives a
+    // behavior-preserving refactor (rename `z`, hoist a helper, regroup a
+    // constant) where a `contains(...)` grep of the source would not, and it
+    // actually proves equivalence rather than textual presence. Returns None when
+    // no C compiler is available, so the test skips like the parity corpus (CI
+    // sets PRISM_CC).
+    fn rt_oracle(body: &str) -> Option<Vec<String>> {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        // Unique per call: tests run concurrently in one process, so a pid-only
+        // path would let two oracles clobber each other's source and binary.
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
+        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
+        if !Command::new(&cc)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skipping runtime oracle: C compiler `{cc}` not found (set PRISM_CC)");
+            return None;
+        }
+
+        let stem = format!(
+            "prism_oracle_{}_{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let dir = std::env::temp_dir();
+        let src = dir.join(format!("{stem}.c"));
+        let bin = dir.join(&stem);
+        let rt = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/prism_rt.c");
+        // The runtime owns `main` and calls `prism_main`; the harness supplies it
+        // and returns a tagged immediate 0 (exit code 0).
+        std::fs::write(
+            &src,
+            format!(
+                "#include <stdio.h>\n#include <string.h>\n\
+                 long prism_rand(void);\n\
+                 long prism_str_lit(const char *, long);\n\
+                 long prism_big_of_str(long, int *);\n\
+                 long prism_big_show(long);\n\
+                 void print_str(long);\n\
+                 long prism_main(void) {{\n{body}\nreturn 1;\n}}\n"
+            ),
+        )
+        .unwrap();
+        let comp = Command::new(&cc)
+            .args(["-O0", "-w"])
+            .arg(&src)
+            .arg(&rt)
+            .arg("-lm")
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&src);
+        assert!(
+            comp.status.success(),
+            "runtime oracle failed to compile:\n{}",
+            String::from_utf8_lossy(&comp.stderr)
+        );
+        let run = Command::new(&bin).output().unwrap();
+        let _ = std::fs::remove_file(&bin);
+        assert!(
+            run.status.success(),
+            "runtime oracle crashed: {:?}",
+            run.status
+        );
+        Some(
+            String::from_utf8(run.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect(),
+        )
     }
 
     // An unseeded `rand` must stream identical values on every backend, so the
     // interpreter's SplitMix64 and the C runtime's must be the same generator.
-    // Like `layout_matches_runtime`: pin the interpreter's stream to a
-    // hand-verified golden vector and assert the C source carries byte-identical
-    // constants and structure, so drift in either implementation fails here
-    // rather than only in the end-to-end corpus.
+    // Pin the interpreter to a hand-verified golden vector, then run the C
+    // runtime as the oracle: its `prism_rand()` (which drops the low 2 bits) must
+    // equal `splitmix64() >> 2`. Drift in either implementation fails here, not
+    // only in the end-to-end corpus.
     #[test]
     fn splitmix64_matches_runtime() {
         assert_eq!(DEFAULT_SEED, 0x9E37_79B9_7F4A_7C15);
         let mut state = DEFAULT_SEED;
-        let seq: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
+        let golden: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
         assert_eq!(
-            seq,
+            golden,
             [
                 0x6E78_9E6A_A1B9_65F4,
                 0x06C4_5D18_8009_454F,
@@ -1259,26 +1336,23 @@ mod tests {
             ]
         );
 
-        let rt = runtime_src();
-        for needle in [
-            "prism_rng = 0x9E3779B97F4A7C15UL",  // default seed
-            "prism_rng += 0x9E3779B97F4A7C15UL", // increment
-            "(z >> 30)) * 0xBF58476D1CE4E5B9UL", // mix 1
-            "(z >> 27)) * 0x94D049BB133111EBUL", // mix 2
-            "z ^= z >> 31",                      // final xor
-            "(long)(z >> 2)",                    // rand() drops the low 2 bits
-        ] {
-            assert!(
-                rt.contains(needle),
-                "SplitMix64 drift: C runtime missing `{needle}`"
-            );
-        }
+        let Some(lines) =
+            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_rand());")
+        else {
+            return;
+        };
+        let want: Vec<String> = golden.iter().map(|z| (z >> 2).to_string()).collect();
+        assert_eq!(
+            lines, want,
+            "C runtime rand() stream diverged from interpreter"
+        );
     }
 
     // Bignum decimal parsing must agree with the C runtime's `prism_big_of_str`
     // so a literal that overflows the immediate parses to the same value on every
-    // backend. Pin the interpreter against golden values and assert the C source
-    // still carries the same trim/sign/base-10 fold.
+    // backend. Pin the interpreter against golden values, then run the C runtime
+    // as the oracle: it must parse each literal to the same value and reject the
+    // same inputs (ok=0, surfaced as "ERR") the interpreter rejects with None.
     #[test]
     fn big_of_str_matches_runtime() {
         use std::str::FromStr;
@@ -1296,7 +1370,7 @@ mod tests {
             ),
             ("+1000000000000000000000", "1000000000000000000000"),
         ];
-        for (input, want) in cases {
+        for &(input, want) in &cases {
             assert_eq!(
                 big_of_str(input),
                 Some(BigInt::from_str(want).unwrap()),
@@ -1306,10 +1380,30 @@ mod tests {
         assert_eq!(big_of_str("12x3"), None);
         assert_eq!(big_of_str(""), None);
 
-        let rt = runtime_src();
-        assert!(
-            rt.contains("long prism_big_of_str(long s, int *ok)"),
-            "C runtime missing prism_big_of_str"
+        // Both the accepted literals and the rejected ones go through the C
+        // parser; "ERR" mirrors the interpreter's None.
+        let inputs: Vec<&str> = cases.iter().map(|&(i, _)| i).chain(["12x3", ""]).collect();
+        let want: Vec<String> = inputs
+            .iter()
+            .map(|s| big_of_str(s).map_or_else(|| "ERR".to_owned(), |b| b.to_string()))
+            .collect();
+        let mut body = String::new();
+        for s in &inputs {
+            use std::fmt::Write;
+            let _ = writeln!(
+                body,
+                "{{ const char *t = \"{esc}\"; long c = prism_str_lit(t, (long)strlen(t)); \
+                 int ok = 0; long b = prism_big_of_str(c, &ok); \
+                 if (!ok) printf(\"ERR\\n\"); else print_str(prism_big_show(b)); }}",
+                esc = s.escape_default()
+            );
+        }
+        let Some(lines) = rt_oracle(&body) else {
+            return;
+        };
+        assert_eq!(
+            lines, want,
+            "C runtime big_of_str diverged from interpreter"
         );
     }
 }
