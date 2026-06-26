@@ -65,6 +65,15 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
+      # Re-run the native parity corpus with the C runtime built under UBSan, so
+      # runtime undefined behavior (e.g. a signed left-shift on a negative Int)
+      # fails CI instead of silently working at -O2. -fno-sanitize-recover makes
+      # the first diagnostic abort the program, which fails the parity check.
+      - name: UBSan runtime
+        env:
+          PRISM_CC_FLAGS: "-fsanitize=undefined -fno-sanitize-recover=all"
+        run: cargo test --test parity native_matches_interpreter
+
       - name: Check prism formatting
         run: |
           cargo build --release 2>/dev/null

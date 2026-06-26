@@ -51,20 +51,11 @@ mod state;
 
 const PURE_TAG: usize = 0;
 const OP_TAG: usize = 1;
-// A deferred step of the free monad: forcing its thunk runs one step and yields
-// the next Eff. `ebind` returns one instead of applying the continuation directly,
-// so a chain of binds (a reified loop) does not grow the native stack; `drive`
-// resolves them in a `musttail` loop. This is what keeps a free-monad loop in
-// constant stack instead of overflowing.
-const BOUNCE_TAG: usize = 2;
-// Type name carrying the free-monad result (its ctors are EPure/EOp/EBounce).
+// Type name carrying the free-monad result (its ctors are EPure/EOp).
 const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
-const EBOUNCE: &str = "EBounce";
 const EBIND: &str = "ebind";
-// The trampoline that drives `EBounce` steps to a bounce-free `EPure`/`EOp`.
-const DRIVE: &str = "drive@eff";
 
 // Step constructors for the state path's early-termination protocol: a fused
 // producer threads `Step S` and stops when `stake` yields `SDone`.
@@ -278,7 +269,6 @@ fn lower_impl(
     // so a fixed binder can never capture another driver's free occurrence.
     fns.extend(std::mem::take(&mut lo.generated));
     fns.push(ebind_fn());
-    fns.push(drive_fn());
     let monadic: BTreeSet<Sym> = if lo.full {
         fns.iter().map(|f| f.name).collect()
     } else {
@@ -290,7 +280,6 @@ fn lower_impl(
     let mut ctors = ctors.clone();
     ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
-    ctors.insert(EBOUNCE.into(), synth_ctor(EFF, BOUNCE_TAG, 1));
 
     let strat = if lo.full {
         "whole-program-free-monad"
@@ -455,10 +444,8 @@ impl Lowerer {
             Comp::Handle { body, ops, .. } if self.is_open(body, ops) => {
                 let e = self.fresh("e");
                 let x = self.fresh("ex");
-                let handled = self.lower_handle(c)?;
-                let dh = self.driven(handled);
                 Comp::Bind(
-                    Box::new(dh),
+                    Box::new(self.lower_handle(c)?),
                     e,
                     Box::new(Comp::Case(
                         Value::Var(e),
@@ -573,19 +560,14 @@ impl Lowerer {
             Comp::Mask(ops, body) => {
                 let driver = self.mask_driver(ops)?;
                 let v = self.fresh("m");
-                let body_eff = self.mon(body)?;
-                let db = self.driven(body_eff);
                 Comp::Bind(
-                    Box::new(db),
+                    Box::new(self.mon(body)?),
                     v,
                     Box::new(Comp::Call(driver, vec![Value::Var(v)])),
                 )
             }
             Comp::Handle { body, ops, .. } if self.is_open(body, ops) => self.lower_handle(c)?,
             Comp::Handle { .. } => {
-                // A closed handler returns a bare value (its body, fed to the
-                // driver, was already driven at the install site), so it is not an
-                // Eff and must not be `drive`d; just lift it.
                 let v = self.fresh("h");
                 Comp::Bind(
                     Box::new(self.lower_handle(c)?),
@@ -667,20 +649,6 @@ impl Lowerer {
         })
     }
 
-    // Run `m` to an Eff and resolve any `EBounce` steps to a bounce-free
-    // `EPure`/`EOp`, so the result can be `case`-dispatched. Every site that
-    // pattern-matches a monadic result (a driver, a mask, `unwrap_main`, the
-    // open/closed handle wrappers) threads its scrutinee through this; `ebind`
-    // does not (it composes `EBounce` itself).
-    fn driven(&mut self, m: Comp) -> Comp {
-        let raw = self.fresh("raw");
-        Comp::Bind(
-            Box::new(m),
-            raw,
-            Box::new(Comp::Call(DRIVE.into(), vec![Value::Var(raw)])),
-        )
-    }
-
     // An entry to a monadic region returns Eff; unwrap its final EPure to the
     // bare value its (direct-convention) caller expects, and trap on an op that
     // escaped every handler, naming it like the interpreter's unhandled-effect
@@ -706,9 +674,8 @@ impl Lowerer {
                 )),
             );
         }
-        let driven_body = self.driven(body);
         Comp::Bind(
-            Box::new(driven_body),
+            Box::new(body),
             r,
             Box::new(Comp::Case(
                 Value::Var(r),
@@ -852,10 +819,8 @@ impl Lowerer {
         let mut full_style: BTreeSet<Sym> = region.clone();
         full_style.extend(generated.iter().map(|f| f.name));
         full_style.insert(EBIND.into());
-        full_style.insert(DRIVE.into());
         fns.extend(generated);
         fns.push(ebind_fn());
-        fns.push(drive_fn());
 
         // Boundary rail over the full-style region (functions, drivers, ebind).
         // The fused rest is a different convention and excluded. A failure here
@@ -872,7 +837,6 @@ impl Lowerer {
         let mut ctors = base_ctors.clone();
         ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
         ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
-        ctors.insert(EBOUNCE.into(), synth_ctor(EFF, BOUNCE_TAG, 1));
         if early {
             ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
             ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
@@ -936,16 +900,13 @@ impl Lowerer {
 
         let mut resume_args = vec![Value::Var(names::RESUME_KONT.into())];
         resume_args.extend(fvs.iter().map(|v| Value::Var(*v)));
-        // Resuming runs the captured continuation, resolves its bounces, then
-        // re-enters this driver, so a tail-resumptive reified loop stays flat.
-        let resume_eff = self.driven(Comp::App(
-            Box::new(Comp::Force(Value::Var(k))),
-            vec![Value::Var(names::RESUME_VAL.into())],
-        ));
         let resume_thunk = Value::Thunk(Box::new(Comp::Lam(
             vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
-                Box::new(resume_eff),
+                Box::new(Comp::App(
+                    Box::new(Comp::Force(Value::Var(k))),
+                    vec![Value::Var(names::RESUME_VAL.into())],
+                )),
                 names::RESUME_KONT.into(),
                 Box::new(Comp::Call(driver, resume_args)),
             )),
@@ -1042,14 +1003,12 @@ impl Lowerer {
             body: body_case,
         });
 
-        // call site: run the monadified body, resolve its bounces, then drive it
+        // call site: run the monadified body, then drive it
         let r0 = self.fresh("r0");
         let mut call_args = vec![Value::Var(r0)];
         call_args.extend(fvs.iter().map(|v| Value::Var(*v)));
-        let body_eff = self.mon(body)?;
-        let driven_body = self.driven(body_eff);
         Ok(Comp::Bind(
-            Box::new(driven_body),
+            Box::new(self.mon(body)?),
             r0,
             Box::new(Comp::Call(driver, call_args)),
         ))
@@ -1064,14 +1023,13 @@ impl Lowerer {
     // the fixed binders cannot capture. Closedness is structural, not checked.
     fn mask_driver(&mut self, ops: &[Sym]) -> Result<Sym, TypeError> {
         let driver = self.fresh("mask");
-        let resume_eff = self.driven(Comp::App(
-            Box::new(Comp::Force(Value::Var(names::CONT.into()))),
-            vec![Value::Var(names::RESUME_VAL.into())],
-        ));
         let resume = Value::Thunk(Box::new(Comp::Lam(
             vec![names::RESUME_VAL.into()],
             Box::new(Comp::Bind(
-                Box::new(resume_eff),
+                Box::new(Comp::App(
+                    Box::new(Comp::Force(Value::Var(names::CONT.into()))),
+                    vec![Value::Var(names::RESUME_VAL.into())],
+                )),
                 names::RESUME_KONT.into(),
                 Box::new(Comp::Call(
                     driver,
@@ -1169,34 +1127,12 @@ fn epure(v: Value) -> Comp {
 // fixed binders cannot capture across templates; do not emit one template's body
 // inside another. Closedness is thus structural, not checked.
 fn ebind_fn() -> CoreFn {
-    // `EPure(x) => force(f)(x)`, but deferred into an `EBounce` so the apply does
-    // not grow the stack; `drive` runs it. This single change is what trampolines
-    // a reified loop's bind chain into constant stack.
     let pure_arm = (
         ctor_pat(EPURE, &[names::COMPOSE.into()]),
-        ebounce(Comp::App(
+        Comp::App(
             Box::new(Comp::Force(Value::Var(names::EBIND_FN.into()))),
             vec![Value::Var(names::COMPOSE.into())],
-        )),
-    );
-    // `EBounce(t) => EBounce(\u. let s = force(t)(u) in ebind(s, f))`: compose past
-    // a deferred step, staying deferred so the driver/`drive` keeps the stack flat.
-    let bounce_arm = (
-        ctor_pat(EBOUNCE, &[Sym::from("bt@")]),
-        ebounce(Comp::Bind(
-            Box::new(Comp::App(
-                Box::new(Comp::Force(Value::Var(Sym::from("bt@")))),
-                vec![Value::Var(Sym::from("bu@"))],
-            )),
-            Sym::from("bstep@"),
-            Box::new(Comp::Call(
-                EBIND.into(),
-                vec![
-                    Value::Var(Sym::from("bstep@")),
-                    Value::Var(names::EBIND_FN.into()),
-                ],
-            )),
-        )),
+        ),
     );
     let resume = Value::Thunk(Box::new(Comp::Lam(
         vec![names::RESUME_VAL.into()],
@@ -1239,81 +1175,7 @@ fn ebind_fn() -> CoreFn {
     CoreFn {
         name: EBIND.into(),
         params: vec![names::RET.into(), names::EBIND_FN.into()],
-        body: Comp::Case(
-            Value::Var(names::RET.into()),
-            vec![pure_arm, op_arm, bounce_arm],
-        ),
-    }
-}
-
-// Wrap a one-step continuation in an `EBounce`: `return EBounce(\u. body)`. Forcing
-// the thunk (in `drive`) runs `body`, which yields the next Eff.
-fn ebounce(body: Comp) -> Comp {
-    Comp::Return(Value::Ctor(
-        EBOUNCE.into(),
-        BOUNCE_TAG,
-        vec![Value::Thunk(Box::new(Comp::Lam(
-            vec![Sym::from("bu@")],
-            Box::new(body),
-        )))],
-    ))
-}
-
-// The trampoline: `drive(e) = case e { EBounce(t) => drive(force(t)(unit)), _ => e }`.
-// The `EBounce` arm is a tail self-call (matching arity), so codegen loops it via
-// `musttail`: a reified computation's deferred steps run in constant native stack.
-// `EPure`/`EOp` are already resolved, returned unchanged.
-fn drive_fn() -> CoreFn {
-    let e = Sym::from("de@");
-    // `EPure`/`EOp` are already resolved: rebuild them from the matched fields
-    // (the reuse pass overwrites the matched cell in place, no allocation) rather
-    // than return the scrutinee, whose cell the pattern-match has consumed.
-    let pure_val = Sym::from("pureval@");
-    let (oid, oskip, oarg, okont) = (
-        Sym::from("opid@"),
-        Sym::from("opskip@"),
-        Sym::from("oparg@"),
-        Sym::from("opkont@"),
-    );
-    let pure_arm = (
-        ctor_pat(EPURE, &[pure_val]),
-        Comp::Return(Value::Ctor(
-            EPURE.into(),
-            PURE_TAG,
-            vec![Value::Var(pure_val)],
-        )),
-    );
-    let op_arm = (
-        ctor_pat(EOP, &[oid, oskip, oarg, okont]),
-        Comp::Return(Value::Ctor(
-            EOP.into(),
-            OP_TAG,
-            vec![
-                Value::Var(oid),
-                Value::Var(oskip),
-                Value::Var(oarg),
-                Value::Var(okont),
-            ],
-        )),
-    );
-    let bounce_arm = (
-        ctor_pat(EBOUNCE, &[Sym::from("dt@")]),
-        Comp::Bind(
-            Box::new(Comp::App(
-                Box::new(Comp::Force(Value::Var(Sym::from("dt@")))),
-                vec![Value::Unit],
-            )),
-            Sym::from("dstep@"),
-            Box::new(Comp::Call(
-                DRIVE.into(),
-                vec![Value::Var(Sym::from("dstep@"))],
-            )),
-        ),
-    );
-    CoreFn {
-        name: DRIVE.into(),
-        params: vec![e],
-        body: Comp::Case(Value::Var(e), vec![pure_arm, op_arm, bounce_arm]),
+        body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
     }
 }
 
@@ -1729,10 +1591,7 @@ fn check_convention_boundaries(
         .map(|f| (f.name.as_str(), f.params.len()))
         .collect();
     for f in check {
-        // `drive` is the trampoline: its arms return the resolved Eff through a
-        // bound variable (`return e`), not an Eff constructor, so the tail check
-        // (which keys on the constructor) does not apply to it.
-        if !monadic.contains(&f.name) || exempt.contains(&f.name) || f.name.as_str() == DRIVE {
+        if !monadic.contains(&f.name) || exempt.contains(&f.name) {
             continue;
         }
         check_tails(f.name.as_str(), &f.body, &arities)?;
@@ -1762,7 +1621,7 @@ fn check_tails(fname: &str, c: &Comp, arities: &BTreeMap<&str, usize>) -> Result
                 check_tails(fname, b, arities)?;
             }
         }
-        Comp::Return(Value::Ctor(n, ..)) if n == EPURE || n == EOP || n == EBOUNCE => {}
+        Comp::Return(Value::Ctor(n, ..)) if n == EPURE || n == EOP => {}
         Comp::Call(g, args) if g != ENTRY_POINT && arities.get(g.as_str()) == Some(&args.len()) => {
         }
         Comp::App(..) | Comp::Error(_) => {}

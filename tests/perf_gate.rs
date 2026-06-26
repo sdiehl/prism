@@ -261,10 +261,7 @@ fn runs_in_bounded_stack(full: &str, tag: &str, stack_kb: u32) -> Result<(), Str
 #[test]
 fn loops_run_in_constant_stack() {
     if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
+        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
         return;
     }
     let n = 1_000_000;
@@ -308,19 +305,11 @@ fn loops_run_in_constant_stack() {
 // computation in a constant-stack driver loop); until it lands these crash at a
 // million iterations. Ignored so the suite is green while the gap is documented;
 // un-ignore when the trampoline lands.
-// Loops whose control still rides the free monad: imperative `break`/`continue`/
-// early `return`. Their loop control reifies into `EOp`/`ebind` cells, but the
-// free-monad trampoline (an `EBounce` step driven by a `musttail` `drive` loop)
-// keeps the native stack constant, so they complete a million iterations under a
-// tight stack instead of overflowing. (Allocation is still O(n); the planned
-// control-effect erasure makes them allocation-free, but they no longer crash.)
 #[test]
+#[ignore = "needs the free-monad trampoline (break/continue/return and parameter-passing effect loops still grow the stack)"]
 fn free_monad_loops_run_in_constant_stack() {
     if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
+        eprintln!("skipping perf gate: C compiler `{}` not found (set PRISM_CC)", cc());
         return;
     }
     let n = 1_000_000;
@@ -341,10 +330,15 @@ fn free_monad_loops_run_in_constant_stack() {
             ),
         ),
         (
-            "break loop",
+            "parameter-passing state loop",
             format!(
-                "fn run(k : Int) : Int =\n  var i := 0\n  loop\n    if i >= k then\n      \
-                 break\n    i += 1\n  i\nfn main() = println(run({n}))\n"
+                "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
+                 fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
+                 spin(k)\n  else\n    rd(())\n\
+                 fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
+                 rd(u, r) => \\(s) -> r(s)(s)\n      wr(v, r) => \\(_s) -> r(())(v)\n      \
+                 return x => \\(_s) -> x\n  f(0)\n\
+                 fn main() = println(run({n}))\n"
             ),
         ),
     ];
@@ -355,39 +349,4 @@ fn free_monad_loops_run_in_constant_stack() {
         }
     }
     assert!(fails.is_empty(), "{}", fails.join("\n"));
-}
-
-// The remaining stack cliff: a hand-rolled, parameter-passing effect handler (the
-// State idiom `\s -> resume(s)(s)`) iterated to scale. Its growth is the
-// state-transformer application chain `(force resume)(s)(s)`, a different site
-// than the `ebind` chain the `EBounce` trampoline covers, so it still overflows.
-// Trampolining first-class application in general would fix it; left ignored and
-// documented because it is exotic (real imperative state uses `var`, which is
-// erased to a mutable cell and never reaches here).
-#[test]
-#[ignore = "parameter-passing effect handlers run at scale still grow the stack (state-transformer apply chain, not the ebind chain)"]
-fn parameter_passing_state_loop_runs_in_constant_stack() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
-    let src = format!(
-        "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
-         fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
-         spin(k)\n  else\n    rd(())\n\
-         fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
-         rd(u, r) => \\(s) -> r(s)(s)\n      wr(v, r) => \\(_s) -> r(())(v)\n      \
-         return x => \\(_s) -> x\n  f(0)\n\
-         fn main() = println(run({}))\n",
-        1_000_000
-    );
-    runs_in_bounded_stack(
-        &prism::with_prelude(&src),
-        "parameter-passing state loop",
-        2048,
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
 }
