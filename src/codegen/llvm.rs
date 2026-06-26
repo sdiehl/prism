@@ -595,9 +595,16 @@ impl Isa for Inkwell<'_> {
 
     // Declarations and globals are created at first use, so the up-front
     // prelude of the textual backends has nothing left to do.
-    fn prelude(&self, _out: &mut String) {}
+    fn prelude(&self, _out: &mut String, _seen: &mut std::collections::BTreeSet<String>) {}
 
-    fn declare(&self, _out: &mut String, sym: &str, arity: usize) {
+    fn declare(
+        &self,
+        _out: &mut String,
+        _seen: &mut std::collections::BTreeSet<String>,
+        sym: &str,
+        arity: usize,
+    ) {
+        // inkwell dedups via get-or-add, so the `seen` set is unused here.
         self.decl(sym, self.i64_fn(arity));
     }
 

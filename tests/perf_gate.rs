@@ -204,6 +204,37 @@ fn allocation_is_flat_for_constant_space_programs() {
 }
 
 #[test]
+fn each_update_reuses_uniquely_owned() {
+    if !have(&cc()) {
+        eprintln!(
+            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
+            cc()
+        );
+        return;
+    }
+    // A uniquely-owned list updated through an `each` path must reuse cells in
+    // place: `fmap` reuses the spine and the per-element rebuild reuses each
+    // record, exactly as the hand-written `fmap(\c -> { c | v = .. }, xs)` would.
+    // A path that lowered to anything fresher than that would show zero reuse.
+    let src = "type Cell = Cell { v: Int }\n\
+               fn bump(xs : List(Cell)) : List(Cell) = { xs | each.v ~ \\(n) -> n + 1 }\n\
+               fn total(xs : List(Cell)) : Int =\n  match xs of\n    Nil => 0\n    Cons(c, r) => c.v + total(r)\n\
+               fn build(n : Int, acc : List(Cell)) : List(Cell) =\n  if n == 0 then acc else build(n - 1, Cons(Cell { v = n }, acc))\n\
+               fn main() = println(total(bump(build(500, Nil))))\n";
+    let hits = stat_src(
+        &prism::with_prelude(src),
+        "each_reuse",
+        "PRISM_REUSE_STATS",
+        "cells reused",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        hits > 0,
+        "a uniquely-owned `each` update reused no cells (hits=0); the path lowering broke FBIP reuse"
+    );
+}
+
+#[test]
 fn fbip_reuse_fires_at_runtime() {
     if !have(&cc()) {
         eprintln!(

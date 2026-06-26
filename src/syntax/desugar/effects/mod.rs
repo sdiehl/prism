@@ -14,13 +14,14 @@ use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
-    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, Pattern, Qualifier, Sugar, SugarArm,
-    Surface, S,
+    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, PathStep, Pattern, Qualifier, Sugar,
+    SugarArm, Surface, S,
 };
 
 mod defaults;
 mod escape;
 mod handlers;
+mod paths;
 mod vars;
 mod views;
 
@@ -270,6 +271,12 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             Expr::RecordUpdate(Box::new(b2), n.clone(), fs2?)
         }
         Expr::RecordUpdatePath(b, ups) => {
+            // An `each`/`?Ctor` step lowers to `fmap`/`match` here, before tc;
+            // what remains is a `Field`-only path the checker and elaborator
+            // rebuild directly.
+            if paths::has_optic(ups) {
+                return paths::lower_optics(b, ups, env, cx, span);
+            }
             let b2 = rw(b, env, cx)?;
             let ups2: Result<Vec<_>, _> = ups
                 .iter()
@@ -278,7 +285,15 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
                         PathOp::Set(v) => PathOp::Set(rw(v, env, cx)?),
                         PathOp::Modify(v) => PathOp::Modify(rw(v, env, cx)?),
                     };
-                    Ok((p.clone(), op2))
+                    // `has_optic` was false, so every step is a `Field`.
+                    let p2 = p
+                        .iter()
+                        .map(|s| match s {
+                            PathStep::Field(f) => PathStep::Field(f.clone()),
+                            _ => unreachable!("optic step in a non-optic path"),
+                        })
+                        .collect();
+                    Ok((p2, op2))
                 })
                 .collect();
             Expr::RecordUpdatePath(Box::new(b2), ups2?)
@@ -829,7 +844,12 @@ impl CtlScan {
             }
             Expr::RecordUpdatePath(b, ups) => {
                 self.go(b);
-                for (_, op) in ups {
+                for (steps, op) in ups {
+                    for s in steps {
+                        if let Some(e) = s.index_expr() {
+                            self.go(e);
+                        }
+                    }
                     self.go(op.expr());
                 }
             }

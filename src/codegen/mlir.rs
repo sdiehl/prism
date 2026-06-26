@@ -201,44 +201,66 @@ impl Isa for MlirText {
         "}\n".into()
     }
 
-    fn prelude(&self, out: &mut String) {
-        out.push_str("llvm.func @printf(!llvm.ptr, ...) -> i32\n");
-        out.push_str("llvm.func @exit(i32)\n");
-        out.push_str("llvm.func @prism_alloc(i64) -> !llvm.ptr\n");
-        out.push_str("llvm.func @prism_div_zero()\n");
-        out.push_str("llvm.func @prism_apply_error()\n");
-        out.push_str("llvm.func @prism_fatal(i64)\n");
-        out.push_str("llvm.func @prism_rc_inc(i64)\n");
-        out.push_str("llvm.func @prism_rc_dec(i64)\n");
-        out.push_str("llvm.func @prism_reuse_token(i64) -> i64\n");
-        out.push_str("llvm.func @prism_reuse_alloc(i64, i64) -> !llvm.ptr\n");
-        out.push_str("llvm.func @prism_effop_alloc()\n");
-        out.push_str("llvm.func @prism_drive_step()\n");
-        out.push_str("llvm.func @prism_taq_snoc(i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_taq_concat(i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_taq_uncons(i64) -> i64\n");
-        out.push_str("llvm.func @prism_frame_bind(i64, i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_frame_handle(i64, i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_frame_mask(i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_kont_splice(i64, i64) -> i64\n");
-        out.push_str("llvm.func @prism_box(i64) -> i64\n");
-        out.push_str("llvm.func @prism_unbox(i64) -> i64\n");
-        out.push_str("llvm.func @prism_print_int(i64)\n");
-        out.push_str("llvm.func @prism_print_nl()\n");
-        out.push_str("llvm.func @prism_read_int() -> i64\n");
-        out.push_str("llvm.func @prism_read_line() -> i64\n");
-        out.push_str("llvm.func @prism_rand() -> i64\n");
-        out.push_str("llvm.func @prism_srand(i64)\n");
-        out.push_str("llvm.func @prism_str_lit(!llvm.ptr, i64) -> i64\n");
+    fn prelude(&self, out: &mut String, seen: &mut BTreeSet<String>) {
+        // The fixed runtime declarations. Some (the `taq` ops, `exit`) also reach
+        // the per-use declares below, so each is registered in `seen` to keep the
+        // textual module from declaring a symbol twice (which fails to verify).
+        const FIXED: &[&str] = &[
+            "llvm.func @printf(!llvm.ptr, ...) -> i32",
+            "llvm.func @exit(i32)",
+            "llvm.func @prism_alloc(i64) -> !llvm.ptr",
+            "llvm.func @prism_div_zero()",
+            "llvm.func @prism_apply_error()",
+            "llvm.func @prism_fatal(i64)",
+            "llvm.func @prism_rc_inc(i64)",
+            "llvm.func @prism_rc_dec(i64)",
+            "llvm.func @prism_reuse_token(i64) -> i64",
+            "llvm.func @prism_reuse_alloc(i64, i64) -> !llvm.ptr",
+            "llvm.func @prism_ref_new(i64) -> i64",
+            "llvm.func @prism_ref_get(i64) -> i64",
+            "llvm.func @prism_ref_set(i64, i64)",
+            "llvm.func @prism_effop_alloc()",
+            "llvm.func @prism_drive_step()",
+            "llvm.func @prism_taq_snoc(i64, i64) -> i64",
+            "llvm.func @prism_taq_concat(i64, i64) -> i64",
+            "llvm.func @prism_taq_uncons(i64) -> i64",
+            "llvm.func @prism_frame_bind(i64, i64, i64) -> i64",
+            "llvm.func @prism_frame_handle(i64, i64, i64) -> i64",
+            "llvm.func @prism_frame_mask(i64, i64) -> i64",
+            "llvm.func @prism_kont_splice(i64, i64) -> i64",
+            "llvm.func @prism_box(i64) -> i64",
+            "llvm.func @prism_unbox(i64) -> i64",
+            "llvm.func @prism_print_int(i64)",
+            "llvm.func @prism_print_nl()",
+            "llvm.func @prism_read_int() -> i64",
+            "llvm.func @prism_read_line() -> i64",
+            "llvm.func @prism_rand() -> i64",
+            "llvm.func @prism_srand(i64)",
+            "llvm.func @prism_str_lit(!llvm.ptr, i64) -> i64",
+        ];
+        for line in FIXED {
+            let name = line
+                .split('@')
+                .nth(1)
+                .and_then(|s| s.split('(').next())
+                .unwrap_or("")
+                .trim();
+            if seen.insert(name.to_string()) {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
         for (sym, arity) in str_builtin_decls() {
-            self.declare(out, &sym, arity);
+            self.declare(out, seen, &sym, arity);
         }
         Self::fmt_global(out, "fmt_g", "%g");
         Self::fmt_global(out, "fmt_s", "%s");
     }
 
-    fn declare(&self, out: &mut String, sym: &str, arity: usize) {
-        writeln!(out, "llvm.func @{sym}({}) -> i64", i64s(arity)).unwrap();
+    fn declare(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str, arity: usize) {
+        if seen.insert(sym.to_string()) {
+            writeln!(out, "llvm.func @{sym}({}) -> i64", i64s(arity)).unwrap();
+        }
     }
 
     fn str_global(&self, out: &mut String, idx: usize, s: &str) {

@@ -11,8 +11,8 @@ use crate::fresh::Fresh;
 use crate::names::{self, dict_ctor, instance_method};
 use crate::sym::Sym;
 use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, PathOp, Pattern, Program,
-    Spanned, Suffix, S,
+    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, PathOp, PathStep, Pattern,
+    Program, Spanned, Suffix, S,
 };
 use crate::types::{infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL};
 
@@ -92,9 +92,12 @@ impl Elab<'_> {
 
     // Name-based chain resolution for REPL re-elaboration, mirroring
     // `field_index_for`. Checked programs carry exact chains in `path_res`.
-    fn path_chain_fallback(&self, path: &[String]) -> Result<Chain, Error> {
+    fn path_chain_fallback(&self, path: &[PathStep<CorePhase>]) -> Result<Chain, Error> {
         path.iter()
             .map(|seg| {
+                let PathStep::Field(seg) = seg else {
+                    return Err(Error::Ice("optic path step survived desugaring".into()));
+                };
                 self.ctors
                     .iter()
                     .find_map(|(cn, info)| {
@@ -113,7 +116,7 @@ impl Elab<'_> {
         &mut self,
         span: Span,
         base_expr: &S<Expr<CorePhase>>,
-        ups: &[(Vec<String>, PathOp<CorePhase>)],
+        ups: &[(Vec<PathStep<CorePhase>>, PathOp<CorePhase>)],
         locals: &Locals,
     ) -> Result<Comp, Error> {
         let chains: Vec<Chain> = match self.checked.path_res.get(&span) {
@@ -858,6 +861,7 @@ impl Elab<'_> {
         let setter = match self.checked.span_types.get(&recv.span) {
             Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "array_set",
             Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "hm_insert",
+            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "list_set",
             other => {
                 return Err(Error::Ice(format!(
                     "indexed assignment target is not a writable container at {:?}: {other:?}",

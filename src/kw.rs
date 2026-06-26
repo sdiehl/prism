@@ -52,6 +52,7 @@ pub const ELSE: &str = "else";
 pub const ELIF: &str = "elif";
 pub const MATCH: &str = "match";
 pub const OF: &str = "of";
+pub const EACH: &str = "each";
 pub const FORALL: &str = "forall";
 pub const TRUE: &str = "true";
 pub const FALSE: &str = "false";

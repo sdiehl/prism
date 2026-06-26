@@ -6,8 +6,33 @@ use super::env::{collect_type_vars, Annot};
 use super::{ClassInfo, Entry, Env, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted};
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, S};
+use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, PathStep, S};
 use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
+
+// Whether the `Field`-only path `short` is a prefix of `long`. tc only ever
+// sees `Field` steps (optic steps are desugared away), so this decides overlap.
+fn field_prefix<P: crate::syntax::ast::Phase>(short: &[PathStep<P>], long: &[PathStep<P>]) -> bool {
+    short.len() <= long.len()
+        && short.iter().zip(long).all(|(a, b)| match (a, b) {
+            (PathStep::Field(x), PathStep::Field(y)) => x == y,
+            _ => false,
+        })
+}
+
+// Render an update path for diagnostics; optic steps are gone by tc, but the
+// match is kept total.
+fn show_path<P: crate::syntax::ast::Phase>(steps: &[PathStep<P>]) -> String {
+    steps
+        .iter()
+        .map(|s| match s {
+            PathStep::Field(f) => f.clone(),
+            PathStep::Each => "each".into(),
+            PathStep::Case(c) => format!("?{c}"),
+            PathStep::Index(_) => "[..]".into(),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
 
 impl Tc<'_> {
     fn lit_range(lit: &ast::IntLit, ty: &Type, span: Span) -> Result<(), TypeError> {
@@ -522,20 +547,22 @@ impl Tc<'_> {
         &mut self,
         env: &Env,
         base: &S<Expr<Core>>,
-        ups: &[(Vec<String>, PathOp<Core>)],
+        ups: &[(Vec<PathStep<Core>>, PathOp<Core>)],
         span: Span,
     ) -> Result<Type, TypeError> {
         let tb = self.synth(env, base)?;
         let tb = self.apply(&tb);
         for (i, (p, _)) in ups.iter().enumerate() {
             for (q, _) in &ups[i + 1..] {
-                if p.starts_with(q) || q.starts_with(p) {
+                // Post-desugar paths are `Field`-only, so a plain field-name
+                // prefix decides overlap.
+                if field_prefix(p, q) || field_prefix(q, p) {
                     return Err(TypeError::Other {
                         span,
                         msg: format!(
                             "conflicting update paths `{}` and `{}`",
-                            p.join("."),
-                            q.join(".")
+                            show_path(p),
+                            show_path(q)
                         ),
                     });
                 }
@@ -546,6 +573,13 @@ impl Tc<'_> {
             let mut cur = tb.clone();
             let mut chain = Vec::new();
             for seg in path {
+                // Optic steps are lowered in desugar, so only `Field` reaches here.
+                let PathStep::Field(seg) = seg else {
+                    return Err(TypeError::Other {
+                        span,
+                        msg: "internal: optic path step survived desugaring".into(),
+                    });
+                };
                 let Type::Con(tname, _) = cur.clone() else {
                     return Err(TypeError::Other {
                         span,
@@ -575,12 +609,13 @@ impl Tc<'_> {
                 cur = ft;
             }
             // `= v` sets, so `v` must have the focus type; `~ f` modifies, so `f`
-            // must be a pure endo-function on the focus. Phase 0 keeps the modify
-            // function pure (effectful focus actions arrive with `each`).
+            // must be a pure endo-function on the focus. The modify function is
+            // required pure: its call is synthesized in elaboration, where a
+            // residual effect row would escape the syntactic effect analysis.
             match op {
                 PathOp::Set(val) => self.check(env, val, &cur)?,
                 PathOp::Modify(f) => {
-                    self.check(env, f, &Type::fun(vec![cur.clone()], cur.clone()))?
+                    self.check(env, f, &Type::fun(vec![cur.clone()], cur.clone()))?;
                 }
             }
             chains.push(chain);
@@ -823,9 +858,18 @@ impl Tc<'_> {
                         ),
                     });
                 }
-                for (d, arg) in doms.iter().zip(args) {
-                    let d = self.apply(d);
-                    self.check(env, arg, &d)?;
+                // Check non-lambda arguments before lambda ones: a concrete
+                // argument can solve type variables a sibling lambda's body
+                // depends on. `map(\e -> e.f, xs)` solves the element type from
+                // `xs` first, so the annotation-free lambda checks against it.
+                for lam_pass in [false, true] {
+                    for (d, arg) in doms.iter().zip(args) {
+                        if matches!(arg.node, Expr::Lam(..)) != lam_pass {
+                            continue;
+                        }
+                        let d = self.apply(d);
+                        self.check(env, arg, &d)?;
+                    }
                 }
                 if args.len() == doms.len() {
                     self.link_row(eff, span)?;
@@ -1207,8 +1251,10 @@ pub(super) fn index_container(ty: &Type) -> Option<(Type, Type, bool)> {
         Type::Con(n, args) if n.as_str() == "HashMap" && args.len() == 1 => {
             Some((Type::Str, args[0].clone(), true))
         }
+        // Writable through `list_set` (functional, O(n)); the in-place `array_set`
+        // is the `Array` case above.
         Type::Con(n, args) if n.as_str() == LIST && args.len() == 1 => {
-            Some((Type::Int, args[0].clone(), false))
+            Some((Type::Int, args[0].clone(), true))
         }
         Type::Str => Some((Type::Int, Type::Int, false)),
         _ => None,

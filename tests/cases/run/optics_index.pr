@@ -1,0 +1,22 @@
+-- The `[i]` path step focuses one element of a list (or array) by index. It
+-- attaches postfix (no dot): `xs[i]`, `party[0].hp`. It composes with field steps
+-- after it, threads multiple indices left to right, and an out-of-range index
+-- leaves the container unchanged (the read defaults back to it).
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type World = World { party: List(Vec2), turn: Int }
+
+fn main() =
+  let xs = Cons(Vec2 { x = 1, y = 2 }, Cons(Vec2 { x = 3, y = 4 }, Nil))
+  -- index then field set
+  println({ xs | [0].x = 99 })
+  -- index then field modify
+  println({ xs | [1].y ~ \(n) -> n + 100 })
+  -- two different indices in one update
+  println({ xs | [0].x = 7, [1].x = 8 })
+  -- field, then index, then field, mixed with a plain field
+  let w = World { party = xs, turn = 1 }
+  println({ w | party[0].x = 0, turn = 5 })
+  -- an out-of-range index leaves the list unchanged
+  println({ xs | [9].x = 0 })

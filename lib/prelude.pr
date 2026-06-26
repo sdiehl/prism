@@ -349,6 +349,13 @@ fn map(f, xs) =
     Nil => Nil
     Cons(x, rest) => Cons(f(x), map(f, rest))
 
+-- Functional index update: a new list with element `i` replaced by `v`, out of
+-- range left unchanged. Backs `xs[i] := v` and the `[i]` optic path on lists.
+fn list_set(xs, i, v) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => if i == 0 then Cons(v, rest) else Cons(x, list_set(rest, i - 1, v))
+
 fn filter(p, xs) =
   match xs of
     Nil => Nil

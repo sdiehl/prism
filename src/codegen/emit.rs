@@ -199,8 +199,11 @@ pub(super) trait Isa {
     fn open_merge(&self, b: &mut Buf, l: &str, dst: &str, preds: &[(String, String)]);
     fn fn_define(&self, name: &str, params: &[String]) -> String;
     fn fn_close(&self) -> String;
-    fn prelude(&self, out: &mut String);
-    fn declare(&self, out: &mut String, sym: &str, arity: usize);
+    fn prelude(&self, out: &mut String, seen: &mut BTreeSet<String>);
+    // Declares `sym` once: a backend that emits text (MLIR) must not re-declare a
+    // symbol the prelude or an earlier use already wrote, or the module fails to
+    // verify. `seen` tracks what has been declared.
+    fn declare(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str, arity: usize);
     fn str_global(&self, out: &mut String, idx: usize, s: &str);
 }
 
@@ -1411,11 +1414,13 @@ pub(super) fn emit_with<I: Isa>(
     }
 
     let mut out = String::new();
-    isa.prelude(&mut out);
+    let mut seen = BTreeSet::new();
+    isa.prelude(&mut out, &mut seen);
     // Runtime declares beyond the static prelude are per-use, so modules that
-    // never leave the immediate fast path stay byte-stable.
+    // never leave the immediate fast path stay byte-stable. `declare` dedups
+    // against the prelude, since some runtime symbols appear in both.
     for (sym, arity) in &cg.used_rt {
-        isa.declare(&mut out, sym, *arity);
+        isa.declare(&mut out, &mut seen, sym, *arity);
     }
     for (i, s) in cg.strs.iter().enumerate() {
         isa.str_global(&mut out, i, s);

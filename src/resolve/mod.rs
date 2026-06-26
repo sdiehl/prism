@@ -532,7 +532,12 @@ impl<'a> Rw<'a> {
             }
             Expr::RecordUpdatePath(x, paths) => {
                 self.expr(x);
-                for (_, op) in paths {
+                for (steps, op) in paths {
+                    for s in steps.iter_mut() {
+                        if let Some(e) = s.index_expr_mut() {
+                            self.expr(e);
+                        }
+                    }
                     self.expr(op.expr_mut());
                 }
             }

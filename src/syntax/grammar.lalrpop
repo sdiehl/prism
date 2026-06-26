@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
@@ -61,6 +61,7 @@ extern {
         "elif"   => Token::Elif,
         "match"  => Token::Match,
         "of"     => Token::Of,
+        "each"   => Token::Each,
         "forall" => Token::Forall,
         "true"   => Token::True,
         "false"  => Token::False,
@@ -893,13 +894,37 @@ Atom: S<Expr> = {
         Spanned { synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
 };
 
-PathUpdate: (Vec<String>, PathOp) = {
-    <first:"ident"> <rest:("." <"ident">)*> "=" <e:Expr> => {
-        let mut p = vec![first]; p.extend(rest); (p, PathOp::Set(e))
+// `[i]` indexes the focus postfix (no dot), so it attaches to a segment or
+// leads a path. `Box`ing the index keeps the step lightweight.
+PathIndex: PathStep = "[" <e:Expr> "]" => PathStep::Index(e);
+
+// A segment yields one or more steps, with optional trailing `[i]` indices.
+// `?Ctor.field` lexes as `?` + a single qualified-name token (`Circle.radius`),
+// so that form is split here into the prism step plus its field steps.
+PathSeg: Vec<PathStep> = {
+    <id:"ident"> <ix:PathIndex*> => { let mut p = vec![PathStep::Field(id)]; p.extend(ix); p },
+    "each" <ix:PathIndex*>        => { let mut p = vec![PathStep::Each]; p.extend(ix); p },
+    "?" <c:"uid"> <ix:PathIndex*> => { let mut p = vec![PathStep::Case(c)]; p.extend(ix); p },
+    "?" <q:"qual"> <ix:PathIndex*> => {
+        let mut parts = q.split('.');
+        let ctor = parts.next().unwrap_or_default().to_string();
+        let mut p = vec![PathStep::Case(ctor)];
+        p.extend(parts.map(|f| PathStep::Field(f.to_string())));
+        p.extend(ix);
+        p
     },
-    <first:"ident"> <rest:("." <"ident">)*> "~" <e:Expr> => {
-        let mut p = vec![first]; p.extend(rest); (p, PathOp::Modify(e))
+    <ix:PathIndex+> => ix,
+};
+
+PathSteps: Vec<PathStep> = {
+    <first:PathSeg> <rest:("." <PathSeg>)*> => {
+        let mut p = first; for r in rest { p.extend(r); } p
     },
+};
+
+PathUpdate: (Vec<PathStep>, PathOp) = {
+    <p:PathSteps> "=" <e:Expr> => (p, PathOp::Set(e)),
+    <p:PathSteps> "~" <e:Expr> => (p, PathOp::Modify(e)),
 };
 
 RecordExprField: (String, S<Expr>) = {

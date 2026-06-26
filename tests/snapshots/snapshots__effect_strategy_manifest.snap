@@ -74,6 +74,7 @@ tests/cases/run/mask.pr: whole-program-free-monad
 tests/cases/run/named_handlers.pr: selective-free-monad
 tests/cases/run/open_nontail.pr: selective-free-monad
 tests/cases/run/opt_chain.pr: selective-free-monad
+tests/cases/run/optics_index.pr: selective-free-monad
 tests/cases/run/param_eff.pr: evidence
 tests/cases/run/rollback.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion

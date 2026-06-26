@@ -1,0 +1,42 @@
+-- The `each` path step traverses every element of any functor (it lowers to
+-- `fmap`): `{ xs | each.f ~ g }` maps `g` over the `f` of every element. It
+-- composes with field steps before and after, with `=`/`~`, nests
+-- (`each ... each`), and folds sibling paths sharing an `each` into one pass.
+-- The list cases below exercise the structure; the Option cases show it is not
+-- list-specific.
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Item = Item { name: String, count: Int }
+
+type Player = Player { name: String, pos: Vec2, hp: Int, bag: List(Item) }
+
+type World = World { party: List(Player), turn: Int }
+
+fn heal(h : Int) : Int = h + 10
+
+fn mk(n : String, h : Int) : Player =
+  Player { name = n, pos = Vec2 { x = 1, y = 2 }, hp = h, bag = Cons(Item { name = "sword", count = 1 }, Nil) }
+
+fn main() =
+  let players = Cons(mk("a", 5), Cons(mk("b", 8), Nil))
+  let world = World { party = players, turn = 1 }
+  -- modify a field of every element
+  println({ players | each.hp ~ heal })
+  -- set a field of every element
+  println({ players | each.hp = 0 })
+  -- terminal each with modify: replace every element via a function
+  println({ players | each ~ \(p) -> { p | hp = 99 } })
+  -- field, then each, then nested field
+  println({ world | party.each.pos.x = 0 })
+  -- sibling paths sharing the each traverse once
+  println({ world | party.each.hp ~ heal, party.each.name = "z" })
+  -- nested each: every item in every player's bag
+  println({ world | party.each.bag.each.count ~ \(n) -> n + 5 })
+  -- each mixed with a plain field set at the top level
+  println({ world | party.each.hp = 1, turn = 2 })
+  -- `each` is over any functor, not just lists: Option here, Some and None
+  let some = Some(Item { name = "gem", count = 3 })
+  println({ some | each.count ~ \(n) -> n * 2 })
+  let none = (None : Option(Item))
+  println({ none | each.count = 0 })

@@ -313,6 +313,9 @@ pub enum Token {
     Match,
     #[token("of")]
     Of,
+    // Reserved only to spell the `each` traversal step in an update path.
+    #[token("each")]
+    Each,
     #[token("forall")]
     Forall,
     #[token("true")]
@@ -539,6 +542,7 @@ impl Token {
             Self::Elif => kw::ELIF,
             Self::Match => kw::MATCH,
             Self::Of => kw::OF,
+            Self::Each => kw::EACH,
             Self::Forall => kw::FORALL,
             Self::True => kw::TRUE,
             Self::False => kw::FALSE,
@@ -715,6 +719,7 @@ mod tests {
             (Token::Elif, kw::ELIF),
             (Token::Match, kw::MATCH),
             (Token::Of, kw::OF),
+            (Token::Each, kw::EACH),
             (Token::Forall, kw::FORALL),
             (Token::True, kw::TRUE),
             (Token::False, kw::FALSE),

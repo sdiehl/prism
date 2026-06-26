@@ -333,7 +333,12 @@ impl Lints {
             }
             Expr::RecordUpdatePath(b, ups) => {
                 self.expr(b);
-                for (_, op) in ups {
+                for (steps, op) in ups {
+                    for s in steps {
+                        if let Some(e) = s.index_expr() {
+                            self.expr(e);
+                        }
+                    }
                     self.expr(op.expr());
                 }
             }

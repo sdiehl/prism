@@ -51,3 +51,40 @@ fn path_update_modify_restores_tilde() {
     assert!(out.contains(" = "), "set sigil lost: {out:?}");
     roundtrips(src);
 }
+
+#[test]
+fn path_update_prism_restores() {
+    // The `?Ctor` prism step survives formatting, with its field tail and mixed
+    // with `each`, and the form is idempotent.
+    let src =
+        "fn f(s, xs) =\n  ({ s | ?Circle.radius ~ double }, { xs | each.?Square.side = 0 })\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(out.contains("?Circle.radius"), "prism step lost: {out:?}");
+    assert!(
+        out.contains("each.?Square.side"),
+        "each+prism lost: {out:?}"
+    );
+    roundtrips(src);
+}
+
+#[test]
+fn path_update_index_restores() {
+    // The `[i]` index step survives formatting: postfix with no dot, leading, and
+    // composed with field and `each` steps, and the form is idempotent.
+    let src = "fn f(xs, w) =\n  ({ xs | [0].x = 1, [i].y ~ g }, { w | party[0].each.hp = 0 })\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(out.contains("[0].x"), "index step lost: {out:?}");
+    assert!(out.contains("party[0].each.hp"), "index+each lost: {out:?}");
+    roundtrips(src);
+}
+
+#[test]
+fn path_update_each_restores() {
+    // The `each` step survives formatting at every depth, mixed with fields and
+    // both operators, and the form is idempotent.
+    let src = "fn f(w) = { w | party.each.hp ~ heal, party.each.bag.each.count = 0, turn = 2 }\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(out.contains("party.each.hp"), "each step lost: {out:?}");
+    assert!(out.contains("bag.each.count"), "nested each lost: {out:?}");
+    roundtrips(src);
+}

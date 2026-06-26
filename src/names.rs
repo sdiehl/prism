@@ -187,6 +187,19 @@ pub fn snapshot(n: u32) -> String {
     format!("snap@{n}")
 }
 
+// Per-element binder for an `each` path step desugared to `map`.
+#[must_use]
+pub fn path_each(n: u32) -> String {
+    format!("each@{n}")
+}
+
+// The base of a path update, bound once so an `each` step's `map` reads it
+// without re-evaluating the (possibly effectful) base expression.
+#[must_use]
+pub fn path_base(n: u32) -> String {
+    format!("base@{n}")
+}
+
 // Binders of a partial-application closure stub: the captured given arguments
 // and the remaining parameters the closure still expects.
 #[must_use]

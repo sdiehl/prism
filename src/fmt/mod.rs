@@ -4,8 +4,8 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, PathOp, Pattern, Program, Qualifier, Sugar,
-    SugarArm, Surface, S,
+    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern, Program, Qualifier,
+    Sugar, SugarArm, Surface, S,
 };
 
 mod decl;
@@ -742,6 +742,36 @@ impl Fmt<'_> {
         Some(out)
     }
 
+    // A path-update path. `Field`/`each`/`?Ctor` join with dots; an `[i]` index
+    // attaches to the preceding step with no dot, as it parses.
+    fn fmt_path(&self, steps: &[PathStep]) -> Option<String> {
+        let mut out = String::new();
+        for s in steps {
+            match s {
+                PathStep::Index(e) => {
+                    out.push('[');
+                    out.push_str(&self.fmt_expr_inline(e, Mode::Flat)?);
+                    out.push(']');
+                }
+                step => {
+                    if !out.is_empty() {
+                        out.push('.');
+                    }
+                    match step {
+                        PathStep::Field(f) => out.push_str(f),
+                        PathStep::Each => out.push_str(kw::EACH),
+                        PathStep::Case(c) => {
+                            out.push('?');
+                            out.push_str(c);
+                        }
+                        PathStep::Index(_) => unreachable!("index handled above"),
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+
     fn fmt_expr_inline(&self, e: &S<Expr>, mode: Mode) -> Option<String> {
         match &e.node {
             Expr::Int(n) => Some(n.to_string()),
@@ -951,8 +981,9 @@ impl Fmt<'_> {
                             PathOp::Set(e) => (kw::EQ, e),
                             PathOp::Modify(e) => (kw::TILDE, e),
                         };
-                        self.fmt_expr_inline(e, Mode::Flat)
-                            .map(|e_s| format!("{} {sigil} {e_s}", p.join(".")))
+                        let ps = self.fmt_path(p)?;
+                        let e_s = self.fmt_expr_inline(e, Mode::Flat)?;
+                        Some(format!("{ps} {sigil} {e_s}"))
                     })
                     .collect();
                 us.map(|us| format!("{{ {base_s} | {} }}", us.join(", ")))

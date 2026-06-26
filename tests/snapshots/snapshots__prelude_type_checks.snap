@@ -103,6 +103,7 @@ lcm : (Int, Int) -> Int ! {}
 length : forall a. (List(a)) -> Int ! {}
 lines_of : (List(String)) -> String ! {}
 list_ap : forall a b e0. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0} ! {}
+list_set : forall a. (List(a), Int, a) -> List(a) ! {}
 list_to_option : forall a. (List(a)) -> Option(a) ! {}
 log10 : (Float) -> Float ! {}
 log2 : (Float) -> Float ! {}

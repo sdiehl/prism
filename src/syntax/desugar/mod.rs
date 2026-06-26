@@ -46,6 +46,12 @@ pub(super) type FnSig = Vec<(String, Option<S<Expr>>)>;
 pub(super) struct Cx {
     pub(super) next: Fresh,
     pub(super) ctors: BTreeSet<String>,
+    // Per constructor: arity and field names (empty when positional). Drives the
+    // `?Ctor` prism lowering, which rebuilds the constructor positionally.
+    pub(super) ctor_shapes: BTreeMap<String, (usize, Vec<String>)>,
+    // Per constructor: how many constructors its type has, so the prism `match`
+    // drops its pass-through arm when the paths already cover every constructor.
+    pub(super) ctor_total: BTreeMap<String, usize>,
     pub(super) effects: Vec<EffectDecl>,
     pub(super) op_sigs: BTreeMap<String, OpSig>,
     pub(super) errors: BTreeSet<String>,
@@ -361,6 +367,24 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         .iter()
         .flat_map(|d| d.ctors.iter().map(|c| c.name.clone()))
         .collect();
+    let ctor_shapes: BTreeMap<String, (usize, Vec<String>)> = prog
+        .types
+        .iter()
+        .flat_map(|d| &d.ctors)
+        .map(|c| {
+            let fields = c
+                .fields
+                .as_ref()
+                .map(|fs| fs.iter().map(|(n, _)| n.clone()).collect())
+                .unwrap_or_default();
+            (c.name.clone(), (c.args.len(), fields))
+        })
+        .collect();
+    let ctor_total: BTreeMap<String, usize> = prog
+        .types
+        .iter()
+        .flat_map(|d| d.ctors.iter().map(move |c| (c.name.clone(), d.ctors.len())))
+        .collect();
     let patterns = lower_patterns(&mut prog, &ctors)?;
     let op_sigs = prog
         .effects
@@ -389,6 +413,8 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     let mut cx = Cx {
         next: Fresh::new(),
         ctors,
+        ctor_shapes,
+        ctor_total,
         effects: Vec::new(),
         op_sigs,
         errors,
@@ -472,6 +498,8 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
     let mut cx = Cx {
         next: Fresh::new(),
         ctors: BTreeSet::new(),
+        ctor_shapes: BTreeMap::new(),
+        ctor_total: BTreeMap::new(),
         effects: Vec::new(),
         op_sigs: BTreeMap::new(),
         errors: BTreeSet::new(),

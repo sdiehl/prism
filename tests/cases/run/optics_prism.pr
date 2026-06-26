@@ -1,0 +1,27 @@
+-- The `?Ctor` path step focuses through a sum constructor (a prism). It rebuilds
+-- the matched constructor and leaves every other constructor untouched (the prism
+-- law for update). It composes with field steps after it, with `each` before it,
+-- folds sibling `?Ctor` paths into one match, and drops its pass-through arm when
+-- the paths cover every constructor.
+
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn double(n : Int) : Int = n * 2
+
+fn main() =
+  let c = Circle { radius = 5 }
+  let s = Square { side = 3 }
+  -- modify through a matching constructor
+  println({ c | ?Circle.radius ~ double })
+  -- a non-matching constructor passes through unchanged
+  println({ s | ?Circle.radius ~ double })
+  -- set through a constructor
+  println({ c | ?Circle.radius = 100 })
+  -- two prism arms cover the whole type: one match, no pass-through arm
+  println({ s | ?Circle.radius = 0, ?Square.side ~ double })
+  -- terminal `?Ctor` replaces the whole matched constructor
+  println({ c | ?Circle ~ \(x) -> Square { side = 1 } })
+  -- `each` then prism: focus the Circles of a list, Squares untouched
+  let shapes =
+    Cons(Circle { radius = 1 }, Cons(Square { side = 2 }, Cons(Circle { radius = 3 }, Nil)))
+  println({ shapes | each.?Circle.radius ~ double })
