@@ -119,6 +119,10 @@ type Env = BTreeMap<i64, Sym>;
 // `EPure`/`EOp`/`Step` synthetics the free-monad and state paths introduce).
 type Lowered = (Core, BTreeMap<String, CtorInfo>);
 
+// The flags are independent lowering modes (whole-program vs selective, early
+// short-circuit, native effect driving and its two sub-states), not a state
+// machine an enum would model, so they stay as separate booleans.
+#[allow(clippy::struct_excessive_bools)]
 struct Lowerer {
     op_ids: BTreeMap<Sym, i64>,
     eff: BTreeSet<Sym>,
@@ -542,11 +546,17 @@ impl Lowerer {
             // A mask reached outside monadic context has no escaping ops to
             // relabel, so it is the identity on its body.
             Comp::Mask(_, b) => self.lower_comp(b)?,
-            Comp::Bind(m, x, n) => Comp::Bind(
-                Box::new(self.lower_comp(m)?),
-                *x,
-                Box::new(self.lower_comp(n)?),
-            ),
+            Comp::Bind(m, x, n) => {
+                if let Some(c) = self.try_lower_fn_answer(m, *x, n)? {
+                    c
+                } else {
+                    Comp::Bind(
+                        Box::new(self.lower_comp(m)?),
+                        *x,
+                        Box::new(self.lower_comp(n)?),
+                    )
+                }
+            }
             Comp::If(v, t, e) => Comp::If(
                 v.clone(),
                 Box::new(self.lower_comp(t)?),
@@ -620,20 +630,18 @@ impl Lowerer {
             // which the `{n}@region` loop drives by tail-calling itself on
             // `qApply(queue, value)`. Eligibility guarantees this is in tail
             // position, so the `EResume` is the clause's result.
-            Comp::App(f, args)
-                if self.native_resume && self.is_resume_app(f) =>
-            {
+            Comp::App(f, args) if self.native_resume && self.is_resume_app(f) => {
                 let Comp::Force(Value::Var(q)) = f.as_ref() else {
                     unreachable!("is_resume_app matched a non-Force(Var)")
                 };
                 let arg = match args.len() {
                     0 => Value::Unit,
                     1 => self.mon_value(&args[0])?,
-                    _ => Value::Tuple(
-                        args.iter()
-                            .map(|a| self.mon_value(a))
-                            .collect::<Result<_, TypeError>>()?,
-                    ),
+                    _ => Value::Tuple(args.iter().map(|a| self.mon_value(a)).collect::<Result<
+                        _,
+                        TypeError,
+                    >>(
+                    )?),
                 };
                 Comp::Return(Value::Ctor(
                     ERESUME.into(),
@@ -949,7 +957,10 @@ impl Lowerer {
     fn forward_eop(&mut self, id: Value, skip: Value, arg: Value, resume: Value) -> Comp {
         let q = self.fresh("q");
         Comp::Bind(
-            Box::new(Comp::StrBuiltin(Builtin::TaqSnoc, vec![Value::Unit, resume])),
+            Box::new(Comp::StrBuiltin(
+                Builtin::TaqSnoc,
+                vec![Value::Unit, resume],
+            )),
             q,
             Box::new(Comp::Return(Value::Ctor(
                 EOP.into(),
@@ -1082,12 +1093,8 @@ impl Lowerer {
                     return Ok(handle);
                 }
                 let sk1 = me.fresh("sk");
-                let reemit = me.forward_eop(
-                    Value::Var(id),
-                    Value::Var(sk1),
-                    Value::Var(arg),
-                    rt.clone(),
-                );
+                let reemit =
+                    me.forward_eop(Value::Var(id), Value::Var(sk1), Value::Var(arg), rt.clone());
                 let forward = Comp::Bind(
                     Box::new(Comp::Prim(CoreOp::Sub, Value::Var(skip), Value::Int(1))),
                     sk1,
@@ -1272,8 +1279,10 @@ impl Lowerer {
                         Box::new(Comp::Call(lname, resume_args)),
                     ),
                 );
-                let (oi, os, oa, ok) =
-                    (me.fresh("id"), me.fresh("sk"), me.fresh("arg"), me.fresh("k"));
+                let oi = me.fresh("id");
+                let os = me.fresh("sk");
+                let oa = me.fresh("arg");
+                let ok = me.fresh("k");
                 let mut redrive_args = vec![Value::Var(cr)];
                 redrive_args.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
                 let op_redrive = (
@@ -1282,8 +1291,7 @@ impl Lowerer {
                 );
                 let ans = me.fresh("ans");
                 let final_arm = (ctor_pat(EPURE, &[ans]), Comp::Return(Value::Var(ans)));
-                let cased =
-                    Comp::Case(Value::Var(cr), vec![resume_arm, op_redrive, final_arm]);
+                let cased = Comp::Case(Value::Var(cr), vec![resume_arm, op_redrive, final_arm]);
                 Ok(Comp::Bind(
                     Box::new(Comp::Call(cname, call_args)),
                     cr,
@@ -1314,6 +1322,203 @@ impl Lowerer {
             r0,
             Box::new(Comp::Call(loop_name, call_args)),
         ))
+    }
+
+    // `let f = <closed function-answer handle> in f(arg)`: the handler's answer
+    // type is a function `S -> A` threaded as a state accumulator (a
+    // parameter-passing handler, e.g. `rd(u, r) => \s -> r(s)(s)`). Each clause
+    // resumes once and applies the result to a new state, so the driver becomes a
+    // single self-tail-recursive loop `region(cur, acc, fvs)` that threads the
+    // state in `acc` and `musttail`s on the resumed continuation: a
+    // parameter-passing loop then runs in constant stack with no per-operation
+    // frame. The boundary application `f(arg)` is folded into the initial call, so
+    // the loop returns the bare answer. Returns None unless the handle is closed,
+    // every clause and the return clause have the state shape, and `f` is applied
+    // exactly once in tail position, so any other program falls back to the proven
+    // free monad. Gated: only when natively driving effects.
+    fn try_lower_fn_answer(
+        &mut self,
+        m: &Comp,
+        f: Sym,
+        n: &Comp,
+    ) -> Result<Option<Comp>, TypeError> {
+        if !self.native {
+            return Ok(None);
+        }
+        let Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        } = m
+        else {
+            return Ok(None);
+        };
+        if ops.is_empty() || self.is_open(body, ops) || return_var.is_none() {
+            return Ok(None);
+        }
+        // Pure shape check first, before any fresh-name or generated-function
+        // mutation, so a non-match leaves the lowerer untouched for the fallback.
+        let Some((ret_s, ret_body)) = state_return(return_body.as_deref()) else {
+            return Ok(None);
+        };
+        let mut clauses = Vec::new();
+        for op in ops {
+            let Some(sc) = state_clause(op) else {
+                return Ok(None);
+            };
+            clauses.push(sc);
+        }
+        if !fn_applied_once_tail(n, f) {
+            return Ok(None);
+        }
+
+        // Captured free vars threaded through the loop and resumptions. The clause
+        // and return lambda params, the op params and the resume are all bound
+        // within their bodies, so they fall out of `comp_without` already.
+        let mut fvs = BTreeSet::new();
+        if let Some(rb) = return_body {
+            fvs.extend(fv::comp_without(rb, return_var.iter()));
+        }
+        for op in ops {
+            let mut s = fv::comp_without(&op.body, &op.params);
+            s.remove(&op.resume);
+            fvs.extend(s);
+        }
+        let mut fvs: Vec<Sym> = fvs.into_iter().collect();
+        fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+        let region = self.fresh("region");
+        let acc = self.fresh("acc");
+
+        // EPure(x) => run the return clause with the accumulator as its state, a
+        // bare answer out.
+        let x = self.fresh("x");
+        let mut pbody = self.lower_comp(&ret_body)?;
+        pbody = Comp::Bind(
+            Box::new(Comp::Return(Value::Var(acc))),
+            ret_s,
+            Box::new(pbody),
+        );
+        let rv = return_var.expect("return_var checked present above");
+        pbody = Comp::Bind(Box::new(Comp::Return(Value::Var(x))), rv, Box::new(pbody));
+        let pure_arm = (ctor_pat(EPURE, &[x]), pbody);
+
+        // EOp(id, skip, arg, k) => dispatch on id; skip is 0 for a closed
+        // handler's own ops, as in the other closed dispatches.
+        let id = self.fresh("id");
+        let skip = self.fresh("sk");
+        let arg = self.fresh("arg");
+        let k = self.fresh("k");
+        let ids: Vec<i64> = ops
+            .iter()
+            .map(|op| self.op_id(op.name))
+            .collect::<Result<_, _>>()?;
+        let fail = Comp::Error(Value::Str(
+            "ICE: unhandled effect op in closed native handler".into(),
+        ));
+        let fvs_ref = &fvs;
+        let clauses_ref = &clauses;
+        let dispatch = self.build_op_chain(
+            &Value::Var(id),
+            &ids,
+            |me, i| {
+                let sc = &clauses_ref[i];
+                let op = &ops[i];
+                // region(qApply(k, A), B, fvs): resume the continuation on `A`,
+                // then thread `B` as the new accumulator.
+                let qa = me.fresh("qa");
+                let mut region_args = vec![Value::Var(qa), sc.b.clone()];
+                region_args.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
+                let mut tail = Comp::Bind(
+                    Box::new(Comp::Call(QAPPLY.into(), vec![Value::Var(k), sc.a.clone()])),
+                    qa,
+                    Box::new(Comp::Call(region, region_args)),
+                );
+                for (pm, px) in sc.prefix.iter().rev() {
+                    let lm = me.lower_comp(pm)?;
+                    tail = Comp::Bind(Box::new(lm), *px, Box::new(tail));
+                }
+                tail = Comp::Bind(
+                    Box::new(Comp::Return(Value::Var(acc))),
+                    sc.s,
+                    Box::new(tail),
+                );
+                Ok(bind_params(&op.params, arg, tail))
+            },
+            fail,
+        )?;
+        let op_arm = (ctor_pat(EOP, &[id, skip, arg, k]), dispatch);
+
+        let cur = self.fresh("cur");
+        let loop_body = Comp::Case(Value::Var(cur), vec![pure_arm, op_arm]);
+        let mut params = vec![cur, acc];
+        params.extend(fvs.iter().copied());
+        self.generated.push(CoreFn {
+            name: region,
+            params,
+            body: loop_body,
+        });
+
+        // Call site: reify the handled computation, then drive it from `arg`. The
+        // continuation `n` has its single `f(arg)` rewritten to the region call.
+        let r0 = self.fresh("r0");
+        let mut aliases = BTreeSet::new();
+        aliases.insert(f);
+        let driven = self
+            .rewrite_fn_use(n, &aliases, region, r0, &fvs)?
+            .ok_or_else(|| TypeError::Ice {
+                msg: "function-answer use-site rewrite failed after shape check".into(),
+            })?;
+        Ok(Some(Comp::Bind(
+            Box::new(self.mon(body)?),
+            r0,
+            Box::new(driven),
+        )))
+    }
+
+    // Rewrite the continuation after `let f = <handle> in n` so the single tail
+    // application `f(arg)` becomes `region(r0, arg, fvs)`, dropping the now-dead
+    // `f` routing. Mirrors `fn_applied_once_tail`, which already verified the
+    // shape, so the `None` arms are unreachable in practice.
+    fn rewrite_fn_use(
+        &mut self,
+        n: &Comp,
+        aliases: &BTreeSet<Sym>,
+        region: Sym,
+        r0: Sym,
+        fvs: &[Sym],
+    ) -> Result<Option<Comp>, TypeError> {
+        match n {
+            Comp::App(f, args) => {
+                let Comp::Force(Value::Var(v)) = f.as_ref() else {
+                    return Ok(None);
+                };
+                if !aliases.contains(v) || args.len() != 1 {
+                    return Ok(None);
+                }
+                let mut call_args = vec![Value::Var(r0), args[0].clone()];
+                call_args.extend(fvs.iter().map(|w| Value::Var(*w)));
+                Ok(Some(Comp::Call(region, call_args)))
+            }
+            Comp::Bind(m, x, rest) => {
+                if let Comp::Return(Value::Var(v)) = m.as_ref() {
+                    if aliases.contains(v) {
+                        let mut a2 = aliases.clone();
+                        a2.insert(*x);
+                        return self.rewrite_fn_use(rest, &a2, region, r0, fvs);
+                    }
+                }
+                if mentions(&fv::comp(m), aliases) {
+                    return Ok(None);
+                }
+                let lm = self.lower_comp(m)?;
+                Ok(self
+                    .rewrite_fn_use(rest, aliases, region, r0, fvs)?
+                    .map(|r| Comp::Bind(Box::new(lm), *x, Box::new(r))))
+            }
+            _ => Ok(None),
+        }
     }
 
     // mask<Eff> becomes a driver that handles nothing: it adds N to the id of
@@ -1452,14 +1657,11 @@ fn mentions(set: &fv::Set, aliases: &BTreeSet<Sym>) -> bool {
 // of an alias disqualifies the clause.
 fn clause_resume_tail(c: &Comp, aliases: &BTreeSet<Sym>, tail: bool) -> bool {
     match c {
-        Comp::App(f, args)
-            if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) =>
-        {
+        Comp::App(f, args) if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) => {
             tail && args.iter().all(|a| !mentions(&fv::value(a), aliases))
         }
         Comp::Bind(m, x, n) => {
-            let routing =
-                matches!(m.as_ref(), Comp::Return(Value::Var(v)) if aliases.contains(v));
+            let routing = matches!(m.as_ref(), Comp::Return(Value::Var(v)) if aliases.contains(v));
             let mut a2 = aliases.clone();
             if let Comp::Return(Value::Var(v)) = m.as_ref() {
                 if aliases.contains(v) {
@@ -1475,9 +1677,215 @@ fn clause_resume_tail(c: &Comp, aliases: &BTreeSet<Sym>, tail: bool) -> bool {
         }
         Comp::Case(v, arms) => {
             !mentions(&fv::value(v), aliases)
-                && arms.iter().all(|(_, b)| clause_resume_tail(b, aliases, tail))
+                && arms
+                    .iter()
+                    .all(|(_, b)| clause_resume_tail(b, aliases, tail))
         }
         other => !mentions(&fv::comp(other), aliases),
+    }
+}
+
+// A function-answer state clause `\s -> let t = resume(A) in t(B)`: the handler's
+// answer type is a function `S -> A` threaded as a state accumulator. `A` is the
+// value the continuation resumes with, `B` the value its result (the next answer
+// function) is applied to, so the loop becomes `region(qApply(k, A), B, fvs)`: a
+// self-tail-call that threads `B` as the new accumulator. `prefix` is the pure
+// routing binds that define `A`/`B` from the lambda param, op params and free
+// vars; they are re-emitted verbatim. None when the clause is not of that shape.
+struct StateClause {
+    s: Sym,
+    prefix: Vec<(Comp, Sym)>,
+    a: Value,
+    b: Value,
+}
+
+fn state_clause(op: &HandleOp) -> Option<StateClause> {
+    let Comp::Return(Value::Thunk(t)) = &op.body else {
+        return None;
+    };
+    let Comp::Lam(ps, inner) = t.as_ref() else {
+        return None;
+    };
+    let [s] = ps.as_slice() else {
+        return None;
+    };
+    let mut aliases = BTreeSet::new();
+    aliases.insert(op.resume);
+    let mut prefix: Vec<(Comp, Sym)> = Vec::new();
+    let mut cur: &Comp = inner;
+    loop {
+        let Comp::Bind(m, x, n) = cur else {
+            return None;
+        };
+        // The resume application `resume(A)` (possibly wrapped in its own pure
+        // routing let-chain) bound to `x`, whose continuation applies `x` to `B`.
+        if let Some((mprefix, a)) = resume_app(m, &aliases) {
+            let b = state_apply_tail(n, *x)?;
+            if mentions(&fv::value(&b), &aliases) {
+                return None;
+            }
+            prefix.extend(mprefix);
+            return Some(StateClause {
+                s: *s,
+                prefix,
+                a,
+                b,
+            });
+        }
+        // `return r to x`: routes the resume through an ANF binder; drop the bind
+        // (the resume is the queue `k`, not a value in scope) and track the alias.
+        if let Comp::Return(Value::Var(v)) = m.as_ref() {
+            if aliases.contains(v) {
+                aliases.insert(*x);
+                cur = n;
+                continue;
+            }
+        }
+        // A pure routing bind that defines part of `A`/`B`: re-emitted as-is.
+        // Anything effectful or that mentions the resume is rejected.
+        if !matches!(m.as_ref(), Comp::Return(_) | Comp::Prim(..))
+            || mentions(&fv::comp(m), &aliases)
+        {
+            return None;
+        }
+        prefix.push(((**m).clone(), *x));
+        cur = n;
+    }
+}
+
+// A resume application `resume(A)`, possibly preceded by its own pure routing
+// let-chain (the ANF binds the elaborator threads `s`/params and the resume
+// through). Returns the pure prefix binds to preserve (resume routing dropped)
+// and the value `A` the continuation resumes with. None when `m` is not a resume
+// application.
+fn resume_app(m: &Comp, aliases: &BTreeSet<Sym>) -> Option<(Vec<(Comp, Sym)>, Value)> {
+    let mut local = aliases.clone();
+    let mut prefix: Vec<(Comp, Sym)> = Vec::new();
+    let mut cur = m;
+    loop {
+        match cur {
+            Comp::App(f, args) => {
+                let Comp::Force(Value::Var(r)) = f.as_ref() else {
+                    return None;
+                };
+                if !local.contains(r) {
+                    return None;
+                }
+                let [a] = args.as_slice() else {
+                    return None;
+                };
+                if mentions(&fv::value(a), &local) {
+                    return None;
+                }
+                return Some((prefix, a.clone()));
+            }
+            Comp::Bind(mm, y, nn) => {
+                if let Comp::Return(Value::Var(v)) = mm.as_ref() {
+                    if local.contains(v) {
+                        local.insert(*y);
+                        cur = nn;
+                        continue;
+                    }
+                }
+                if !matches!(mm.as_ref(), Comp::Return(_) | Comp::Prim(..))
+                    || mentions(&fv::comp(mm), &local)
+                {
+                    return None;
+                }
+                prefix.push(((**mm).clone(), *y));
+                cur = nn;
+            }
+            _ => return None,
+        }
+    }
+}
+
+// The tail of a state clause: the resume result `t` applied once to `B`, modulo
+// `return t to x` routing. Returns `B`.
+fn state_apply_tail(n: &Comp, t: Sym) -> Option<Value> {
+    let mut aliases = BTreeSet::new();
+    aliases.insert(t);
+    let mut cur = n;
+    loop {
+        match cur {
+            Comp::App(f, args) => {
+                let Comp::Force(Value::Var(v)) = f.as_ref() else {
+                    return None;
+                };
+                if !aliases.contains(v) {
+                    return None;
+                }
+                let [b] = args.as_slice() else {
+                    return None;
+                };
+                if mentions(&fv::value(b), &aliases) {
+                    return None;
+                }
+                return Some(b.clone());
+            }
+            Comp::Bind(m, x, rest) => {
+                let Comp::Return(Value::Var(v)) = m.as_ref() else {
+                    return None;
+                };
+                if !aliases.contains(v) {
+                    return None;
+                }
+                aliases.insert(*x);
+                cur = rest;
+            }
+            _ => return None,
+        }
+    }
+}
+
+// The return clause of a function-answer handler: `\s -> R`. Returns the lambda
+// param and body, threaded with the accumulator at the loop's `EPure` arm.
+fn state_return(return_body: Option<&Comp>) -> Option<(Sym, Comp)> {
+    let Comp::Return(Value::Thunk(t)) = return_body? else {
+        return None;
+    };
+    let Comp::Lam(ps, body) = t.as_ref() else {
+        return None;
+    };
+    let [s] = ps.as_slice() else {
+        return None;
+    };
+    Some((*s, (**body).clone()))
+}
+
+// Whether the continuation `n` after `let f = <handle> in n` applies `f` exactly
+// once, as the head of a tail application with a single argument, modulo `return f
+// to x` routing. A `f` used anywhere else (escaping as a value, applied twice)
+// means the answer function cannot be folded into the region loop.
+fn fn_applied_once_tail(n: &Comp, f: Sym) -> bool {
+    let mut aliases = BTreeSet::new();
+    aliases.insert(f);
+    let mut cur = n;
+    loop {
+        match cur {
+            Comp::App(fc, args) => {
+                let Comp::Force(Value::Var(v)) = fc.as_ref() else {
+                    return false;
+                };
+                return aliases.contains(v)
+                    && args.len() == 1
+                    && !mentions(&fv::value(&args[0]), &aliases);
+            }
+            Comp::Bind(m, x, rest) => {
+                if let Comp::Return(Value::Var(v)) = m.as_ref() {
+                    if aliases.contains(v) {
+                        aliases.insert(*x);
+                        cur = rest;
+                        continue;
+                    }
+                }
+                if mentions(&fv::comp(m), &aliases) {
+                    return false;
+                }
+                cur = rest;
+            }
+            _ => return false,
+        }
     }
 }
 
@@ -1574,10 +1982,7 @@ fn qapply_fn() -> CoreFn {
     let u = Sym::from(names::ERR);
 
     // case applied { EPure(w) => qApply(qr, w), EOp(..) => EOp(.., concat(q2, qr)) }
-    let applied = Comp::App(
-        Box::new(Comp::Force(Value::Var(g))),
-        vec![Value::Var(v)],
-    );
+    let applied = Comp::App(Box::new(Comp::Force(Value::Var(g))), vec![Value::Var(v)]);
     let on_op = Comp::Bind(
         Box::new(Comp::StrBuiltin(
             Builtin::TaqConcat,
@@ -1587,7 +1992,12 @@ fn qapply_fn() -> CoreFn {
         Box::new(Comp::Return(Value::Ctor(
             EOP.into(),
             OP_TAG,
-            vec![Value::Var(id), Value::Var(sk), Value::Var(a), Value::Var(spliced)],
+            vec![
+                Value::Var(id),
+                Value::Var(sk),
+                Value::Var(a),
+                Value::Var(spliced),
+            ],
         ))),
     );
     let inner = Comp::Bind(
@@ -1610,7 +2020,10 @@ fn qapply_fn() -> CoreFn {
         name: QAPPLY.into(),
         params: vec![qparam, v],
         body: Comp::Bind(
-            Box::new(Comp::StrBuiltin(Builtin::TaqUncons, vec![Value::Var(qparam)])),
+            Box::new(Comp::StrBuiltin(
+                Builtin::TaqUncons,
+                vec![Value::Var(qparam)],
+            )),
             u,
             Box::new(Comp::Case(Value::Var(u), vec![nil_arm, cons_arm])),
         ),
