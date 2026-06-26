@@ -72,7 +72,9 @@ where
       | some w, some ws => some (w :: ws)
       | _, _ => none
 
-/-- `delta` on runtime values; the integer/boolean fragment of `Prism.delta`. -/
+/-- `delta` on runtime values: the integer/boolean fragment of `Prism.delta`,
+    plus the float arithmetic and comparisons the executable machine evaluates
+    (the substitution `delta` leaves floats abstract; the machine does not). -/
 def deltaR : BinOp → Rv → Rv → Option Rv
   | .add, .int a, .int b => some (.int (a + b))
   | .sub, .int a, .int b => some (.int (a - b))
@@ -89,6 +91,16 @@ def deltaR : BinOp → Rv → Rv → Option Rv
   | .ge, .int a, .int b => some (.bool (a ≥ b))
   | .and, .bool a, .bool b => some (.bool (a && b))
   | .or, .bool a, .bool b => some (.bool (a || b))
+  | .addf, .float a, .float b => some (.float (a + b))
+  | .subf, .float a, .float b => some (.float (a - b))
+  | .mulf, .float a, .float b => some (.float (a * b))
+  | .divf, .float a, .float b => some (.float (a / b))
+  | .eqf, .float a, .float b => some (.bool (a == b))
+  | .nef, .float a, .float b => some (.bool (a != b))
+  | .ltf, .float a, .float b => some (.bool (a < b))
+  | .lef, .float a, .float b => some (.bool (a ≤ b))
+  | .gtf, .float a, .float b => some (.bool (a > b))
+  | .gef, .float a, .float b => some (.bool (a ≥ b))
   | _, _, _ => none
 
 /-- Pattern match against a runtime value, mirroring `match_pat`. -/

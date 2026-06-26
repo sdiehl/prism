@@ -150,10 +150,63 @@ example {m n : Comp}
 
 /- ===== Rendering: match the Rust interpreter's `Rv::show` byte for byte ===== -/
 
+private def stripTrailing (s : String) : String :=
+  if s.any (· == '.') then
+    String.ofList (s.toList.reverse.dropWhile (· == '0') |>.dropWhile (· == '.')).reverse
+  else s
+
+/-- Render a `Float` exactly as the runtime's `fmt_g` (C `printf` `%g`, 6 significant
+    digits, round-half-to-even). Computed from the IEEE bits via exact big-integer
+    arithmetic, so it is byte-identical to `prism run`'s float output. -/
+def fmtG (d : Float) : String :=
+  let bits := d.toBits
+  let neg := (bits >>> 63) == 1
+  let expBits := ((bits >>> 52) &&& 0x7FF).toNat
+  let frac := (bits &&& 0xFFFFFFFFFFFFF).toNat
+  if expBits == 0x7FF then
+    (if frac == 0 then (if neg then "-inf" else "inf") else "nan")
+  else
+    let M : Nat := if expBits == 0 then frac else frac + 2 ^ 52
+    if M == 0 then (if neg then "-0" else "0")
+    else
+      let E : Int := if expBits == 0 then -1074 else (expBits : Int) - 1075
+      -- exact value = M * 2^E = num / 10^scale
+      let num : Nat := if E ≥ 0 then M * 2 ^ E.toNat else M * 5 ^ (-E).toNat
+      let scale : Nat := if E ≥ 0 then 0 else (-E).toNat
+      let e10₀ : Int := ((toString num).length : Int) - 1 - (scale : Int)
+      let q : Int := (scale : Int) - (6 - 1 - e10₀)
+      let R₀ : Nat :=
+        if q ≤ 0 then num * 10 ^ (-q).toNat
+        else
+          let p10 := 10 ^ q.toNat
+          let quot := num / p10
+          let rem := num % p10
+          let half := p10 / 2
+          if rem < half then quot
+          else if rem > half then quot + 1
+          else (if quot % 2 == 0 then quot else quot + 1)
+      -- a rounding carry can bump to 7 digits (e.g. 999999.6 -> 1000000): renormalize
+      let (R, e10) := if (toString R₀).length > 6 then (R₀ / 10, e10₀ + 1) else (R₀, e10₀)
+      let digs : List Char := (toString R).toList
+      let body :=
+        if (-4 : Int) ≤ e10 ∧ e10 < 6 then
+          if e10 ≥ 0 then
+            let intPart := String.ofList (digs.take (e10 + 1).toNat)
+            let fracPart := String.ofList (digs.drop (e10 + 1).toNat)
+            stripTrailing (if fracPart == "" then intPart else intPart ++ "." ++ fracPart)
+          else
+            let zeros := String.ofList (List.replicate ((-e10).toNat - 1) '0')
+            stripTrailing ("0." ++ zeros ++ String.ofList digs)
+        else
+          let mant := stripTrailing (String.ofList (digs.take 1) ++ "." ++ String.ofList (digs.drop 1))
+          let estr := if e10.natAbs < 10 then "0" ++ toString e10.natAbs else toString e10.natAbs
+          mant ++ "e" ++ (if e10 < 0 then "-" else "+") ++ estr
+      (if neg then "-" else "") ++ body
+
 mutual
   def showRv : Rv → String
     | .int n => toString n
-    | .float f => toString f
+    | .float f => fmtG f
     | .bool b => toString b
     | .unit => "()"
     | .str s => s

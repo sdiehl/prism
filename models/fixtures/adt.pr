@@ -1,0 +1,6 @@
+type Box = Empty | Full(Int)
+fn unwrap(b : Box) : Int =
+  match b of
+    Full(n) => n
+    Empty => 0
+fn main() : Int = unwrap(Full(42))
