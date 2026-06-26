@@ -1,0 +1,8 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn test() =\\n\\\n     \\x20 let x = 1 -- trailing on x\\n\\\n     \\x20 let y = x + 2 -- and on y\\n\\\n     \\x20 y\\n\")"
+---
+fn test() =
+  let x = 1  -- trailing on x
+  let y = x + 2  -- and on y
+  y

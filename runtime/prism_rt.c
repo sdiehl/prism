@@ -18,6 +18,7 @@ extern void *mi_calloc(size_t, size_t);
 #define calloc(a, b) mi_calloc(a, b)
 #endif
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1204,7 +1205,22 @@ long prism_rand(void) {
 }
 
 long prism_parse_float(long s) {
-    double d = strtod(prism_str_data(s), NULL);
+    // Mirror the interpreter's `s.trim().parse::<f64>()`: the whole trimmed
+    // string must be a valid decimal float, else 0.0. strtod alone diverges by
+    // accepting trailing garbage (`3.14x` -> 3.14) and hex (`0x10` -> 16), which
+    // the Rust parser rejects.
+    const char *data = prism_str_data(s);
+    while (isspace((unsigned char)*data)) data++;
+    const char *digits = data + (*data == '+' || *data == '-' ? 1 : 0);
+    int hex = digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
+    char *end;
+    double d = strtod(data, &end);
+    if (hex || end == data) {
+        d = 0.0;
+    } else {
+        while (isspace((unsigned char)*end)) end++;
+        if (*end != '\0') d = 0.0;
+    }
     long bits;
     memcpy(&bits, &d, 8);
     return prism_box(bits);

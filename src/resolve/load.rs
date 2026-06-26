@@ -44,10 +44,11 @@ pub fn load(root: &Program, base: &Path) -> Result<Vec<Module>, Error> {
         let file = module_file(base, &path);
         let src = fs::read_to_string(&file).map_err(|e| {
             Error::Resolve(format!(
-                "cannot load module `{}`: {} ({})",
+                "cannot load module `{}`: {} (searched `{}` under root `{}`)",
                 path.join("."),
                 e,
-                file.display()
+                file.display(),
+                base.display()
             ))
         })?;
         let program = parse(&src)

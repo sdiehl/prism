@@ -10,6 +10,7 @@
 //! globally unique symbols. Two modules may export the same short name and
 //! coexist, since references reach the disjoint canonical symbols.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -245,9 +246,7 @@ fn add_reexports(
                     .map_or_else(|| src.keys().cloned().collect(), Clone::clone);
                 for n in names {
                     if let Some(canon) = src.get(&n) {
-                        if let std::collections::btree_map::Entry::Vacant(e) =
-                            mods[ti].exports.entry(n)
-                        {
+                        if let Entry::Vacant(e) = mods[ti].exports.entry(n) {
                             e.insert(canon.clone());
                             changed = true;
                         }
@@ -533,8 +532,8 @@ impl<'a> Rw<'a> {
             }
             Expr::RecordUpdatePath(x, paths) => {
                 self.expr(x);
-                for (_, v) in paths {
-                    self.expr(v);
+                for (_, op) in paths {
+                    self.expr(op.expr_mut());
                 }
             }
             Expr::Handle(body, arms) => {

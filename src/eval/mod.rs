@@ -753,6 +753,8 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             Ok(Rv::Str(s))
         }
         (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(a.powf(*b))),
+        // Strict full-consume parse: trailing garbage and hex yield 0.0, matching
+        // `prism_parse_float` in the runtime (see its note on the strtod divergence).
         (B::ParseFloat, [Rv::Str(s)]) => Ok(Rv::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
         (B::Substring, [Rv::Str(s), Rv::Int(start), Rv::Int(len)]) => {
             let st = usize::try_from(*start).unwrap_or(0);

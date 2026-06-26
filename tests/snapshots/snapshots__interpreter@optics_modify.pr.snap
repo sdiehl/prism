@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optics_modify.pr
+---
+Player(hero, Vec2(3, 4), 30)
+Player(hero, Vec2(3, 4), 40)
+Player(hero, Vec2(4, 4), 20)
+Player(healed, Vec2(3, 4), 30)
+=> ()

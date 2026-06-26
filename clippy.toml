@@ -1,2 +1,4 @@
-# Sized to the largest lowering/emit walker; do not raise casually.
-too-many-lines-threshold = 354
+# Sized to the largest functions in the crate: the class-resolution builder
+# `tc::classes::build_classes` and the expression synthesizer `tc::infer::synth_node`
+# (both 313 lines). Do not raise casually.
+too-many-lines-threshold = 313

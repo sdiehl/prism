@@ -370,6 +370,7 @@ pub enum Ty {
     // A `var x := e` state cell, lowered straight to the pinned existential
     // `Exist(n)` so every read/write/handler of one var unifies through it. Only
     // desugar produces it. It never appears in source or surviving annotations.
+    #[doc(hidden)]
     State(u32),
     Forall(Vec<String>, Box<Self>),
     Fun(Vec<Self>, Row, Box<Self>),
@@ -560,6 +561,30 @@ pub enum Sugar<P: Phase> {
     Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
 }
 
+// The terminal action of an update path. `= e` (`Set`) replaces the focus with
+// `e`; `~ f` (`Modify`) applies `f` to the current focus. The distinction is
+// purely in the desugaring: `Set` ignores the old focus, `Modify` reads it and
+// calls `f`. Both carry an ordinary expression, so neither reaches the core.
+#[derive(Clone, Debug)]
+pub enum PathOp<P: Phase = Surface> {
+    Set(S<Expr<P>>),
+    Modify(S<Expr<P>>),
+}
+
+impl<P: Phase> PathOp<P> {
+    pub const fn expr(&self) -> &S<Expr<P>> {
+        match self {
+            Self::Set(e) | Self::Modify(e) => e,
+        }
+    }
+
+    pub const fn expr_mut(&mut self) -> &mut S<Expr<P>> {
+        match self {
+            Self::Set(e) | Self::Modify(e) => e,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Expr<P: Phase = Surface> {
     Int(IntLit),
@@ -581,9 +606,10 @@ pub enum Expr<P: Phase = Surface> {
     FieldAccess(Box<S<Self>>, String),
     RecordCreate(String, Vec<(String, S<Self>)>),
     RecordUpdate(Box<S<Self>>, String, Vec<(String, S<Self>)>),
-    // `{ base | a.b.c = v, d = w }`: nested functional update along field
+    // `{ base | a.b.c = v, d ~ f }`: nested functional update along field
     // paths, each level a single-constructor rebuild (reusable under Perceus).
-    RecordUpdatePath(Box<S<Self>>, Vec<(Vec<String>, S<Self>)>),
+    // Each path ends in a `PathOp`: `= v` sets the focus, `~ f` modifies it.
+    RecordUpdatePath(Box<S<Self>>, Vec<(Vec<String>, PathOp<P>)>),
     Handle(Box<S<Self>>, Vec<HandlerArm<P>>),
     Mask(String, Box<S<Self>>),
     Inst(Box<S<Self>>, Vec<String>),

@@ -6,7 +6,7 @@ use super::env::{collect_type_vars, Annot};
 use super::{ClassInfo, Entry, Env, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted};
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, S};
+use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, S};
 use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
 
 impl Tc<'_> {
@@ -522,7 +522,7 @@ impl Tc<'_> {
         &mut self,
         env: &Env,
         base: &S<Expr<Core>>,
-        ups: &[(Vec<String>, S<Expr<Core>>)],
+        ups: &[(Vec<String>, PathOp<Core>)],
         span: Span,
     ) -> Result<Type, TypeError> {
         let tb = self.synth(env, base)?;
@@ -542,7 +542,7 @@ impl Tc<'_> {
             }
         }
         let mut chains = Vec::new();
-        for (path, val) in ups {
+        for (path, op) in ups {
             let mut cur = tb.clone();
             let mut chain = Vec::new();
             for seg in path {
@@ -574,7 +574,15 @@ impl Tc<'_> {
                 chain.push((cname, fi, arity));
                 cur = ft;
             }
-            self.check(env, val, &cur)?;
+            // `= v` sets, so `v` must have the focus type; `~ f` modifies, so `f`
+            // must be a pure endo-function on the focus. Phase 0 keeps the modify
+            // function pure (effectful focus actions arrive with `each`).
+            match op {
+                PathOp::Set(val) => self.check(env, val, &cur)?,
+                PathOp::Modify(f) => {
+                    self.check(env, f, &Type::fun(vec![cur.clone()], cur.clone()))?
+                }
+            }
             chains.push(chain);
         }
         self.path_res.insert(span, chains);

@@ -7,7 +7,7 @@ use marginalia::Span;
 use super::{call, eint, evar, sp, spat};
 use crate::error::TypeError;
 use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Constraint, DataDecl, Decl, Expr, Fip, InstanceDecl, IntLit, Param,
+    Arm, BigInt, BinOp, Constraint, DataDecl, Decl, Expr, Fip, InstanceDecl, IntLit, Param, PathOp,
     Pattern, Program, Suffix, Ty, S,
 };
 use crate::types::{EQ_CLASS, ORD_CLASS, SHOW_CLASS};
@@ -120,7 +120,7 @@ fn derive_lens(d: &DataDecl, al: &mut SpanAlloc, cspan: Span) -> Result<Vec<Decl
         let set = sp(
             Expr::RecordUpdatePath(
                 Box::new(evar("_r", sz)),
-                vec![(vec![f.clone()], evar("_v", sz))],
+                vec![(vec![f.clone()], PathOp::Set(evar("_v", sz)))],
             ),
             sz,
         );

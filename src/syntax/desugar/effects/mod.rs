@@ -14,7 +14,7 @@ use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
-    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, Pattern, Qualifier, Sugar, SugarArm,
+    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, Pattern, Qualifier, Sugar, SugarArm,
     Surface, S,
 };
 
@@ -273,7 +273,13 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             let b2 = rw(b, env, cx)?;
             let ups2: Result<Vec<_>, _> = ups
                 .iter()
-                .map(|(p, v)| rw(v, env, cx).map(|v2| (p.clone(), v2)))
+                .map(|(p, op)| {
+                    let op2 = match op {
+                        PathOp::Set(v) => PathOp::Set(rw(v, env, cx)?),
+                        PathOp::Modify(v) => PathOp::Modify(rw(v, env, cx)?),
+                    };
+                    Ok((p.clone(), op2))
+                })
                 .collect();
             Expr::RecordUpdatePath(Box::new(b2), ups2?)
         }
@@ -823,8 +829,8 @@ impl CtlScan {
             }
             Expr::RecordUpdatePath(b, ups) => {
                 self.go(b);
-                for (_, v) in ups {
-                    self.go(v);
+                for (_, op) in ups {
+                    self.go(op.expr());
                 }
             }
             Expr::Handle(b, arms) => {

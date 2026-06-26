@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::kw;
 use crate::sym::Sym;
 
 pub type Effects = BTreeSet<Sym>;
@@ -394,14 +395,14 @@ impl Type {
 
     pub fn show(&self) -> String {
         match self {
-            Self::Unit => "Unit".into(),
-            Self::Int => "Int".into(),
-            Self::I64 => "I64".into(),
-            Self::U64 => "U64".into(),
-            Self::Bool => "Bool".into(),
-            Self::Float => "Float".into(),
-            Self::Char => "Char".into(),
-            Self::Str => "String".into(),
+            Self::Unit => kw::TY_UNIT.into(),
+            Self::Int => kw::TY_INT.into(),
+            Self::I64 => kw::TY_I64.into(),
+            Self::U64 => kw::TY_U64.into(),
+            Self::Bool => kw::TY_BOOL.into(),
+            Self::Float => kw::TY_FLOAT.into(),
+            Self::Char => kw::TY_CHAR.into(),
+            Self::Str => kw::TY_STRING.into(),
             Self::Var(n) => n.to_string(),
             Self::Exist(v) => format!("?{v}"),
             Self::Forall(..) | Self::RowForall(..) => {

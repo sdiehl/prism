@@ -333,8 +333,8 @@ impl Lints {
             }
             Expr::RecordUpdatePath(b, ups) => {
                 self.expr(b);
-                for (_, v) in ups {
-                    self.expr(v);
+                for (_, op) in ups {
+                    self.expr(op.expr());
                 }
             }
             Expr::Handle(b, arms) => {

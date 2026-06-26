@@ -25,7 +25,7 @@ use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::resolve_modules;
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Program};
+use crate::syntax::ast::{Core as CorePhase, Program, Span};
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, Checked, CtorInfo};
 
@@ -233,7 +233,8 @@ pub fn interpret_io_at(
 fn prepared_core(src: &str, base: &Path) -> Result<Core, Error> {
     let (program, checked, core) = frontend(src, base)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, _) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, _, warning) = lower_effects(&core, &checked.ctors)?;
+    emit_lower_warning(src, warning.as_deref());
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
     Ok(core)
@@ -245,8 +246,22 @@ fn lowered_core(
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (program, checked, core) = frontend(src, base)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, ctors, warning) = lower_effects(&core, &checked.ctors)?;
+    emit_lower_warning(src, warning.as_deref());
     Ok((checked, lowered, ctors, sigs))
+}
+
+// Surface the effect-lowering fallback warning through the standard renderer,
+// the same one `emit_warnings` uses for checker diagnostics. The diagnostic
+// comes from the Core phase, which carries no source spans, so it renders as a
+// plain `warning: ...` line (an empty span makes `render_warning` skip the caret).
+fn emit_lower_warning(src: &str, warning: Option<&str>) {
+    if let Some(msg) = warning {
+        eprint!(
+            "{}",
+            crate::error::render_warning(src, "<source>", &Span::empty(0), msg, true)
+        );
+    }
 }
 
 /// The effect-lowering strategy this snippet's program takes.
@@ -262,6 +277,20 @@ fn lowered_core(
 pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Error> {
     let (_, checked, core) = frontend(full, base)?;
     Ok(crate::core::effect_strategy(&core, &checked.ctors)?)
+}
+
+/// The effect-lowering fallback warnings this snippet's program raises.
+///
+/// Empty when it stays on a fused path. Each names the functions that lost
+/// fusion and why, so a test can lock the diagnostic a slow-path program
+/// produces. `full` carries the prelude.
+///
+/// # Errors
+/// Fails on front-end errors.
+pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Error> {
+    let (_, checked, core) = frontend(full, base)?;
+    let (_, _, warning) = lower_effects(&core, &checked.ctors)?;
+    Ok(warning.into_iter().collect())
 }
 
 /// The CBPV core IR of the snippet's own functions (prelude elided),
@@ -634,7 +663,7 @@ pub fn report_at(src: &str, base: &Path) -> String {
 
     #[cfg(feature = "native")]
     match lower_effects(&core, &checked.ctors) {
-        Ok((lowered, ctors)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
+        Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
             Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
             Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
         },

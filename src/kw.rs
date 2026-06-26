@@ -113,6 +113,7 @@ pub const DOT: &str = ".";
 pub const QUESTION_QUESTION: &str = "??";
 pub const QUESTION_DOT: &str = "?.";
 pub const QUESTION: &str = "?";
+pub const TILDE: &str = "~";
 
 // Single-character delimiters
 pub const LPAREN: &str = "(";

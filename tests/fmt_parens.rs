@@ -40,3 +40,14 @@ fn right_nested_non_associative_arith_keeps_parens() {
         roundtrips(src);
     }
 }
+
+#[test]
+fn path_update_modify_restores_tilde() {
+    // The `~` modify operator, on its own and mixed with `=`, must survive
+    // formatting: both sigils restored and the whole form idempotent.
+    let src = "fn f(p) = { p | hp ~ heal, name = \"x\" }\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(out.contains('~'), "modify sigil lost: {out:?}");
+    assert!(out.contains(" = "), "set sigil lost: {out:?}");
+    roundtrips(src);
+}

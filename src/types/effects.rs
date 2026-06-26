@@ -171,8 +171,8 @@ fn of_expr(
         }
         Expr::RecordUpdatePath(base, ups) => {
             let mut acc = of_expr(base, fns, ops, locals);
-            for (_, e) in ups {
-                acc = union(acc, &of_expr(e, fns, ops, locals));
+            for (_, op) in ups {
+                acc = union(acc, &of_expr(op.expr(), fns, ops, locals));
             }
             acc
         }

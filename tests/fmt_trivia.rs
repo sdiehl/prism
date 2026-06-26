@@ -44,6 +44,16 @@ trivia_case!(
      \x20 x\n"
 );
 
+// A comment trailing a binding on the same line stays on that line instead of
+// being relocated above the next statement.
+trivia_case!(
+    trailing_same_line_comments,
+    "fn test() =\n\
+     \x20 let x = 1 -- trailing on x\n\
+     \x20 let y = x + 2 -- and on y\n\
+     \x20 y\n"
+);
+
 // Comments above match arms and inside an arm's body block.
 trivia_case!(
     match_arm_comments,

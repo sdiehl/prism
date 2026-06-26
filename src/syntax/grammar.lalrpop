@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
@@ -102,6 +102,7 @@ extern {
         "/"     => Token::Slash,
         "%"     => Token::Percent,
         "^"     => Token::Caret,
+        "~"     => Token::Tilde,
         "==."   => Token::EqDot,
         "/=."   => Token::NeDot,
         "<."    => Token::LtDot,
@@ -892,9 +893,12 @@ Atom: S<Expr> = {
         Spanned { synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
 };
 
-PathUpdate: (Vec<String>, S<Expr>) = {
+PathUpdate: (Vec<String>, PathOp) = {
     <first:"ident"> <rest:("." <"ident">)*> "=" <e:Expr> => {
-        let mut p = vec![first]; p.extend(rest); (p, e)
+        let mut p = vec![first]; p.extend(rest); (p, PathOp::Set(e))
+    },
+    <first:"ident"> <rest:("." <"ident">)*> "~" <e:Expr> => {
+        let mut p = vec![first]; p.extend(rest); (p, PathOp::Modify(e))
     },
 };
 

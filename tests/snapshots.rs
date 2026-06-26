@@ -724,6 +724,24 @@ fn effect_strategy_manifest() {
     insta::assert_snapshot!(lines.join("\n"));
 }
 
+// A program that drops onto the free monad must say so, not fall back silently.
+// Here `apply` passes the effectful `risky` as a first-class value and the
+// handler does not resume in tail position, so the continuation reifies into EOp
+// cells. `effect_warnings_full` shares `lower`'s single code path, so the warning
+// it returns is exactly the one a build/run surfaces through the standard
+// renderer. This locks both that the fallback warns and the text naming the cause.
+#[test]
+fn free_monad_fallback_warns() {
+    let src = prism::with_prelude(
+        "effect Boom {\n  ctl boom(Int) : Int\n}\n\
+         fn apply(f : (Int) -> Int ! {Boom}, x : Int) : !{Boom} Int = f(x)\n\
+         fn risky(x) =\n  if x == 0 then boom(1) else x\n\
+         fn main() =\n  handle apply(risky, 0) with\n    boom(v, k) => 0 - v\n    return r => r\n",
+    );
+    let warnings = prism::effect_warnings_full(&src, Path::new(".")).unwrap();
+    insta::assert_snapshot!(warnings.join("\n"));
+}
+
 // Optimization coverage requirement. Two guarantees the per-program snapshot
 // cannot give on its own: (1) breadth -- every named fast path keeps at least one
 // live witness in the corpus, so silently losing a whole optimization fails here,

@@ -4,8 +4,8 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, Pattern, Program, Qualifier, Sugar, SugarArm,
-    Surface, S,
+    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, PathOp, Pattern, Program, Qualifier, Sugar,
+    SugarArm, Surface, S,
 };
 
 mod decl;
@@ -286,6 +286,25 @@ impl Fmt<'_> {
             })
     }
 
+    // A line comment that opens on the same source line as `after` (no newline
+    // in between), i.e. a trailing comment like `let x = 1 -- note`. Returns its
+    // text and the offset just past it, so the caller can both append it inline
+    // and skip it when emitting the following statement's leading comments.
+    fn trailing_comment(&self, after: usize) -> Option<(&str, usize)> {
+        let eol = self.source[after..]
+            .find('\n')
+            .map_or(self.source.len(), |i| after + i);
+        self.trivia
+            .between(after, eol)
+            .find_map(|ev| match &ev.trivia {
+                Trivia::Comment {
+                    kind: BuiltinKind::Line,
+                    text,
+                } => Some((text.as_str(), ev.span.end)),
+                _ => None,
+            })
+    }
+
     fn emit_leading_trivia(&self, lo: usize, hi: usize, out: &mut String) {
         for ev in self.trivia.between(lo, hi) {
             match &ev.trivia {
@@ -459,12 +478,23 @@ impl Fmt<'_> {
         // is uniform and lives only here; the stepper renders the bare statement.
         while let Some(step) = self.block_step(cur, indent) {
             let lead = self.lead_comments(prev, cur.span.start, indent);
-            lines.push(if lead.is_empty() {
+            let single_line = !step.rendered.contains('\n');
+            let mut rendered = if lead.is_empty() {
                 step.rendered
             } else {
                 format!("{lead}{}", step.rendered)
-            });
+            };
             prev = step.prev;
+            // Keep a same-line trailing comment on the statement it follows rather
+            // than relocating it onto its own line above the next statement.
+            if single_line {
+                if let Some((text, end)) = self.trailing_comment(prev) {
+                    rendered.push_str("  ");
+                    rendered.push_str(text);
+                    prev = end;
+                }
+            }
+            lines.push(rendered);
             cur = step.next;
             // The sentinel marks an ill-formed trailing `with`. Nothing follows.
             if matches!(&cur.node, Expr::Marker(Marker::With)) {
@@ -916,9 +946,13 @@ impl Fmt<'_> {
                 let base_s = self.fmt_expr_inline(base, Mode::Flat)?;
                 let us: Option<Vec<_>> = ups
                     .iter()
-                    .map(|(p, e)| {
+                    .map(|(p, op)| {
+                        let (sigil, e) = match op {
+                            PathOp::Set(e) => (kw::EQ, e),
+                            PathOp::Modify(e) => (kw::TILDE, e),
+                        };
                         self.fmt_expr_inline(e, Mode::Flat)
-                            .map(|e_s| format!("{} = {e_s}", p.join(".")))
+                            .map(|e_s| format!("{} {sigil} {e_s}", p.join(".")))
                     })
                     .collect();
                 us.map(|us| format!("{{ {base_s} | {} }}", us.join(", ")))

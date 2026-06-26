@@ -45,7 +45,9 @@ pub(super) fn free_resume(e: &S<Expr>, sh: bool) -> Option<Span> {
         Expr::Index(recv, key) => fr(recv).or_else(|| fr(key)),
         Expr::RecordCreate(_, fs) => fs.iter().find_map(|(_, v)| fr(v)),
         Expr::RecordUpdate(b, _, fs) => fr(b).or_else(|| fs.iter().find_map(|(_, v)| fr(v))),
-        Expr::RecordUpdatePath(b, ups) => fr(b).or_else(|| ups.iter().find_map(|(_, v)| fr(v))),
+        Expr::RecordUpdatePath(b, ups) => {
+            fr(b).or_else(|| ups.iter().find_map(|(_, op)| fr(op.expr())))
+        }
         Expr::Sugar(s) => free_resume_sugar(s),
         _ => None,
     }
@@ -183,8 +185,8 @@ fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
         }
         Expr::RecordUpdatePath(b, ups) => {
             walk(b, f);
-            for (_, a) in ups {
-                walk(a, f);
+            for (_, op) in ups {
+                walk(op.expr(), f);
             }
         }
         _ => {}
@@ -259,7 +261,7 @@ pub(super) fn escapes(
         Expr::RecordUpdatePath(b, ups) => {
             escapes(b, ops, ctors, &mut tainted.clone()).or_else(|| {
                 ups.iter()
-                    .find_map(|(_, v)| escapes(v, ops, ctors, &mut tainted.clone()))
+                    .find_map(|(_, op)| escapes(op.expr(), ops, ctors, &mut tainted.clone()))
             })
         }
         Expr::Handle(b, _)

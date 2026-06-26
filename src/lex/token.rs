@@ -415,6 +415,9 @@ pub enum Token {
     Percent,
     #[token("^")]
     Caret,
+    // The path-update modify operator, `{ r | f ~ g }`: apply `g` to the focus.
+    #[token("~")]
+    Tilde,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -600,6 +603,7 @@ impl Token {
             Self::QuestionQuestion => kw::QUESTION_QUESTION,
             Self::QuestionDot => kw::QUESTION_DOT,
             Self::Question => kw::QUESTION,
+            Self::Tilde => kw::TILDE,
             _ => "",
         }
     }
@@ -769,6 +773,7 @@ mod tests {
             (Token::QuestionQuestion, kw::QUESTION_QUESTION),
             (Token::QuestionDot, kw::QUESTION_DOT),
             (Token::Question, kw::QUESTION),
+            (Token::Tilde, kw::TILDE),
         ]
     }
 

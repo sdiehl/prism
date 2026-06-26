@@ -1,0 +1,20 @@
+-- The `~` path-update operator modifies a focus in place: `{ r | f ~ g }`
+-- applies `g` to the current `f` and rebuilds, the modify twin of `{ r | f = v }`.
+-- It runs down nested field paths and mixes freely with `=` in one update.
+
+type Vec2 = Vec2 { x: Int, y: Int } deriving (Show)
+
+type Player = Player { name: String, pos: Vec2, hp: Int } deriving (Show)
+
+fn heal(h : Int) : Int = h + 10
+
+fn main() =
+  let p = Player { name = "hero", pos = Vec2 { x = 3, y = 4 }, hp = 20 }
+  -- single-focus modify with a named function
+  println({ p | hp ~ heal })
+  -- modify with a lambda
+  println({ p | hp ~ \(h) -> h * 2 })
+  -- nested path modify reaches the inner field
+  println({ p | pos.x ~ \(n) -> n + 1 })
+  -- modify and set mix in one update
+  println({ p | hp ~ heal, name = "healed" })
