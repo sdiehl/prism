@@ -379,13 +379,13 @@ Prism has no optic library: no `Lens` type, no `over`/`set`/`toListOf` to compos
 
 A step is one of:
 
-| Step | Meaning |
-| --- | --- |
-| `.field` | descend into a record field |
-| `each` | traverse every element of a functor (lowers to `fmap`) |
-| `[i]` | focus one element of a list or array, by index |
-| `?Ctor` | focus through a sum constructor; others pass through |
-| `(steps where p)` | keep only the foci satisfying the predicate `p` |
+| Step              | Meaning                                                |
+| ----------------- | ------------------------------------------------------ |
+| `.field`          | descend into a record field                            |
+| `each`            | traverse every element of a functor (lowers to `fmap`) |
+| `[i]`             | focus one element of a list or array, by index         |
+| `?Ctor`           | focus through a sum constructor; others pass through   |
+| `(steps where p)` | keep only the foci satisfying the predicate `p`        |
 
 End a path with `= v` to **set** the focus or `~ f` to **modify** it (apply `f`); wrap a path in `s.[ path ]` to **read** every focus it selects into a list. `each` is a reserved keyword; the other steps reuse existing tokens.
 
