@@ -1,6 +1,7 @@
 name = "prism"
-defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Sanity"]
+defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "oracle"]
 
+# Proof libraries: theorems only, no examples, no IO.
 [[lean_lib]]
 name = "Prism"
 
@@ -13,5 +14,7 @@ name = "Dynamics"
 [[lean_lib]]
 name = "Meta"
 
-[[lean_lib]]
-name = "Sanity"
+# Executable: all ad-hoc examples + the runnable CEK oracle demo.
+[[lean_exe]]
+name = "oracle"
+root = "Oracle"
