@@ -65,13 +65,19 @@ jobs:
       - name: Run tests
         run: cargo test --all
 
-      # Re-run the native parity corpus with the C runtime built under UBSan, so
-      # runtime undefined behavior (e.g. a signed left-shift on a negative Int)
-      # fails CI instead of silently working at -O2. -fno-sanitize-recover makes
-      # the first diagnostic abort the program, which fails the parity check.
-      - name: UBSan runtime
+      # Re-run the native parity corpus with the C runtime built under ASan +
+      # UBSan, so runtime undefined behavior (e.g. a signed left-shift on a
+      # negative Int) and spatial/temporal memory bugs (heap overflow on a bignum
+      # limb store, use-after-free of an rc'd cell, a stray kont frame) fail CI
+      # instead of silently working at -O2. -fno-sanitize-recover makes the first
+      # diagnostic abort the program, which fails the parity check. ASan's own
+      # leak detection stays off: the runtime's deterministic PRISM_CHECK_LEAKS
+      # cell-balance gate (asserted by parity.rs) owns that. Runs over the default
+      # build, not --features mimalloc, whose malloc shim ASan cannot instrument.
+      - name: ASan + UBSan runtime
         env:
-          PRISM_CC_FLAGS: "-fsanitize=undefined -fno-sanitize-recover=all"
+          PRISM_CC_FLAGS: "-fsanitize=address,undefined -fno-sanitize-recover=all"
+          ASAN_OPTIONS: "detect_leaks=0:abort_on_error=1"
         run: cargo test --test parity native_matches_interpreter
 
       - name: Check prism formatting
