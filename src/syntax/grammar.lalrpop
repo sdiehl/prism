@@ -787,6 +787,9 @@ Pow: S<Expr> = {
 Call: S<Expr> = {
     <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
         Spanned { synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+    // `e.[ path ]`: read the foci a path selects into a list.
+    <l:@L> <e:Call> "." "[" <p:PathSteps> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?." <field:"ident"> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?" <r:@R> => try_mark(e, l, r),
@@ -912,6 +915,11 @@ PathSeg: Vec<PathStep> = {
         p.extend(parts.map(|f| PathStep::Field(f.to_string())));
         p.extend(ix);
         p
+    },
+    // `(steps where p)`: a filtered traversal. The predicate trails the steps it
+    // guards as a `Where` step.
+    "(" <inner:PathSteps> "where" <pred:Expr> ")" <ix:PathIndex*> => {
+        let mut p = inner; p.push(PathStep::Where(pred)); p.extend(ix); p
     },
     <ix:PathIndex+> => ix,
 };

@@ -361,6 +361,7 @@ fn rw_sugar(
 ) -> Result<S<Expr<Core>>, TypeError> {
     match s {
         Sugar::NamedHandle(f, body, arms) => rw_named(f, body, arms, span, env, cx),
+        Sugar::ReadPath(base, steps) => paths::read_path(base, steps, env, cx, span),
         Sugar::VarDecl(x, init, rest) => rw_var_decl(x, init, rest, span, env, cx),
         Sugar::Assign(x, v) => {
             let v2 = rw(v, env, cx)?;
@@ -779,6 +780,14 @@ impl CtlScan {
                 }
                 self.go(hi);
             }
+            Sugar::ReadPath(b, steps) => {
+                self.go(b);
+                for s in steps {
+                    if let Some(e) = s.sub_expr() {
+                        self.go(e);
+                    }
+                }
+            }
         }
     }
 
@@ -846,7 +855,7 @@ impl CtlScan {
                 self.go(b);
                 for (steps, op) in ups {
                     for s in steps {
-                        if let Some(e) = s.index_expr() {
+                        if let Some(e) = s.sub_expr() {
                             self.go(e);
                         }
                     }

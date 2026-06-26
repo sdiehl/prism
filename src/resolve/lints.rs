@@ -201,6 +201,14 @@ impl Lints {
                 self.expr(key);
                 self.expr(v);
             }
+            Sugar::ReadPath(b, steps) => {
+                self.expr(b);
+                for s in steps {
+                    if let Some(e) = s.sub_expr() {
+                        self.expr(e);
+                    }
+                }
+            }
             Sugar::Throw(_, args) => {
                 for a in args {
                     self.expr(a);
@@ -335,7 +343,7 @@ impl Lints {
                 self.expr(b);
                 for (steps, op) in ups {
                     for s in steps {
-                        if let Some(e) = s.index_expr() {
+                        if let Some(e) = s.sub_expr() {
                             self.expr(e);
                         }
                     }

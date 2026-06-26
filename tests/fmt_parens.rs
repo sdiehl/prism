@@ -68,6 +68,40 @@ fn path_update_prism_restores() {
 }
 
 #[test]
+fn read_path_restores() {
+    // The `s.[ path ]` read form survives formatting across the step vocabulary,
+    // and the form is idempotent.
+    let src = "fn f(ps, s) =\n  (ps.[(each where alive).hp], s.[each.?Circle.radius])\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(
+        out.contains(".[(each where alive).hp]"),
+        "read fold lost: {out:?}"
+    );
+    assert!(
+        out.contains(".[each.?Circle.radius]"),
+        "read prism lost: {out:?}"
+    );
+    roundtrips(src);
+}
+
+#[test]
+fn path_update_where_restores() {
+    // The `(each where p)` filter survives formatting, on its own and composed
+    // deep in a path, and the form is idempotent.
+    let src = "fn f(ps, w) =\n  ({ ps | (each where alive).hp ~ heal }, { w | party.(each where alive).bag.each.count = 0 })\n";
+    let out = prism::format(src).expect("input must parse");
+    assert!(
+        out.contains("(each where alive)"),
+        "where filter lost: {out:?}"
+    );
+    assert!(
+        out.contains("party.(each where alive).bag"),
+        "composed where lost: {out:?}"
+    );
+    roundtrips(src);
+}
+
+#[test]
 fn path_update_index_restores() {
     // The `[i]` index step survives formatting: postfix with no dot, leading, and
     // composed with field and `each` steps, and the form is idempotent.

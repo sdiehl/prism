@@ -743,31 +743,44 @@ impl Fmt<'_> {
     }
 
     // A path-update path. `Field`/`each`/`?Ctor` join with dots; an `[i]` index
-    // attaches to the preceding step with no dot, as it parses.
+    // attaches to the preceding step with no dot; a `where p` filter wraps the
+    // step it follows as `(step where p)`, the form it parses from.
     fn fmt_path(&self, steps: &[PathStep]) -> Option<String> {
-        let mut out = String::new();
-        for s in steps {
-            match s {
+        // Each segment is (joins_with_dot, text). Index segments attach.
+        let mut segs: Vec<(bool, String)> = Vec::new();
+        let mut i = 0;
+        while i < steps.len() {
+            match &steps[i] {
                 PathStep::Index(e) => {
-                    out.push('[');
-                    out.push_str(&self.fmt_expr_inline(e, Mode::Flat)?);
-                    out.push(']');
+                    segs.push((false, format!("[{}]", self.fmt_expr_inline(e, Mode::Flat)?)));
+                    i += 1;
                 }
+                // A bare `where` not preceded by a step never parses; skip defensively.
+                PathStep::Where(_) => i += 1,
                 step => {
-                    if !out.is_empty() {
-                        out.push('.');
-                    }
-                    match step {
-                        PathStep::Field(f) => out.push_str(f),
-                        PathStep::Each => out.push_str(kw::EACH),
-                        PathStep::Case(c) => {
-                            out.push('?');
-                            out.push_str(c);
-                        }
-                        PathStep::Index(_) => unreachable!("index handled above"),
+                    let base = match step {
+                        PathStep::Field(f) => f.clone(),
+                        PathStep::Each => kw::EACH.to_string(),
+                        PathStep::Case(c) => format!("{}{c}", kw::QUESTION),
+                        _ => unreachable!("index/where handled above"),
+                    };
+                    if let Some(PathStep::Where(p)) = steps.get(i + 1) {
+                        let ps = self.fmt_expr_inline(p, Mode::Flat)?;
+                        segs.push((true, format!("({base} {} {ps})", kw::WHERE)));
+                        i += 2;
+                    } else {
+                        segs.push((true, base));
+                        i += 1;
                     }
                 }
             }
+        }
+        let mut out = String::new();
+        for (k, (dot, text)) in segs.iter().enumerate() {
+            if k > 0 && *dot {
+                out.push('.');
+            }
+            out.push_str(text);
         }
         Some(out)
     }
@@ -1030,6 +1043,11 @@ impl Fmt<'_> {
             Sugar::OptChain(e, field) => {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{e_s}{}{field}", kw::QUESTION_DOT))
+            }
+            Sugar::ReadPath(base, steps) => {
+                let base_s = self.fmt_expr_inline(base, mode)?;
+                let path = self.fmt_path(steps)?;
+                Some(format!("{base_s}.[{path}]"))
             }
             Sugar::Assign(x, v) => {
                 if let Some((op, rhs)) = as_compound_assign(x, v) {

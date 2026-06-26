@@ -24,9 +24,9 @@ use marginalia::Span;
 
 use super::{rw, synth_span, Cx, Vars};
 use crate::error::TypeError;
-use crate::names;
 use crate::syntax::ast::{Arm, Core, Expr, PathOp, PathStep, Pattern, Sugar, S};
 use crate::syntax::desugar::{call, evar, lam1, sp, spat};
+use crate::{kw, names};
 
 type Path = (Vec<PathStep>, PathOp);
 
@@ -123,8 +123,34 @@ fn dispatch(
         }
         PathStep::Case(_) => case_over(target, paths, cx, span),
         PathStep::Index(_) => index_over(target, paths, cx, span),
+        PathStep::Where(_) => where_guard(target, paths, cx, span),
         PathStep::Field(_) => unreachable!("dispatch is only entered on an optic step"),
     }
+}
+
+// `if p(focus) then <rest> else focus`: apply the rest only to a focus the
+// predicate keeps, passing the rest through unchanged. The predicate is the one
+// the first path carries; sibling paths through the same filter share it.
+fn where_guard(
+    focus: S<Expr>,
+    paths: Vec<Path>,
+    cx: &mut Cx,
+    span: Span,
+) -> Result<S<Expr>, TypeError> {
+    let PathStep::Where(pred) = &paths[0].0[0] else {
+        unreachable!("where_guard entered on a non-`where` step");
+    };
+    let pred = pred.clone();
+    let stripped = paths
+        .into_iter()
+        .map(|(s, op)| (s[1..].to_vec(), op))
+        .collect();
+    let kept = apply_paths(focus.clone(), stripped, cx, span)?;
+    let cond = call(pred, vec![focus.clone()], synth_span(cx));
+    Ok(sp(
+        Expr::If(Box::new(cond), Box::new(kept), Box::new(focus)),
+        synth_span(cx),
+    ))
 }
 
 // `index_set(xs, i, update(xs[i]))` per `[i]` path, threaded left to right: each
@@ -267,7 +293,10 @@ fn case_over(
                 .cloned()
                 .ok_or_else(|| TypeError::Other {
                     span,
-                    msg: format!("unknown constructor `{ctor}` in `?{ctor}` path step"),
+                    msg: format!(
+                        "unknown constructor `{ctor}` in `{}{ctor}` path step",
+                        kw::QUESTION
+                    ),
                 })?;
         let binders: Vec<String> = (0..arity)
             .map(|_| names::path_each(cx.next.bump()))
@@ -283,7 +312,10 @@ fn case_over(
             let PathStep::Field(f) = head else {
                 return Err(TypeError::Other {
                     span,
-                    msg: format!("`?{ctor}` must be followed by one of its fields"),
+                    msg: format!(
+                        "`{}{ctor}` must be followed by one of its fields",
+                        kw::QUESTION
+                    ),
                 });
             };
             let idx = fields
@@ -352,6 +384,154 @@ fn apply_paths(
     build_update(&focus, paths, cx, span)
 }
 
+// `s.[path]`: the list of foci `path` selects, the read twin of the update. A
+// `Field`/`[i]` step descends, `each` flat-maps, `?Ctor` previews (zero or one),
+// `where` filters; the leaf focus is a one-element list, concatenated up.
+pub(super) fn read_path(
+    base: &S<Expr>,
+    steps: &[PathStep],
+    env: &Vars,
+    cx: &mut Cx,
+    span: Span,
+) -> Result<S<Expr<Core>>, TypeError> {
+    let body = to_list(base.clone(), steps, cx, span)?;
+    rw(&body, env, cx)
+}
+
+const fn nil(cx: &mut Cx) -> S<Expr> {
+    sp(Expr::List(Vec::new()), synth_span(cx))
+}
+
+fn to_list(
+    focus: S<Expr>,
+    steps: &[PathStep],
+    cx: &mut Cx,
+    span: Span,
+) -> Result<S<Expr>, TypeError> {
+    let Some(step) = steps.first() else {
+        // The leaf focus, as a one-element list.
+        return Ok(sp(Expr::List(vec![focus]), synth_span(cx)));
+    };
+    let rest = &steps[1..];
+    match step {
+        PathStep::Field(f) => {
+            let inner = sp(
+                Expr::FieldAccess(Box::new(focus), f.clone()),
+                synth_span(cx),
+            );
+            to_list(inner, rest, cx, span)
+        }
+        PathStep::Each => {
+            let e = names::path_each(cx.next.bump());
+            let body = to_list(evar(&e, synth_span(cx)), rest, cx, span)?;
+            let lam = lam1(&e, body, synth_span(cx));
+            // concat_map(\e -> <foci of e>, focus)
+            Ok(call(
+                evar("concat_map", synth_span(cx)),
+                vec![lam, focus],
+                synth_span(cx),
+            ))
+        }
+        PathStep::Where(pred) => {
+            let kept = to_list(focus.clone(), rest, cx, span)?;
+            let cond = call(pred.clone(), vec![focus], synth_span(cx));
+            let none = nil(cx);
+            Ok(sp(
+                Expr::If(Box::new(cond), Box::new(kept), Box::new(none)),
+                synth_span(cx),
+            ))
+        }
+        PathStep::Index(idx) => {
+            let read = sp(
+                Expr::Index(Box::new(focus), Box::new(idx.clone())),
+                synth_span(cx),
+            );
+            let inner = to_list(read, rest, cx, span)?;
+            // An out-of-range index selects no focus.
+            let none = nil(cx);
+            Ok(sp(
+                Expr::Sugar(Sugar::Default(Box::new(inner), Box::new(none))),
+                synth_span(cx),
+            ))
+        }
+        PathStep::Case(ctor) => to_list_case(focus, ctor, rest, cx, span),
+    }
+}
+
+// `match focus of { C(fields) => <foci>; _ => [] }`: preview through a prism.
+fn to_list_case(
+    focus: S<Expr>,
+    ctor: &str,
+    rest: &[PathStep],
+    cx: &mut Cx,
+    span: Span,
+) -> Result<S<Expr>, TypeError> {
+    let (arity, fields) = cx
+        .ctor_shapes
+        .get(ctor)
+        .cloned()
+        .ok_or_else(|| TypeError::Other {
+            span,
+            msg: format!(
+                "unknown constructor `{ctor}` in `{}{ctor}` path step",
+                kw::QUESTION
+            ),
+        })?;
+    let binders: Vec<String> = (0..arity)
+        .map(|_| names::path_each(cx.next.bump()))
+        .collect();
+    let body = if let Some(PathStep::Field(f)) = rest.first() {
+        let idx = fields
+            .iter()
+            .position(|n| n == f)
+            .ok_or_else(|| TypeError::Other {
+                span,
+                msg: format!("constructor `{ctor}` has no field `{f}`"),
+            })?;
+        to_list(evar(&binders[idx], synth_span(cx)), &rest[1..], cx, span)?
+    } else if rest.is_empty() {
+        // `?C` alone previews the whole matched constructor.
+        let rebuilt = call(
+            evar(ctor, synth_span(cx)),
+            binders.iter().map(|b| evar(b, synth_span(cx))).collect(),
+            synth_span(cx),
+        );
+        sp(Expr::List(vec![rebuilt]), synth_span(cx))
+    } else {
+        return Err(TypeError::Other {
+            span,
+            msg: format!(
+                "`{}{ctor}` must be followed by one of its fields",
+                kw::QUESTION
+            ),
+        });
+    };
+    let pat = spat(
+        Pattern::Ctor(
+            ctor.to_string(),
+            binders
+                .iter()
+                .map(|b| spat(Pattern::Var(b.clone()), synth_span(cx)))
+                .collect(),
+        ),
+        synth_span(cx),
+    );
+    let mut arms = vec![Arm {
+        pat,
+        guard: None,
+        body,
+    }];
+    // Drop the unreachable pass-through arm when the type has one constructor.
+    if cx.ctor_total.get(ctor).copied() != Some(1) {
+        arms.push(Arm {
+            pat: spat(Pattern::Wild, synth_span(cx)),
+            guard: None,
+            body: nil(cx),
+        });
+    }
+    Ok(sp(Expr::Match(Box::new(focus), arms), synth_span(cx)))
+}
+
 fn fmap_call(f: S<Expr>, container: S<Expr>, cx: &mut Cx) -> S<Expr> {
     call(
         evar("fmap", synth_span(cx)),
@@ -400,7 +580,7 @@ fn is_prefix(short: &[PathStep], long: &[PathStep]) -> bool {
             (PathStep::Field(x), PathStep::Field(y)) | (PathStep::Case(x), PathStep::Case(y)) => {
                 x == y
             }
-            (PathStep::Each, PathStep::Each) => true,
+            (PathStep::Each, PathStep::Each) | (PathStep::Where(_), PathStep::Where(_)) => true,
             _ => false,
         })
 }
@@ -410,9 +590,10 @@ fn show_path(steps: &[PathStep]) -> String {
         .iter()
         .map(|s| match s {
             PathStep::Field(f) => f.clone(),
-            PathStep::Each => "each".into(),
-            PathStep::Case(c) => format!("?{c}"),
+            PathStep::Each => kw::EACH.into(),
+            PathStep::Case(c) => format!("{}{c}", kw::QUESTION),
             PathStep::Index(_) => "[..]".into(),
+            PathStep::Where(_) => kw::WHERE.into(),
         })
         .collect::<Vec<_>>()
         .join(".")

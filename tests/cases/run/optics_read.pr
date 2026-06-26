@@ -1,0 +1,30 @@
+-- `s.[ path ]` reads every focus a path selects into a list, the read twin of
+-- the `{ s | path = .. }` update. The same step vocabulary applies: `.field`
+-- descends, `each` flat-maps, `[i]` indexes, `?Ctor` previews (zero or one),
+-- `where` filters. A single-focus path still yields a one-element list.
+
+type Item = Item { name: String, count: Int }
+
+type Player = Player { name: String, hp: Int, bag: List(Item) }
+
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn alive(p : Player) : Bool = p.hp > 0
+
+fn mk(n : String, h : Int) : Player =
+  Player { name = n, hp = h, bag = Cons(Item { name = "a", count = 1 }, Cons(Item { name = "b", count = 2 }, Nil)) }
+
+fn main() =
+  let ps = Cons(mk("a", 5), Cons(mk("b", 0), Cons(mk("c", 3), Nil)))
+  -- every hp
+  println(ps.[each.hp])
+  -- a single focus, still a one-element list
+  println(ps.[[0].name])
+  -- the hp of the living only
+  println(ps.[(each where alive).hp])
+  -- nested each flattens: every item count of every player
+  println(ps.[each.bag.each.count])
+  -- prism preview: the radius of the circles, squares skipped
+  let shapes =
+    Cons(Circle { radius = 7 }, Cons(Square { side = 2 }, Cons(Circle { radius = 9 }, Nil)))
+  println(shapes.[each.?Circle.radius])

@@ -26,9 +26,10 @@ fn show_path<P: crate::syntax::ast::Phase>(steps: &[PathStep<P>]) -> String {
         .iter()
         .map(|s| match s {
             PathStep::Field(f) => f.clone(),
-            PathStep::Each => "each".into(),
-            PathStep::Case(c) => format!("?{c}"),
+            PathStep::Each => crate::kw::EACH.into(),
+            PathStep::Case(c) => format!("{}{c}", crate::kw::QUESTION),
             PathStep::Index(_) => "[..]".into(),
+            PathStep::Where(_) => crate::kw::WHERE.into(),
         })
         .collect::<Vec<_>>()
         .join(".")

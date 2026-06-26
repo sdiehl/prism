@@ -338,7 +338,7 @@ A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qual
 
 ### 8.2 Records
 
-Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the records of [Section 5.7](#57-records); each is an in-place write on a uniquely owned value. The `deriving (Lens)` getters and setters compose with them for deeper access.
+Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the records of [Section 5.7](#57-records); each is an in-place write on a uniquely owned value. The `deriving (Lens)` getters and setters compose with them for deeper access. A path generalizes past nested fields to traversals, indices, prisms, filters, and a read form ([Section 8.6](#86-optic-paths)).
 
 ```prism
 {{#include ../examples/lens_derive.pr}}
@@ -369,9 +369,53 @@ Each form desugars to an existing construct:
 
 ### 8.5 Indexing
 
-`a[i]` reads, `a[i] := v` writes, and `a[i] += e` updates an indexed container. The form is dispatched on the receiver's type (not a class, so no inference change): `Array` is indexed by `Int`, `HashMap` by `String`, `String` by `Int` (yielding the byte), and `List` by `Int`. `Array` and `HashMap` are writable; `String` and `List` are read-only.
+`a[i]` reads, `a[i] := v` writes, and `a[i] += e` updates an indexed container. The form is dispatched on the receiver's type (not a class, so no inference change): `Array` is indexed by `Int`, `HashMap` by `String`, `String` by `Int` (yielding the byte), and `List` by `Int`. `Array`, `HashMap`, and `List` are writable; `String` is read-only. `Array` and `HashMap` rewrite the cell in place (FBIP); a `List` write is the functional `list_set`, rebuilding the spine.
 
 A read is _failable_: a missing index or key performs the `Fail` effect ([Section 7.5](#75-errors-and-failure)), so `a[i]` has type `Elem ! {Fail}` and the partiality surfaces in the row rather than in an `Option` wrapper. It therefore composes with `??`, `?.`, `default`, and the rest of the failure axis: `a[i] ?? d` supplies a default, and the counter idiom is `m[k] := (m[k] ?? 0) + 1`, honest that an absent key starts at zero. A plain write `a[i] := v` is total; `a[i] += e` reads first, so it is `! {Fail}`. Writes rebind the underlying `var` and rewrite the cell in place when it is uniquely owned (FBIP, [Section 10](#10-declarations-and-programs)); nested `grid[i][j] := v` composes the same way. `a[i] := v` requires `a` to be an assignable `var`.
+
+### 8.6 Optic Paths
+
+Prism has no optic library: no `Lens` type, no `over`/`set`/`toListOf` to compose, no profunctor encodings. It has one rule instead. Between the `|` and the operator of a record update ([Section 8.2](#82-records)), or inside `s.[ ... ]`, a **path** is a sequence of steps read left to right. The path _is_ the optic, spelled at the use site rather than reified as a value. Every form is sugar over `map`/`with`/`match`, so in-place reuse and fusion come for free and nothing new reaches the core: this is the language's "effects instead of monads" stance applied to optics, paths instead of optic combinators.
+
+A step is one of:
+
+| Step | Meaning |
+| --- | --- |
+| `.field` | descend into a record field |
+| `each` | traverse every element of a functor (lowers to `fmap`) |
+| `[i]` | focus one element of a list or array, by index |
+| `?Ctor` | focus through a sum constructor; others pass through |
+| `(steps where p)` | keep only the foci satisfying the predicate `p` |
+
+End a path with `= v` to **set** the focus or `~ f` to **modify** it (apply `f`); wrap a path in `s.[ path ]` to **read** every focus it selects into a list. `each` is a reserved keyword; the other steps reuse existing tokens.
+
+Each form lowers to ordinary code, shown here over `type Player = Player { name: String, pos: Vec2, hp: Int, bag: List(Int) }` and `type Shape = Circle { radius: Int } | Square { side: Int }`. A field sets through the derived setter, `{ p | hp = 100 }` to `with_hp(p, 100)`, and nests, `{ pl | pos.x = 30 }` to `with_pos(pl, with_x(pl.pos, 30))`. Modify reads the focus, `{ p | hp ~ heal }` to `with_hp(p, heal(p.hp))`. `each` fans out over any functor, `{ players | each.hp ~ heal }` to `fmap(\p -> with_hp(p, heal(p.hp)), players)`, and composes with descent, `{ world | party.each.pos.x = 0 }`. An index focuses one element, `{ world | party[0].hp = 100 }`, lowering through `list_set` (or in-place `array_set`); an out-of-range index leaves the container unchanged. A prism rebuilds a matched constructor and passes the others through, the prism law for update:
+
+```text
+{ shape | ?Circle.radius ~ double }
+  =>  match shape of
+        Circle { radius = r } => Circle { radius = double(r) }
+        other                 => other
+```
+
+A filter guards a traversal, `{ world | party.(each where alive).hp ~ heal }` applying the rest only to the foci `alive` keeps and passing the rest through. The whole vocabulary composes in one path:
+
+```text
+{ world | party.(each where alive).bag.each.count ~ \(n) -> n + 5 }
+  =>  with_party(world,
+        fmap(\p -> if alive(p)
+                   then with_bag(p, fmap(\it -> with_count(it, it.count + 5), p.bag))
+                   else p,
+             world.party))
+```
+
+The read form `s.[ path ]` collects every focus a path selects into a list, the read twin of the update: `players.[each.hp]` is the list of each `hp`, `each` flat-maps so `world.[party.each.bag.each.count]` flattens, `?Ctor` previews zero or one focus, and a single-focus path yields a one-element list.
+
+Paths are deliberately use-site syntax, not first-class values: there is no `Optic` type, no passing an optic to a function, no library of named composable optics, and optic _kinds_ are not tracked in the type system (that a read-only path is read-only is a structural fact of the desugaring, not a typed law). This is the explicit trade: paths cover the great majority of real optic _use_ and give up abstracting over _which_ optic. The mental model is one breath: steps read left to right, `= v`/`~ f` to write, `s.[ ... ]` to read, nothing escaping into a new core construct.
+
+```prism
+{{#include ../examples/optics_tour.pr}}
+```
 
 ## 9. Patterns
 

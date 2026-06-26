@@ -49,7 +49,7 @@ pub(super) fn free_resume(e: &S<Expr>, sh: bool) -> Option<Span> {
             ups.iter().find_map(|(steps, op)| {
                 steps
                     .iter()
-                    .find_map(|s| s.index_expr().and_then(fr))
+                    .find_map(|s| s.sub_expr().and_then(fr))
                     .or_else(|| fr(op.expr()))
             })
         }),
@@ -92,6 +92,9 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::While(cond, b) => cond.as_deref().and_then(fr).or_else(|| fr(b)),
         Sugar::Break | Sugar::Continue => None,
         Sugar::Return(e) => fr(e),
+        Sugar::ReadPath(b, steps) => {
+            fr(b).or_else(|| steps.iter().find_map(|s| s.sub_expr().and_then(fr)))
+        }
     }
 }
 
@@ -192,7 +195,7 @@ fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
             walk(b, f);
             for (steps, op) in ups {
                 for s in steps {
-                    if let Some(e) = s.index_expr() {
+                    if let Some(e) = s.sub_expr() {
                         walk(e, f);
                     }
                 }
@@ -274,7 +277,7 @@ pub(super) fn escapes(
                     steps
                         .iter()
                         .find_map(|s| {
-                            s.index_expr()
+                            s.sub_expr()
                                 .and_then(|e| escapes(e, ops, ctors, &mut tainted.clone()))
                         })
                         .or_else(|| escapes(op.expr(), ops, ctors, &mut tainted.clone()))

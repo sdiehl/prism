@@ -559,35 +559,40 @@ pub enum Sugar<P: Phase> {
     // (backward, `false`). Kept as sugar so the surface operator survives
     // formatting; desugar lowers it to `\x -> g(f(x))` / `\x -> f(g(x))`.
     Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // `s.[ path ]`: read every focus the path selects into a `List`, the read
+    // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
+    ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),
 }
 
 // One step of an update path, read left to right. `Field(f)` descends into a
 // record field; `Each` fans out over every element of a functor; `Case(C)`
 // focuses through a sum constructor (a prism), leaving other constructors
-// untouched; `Index(i)` focuses one element of an array/list. All but `Field`
-// are removed by desugar (lowered to `fmap`, a `match`, and `index_set`), so a
-// path that reaches tc/elaborate is `Field`-only.
+// untouched; `Index(i)` focuses one element of an array/list; `Where(p)` keeps
+// only foci satisfying `p`. All but `Field` are removed by desugar (lowered to
+// `fmap`, a `match`, `index_set`, and a guard), so a path that reaches
+// tc/elaborate is `Field`-only.
 #[derive(Clone, Debug)]
 pub enum PathStep<P: Phase = Surface> {
     Field(String),
     Each,
     Case(String),
     Index(S<Expr<P>>),
+    Where(S<Expr<P>>),
 }
 
 impl<P: Phase> PathStep<P> {
-    // The index expression of an `[i]` step, the one step carrying a subterm a
-    // surface traversal must visit.
-    pub const fn index_expr(&self) -> Option<&S<Expr<P>>> {
+    // The subterm an `[i]` index or a `where p` filter carries, the steps a
+    // surface traversal must descend into.
+    pub const fn sub_expr(&self) -> Option<&S<Expr<P>>> {
         match self {
-            Self::Index(e) => Some(e),
+            Self::Index(e) | Self::Where(e) => Some(e),
             _ => None,
         }
     }
 
-    pub const fn index_expr_mut(&mut self) -> Option<&mut S<Expr<P>>> {
+    pub const fn sub_expr_mut(&mut self) -> Option<&mut S<Expr<P>>> {
         match self {
-            Self::Index(e) => Some(e),
+            Self::Index(e) | Self::Where(e) => Some(e),
             _ => None,
         }
     }

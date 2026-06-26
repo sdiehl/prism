@@ -534,7 +534,7 @@ impl<'a> Rw<'a> {
                 self.expr(x);
                 for (steps, op) in paths {
                     for s in steps.iter_mut() {
-                        if let Some(e) = s.index_expr_mut() {
+                        if let Some(e) = s.sub_expr_mut() {
                             self.expr(e);
                         }
                     }
@@ -598,6 +598,14 @@ impl<'a> Rw<'a> {
                 self.locals.truncate(base);
             }
             Sugar::OptChain(x, _) => self.expr(x),
+            Sugar::ReadPath(b, steps) => {
+                self.expr(b);
+                for s in steps.iter_mut() {
+                    if let Some(e) = s.sub_expr_mut() {
+                        self.expr(e);
+                    }
+                }
+            }
             Sugar::NamedHandle(name, body, arms) => {
                 let base = self.locals.len();
                 self.locals.push(name.clone());
