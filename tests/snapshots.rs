@@ -218,6 +218,106 @@ fn exit_code_and_stdout() {
     assert_eq!(out.status.code(), Some(7));
 }
 
+// Local monadification partitions the lowered program: the escaping Log
+// component reifies into the free monad (EOp cells threaded by `ebind`), while
+// the unrelated stream pipeline stays fused (its producers thread evidence/state
+// and build no EOp cell). Pins the split so a regression that re-globalizes
+// monadification, dragging the pipeline monadic, surfaces here.
+#[test]
+fn local_monadification_partition() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let src = fs::read_to_string(format!("{root}/tests/cases/run/local_mono_combined.pr")).unwrap();
+    let lowered = prism::dump("lowered", &prism::with_prelude(&src)).unwrap();
+    // Extract a top-level function body (from `fn name(` to the next `\nfn `).
+    let fn_body = |name: &str| -> String {
+        let start = lowered
+            .find(&format!("fn {name}("))
+            .unwrap_or_else(|| panic!("`{name}` missing from lowered dump"));
+        let rest = &lowered[start..];
+        let end = rest[1..].find("\nfn ").map_or(rest.len(), |e| e + 1);
+        rest[..end].to_string()
+    };
+    // The region is monadic: the free monad and its binder appear.
+    assert!(
+        lowered.contains("EOp") && lowered.contains("ebind"),
+        "the escaping Log component must reify into the free monad"
+    );
+    assert!(
+        fn_body("run_all").contains("ebind"),
+        "the dynamically-applied region function must be monadified"
+    );
+    // The stream pipeline stays fused: its producers thread evidence/state and
+    // build no EOp cell.
+    for f in ["srange_go", "smap_go"] {
+        let body = fn_body(f);
+        assert!(
+            !body.contains("EOp") && !body.contains("ebind"),
+            "fused pipeline function `{f}` must not reify into the free monad:\n{body}"
+        );
+        assert!(
+            body.contains("st@") || body.contains("ev@"),
+            "fused pipeline function `{f}` must thread fusion evidence/state:\n{body}"
+        );
+    }
+    // `weight` is a pure helper called from both the region (the escaping
+    // closures) and the rest (`main`). A closure-inert function stays shared in
+    // the rest rather than being pulled into the monadic region, so it neither
+    // reifies nor gains fusion parameters: a plain bare function called from both
+    // conventions. A regression that pulled it in would force a whole-program bail.
+    let weight = fn_body("weight");
+    assert!(
+        weight.starts_with("fn weight(x) =")
+            && !weight.contains("EPure")
+            && !weight.contains("EOp")
+            && !weight.contains("ev@")
+            && !weight.contains("st@"),
+        "the shared inert helper `weight` must stay a plain bare function (no monadic \
+         EPure/EOp, no appended fusion parameters):\n{weight}"
+    );
+}
+
+// The free-monad fallback warning is default-on, proportionate, and free of
+// false positives. A fully fused program is silent; a program with one escaping
+// effectful closure warns exactly once, naming the entangled functions and the
+// cause, never the unrelated fused pipeline beside it. Spawned via the CLI so the
+// compile-time stderr is observable.
+#[test]
+fn free_monad_warning_default_on_and_proportionate() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let stderr = |case: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+            .arg("run")
+            .arg(format!("{root}/{case}"))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    // Zero false positives: a fully fused stream program says nothing.
+    let fused = stderr("examples/stream_fold.pr");
+    assert!(
+        !fused.contains("fell off the fused path"),
+        "a fully fused program must emit no free-monad warning, got: {fused}"
+    );
+    // Exactly one warning, naming the escaping component and its cause.
+    let escaping = stderr("tests/cases/run/local_mono_combined.pr");
+    assert_eq!(
+        escaping.matches("fell off the fused path").count(),
+        1,
+        "an escaping program must warn exactly once: {escaping}"
+    );
+    assert!(
+        escaping.contains("`logged`")
+            && escaping.contains("run_all")
+            && escaping.contains("captures an effectful computation"),
+        "the warning must name the entangled functions and the cause: {escaping}"
+    );
+    // Proportionate: the unrelated fused pipeline is never blamed.
+    assert!(
+        !escaping.contains("smap_go") && !escaping.contains("srange_go"),
+        "the warning must not name the fused pipeline: {escaping}"
+    );
+}
+
 // read_file on a missing path must fail loudly, never return "" silently.
 // Spawned like the exit test so the nonzero exit code is observable.
 #[test]
@@ -567,6 +667,71 @@ fn corpus_files() -> impl Iterator<Item = PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("pr"))
+}
+
+// Strategy classification snapshot: pin which effect-lowering strategy every
+// effectful corpus program takes, so a regression that drops a program from a
+// fused path onto the free monad (or an improvement that lifts it off) is a
+// reviewable diff. The classification is the SAME decision the compiler makes
+// (`prism::effect_strategy_full` shares `lower`'s single code path), so it can
+// never drift from reality. This is the principled answer to the blind spot that
+// let `var` loops ship silently on the whole-program free monad: their slow path
+// is now spelled out here for review. Pure (effect-free) programs are omitted to
+// keep the manifest about the programs whose fusion actually matters.
+#[test]
+fn effect_strategy_manifest() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut lines: Vec<String> = Vec::new();
+    for path in corpus_files() {
+        let src = fs::read_to_string(&path).unwrap();
+        let full = prism::with_prelude(&src);
+        let Ok(strat) = prism::effect_strategy_full(&full, Path::new(".")) else {
+            continue;
+        };
+        if strat == "pure" {
+            continue;
+        }
+        let key = path.strip_prefix(root).unwrap_or(&path).display();
+        lines.push(format!("{key}: {strat}"));
+    }
+    lines.sort();
+    insta::assert_snapshot!(lines.join("\n"));
+}
+
+// Optimization coverage requirement. Two guarantees the per-program snapshot
+// cannot give on its own: (1) breadth -- every named fast path keeps at least one
+// live witness in the corpus, so silently losing a whole optimization fails here,
+// not just shifts a snapshot line; and (2) the basic-loop invariant -- a canonical
+// `var` while-loop must NOT classify as a free-monad strategy, because imperative
+// loops have to compile to constant-stack, allocation-free loops. (2) is the
+// requirement whose absence let the var-loop regression ship; it fails until the
+// var/loop optimization fires and stays a permanent ratchet after.
+#[test]
+fn optimization_coverage() {
+    let mut seen = std::collections::BTreeSet::new();
+    for path in corpus_files() {
+        let src = fs::read_to_string(&path).unwrap();
+        if let Ok(s) = prism::effect_strategy_full(&prism::with_prelude(&src), Path::new(".")) {
+            seen.insert(s);
+        }
+    }
+    for opt in ["evidence", "state-fusion", "local-partial"] {
+        assert!(
+            seen.contains(opt),
+            "no corpus program exercises the `{opt}` fast path; its gate has no live witness"
+        );
+    }
+    // A basic imperative loop must compile to a loop, never the free monad.
+    let loop_prog = prism::with_prelude(
+        "fn run(n : Int) : Int =\n  var s := 0\n  var i := 0\n  while i < n do\n    \
+         i += 1\n    s += i\n  s\nfn main() = println(run(10))\n",
+    );
+    let strat = prism::effect_strategy_full(&loop_prog, Path::new(".")).unwrap();
+    assert!(
+        !strat.contains("free-monad"),
+        "a basic `var` while-loop classifies as `{strat}`: imperative loops must not reify \
+         into the free monad (O(n) heap allocation and stack overflow)"
+    );
 }
 
 #[test]

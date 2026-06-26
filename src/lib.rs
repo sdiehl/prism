@@ -8,7 +8,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 // Link in the mimalloc symbols so the C runtime shim resolves mi_*; no Rust code
-// calls them directly (see runtime/prism_rt.c, MIMALLOC.md).
+// calls them directly (see runtime/prism_rt.c).
 #[cfg(feature = "mimalloc")]
 extern crate libmimalloc_sys as _;
 
@@ -42,9 +42,9 @@ pub use driver::{build, build_at, emit_ir};
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at};
 pub use driver::{
-    check, check_at, core_ir, core_ir_full, dump, dump_at, interpret, interpret_at,
-    interpret_io_at, off_platform_builtins, rc_balanced, report, report_at, with_custom_prelude,
-    with_prelude,
+    check, check_at, core_ir, core_ir_full, dump, dump_at, effect_strategy_full, interpret,
+    interpret_at, interpret_io_at, off_platform_builtins, rc_balanced, report, report_at,
+    with_custom_prelude, with_prelude,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use fmt::{format, format_check};

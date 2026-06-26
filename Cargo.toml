@@ -44,7 +44,7 @@ native = ["dep:inkwell", "dep:clap", "dep:rustyline", "dep:glob", "dep:toml"]
 mlir = ["native"]
 wasm = ["dep:wasm-bindgen"]
 # Opt-in: route the native C runtime allocator through mimalloc. The mi_*
-# symbols come from the libmimalloc-sys crate (no in-tree source). See MIMALLOC.md.
+# symbols come from the libmimalloc-sys crate (no in-tree source).
 mimalloc = ["dep:libmimalloc-sys"]
 
 [lib]

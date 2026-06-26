@@ -625,6 +625,28 @@ impl<'a, I: Isa> Cg<'a, I> {
                 let fvs = self.values(regs, fields)?;
                 Ok(self.reuse_obj(&t, tag, &fvs))
             }
+            // Mutable-cell ops for an erased `var`. The cell flows as an ordinary
+            // owned value; `value` returns the dup'd reference the rc pass gave
+            // this use, which read/write consume (rc_dec the cell after). The
+            // stored/initial value moves into the cell, so it is not dropped here.
+            Comp::RefNew(v) => {
+                let r = self.value(regs, v)?;
+                Ok(self.dst(|i, b, d| i.call(b, d, "prism_ref_new", slice::from_ref(&r))))
+            }
+            Comp::RefGet(c) => {
+                let cv = self.value(regs, c)?;
+                let r = self.dst(|i, b, d| i.call(b, d, "prism_ref_get", slice::from_ref(&cv)));
+                self.rc_dec(&cv);
+                Ok(r)
+            }
+            Comp::RefSet(c, v) => {
+                let cv = self.value(regs, c)?;
+                let rv = self.value(regs, v)?;
+                self.isa
+                    .call_void(&mut self.b, "prism_ref_set", &[cv.clone(), rv]);
+                self.rc_dec(&cv);
+                Ok(self.isa.fresh_zero(&mut self.b))
+            }
         }
     }
 

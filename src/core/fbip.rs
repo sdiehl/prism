@@ -406,6 +406,9 @@ fn rc_thunks(c: &Comp, sigs: &Sigs) -> Comp {
         Comp::App(f, args) => {
             Comp::App(Box::new(rc_thunks(f, sigs)), args.iter().map(rv).collect())
         }
+        Comp::RefNew(v) => Comp::RefNew(rv(v)),
+        Comp::RefGet(v) => Comp::RefGet(rv(v)),
+        Comp::RefSet(c, v) => Comp::RefSet(rv(c), rv(v)),
         other => other.clone(),
     }
 }
@@ -446,7 +449,17 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
         | Comp::PrintS(v)
         | Comp::Error(v)
         | Comp::Srand(v)
-        | Comp::FloatBuiltin(_, v) => count_val(v, out),
+        | Comp::FloatBuiltin(_, v)
+        // A `var` cell flows as an ordinary owned value: each read/write consumes
+        // a reference (the rc pass dups so each use has one), and `ref_set`
+        // overwrites the cell in place. So a Ref op counts its cell and value like
+        // any other consuming leaf.
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => count_val(v, out),
+        Comp::RefSet(c, v) => {
+            count_val(c, out);
+            count_val(v, out);
+        }
         Comp::App(f, args) => {
             for x in freev(f) {
                 *out.entry(x).or_default() += 1;
@@ -627,7 +640,13 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         | Comp::PrintS(v)
         | Comp::Error(v)
         | Comp::Srand(v)
-        | Comp::FloatBuiltin(_, v) => use_val(v, env, sigs),
+        | Comp::FloatBuiltin(_, v)
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => use_val(v, env, sigs),
+        Comp::RefSet(c, v) => {
+            use_val(c, env, sigs)?;
+            use_val(v, env, sigs)
+        }
         // Free the dropped cell, then bind its token (one credit) over the body;
         // a `Reuse` inside the body spends it, so the body brings the token back
         // to zero on every path (enforced by the branch-merge and end-of-scope
@@ -1004,7 +1023,10 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
         | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
-        | Comp::Drop(v) => occ(v),
+        | Comp::Drop(v)
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => occ(v),
+        Comp::RefSet(c, v) => occ(c) + occ(v),
         // `token` shadows `x` over `body`; the freed cell is named in scope.
         Comp::WithReuse { token, freed, body } => {
             occ(freed) + if *token == x { 0 } else { max_uses(x, body) }
@@ -1127,7 +1149,16 @@ fn fip_comp(
         | Comp::Error(v)
         | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
-        | Comp::Drop(v) => val(v),
+        | Comp::Drop(v)
+        // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
+        // only by `erase_local_vars` during effect lowering) is unreachable here;
+        // check its values for completeness.
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => val(v),
+        Comp::RefSet(c, v) => {
+            val(c)?;
+            val(v)
+        }
         Comp::Do(_, args) | Comp::StrBuiltin(_, args) => args.iter().try_for_each(val),
         Comp::Handle {
             body,

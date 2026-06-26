@@ -9,6 +9,7 @@ use crate::names::{self, ENTRY_POINT};
 use crate::sym::Sym;
 use crate::types::{CtorInfo, Type};
 
+mod erase_var;
 mod evidence;
 mod flow;
 mod state;
@@ -82,6 +83,10 @@ type Latent = BTreeMap<Sym, BTreeSet<MaskOp>>;
 // keeping evidence parameter order agreed between callers and callees.
 type Env = BTreeMap<i64, Sym>;
 
+// A lowered program: its functions plus the constructor table (extended with the
+// `EPure`/`EOp`/`Step` synthetics the free-monad and state paths introduce).
+type Lowered = (Core, BTreeMap<String, CtorInfo>);
+
 struct Lowerer {
     op_ids: BTreeMap<Sym, i64>,
     eff: BTreeSet<Sym>,
@@ -109,6 +114,32 @@ pub fn lower(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
 ) -> Result<(Core, BTreeMap<String, CtorInfo>), TypeError> {
+    let (c, ct, _) = lower_impl(core, ctors)?;
+    Ok((c, ct))
+}
+
+/// The lowering strategy a program takes.
+///
+/// The single source of truth is [`lower_impl`] itself, so the classification can
+/// never drift from the decision the compiler actually makes. One of: `pure` (no
+/// effects survive), `evidence`, `state-fusion`, `local-partial` (free monad
+/// confined to a component, rest fused), `whole-program-free-monad`, or
+/// `selective-free-monad`. A perf snapshot pins this per program so a
+/// fusion-to-free-monad regression is a reviewable diff.
+///
+/// # Errors
+/// As [`lower`].
+pub fn strategy(
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<&'static str, TypeError> {
+    Ok(lower_impl(core, ctors)?.2)
+}
+
+fn lower_impl(
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<(Core, BTreeMap<String, CtorInfo>, &'static str), TypeError> {
     // Dead prelude code must not flip the program into monadic mode, so only
     // functions reachable from main are lowered (and kept) at all.
     let shaken;
@@ -126,8 +157,14 @@ pub fn lower(
     } else {
         core
     };
+    // Erase escape-checked local `var` state to mutable cells before anything
+    // else: a var-only program then has no residual effects and returns here,
+    // and a var+effect program becomes a strictly smaller effect problem for the
+    // strategies below (the var was forcing the free monad).
+    let erased = erase_var::erase_local_vars(core);
+    let core = &erased;
     if !core.fns.iter().any(|f| raw_effects(&f.body)) {
-        return Ok((core.clone(), ctors.clone()));
+        return Ok((core.clone(), ctors.clone(), "pure"));
     }
 
     let mut op_set = BTreeSet::new();
@@ -186,7 +223,7 @@ pub fn lower(
     // trackable to its force sites. It fully succeeds or returns None, falling
     // back here with no state to undo.
     if let Some(lowered) = lo.try_lower_ev(core) {
-        return Ok((lowered, ctors.clone()));
+        return Ok((lowered, ctors.clone(), "evidence"));
     }
     if let Some(lowered) = lo.try_lower_state(core) {
         let mut ctors = ctors.clone();
@@ -194,40 +231,31 @@ pub fn lower(
             ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
             ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
         }
-        return Ok((lowered, ctors));
+        return Ok((lowered, ctors, "state-fusion"));
     }
 
-    // Neither fusion path applied, so the continuation is reified into the free
-    // monad (EOp cells), the slow path. Off by default; `PRISM_WARN_FREE_MONAD`
-    // surfaces it for someone tuning a hot effect pipeline back onto a fused path.
-    warn_free_monad(&lo);
+    // Global fusion failed. Before paying the free monad for the whole program,
+    // try to confine it: if the escaping effectful closure lives in a component
+    // whose effects are disjoint from the rest, free-monad only that component
+    // and keep the rest fused (local monadification). Bails to whole-program when
+    // the split is not clean, so it never regresses a program that compiles today.
+    if let Some((c, ct)) = lo.try_local(core, ctors)? {
+        return Ok((c, ct, "local-partial"));
+    }
 
-    let mut fns: Vec<CoreFn> = core
-        .fns
-        .iter()
-        .map(|f| {
-            let body = if lo.eff.contains(&f.name) {
-                lo.mon(&f.body)?
-            } else {
-                lo.lower_comp(&f.body)?
-            };
-            // Trap an effect that escaped every handler whenever `main` is
-            // monadified, not only in whole-program mode: in selective mode an
-            // unhandled effect leaves `main` in `eff` and its `EOp` would
-            // otherwise flow out as a bare value, silently diverging from the
-            // interpreter, which raises `unhandled effect`.
-            let body = if f.name == ENTRY_POINT && lo.eff.contains(&f.name) {
-                lo.unwrap_main(body)
-            } else {
-                body
-            };
-            Ok(CoreFn {
-                name: f.name,
-                params: f.params.clone(),
-                body,
-            })
-        })
-        .collect::<Result<_, TypeError>>()?;
+    // Neither fusion path applied and the escape is not confinable, so the
+    // continuation is reified into the free monad (EOp cells), the slow path.
+    // Default-on warning (silenceable with `PRISM_QUIET`) names the functions
+    // that lost fusion and why.
+    warn_free_monad(core, &genuine_eff(&lo.latent), &lo.latent);
+
+    let entries: BTreeSet<Sym> = if lo.eff.contains(&Sym::new(ENTRY_POINT)) {
+        std::iter::once(Sym::from(ENTRY_POINT)).collect()
+    } else {
+        BTreeSet::new()
+    };
+    let refs: Vec<&CoreFn> = core.fns.iter().collect();
+    let mut fns = lo.lower_set(&refs, &entries)?;
     // The appended drivers are closed by construction, so no hygiene pass is
     // needed. A per-handler driver takes `[res] ++ fvs` as parameters, where
     // `fvs` is `fv::comp_without` of its clause bodies (gathered in
@@ -239,40 +267,115 @@ pub fn lower(
     // bind only the fixed `names::*` set, whose `@` is unforgeable in source, and
     // the drivers reference one another only by `Call`, never by lexical nesting,
     // so a fixed binder can never capture another driver's free occurrence.
-    fns.extend(lo.generated);
+    fns.extend(std::mem::take(&mut lo.generated));
     fns.push(ebind_fn());
-    if lo.full {
-        check_monadified(&fns)?;
-    }
+    let monadic: BTreeSet<Sym> = if lo.full {
+        fns.iter().map(|f| f.name).collect()
+    } else {
+        lo.eff.clone()
+    };
+    let refs: Vec<&CoreFn> = fns.iter().collect();
+    check_convention_boundaries(&fns, &refs, &monadic, lo.full, &entries)?;
 
     let mut ctors = ctors.clone();
     ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
 
-    Ok((Core { fns }, ctors))
+    let strat = if lo.full {
+        "whole-program-free-monad"
+    } else {
+        "selective-free-monad"
+    };
+    Ok((Core { fns }, ctors, strat))
 }
 
-// Off-by-default diagnostic for the free-monad fallback (`PRISM_WARN_FREE_MONAD`).
-// Names the monadified functions so a hot pipeline that fell off the fused
-// evidence/state path can be steered back onto it.
-fn warn_free_monad(lo: &Lowerer) {
-    if std::env::var_os("PRISM_WARN_FREE_MONAD").is_none() {
+// Default-on diagnostic for the free-monad fallback. Falling off the fused
+// evidence/state path is a real performance event (handlers reify into per-op
+// `EOp` cells instead of fusing), so it is announced unless `PRISM_QUIET` is
+// set. It names the monadified functions and the specific cause, so a hot
+// pipeline can be steered back onto a fused path. It fires only here, in the
+// fallback, so a fully fused program is silent (zero false positives).
+// `monadified` is the set that actually reified into EOp cells: in whole-program
+// mode the genuinely effectful functions, in local mode just the entangled
+// component (so the warning names the few functions that lost fusion, not the
+// whole program). Causes are reported only for those functions, so a fused
+// pipeline sharing the program is never blamed.
+fn warn_free_monad(core: &Core, monadified: &BTreeSet<Sym>, fl: &Latent) {
+    if std::env::var_os("PRISM_QUIET").is_some() {
         return;
     }
-    let mut names: Vec<&str> = lo.eff.iter().map(|s| s.as_str()).collect();
+    let mut names: Vec<&str> = monadified.iter().map(|s| s.as_str()).collect();
     names.sort_unstable();
-    let scope = if lo.full {
-        "whole-program"
+    if names.is_empty() {
+        return;
+    }
+    let causes = free_monad_causes(core, monadified, fl);
+    let why = if causes.is_empty() {
+        // No structural cause matched: a reachable handler is not tail-resumptive
+        // (it captures or multiply-applies `resume`), so its continuation is reified.
+        "a handler reifies its continuation (not tail-resumptive)".to_string()
     } else {
-        "selective"
+        causes.join("; ")
     };
     eprintln!(
-        "warning: effect lowering took the free-monad path ({scope}; an effectful \
-         computation escapes first-class, so handlers are reified into EOp cells), \
-         {} function(s) monadified: {}",
+        "warning: effect lowering fell off the fused path: {why}. {} function(s) now \
+         reify into EOp cells per operation instead of fusing: {}. \
+         Call effectful functions directly instead of through a first-class value, or \
+         restructure the handler, to refuse. Silence with PRISM_QUIET.",
         names.len(),
         names.join(", ")
     );
+}
+
+// The genuinely effectful functions: those with a non-empty latent set. This is
+// the natural per-function monadic set, before any whole-program inflation.
+fn genuine_eff(fl: &Latent) -> BTreeSet<Sym> {
+    fl.iter()
+        .filter(|(_, s)| !s.is_empty())
+        .map(|(n, _)| *n)
+        .collect()
+}
+
+// The reasons a program fell to the free monad, each naming the offending
+// function and the construct (an effectful closure at an apply site, a raw
+// do/handle captured in a thunk, or an open handler whose resume escapes). Only
+// the `monadified` functions are scanned, so a fused combinator in the same
+// program (whose thunk legitimately performs effects) is not falsely blamed. The
+// Core IR carries no source spans, so the function name is the locator.
+fn free_monad_causes(core: &Core, monadified: &BTreeSet<Sym>, fl: &Latent) -> Vec<String> {
+    let eff = genuine_eff(fl);
+    let mut causes = Vec::new();
+    for f in core.fns.iter().filter(|f| monadified.contains(&f.name)) {
+        let mut thunks = Vec::new();
+        thunks_in_comp(&f.body, &mut thunks);
+        let captures_effect = thunks.iter().any(|body| {
+            let mut heads = BTreeSet::new();
+            all_calls(body, &mut heads);
+            !heads.is_disjoint(&eff) || raw_effects(body)
+        });
+        if captures_effect {
+            causes.push(format!(
+                "`{}` captures an effectful computation in a first-class closure",
+                f.name
+            ));
+        }
+        if open_resume_escapes(&f.body, fl) {
+            causes.push(format!("`{}` has a handler whose resume escapes", f.name));
+        }
+        if contains_mask(&f.body) {
+            causes.push(format!("`{}` uses `mask`, which disables fusion", f.name));
+        }
+    }
+    // An effect that reaches `main` unhandled is monadified to trap at the top
+    // (the interpreter's unhandled-effect error), the same as today.
+    if monadified.contains(&Sym::new(ENTRY_POINT))
+        && fl
+            .get(&Sym::new(ENTRY_POINT))
+            .is_some_and(|s| !s.is_empty())
+    {
+        causes.push("an effect reaches `main` unhandled".to_string());
+    }
+    causes
 }
 
 impl Lowerer {
@@ -546,9 +649,11 @@ impl Lowerer {
         })
     }
 
-    // Whole-program mode leaves `main` monadic; unwrap the final EPure and
-    // trap on an op that escaped every handler, naming it like the
-    // interpreter's unhandled-effect error.
+    // An entry to a monadic region returns Eff; unwrap its final EPure to the
+    // bare value its (direct-convention) caller expects, and trap on an op that
+    // escaped every handler, naming it like the interpreter's unhandled-effect
+    // error. `main` is the canonical entry (the runtime calls it); under local
+    // monadification every component function a fused caller invokes is one too.
     fn unwrap_main(&mut self, body: Comp) -> Comp {
         let r = self.fresh("r");
         let x = self.fresh("x");
@@ -586,6 +691,157 @@ impl Lowerer {
                 ],
             )),
         )
+    }
+
+    // Lower a set of functions on the free-monad path: monadify the effectful
+    // ones (`self.eff`), leave the rest direct, and unwrap each entry. Shared by
+    // the whole-program fallback and the local-monadification region.
+    fn lower_set(
+        &mut self,
+        fns: &[&CoreFn],
+        entries: &BTreeSet<Sym>,
+    ) -> Result<Vec<CoreFn>, TypeError> {
+        fns.iter()
+            .map(|f| {
+                let body = if self.eff.contains(&f.name) {
+                    self.mon(&f.body)?
+                } else {
+                    self.lower_comp(&f.body)?
+                };
+                // Trap an effect that escaped every handler whenever the function
+                // is a monadic entry, not only in whole-program mode: an unhandled
+                // effect would otherwise flow out as a bare `EOp`, silently
+                // diverging from the interpreter, which raises `unhandled effect`.
+                let body = if entries.contains(&f.name) && self.eff.contains(&f.name) {
+                    self.unwrap_main(body)
+                } else {
+                    body
+                };
+                Ok(CoreFn {
+                    name: f.name,
+                    params: f.params.clone(),
+                    body,
+                })
+            })
+            .collect()
+    }
+
+    // The functions whose body lets an effectful closure escape untrackably, or
+    // whose open handler's resume escapes: the seeds of the monadic region.
+    fn escaping_set(&self, core: &Core) -> BTreeSet<Sym> {
+        let mut s = flow::escaping_fns(core, &self.latent, &self.flow);
+        for f in &core.fns {
+            if open_resume_escapes(&f.body, &self.latent) {
+                s.insert(f.name);
+            }
+        }
+        s
+    }
+
+    // Local monadification (Phase A). When an effectful closure escapes, confine
+    // the free monad to the flow/effect-connected component that contains it and
+    // keep everything else fused. Returns the fully lowered program when the split
+    // is clean, or None to fall back to whole-program monadification (sound, no
+    // regression). The cleanliness is structural: the component's effect ops are
+    // disjoint from the rest (so no boundary call crosses a live effect), and no
+    // thunk crosses the boundary as a call argument or entry result (so the two
+    // calling conventions never meet on a first-class value); `monadic_region`
+    // returns None otherwise.
+    fn try_local(
+        &mut self,
+        core: &Core,
+        base_ctors: &BTreeMap<String, CtorInfo>,
+    ) -> Result<Option<Lowered>, TypeError> {
+        let escaping = self.escaping_set(core);
+        if escaping.is_empty() {
+            return Ok(None);
+        }
+        let Some((region, entries)) = monadic_region(core, &self.latent, &escaping) else {
+            return Ok(None);
+        };
+        // `main` must be fusable (in the rest) for the rest to fuse at all; if it
+        // is in the region the rest-fusion guard rejects it anyway.
+        if region.contains(&Sym::new(ENTRY_POINT)) {
+            return Ok(None);
+        }
+
+        // Below here `self.eff`/`full`/`early`/`generated` are reconfigured for
+        // the two sub-lowerings. Save them so any bail restores the whole-program
+        // state `monadic_set` chose, which the fallback then uses unchanged.
+        let saved_eff = std::mem::take(&mut self.eff);
+        let saved_full = self.full;
+        let restore = |me: &mut Self, eff: BTreeSet<Sym>, full: bool| {
+            me.eff = eff;
+            me.full = full;
+            me.early = false;
+            me.generated.clear();
+        };
+
+        // Fuse the rest. Evidence threading appends evidence for genuinely
+        // effectful functions only, so reset `eff` from the whole-program
+        // inflation `monadic_set` returned.
+        let rest = Core {
+            fns: core
+                .fns
+                .iter()
+                .filter(|f| !region.contains(&f.name))
+                .cloned()
+                .collect(),
+        };
+        self.eff = genuine_eff(&self.latent);
+        self.full = false;
+        self.early = false;
+        let (fused, early) = if let Some(c) = self.try_lower_ev(&rest) {
+            (c, false)
+        } else if let Some(c) = self.try_lower_state(&rest) {
+            (c, self.early)
+        } else {
+            restore(self, saved_eff, saved_full);
+            return Ok(None);
+        };
+
+        // Free-monad the region, full-style: a uniform monadic convention within
+        // it so the escaping closure's dynamic applies all agree.
+        self.eff.clone_from(&region);
+        self.full = true;
+        self.early = false;
+        self.generated.clear();
+        let region_fns: Vec<&CoreFn> = core
+            .fns
+            .iter()
+            .filter(|f| region.contains(&f.name))
+            .collect();
+        let mon_fns = self.lower_set(&region_fns, &entries)?;
+
+        let mut fns = fused.fns;
+        fns.extend(mon_fns);
+        let generated = std::mem::take(&mut self.generated);
+        let mut full_style: BTreeSet<Sym> = region.clone();
+        full_style.extend(generated.iter().map(|f| f.name));
+        full_style.insert(EBIND.into());
+        fns.extend(generated);
+        fns.push(ebind_fn());
+
+        // Boundary rail over the full-style region (functions, drivers, ebind).
+        // The fused rest is a different convention and excluded. A failure here
+        // means the split was not as clean as the static checks judged, so fall
+        // back to whole-program monadification rather than miscompiling.
+        let refs: Vec<&CoreFn> = fns.iter().collect();
+        if check_convention_boundaries(&fns, &refs, &full_style, true, &entries).is_err() {
+            restore(self, saved_eff, saved_full);
+            return Ok(None);
+        }
+
+        warn_free_monad(core, &region, &self.latent);
+
+        let mut ctors = base_ctors.clone();
+        ctors.insert(EPURE.into(), synth_ctor(EFF, PURE_TAG, 1));
+        ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
+        if early {
+            ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
+            ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
+        }
+        Ok(Some((Core { fns }, ctors)))
     }
 
     fn lower_handle(&mut self, c: &Comp) -> Result<Comp, TypeError> {
@@ -965,9 +1221,10 @@ fn latent_map(core: &Core) -> Latent {
 // Selective mode monadifies only functions that perform or propagate an
 // effect. When effectful code escapes first-class through a thunk (a call to
 // an effectful function, or a raw do/handle inside a closure body), dynamic
-// call sites cannot tell conventions apart, so switch to whole-program mode
-// and monadify everything. check_monadified enforces the resulting invariant
-// after the rewrite.
+// call sites cannot tell conventions apart, so switch to whole-program mode and
+// monadify everything. `try_local` first tries to confine that whole-program
+// answer to the escaping component; this is its fallback. check_convention_boundaries
+// enforces the resulting invariant after the rewrite.
 fn monadic_set(core: &Core, fl: &Latent) -> (BTreeSet<Sym>, bool) {
     let eff: BTreeSet<Sym> = fl
         .iter()
@@ -987,6 +1244,287 @@ fn monadic_set(core: &Core, fl: &Latent) -> (BTreeSet<Sym>, bool) {
         (core.fns.iter().map(|f| f.name).collect(), true)
     } else {
         (eff, false)
+    }
+}
+
+// The monadic region for local monadification: the component of functions that
+// must be free-monad lowered because an effectful closure escapes inside it,
+// together with its entry functions (the ones a fused caller invokes, which need
+// a bare-returning, unwrapped convention). Returns None when the split is not
+// clean enough to keep the rest fused, so the caller falls back to whole-program.
+//
+// Built as the connected component of the escaping functions under two closures:
+// downward over the call graph (every function an escaping one calls, so the
+// closure that is applied dynamically and the data path it flows through are all
+// monadic together), and over a shared effect op (a function that performs or
+// handles an op the region performs joins it, so the handler that drives the
+// region's `EOp` cells is inside it). The region is therefore downward-closed:
+// it calls no function outside itself, so the only boundary is the rest calling
+// in at entries. With its effect ops disjoint from the rest (checked below) and
+// no first-class closure crossing at an entry, the two calling conventions never
+// meet on a value, so the rest stays fused.
+fn monadic_region(
+    core: &Core,
+    fl: &Latent,
+    escaping: &BTreeSet<Sym>,
+) -> Option<(BTreeSet<Sym>, BTreeSet<Sym>)> {
+    let by_name: BTreeMap<Sym, &CoreFn> = core.fns.iter().map(|f| (f.name, f)).collect();
+    let footprint: BTreeMap<Sym, BTreeSet<Sym>> = core
+        .fns
+        .iter()
+        .map(|f| {
+            let mut ops = BTreeSet::new();
+            collect_ops(&f.body, &mut ops);
+            if let Some(s) = fl.get(&f.name) {
+                ops.extend(s.iter().map(|m| m.id));
+            }
+            (f.name, ops)
+        })
+        .collect();
+    // Closure-inert functions: no effect and no dynamic application anywhere in
+    // their downward call-graph. A monadified closure can flow through one as
+    // opaque data (it is never forced) and the function returns a bare value, so
+    // it is convention-agnostic and stays shared in the fused rest rather than
+    // being pulled into the region (which would falsely conflict whenever the
+    // rest also calls it, e.g. a prelude helper like `length`). Greatest fixpoint:
+    // start all-inert, drop any that applies a value, performs/propagates an
+    // effect, or calls a non-inert function.
+    let mut inert: BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
+    loop {
+        let mut changed = false;
+        for f in &core.fns {
+            if !inert.contains(&f.name) {
+                continue;
+            }
+            let mut callees = BTreeSet::new();
+            all_calls(&f.body, &mut callees);
+            let disqualified = has_app(&f.body)
+                || !footprint[&f.name].is_empty()
+                || callees
+                    .iter()
+                    .any(|g| by_name.contains_key(g) && !inert.contains(g));
+            if disqualified {
+                inert.remove(&f.name);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut region: BTreeSet<Sym> = escaping.clone();
+    loop {
+        let mut changed = false;
+        // Downward: every named, non-inert callee of a region function (the
+        // dynamic-apply and data-flow reach of the escaping closure). Inert
+        // callees stay shared in the rest.
+        for name in region.clone() {
+            if let Some(f) = by_name.get(&name) {
+                let mut heads = BTreeSet::new();
+                all_calls(&f.body, &mut heads);
+                for g in heads {
+                    if by_name.contains_key(&g) && !inert.contains(&g) {
+                        changed |= region.insert(g);
+                    }
+                }
+            }
+        }
+        // Over a shared effect op: anything performing or handling an op the
+        // region touches (the handler that drives its EOp cells, a co-performer).
+        let tainted: BTreeSet<Sym> = region
+            .iter()
+            .flat_map(|f| footprint[f].iter().copied())
+            .collect();
+        for f in &core.fns {
+            if !footprint[&f.name].is_disjoint(&tainted) {
+                changed |= region.insert(f.name);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let entry_point = Sym::new(ENTRY_POINT);
+    // Disjoint effects: no rest function may touch an op the region does, else a
+    // boundary call would cross a live effect with mismatched conventions.
+    let region_ops: BTreeSet<Sym> = region
+        .iter()
+        .flat_map(|f| footprint[f].iter().copied())
+        .collect();
+    for f in core.fns.iter().filter(|f| !region.contains(&f.name)) {
+        if !footprint[&f.name].is_disjoint(&region_ops) {
+            return None;
+        }
+    }
+
+    // Entries: region functions a non-region (fused) function calls, plus `main`
+    // when it is in the region (the runtime is its caller).
+    let mut entries = BTreeSet::new();
+    for f in &core.fns {
+        if region.contains(&f.name) {
+            continue;
+        }
+        let mut heads = BTreeSet::new();
+        all_calls(&f.body, &mut heads);
+        entries.extend(heads.into_iter().filter(|g| region.contains(g)));
+    }
+    if region.contains(&entry_point) {
+        entries.insert(entry_point);
+    }
+    // An entry also called from within the region would need two conventions
+    // (bare for the fused caller, Eff for the region caller). `main` is never
+    // called by program code, so it is exempt.
+    for f in core.fns.iter().filter(|f| region.contains(&f.name)) {
+        let mut heads = BTreeSet::new();
+        all_calls(&f.body, &mut heads);
+        if heads
+            .iter()
+            .any(|g| *g != entry_point && entries.contains(g))
+        {
+            return None;
+        }
+    }
+    // A closure crossing the boundary as a call argument, or returned from an
+    // entry, would mix conventions: the rest threads bare-returning thunks while
+    // the region monadifies thunk bodies into Eff. Reject either.
+    for f in &core.fns {
+        let in_region = region.contains(&f.name);
+        let mut crosses_thunk = false;
+        for_each_call(&f.body, &mut |g, args| {
+            if in_region != region.contains(&g) && args.iter().any(carries_thunk) {
+                crosses_thunk = true;
+            }
+        });
+        if crosses_thunk {
+            return None;
+        }
+    }
+    for e in entries.iter().filter(|e| **e != entry_point) {
+        if let Some(f) = core.fns.iter().find(|f| f.name == *e) {
+            // A closure returned to, or dynamically applied from, a fused caller
+            // mixes conventions on a value the syntactic argument check (which
+            // only sees literal thunks, not ones bound to a variable) cannot rule
+            // out, so reject a higher-order entry outright.
+            let params: BTreeSet<Sym> = f.params.iter().copied().collect();
+            if tail_returns_thunk(&f.body) || applies_param(&f.body, &params) {
+                return None;
+            }
+        }
+    }
+    Some((region, entries))
+}
+
+// Whether a computation dynamically applies any value (an `App` node anywhere,
+// including inside a thunk it builds). A function with no `App` in its whole
+// body never forces a closure, so a monadified closure can pass through it as
+// opaque data without a convention clash.
+fn has_app(c: &Comp) -> bool {
+    if matches!(c, Comp::App(..)) {
+        return true;
+    }
+    let mut found = false;
+    each_value(c, &mut |v| {
+        let mut ts = Vec::new();
+        thunks_in_value(v, &mut ts);
+        for t in ts {
+            found |= has_app(t);
+        }
+    });
+    each_subcomp(c, &mut |sc| found |= has_app(sc));
+    found
+}
+
+// A value that carries a first-class closure (directly or nested in a
+// constructor or tuple): the convention-sensitive shape at a region boundary.
+fn carries_thunk(v: &Value) -> bool {
+    match v {
+        Value::Thunk(_) => true,
+        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().any(carries_thunk),
+        _ => false,
+    }
+}
+
+// Visit every `Call` head and its arguments, descending into thunk bodies.
+fn for_each_call<'a>(c: &'a Comp, f: &mut impl FnMut(Sym, &'a [Value])) {
+    if let Comp::Call(g, args) = c {
+        f(*g, args);
+    }
+    each_value(c, &mut |v| {
+        let mut ts = Vec::new();
+        thunks_in_value(v, &mut ts);
+        for t in ts {
+            for_each_call(t, f);
+        }
+    });
+    each_subcomp(c, &mut |sc| for_each_call(sc, f));
+}
+
+// Whether a computation dynamically applies one of `params` (forcing it as a
+// call head), tracking `let`-aliases of a param. A region entry that does this is
+// higher-order over a value its fused caller supplies, whose convention the
+// region cannot assume, so such entries are rejected.
+fn applies_param(c: &Comp, params: &BTreeSet<Sym>) -> bool {
+    match c {
+        Comp::App(f, _) => {
+            matches!(f.as_ref(), Comp::Force(Value::Var(p)) if params.contains(p))
+                || applies_param(f, params)
+        }
+        Comp::Bind(m, x, n) => {
+            if applies_param(m, params) {
+                return true;
+            }
+            // `let x = p` makes x an alias of the param p.
+            if let Comp::Return(Value::Var(v)) = m.as_ref() {
+                if params.contains(v) {
+                    let mut p2 = params.clone();
+                    p2.insert(*x);
+                    return applies_param(n, &p2);
+                }
+            }
+            applies_param(n, params)
+        }
+        Comp::If(_, t, e) => applies_param(t, params) || applies_param(e, params),
+        Comp::Case(_, arms) => arms.iter().any(|(_, b)| applies_param(b, params)),
+        Comp::Lam(_, b) | Comp::Mask(_, b) => applies_param(b, params),
+        Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            applies_param(body, params)
+                || return_body
+                    .as_ref()
+                    .is_some_and(|rb| applies_param(rb, params))
+                || ops.iter().any(|op| applies_param(&op.body, params))
+        }
+        _ => false,
+    }
+}
+
+// Whether a computation can return a closure at a tail (result) position, the
+// value an entry hands back to its fused caller.
+fn tail_returns_thunk(c: &Comp) -> bool {
+    match c {
+        Comp::Return(v) => carries_thunk(v),
+        Comp::Bind(_, _, n) => tail_returns_thunk(n),
+        Comp::If(_, t, e) => tail_returns_thunk(t) || tail_returns_thunk(e),
+        Comp::Case(_, arms) => arms.iter().any(|(_, b)| tail_returns_thunk(b)),
+        Comp::Mask(_, b) => tail_returns_thunk(b),
+        Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            tail_returns_thunk(body)
+                || return_body
+                    .as_ref()
+                    .is_some_and(|rb| tail_returns_thunk(rb))
+                || ops.iter().any(|op| tail_returns_thunk(&op.body))
+        }
+        _ => false,
     }
 }
 
@@ -1026,28 +1564,46 @@ fn resume_in_thunk(c: &Comp, resume: Sym) -> bool {
     found
 }
 
-// Escalation invariant: after whole-program monadification every function
-// body and every thunk body (under its lambda binder, if any) finishes with
-// an Eff value at each tail: an EPure/EOp construction, a saturated call to
-// a program function (itself Eff-tailed by induction), a dynamic application
-// of a closure (every closure body is monadified), or a diverging Error.
-// `main` is exempt because unwrap_main strips its final EPure. A function
-// the rewrite missed shows up here instead of as a miscompile at a distant
-// dynamic call site.
-fn check_monadified(fns: &[CoreFn]) -> Result<(), TypeError> {
-    let arities: BTreeMap<&str, usize> = fns
+// Convention-boundary rail, run in both selective and whole-program mode. A
+// monadic context must end in an Eff value at every tail: an EPure/EOp
+// construction, a saturated call to a program function (itself Eff-tailed by
+// induction or because it is the direct callee a monadic context EPure-wrapped),
+// a dynamic application of a monadified closure, or a diverging Error. A function
+// the rewrite should have monadified but did not shows up here as an ICE, exactly
+// where the old whole-program uniformity used to make a missed boundary
+// impossible, rather than as a miscompile at a distant dynamic call site.
+//
+// Whole-program mode (`full`): every function, generated driver, and thunk body
+// is monadic, so all are checked, including under their lambda binders. Selective
+// mode: only the `monadic` program functions are; their top-level tail is checked
+// (their interior mixes monadic continuation thunks with direct data thunks, so a
+// blanket thunk check would false-positive). `main` is exempt either way because
+// `unwrap_main` strips its final EPure.
+fn check_convention_boundaries(
+    arity_fns: &[CoreFn],
+    check: &[&CoreFn],
+    monadic: &BTreeSet<Sym>,
+    blanket: bool,
+    exempt: &BTreeSet<Sym>,
+) -> Result<(), TypeError> {
+    let arities: BTreeMap<&str, usize> = arity_fns
         .iter()
         .map(|f| (f.name.as_str(), f.params.len()))
         .collect();
-    for f in fns {
-        if f.name != ENTRY_POINT {
-            check_tails(f.name.as_str(), &f.body, &arities)?;
+    for f in check {
+        if !monadic.contains(&f.name) || exempt.contains(&f.name) {
+            continue;
         }
-        let mut ts = Vec::new();
-        thunks_in_comp(&f.body, &mut ts);
-        for t in ts {
-            let b = if let Comp::Lam(_, b) = t { b } else { t };
-            check_tails(f.name.as_str(), b, &arities)?;
+        check_tails(f.name.as_str(), &f.body, &arities)?;
+        if blanket {
+            // A full-style monadic function monadifies every thunk body too, so
+            // each (under its lambda binder) must also be Eff-tailed.
+            let mut ts = Vec::new();
+            thunks_in_comp(&f.body, &mut ts);
+            for t in ts {
+                let b = if let Comp::Lam(_, b) = t { b } else { t };
+                check_tails(f.name.as_str(), b, &arities)?;
+            }
         }
     }
     Ok(())
@@ -1155,9 +1711,14 @@ fn each_value<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Value)) {
         // freed cell and the reuse constructor are the value positions.
         | Comp::WithReuse { freed: v, .. }
         | Comp::Reuse(_, v)
+        // Ref ops arise from `erase_local_vars` at the top of `lower`, so the
+        // analyses below must visit their values (e.g. a thunk a var holds whose
+        // body still performs another effect).
+        | Comp::RefNew(v)
+        | Comp::RefGet(v)
         | Comp::If(v, ..)
         | Comp::Case(v, _) => f(v),
-        Comp::Prim(_, a, b) => {
+        Comp::Prim(_, a, b) | Comp::RefSet(a, b) => {
             f(a);
             f(b);
         }

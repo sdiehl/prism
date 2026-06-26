@@ -17,7 +17,14 @@ impl Lowerer {
     // no handles, or any handler that is not a single-op fold consumer with an
     // identity return clause.
     pub(super) fn fold_uniform(&mut self, core: &Core) -> Option<Sym> {
-        if self.op_ids.len() != 1 {
+        // The op count is over the functions actually being fused, not the global
+        // table: under local monadification `core` is the fusable rest, whose
+        // single streamed op coexists with the region's disjoint ops elsewhere.
+        let mut ops = std::collections::BTreeSet::new();
+        for f in &core.fns {
+            super::super::collect_ops(&f.body, &mut ops);
+        }
+        if ops.len() != 1 {
             return None;
         }
         let handles = self.fusion_handles(core)?;

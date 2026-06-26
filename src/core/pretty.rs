@@ -220,6 +220,9 @@ pub fn pp_comp(c: &Comp) -> String {
             )
         }
         Comp::Reuse(tok, v) => format!("reuse {tok} as {}", pp_value(v)),
+        Comp::RefNew(v) => format!("ref_new {}", pp_value(v)),
+        Comp::RefGet(c) => format!("ref_get {}", pp_value(c)),
+        Comp::RefSet(c, v) => format!("ref_set {} {}", pp_value(c), pp_value(v)),
         Comp::Do(op, args) => {
             let args: Vec<_> = args.iter().map(pp_value).collect();
             format!("do {op}({})", args.join(", "))

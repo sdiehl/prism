@@ -213,6 +213,33 @@ void prism_rc_dec(long v) {
     }
 }
 
+/* A var cell: an arity-1 mutable cell holding one owned value. Escape-checked
+ * local mutable state (`var x := e`) compiles to one of these, so reads and
+ * writes are loads/stores and a `var` loop is a real constant-stack loop instead
+ * of the algebraic-effect free monad. `prism_ref_set` overwrites the field in
+ * place regardless of the cell's refcount: sound because escape analysis proves
+ * every reference is the same logical variable, never an alias of a distinct
+ * value. The cell is an ordinary arity-1 cell, so `prism_rc_dec` frees its field
+ * with it; the caller (codegen) owns the cell reference and rc_decs it after each
+ * read/write, the rc pass having dup'd so each use has its own reference. */
+long prism_ref_new(long v) {
+    long *p = prism_alloc(1); /* rc=1, arity=1 */
+    p[PRISM_HDR_WORDS] = v;   /* v moves into the cell */
+    return (long)p;
+}
+
+long prism_ref_get(long c) {
+    long e = ((long *)c)[PRISM_HDR_WORDS];
+    prism_rc_inc(e); /* an owned snapshot; the caller rc_decs the cell */
+    return e;
+}
+
+void prism_ref_set(long c, long v) {
+    long *p = (long *)c;
+    prism_rc_dec(p[PRISM_HDR_WORDS]); /* free the old value */
+    p[PRISM_HDR_WORDS] = v;           /* v moves into the cell */
+}
+
 /* FBIP reuse (Lorenzen and Leijen, "Reference Counting with Frame-Limited
  * Reuse"): a uniquely-owned cell about to be dropped is turned into a reuse
  * token and handed to the matching constructor allocation in the same arm, so

@@ -152,6 +152,17 @@ pub enum Comp {
     // instead of calling the allocator. The token is the only operand position
     // that may name a reuse token.
     Reuse(Sym, Value),
+    // A local mutable cell, the runtime form of an escape-checked `var`. The
+    // effect-lowering pass `erase_local_vars` rewrites a closed var/State handler
+    // into these, so a `var` loop runs as a real loop (constant stack, no
+    // per-operation reification) instead of the free monad.
+    //   RefNew(v)      allocate a one-field cell holding v; result owns the cell
+    //   RefGet(c)      read the cell's field (an owned snapshot; c is borrowed)
+    //   RefSet(c, v)   overwrite the cell's field with v in place (c borrowed, v
+    //                  moved in); yields Unit
+    RefNew(Value),
+    RefGet(Value),
+    RefSet(Value, Value),
 }
 
 impl Comp {
@@ -185,6 +196,9 @@ impl Comp {
             Self::Drop(_) => "Drop",
             Self::WithReuse { .. } => "WithReuse",
             Self::Reuse(..) => "Reuse",
+            Self::RefNew(_) => "RefNew",
+            Self::RefGet(_) => "RefGet",
+            Self::RefSet(..) => "RefSet",
         }
     }
 }
@@ -258,7 +272,13 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
-        | Comp::Reuse(_, v) => {
+        | Comp::Reuse(_, v)
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => {
+            calls_in_val(v, out);
+        }
+        Comp::RefSet(c, v) => {
+            calls_in_val(c, out);
             calls_in_val(v, out);
         }
         Comp::WithReuse { freed, body, .. } => {

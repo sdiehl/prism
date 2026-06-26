@@ -249,6 +249,21 @@ fn lowered_core(
     Ok((checked, lowered, ctors, sigs))
 }
 
+/// The effect-lowering strategy this snippet's program takes.
+///
+/// A performance classification of how its effects compile (`pure`, `evidence`,
+/// `state-fusion`, `local-partial`, `whole-program-free-monad`,
+/// `selective-free-monad`). A perf snapshot pins this per corpus program so a
+/// silent regression onto the slow free-monad path surfaces as a reviewable diff.
+/// `full` carries the prelude.
+///
+/// # Errors
+/// Fails on front-end errors.
+pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Error> {
+    let (_, checked, core) = frontend(full, base)?;
+    Ok(crate::core::effect_strategy(&core, &checked.ctors)?)
+}
+
 /// The CBPV core IR of the snippet's own functions (prelude elided),
 /// pretty-printed.
 ///
@@ -325,7 +340,13 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
             | Comp::FloatBuiltin(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
-            | Comp::Reuse(_, v) => scan_val(v, out),
+            | Comp::Reuse(_, v)
+            | Comp::RefNew(v)
+            | Comp::RefGet(v) => scan_val(v, out),
+            Comp::RefSet(c, v) => {
+                scan_val(c, out);
+                scan_val(v, out);
+            }
             Comp::WithReuse { freed, body, .. } => {
                 scan_val(freed, out);
                 scan_comp(body, out);
