@@ -217,6 +217,10 @@ impl Isa for MlirText {
         out.push_str("llvm.func @prism_taq_snoc(i64, i64) -> i64\n");
         out.push_str("llvm.func @prism_taq_concat(i64, i64) -> i64\n");
         out.push_str("llvm.func @prism_taq_uncons(i64) -> i64\n");
+        out.push_str("llvm.func @prism_frame_bind(i64, i64, i64) -> i64\n");
+        out.push_str("llvm.func @prism_frame_handle(i64, i64, i64) -> i64\n");
+        out.push_str("llvm.func @prism_frame_mask(i64, i64) -> i64\n");
+        out.push_str("llvm.func @prism_kont_splice(i64, i64) -> i64\n");
         out.push_str("llvm.func @prism_box(i64) -> i64\n");
         out.push_str("llvm.func @prism_unbox(i64) -> i64\n");
         out.push_str("llvm.func @prism_print_int(i64)\n");

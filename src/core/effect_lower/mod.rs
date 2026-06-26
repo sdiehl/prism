@@ -53,7 +53,12 @@ mod state;
 
 const PURE_TAG: usize = 0;
 const OP_TAG: usize = 1;
-// Type name carrying the free-monad result (its ctors are EPure/EOp).
+// A third Eff ctor used only by the self-recursive driver: a clause that resumes
+// in tail position yields `EResume(queue, value)` instead of re-entering a driver,
+// so the driver drives the resumed continuation by tail-calling itself.
+const RESUME_TAG: usize = 2;
+const ERESUME: &str = "EResume";
+// Type name carrying the free-monad result (its ctors are EPure/EOp/EResume).
 const EFF: &str = "Eff";
 const EPURE: &str = "EPure";
 pub(crate) const EOP: &str = "EOp";
@@ -77,7 +82,11 @@ const TQCONS_TAG: usize = 1;
 /// constant-stack control flow, not the free-monad driver, so they are excluded.
 #[must_use]
 pub(crate) fn is_free_monad_driver(name: &str) -> bool {
-    name == EBIND || name == QAPPLY || name.ends_with("@handle") || name.ends_with("@mask")
+    name == EBIND
+        || name == QAPPLY
+        || name.ends_with("@handle")
+        || name.ends_with("@mask")
+        || name.ends_with("@region")
 }
 
 // Step constructors for the state path's early-termination protocol: a fused
@@ -123,6 +132,17 @@ struct Lowerer {
     // Set by the state path when a `stake`-style early-terminating handler is
     // present: producers then thread `Step S` and check it after each emit.
     early: bool,
+    // Opt-in (PRISM_NATIVE_EFFECTS): drive eligible closed handlers with a
+    // self-recursive `{n}@region` loop whose tail-resume is a queue plus `EResume`
+    // instead of a continuation thunk that re-enters a mutually-recursive driver,
+    // so the resumed continuation is driven by a musttail self-call.
+    native: bool,
+    // Set while lowering a native clause body: a resume application then yields
+    // `EResume(queue, value)` for the `{n}@region` loop to drive.
+    native_resume: bool,
+    // Recorded when any handler is driven natively, so the `EResume` ctor is added
+    // to the table only when it is actually used.
+    used_resume: bool,
 }
 
 /// # Panics
@@ -244,6 +264,9 @@ fn lower_impl(
         fresh: Fresh::new(),
         generated: Vec::new(),
         early: false,
+        native: std::env::var_os("PRISM_NATIVE_EFFECTS").is_some(),
+        native_resume: false,
+        used_resume: false,
     };
 
     // The two fusion paths and the free-monad fallback are three answer-type
@@ -325,6 +348,9 @@ fn lower_impl(
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
     ctors.insert(TQNIL.into(), synth_ctor(TQ, TQNIL_TAG, 0));
     ctors.insert(TQCONS.into(), synth_ctor(TQ, TQCONS_TAG, 2));
+    if lo.used_resume {
+        ctors.insert(ERESUME.into(), synth_ctor(EFF, RESUME_TAG, 2));
+    }
 
     let strat = if lo.full {
         "whole-program-free-monad"
@@ -512,7 +538,7 @@ impl Lowerer {
                     )),
                 )
             }
-            Comp::Handle { .. } => self.lower_handle(c)?,
+            Comp::Handle { .. } => self.handle_closed(c)?,
             // A mask reached outside monadic context has no escaping ops to
             // relabel, so it is the identity on its body.
             Comp::Mask(_, b) => self.lower_comp(b)?,
@@ -589,6 +615,32 @@ impl Lowerer {
                     .map(|(p, b)| Ok((p.clone(), self.mon(b)?)))
                     .collect::<Result<_, TypeError>>()?,
             ),
+            // Driving the resume natively: `resume` is bound to the op's
+            // continuation queue, so applying it yields `EResume(queue, value)`,
+            // which the `{n}@region` loop drives by tail-calling itself on
+            // `qApply(queue, value)`. Eligibility guarantees this is in tail
+            // position, so the `EResume` is the clause's result.
+            Comp::App(f, args)
+                if self.native_resume && self.is_resume_app(f) =>
+            {
+                let Comp::Force(Value::Var(q)) = f.as_ref() else {
+                    unreachable!("is_resume_app matched a non-Force(Var)")
+                };
+                let arg = match args.len() {
+                    0 => Value::Unit,
+                    1 => self.mon_value(&args[0])?,
+                    _ => Value::Tuple(
+                        args.iter()
+                            .map(|a| self.mon_value(a))
+                            .collect::<Result<_, TypeError>>()?,
+                    ),
+                };
+                Comp::Return(Value::Ctor(
+                    ERESUME.into(),
+                    RESUME_TAG,
+                    vec![Value::Var(*q), arg],
+                ))
+            }
             // Applying the current resume already yields an Eff value (the
             // re-driven continuation), so thread it instead of EPure-wrapping.
             Comp::App(f, args) if self.is_resume_app(f) => Comp::App(f.clone(), args.clone()),
@@ -613,7 +665,7 @@ impl Lowerer {
             Comp::Handle { .. } => {
                 let v = self.fresh("h");
                 Comp::Bind(
-                    Box::new(self.lower_handle(c)?),
+                    Box::new(self.handle_closed(c)?),
                     v,
                     Box::new(epure(Value::Var(v))),
                 )
@@ -781,9 +833,9 @@ impl Lowerer {
         s
     }
 
-    // Local monadification (Phase A). When an effectful closure escapes, confine
-    // the free monad to the flow/effect-connected component that contains it and
-    // keep everything else fused. Returns the fully lowered program when the split
+    // Local monadification. When an effectful closure escapes, confine the free
+    // monad to the flow/effect-connected component that contains it and keep
+    // everything else fused. Returns the fully lowered program when the split
     // is clean, or None to fall back to whole-program monadification (sound, no
     // regression). The cleanliness is structural: the component's effect ops are
     // disjoint from the rest (so no boundary call crosses a live effect), and no
@@ -1078,6 +1130,192 @@ impl Lowerer {
         ))
     }
 
+    // A closed handle is driven natively when opted in and every clause resumes
+    // only in tail position: its continuation never needs a mutually-recursive
+    // driver, so a single self-recursive loop drives it in constant stack.
+    fn native_eligible(&self, c: &Comp) -> bool {
+        if !self.native {
+            return false;
+        }
+        let Comp::Handle { body, ops, .. } = c else {
+            return false;
+        };
+        !self.is_open(body, ops) && resume_tail_only(ops)
+    }
+
+    fn handle_closed(&mut self, c: &Comp) -> Result<Comp, TypeError> {
+        if self.native_eligible(c) {
+            self.lower_handle_native(c)
+        } else {
+            self.lower_handle(c)
+        }
+    }
+
+    // The self-recursive driver for an eligible closed handle. Mirrors
+    // `lower_handle`, but the per-op continuation is the `EOp` queue itself: a
+    // tail resume becomes `EResume(queue, value)`, and the loop drives the resumed
+    // continuation by tail-calling itself on `qApply(queue, value)`. Because the
+    // re-entry is a self-call at fixed arity it compiles to a `musttail`, so a
+    // resuming loop runs in constant stack. The clauses are separate top-level
+    // functions (direct calls, no per-dispatch closure), and the loop returns the
+    // bare handler answer, the same call-site contract as `lower_handle` closed.
+    fn lower_handle_native(&mut self, c: &Comp) -> Result<Comp, TypeError> {
+        let Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        } = c
+        else {
+            return Ok(c.clone());
+        };
+
+        let mut fvs = BTreeSet::new();
+        if let Some(rb) = return_body {
+            fvs.extend(fv::comp_without(rb, return_var.iter()));
+        }
+        for op in ops {
+            let mut s = fv::comp_without(&op.body, &op.params);
+            s.remove(&op.resume);
+            fvs.extend(s);
+        }
+        let mut fvs: Vec<Sym> = fvs.into_iter().collect();
+        fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+        self.used_resume = true;
+        let loop_name = self.fresh("region");
+
+        // One top-level function per op: clause(arg, resume, fvs...). `resume` is
+        // the op's continuation queue, so a tail resume monadifies to
+        // `EResume(resume, value)`.
+        let mut clause_names = Vec::new();
+        for op in ops {
+            let cname = self.fresh("clause");
+            let arg_p = self.fresh("arg");
+            let resume_p = self.fresh("res");
+            let saved = std::mem::take(&mut self.resume_aliases);
+            self.resume_aliases.insert(op.resume);
+            let saved_native = self.native_resume;
+            self.native_resume = true;
+            let mbody = self.mon(&op.body);
+            self.native_resume = saved_native;
+            self.resume_aliases = saved;
+            let with_resume = Comp::Bind(
+                Box::new(Comp::Return(Value::Var(resume_p))),
+                op.resume,
+                Box::new(mbody?),
+            );
+            let cbody = bind_params(&op.params, arg_p, with_resume);
+            let mut params = vec![arg_p, resume_p];
+            params.extend(fvs.iter().copied());
+            self.generated.push(CoreFn {
+                name: cname,
+                params,
+                body: cbody,
+            });
+            clause_names.push(cname);
+        }
+
+        // EPure(x) => the body finished: run the return clause for the answer.
+        let x = self.fresh("x");
+        let pure_body = match (return_var, return_body) {
+            (Some(rv), Some(rb)) => Comp::Bind(
+                Box::new(Comp::Return(Value::Var(x))),
+                *rv,
+                Box::new(self.lower_comp(rb)?),
+            ),
+            _ => Comp::Return(Value::Var(x)),
+        };
+        let pure_arm = (ctor_pat(EPURE, &[x]), pure_body);
+
+        // EOp(id, skip, arg, k) => dispatch on id. A closed handler's ops always
+        // arrive at skip 0 (a masked op keeps the handler open), so `skip` is
+        // unused, matching the closed `lower_handle` dispatch.
+        let id = self.fresh("id");
+        let skip = self.fresh("sk");
+        let arg = self.fresh("arg");
+        let k = self.fresh("k");
+        let ids: Vec<i64> = ops
+            .iter()
+            .map(|op| self.op_id(op.name))
+            .collect::<Result<_, _>>()?;
+        let fail = Comp::Error(Value::Str(
+            "ICE: unhandled effect op in closed native handler".into(),
+        ));
+        let lname = loop_name;
+        let fvs_ref = &fvs;
+        let dispatch = self.build_op_chain(
+            &Value::Var(id),
+            &ids,
+            |me, i| {
+                let cname = clause_names[i];
+                let mut call_args = vec![Value::Var(arg), Value::Var(k)];
+                call_args.extend(fvs_ref.iter().map(|v| Value::Var(*v)));
+                let cr = me.fresh("cr");
+                // case cr of
+                //   EResume(q, v) => region(qApply(q, v), fvs)   -- drive the resume
+                //   EOp(..)       => region(cr, fvs)             -- a re-performed op
+                //   EPure(ans)    => ans                         -- finished, bare answer
+                let q = me.fresh("q");
+                let v = me.fresh("v");
+                let qa = me.fresh("qa");
+                let mut resume_args = vec![Value::Var(qa)];
+                resume_args.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
+                let resume_arm = (
+                    ctor_pat(ERESUME, &[q, v]),
+                    Comp::Bind(
+                        Box::new(Comp::Call(
+                            QAPPLY.into(),
+                            vec![Value::Var(q), Value::Var(v)],
+                        )),
+                        qa,
+                        Box::new(Comp::Call(lname, resume_args)),
+                    ),
+                );
+                let (oi, os, oa, ok) =
+                    (me.fresh("id"), me.fresh("sk"), me.fresh("arg"), me.fresh("k"));
+                let mut redrive_args = vec![Value::Var(cr)];
+                redrive_args.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
+                let op_redrive = (
+                    ctor_pat(EOP, &[oi, os, oa, ok]),
+                    Comp::Call(lname, redrive_args),
+                );
+                let ans = me.fresh("ans");
+                let final_arm = (ctor_pat(EPURE, &[ans]), Comp::Return(Value::Var(ans)));
+                let cased =
+                    Comp::Case(Value::Var(cr), vec![resume_arm, op_redrive, final_arm]);
+                Ok(Comp::Bind(
+                    Box::new(Comp::Call(cname, call_args)),
+                    cr,
+                    Box::new(cased),
+                ))
+            },
+            fail,
+        )?;
+        let op_arm = (ctor_pat(EOP, &[id, skip, arg, k]), dispatch);
+
+        let cur = self.fresh("cur");
+        let loop_body = Comp::Case(Value::Var(cur), vec![pure_arm, op_arm]);
+        let mut params = vec![cur];
+        params.extend(fvs.iter().copied());
+        self.generated.push(CoreFn {
+            name: loop_name,
+            params,
+            body: loop_body,
+        });
+
+        // Call site: reify the body to an Eff value, then drive it; the loop
+        // returns the bare answer (closed).
+        let r0 = self.fresh("r0");
+        let mut call_args = vec![Value::Var(r0)];
+        call_args.extend(fvs.iter().map(|v| Value::Var(*v)));
+        Ok(Comp::Bind(
+            Box::new(self.mon(body)?),
+            r0,
+            Box::new(Comp::Call(loop_name, call_args)),
+        ))
+    }
+
     // mask<Eff> becomes a driver that handles nothing: it adds N to the id of
     // every Eff op flowing through it, so the next driver of that effect
     // misses its equality match once and forwards with id - N.
@@ -1186,6 +1424,60 @@ fn bind_params(params: &[Sym], arg: Sym, body: Comp) -> Comp {
             let binders = params.iter().map(|p| Some(*p)).collect();
             Comp::Case(Value::Var(arg), vec![(CorePat::Tuple(binders), body)])
         }
+    }
+}
+
+// Whether every clause of a handler uses `resume` only as the head of a
+// tail-position application. Such a resume can be driven by the self-recursive
+// `{n}@region` loop (a tail resume is the clause's result, so it becomes
+// `EResume(queue, value)`); any other occurrence (captured by a lambda, passed as
+// an argument, bound and reused, returned as a value) would leave the queue where
+// the loop cannot drive it, so the handler stays on the free monad.
+fn resume_tail_only(ops: &[HandleOp]) -> bool {
+    ops.iter().all(|op| {
+        let mut aliases = BTreeSet::new();
+        aliases.insert(op.resume);
+        clause_resume_tail(&op.body, &aliases, true)
+    })
+}
+
+fn mentions(set: &fv::Set, aliases: &BTreeSet<Sym>) -> bool {
+    aliases.iter().any(|a| set.contains(a))
+}
+
+// `tail` tracks whether `c`'s value is the clause result. A resume application is
+// allowed only in tail position with arguments that do not themselves mention a
+// resume alias. The elaborator routes resume through `return k to x`, so a bind of
+// that shape grows the alias set (and is not itself a use). Any other occurrence
+// of an alias disqualifies the clause.
+fn clause_resume_tail(c: &Comp, aliases: &BTreeSet<Sym>, tail: bool) -> bool {
+    match c {
+        Comp::App(f, args)
+            if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) =>
+        {
+            tail && args.iter().all(|a| !mentions(&fv::value(a), aliases))
+        }
+        Comp::Bind(m, x, n) => {
+            let routing =
+                matches!(m.as_ref(), Comp::Return(Value::Var(v)) if aliases.contains(v));
+            let mut a2 = aliases.clone();
+            if let Comp::Return(Value::Var(v)) = m.as_ref() {
+                if aliases.contains(v) {
+                    a2.insert(*x);
+                }
+            }
+            (routing || clause_resume_tail(m, aliases, false)) && clause_resume_tail(n, &a2, tail)
+        }
+        Comp::If(v, t, e) => {
+            !mentions(&fv::value(v), aliases)
+                && clause_resume_tail(t, aliases, tail)
+                && clause_resume_tail(e, aliases, tail)
+        }
+        Comp::Case(v, arms) => {
+            !mentions(&fv::value(v), aliases)
+                && arms.iter().all(|(_, b)| clause_resume_tail(b, aliases, tail))
+        }
+        other => !mentions(&fv::comp(other), aliases),
     }
 }
 

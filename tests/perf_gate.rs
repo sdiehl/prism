@@ -360,13 +360,13 @@ fn free_monad_loops_run_in_constant_stack() {
 // The loop still on the free monad: a hand-rolled parameter-passing effect loop.
 // Its handler is not tail-resumptive (`r(s)(s)`): the clause applies the
 // resumption's *result* to the state, so each iteration leaves a pending-apply
-// frame on the native stack. Phase B's type-aligned dequeue makes the driver's
-// time linear (no spine re-walk) but cannot collapse that answer-type-function
-// tower -- that is exactly what Phase C's explicit handler stack does (a `do`
-// captures the native continuation, including the pending applications, into a
-// heap kont, so the machine stack does not grow). Ignored until Phase C lands.
+// frame on the native stack. The type-aligned dequeue makes the driver's time
+// linear (no spine re-walk) but cannot collapse that answer-type-function tower;
+// removing it needs an explicit handler stack where a `do` captures the native
+// continuation (the pending applications included) into a heap continuation, so
+// the machine stack does not grow. Ignored until that runtime lands.
 #[test]
-#[ignore = "needs Phase C (explicit handler stack): a parameter-passing handler applies the resumption result, leaving a pending-apply frame per iteration that the continuation dequeue cannot remove"]
+#[ignore = "a parameter-passing handler applies the resumption result, leaving a pending-apply frame per iteration that the continuation dequeue cannot remove; needs an explicit-handler-stack runtime"]
 fn param_passing_effect_loop_runs_in_constant_stack() {
     if !have(&cc()) {
         eprintln!(
@@ -400,10 +400,10 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 // -- only the driver's actual work-step count does. Run at N and 4N and assert the
 // growth ratio is sub-octic: a linear driver does ~4x the steps, a quadratic one
 // (the EBounce re-association that re-walks the left-nested spine each bounce) does
-// ~16x. Phase B's type-aligned dequeue replaced `EOp`'s nested-closure
-// continuation with an O(1)-snoc queue, so `ebind` no longer re-walks the spine;
-// this is the permanent ratchet that pins that in (and would catch its
-// reintroduction, the EBounce regression -- see the rehearsal note in DEMONAD.md).
+// ~16x. The type-aligned dequeue replaced `EOp`'s nested-closure continuation
+// with an O(1)-snoc queue, so `ebind` no longer re-walks the spine; this is the
+// permanent ratchet that pins that in, and would catch its reintroduction (the
+// re-association blowup that made `deep_abort` quadratic and had to be reverted).
 #[test]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
     if !have(&cc()) {
