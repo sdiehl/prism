@@ -75,6 +75,7 @@ mutual
     | floatBuiltin (name : String) (v : Value)
     | doOp (name : String) (args : List Value)
     | handle (body : Comp) (retVar : Option String) (retBody : Option Comp) (ops : List HandleOp)
+    | mask (ops : List String) (body : Comp)
     | strBuiltin (name : String) (args : List Value)
     | dup (v : Value)
     | drop (v : Value)
@@ -135,6 +136,7 @@ mutual
     | .doOp n args => .doOp n (substVL x w args)
     | .handle b rv rb ops =>
         .handle (substC x w b) rv (substRet x w rb) (substOps x w ops)
+    | .mask ops b => .mask ops (substC x w b)
     | .strBuiltin n args => .strBuiltin n (substVL x w args)
     | .dup v => .dup (substV x w v)
     | .drop v => .drop (substV x w v)

@@ -1,8 +1,17 @@
 name = "prism"
-defaultTargets = ["Prism", "Sanity"]
+defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Sanity"]
 
 [[lean_lib]]
 name = "Prism"
+
+[[lean_lib]]
+name = "CEK"
+
+[[lean_lib]]
+name = "Dynamics"
+
+[[lean_lib]]
+name = "Meta"
 
 [[lean_lib]]
 name = "Sanity"
