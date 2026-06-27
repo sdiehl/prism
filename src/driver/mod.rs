@@ -344,14 +344,7 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
     let (program, _, core) = frontend(full, &default_roots(base))?;
     let sigs = borrow_sigs(&program);
     let optimized = reuse(&insert_rc(&core, &sigs));
-    let own = Core {
-        fns: optimized
-            .fns
-            .into_iter()
-            .filter(|f| !prelude.contains(&f.name))
-            .collect(),
-    };
-    Ok(pp_core_pretty(&own))
+    Ok(pp_core_pretty(&strip_prelude(optimized, &prelude)))
 }
 
 /// Off-platform builtins (file IO, env, process) the snippet would invoke.
@@ -466,6 +459,19 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")))?;
     Ok(core.fns.into_iter().map(|f| f.name).collect())
+}
+
+// Drop the prelude's functions from a core dump, leaving only the snippet's own
+// declarations. The 300-plus prelude functions otherwise bury the user's code;
+// the playground filters them the same way, so CLI `dump` matches it.
+fn strip_prelude(core: Core, prelude: &std::collections::HashSet<Sym>) -> Core {
+    Core {
+        fns: core
+            .fns
+            .into_iter()
+            .filter(|f| !prelude.contains(&f.name))
+            .collect(),
+    }
 }
 
 #[cfg(feature = "native")]
@@ -781,7 +787,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> 
         "types" => Ok(types_section(&check_on(src, roots)?)),
         "core" => {
             let (_, _, core) = frontend(src, roots)?;
-            Ok(pp_core_pretty(&core))
+            Ok(pp_core_pretty(&strip_prelude(core, &prelude_fn_names()?)))
         }
         "core-json" => {
             let (_, _, core) = frontend(src, roots)?;
