@@ -394,65 +394,14 @@ fn sccs(core: &Core, fnmap: &BTreeMap<Sym, &CoreFn>) -> Vec<Vec<Sym>> {
         })
         .collect();
 
-    let mut t = Tarjan {
-        adj: &adj,
-        index: vec![usize::MAX; order.len()],
-        low: vec![0; order.len()],
-        on_stack: vec![false; order.len()],
-        stack: Vec::new(),
-        next: 0,
-        out: Vec::new(),
-    };
-    for v in 0..order.len() {
-        if t.index[v] == usize::MAX {
-            t.dfs(v);
-        }
-    }
-    // Tarjan emits each component after the ones it depends on: callee-first.
-    t.out
+    // Shared iterative Tarjan: components come out callee-first (the order the
+    // Merkle hashing needs, a cycle's dependencies hashed before it). hash.rs
+    // canonicalizes the members within a component separately, so their order
+    // here is not load-bearing.
+    crate::scc::tarjan_scc(&adj)
         .into_iter()
         .map(|comp| comp.into_iter().map(|i| order[i]).collect())
         .collect()
-}
-
-struct Tarjan<'a> {
-    adj: &'a [Vec<usize>],
-    index: Vec<usize>,
-    low: Vec<usize>,
-    on_stack: Vec<bool>,
-    stack: Vec<usize>,
-    next: usize,
-    out: Vec<Vec<usize>>,
-}
-
-impl Tarjan<'_> {
-    fn dfs(&mut self, v: usize) {
-        self.index[v] = self.next;
-        self.low[v] = self.next;
-        self.next += 1;
-        self.stack.push(v);
-        self.on_stack[v] = true;
-        for &w in &self.adj[v] {
-            if self.index[w] == usize::MAX {
-                self.dfs(w);
-                self.low[v] = self.low[v].min(self.low[w]);
-            } else if self.on_stack[w] {
-                self.low[v] = self.low[v].min(self.index[w]);
-            }
-        }
-        if self.low[v] == self.index[v] {
-            let mut comp = Vec::new();
-            loop {
-                let w = self.stack.pop().unwrap();
-                self.on_stack[w] = false;
-                comp.push(w);
-                if w == v {
-                    break;
-                }
-            }
-            self.out.push(comp);
-        }
-    }
 }
 
 #[cfg(test)]

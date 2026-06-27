@@ -264,16 +264,14 @@ fn union(mut a: Effects, b: &Effects) -> Effects {
 /// is sound (it can never drop a real dependency).
 #[must_use]
 pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
-    const UNVISITED: u32 = u32::MAX;
-    let n = prog.fns.len();
     let names: std::collections::BTreeMap<&str, usize> = prog
         .fns
         .iter()
         .enumerate()
         .map(|(i, d)| (d.name.as_str(), i))
         .collect();
-    // Callee indices per function, deduped and in increasing order so the DFS is
-    // deterministic.
+    // Callee indices per function, deduped and in increasing order so the shared
+    // Tarjan walks them deterministically. It returns the components callee-first.
     let deps: Vec<Vec<usize>> = prog
         .fns
         .iter()
@@ -283,63 +281,7 @@ pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
             refs.into_iter().collect()
         })
         .collect();
-    // Iterative Tarjan over the index graph. An explicit work stack avoids
-    // blowing the native stack on a deep prelude call chain. Tarjan emits each
-    // component when its DFS root finishes, which is after all the component's
-    // callees have finished, so components come out callee-before-caller already:
-    // the emission order is the processing order, no reversal needed.
-    let mut index = vec![UNVISITED; n];
-    let mut lowlink = vec![0u32; n];
-    let mut on_stack = vec![false; n];
-    let mut comp_stack: Vec<usize> = Vec::new();
-    let mut next_index: u32 = 0;
-    let mut sccs: Vec<Vec<usize>> = Vec::new();
-    for start in 0..n {
-        if index[start] != UNVISITED {
-            continue;
-        }
-        index[start] = next_index;
-        lowlink[start] = next_index;
-        next_index += 1;
-        comp_stack.push(start);
-        on_stack[start] = true;
-        let mut work: Vec<(usize, usize)> = vec![(start, 0)];
-        while let Some(&mut (v, ref mut i)) = work.last_mut() {
-            if let Some(&w) = deps[v].get(*i) {
-                *i += 1;
-                if index[w] == UNVISITED {
-                    index[w] = next_index;
-                    lowlink[w] = next_index;
-                    next_index += 1;
-                    comp_stack.push(w);
-                    on_stack[w] = true;
-                    work.push((w, 0));
-                } else if on_stack[w] {
-                    lowlink[v] = lowlink[v].min(index[w]);
-                }
-            } else {
-                if lowlink[v] == index[v] {
-                    let mut comp = Vec::new();
-                    loop {
-                        let u = comp_stack.pop().expect("Tarjan stack underflow");
-                        on_stack[u] = false;
-                        comp.push(u);
-                        if u == v {
-                            break;
-                        }
-                    }
-                    comp.sort_unstable();
-                    sccs.push(comp);
-                }
-                let low_v = lowlink[v];
-                work.pop();
-                if let Some(&(parent, _)) = work.last() {
-                    lowlink[parent] = lowlink[parent].min(low_v);
-                }
-            }
-        }
-    }
-    sccs
+    crate::scc::tarjan_scc(&deps)
 }
 
 /// Whether a declaration's body refers to its own name: direct self-recursion,

@@ -30,6 +30,7 @@ pub mod project;
 #[cfg(feature = "native")]
 pub mod repl;
 pub mod resolve;
+pub(crate) mod scc;
 pub mod stdlib;
 pub mod sym;
 pub mod syntax;

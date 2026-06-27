@@ -58,6 +58,26 @@ fn behavior_changes_the_hash() {
     assert_ne!(a, b);
 }
 
+// The fip/fbip annotation and the borrow mask are elaboration inputs that change
+// codegen (the mask drives `insert_rc`, fip pins the loop lowering) without
+// touching the Core body, so the hash must commit to them: two programs with a
+// byte-identical Core body but different metadata hash differently. Omitting
+// either was a silent-miscompile hole (a from-scratch build and an incremental
+// one keyed by hash would disagree).
+#[test]
+fn metadata_is_committed_to_the_hash() {
+    let plain = h("fn add1(n) = n + 1\nfn main() = println(add1(0))", "add1");
+    let fip = h(
+        "fip fn add1(n) = n + 1\nfn main() = println(add1(0))",
+        "add1",
+    );
+    assert_ne!(plain, fip, "fip annotation must change the hash");
+
+    let owned = h("fn dup(x) = (x, x)\nfn main() = ()", "dup");
+    let borrowed = h("fn dup(borrow x) = (x, x)\nfn main() = ()", "dup");
+    assert_ne!(owned, borrowed, "borrow mask must change the hash");
+}
+
 // Editing one definition rehashes exactly its transitive dependents and nothing
 // else: `base` -> `g` -> `h` all move, the unrelated `other` is a cache hit.
 #[test]

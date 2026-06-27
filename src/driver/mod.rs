@@ -12,10 +12,10 @@ use crate::codegen::emit_mlir;
 use crate::codegen::{emit_llvm, emit_llvm_bc};
 #[cfg(feature = "native")]
 use crate::core::effect_lower::residual_effects;
-use crate::core::fbip::{borrow_sigs, Sigs};
+use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
-    balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
-    lower_effects, pp_core, pp_core_pretty, reuse, Core,
+    balanced, check_fip, check_fip_linear, elaborate, erase_newtypes, fip_annots, hash_program,
+    insert_rc, lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, Core,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -119,6 +119,10 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &checked, &core)?;
     reconcile_effects(&checked, &core)?;
+    // Zero-cost newtypes: erase the one-field box above the backend fork so both
+    // the interpreter and native see the same unwrapped Core. Placed after the
+    // fip/effect validators so they still judge the program as written.
+    let core = erase_newtypes(&core, &newtype_ctors(&program));
     Ok((program, checked, core))
 }
 
@@ -768,16 +772,32 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
     dump_on(phase, src, &default_roots(base))
 }
 
-// Out-of-Core elaboration inputs the content hash must commit to: the
-// generalized type and the principal effect row, keyed by canonical symbol.
-fn hash_meta(checked: &Checked) -> BTreeMap<Sym, String> {
+// Out-of-Core elaboration inputs the content hash must commit to, keyed by
+// canonical symbol: the generalized type, the principal effect row, the
+// fip/fbip annotation, and the borrow mask. The last two are load-bearing for
+// codegen (the mask drives `insert_rc`, fip pins the loop lowering), so a change
+// to either must change the hash even when the Core body is byte-identical.
+fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, String> {
     checked
         .decls
         .iter()
         .map(|d| {
+            let sym = Sym::new(&d.name);
+            let fip = match fips.get(&sym) {
+                Some(crate::syntax::ast::Fip::Fip) => "fip",
+                Some(crate::syntax::ast::Fip::Fbip) => "fbip",
+                _ => "",
+            };
+            let mask: String = sigs.get(&sym).map_or_else(String::new, |bs| {
+                bs.iter().map(|b| if *b { 'b' } else { '.' }).collect()
+            });
             (
-                Sym::new(&d.name),
-                format!("{} ! {}", d.ty.show(), show_effects(&d.effects)),
+                sym,
+                format!(
+                    "{} ! {} fip:{fip} borrow:{mask}",
+                    d.ty.show(),
+                    show_effects(&d.effects)
+                ),
             )
         })
         .collect()
@@ -807,8 +827,11 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> 
             Ok(crate::core::core_to_json(&core))
         }
         "core-hash" => {
-            let (_, checked, core) = frontend(src, roots)?;
-            let hashes = hash_program(&core, &hash_meta(&checked));
+            let (program, checked, core) = frontend(src, roots)?;
+            let hashes = hash_program(
+                &core,
+                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+            );
             let mut names: Vec<&Sym> = hashes.keys().collect();
             names.sort_by_key(|s| s.as_str());
             let mut out = String::new();
