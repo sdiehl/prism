@@ -94,6 +94,7 @@ const TQCONS_TAG: usize = 1;
 /// codegen emits the bump at its head). The names are minted here, so the
 /// predicate lives here. The erased-loop drivers (`{n}@loopdrv`) are direct,
 /// constant-stack control flow, not the free-monad driver, so they are excluded.
+#[cfg(feature = "native")]
 #[must_use]
 pub(crate) fn is_free_monad_driver(name: &str) -> bool {
     name == EBIND

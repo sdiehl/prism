@@ -53,8 +53,13 @@ pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
 /// Width of each module's span band. Module `i` shifts its spans by
 /// `(i + 1) << SPAN_BAND_SHIFT`, so no single file exceeding 1 TiB and no run of
 /// fewer than 2^23 modules can collide, while staying clear of the synthesized
-/// span region at `usize::MAX / 2`.
+/// span region at `usize::MAX / 2`. On 32-bit targets (wasm32) `usize` is too
+/// narrow for a 40-bit band, so the shift drops to 24 (16 MiB per file, up to
+/// ~128 modules before nearing `usize::MAX / 2`).
+#[cfg(target_pointer_width = "64")]
 const SPAN_BAND_SHIFT: u32 = 40;
+#[cfg(not(target_pointer_width = "64"))]
+const SPAN_BAND_SHIFT: u32 = 24;
 
 /// Bare names a selective import binds in unqualified scope, each mapped to the
 /// canonical symbol it resolves to.
