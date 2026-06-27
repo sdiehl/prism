@@ -804,7 +804,13 @@ impl Fmt<'_> {
             Expr::Unit => Some("()".into()),
             Expr::Str(s) => Some(format!("\"{}\"", escape_str(s))),
             Expr::Var(x) => Some(x.clone()),
+            // A delimited list collapses onto one line only when nothing inside
+            // carries a comment; an interior `--` line comment cannot survive a
+            // flat join, so refuse and let the break path emit it verbatim.
             Expr::Tuple(elems) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
                 let parts: Option<Vec<_>> = elems
                     .iter()
                     .map(|x| self.fmt_expr_inline(x, Mode::Flat))
@@ -813,6 +819,9 @@ impl Fmt<'_> {
             }
             Expr::List(elems) if elems.is_empty() => Some("[]".into()),
             Expr::List(elems) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
                 let parts: Option<Vec<_>> = elems
                     .iter()
                     .map(|x| self.fmt_expr_inline(x, Mode::Flat))
@@ -847,6 +856,11 @@ impl Fmt<'_> {
                     return Some(s);
                 }
                 if is_with_call(args) {
+                    return None;
+                }
+                // A comment between the arguments would be dropped by the flat
+                // join below; refuse so the break path preserves it verbatim.
+                if self.has_comments(f.span.end, e.span.end) {
                     return None;
                 }
                 if let Some(recv) = try_recv(f, args) {
@@ -1298,6 +1312,11 @@ impl Fmt<'_> {
             }
             (Expr::Let(x, v, b), _) => self.fmt_let_break(x, v, b, indent, mode),
             (Expr::Pipe(x, f), _) => self.fmt_pipe_break(x, f, indent, mode),
+            // A flat call drops comments sitting between its arguments; when any
+            // are present, reproduce the call from source so they survive.
+            (Expr::Call(f, args), _) if self.has_comments(f.span.end, e.span.end) => {
+                self.verbatim(e.span.start, e.span.end)
+            }
             (Expr::Call(f, args), _) => self.fmt_call_flat(f, args, indent),
             (Expr::Handle(body, arms), Mode::Layout) => self.fmt_handle_layout(body, arms, indent),
             (Expr::Sugar(Sugar::TryCatch(body, arms)), Mode::Layout) => {

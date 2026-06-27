@@ -1,0 +1,9 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn main() =\\n\\\n     \\x20 (\\n\\\n     \\x20   1,  -- x coord\\n\\\n     \\x20   2,  -- y coord\\n\\\n     \\x20 )\\n\")"
+---
+fn main() =
+  (
+    1,  -- x coord
+    2,  -- y coord
+  )

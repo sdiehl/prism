@@ -201,3 +201,34 @@ trivia_case!(
      \x20 n := n + 1\n\
      \x20 n\n"
 );
+
+// A comment between call arguments must survive: the flat one-line join would
+// drop it, so the formatter keeps the call in its laid-out source form.
+trivia_case!(
+    call_arg_comments,
+    "fn main() : Int =\n\
+     \x20 foo(\n\
+     \x20   1,  -- keep me\n\
+     \x20   2,\n\
+     \x20 )\n"
+);
+
+// Comments inside a list literal are preserved the same way.
+trivia_case!(
+    list_element_comments,
+    "fn main() : List(Int) =\n\
+     \x20 [\n\
+     \x20   1,  -- one\n\
+     \x20   2,  -- two\n\
+     \x20 ]\n"
+);
+
+// Comments inside a tuple literal are preserved the same way.
+trivia_case!(
+    tuple_element_comments,
+    "fn main() =\n\
+     \x20 (\n\
+     \x20   1,  -- x coord\n\
+     \x20   2,  -- y coord\n\
+     \x20 )\n"
+);

@@ -1,0 +1,9 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn main() : List(Int) =\\n\\\n     \\x20 [\\n\\\n     \\x20   1,  -- one\\n\\\n     \\x20   2,  -- two\\n\\\n     \\x20 ]\\n\")"
+---
+fn main() : List(Int) =
+  [
+    1,  -- one
+    2,  -- two
+  ]

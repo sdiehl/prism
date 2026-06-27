@@ -999,7 +999,7 @@ fn fmt_g(d: f64) -> String {
         layout_fixed(&digits, e10)
     } else {
         let m = if digits.len() == 1 {
-            digits.clone()
+            digits
         } else {
             strip_zeros(format!("{}.{}", &digits[..1], &digits[1..]))
         };
@@ -1017,14 +1017,14 @@ fn fmt_g(d: f64) -> String {
 // leading digit has place value 10^`e10`. Trailing zeros are stripped.
 fn layout_fixed(digits: &str, e10: i32) -> String {
     if e10 >= 0 {
-        let k = e10 as usize + 1;
+        let k = e10.unsigned_abs() as usize + 1;
         if digits.len() <= k {
             format!("{digits}{}", "0".repeat(k - digits.len()))
         } else {
             strip_zeros(format!("{}.{}", &digits[..k], &digits[k..]))
         }
     } else {
-        let zeros = "0".repeat((-e10 - 1) as usize);
+        let zeros = "0".repeat((-e10 - 1).unsigned_abs() as usize);
         strip_zeros(format!("0.{zeros}{digits}"))
     }
 }
@@ -1252,7 +1252,7 @@ mod tests {
             (1.0 / 3.0, "0.3333333333333333"),
             (10.0 / 3.0, "3.3333333333333335"),
             (std::f64::consts::PI, "3.141592653589793"),
-            (3.14, "3.14"),
+            (12.34, "12.34"),
             (100.0, "100"),
             (1_000_000.0, "1000000"),
             (0.0001, "0.0001"),
@@ -1261,7 +1261,7 @@ mod tests {
             (1e16, "1e+16"),
             (1e100, "1e+100"),
             (1e-100, "1e-100"),
-            (1.23456789e-5, "1.23456789e-05"),
+            (1.234_567_89e-5, "1.23456789e-05"),
         ];
         for &(d, want) in cases {
             assert_eq!(fmt_g(d), want, "fmt_g({d})");
@@ -1373,7 +1373,7 @@ mod tests {
             1.0 / 3.0,
             10.0 / 3.0,
             std::f64::consts::PI,
-            3.14,
+            12.34,
             100.0,
             1_000_000.0,
             0.0001,
@@ -1391,7 +1391,7 @@ mod tests {
         let want: Vec<String> = vals.iter().map(|&d| fmt_g(d)).collect();
         let mut body = String::from("long prism_show_float(long);\n");
         for &d in vals {
-            let bits = d.to_bits() as i64;
+            let bits = d.to_bits().cast_signed();
             let _ = writeln!(body, "{{ long b = {bits}L; print_str(prism_show_float(b)); }}");
         }
         let Some(lines) = rt_oracle(&body) else {
