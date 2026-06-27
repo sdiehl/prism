@@ -1,4 +1,4 @@
-//! Content-addressed hashing of elaborated Core (CODEBASE.md, Stage 1 probe).
+//! Content-addressed hashing of elaborated Core.
 //!
 //! Each top-level definition is hashed over its Core after two normalizations,
 //! so the hash names *behavior*, not spelling or position:
@@ -35,8 +35,8 @@ use crate::sym::Sym;
 /// Map from a definition's canonical symbol to its content hash (hex).
 pub type Hashes = BTreeMap<Sym, String>;
 
-/// Scheme tag: every hash commits to it, so a scheme change cannot silently
-/// reuse an old store (CODEBASE.md "hashing scheme is versioned").
+/// Scheme tag: every hash commits to it, so a change to this encoding cannot
+/// silently reuse an old hash computed under a different scheme.
 const SCHEME: &str = "prism-core-hash-v1";
 
 /// Hash every definition in `core`. `meta[sym]` is a canonical rendering of the
