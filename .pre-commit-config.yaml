@@ -39,6 +39,23 @@ repos:
         types: [rust]
         pass_filenames: false
 
+      # C runtime gates, mirroring the CI "Test" job. Both run on the host
+      # toolchain, so they catch most findings locally; a few clang-analyzer
+      # results are glibc-header-sensitive and only surface on the Linux CI.
+      - id: c-runtime-warnings
+        name: C runtime warnings (-Werror)
+        language: system
+        entry: bash -c 'cc="$(command -v clang-22 || command -v clang)"; exec "$cc" -std=c11 -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align -Wpointer-arith -Wwrite-strings -Wfloat-equal -Wundef -Wredundant-decls -Wvla -Wdouble-promotion -Wformat=2 -fsyntax-only runtime/prism_rt.c'
+        files: ^runtime/prism_rt\.c$
+        pass_filenames: false
+
+      - id: clang-tidy
+        name: C runtime clang-tidy
+        language: system
+        entry: bash -c 'ct="$(command -v clang-tidy-22 || command -v clang-tidy)"; exec "$ct" runtime/prism_rt.c --quiet -- -std=c11 -O2'
+        files: ^runtime/(prism_rt\.c|\.clang-tidy)$
+        pass_filenames: false
+
       - id: cargo-test
         name: cargo test
         entry: cargo test --all

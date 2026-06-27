@@ -708,7 +708,10 @@ static long mag_trim(const unsigned long *m, long n) {
 static long big_make(const unsigned long *m, long n, int neg) {
     n = mag_trim(m, n);
     long *p = prism_big_alloc(n);
-    if (n) memcpy(p + PRISM_HDR_WORDS, m, (size_t)n * 8);
+    // n > 0 implies m is non-null (mag_trim already read it); the explicit `&& m`
+    // says so to the analyzer, which otherwise loses the constraint through the
+    // zero-bignum call big_make(0, 0, 0) and flags memcpy's nonnull `src`.
+    if (n && m) memcpy(p + PRISM_HDR_WORDS, m, (size_t)n * 8);
     p[PRISM_ARITY_W] = neg ? -n : n;
     return (long)p;
 }

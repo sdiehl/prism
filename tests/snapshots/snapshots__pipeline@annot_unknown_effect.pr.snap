@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/annot_unknown_effect.pr
 ---
 == tokens ==
-VOpen Fn Ident("fact") LParen Ident("n") RParen Colon Bang LBrace UIdent("Foo") RBrace KwInt Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then Int(IntLit { value: 1, suffix: None }) Else Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
+VOpen Fn Ident("fact") LParen Ident("n") RParen Colon Bang LBrace UIdent("Foo") RBrace KwInt Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -67,7 +67,7 @@ Program {
                                 suffix: None,
                             },
                         ),
-                        span: 43..44,
+                        span: 47..48,
                     },
                     Spanned {
                         node: Bin(
@@ -76,7 +76,7 @@ Program {
                                 node: Var(
                                     "n",
                                 ),
-                                span: 50..51,
+                                span: 60..61,
                             },
                             Spanned {
                                 node: Call(
@@ -84,7 +84,7 @@ Program {
                                         node: Var(
                                             "fact",
                                         ),
-                                        span: 54..58,
+                                        span: 64..68,
                                     },
                                     [
                                         Spanned {
@@ -94,7 +94,7 @@ Program {
                                                     node: Var(
                                                         "n",
                                                     ),
-                                                    span: 59..60,
+                                                    span: 69..70,
                                                 },
                                                 Spanned {
                                                     node: Int(
@@ -103,23 +103,23 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 63..64,
+                                                    span: 73..74,
                                                 },
                                             ),
-                                            span: 59..64,
+                                            span: 69..74,
                                         },
                                     ],
                                 ),
-                                span: 54..65,
+                                span: 64..75,
                             },
                         ),
-                        span: 50..65,
+                        span: 60..75,
                     },
                 ),
-                span: 28..65,
+                span: 28..75,
             },
             wheres: [],
-            span: 0..65,
+            span: 0..75,
         },
         Decl {
             name: "main",
@@ -133,7 +133,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 79..86,
+                        span: 89..96,
                     },
                     [
                         Spanned {
@@ -142,7 +142,7 @@ Program {
                                     node: Var(
                                         "fact",
                                     ),
-                                    span: 87..91,
+                                    span: 97..101,
                                 },
                                 [
                                     Spanned {
@@ -152,18 +152,18 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 92..93,
+                                        span: 102..103,
                                     },
                                 ],
                             ),
-                            span: 87..94,
+                            span: 97..104,
                         },
                     ],
                 ),
-                span: 79..95,
+                span: 89..105,
             },
             wheres: [],
-            span: 67..95,
+            span: 77..105,
         },
     ],
 }
@@ -173,7 +173,8 @@ Type Error: in `fact`: unknown effect `Foo`
    ╭─[ <source>:1:1 ]
    │
  1 │ ╭─▶ fn fact(n) : !{Foo} Int =
- 2 │ ├─▶   if n == 0 then 1 else n * fact(n - 1)
-   │ │                                             
-   │ ╰───────────────────────────────────────────── in `fact`: unknown effect `Foo`
+   ┆ ┆   
+ 5 │ ├─▶     n * fact(n - 1)
+   │ │                         
+   │ ╰───────────────────────── in `fact`: unknown effect `Foo`
 ───╯
