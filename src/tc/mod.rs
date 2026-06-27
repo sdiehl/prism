@@ -69,8 +69,8 @@ pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
 
 // The canonical-instance designation: for a `(class, head)` that several
 // instances share, the one implicit resolution selects. Built from `canonical`
-// decls beside `inst_keys`; the file-world seed of the content-addressed store's
-// `(class, head) -> instance-hash` canonical binding (see COHERENCE.md).
+// decls beside `inst_keys`, keying each `(class, head)` to the chosen instance
+// name so resolution is deterministic instead of ambiguous.
 pub type Canon = BTreeMap<(String, HeadKey), String>;
 
 // How a constraint is discharged at a use site: a top-level instance dictionary
