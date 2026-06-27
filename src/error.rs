@@ -72,7 +72,7 @@ impl<'a> SourceMap<'a> {
     }
 }
 
-fn line_col(src: &str, byte: usize) -> (u32, u32) {
+pub(crate) fn line_col(src: &str, byte: usize) -> (u32, u32) {
     let (mut line, mut col) = (1u32, 1u32);
     for (i, c) in src.char_indices() {
         if i >= byte {

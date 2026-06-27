@@ -39,8 +39,7 @@ fn first_optic(steps: &[PathStep]) -> Option<usize> {
 }
 
 pub(super) fn has_optic(ups: &[Path]) -> bool {
-    ups.iter()
-        .any(|(steps, _)| steps.iter().any(|s| !is_field(s)))
+    ups.iter().any(|(steps, _)| first_optic(steps).is_some())
 }
 
 // Rewrite `{ base | ups }` (which contains at least one optic step) into the

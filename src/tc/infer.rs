@@ -1307,10 +1307,16 @@ impl Tc<'_> {
     // option without a signature). A *constrained* function keeps the monomorphic
     // self-type so its recursive call still discharges the constraint against the
     // enclosing dictionary parameter (`cur_self`) rather than re-resolving it.
-    fn infer_body(&mut self, env: &Env, d: &Decl<Core>, seed: &DeclSeed) -> Result<(), TypeError> {
+    // Reset the per-declaration obligation buffers (class constraints, numeric
+    // defaulting candidates, index-op resolutions) before checking a new body.
+    fn clear_obligations(&mut self) {
         self.wanted.clear();
         self.num_default.clear();
         self.index_ops.clear();
+    }
+
+    fn infer_body(&mut self, env: &Env, d: &Decl<Core>, seed: &DeclSeed) -> Result<(), TypeError> {
+        self.clear_obligations();
         let mut env2 = env.clone();
         for (p, t) in d.params.iter().zip(&seed.doms) {
             env2.insert(Sym::from(&p.name), t.clone());
@@ -1391,9 +1397,7 @@ impl Tc<'_> {
     // instantiate fresh at each reference.
     pub(super) fn infer_const(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
         self.reset_ctx();
-        self.wanted.clear();
-        self.num_default.clear();
-        self.index_ops.clear();
+        self.clear_obligations();
         let ty = if let Some(ann) = &d.ret {
             self.check_annot_rows(ann, d.span)?;
             let mut ty_ex = BTreeMap::new();
@@ -1421,9 +1425,7 @@ impl Tc<'_> {
     ) -> Result<(), TypeError> {
         for m in &inst.methods {
             self.reset_ctx();
-            self.wanted.clear();
-            self.num_default.clear();
-            self.index_ops.clear();
+            self.clear_obligations();
             let (_, sig) = class
                 .methods
                 .iter()

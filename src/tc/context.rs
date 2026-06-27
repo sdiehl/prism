@@ -243,9 +243,15 @@ impl Tc<'_> {
         let t = self.apply(ty);
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
+        // One zonk per env binding feeds both the existential and the row-existential
+        // free-variable sets; the env is often the whole prelude, so walking it once
+        // rather than twice is the cheaper of two identical passes.
         let mut env_exs = BTreeSet::new();
+        let mut env_row_exs = BTreeSet::new();
         for v in env.values() {
-            self.apply(v).free_exist(&mut env_exs);
+            let av = self.apply(v);
+            av.free_exist(&mut env_exs);
+            av.free_exist_row(&mut env_row_exs);
         }
         let gen: Vec<u32> = exs.into_iter().filter(|e| !env_exs.contains(e)).collect();
         let mut out = t;

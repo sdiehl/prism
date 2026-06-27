@@ -956,7 +956,7 @@ fn set(session: &mut Session, arg: &str) {
         return;
     }
     for tok in arg.split_whitespace() {
-        let (on, flag) = match tok.split_at(tok.len().min(1)) {
+        let (on, flag) = match tok.split_at(1) {
             ("+", f) => (true, f),
             ("-", f) => (false, f),
             _ => {

@@ -63,21 +63,31 @@ pub(super) struct Cx {
 // instantiates it fresh at each throw site.
 const THROW_RET: &str = "a@throw";
 
-// `fail()` is the anonymous twin of an `error`: a builtin one-op effect always
-// in scope, so any expression can short-circuit and the row tracks it. Reusing
-// THROW_RET makes the checker instantiate its return fresh per site and restrict
-// it to `final ctl`, exactly the throw path.
-fn inject_fail(prog: &mut Program) {
-    prog.effects.push(EffectDecl {
-        name: names::FAIL_EFFECT.into(),
+// A one-op effect whose op never resumes (its result is the freshened-per-site
+// THROW_RET var pinned to `final ctl`). `fail`, `break`/`continue`, and every
+// `error` are all this exact shape, differing only in name and op params.
+fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -> EffectDecl {
+    EffectDecl {
+        name,
         params: Vec::new(),
         ops: vec![EffOp {
-            name: names::FAIL_OP.into(),
-            params: Vec::new(),
+            name: op_name,
+            params: op_params,
             ret: Ty::Var(THROW_RET.into()),
         }],
-        span: Span::empty(0),
-    });
+        span,
+    }
+}
+
+// `fail()` is the anonymous twin of an `error`: a builtin one-op effect always
+// in scope, so any expression can short-circuit and the row tracks it.
+fn inject_fail(prog: &mut Program) {
+    prog.effects.push(throw_effect(
+        names::FAIL_EFFECT.into(),
+        names::FAIL_OP.into(),
+        Vec::new(),
+        Span::empty(0),
+    ));
 }
 
 // `break` / `continue` desugar to non-resumable performs of these one-op effects,
@@ -89,16 +99,12 @@ fn inject_loop_effects(prog: &mut Program) {
         (names::BREAK_EFFECT, names::BREAK_OP),
         (names::CONTINUE_EFFECT, names::CONTINUE_OP),
     ] {
-        prog.effects.push(EffectDecl {
-            name: eff.into(),
-            params: Vec::new(),
-            ops: vec![EffOp {
-                name: op.into(),
-                params: Vec::new(),
-                ret: Ty::Var(THROW_RET.into()),
-            }],
-            span: Span::empty(0),
-        });
+        prog.effects.push(throw_effect(
+            eff.into(),
+            op.into(),
+            Vec::new(),
+            Span::empty(0),
+        ));
     }
 }
 
@@ -130,16 +136,12 @@ fn lower_errors(prog: &mut Program) -> BTreeSet<String> {
     let mut names_out = BTreeSet::new();
     for e in std::mem::take(&mut prog.errors) {
         names_out.insert(e.name.clone());
-        prog.effects.push(EffectDecl {
-            name: e.name.clone(),
-            params: Vec::new(),
-            ops: vec![EffOp {
-                name: names::throw_op(&e.name),
-                params: e.params,
-                ret: Ty::Var(THROW_RET.into()),
-            }],
-            span: e.span,
-        });
+        prog.effects.push(throw_effect(
+            e.name.clone(),
+            names::throw_op(&e.name),
+            e.params,
+            e.span,
+        ));
     }
     names_out
 }
@@ -272,21 +274,12 @@ fn fold_wheres(d: &mut Decl) {
         return;
     }
     let span = d.body.span;
-    let body = std::mem::replace(
-        &mut d.body,
-        Spanned {
-            synth: false,
-            node: Expr::Unit,
-            span,
-        },
-    );
+    let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
     d.body = std::mem::take(&mut d.wheres)
         .into_iter()
         .rev()
-        .fold(body, |acc, (n, v)| Spanned {
-            synth: false,
-            node: Expr::Let(n, Box::new(v), Box::new(acc)),
-            span,
+        .fold(body, |acc, (n, v)| {
+            sp(Expr::Let(n, Box::new(v), Box::new(acc)), span)
         });
 }
 

@@ -643,7 +643,7 @@ long prism_show_float(long f) {
     const char *s = sci;
     int neg = (*s == '-');
     if (neg) s++;
-    char digits[20];
+    char digits[20] = {0};
     int nd = 0;
     while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }
     int e10 = atoi(s + 1); /* s now points at 'e' */

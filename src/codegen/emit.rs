@@ -1208,6 +1208,14 @@ impl<I: Isa> Cg<'_, I> {
     // the fixpoint finite, since an n == 0 under-application would mint a
     // same-arity adapter that regenerates forever. Every other adapter has arity
     // m - n < m, so the chain of adapters-of-adapters strictly shrinks.
+    // Every lambda arity plus every arity an `App` actually calls. The planning
+    // fixpoint and the final dispatcher emission both iterate exactly this set.
+    fn apply_arities(&self) -> BTreeSet<usize> {
+        let mut a: BTreeSet<usize> = self.lams.iter().map(|l| l.params.len()).collect();
+        a.extend(self.used_apply.iter().copied());
+        a
+    }
+
     fn plan_dispatch(&mut self, n: usize) {
         if n == 0 {
             return;
@@ -1386,12 +1394,7 @@ pub(super) fn emit_with<I: Isa>(
     // the fixpoint terminates.
     loop {
         let before = (cg.lams.len(), cg.used_apply.len());
-        let arities: Vec<usize> = {
-            let mut a: BTreeSet<usize> = cg.lams.iter().map(|l| l.params.len()).collect();
-            a.extend(cg.used_apply.iter().copied());
-            a.into_iter().collect()
-        };
-        for n in arities {
+        for n in cg.apply_arities() {
             cg.plan_dispatch(n);
         }
         if (cg.lams.len(), cg.used_apply.len()) == before {
@@ -1410,13 +1413,8 @@ pub(super) fn emit_with<I: Isa>(
     // Every lambda arity needs a dispatcher, as does every arity an `App` calls,
     // even with no matching lambda (a 0-arg apply on a dead path still has to
     // resolve as a symbol).
-    let arities: BTreeSet<usize> = {
-        let mut a: BTreeSet<usize> = cg.lams.iter().map(|l| l.params.len()).collect();
-        a.extend(cg.used_apply.iter().copied());
-        a
-    };
     let mut dispatch = String::new();
-    for n in arities {
+    for n in cg.apply_arities() {
         dispatch.push_str(&cg.apply_dispatch(n));
         dispatch.push('\n');
     }

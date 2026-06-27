@@ -92,6 +92,16 @@ const fn callee_parens(e: &Expr) -> bool {
     low_prec_operand(e) || matches!(e, Expr::Handle(..) | Expr::FieldAccess(..))
 }
 
+// Wrap an already-rendered operand in parens when the surrounding precedence
+// demands it; the no-paren case returns the string untouched.
+fn paren_if(parens: bool, s: String) -> String {
+    if parens {
+        format!("({s})")
+    } else {
+        s
+    }
+}
+
 // In statement position, `match` and `if` always lay out across lines, even
 // when they would fit on one: their arms and branches read better stacked, the
 // way other languages write them. Synth matches (pattern-let / `?` desugar) are
@@ -437,11 +447,7 @@ impl Fmt<'_> {
 
     fn fmt_dot_recv(&self, recv: &S<Expr>, indent: usize) -> String {
         let s = self.fmt_expr(recv, indent, Mode::Flat);
-        if dot_recv_parens(&recv.node) {
-            format!("({s})")
-        } else {
-            s
-        }
+        paren_if(dot_recv_parens(&recv.node), s)
     }
 
     // A call head in flat form: either `f(args)` or the restored `recv.f(rest)`.
@@ -464,11 +470,7 @@ impl Fmt<'_> {
             );
         }
         let f_s = self.fmt_expr(f, indent, Mode::Flat);
-        let f_s = if callee_parens(&f.node) {
-            format!("({f_s})")
-        } else {
-            f_s
-        };
+        let f_s = paren_if(callee_parens(&f.node), f_s);
         let args_s: Vec<String> = args
             .iter()
             .map(|a| self.fmt_expr(a, indent, Mode::Flat))
@@ -834,8 +836,8 @@ impl Fmt<'_> {
                 let b_paren = needs_right_paren(&b.node, *op, p);
                 let a_s = self.fmt_expr_inline(a, if a_paren { Mode::Flat } else { mode })?;
                 let b_s = self.fmt_expr_inline(b, if b_paren { Mode::Flat } else { mode })?;
-                let a_s = if a_paren { format!("({a_s})") } else { a_s };
-                let b_s = if b_paren { format!("({b_s})") } else { b_s };
+                let a_s = paren_if(a_paren, a_s);
+                let b_s = paren_if(b_paren, b_s);
                 Some(format!("{a_s} {} {b_s}", op.spelling()))
             }
             Expr::If(..) => {
@@ -865,20 +867,12 @@ impl Fmt<'_> {
                 }
                 if let Some(recv) = try_recv(f, args) {
                     let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = if dot_recv_parens(&recv.node) {
-                        format!("({recv_s})")
-                    } else {
-                        recv_s
-                    };
+                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
                     return Some(format!("{recv_s}{}", kw::QUESTION));
                 }
                 if let Some((name, recv, rest)) = dot_parts(f, args) {
                     let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = if dot_recv_parens(&recv.node) {
-                        format!("({recv_s})")
-                    } else {
-                        recv_s
-                    };
+                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
                     let rest_s: Option<Vec<_>> = rest
                         .iter()
                         .map(|a| self.fmt_expr_inline(a, Mode::Flat))
@@ -889,11 +883,7 @@ impl Fmt<'_> {
                 // fold its names back into a trailing `using` clause on this call.
                 if let Expr::Inst(inner, names) = &f.node {
                     let inner_s = self.fmt_expr_inline(inner, mode)?;
-                    let inner_s = if callee_parens(&inner.node) {
-                        format!("({inner_s})")
-                    } else {
-                        inner_s
-                    };
+                    let inner_s = paren_if(callee_parens(&inner.node), inner_s);
                     let args: Option<Vec<_>> = args
                         .iter()
                         .map(|a| self.fmt_expr_inline(a, Mode::Flat))
@@ -908,11 +898,7 @@ impl Fmt<'_> {
                     });
                 }
                 let f_s = self.fmt_expr_inline(f, mode)?;
-                let f_s = if callee_parens(&f.node) {
-                    format!("({f_s})")
-                } else {
-                    f_s
-                };
+                let f_s = paren_if(callee_parens(&f.node), f_s);
                 let args: Option<Vec<_>> = args
                     .iter()
                     .map(|a| self.fmt_expr_inline(a, Mode::Flat))
@@ -972,11 +958,7 @@ impl Fmt<'_> {
             }
             Expr::Index(recv, key) => {
                 let recv_s = self.fmt_expr_inline(recv, mode)?;
-                let recv_s = if callee_parens(&recv.node) {
-                    format!("({recv_s})")
-                } else {
-                    recv_s
-                };
+                let recv_s = paren_if(callee_parens(&recv.node), recv_s);
                 let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
                 Some(format!("{recv_s}[{key_s}]"))
             }
@@ -1084,11 +1066,7 @@ impl Fmt<'_> {
             }
             Sugar::IndexAssign(recv, key, value) => {
                 let recv_s = self.fmt_expr_inline(recv, mode)?;
-                let recv_s = if callee_parens(&recv.node) {
-                    format!("({recv_s})")
-                } else {
-                    recv_s
-                };
+                let recv_s = paren_if(callee_parens(&recv.node), recv_s);
                 let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
                 if let Some((op, rhs)) = as_index_compound(value) {
                     let rhs_s = self.fmt_expr_inline(rhs, mode)?;

@@ -1050,9 +1050,26 @@ fn dispatch_float_op(op: CoreOp, x: f64, y: f64) -> Result<Rv, String> {
 }
 
 // i64 fast path: arithmetic that overflows i64 promotes to a normalized Big.
+// The six ordering/equality ops are identical across every numeric type; only
+// the arithmetic arms differ, so each `dispatch_*_op` consults this first.
+fn cmp_op<T: Ord>(op: CoreOp, x: &T, y: &T) -> Option<Rv> {
+    Some(Rv::Bool(match op {
+        CoreOp::Eq => x == y,
+        CoreOp::Ne => x != y,
+        CoreOp::Lt => x < y,
+        CoreOp::Le => x <= y,
+        CoreOp::Gt => x > y,
+        CoreOp::Ge => x >= y,
+        _ => return None,
+    }))
+}
+
 fn dispatch_int_op(op: CoreOp, x: i64, y: i64) -> Result<Rv, String> {
     if matches!(op, CoreOp::Div | CoreOp::Rem) && y == 0 {
         return Err("division by zero".into());
+    }
+    if let Some(r) = cmp_op(op, &x, &y) {
+        return Ok(r);
     }
     let wide = |r: Option<i64>, f: fn(BigInt, BigInt) -> BigInt| {
         r.map_or_else(|| norm(f(BigInt::from(x), BigInt::from(y))), Rv::Int)
@@ -1063,12 +1080,6 @@ fn dispatch_int_op(op: CoreOp, x: i64, y: i64) -> Result<Rv, String> {
         CoreOp::Mul => wide(x.checked_mul(y), |a, b| a * b),
         CoreOp::Div => wide(x.checked_div(y), |a, b| a / b),
         CoreOp::Rem => Rv::Int(x.wrapping_rem(y)),
-        CoreOp::Eq => Rv::Bool(x == y),
-        CoreOp::Ne => Rv::Bool(x != y),
-        CoreOp::Lt => Rv::Bool(x < y),
-        CoreOp::Le => Rv::Bool(x <= y),
-        CoreOp::Gt => Rv::Bool(x > y),
-        CoreOp::Ge => Rv::Bool(x >= y),
         _ => return Err(format!("op {op:?} not defined for Int")),
     })
 }
@@ -1077,18 +1088,15 @@ fn dispatch_bigint_op(op: CoreOp, x: BigInt, y: BigInt) -> Result<Rv, String> {
     if matches!(op, CoreOp::Div | CoreOp::Rem) && y.sign() == Sign::NoSign {
         return Err("division by zero".into());
     }
+    if let Some(r) = cmp_op(op, &x, &y) {
+        return Ok(r);
+    }
     Ok(match op {
         CoreOp::Add => norm(x + y),
         CoreOp::Sub => norm(x - y),
         CoreOp::Mul => norm(x * y),
         CoreOp::Div => norm(x / y),
         CoreOp::Rem => norm(x % y),
-        CoreOp::Eq => Rv::Bool(x == y),
-        CoreOp::Ne => Rv::Bool(x != y),
-        CoreOp::Lt => Rv::Bool(x < y),
-        CoreOp::Le => Rv::Bool(x <= y),
-        CoreOp::Gt => Rv::Bool(x > y),
-        CoreOp::Ge => Rv::Bool(x >= y),
         _ => return Err(format!("op {op:?} not defined for Int")),
     })
 }

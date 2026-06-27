@@ -100,22 +100,6 @@ pub fn tokens(src: &str) -> String {
     format!("[{}]", parts.join(","))
 }
 
-fn line_col(src: &str, byte: usize) -> (usize, usize) {
-    let (mut line, mut col) = (1, 1);
-    for (i, c) in src.char_indices() {
-        if i >= byte {
-            break;
-        }
-        if c == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
-}
-
 fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -154,8 +138,8 @@ pub fn diagnostics(src: &str) -> String {
         }
         let s = raw_s.saturating_sub(pre).min(user.len());
         let end = raw_e.saturating_sub(pre).max(s + 1).min(user.len()).max(s);
-        let (line, col) = line_col(user, s);
-        let (eline, ecol) = line_col(user, end);
+        let (line, col) = crate::error::line_col(user, s);
+        let (eline, ecol) = crate::error::line_col(user, end);
         Some(format!(
             r#"{{"s":{s},"e":{end},"line":{line},"col":{col},"endLine":{eline},"endCol":{ecol},"kind":"{}","msg":"{}"}}"#,
             json_escape(kind),
