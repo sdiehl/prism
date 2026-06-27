@@ -1,0 +1,131 @@
+-- Persistent ordered map: an AVL-balanced binary search tree over keys with an
+-- `Ord` instance. The `Map(k, v)` type and its `Tip`/`Bin` constructors are
+-- wired in; this module is the operation surface. The prelude opens it.
+
+import Data.List (append, map, foldl)
+
+import Data.Maybe (is_some)
+
+pub let map_empty : Map(k, v) = Tip
+
+pub fn map_height(m) =
+  match m of
+    Tip => 0
+    Bin(h, _, _, _, _) => h
+
+pub fn map_node(k, v, l, r) = Bin(1 + max(map_height(l), map_height(r)), k, v, l, r)
+
+pub fn map_bf(m) =
+  match m of
+    Tip => 0
+    Bin(_, _, _, l, r) => map_height(l) - map_height(r)
+
+pub fn map_rot_right(m) =
+  match m of
+    Bin(_, k, v, Bin(_, lk, lv, ll, lr), r) =>
+      map_node(lk, lv, ll, map_node(k, v, lr, r))
+    other => other
+
+pub fn map_rot_left(m) =
+  match m of
+    Bin(_, k, v, l, Bin(_, rk, rv, rl, rr)) =>
+      map_node(rk, rv, map_node(k, v, l, rl), rr)
+    other => other
+
+pub fn map_balance(m) =
+  let bf = map_bf(m)
+  if bf > 1 then
+    match m of
+      Bin(_, k, v, l, r) =>
+        if map_bf(l) < 0 then
+          map_rot_right(map_node(k, v, map_rot_left(l), r))
+        else
+          map_rot_right(m)
+      Tip => Tip
+  elif bf < 0 - 1 then
+    match m of
+      Bin(_, k, v, l, r) =>
+        if map_bf(r) > 0 then
+          map_rot_left(map_node(k, v, l, map_rot_right(r)))
+        else
+          map_rot_left(m)
+      Tip => Tip
+  else
+    m
+
+pub fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
+  match m of
+    Tip => map_node(key, value, Tip, Tip)
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_balance(map_node(k2, v2, map_insert(key, value, l), r))
+      elif c > 0 then
+        map_balance(map_node(k2, v2, l, map_insert(key, value, r)))
+      else
+        map_node(k2, value, l, r)
+
+pub fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
+  match m of
+    Tip => None
+    Bin(_, k2, v, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_lookup(key, l)
+      elif c > 0 then
+        map_lookup(key, r)
+      else
+        Some(v)
+
+pub fn map_member(key : k, m : Map(k, v)) : Bool given Ord(k) =
+  is_some(map_lookup(key, m))
+
+pub fn map_size(m) =
+  match m of
+    Tip => 0
+    Bin(_, _, _, l, r) => 1 + map_size(l) + map_size(r)
+
+pub fn map_min(m) =
+  match m of
+    Tip => None
+    Bin(_, k, v, Tip, _) => Some((k, v))
+    Bin(_, _, _, l, _) => map_min(l)
+
+pub fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
+  match m of
+    Tip => Tip
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_balance(map_node(k2, v2, map_delete(key, l), r))
+      elif c > 0 then
+        map_balance(map_node(k2, v2, l, map_delete(key, r)))
+      else
+        match l of
+          Tip => r
+          _ =>
+            match r of
+              Tip => l
+              _ =>
+                match map_min(r) of
+                  None => l
+                  Some((mk, mv)) =>
+                    map_balance(map_node(mk, mv, l, map_delete(mk, r)))
+
+pub fn map_to_list(m) =
+  match m of
+    Tip => Nil
+    Bin(_, k, v, l, r) => append(map_to_list(l), Cons((k, v), map_to_list(r)))
+
+pub fn map_keys(m) = map(fst, map_to_list(m))
+
+pub fn map_values(m) = map(snd, map_to_list(m))
+
+pub fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
+  foldl(\(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) }, Tip, xs)
+
+pub fn map_map_values(f, m) =
+  match m of
+    Tip => Tip
+    Bin(h, k, v, l, r) =>
+      Bin(h, k, f(v), map_map_values(f, l), map_map_values(f, r))

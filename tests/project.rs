@@ -7,7 +7,7 @@ use std::{env, fs};
 
 use prism::eval::Rv;
 use prism::project::load_project;
-use prism::{build_at, interpret_at, with_custom_prelude, with_prelude};
+use prism::{interpret_at, with_custom_prelude, with_prelude};
 
 fn hello() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/projects/hello"))
@@ -27,6 +27,13 @@ fn modlib() -> &'static Path {
     ))
 }
 
+fn withdep() -> &'static Path {
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/projects/withdep"
+    ))
+}
+
 // Build a project's entry to a native binary and assert its stdout matches the
 // interpreter, the same oracle as the parity corpus. Returns early when no C
 // compiler is available so CI without clang still passes.
@@ -36,11 +43,12 @@ fn assert_native_matches_interp(project_dir: &Path) {
     }
     let project = load_project(project_dir).expect("manifest loads");
     let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
-    let want = interpret_at(&full, &project.src_dir)
+    let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
+    let want = prism::interpret_io_on(&full, &roots, &mut Vec::new(), &mut std::io::empty())
         .expect("interprets")
         .term;
     let bin = env::temp_dir().join(format!("prism_{}_{}", project.name, process::id()));
-    build_at(&full, &project.src_dir, &bin).expect("native build");
+    prism::build_on(&full, &roots, &bin).expect("native build");
     let out = Command::new(&bin).output().expect("runs binary");
     for ext in ["bc", "ll"] {
         let _ = fs::remove_file(bin.with_extension(ext));
@@ -85,6 +93,40 @@ fn modlib_project_interprets() {
 #[test]
 fn loading_a_missing_manifest_errors() {
     assert!(load_project(Path::new("/nonexistent/prism-project")).is_err());
+}
+
+#[test]
+fn manifest_parses_path_dependencies() {
+    let project = load_project(withdep()).expect("manifest loads");
+    // The dependency's own `src/` is on the search path, resolved through its
+    // manifest, so its modules resolve under its root.
+    assert_eq!(project.dep_src_dirs.len(), 1);
+    assert!(project
+        .dep_src_dirs
+        .iter()
+        .any(|d| d.ends_with("geometry/src")));
+}
+
+#[test]
+fn path_dependency_modules_resolve_and_run() {
+    let project = load_project(withdep()).expect("manifest loads");
+    let src = fs::read_to_string(&project.entry).expect("entry reads");
+    let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
+    // `Geo.Shapes` lives in the `geometry` dependency, not in this project.
+    let run = prism::interpret_io_on(
+        &with_prelude(&src),
+        &roots,
+        &mut Vec::new(),
+        &mut std::io::empty(),
+    )
+    .expect("resolves and runs");
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
+    assert_eq!(out, ["25", "48"]);
+}
+
+#[test]
+fn path_dependency_native_build_matches_interpreter() {
+    assert_native_matches_interp(withdep());
 }
 
 fn cc() -> String {

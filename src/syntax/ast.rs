@@ -140,15 +140,18 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
     }
 }
 
-// `import Data.Map`, `import List (map, filter)`, `import Json as J`. The path
-// is the dotted module path. `names` present means a selective unqualified
-// import; absent means a qualified import bound under `alias` or the last path
-// component.
+// `import Data.Map`, `import List (map, filter)`, `import Json as J`,
+// `import Data.List (..)`. The path is the dotted module path. `names` present
+// means a selective unqualified import; absent means a qualified import bound
+// under `alias` or the last path component. `glob` is the `(..)` form: every
+// exported name enters unqualified scope, the mechanism the layered prelude uses
+// to re-open its stdlib modules.
 #[derive(Clone, Debug)]
 pub struct ImportDecl {
     pub path: Vec<String>,
     pub alias: Option<String>,
     pub names: Option<Vec<String>>,
+    pub glob: bool,
     // A `pub import` re-exports the imported names from this module, so a
     // downstream importer can reach them through this module too.
     pub reexport: bool,

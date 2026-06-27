@@ -1,0 +1,3 @@
+import Data.List (foldl)
+
+pub fn total(xs : List(Int)) : Int = foldl(\(a, b) -> a + b, 0, xs)

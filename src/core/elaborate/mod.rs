@@ -1050,9 +1050,13 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             all.extend(params);
             params = all;
         }
+        let body = elab.elab(&d.body, &locals).map_err(|e| match e {
+            Error::Ice(m) => Error::Ice(format!("in `{}`: {m}", d.name)),
+            other => other,
+        })?;
         fns.push(CoreFn {
             name: d.name.clone().into(),
-            body: elab.elab(&d.body, &locals)?,
+            body,
             params: params.into_iter().map(Sym::from).collect(),
         });
     }

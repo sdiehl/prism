@@ -1,0 +1,65 @@
+-- Operations over the wired-in `Option(a)` type (`None` / `Some(a)`). The
+-- prelude opens this module, so these are in unqualified scope everywhere.
+
+pub fn is_some(o) =
+  match o of
+    None => false
+    Some(x) => true
+
+pub fn is_none(o) =
+  match o of
+    None => true
+    Some(x) => false
+
+pub fn unwrap_or(d, o) =
+  match o of
+    None => d
+    Some(x) => x
+
+pub fn map_option(f, o) =
+  match o of
+    None => None
+    Some(x) => Some(f(x))
+
+pub fn and_then(f, o) =
+  match o of
+    None => None
+    Some(x) => f(x)
+
+pub fn map_or(d, f, o) =
+  match o of
+    None => d
+    Some(x) => f(x)
+
+pub fn option_or(alt, o) =
+  match o of
+    None => alt
+    Some(x) => Some(x)
+
+pub fn option_to_list(o) =
+  match o of
+    None => Nil
+    Some(x) => Cons(x, Nil)
+
+pub fn both(o1, o2) =
+  match o1 of
+    None => None
+    Some(x) =>
+      match o2 of
+        None => None
+        Some(y) => Some((x, y))
+
+pub fn option_fold_r(g, z, o) =
+  match o of
+    None => z
+    Some(x) => g(x, z)
+
+pub fn option_bind(o, g) =
+  match o of
+    None => None
+    Some(x) => g(x)
+
+pub fn option_ap(fo, xo) =
+  match fo of
+    None => None
+    Some(g) => map_option(g, xo)

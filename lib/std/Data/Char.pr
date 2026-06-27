@@ -1,0 +1,26 @@
+-- ASCII character classification on the byte/codepoint returned by
+-- `byte_at`/`char_at`. The prelude opens this module.
+
+pub fn is_digit(c : Int) : Bool = c >= 48 && c <= 57
+
+pub fn is_upper(c : Int) : Bool = c >= 65 && c <= 90
+
+pub fn is_lower(c : Int) : Bool = c >= 97 && c <= 122
+
+pub fn is_alpha(c : Int) : Bool = is_upper(c) || is_lower(c)
+
+pub fn is_alnum(c : Int) : Bool = is_alpha(c) || is_digit(c)
+
+pub fn is_space(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
+
+pub fn to_lower_c(c : Int) : Int =
+  if is_upper(c) then
+    c + 32
+  else
+    c
+
+pub fn to_upper_c(c : Int) : Int =
+  if is_lower(c) then
+    c - 32
+  else
+    c

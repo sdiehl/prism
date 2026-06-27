@@ -1,3 +1,24 @@
+-- The always-on prelude: wired-in types, the type-class hierarchy, core
+-- combinators and arithmetic, the effect/stream and loop machinery, and the
+-- containers the compiler synthesizes calls into. The broad data-structure
+-- surface (lists, maybe/result, maps, sets, strings, chars) lives in importable
+-- stdlib modules under `Data.*`; the glob imports below re-open them into
+-- unqualified scope so every name stays available without an explicit import.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Data.Map (..)
+
+import Data.Set (..)
+
+import Data.Char (..)
+
+import Data.String (..)
+
 type Option(a) = None | Some(a) deriving (Eq)
 
 type Result(a, e) = Ok(a) | Err(e) deriving (Eq)
@@ -132,89 +153,6 @@ fn pair_map(f, g, p) =
   match p of
     (x, y) => (f(x), g(y))
 
-fn is_some(o) =
-  match o of
-    None => false
-    Some(x) => true
-
-fn is_none(o) =
-  match o of
-    None => true
-    Some(x) => false
-
-fn unwrap_or(d, o) =
-  match o of
-    None => d
-    Some(x) => x
-
-fn map_option(f, o) =
-  match o of
-    None => None
-    Some(x) => Some(f(x))
-
-fn and_then(f, o) =
-  match o of
-    None => None
-    Some(x) => f(x)
-
-fn map_or(d, f, o) =
-  match o of
-    None => d
-    Some(x) => f(x)
-
-fn option_or(alt, o) =
-  match o of
-    None => alt
-    Some(x) => Some(x)
-
-fn option_to_list(o) =
-  match o of
-    None => Nil
-    Some(x) => Cons(x, Nil)
-
-fn both(o1, o2) =
-  match o1 of
-    None => None
-    Some(x) =>
-      match o2 of
-        None => None
-        Some(y) => Some((x, y))
-
-fn is_ok(r) =
-  match r of
-    Ok(x) => true
-    Err(e) => false
-
-fn is_err(r) =
-  match r of
-    Ok(x) => false
-    Err(e) => true
-
-fn map_result(f, r) =
-  match r of
-    Ok(x) => Ok(f(x))
-    Err(e) => Err(e)
-
-fn and_then_result(f, r) =
-  match r of
-    Ok(x) => f(x)
-    Err(e) => Err(e)
-
-fn result_or(d, r) =
-  match r of
-    Ok(x) => x
-    Err(e) => d
-
-fn ok_of_option(err, o) =
-  match o of
-    None => Err(err)
-    Some(x) => Ok(x)
-
-fn option_of_result(r) =
-  match r of
-    Ok(x) => Some(x)
-    Err(e) => None
-
 fn guard(b) =
   if b then
     ()
@@ -272,83 +210,6 @@ fn at_byte(s : String, i : Int) : Int =
   else
     fail()
 
-fn singleton(x) = Cons(x, Nil)
-
-fn is_nil(xs) =
-  match xs of
-    Nil => true
-    Cons(x, rest) => false
-
-fn head(xs) =
-  match xs of
-    Nil => None
-    Cons(x, _) => Some(x)
-
-fn tail(xs) =
-  match xs of
-    Nil => Nil
-    Cons(_, rest) => rest
-
-fn last(xs) =
-  match xs of
-    Nil => None
-    Cons(x, Nil) => Some(x)
-    Cons(_, rest) => last(rest)
-
-fn length(xs) =
-  match xs of
-    Nil => 0
-    Cons(x, rest) => 1 + length(rest)
-
-fn nth(n, xs) =
-  if n == 0 then
-    head(xs)
-  else
-    match xs of
-      Nil => None
-      Cons(_, rest) => nth(n - 1, rest)
-
-fn take(n, xs) =
-  if n == 0 then
-    Nil
-  else
-    match xs of
-      Nil => Nil
-      Cons(x, rest) => Cons(x, take(n - 1, rest))
-
-fn drop(n, xs) =
-  if n == 0 then
-    xs
-  else
-    match xs of
-      Nil => Nil
-      Cons(_, rest) => drop(n - 1, rest)
-
-fn take_while(p, xs) =
-  match xs of
-    Nil => Nil
-    Cons(x, rest) =>
-      if p(x) then
-        Cons(x, take_while(p, rest))
-      else
-        Nil
-
-fn drop_while(p, xs) =
-  match xs of
-    Nil => Nil
-    Cons(x, rest) =>
-      if p(x) then
-        drop_while(p, rest)
-      else
-        xs
-
-fn split_at(n, xs) = (take(n, xs), drop(n, xs))
-
-fn map(f, xs) =
-  match xs of
-    Nil => Nil
-    Cons(x, rest) => Cons(f(x), map(f, rest))
-
 -- Functional index update: a new list with element `i` replaced by `v`, out of
 -- range left unchanged. Backs `xs[i] := v` and the `[i]` optic path on lists.
 fn list_set(xs, i, v) =
@@ -360,143 +221,11 @@ fn list_set(xs, i, v) =
       else
         Cons(x, list_set(rest, i - 1, v))
 
-fn filter(p, xs) =
-  match xs of
-    Nil => Nil
-    Cons(x, rest) =>
-      if p(x) then
-        Cons(x, filter(p, rest))
-      else
-        filter(p, rest)
-
-fn foldr(f, z, xs) =
-  match xs of
-    Nil => z
-    Cons(x, rest) => f(x, foldr(f, z, rest))
-
-fn foldl(f, z, xs) =
-  match xs of
-    Nil => z
-    Cons(x, rest) => foldl(f, f(z, x), rest)
-
-fn append(xs, ys) =
-  match xs of
-    Nil => ys
-    Cons(x, rest) => Cons(x, append(rest, ys))
-
-fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
-
-fn flatten(xss) = foldr(append, Nil, xss)
-
-fn concat_map(f, xs) = flatten(map(f, xs))
-
-fn zip_with(f, xs, ys) =
-  match xs of
-    Nil => Nil
-    Cons(x, xr) =>
-      match ys of
-        Nil => Nil
-        Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
-
-fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
-
-fn unzip(ps) =
-  (map(\(p) -> match p of { (x, _) => x }, ps), map(\(p) -> match p of { (_, y) => y }, ps))
-
-fn all(p, xs) =
-  match xs of
-    Nil => true
-    Cons(x, rest) =>
-      if p(x) then
-        all(p, rest)
-      else
-        false
-
-fn any(p, xs) =
-  match xs of
-    Nil => false
-    Cons(x, rest) =>
-      if p(x) then
-        true
-      else
-        any(p, rest)
-
-fn count(p, xs) = length(filter(p, xs))
-
-fn find(p, xs) =
-  match xs of
-    Nil => None
-    Cons(x, rest) =>
-      if p(x) then
-        Some(x)
-      else
-        find(p, rest)
-
-fn position_go(p, n, xs) =
-  match xs of
-    Nil => None
-    Cons(x, rest) =>
-      if p(x) then
-        Some(n)
-      else
-        position_go(p, n + 1, rest)
-
-fn position(p, xs) = position_go(p, 0, xs)
-
-fn sum(xs) = foldl(\(a, b) -> a + b, 0, xs)
-
-fn product(xs) = foldl(\(a, b) -> a * b, 1, xs)
-
-fn maximum(xs) =
-  match xs of
-    Nil => None
-    Cons(x, rest) => Some(foldl(max, x, rest))
-
-fn minimum(xs) =
-  match xs of
-    Nil => None
-    Cons(x, rest) => Some(foldl(min, x, rest))
-
-fn replicate(n, x) =
-  if n == 0 then
-    Nil
-  else
-    Cons(x, replicate(n - 1, x))
-
-fn range(lo, hi) =
-  if lo >= hi then
-    Nil
-  else
-    Cons(lo, range(lo + 1, hi))
-
-fn tabulate(n, f) = map(f, range(0, n))
-
-fn insert_sorted(x, xs) =
-  match xs of
-    Nil => Cons(x, Nil)
-    Cons(y, rest) =>
-      if x <= y then
-        Cons(x, xs)
-      else
-        Cons(y, insert_sorted(x, rest))
-
+-- Stable, O(n log n) merge sort. Primitive element types (Integer, Float, the
+-- fixed-width ints, Char, Bool) are specialized to a native kernel at the call
+-- site; any other Ord type uses this generic path. `sort` and `sort_by_ord` are
+-- recognized by name during elaboration, so they stay in the always-on prelude.
 fn sort(xs : List(a)) : List(a) given Ord(a) = sort_by_ord(xs)
-
-fn list_to_option(xs) =
-  match xs of
-    Nil => None
-    Cons(x, _) => Some(x)
-
-fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
-
-fn chunks_of(n, xs) =
-  if is_nil(xs) then
-    Nil
-  else
-    Cons(take(n, xs), chunks_of(n, drop(n, xs)))
-
-fn scan_left(f, z, xs) =
-  Cons(z, match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) })
 
 fn while_loop(cond, body, s) =
   if cond(s) then
@@ -612,33 +341,10 @@ fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 
-fn str_join(sep, xs) =
-  match xs of
-    Nil => ""
-    Cons(x, Nil) => x
-    Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
-
-fn str_repeat(s, n) =
-  if n <= 0 then
-    ""
-  else
-    concat(s, str_repeat(s, n - 1))
-
-fn pad_left(s, w) =
-  let pad = w - str_len(s)
-  if pad <= 0 then
-    s
-  else
-    concat(str_repeat(" ", pad), s)
-
-fn pad_right(s, w) =
-  let pad = w - str_len(s)
-  if pad <= 0 then
-    s
-  else
-    concat(s, str_repeat(" ", pad))
-
-fn lines_of(xs) = str_join("\n", xs)
+-- Kept in the always-on prelude (as well as `Data.List`) because optic-path
+-- desugaring synthesizes calls to it by bare name after resolution, so it must
+-- be a bare global symbol.
+fn concat_map(f, xs) = flatten(map(f, xs))
 
 fn eprintln(s) = eprint(concat(s, "\n"))
 
@@ -830,131 +536,6 @@ fn args_go(i, n) =
 
 fn args() : List(String) = args_go(0, args_count())
 
--- Character classification on the byte/codepoint returned by byte_at/char_at.
-fn is_digit(c : Int) : Bool = c >= 48 && c <= 57
-
-fn is_upper(c : Int) : Bool = c >= 65 && c <= 90
-
-fn is_lower(c : Int) : Bool = c >= 97 && c <= 122
-
-fn is_alpha(c : Int) : Bool = is_upper(c) || is_lower(c)
-
-fn is_alnum(c : Int) : Bool = is_alpha(c) || is_digit(c)
-
-fn is_space(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
-
-fn to_lower_c(c : Int) : Int =
-  if is_upper(c) then
-    c + 32
-  else
-    c
-
-fn to_upper_c(c : Int) : Int =
-  if is_lower(c) then
-    c - 32
-  else
-    c
-
--- Byte-level substring queries (ASCII-oriented: byte index equals codepoint index
--- for ASCII text). `occurs_at` tests whether `needle` sits at offset j in s.
-fn occurs_at(needle, s, j, k) =
-  if k >= byte_len(needle) then
-    true
-  elif j + k >= byte_len(s) then
-    false
-  elif byte_at(needle, k) == byte_at(s, j + k) then
-    occurs_at(needle, s, j, k + 1)
-  else
-    false
-
-fn starts_with(prefix : String, s : String) : Bool = occurs_at(prefix, s, 0, 0)
-
-fn ends_with(suffix : String, s : String) : Bool =
-  let d = byte_len(s) - byte_len(suffix)
-  if d < 0 then
-    false
-  else
-    occurs_at(suffix, s, d, 0)
-
-fn index_of_go(needle, s, j) =
-  if j + byte_len(needle) > byte_len(s) then
-    0 - 1
-  elif occurs_at(needle, s, j, 0) then
-    j
-  else
-    index_of_go(needle, s, j + 1)
-
-fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
-
-fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
-
--- ASCII case mapping and whitespace trimming, rebuilt byte-accurately.
-fn map_case(s, i, arr, up) =
-  if i >= byte_len(s) then
-    arr
-  else
-    let c = byte_at(s, i)
-    map_case(s, i + 1, array_push(arr, if up then to_upper_c(c) else to_lower_c(c)), up)
-
-fn to_upper(s : String) : String =
-  string_of_bytes(map_case(s, 0, array_empty(), true))
-
-fn to_lower(s : String) : String =
-  string_of_bytes(map_case(s, 0, array_empty(), false))
-
-fn ltrim_idx(s, i) =
-  if i < byte_len(s) && is_space(byte_at(s, i)) then
-    ltrim_idx(s, i + 1)
-  else
-    i
-
-fn rtrim_idx(s, i) =
-  if i > 0 && is_space(byte_at(s, i - 1)) then
-    rtrim_idx(s, i - 1)
-  else
-    i
-
-fn slice_bytes(s, lo, hi, arr) =
-  if lo >= hi then
-    arr
-  else
-    slice_bytes(s, lo + 1, hi, array_push(arr, byte_at(s, lo)))
-
-fn trim(s : String) : String =
-  let lo = ltrim_idx(s, 0)
-  let hi = rtrim_idx(s, byte_len(s))
-  if lo >= hi then
-    ""
-  else
-    string_of_bytes(slice_bytes(s, lo, hi, array_empty()))
-
-fn index_of_from(c, s, i) =
-  if i >= str_len(s) then
-    0 - 1
-  elif char_at(s, i) == c then
-    i
-  else
-    index_of_from(c, s, i + 1)
-
-fn split_from(c, s, i) =
-  let j = index_of_from(c, s, i)
-  if j < 0 then
-    Cons(substring(s, i, str_len(s) - i), Nil)
-  else
-    Cons(substring(s, i, j - i), split_from(c, s, j + 1))
-
-fn split(c, s) = split_from(c, s, 0)
-
-fn str_of_char(c) = show_char(c)
-
-fn chars_from(s : String, i : Int) : List(Char) =
-  if i >= str_len(s) then
-    Nil
-  else
-    Cons(chr(char_at(s, i)), chars_from(s, i + 1))
-
-fn chars(s : String) : List(Char) = chars_from(s, 0)
-
 fn int_cmp(a, b) =
   if a < b then
     0 - 1
@@ -962,159 +543,6 @@ fn int_cmp(a, b) =
     1
   else
     0
-
-let map_empty = Tip
-
-fn map_height(m) =
-  match m of
-    Tip => 0
-    Bin(h, _, _, _, _) => h
-
-fn map_node(k, v, l, r) = Bin(1 + max(map_height(l), map_height(r)), k, v, l, r)
-
-fn map_bf(m) =
-  match m of
-    Tip => 0
-    Bin(_, _, _, l, r) => map_height(l) - map_height(r)
-
-fn map_rot_right(m) =
-  match m of
-    Bin(_, k, v, Bin(_, lk, lv, ll, lr), r) =>
-      map_node(lk, lv, ll, map_node(k, v, lr, r))
-    other => other
-
-fn map_rot_left(m) =
-  match m of
-    Bin(_, k, v, l, Bin(_, rk, rv, rl, rr)) =>
-      map_node(rk, rv, map_node(k, v, l, rl), rr)
-    other => other
-
-fn map_balance(m) =
-  let bf = map_bf(m)
-  if bf > 1 then
-    match m of
-      Bin(_, k, v, l, r) =>
-        if map_bf(l) < 0 then
-          map_rot_right(map_node(k, v, map_rot_left(l), r))
-        else
-          map_rot_right(m)
-      Tip => Tip
-  elif bf < 0 - 1 then
-    match m of
-      Bin(_, k, v, l, r) =>
-        if map_bf(r) > 0 then
-          map_rot_left(map_node(k, v, l, map_rot_right(r)))
-        else
-          map_rot_left(m)
-      Tip => Tip
-  else
-    m
-
-fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
-  match m of
-    Tip => map_node(key, value, Tip, Tip)
-    Bin(_, k2, v2, l, r) =>
-      let c = cmp(key, k2)
-      if c < 0 then
-        map_balance(map_node(k2, v2, map_insert(key, value, l), r))
-      elif c > 0 then
-        map_balance(map_node(k2, v2, l, map_insert(key, value, r)))
-      else
-        map_node(k2, value, l, r)
-
-fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
-  match m of
-    Tip => None
-    Bin(_, k2, v, l, r) =>
-      let c = cmp(key, k2)
-      if c < 0 then
-        map_lookup(key, l)
-      elif c > 0 then
-        map_lookup(key, r)
-      else
-        Some(v)
-
-fn map_member(key : k, m : Map(k, v)) : Bool given Ord(k) =
-  is_some(map_lookup(key, m))
-
-fn map_size(m) =
-  match m of
-    Tip => 0
-    Bin(_, _, _, l, r) => 1 + map_size(l) + map_size(r)
-
-fn map_min(m) =
-  match m of
-    Tip => None
-    Bin(_, k, v, Tip, _) => Some((k, v))
-    Bin(_, _, _, l, _) => map_min(l)
-
-fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
-  match m of
-    Tip => Tip
-    Bin(_, k2, v2, l, r) =>
-      let c = cmp(key, k2)
-      if c < 0 then
-        map_balance(map_node(k2, v2, map_delete(key, l), r))
-      elif c > 0 then
-        map_balance(map_node(k2, v2, l, map_delete(key, r)))
-      else
-        match l of
-          Tip => r
-          _ =>
-            match r of
-              Tip => l
-              _ =>
-                match map_min(r) of
-                  None => l
-                  Some((mk, mv)) =>
-                    map_balance(map_node(mk, mv, l, map_delete(mk, r)))
-
-fn map_to_list(m) =
-  match m of
-    Tip => Nil
-    Bin(_, k, v, l, r) => append(map_to_list(l), Cons((k, v), map_to_list(r)))
-
-fn map_keys(m) = map(fst, map_to_list(m))
-
-fn map_values(m) = map(snd, map_to_list(m))
-
-fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
-  foldl(\(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) }, Tip, xs)
-
-fn map_map_values(f, m) =
-  match m of
-    Tip => Tip
-    Bin(h, k, v, l, r) =>
-      Bin(h, k, f(v), map_map_values(f, l), map_map_values(f, r))
-
-let set_empty = map_empty
-
-fn set_insert(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
-  map_insert(x, (), s)
-
-fn set_member(x : k, s : Map(k, Unit)) : Bool given Ord(k) = map_member(x, s)
-
-fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
-  map_delete(x, s)
-
-fn set_size(s) = map_size(s)
-
-fn set_to_list(s) = map_keys(s)
-
-fn set_from_list(xs : List(k)) : Map(k, Unit) given Ord(k) =
-  foldl(\(acc, x) -> set_insert(x, acc), set_empty, xs)
-
--- Set algebra over the ordered `Map(k, Unit)` representation. Union folds one
--- set's elements into the other; intersection and difference filter one set by
--- membership in the other, so all three stay O(n log n) and keep iteration order.
-fn set_union(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
-  foldl(\(acc, x) -> set_insert(x, acc), s1, set_to_list(s2))
-
-fn set_intersection(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
-  set_from_list(filter(\(x) -> set_member(x, s2), set_to_list(s1)))
-
-fn set_difference(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
-  set_from_list(filter(\(x) -> not(set_member(x, s2)), set_to_list(s1)))
 
 class Eq(a) {
   eq : (a, a) -> Bool
@@ -1247,11 +675,6 @@ class Foldable(t) {
   fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
 }
 
-fn option_fold_r(g, z, o) =
-  match o of
-    None => z
-    Some(x) => g(x, z)
-
 instance foldableList : Foldable(List) {
   fn fold_r(g, z, xs) = foldr(g, z, xs)
 }
@@ -1265,13 +688,6 @@ class Applicative(f) given Functor(f) {
   pure : (a) -> f(a),
   ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
 }
-
-fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)
-
-fn option_ap(fo, xo) =
-  match fo of
-    None => None
-    Some(g) => map_option(g, xo)
 
 instance applicativeList : Applicative(List) {
   fn pure(x) = singleton(x),
@@ -1288,11 +704,6 @@ instance applicativeOption : Applicative(Option) {
 class Monad(m) given Applicative(m) {
   bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
 }
-
-fn option_bind(o, g) =
-  match o of
-    None => None
-    Some(x) => g(x)
 
 instance monadList : Monad(List) {
   fn bind(xs, g) = concat_map(g, xs)
@@ -1339,10 +750,6 @@ fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
           else
             Cons(y, merge_by_ord(xs, yr))
 
--- Stable, O(n log n) merge sort. Primitive element types (Integer, Float, the
--- fixed-width ints, Char, Bool) are specialized to a native kernel at the call
--- site; any other Ord type uses this generic path. Write your own with
--- insert_by_ord / merge_by_ord if you need different behavior.
 fn sort_by_ord(xs : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => Nil

@@ -12,7 +12,7 @@
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use marginalia::Span;
 
@@ -25,7 +25,36 @@ use crate::syntax::ast::{
 mod lints;
 mod load;
 pub use lints::lint_bindings;
-pub use load::{load, Module};
+pub use load::{load, Module, Root};
+
+/// The search path for a single-file or test program: the given source root,
+/// then the embedded standard library.
+#[must_use]
+pub fn default_roots(base: &Path) -> Vec<Root> {
+    vec![
+        Root::Dir(base.to_path_buf()),
+        Root::Embedded(crate::stdlib::STDLIB),
+    ]
+}
+
+/// The search path for a project.
+///
+/// The project source root, each path dependency's source root (in declared
+/// order), then the embedded standard library. A dependency's modules resolve
+/// under its own root; the project shadows a name it redefines.
+#[must_use]
+pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
+    let mut roots = vec![Root::Dir(src_dir.to_path_buf())];
+    roots.extend(dep_dirs.iter().map(|d| Root::Dir(d.clone())));
+    roots.push(Root::Embedded(crate::stdlib::STDLIB));
+    roots
+}
+
+/// Width of each module's span band. Module `i` shifts its spans by
+/// `(i + 1) << SPAN_BAND_SHIFT`, so no single file exceeding 1 TiB and no run of
+/// fewer than 2^23 modules can collide, while staying clear of the synthesized
+/// span region at `usize::MAX / 2`.
+const SPAN_BAND_SHIFT: u32 = 40;
 
 /// Bare names a selective import binds in unqualified scope, each mapped to the
 /// canonical symbol it resolves to.
@@ -107,11 +136,24 @@ struct ModInfo {
 /// Fails on a missing or unparseable module, a cross-module name clash, an
 /// undefined export, or an unresolved/ambiguous qualified reference.
 pub fn resolve_modules(root: Program, base: &Path) -> Result<Program, Error> {
+    resolve_modules_in(root, &default_roots(base))
+}
+
+/// Like [`resolve_modules`], but against an explicit module search path.
+///
+/// The roots are the project root, its dependencies, and the stdlib. The
+/// single-`base` form is the common case; this form threads dependency roots for
+/// a project build.
+///
+/// # Errors
+/// Fails on a missing or unparseable module, a cross-module name clash, an
+/// undefined export, or an unresolved/ambiguous qualified reference.
+pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Error> {
     if root.imports.is_empty() {
         return Ok(resolve(root)?);
     }
 
-    let mut modules = load(&root, base)?;
+    let mut modules = load(&root, roots)?;
     let mut mods: Vec<ModInfo> = modules
         .iter()
         .map(|m| {
@@ -138,13 +180,15 @@ pub fn resolve_modules(root: Program, base: &Path) -> Result<Program, Error> {
     let root_own = canon_of(&root, None);
     let (root_unqual, root_quals) = build_scope(&root.imports, &by_path, &mods)?;
     let mut root = root;
-    Rw::new("", &root_own, &root_unqual, &root_quals, &mods).program(&mut root)?;
+    Rw::new("", &root_own, &root_unqual, &root_quals, &mods, 0).program(&mut root)?;
 
-    for m in &mut modules {
+    for (i, m) in modules.iter_mut().enumerate() {
         let path = m.path.join(".");
         let own = canon_of(&m.prog, Some(&path));
         let (unqual, quals) = build_scope(&m.prog.imports, &by_path, &mods)?;
-        Rw::new(&path, &own, &unqual, &quals, &mods).program(&mut m.prog)?;
+        // Each module lands in its own span band; see `Rw::span_delta`.
+        let delta = (i + 1) << SPAN_BAND_SHIFT;
+        Rw::new(&path, &own, &unqual, &quals, &mods, delta).program(&mut m.prog)?;
     }
 
     Ok(merge(root, modules))
@@ -187,20 +231,34 @@ fn build_scope(
         let idx = *by_path
             .get(path.as_str())
             .ok_or_else(|| Error::Resolve(format!("cannot resolve import of module `{path}`")))?;
-        if let Some(names) = &imp.names {
+        // A glob import (`import M (..)`) opens every exported name into
+        // unqualified scope; a selective import opens just the listed names.
+        let opened: Vec<(String, String)> = if imp.glob {
+            mods[idx]
+                .exports
+                .iter()
+                .map(|(n, c)| (n.clone(), c.clone()))
+                .collect()
+        } else if let Some(names) = &imp.names {
+            let mut v = Vec::with_capacity(names.len());
             for n in names {
                 let Some(canon) = mods[idx].exports.get(n) else {
                     return Err(Error::Resolve(format!(
                         "module `{path}` does not export `{n}`"
                     )));
                 };
-                let canon = canon.clone();
-                if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
-                    if prev != canon {
-                        return Err(Error::Resolve(format!(
-                            "`{n}` is ambiguous: brought unqualified by `{prev}` and `{canon}`"
-                        )));
-                    }
+                v.push((n.clone(), canon.clone()));
+            }
+            v
+        } else {
+            Vec::new()
+        };
+        for (n, canon) in opened {
+            if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
+                if prev != canon {
+                    return Err(Error::Resolve(format!(
+                        "`{n}` is ambiguous: brought unqualified by `{prev}` and `{canon}`"
+                    )));
                 }
             }
         }
@@ -211,12 +269,22 @@ fn build_scope(
             .alias
             .clone()
             .unwrap_or_else(|| imp.path.last().cloned().unwrap_or_default());
-        quals.entry(path.clone()).or_default().push(idx);
+        // Register the same module under a qualifier at most once: a module the
+        // prelude already opened and the user imports again names one module, not
+        // two, so it must not read as ambiguous. Distinct modules sharing a short
+        // name still each get an entry, which is the genuine ambiguity.
+        push_unique(quals.entry(path.clone()).or_default(), idx);
         if short != path {
-            quals.entry(short).or_default().push(idx);
+            push_unique(quals.entry(short).or_default(), idx);
         }
     }
     Ok((unqualified, quals))
+}
+
+fn push_unique(v: &mut Vec<usize>, idx: usize) {
+    if !v.contains(&idx) {
+        v.push(idx);
+    }
 }
 
 /// Propagate `pub import` re-exports: a module that `pub import`s names from
@@ -292,6 +360,13 @@ struct Rw<'a> {
     unqualified: &'a BTreeMap<String, String>,
     quals: &'a BTreeMap<String, Vec<usize>>,
     mods: &'a [ModInfo],
+    // Per-module span offset. Each module is parsed with byte offsets from 0, so
+    // two modules' nodes can share a span; the type checker's span-keyed maps
+    // (`span_types`, `dicts`, `fixed`, ...) would then collide and the elaborator
+    // would read one module's type for another's expression. Shifting every node
+    // into a disjoint high band keyed by module index makes spans globally
+    // unique. The root module keeps delta 0 (real source offsets).
+    span_delta: usize,
     locals: Vec<String>,
     err: Option<TypeError>,
 }
@@ -303,6 +378,7 @@ impl<'a> Rw<'a> {
         unqualified: &'a BTreeMap<String, String>,
         quals: &'a BTreeMap<String, Vec<usize>>,
         mods: &'a [ModInfo],
+        span_delta: usize,
     ) -> Self {
         Self {
             module,
@@ -310,8 +386,17 @@ impl<'a> Rw<'a> {
             unqualified,
             quals,
             mods,
+            span_delta,
             locals: Vec::new(),
             err: None,
+        }
+    }
+
+    // Shift a node's span into this module's disjoint band.
+    const fn shift(&self, s: &mut Span) {
+        if self.span_delta != 0 {
+            s.start += self.span_delta;
+            s.end += self.span_delta;
         }
     }
 
@@ -464,6 +549,7 @@ impl<'a> Rw<'a> {
     }
 
     fn expr(&mut self, e: &mut S<Expr>) {
+        self.shift(&mut e.span);
         let span = e.span;
         match &mut e.node {
             Expr::Var(n) => *n = self.value(n, span),
@@ -707,6 +793,7 @@ impl<'a> Rw<'a> {
     }
 
     fn pat(&mut self, p: &mut S<Pattern>) {
+        self.shift(&mut p.span);
         match &mut p.node {
             Pattern::Var(n) => self.locals.push(n.clone()),
             Pattern::Ctor(name, args) => {

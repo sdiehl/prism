@@ -254,3 +254,163 @@ fn union(mut a: Effects, b: &Effects) -> Effects {
     a.extend(b.iter().copied());
     a
 }
+
+/// A dependency-respecting order over `prog.fns`: every callee is type-checked
+/// before its non-recursive callers, so a forward reference to a top-level
+/// binding sees its generalized type rather than a structure-free stub. This is
+/// what makes a split library (a function that calls another defined in a module
+/// merged after it) infer the same precise types as a single hand-ordered file.
+///
+/// The returned vector is a permutation of `0..prog.fns.len()`. Mutually
+/// recursive groups are emitted contiguously and checked against each other's
+/// stubs, exactly as a single declaration's self-recursion already is. A
+/// shadowing local that happens to share a top-level name only adds a spurious
+/// edge, which is sound (it can never drop a real dependency).
+#[must_use]
+pub(crate) fn dep_order(prog: &Program<Core>) -> Vec<usize> {
+    let names: std::collections::BTreeMap<&str, usize> = prog
+        .fns
+        .iter()
+        .enumerate()
+        .map(|(i, d)| (d.name.as_str(), i))
+        .collect();
+    // Callee indices per function, deduped and in increasing order for a
+    // deterministic post-order.
+    let deps: Vec<Vec<usize>> = prog
+        .fns
+        .iter()
+        .map(|d| {
+            let mut refs = std::collections::BTreeSet::new();
+            collect_refs(&d.body, &names, &mut refs);
+            refs.into_iter().collect()
+        })
+        .collect();
+    // Iterative DFS post-order (callees emitted before the caller), seeded in
+    // declaration order so the result is stable. An explicit stack avoids
+    // blowing the native stack on a deep prelude call chain.
+    let mut state = vec![0u8; prog.fns.len()]; // 0 unseen, 1 on-stack, 2 done
+    let mut order = Vec::with_capacity(prog.fns.len());
+    for start in 0..prog.fns.len() {
+        if state[start] != 0 {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        state[start] = 1;
+        while let Some(&mut (node, ref mut next)) = stack.last_mut() {
+            if let Some(&callee) = deps[node].get(*next) {
+                *next += 1;
+                if state[callee] == 0 {
+                    state[callee] = 1;
+                    stack.push((callee, 0));
+                }
+            } else {
+                state[node] = 2;
+                order.push(node);
+                stack.pop();
+            }
+        }
+    }
+    order
+}
+
+// Every top-level function `e` references, by canonical name. Constructors,
+// effect ops, builtins, and locals are not in `names`, so they fall out; the
+// over-approximation from a same-named shadowing local is harmless.
+fn collect_refs(
+    e: &S<Expr<Core>>,
+    names: &std::collections::BTreeMap<&str, usize>,
+    out: &mut std::collections::BTreeSet<usize>,
+) {
+    let mut go = |e| collect_refs(e, names, out);
+    match &e.node {
+        Expr::Var(n) => {
+            if let Some(&i) = names.get(n.as_str()) {
+                out.insert(i);
+            }
+        }
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Char(_)
+        | Expr::Bool(_)
+        | Expr::Unit
+        | Expr::Str(_) => {}
+        Expr::Bin(_, a, b) | Expr::Index(a, b) | Expr::Pipe(a, b) => {
+            go(a);
+            go(b);
+        }
+        Expr::If(c, t, e2) => {
+            go(c);
+            go(t);
+            go(e2);
+        }
+        Expr::Let(_, v, b) => {
+            go(v);
+            go(b);
+        }
+        Expr::Lam(_, b)
+        | Expr::FieldAccess(b, _)
+        | Expr::Inst(b, _)
+        | Expr::Ann(b, _)
+        | Expr::Mask(_, b) => go(b),
+        Expr::Call(f, args) => {
+            go(f);
+            for a in args {
+                go(a);
+            }
+        }
+        Expr::Match(s, arms) => {
+            go(s);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    go(g);
+                }
+                go(&arm.body);
+            }
+        }
+        Expr::List(xs) | Expr::Tuple(xs) => {
+            for x in xs {
+                go(x);
+            }
+        }
+        Expr::IndexSet(a, b, c) => {
+            go(a);
+            go(b);
+            go(c);
+        }
+        Expr::RecordCreate(_, fields) => {
+            for (_, v) in fields {
+                go(v);
+            }
+        }
+        Expr::RecordUpdate(base, _, fields) => {
+            go(base);
+            for (_, v) in fields {
+                go(v);
+            }
+        }
+        Expr::RecordUpdatePath(base, ups) => {
+            go(base);
+            for (_, op) in ups {
+                go(op.expr());
+            }
+        }
+        Expr::Handle(body, arms) => {
+            go(body);
+            for arm in arms {
+                match arm {
+                    HandlerArm::Return(_, e2) | HandlerArm::Op(_, _, _, e2) => go(e2),
+                    #[expect(
+                        clippy::uninhabited_references,
+                        reason = "Never is uninhabited in Core"
+                    )]
+                    HandlerArm::Sugar(never) => match *never {},
+                }
+            }
+        }
+        #[expect(
+            clippy::uninhabited_references,
+            reason = "Never is uninhabited in Core"
+        )]
+        Expr::Sugar(never) | Expr::Marker(never) => match *never {},
+    }
+}

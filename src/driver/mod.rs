@@ -23,7 +23,7 @@ use crate::lex::lex;
 #[cfg(feature = "native")]
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
-use crate::resolve::resolve_modules;
+use crate::resolve::{default_roots, resolve_modules_in, Root};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program, Span};
 use crate::syntax::desugar::desugar;
@@ -70,8 +70,17 @@ pub fn check(src: &str) -> Result<Checked, Error> {
 /// # Errors
 /// Fails on lex, parse, module, or type errors.
 pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
+    check_on(src, &default_roots(base))
+}
+
+/// Like [`check_at`], but against an explicit module search path (a project's
+/// source root, its path dependencies, and the stdlib).
+///
+/// # Errors
+/// Fails on lex, parse, module, or type errors.
+pub fn check_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
     let ParseResult { program, .. } = parse(src)?;
-    let program = resolve_modules(program, base)?;
+    let program = resolve_modules_in(program, roots)?;
     let lints = lint_surface(src, &program);
     let program = desugar(program)?;
     let mut checked = typecheck(&program)?;
@@ -99,9 +108,9 @@ fn emit_warnings(src: &str, checked: &Checked) {
     }
 }
 
-fn frontend(src: &str, base: &Path) -> Result<(Program<CorePhase>, Checked, Core), Error> {
+fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, Core), Error> {
     let ParseResult { program, .. } = parse(src)?;
-    let program = resolve_modules(program, base)?;
+    let program = resolve_modules_in(program, roots)?;
     let lints = lint_surface(src, &program);
     let program = desugar(program)?;
     let mut checked = typecheck(&program)?;
@@ -205,7 +214,7 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
 /// # Errors
 /// Fails on front-end errors or a runtime fault.
 pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
-    let core = prepared_core(src, base)?;
+    let core = prepared_core(src, &default_roots(base))?;
     run(&core).map_err(Error::Runtime)
 }
 
@@ -223,15 +232,29 @@ pub fn interpret_io_at(
     out_sink: &mut dyn std::io::Write,
     input: &mut dyn std::io::BufRead,
 ) -> Result<Run, Error> {
-    let core = prepared_core(src, base)?;
+    interpret_io_on(src, &default_roots(base), out_sink, input)
+}
+
+/// Like [`interpret_io_at`], but against an explicit module search path (a
+/// project's source root, its path dependencies, and the stdlib).
+///
+/// # Errors
+/// Fails on front-end errors or a runtime fault.
+pub fn interpret_io_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+) -> Result<Run, Error> {
+    let core = prepared_core(src, roots)?;
     crate::eval::run_io(&core, out_sink, input).map_err(Error::Runtime)
 }
 
 // Shared front-end and rc-balance ICE check for the interpreter entries. The
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
-fn prepared_core(src: &str, base: &Path) -> Result<Core, Error> {
-    let (program, checked, core) = frontend(src, base)?;
+fn prepared_core(src: &str, roots: &[Root]) -> Result<Core, Error> {
+    let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
     let (lowered, _, warning) = lower_effects(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
@@ -242,9 +265,9 @@ fn prepared_core(src: &str, base: &Path) -> Result<Core, Error> {
 
 fn lowered_core(
     src: &str,
-    base: &Path,
+    roots: &[Root],
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
-    let (program, checked, core) = frontend(src, base)?;
+    let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
     let (lowered, ctors, warning) = lower_effects(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
@@ -275,7 +298,7 @@ fn emit_lower_warning(src: &str, warning: Option<&str>) {
 /// # Errors
 /// Fails on front-end errors.
 pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Error> {
-    let (_, checked, core) = frontend(full, base)?;
+    let (_, checked, core) = frontend(full, &default_roots(base))?;
     Ok(crate::core::effect_strategy(&core, &checked.ctors)?)
 }
 
@@ -288,7 +311,7 @@ pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Err
 /// # Errors
 /// Fails on front-end errors.
 pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Error> {
-    let (_, checked, core) = frontend(full, base)?;
+    let (_, checked, core) = frontend(full, &default_roots(base))?;
     let (_, _, warning) = lower_effects(&core, &checked.ctors)?;
     Ok(warning.into_iter().collect())
 }
@@ -318,7 +341,7 @@ pub fn core_ir(src: &str) -> Result<String, Error> {
 /// Fails on front-end errors.
 pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
     let prelude = prelude_fn_names()?;
-    let (program, _, core) = frontend(full, base)?;
+    let (program, _, core) = frontend(full, &default_roots(base))?;
     let sigs = borrow_sigs(&program);
     let optimized = reuse(&insert_rc(&core, &sigs));
     let own = Core {
@@ -429,7 +452,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
         }
     }
 
-    let (_, _, core) = frontend(full, base)?;
+    let (_, _, core) = frontend(full, &default_roots(base))?;
     let reachable = crate::core::reachable_fns(&core);
     let mut out = Vec::new();
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {
@@ -441,13 +464,16 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 // Core function names contributed by the prelude alone, used to elide it from a
 // snippet's IR dump.
 fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
-    let (_, _, core) = frontend(PRELUDE, Path::new("."))?;
+    let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")))?;
     Ok(core.fns.into_iter().map(|f| f.name).collect())
 }
 
 #[cfg(feature = "native")]
-fn compiled(src: &str, base: &Path) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>), Error> {
-    let (checked, lowered, ctors, sigs) = lowered_core(src, base)?;
+fn compiled(
+    src: &str,
+    roots: &[Root],
+) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>), Error> {
+    let (checked, lowered, ctors, sigs) = lowered_core(src, roots)?;
     residual_effects(&lowered).map_err(Error::Ice)?;
     Ok((checked, reuse(&insert_rc(&lowered, &sigs)), ctors))
 }
@@ -465,7 +491,17 @@ pub fn build(src: &str, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
 pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    let (checked, core, ctors) = compiled(src, base)?;
+    build_on(src, &default_roots(base), out)
+}
+
+/// Like [`build_at`], but against an explicit module search path (a project's
+/// source root, its path dependencies, and the stdlib).
+///
+/// # Errors
+/// Fails on front-end errors, codegen failure, or when linking with cc fails.
+#[cfg(feature = "native")]
+pub fn build_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
+    let (checked, core, ctors) = compiled(src, roots)?;
     if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
         return Err(Error::Codegen("no main function to build".into()));
     }
@@ -524,14 +560,14 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors or codegen failure.
 #[cfg(feature = "native")]
 pub fn emit_ir(src: &str) -> Result<String, Error> {
-    let (_, core, ctors) = compiled(src, Path::new("."))?;
+    let (_, core, ctors) = compiled(src, &default_roots(Path::new(".")))?;
     emit_llvm(&core, &ctors).map_err(Error::Codegen)
 }
 
 /// # Errors
 /// Fails on front-end errors or an unbalanced rc insertion.
 pub fn rc_balanced(src: &str) -> Result<(), Error> {
-    let (_, lowered, _, sigs) = lowered_core(src, Path::new("."))?;
+    let (_, lowered, _, sigs) = lowered_core(src, &default_roots(Path::new(".")))?;
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs).map_err(Error::Codegen)
 }
 
@@ -548,7 +584,16 @@ pub fn build_mlir(src: &str, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
 #[cfg(feature = "mlir")]
 pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    let (checked, core, ctors) = compiled(src, base)?;
+    build_mlir_on(src, &default_roots(base), out)
+}
+
+/// Like [`build_mlir_at`], but against an explicit module search path.
+///
+/// # Errors
+/// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
+#[cfg(feature = "mlir")]
+pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
+    let (checked, core, ctors) = compiled(src, roots)?;
     if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
         return Err(Error::Codegen("no main function to build".into()));
     }
@@ -595,6 +640,12 @@ pub fn report(src: &str) -> String {
 
 #[must_use]
 pub fn report_at(src: &str, base: &Path) -> String {
+    report_on(src, &default_roots(base))
+}
+
+/// Like [`report_at`], but against an explicit module search path.
+#[must_use]
+pub fn report_on(src: &str, roots: &[Root]) -> String {
     // Render a phase failure with the same span-aware ariadne report the CLI
     // shows for `run`/`build`/`check`, so `report` does not degrade to a bare
     // message.
@@ -616,7 +667,7 @@ pub fn report_at(src: &str, base: &Path) -> String {
     };
     section(&mut out, "ast", &format!("{program:#?}"));
 
-    let program = match resolve_modules(program, base) {
+    let program = match resolve_modules_in(program, roots) {
         Ok(p) => p,
         Err(e) => {
             section(&mut out, "resolve", &render(e));
@@ -695,6 +746,14 @@ pub fn dump(phase: &str, src: &str) -> Result<String, Error> {
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
 pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
+    dump_on(phase, src, &default_roots(base))
+}
+
+/// Like [`dump_at`], but against an explicit module search path.
+///
+/// # Errors
+/// Fails on front-end errors or an unknown phase name.
+pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> {
     match phase {
         "tokens" => {
             let (t, _) = lex(src)?;
@@ -704,32 +763,32 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
                 .join(" "))
         }
         "ast" => Ok(format!("{:#?}", parse(src)?.program)),
-        "types" => Ok(types_section(&check_at(src, base)?)),
+        "types" => Ok(types_section(&check_on(src, roots)?)),
         "core" => {
-            let (_, _, core) = frontend(src, base)?;
+            let (_, _, core) = frontend(src, roots)?;
             Ok(pp_core_pretty(&core))
         }
         "core-json" => {
-            let (_, _, core) = frontend(src, base)?;
+            let (_, _, core) = frontend(src, roots)?;
             Ok(crate::core::core_to_json(&core))
         }
         "fbip" => {
-            let (program, _, core) = frontend(src, base)?;
+            let (program, _, core) = frontend(src, roots)?;
             let sigs = borrow_sigs(&program);
             Ok(pp_core_pretty(&reuse(&insert_rc(&core, &sigs))))
         }
         "lowered" => {
-            let (_, lowered, _, _) = lowered_core(src, base)?;
+            let (_, lowered, _, _) = lowered_core(src, roots)?;
             Ok(pp_core_pretty(&lowered))
         }
         #[cfg(feature = "native")]
         "llvm" => {
-            let (_, core, ctors) = compiled(src, base)?;
+            let (_, core, ctors) = compiled(src, roots)?;
             emit_llvm(&core, &ctors).map_err(Error::Codegen)
         }
         #[cfg(feature = "mlir")]
         "mlir" => {
-            let (_, core, ctors) = compiled(src, base)?;
+            let (_, core, ctors) = compiled(src, roots)?;
             emit_mlir(&core, &ctors).map_err(Error::Codegen)
         }
         other => Err(Error::Codegen(format!("unknown phase {other}"))),

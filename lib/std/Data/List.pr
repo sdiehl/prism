@@ -1,0 +1,220 @@
+-- Singly-linked list operations. The `List(a)` type and its `Nil`/`Cons`
+-- constructors are wired into the language (list literals, deriving); this module
+-- is the function surface over them. The prelude opens it, so these names are in
+-- scope unqualified everywhere; a project module reaches them with `import
+-- Data.List`.
+
+pub fn singleton(x) = Cons(x, Nil)
+
+pub fn is_nil(xs) =
+  match xs of
+    Nil => true
+    Cons(x, rest) => false
+
+pub fn head(xs) =
+  match xs of
+    Nil => None
+    Cons(x, _) => Some(x)
+
+pub fn tail(xs) =
+  match xs of
+    Nil => Nil
+    Cons(_, rest) => rest
+
+pub fn last(xs) =
+  match xs of
+    Nil => None
+    Cons(x, Nil) => Some(x)
+    Cons(_, rest) => last(rest)
+
+pub fn length(xs) =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => 1 + length(rest)
+
+pub fn nth(n, xs) =
+  if n == 0 then
+    head(xs)
+  else
+    match xs of
+      Nil => None
+      Cons(_, rest) => nth(n - 1, rest)
+
+pub fn take(n, xs) =
+  if n == 0 then
+    Nil
+  else
+    match xs of
+      Nil => Nil
+      Cons(x, rest) => Cons(x, take(n - 1, rest))
+
+pub fn drop(n, xs) =
+  if n == 0 then
+    xs
+  else
+    match xs of
+      Nil => Nil
+      Cons(_, rest) => drop(n - 1, rest)
+
+pub fn take_while(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        Cons(x, take_while(p, rest))
+      else
+        Nil
+
+pub fn drop_while(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        drop_while(p, rest)
+      else
+        xs
+
+pub fn split_at(n, xs) = (take(n, xs), drop(n, xs))
+
+pub fn map(f, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => Cons(f(x), map(f, rest))
+
+pub fn filter(p, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if p(x) then
+        Cons(x, filter(p, rest))
+      else
+        filter(p, rest)
+
+pub fn foldr(f, z, xs) =
+  match xs of
+    Nil => z
+    Cons(x, rest) => f(x, foldr(f, z, rest))
+
+pub fn foldl(f, z, xs) =
+  match xs of
+    Nil => z
+    Cons(x, rest) => foldl(f, f(z, x), rest)
+
+pub fn append(xs, ys) =
+  match xs of
+    Nil => ys
+    Cons(x, rest) => Cons(x, append(rest, ys))
+
+pub fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
+
+pub fn flatten(xss) = foldr(append, Nil, xss)
+
+pub fn concat_map(f, xs) = flatten(map(f, xs))
+
+pub fn zip_with(f, xs, ys) =
+  match xs of
+    Nil => Nil
+    Cons(x, xr) =>
+      match ys of
+        Nil => Nil
+        Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
+
+pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
+
+pub fn unzip(ps) =
+  (map(\(p) -> match p of { (x, _) => x }, ps), map(\(p) -> match p of { (_, y) => y }, ps))
+
+pub fn all(p, xs) =
+  match xs of
+    Nil => true
+    Cons(x, rest) =>
+      if p(x) then
+        all(p, rest)
+      else
+        false
+
+pub fn any(p, xs) =
+  match xs of
+    Nil => false
+    Cons(x, rest) =>
+      if p(x) then
+        true
+      else
+        any(p, rest)
+
+pub fn count(p, xs) = length(filter(p, xs))
+
+pub fn find(p, xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      if p(x) then
+        Some(x)
+      else
+        find(p, rest)
+
+pub fn position_go(p, n, xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      if p(x) then
+        Some(n)
+      else
+        position_go(p, n + 1, rest)
+
+pub fn position(p, xs) = position_go(p, 0, xs)
+
+pub fn sum(xs) = foldl(\(a, b) -> a + b, 0, xs)
+
+pub fn product(xs) = foldl(\(a, b) -> a * b, 1, xs)
+
+pub fn maximum(xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) => Some(foldl(max, x, rest))
+
+pub fn minimum(xs) =
+  match xs of
+    Nil => None
+    Cons(x, rest) => Some(foldl(min, x, rest))
+
+pub fn replicate(n, x) =
+  if n == 0 then
+    Nil
+  else
+    Cons(x, replicate(n - 1, x))
+
+pub fn range(lo, hi) =
+  if lo >= hi then
+    Nil
+  else
+    Cons(lo, range(lo + 1, hi))
+
+pub fn tabulate(n, f) = map(f, range(0, n))
+
+pub fn insert_sorted(x, xs) =
+  match xs of
+    Nil => Cons(x, Nil)
+    Cons(y, rest) =>
+      if x <= y then
+        Cons(x, xs)
+      else
+        Cons(y, insert_sorted(x, rest))
+
+pub fn list_to_option(xs) =
+  match xs of
+    Nil => None
+    Cons(x, _) => Some(x)
+
+pub fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
+
+pub fn chunks_of(n, xs) =
+  if is_nil(xs) then
+    Nil
+  else
+    Cons(take(n, xs), chunks_of(n, drop(n, xs)))
+
+pub fn scan_left(f, z, xs) =
+  Cons(z, match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) })
+
+pub fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)

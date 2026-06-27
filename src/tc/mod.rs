@@ -349,7 +349,12 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             row_ctx: Vec::new(),
             cur_row: None,
         };
-        for d in &prog.fns {
+        // Check callees before callers so a forward reference (notably one into a
+        // stdlib module merged after the prelude) sees a generalized type, not a
+        // structure-free stub. `infos` is rebuilt in declaration order afterward
+        // so downstream output is unaffected by the visiting order.
+        for &di in &effects::dep_order(prog) {
+            let d = &prog.fns[di];
             if d.konst {
                 let effs = effects::of_decl(d, &effects, &eff_ops);
                 if !effs.is_empty() {
@@ -491,6 +496,17 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         span_types = tc.span_types;
         dicts = tc.dicts;
         constrained_final = tc.constrained;
+    }
+    // Restore declaration order: `infos` was filled in dependency order, but
+    // consumers (signatures listing, snapshots) expect source order.
+    {
+        let pos: BTreeMap<&str, usize> = prog
+            .fns
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.name.as_str(), i))
+            .collect();
+        infos.sort_by_key(|info| pos.get(info.name.as_str()).copied().unwrap_or(usize::MAX));
     }
     Ok(Checked {
         env,

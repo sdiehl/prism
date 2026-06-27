@@ -1,0 +1,37 @@
+-- Operations over the wired-in `Result(a, e)` type (`Ok(a)` / `Err(e)`). The
+-- prelude opens this module, so these are in unqualified scope everywhere.
+
+pub fn is_ok(r) =
+  match r of
+    Ok(x) => true
+    Err(e) => false
+
+pub fn is_err(r) =
+  match r of
+    Ok(x) => false
+    Err(e) => true
+
+pub fn map_result(f, r) =
+  match r of
+    Ok(x) => Ok(f(x))
+    Err(e) => Err(e)
+
+pub fn and_then_result(f, r) =
+  match r of
+    Ok(x) => f(x)
+    Err(e) => Err(e)
+
+pub fn result_or(d, r) =
+  match r of
+    Ok(x) => x
+    Err(e) => d
+
+pub fn ok_of_option(err, o) =
+  match o of
+    None => Err(err)
+    Some(x) => Ok(x)
+
+pub fn option_of_result(r) =
+  match r of
+    Ok(x) => Some(x)
+    Err(e) => None

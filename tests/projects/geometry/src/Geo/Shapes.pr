@@ -1,0 +1,3 @@
+pub fn square_area(side : Int) : Int = side * side
+
+pub fn circle_area_approx(r : Int) : Int = 3 * r * r

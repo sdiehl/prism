@@ -103,10 +103,11 @@ fn base_of(file: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
-// A resolved CLI input: source with prelude prepended, the module-resolution
-// base, a display name for diagnostics, and the default binary name a bare build
-// would write.
-type Resolved = (String, PathBuf, String, PathBuf);
+// A resolved CLI input: source with prelude prepended, the module search path
+// (project source root, any path dependencies, then the embedded stdlib), a
+// display name for diagnostics, and the default binary name a bare build would
+// write.
+type Resolved = (String, Vec<prism::Root>, String, PathBuf);
 
 // Resolve a CLI argument into the source to compile, the module-resolution base,
 // a display name, and the default binary name a bare build would write. A
@@ -131,7 +132,8 @@ fn resolve_input(arg: &Path) -> Result<Resolved, (Error, String, String)> {
             None => prism::with_prelude(&src),
         };
         let out = PathBuf::from(&project.name);
-        Ok((full, project.src_dir, file_name(&project.entry), out))
+        let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
+        Ok((full, roots, file_name(&project.entry), out))
     } else {
         let src = read(arg).map_err(|e| (e, String::new(), file_name(arg)))?;
         let full = prism::with_prelude(&src);
@@ -139,7 +141,12 @@ fn resolve_input(arg: &Path) -> Result<Resolved, (Error, String, String)> {
         let out = arg
             .file_stem()
             .map_or_else(|| PathBuf::from("a.out"), PathBuf::from);
-        Ok((full, base_of(arg), file_name(arg), out))
+        Ok((
+            full,
+            prism::default_roots(&base_of(arg)),
+            file_name(arg),
+            out,
+        ))
     }
 }
 
@@ -151,9 +158,9 @@ fn build_input(
     out: Option<PathBuf>,
     mlir: bool,
 ) -> Result<(), (Error, String, String)> {
-    let (full, base, name, default_out) = resolve_input(arg)?;
+    let (full, roots, name, default_out) = resolve_input(arg)?;
     let out = out.unwrap_or(default_out);
-    build_dispatch(mlir, &full, &base, &out).map_err(|e| (e, full, name))?;
+    build_dispatch(mlir, &full, &roots, &out).map_err(|e| (e, full, name))?;
     println!("wrote {}", out.display());
     Ok(())
 }
@@ -161,7 +168,7 @@ fn build_input(
 fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
     match cmd {
         Cmd::Run { file } => {
-            let (full, base, name, _) = resolve_input(&file)?;
+            let (full, roots, name, _) = resolve_input(&file)?;
             // Stream `print` to the terminal and read from real stdin so the CLI
             // behaves like a normal program. `exit(n)` maps to a real process
             // exit with that code, skipping the `=> value` trailer.
@@ -169,7 +176,7 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             let stdin = std::io::stdin();
             let mut out = stdout.lock();
             let mut input = stdin.lock();
-            let run = prism::interpret_io_at(&full, &base, &mut out, &mut input)
+            let run = prism::interpret_io_on(&full, &roots, &mut out, &mut input)
                 .map_err(|e| (e, full, name))?;
             drop(out);
             drop(input);
@@ -199,22 +206,22 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             build_input(&manifest, out, mlir)
         }
         Cmd::Check { file } => {
-            let (full, base, name, _) = resolve_input(&file)?;
-            let checked = prism::check_at(&full, &base).map_err(|e| (e, full, name))?;
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let checked = prism::check_on(&full, &roots).map_err(|e| (e, full, name))?;
             for d in &checked.decls {
                 println!("{} : {}", d.name, d.ty.show());
             }
             Ok(())
         }
         Cmd::Dump { phase, file } => {
-            let (full, base, name, _) = resolve_input(&file)?;
-            let out = prism::dump_at(&phase, &full, &base).map_err(|e| (e, full, name))?;
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let out = prism::dump_on(&phase, &full, &roots).map_err(|e| (e, full, name))?;
             println!("{out}");
             Ok(())
         }
         Cmd::Report { file } => {
-            let (full, base, _name, _) = resolve_input(&file)?;
-            print!("{}", prism::report_at(&full, &base));
+            let (full, roots, _name, _) = resolve_input(&file)?;
+            print!("{}", prism::report_on(&full, &roots));
             Ok(())
         }
         Cmd::Repl { no_banner } => {
@@ -308,19 +315,19 @@ fn fmt_stdin() -> Result<(), (Error, String, String)> {
     Ok(())
 }
 
-fn build_dispatch(mlir: bool, src: &str, base: &Path, out: &Path) -> Result<(), Error> {
+fn build_dispatch(mlir: bool, src: &str, roots: &[prism::Root], out: &Path) -> Result<(), Error> {
     if mlir {
         #[cfg(feature = "mlir")]
-        return prism::build_mlir_at(src, base, out);
+        return prism::build_mlir_on(src, roots, out);
         #[cfg(not(feature = "mlir"))]
         {
-            let _ = base;
+            let _ = roots;
             return Err(Error::Codegen(
                 "rebuild with --features mlir to use the MLIR backend".into(),
             ));
         }
     }
-    prism::build_at(src, base, out)
+    prism::build_on(src, roots, out)
 }
 
 fn file_name(p: &Path) -> String {

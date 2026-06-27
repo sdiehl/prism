@@ -1,0 +1,132 @@
+-- String operations over the builtin UTF-8 string primitives (byte-oriented,
+-- ASCII-accurate). The prelude opens this module.
+
+import Data.Char (is_space, to_upper_c, to_lower_c)
+
+pub fn str_join(sep, xs) =
+  match xs of
+    Nil => ""
+    Cons(x, Nil) => x
+    Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
+
+pub fn str_repeat(s, n) =
+  if n <= 0 then
+    ""
+  else
+    concat(s, str_repeat(s, n - 1))
+
+pub fn pad_left(s, w) =
+  let pad = w - str_len(s)
+  if pad <= 0 then
+    s
+  else
+    concat(str_repeat(" ", pad), s)
+
+pub fn pad_right(s, w) =
+  let pad = w - str_len(s)
+  if pad <= 0 then
+    s
+  else
+    concat(s, str_repeat(" ", pad))
+
+pub fn lines_of(xs) = str_join("\n", xs)
+
+-- Byte-level substring queries. `occurs_at` tests whether `needle` sits at
+-- offset j in s.
+pub fn occurs_at(needle, s, j, k) =
+  if k >= byte_len(needle) then
+    true
+  elif j + k >= byte_len(s) then
+    false
+  elif byte_at(needle, k) == byte_at(s, j + k) then
+    occurs_at(needle, s, j, k + 1)
+  else
+    false
+
+pub fn starts_with(prefix : String, s : String) : Bool = occurs_at(prefix, s, 0, 0)
+
+pub fn ends_with(suffix : String, s : String) : Bool =
+  let d = byte_len(s) - byte_len(suffix)
+  if d < 0 then
+    false
+  else
+    occurs_at(suffix, s, d, 0)
+
+pub fn index_of_go(needle, s, j) =
+  if j + byte_len(needle) > byte_len(s) then
+    0 - 1
+  elif occurs_at(needle, s, j, 0) then
+    j
+  else
+    index_of_go(needle, s, j + 1)
+
+pub fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
+
+pub fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
+
+-- ASCII case mapping and whitespace trimming, rebuilt byte-accurately.
+pub fn map_case(s, i, arr, up) =
+  if i >= byte_len(s) then
+    arr
+  else
+    let c = byte_at(s, i)
+    map_case(s, i + 1, array_push(arr, if up then to_upper_c(c) else to_lower_c(c)), up)
+
+pub fn to_upper(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), true))
+
+pub fn to_lower(s : String) : String =
+  string_of_bytes(map_case(s, 0, array_empty(), false))
+
+pub fn ltrim_idx(s, i) =
+  if i < byte_len(s) && is_space(byte_at(s, i)) then
+    ltrim_idx(s, i + 1)
+  else
+    i
+
+pub fn rtrim_idx(s, i) =
+  if i > 0 && is_space(byte_at(s, i - 1)) then
+    rtrim_idx(s, i - 1)
+  else
+    i
+
+pub fn slice_bytes(s, lo, hi, arr) =
+  if lo >= hi then
+    arr
+  else
+    slice_bytes(s, lo + 1, hi, array_push(arr, byte_at(s, lo)))
+
+pub fn trim(s : String) : String =
+  let lo = ltrim_idx(s, 0)
+  let hi = rtrim_idx(s, byte_len(s))
+  if lo >= hi then
+    ""
+  else
+    string_of_bytes(slice_bytes(s, lo, hi, array_empty()))
+
+pub fn index_of_from(c, s, i) =
+  if i >= str_len(s) then
+    0 - 1
+  elif char_at(s, i) == c then
+    i
+  else
+    index_of_from(c, s, i + 1)
+
+pub fn split_from(c, s, i) =
+  let j = index_of_from(c, s, i)
+  if j < 0 then
+    Cons(substring(s, i, str_len(s) - i), Nil)
+  else
+    Cons(substring(s, i, j - i), split_from(c, s, j + 1))
+
+pub fn split(c, s) = split_from(c, s, 0)
+
+pub fn str_of_char(c) = show_char(c)
+
+pub fn chars_from(s : String, i : Int) : List(Char) =
+  if i >= str_len(s) then
+    Nil
+  else
+    Cons(chr(char_at(s, i)), chars_from(s, i + 1))
+
+pub fn chars(s : String) : List(Char) = chars_from(s, 0)
