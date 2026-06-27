@@ -14,8 +14,8 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Sigs};
 use crate::core::{
-    balanced, check_fip, check_fip_linear, elaborate, fip_annots, insert_rc, lower_effects,
-    pp_core, pp_core_pretty, reuse, Core,
+    balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
+    lower_effects, pp_core, pp_core_pretty, reuse, Core,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -27,7 +27,7 @@ use crate::resolve::{default_roots, resolve_modules_in, Root};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program, Span};
 use crate::syntax::desugar::desugar;
-use crate::types::{check as typecheck, Checked, CtorInfo};
+use crate::types::{check as typecheck, show_effects, Checked, CtorInfo};
 
 pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
@@ -749,6 +749,21 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
     dump_on(phase, src, &default_roots(base))
 }
 
+// Out-of-Core elaboration inputs the content hash must commit to: the
+// generalized type and the principal effect row, keyed by canonical symbol.
+fn hash_meta(checked: &Checked) -> BTreeMap<Sym, String> {
+    checked
+        .decls
+        .iter()
+        .map(|d| {
+            (
+                Sym::new(&d.name),
+                format!("{} ! {}", d.ty.show(), show_effects(&d.effects)),
+            )
+        })
+        .collect()
+}
+
 /// Like [`dump_at`], but against an explicit module search path.
 ///
 /// # Errors
@@ -771,6 +786,17 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> 
         "core-json" => {
             let (_, _, core) = frontend(src, roots)?;
             Ok(crate::core::core_to_json(&core))
+        }
+        "core-hash" => {
+            let (_, checked, core) = frontend(src, roots)?;
+            let hashes = hash_program(&core, &hash_meta(&checked));
+            let mut names: Vec<&Sym> = hashes.keys().collect();
+            names.sort_by_key(|s| s.as_str());
+            let mut out = String::new();
+            for name in names {
+                writeln!(out, "{}  {}", &hashes[name][..16], name.as_str()).unwrap();
+            }
+            Ok(out)
         }
         "fbip" => {
             let (program, _, core) = frontend(src, roots)?;

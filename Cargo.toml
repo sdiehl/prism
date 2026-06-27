@@ -14,6 +14,7 @@ description = "An effect-typed functional language with a call-by-push-value cor
 [dependencies]
 anstyle = "1"
 ariadne = "0.6"
+blake3 = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 glob = { version = "0.3", optional = true }
 inkwell = { version = "0.9", features = ["llvm22-1"], optional = true }
