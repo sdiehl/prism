@@ -125,7 +125,14 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     let core = erase_newtypes(&core, &newtype_ctors(&program));
     // Dictionary specialization: a constrained call on a known instance becomes a
     // direct call to the instance method, with the dictionary build eliminated.
-    let core = specialize(&core);
+    // Opt-out (for before/after measurement and as an escape hatch) keeps the
+    // generic dictionary-passing form; both backends still share one Core, so the
+    // parity oracle holds either way.
+    let core = if std::env::var_os("PRISM_NO_SPECIALIZE").is_some() {
+        core
+    } else {
+        specialize(&core)
+    };
     Ok((program, checked, core))
 }
 
