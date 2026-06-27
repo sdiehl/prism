@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
 expression: "prism::report(&src)"
-input_file: tests/cases/instance_ambiguous.pr
+input_file: tests/cases/canonical_duplicate.pr
 ---
 == tokens ==
-VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordRev") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -215,6 +215,20 @@ Program {
             span: 116..190,
         },
     ],
+    canonicals: [
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "ordInt",
+            span: 192..219,
+        },
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "ordRev",
+            span: 220..247,
+        },
+    ],
     fns: [
         Decl {
             name: "main",
@@ -228,7 +242,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 204..207,
+                        span: 261..264,
                     },
                     [
                         Spanned {
@@ -238,7 +252,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 208..209,
+                            span: 265..266,
                         },
                         Spanned {
                             node: Int(
@@ -247,25 +261,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 211..212,
+                            span: 268..269,
                         },
                     ],
                 ),
-                span: 204..213,
+                span: 261..270,
             },
             wheres: [],
-            span: 192..213,
+            span: 249..270,
         },
     ],
 }
 
 == types ==
-Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-   ╭─[ <source>:5:1 ]
-   │
- 5 │ ╭─▶ instance ordInt : Ord(Int) {
-   ┆ ┆   
- 7 │ ├─▶ }
-   │ │       
-   │ ╰─────── 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-───╯
+Type Error: duplicate canonical designation for Ord(Int)
+    ╭─[ <source>:14:1 ]
+    │
+ 14 │ canonical Ord(Int) = ordRev
+    │ ─────────────┬─────────────  
+    │              ╰─────────────── duplicate canonical designation for Ord(Int)
+────╯

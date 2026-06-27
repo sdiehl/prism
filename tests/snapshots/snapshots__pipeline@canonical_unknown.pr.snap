@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
 expression: "prism::report(&src)"
-input_file: tests/cases/instance_ambiguous.pr
+input_file: tests/cases/canonical_unknown.pr
 ---
 == tokens ==
-VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("nope") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -215,6 +215,14 @@ Program {
             span: 116..190,
         },
     ],
+    canonicals: [
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "nope",
+            span: 192..217,
+        },
+    ],
     fns: [
         Decl {
             name: "main",
@@ -228,7 +236,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 204..207,
+                        span: 231..234,
                     },
                     [
                         Spanned {
@@ -238,7 +246,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 208..209,
+                            span: 235..236,
                         },
                         Spanned {
                             node: Int(
@@ -247,25 +255,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 211..212,
+                            span: 238..239,
                         },
                     ],
                 ),
-                span: 204..213,
+                span: 231..240,
             },
             wheres: [],
-            span: 192..213,
+            span: 219..240,
         },
     ],
 }
 
 == types ==
-Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-   ╭─[ <source>:5:1 ]
-   │
- 5 │ ╭─▶ instance ordInt : Ord(Int) {
-   ┆ ┆   
- 7 │ ├─▶ }
-   │ │       
-   │ ╰─────── 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-───╯
+Type Error: `nope` is not an instance of Ord(Int)
+    ╭─[ <source>:13:1 ]
+    │
+ 13 │ canonical Ord(Int) = nope
+    │ ────────────┬────────────  
+    │             ╰────────────── `nope` is not an instance of Ord(Int)
+────╯

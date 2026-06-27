@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
@@ -32,6 +32,7 @@ extern {
         "alias"  => Token::Alias,
         "class"  => Token::Class,
         "instance" => Token::Instance,
+        "canonical" => Token::Canonical,
         "pattern" => Token::Pattern,
         "deriving" => Token::Deriving,
         "where"  => Token::Where,
@@ -183,6 +184,7 @@ Item: Item = {
     <a:AliasOrSynonym> => a,
     <c:ClassD> => Item::Class(c),
     <i:InstanceD> => Item::Instance(i),
+    <c:CanonicalD> => Item::Canonical(c),
     <p:PatternD> => Item::Pattern(p),
     <c:ConstD> => Item::Fn(c),
     <f:Fn> => Item::Fn(f),
@@ -249,6 +251,14 @@ InstanceD: InstanceDecl = {
 
 InstFns: Vec<Decl> = {
     <v:(<Fn> ArmSep)*> <e:Fn?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+// Designate the canonical instance for a (class, type-head): the one implicit
+// resolution selects when several instances share a head. The named instance
+// stays a bare global symbol, like every instance reference.
+CanonicalD: CanonicalDecl = {
+    <l:@L> "canonical" <class:"uid"> "(" <head:Type> ")" "=" <name:"ident"> <r:@R> =>
+        CanonicalDecl { class, head, name, span: Span::new(l, r) },
 };
 
 // Constraint qualifier on a signature uses `given`; Haskell-style `where` is

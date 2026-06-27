@@ -67,6 +67,12 @@ pub enum HeadKey {
 
 pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
 
+// The canonical-instance designation: for a `(class, head)` that several
+// instances share, the one implicit resolution selects. Built from `canonical`
+// decls beside `inst_keys`; the file-world seed of the content-addressed store's
+// `(class, head) -> instance-hash` canonical binding (see COHERENCE.md).
+pub type Canon = BTreeMap<(String, HeadKey), String>;
+
 // How a constraint is discharged at a use site: a top-level instance dictionary
 // (applied to its context dictionaries) or the i-th hidden dictionary parameter
 // of the enclosing constrained function.
@@ -135,6 +141,7 @@ pub struct Checked {
     pub classes: BTreeMap<String, ClassInfo>,
     pub instances: BTreeMap<String, InstInfo>,
     pub inst_keys: InstKeys,
+    pub canonical: Canon,
     pub methods: BTreeMap<String, (String, usize)>,
     pub constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     pub dicts: DictTable,
@@ -223,6 +230,7 @@ struct Tc<'a> {
     classes: &'a BTreeMap<String, ClassInfo>,
     instances: &'a BTreeMap<String, InstInfo>,
     inst_keys: &'a InstKeys,
+    canonical: &'a Canon,
     constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     // The named function whose body is currently being checked, with its self
     // type and the class constraints in force. `None` when no self scope is
@@ -380,7 +388,7 @@ fn finalize_fn(
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
     let seeds = env::seed_var_states(&eff_ops);
-    let (classes, instances, inst_keys, methods, mut constrained, mut warnings) =
+    let (classes, instances, inst_keys, canonical, methods, mut constrained, mut warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
     let effects = effects::fixpoint(prog, &eff_ops);
@@ -440,6 +448,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             classes: &classes,
             instances: &instances,
             inst_keys: &inst_keys,
+            canonical: &canonical,
             constrained,
             cur_self: None,
             wanted: Vec::new(),
@@ -593,6 +602,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         classes,
         instances,
         inst_keys,
+        canonical,
         methods,
         constrained: constrained_final,
         dicts,
@@ -652,6 +662,7 @@ fn infer_expr_full(
         classes: &checked.classes,
         instances: &checked.instances,
         inst_keys: &checked.inst_keys,
+        canonical: &checked.canonical,
         constrained: checked.constrained.clone(),
         cur_self: None,
         wanted: Vec::new(),

@@ -2,6 +2,8 @@ instance ordRev : Ord(Int) {
   fn cmp(x, y) = int_cmp(y, x)
 }
 
+canonical Ord(Int) = ordInt
+
 fn main() =
   println(show([7]))
   println(show([[1], [2, 3]]))

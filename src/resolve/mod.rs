@@ -345,6 +345,7 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
         root.synonyms.extend(p.synonyms);
         root.classes.extend(p.classes);
         root.instances.extend(p.instances);
+        root.canonicals.extend(p.canonicals);
         root.patterns.extend(p.patterns);
         root.fns.extend(p.fns);
         root.opaques.extend(p.opaques);
@@ -461,6 +462,14 @@ impl<'a> Rw<'a> {
             for m in &mut inst.methods {
                 self.decl(m, false);
             }
+        }
+        for c in &mut p.canonicals {
+            // Mirror instance canonicalization: class and head become global
+            // symbols so the designation keys on the same `(class, head)` the
+            // instance store does. `name` is a global instance reference, left
+            // bare exactly like the names in `inst_keys`.
+            c.class = self.value(&c.class, c.span);
+            self.ty(&mut c.head);
         }
         for pat in &mut p.patterns {
             pat.name = self.canon(&pat.name);

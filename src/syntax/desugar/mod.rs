@@ -452,6 +452,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         synonyms: prog.synonyms,
         classes: prog.classes,
         instances,
+        canonicals: prog.canonicals,
         patterns: Vec::new(),
         fns,
         imports: prog.imports,

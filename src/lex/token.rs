@@ -255,6 +255,8 @@ pub enum Token {
     Class,
     #[token("instance")]
     Instance,
+    #[token("canonical")]
+    Canonical,
     #[token("pattern")]
     Pattern,
     #[token("deriving")]
@@ -513,6 +515,7 @@ impl Token {
             Self::Alias => kw::ALIAS,
             Self::Class => kw::CLASS,
             Self::Instance => kw::INSTANCE,
+            Self::Canonical => kw::CANONICAL,
             Self::Pattern => kw::PATTERN,
             Self::Deriving => kw::DERIVING,
             Self::Where => kw::WHERE,
@@ -694,6 +697,7 @@ mod tests {
             (Token::Alias, kw::ALIAS),
             (Token::Class, kw::CLASS),
             (Token::Instance, kw::INSTANCE),
+            (Token::Canonical, kw::CANONICAL),
             (Token::Pattern, kw::PATTERN),
             (Token::Deriving, kw::DERIVING),
             (Token::Where, kw::WHERE),

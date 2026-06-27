@@ -36,19 +36,19 @@ Prism distinguishes identifiers by initial case. A `varid` begins with a lower-c
 
 The following are reserved and may not be used as identifiers.
 
-|            |         |            |           |            |
-| ---------- | ------- | ---------- | --------- | ---------- |
-| `fn`       | `fip`   | `fbip`     | `pub`     | `import`   |
-| `as`       | `type`  | `newtype`  | `opaque`  | `alias`    |
-| `effect`   | `error` | `throw`    | `try`     | `catch`    |
-| `transact` | `class` | `instance` | `pattern` | `deriving` |
-| `where`    | `given` | `handle`   | `with`    | `handler`  |
-| `mask`     | `ctl`   | `final`    | `fun`     | `val`      |
-| `return`   | `let`   | `var`      | `borrow`  | `in`       |
-| `for`      | `do`    | `if`       | `then`    | `else`     |
-| `elif`     | `match` | `of`       | `forall`  | `true`     |
-| `false`    | `while` | `loop`     | `break`   | `continue` |
-| `using`    |         |            |           |            |
+|            |             |            |           |            |
+| ---------- | ----------- | ---------- | --------- | ---------- |
+| `fn`       | `fip`       | `fbip`     | `pub`     | `import`   |
+| `as`       | `type`      | `newtype`  | `opaque`  | `alias`    |
+| `effect`   | `error`     | `throw`    | `try`     | `catch`    |
+| `transact` | `class`     | `instance` | `pattern` | `deriving` |
+| `where`    | `given`     | `handle`   | `with`    | `handler`  |
+| `mask`     | `ctl`       | `final`    | `fun`     | `val`      |
+| `return`   | `let`       | `var`      | `borrow`  | `in`       |
+| `for`      | `do`        | `if`       | `then`    | `else`     |
+| `elif`     | `match`     | `of`       | `forall`  | `true`     |
+| `false`    | `while`     | `loop`     | `break`   | `continue` |
+| `using`    | `canonical` |            |           |            |
 
 The built-in type names `Int`, `I64`, `U64`, `Bool`, `Unit`, `Float`, `Char`, and `String` are also reserved.
 
@@ -188,15 +188,29 @@ A constructor may instead take _named_ fields, `C { f : T, ... }`, making the ty
 
 ## 6. Type Classes
 
-A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A constrained function receives its dictionaries as hidden arguments resolved at each call site. The following program declares an `Ord(Int)` instance named `ordDesc` that reverses the ordering and uses it explicitly.
+A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A constrained function receives its dictionaries as hidden arguments resolved at each call site. The following program declares a second `Ord(Int)` instance named `ordDesc` that reverses the ordering, designates the prelude's ascending `ordInt` as canonical, and selects each explicitly.
 
 ```prism
 {{#include ../examples/classes.pr}}
 ```
 
-### 6.1 Resolution and Ambiguity
+### 6.1 Coherence and Resolution
 
-An instance is selected by the head constructor of the constraint type (the outermost constructor, for example `List` in `List(Int)`). When two instances match one head, resolution is ambiguous and the program must pick one explicitly by passing the instance as a trailing `using` argument in the call, `f(args, using instanceName)`, as `sort_by_ord(xs, using ordDesc)` does above. (This is the same `using` form reserved for first-class dictionary passing.) Resolution recurses through instance contexts up to a fixed depth.
+An instance is selected by the head constructor of the constraint type (the outermost constructor, for example `List` in `List(Int)`). Resolution is _coherent_: a program's meaning never silently depends on which instance the resolver happened to pick. For each `(class, type-head)` there is exactly one _canonical_ instance, and implicit resolution always selects it, so resolution is deterministic.
+
+With a single instance for a head, that instance is canonical automatically. When two or more instances share a head, one must be designated canonical with a top-level declaration:
+
+```text
+canonical Class(Head) = instanceName
+```
+
+Two instances for one head with no designation is a coherence error reported at definition, not a silent ambiguity deferred to the use site. The designated instance is what implicit resolution selects; the others remain reachable only through an explicit override.
+
+An explicit override is visible at the use site and changes nothing else's resolution: pass the chosen instance as a trailing `using` argument, `f(args, using instanceName)`, as `sort_by_ord(xs, using ordDesc)` does above. (This is the same `using` form reserved for first-class dictionary passing.) There is no ambient, scoped instance mechanism: an override is always written where it is used.
+
+The preferred way to obtain a _different_ instance for a type is a `newtype` with its own canonical instance (`newtype Down = Down(Int)` for reverse order, a folded-case wrapper for case-insensitive comparison) rather than a non-canonical instance of the base type. This changes the type, not the instance-for-a-type, so coherence is preserved exactly and the difference is visible in the signature; an explicit `using` override is the second-line tool when a newtype is too heavy.
+
+Resolution recurses through instance contexts up to a fixed depth.
 
 ### 6.2 Superclasses
 

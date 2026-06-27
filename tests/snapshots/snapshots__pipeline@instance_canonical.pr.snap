@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
 expression: "prism::report(&src)"
-input_file: tests/cases/instance_ambiguous.pr
+input_file: tests/cases/instance_canonical.pr
 ---
 == tokens ==
-VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -215,6 +215,14 @@ Program {
             span: 116..190,
         },
     ],
+    canonicals: [
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "ordInt",
+            span: 192..219,
+        },
+    ],
     fns: [
         Decl {
             name: "main",
@@ -228,7 +236,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 204..207,
+                        span: 233..236,
                     },
                     [
                         Spanned {
@@ -238,7 +246,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 208..209,
+                            span: 237..238,
                         },
                         Spanned {
                             node: Int(
@@ -247,25 +255,115 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 211..212,
+                            span: 240..241,
                         },
                     ],
                 ),
-                span: 204..213,
+                span: 233..242,
             },
             wheres: [],
-            span: 192..213,
+            span: 221..242,
         },
     ],
 }
 
 == types ==
-Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-   ╭─[ <source>:5:1 ]
-   │
- 5 │ ╭─▶ instance ordInt : Ord(Int) {
-   ┆ ┆   
- 7 │ ├─▶ }
-   │ │       
-   │ ╰─────── 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
-───╯
+main : () -> Int
+
+== core (cbpv) ==
+fn main() =
+  return 1 to t@0; return 2 to t@1; i@ordInt@cmp(t@0, t@1)
+fn i@ordInt@cmp(x, y) =
+  return x to t@2; return y to t@3; t@2 < t@3 to t@6; if t@6 then (return 0 to t@4; return 1 to t@5; t@4 - t@5) else (return 1)
+fn ordInt() =
+  return _DOrd(thunk { \_p0 _p1. i@ordInt@cmp(_p0, _p1) })
+fn i@ordRev@cmp(x, y) =
+  return x to t@7; return y to t@8; t@7 < t@8 to t@11; if t@11 then (return 1) else (return 0 to t@9; return 1 to t@10; t@9 - t@10)
+fn ordRev() =
+  return _DOrd(thunk { \_p0 _p1. i@ordRev@cmp(_p0, _p1) })
+
+== fbip (rc) ==
+fn main() =
+  return 1 to t@0; return 2 to t@1; i@ordInt@cmp(t@0, t@1)
+fn i@ordInt@cmp(x, y) =
+  return x to t@2; return y to t@3; t@2 < t@3 to t@6; if t@6 then (drop t@6 to _; return 0 to t@4; return 1 to t@5; t@4 - t@5) else (drop t@6 to _; return 1)
+fn ordInt() =
+  return _DOrd(thunk { \_p0 _p1. i@ordInt@cmp(_p0, _p1) })
+fn i@ordRev@cmp(x, y) =
+  return x to t@7; return y to t@8; t@7 < t@8 to t@11; if t@11 then (drop t@11 to _; return 1) else (drop t@11 to _; return 0 to t@9; return 1 to t@10; t@9 - t@10)
+fn ordRev() =
+  return _DOrd(thunk { \_p0 _p1. i@ordRev@cmp(_p0, _p1) })
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+define i64 @prism_main() {
+entry:
+  %t0 = call i64 @prism_i.ordInt.cmp(i64 3, i64 5)
+  ret i64 %t0
+}
+
+define i64 @prism_i.ordInt.cmp(i64 %a0, i64 %a1) {
+entry:
+  %t0 = and i64 %a0, %a1
+  %t1 = and i64 %t0, 1
+  %t2 = icmp eq i64 %t1, 1
+  br i1 %t2, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t3 = icmp slt i64 %a0, %a1
+  %t4 = zext i1 %t3 to i64
+  %t5 = shl i64 %t4, 1
+  %t6 = or i64 %t5, 1
+  br label %b2
+
+b1:                                               ; preds = %entry
+  %t7 = call i64 @prism_rt_int_cmp(i64 %a0, i64 %a1)
+  %t8 = icmp slt i64 %t7, 0
+  %t9 = zext i1 %t8 to i64
+  %t10 = shl i64 %t9, 1
+  %t11 = or i64 %t10, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b0
+  %t12 = phi i64 [ %t6, %b0 ], [ %t11, %b1 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %a1)
+  %t13 = icmp ne i64 %t12, 1
+  br i1 %t13, label %b3, label %b4
+
+b3:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t12)
+  br i1 true, label %b5, label %b6
+
+b4:                                               ; preds = %b2
+  call void @prism_rc_dec(i64 %t12)
+  ret i64 3
+
+b5:                                               ; preds = %b3
+  br i1 true, label %b8, label %b6
+
+b6:                                               ; preds = %b5, %b3
+  %t25 = call i64 @prism_rt_int_sub(i64 1, i64 3)
+  br label %b7
+
+b8:                                               ; preds = %b5
+  br label %b7
+
+b7:                                               ; preds = %b6, %b8
+  %t26 = phi i64 [ -1, %b8 ], [ %t25, %b6 ]
+  call void @prism_rc_dec(i64 1)
+  call void @prism_rc_dec(i64 3)
+  ret i64 %t26
+}
+
+declare i64 @prism_rt_int_cmp(i64, i64)
+
+declare void @prism_rc_dec(i64)
+
+declare i64 @prism_rt_int_sub(i64, i64)
+
+== run ==
+output: []
+result: -1

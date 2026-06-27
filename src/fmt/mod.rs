@@ -375,6 +375,16 @@ impl Fmt<'_> {
         for i in &prog.instances {
             items.push((i.span.start, i.span.end, self.fmt_instance(i)));
         }
+        for c in &prog.canonicals {
+            let line = format!(
+                "{} {}({}) = {}",
+                kw::CANONICAL,
+                c.class,
+                fmt_ty(&c.head),
+                c.name
+            );
+            items.push((c.span.start, c.span.end, line));
+        }
         for p in &prog.patterns {
             items.push((
                 p.span.start,

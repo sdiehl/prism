@@ -4,7 +4,8 @@ use marginalia::Span;
 
 use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
-    ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted, Warning,
+    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted,
+    Warning,
 };
 use crate::error::TypeError;
 use crate::names::{dict_ctor, module_of};
@@ -195,30 +196,36 @@ impl Tc<'_> {
             let key = Self::head_key(class, t, span)?;
             match self
                 .inst_keys
-                .get(&(class.to_string(), key))
+                .get(&(class.to_string(), key.clone()))
                 .map(Vec::as_slice)
             {
                 Some([one]) => one.clone(),
                 Some(many @ [_, _, ..]) => {
-                    // Name the defining module of each candidate when they span
-                    // more than one; for purely root-local named instances the
-                    // bare list is clearer (and keeps the message stable).
-                    let cross_module = many
-                        .iter()
-                        .filter_map(|n| self.instances.get(n))
-                        .any(|i| !i.module.is_empty());
-                    let listed = if cross_module {
-                        provenance_list(self.instances, many)
-                    } else {
-                        many.join(", ")
+                    // Several instances share this head; implicit resolution is
+                    // the canonical designation, deterministic and never
+                    // ambient. Phase-2 coherence checking rejects 2+ undesignated
+                    // instances at definition, so a missing entry here is a
+                    // backstop, not a reachable user error.
+                    let Some(name) = self.canonical.get(&(class.to_string(), key)) else {
+                        let cross_module = many
+                            .iter()
+                            .filter_map(|n| self.instances.get(n))
+                            .any(|i| !i.module.is_empty());
+                        let listed = if cross_module {
+                            provenance_list(self.instances, many)
+                        } else {
+                            many.join(", ")
+                        };
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!(
+                                "ambiguous instance for {class}({h}): {listed}; \
+                                 designate one with `canonical {class}({h}) = name`",
+                                h = t.show(),
+                            ),
+                        });
                     };
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!(
-                            "ambiguous instance for {class}({}): {listed}; select one with f[name]",
-                            t.show(),
-                        ),
-                    });
+                    name.clone()
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -319,6 +326,7 @@ type BuildClassResult = (
     BTreeMap<String, ClassInfo>,
     BTreeMap<String, InstInfo>,
     InstKeys,
+    Canon,
     BTreeMap<String, (String, usize)>,
     BTreeMap<String, (Type, Vec<(String, Type)>)>,
     Vec<Warning>,
@@ -711,39 +719,89 @@ pub(super) fn build_classes(
             },
         );
     }
-    // Overlap: two or more instances for the same (class, head) are allowed (the
-    // use site disambiguates with `f[name]`), but when they come from different
-    // modules the conflict is invisible at definition time, so flag it. Instances
-    // from a single module (or all root-local, the deliberate named-instance
-    // case) are left alone.
-    for ((class, _key), names) in &inst_keys {
-        if names.len() < 2 {
-            continue;
-        }
-        let mods: BTreeSet<&str> = names
-            .iter()
-            .filter_map(|n| instances.get(n))
-            .map(|i| i.module.as_str())
-            .collect();
-        if mods.len() < 2 {
-            continue;
-        }
-        warnings.push(Warning {
-            span: Span::default(),
-            msg: format!(
-                "overlapping instances for {class}: {}; uses must disambiguate with f[name]",
-                provenance_list(&instances, names)
-            ),
-        });
-    }
+    let canonical = build_canonical(prog, &inst_keys, &instances)?;
     Ok((
         classes,
         instances,
         inst_keys,
+        canonical,
         methods,
         constrained,
         warnings,
     ))
+}
+
+// Build the canonical-instance store from `canonical Class(Head) = name` decls
+// and enforce coherence. Each designation must name a registered instance for
+// its `(class, head)` and may appear once; then every head shared by two or more
+// instances must have a designation, else implicit resolution would be ambient.
+// The error is raised at definition, not deferred to each use site.
+fn build_canonical(
+    prog: &Program<Core>,
+    inst_keys: &InstKeys,
+    instances: &BTreeMap<String, InstInfo>,
+) -> Result<Canon, TypeError> {
+    let mut canonical: Canon = BTreeMap::new();
+    for c in &prog.canonicals {
+        let head = convert_data(&c.head);
+        let key = head_name(&head).ok_or_else(|| TypeError::Other {
+            span: c.span,
+            msg: "canonical head must be a primitive type or a data type constructor".to_string(),
+        })?;
+        let registered = inst_keys
+            .get(&(c.class.clone(), key.clone()))
+            .is_some_and(|ns| ns.contains(&c.name));
+        if !registered {
+            return Err(TypeError::Other {
+                span: c.span,
+                msg: format!(
+                    "`{}` is not an instance of {}({})",
+                    c.name,
+                    c.class,
+                    head.show()
+                ),
+            });
+        }
+        if canonical
+            .insert((c.class.clone(), key), c.name.clone())
+            .is_some()
+        {
+            return Err(TypeError::Other {
+                span: c.span,
+                msg: format!(
+                    "duplicate canonical designation for {}({})",
+                    c.class,
+                    head.show()
+                ),
+            });
+        }
+    }
+    for ((class, key), names) in inst_keys {
+        if names.len() < 2 || canonical.contains_key(&(class.clone(), key.clone())) {
+            continue;
+        }
+        let head = instances
+            .get(&names[0])
+            .map(|i| i.head.show())
+            .unwrap_or_default();
+        // Caret a root-local instance decl when one exists; an imported decl's
+        // span belongs to another file, so fall back to a plain line.
+        let span = prog
+            .instances
+            .iter()
+            .find(|i| names.contains(&i.name) && i.module.is_empty())
+            .map_or_else(Span::default, |i| i.span);
+        return Err(TypeError::Other {
+            span,
+            msg: format!(
+                "{n} instances for {class}({head}): {listed}; \
+                 designate one with `canonical {class}({head}) = name`",
+                n = names.len(),
+                listed = provenance_list(instances, names),
+            ),
+        });
+    }
+    Ok(canonical)
 }
 
 /// Render a list of instance names with their defining module, for overlap and

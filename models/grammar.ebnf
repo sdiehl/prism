@@ -59,8 +59,8 @@ program   ->  { topdecl }                       -- separated by layout
 
 topdecl   ->  [ "pub" | "opaque" ] item
 item      ->  import | datatype | newtype | synonym | rowalias
-           |  classdecl | instancedecl | effectdecl | errordecl
-           |  patterndecl | constdecl | fundecl
+           |  classdecl | instancedecl | canonicaldecl | effectdecl
+           |  errordecl | patterndecl | constdecl | fundecl
 
 import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
            |  "pub" "import" modpath [ "(" name , ... ")" ]
@@ -93,6 +93,7 @@ wheres    ->  "where" "{" { varid "=" expr } "}"
 classdecl    ->  "class" conid "(" varid ")" [ given ] "{" sig , ... "}"
 instancedecl ->  "instance" varid ":" conid "(" type ")" [ given ]
                    "{" fundecl , ... "}"
+canonicaldecl -> "canonical" conid "(" type ")" "=" varid
 sig          ->  varid ":" type
 
 effectdecl   ->  "effect" conid [ tyvars ] "{" effop , ... "}"

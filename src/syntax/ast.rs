@@ -78,6 +78,9 @@ pub struct Program<P: Phase = Surface> {
     pub synonyms: Vec<SynonymDecl>,
     pub classes: Vec<ClassDecl>,
     pub instances: Vec<InstanceDecl<P>>,
+    // Canonical-instance designations: which instance implicit resolution picks
+    // when several share a `(class, type-head)`. Phase-independent (no exprs).
+    pub canonicals: Vec<CanonicalDecl>,
     pub patterns: Vec<PatternDecl<P>>,
     pub fns: Vec<Decl<P>>,
     // Module imports, resolved away by the name-resolution pass.
@@ -126,6 +129,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
         }
         d.field("classes", &self.classes)
             .field("instances", &self.instances);
+        if !self.canonicals.is_empty() {
+            d.field("canonicals", &self.canonicals);
+        }
         if !self.patterns.is_empty() {
             d.field("patterns", &self.patterns);
         }
@@ -168,6 +174,7 @@ pub enum Item {
     Synonym(SynonymDecl),
     Class(ClassDecl),
     Instance(InstanceDecl),
+    Canonical(CanonicalDecl),
     Pattern(PatternDecl),
     Fn(Decl),
 }
@@ -261,6 +268,19 @@ pub struct InstanceDecl<P: Phase = Surface> {
     // provenance diagnostics. Empty for a root-program instance. A user instance
     // is tagged by the renamer; a derived one by its data type's canonical name.
     pub module: String,
+    pub span: Span,
+}
+
+// `canonical Class(Head) = name`: designates the canonical instance for a
+// `(class, type-head)` so implicit resolution is deterministic when several
+// instances share the head. `name` references a global instance (stays bare,
+// like every instance reference); `class`/`head` are canonicalized by the
+// renamer to match the keys the instance store is built under.
+#[derive(Clone, Debug)]
+pub struct CanonicalDecl {
+    pub class: String,
+    pub head: Ty,
+    pub name: String,
     pub span: Span,
 }
 

@@ -23,6 +23,7 @@ pub const TRANSACT: &str = "transact";
 pub const ALIAS: &str = "alias";
 pub const CLASS: &str = "class";
 pub const INSTANCE: &str = "instance";
+pub const CANONICAL: &str = "canonical";
 pub const PATTERN: &str = "pattern";
 pub const DERIVING: &str = "deriving";
 pub const WHERE: &str = "where";

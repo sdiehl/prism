@@ -1,7 +1,9 @@
 -- Typeclasses with Lean-style named instances. A class declares a dictionary
 -- shape, instances are named values, and constrained functions take hidden
--- dictionaries resolved at the call site. Two instances at one head make
--- resolution ambiguous, so pick one explicitly with f(args, using instName).
+-- dictionaries resolved at the call site. When a head has two instances one is
+-- canonical (here the prelude's ascending ordInt, designated below); implicit
+-- resolution picks it, and the other is selected explicitly with
+-- f(args, using instName). Coherence: resolution is never silently ambiguous.
 
 fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
   match xs of
@@ -18,6 +20,11 @@ fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
 instance ordDesc : Ord(Int) {
   fn cmp(x, y) = int_cmp(y, x)
 }
+
+-- The prelude's ascending ordInt is the canonical Ord(Int); ordDesc stays the
+-- explicit yardstick. Without this, two Ord(Int) instances would be a coherence
+-- error at definition rather than a silent ambiguity at the use site.
+canonical Ord(Int) = ordInt
 
 fn join_shown(xs : List(a)) : String given Show(a) =
   match xs of

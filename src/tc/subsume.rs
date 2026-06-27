@@ -456,6 +456,7 @@ mod tests {
         classes: &'a BTreeMap<String, super::super::ClassInfo>,
         instances: &'a BTreeMap<String, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
+        canonical: &'a super::super::Canon,
     ) -> Tc<'a> {
         Tc {
             ctx: Vec::new(),
@@ -472,6 +473,7 @@ mod tests {
             classes,
             instances,
             inst_keys,
+            canonical,
             constrained: BTreeMap::new(),
             cur_self: None,
             wanted: Vec::new(),
@@ -524,7 +526,10 @@ mod tests {
         let classes = BTreeMap::new();
         let instances = BTreeMap::new();
         let inst_keys = BTreeMap::new();
-        let mut t = tc(&ctors, &data, &eff_ops, &classes, &instances, &inst_keys);
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
 
         let io = Label::bare("IO");
         let head = |a: &str, b: &str| {
