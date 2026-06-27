@@ -17,6 +17,9 @@ use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
+mod specialize;
+pub use specialize::specialize;
+
 /// The constructor symbol of every `newtype` in the program (each a single-field
 /// wrapper whose box this tier erases).
 #[must_use]

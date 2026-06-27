@@ -15,7 +15,7 @@ use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, erase_newtypes, fip_annots, hash_program,
-    insert_rc, lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, Core,
+    insert_rc, lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, specialize, Core,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -123,6 +123,9 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     // the interpreter and native see the same unwrapped Core. Placed after the
     // fip/effect validators so they still judge the program as written.
     let core = erase_newtypes(&core, &newtype_ctors(&program));
+    // Dictionary specialization: a constrained call on a known instance becomes a
+    // direct call to the instance method, with the dictionary build eliminated.
+    let core = specialize(&core);
     Ok((program, checked, core))
 }
 
