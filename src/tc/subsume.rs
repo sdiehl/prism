@@ -482,6 +482,7 @@ mod tests {
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,
+            handler_stack: Vec::new(),
         }
     }
 

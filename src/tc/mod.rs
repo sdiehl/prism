@@ -260,6 +260,18 @@ struct Tc<'a> {
     // body; `None` when no scope is active. Tail and prefix move in lockstep so
     // they cannot desync.
     cur_row: Option<RowScope>,
+    // Innermost-last stack of active handler bodies. A `mask<E>` marks the
+    // nearest frame that handles `E` as not discharging it, so the masked
+    // operation tunnels past that one handler and stays in the residual row
+    // (the handler it skips is the innermost enclosing one, by construction).
+    handler_stack: Vec<HandlerFrame>,
+}
+
+// One active handler while its body is checked: the effects its arms handle,
+// and those a `mask` inside the body has tunnelled past it.
+struct HandlerFrame {
+    handled: BTreeSet<Sym>,
+    masked: BTreeSet<Sym>,
 }
 
 // Ambient self-reference state for the body of a named declaration.
@@ -457,6 +469,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,
+            handler_stack: Vec::new(),
         };
         // Check each strongly-connected component after its callee components, so
         // a forward reference (notably one into a stdlib module merged after the
@@ -671,6 +684,7 @@ fn infer_expr_full(
         dicts: BTreeMap::new(),
         row_ctx: Vec::new(),
         cur_row: None,
+        handler_stack: Vec::new(),
     };
     let t = tc.synth(&env, e)?;
     tc.resolve_all()?;

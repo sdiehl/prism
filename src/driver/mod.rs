@@ -124,22 +124,35 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
 
 // Cross-check the two effect engines as a real assertion (not a debug_assert):
 // the op-keyed call-graph fixpoint used by effect lowering (`latent_ops`)
-// against the type checker's effect-name-keyed inferred row (`Checked::effects`).
-// The agreed direction is containment: every effect a function can still perform
-// must appear in its inferred row. A violation means the checker under-reported
-// an effect a later pass will still try to lower, an internal-consistency bug
-// surfaced here rather than as a miscompile. Synthesized ops that are not
-// type-level effects are skipped rather than flagged.
+// against each function's inferred row (the effect labels of its checked type,
+// `DeclInfo::effects`). The agreed direction is containment: every effect a
+// function can still perform must appear in its inferred row. A violation means
+// the checker under-reported an effect a later pass will still try to lower, an
+// internal-consistency bug surfaced here rather than as a miscompile.
+// Synthesized ops that are not type-level effects are skipped rather than
+// flagged.
 fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
     use std::collections::BTreeSet;
 
     let latent = crate::core::effect_lower::latent_ops(core);
     let empty = BTreeSet::new();
+    // Validate against each function's inferred row (the labels of its checked
+    // type), not the set-pass `effects` seed: the seed cannot count the scoped
+    // masking that lets a `mask`ed effect tunnel past its handler, so only the
+    // inferred row reflects what the function actually leaves unhandled.
+    let inferred_rows: std::collections::BTreeMap<&str, &crate::types::Effects> = checked
+        .decls
+        .iter()
+        .map(|d| (d.name.as_str(), &d.effects))
+        .collect();
     for f in &core.fns {
         let Some(ops) = latent.get(&f.name) else {
             continue;
         };
-        let inferred = checked.effects.get(f.name.as_str()).unwrap_or(&empty);
+        let inferred = inferred_rows
+            .get(f.name.as_str())
+            .copied()
+            .unwrap_or(&empty);
         let extra: Vec<&str> = ops
             .iter()
             .filter_map(|op| checked.eff_ops.get(op.as_str()))

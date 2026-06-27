@@ -43,6 +43,7 @@ tests/cases/effect_rows.pr: selective-free-monad
 tests/cases/effects.pr: selective-free-monad
 tests/cases/errors_unhandled.pr: selective-free-monad
 tests/cases/higher_eff.pr: whole-program-free-monad
+tests/cases/mask_tunnels_to_outer.pr: selective-free-monad
 tests/cases/multishot.pr: evidence
 tests/cases/run/class_effects.pr: evidence
 tests/cases/run/combine_effects.pr: selective-free-monad

@@ -1392,7 +1392,10 @@ mod tests {
         let mut body = String::from("long prism_show_float(long);\n");
         for &d in vals {
             let bits = d.to_bits().cast_signed();
-            let _ = writeln!(body, "{{ long b = {bits}L; print_str(prism_show_float(b)); }}");
+            let _ = writeln!(
+                body,
+                "{{ long b = {bits}L; print_str(prism_show_float(b)); }}"
+            );
         }
         let Some(lines) = rt_oracle(&body) else {
             return;

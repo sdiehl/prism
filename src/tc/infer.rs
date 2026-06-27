@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::env::{collect_type_vars, Annot};
-use super::{ClassInfo, Entry, Env, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted};
+use super::{
+    ClassInfo, Entry, Env, HandlerFrame, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted,
+};
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, PathStep, S};
@@ -537,32 +539,7 @@ impl Tc<'_> {
                 }
                 Ok(self.apply(&Type::Exist(ret_ex)))
             }
-            Expr::Mask(eff, body) => {
-                let eff_sym = Sym::from(eff);
-                if !self.eff_ops.values().any(|i| i.effect_name == eff_sym)
-                    && !super::env::is_builtin_effect(eff)
-                {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("unknown effect `{eff}` in mask"),
-                    });
-                }
-                let t = self.synth(env, body)?;
-                // The masked ops bypass the innermost handler, so the expression
-                // still demands an enclosing handler. Inject one label into the
-                // ambient row, mirroring the set pass (effects.rs `Expr::Mask`),
-                // so the unifier does not under-report a masked effect.
-                let args = (0..self.eff_arity(eff_sym))
-                    .map(|_| Type::Exist(self.push_ex()))
-                    .collect();
-                let label = Label {
-                    name: eff_sym,
-                    args,
-                };
-                self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
-                    .map_err(|e| e.at(span))?;
-                Ok(t)
-            }
+            Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
                 let mut ty_ex = BTreeMap::new();
@@ -1017,6 +994,49 @@ impl Tc<'_> {
             .map_or(0, |i| i.eff_params.len())
     }
 
+    // `mask<E>(body)`: the masked ops bypass the innermost `E` handler, so the
+    // expression still demands an enclosing one. Inject one `E` label into the
+    // ambient row (mirroring the set pass, effects.rs `Expr::Mask`) so the
+    // unifier does not under-report it, and mark the nearest enclosing `E`
+    // handler so it leaves the label in its residual row instead of discharging
+    // it.
+    fn synth_mask(
+        &mut self,
+        env: &Env,
+        eff: &str,
+        body: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let eff_sym = Sym::from(eff);
+        if !self.eff_ops.values().any(|i| i.effect_name == eff_sym)
+            && !super::env::is_builtin_effect(eff)
+        {
+            return Err(TypeError::Other {
+                span,
+                msg: format!("unknown effect `{eff}` in mask"),
+            });
+        }
+        let t = self.synth(env, body)?;
+        let args = (0..self.eff_arity(eff_sym))
+            .map(|_| Type::Exist(self.push_ex()))
+            .collect();
+        let label = Label {
+            name: eff_sym,
+            args,
+        };
+        self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
+        if let Some(frame) = self
+            .handler_stack
+            .iter_mut()
+            .rev()
+            .find(|f| f.handled.contains(&eff_sym))
+        {
+            frame.masked.insert(eff_sym);
+        }
+        Ok(t)
+    }
+
     // Synthesize a handler body under a fresh effect obligation, then discharge
     // the labels this handler names back into the enclosing row, so a handled
     // effect (even one that arrived through a function value) vanishes from the
@@ -1040,9 +1060,8 @@ impl Tc<'_> {
             tail: body_row,
             prefix,
         });
-        let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
-        self.cur_row = saved_row;
-        let body_ty = self.apply(&body_ty?);
+        // This handler joins the active stack while its body is checked, so a
+        // `mask` inside the body can find it and tunnel an effect past it.
         let handled: BTreeSet<Sym> = arms
             .iter()
             .filter_map(|a| match a {
@@ -1050,7 +1069,19 @@ impl Tc<'_> {
                 _ => None,
             })
             .collect();
-        self.discharge_row(body_row, &handled)
+        self.handler_stack.push(HandlerFrame {
+            handled: handled.clone(),
+            masked: BTreeSet::new(),
+        });
+        let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
+        let frame = self.handler_stack.pop().expect("handler frame");
+        self.cur_row = saved_row;
+        let body_ty = self.apply(&body_ty?);
+        // A masked effect tunnels past this handler: keep it in the residual row
+        // rather than discharging it, so the surrounding function still demands
+        // an enclosing handler for it.
+        let discharged: BTreeSet<Sym> = handled.difference(&frame.masked).copied().collect();
+        self.discharge_row(body_row, &discharged)
             .map_err(|e| e.at(span))?;
         Ok(body_ty)
     }
