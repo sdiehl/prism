@@ -473,6 +473,12 @@ impl Isa for Inkwell<'_> {
         self.call_named(f, ty, args, "");
     }
 
+    // `musttail` is a hard guarantee, not a hint: LLVM either emits a tail call
+    // or fails compilation, so a TRMC/handler loop can never silently degrade to
+    // a stack-growing call. The structural preconditions (matching signature, the
+    // call in tail position followed by `ret`) are enforced by `Module::verify`,
+    // which `emit_bitcode` runs before lowering; a violation is a loud verifier
+    // error with the offending IR kept on disk, never a runtime overflow.
     fn musttail_call(&self, _b: &mut Buf, dst: &str, f: &str, args: &[String]) {
         let f = self.decl(f, self.i64_fn(args.len()));
         let margs: Vec<BasicMetadataValueEnum<'_>> =

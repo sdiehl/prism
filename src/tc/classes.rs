@@ -122,7 +122,7 @@ impl Tc<'_> {
             let mut ds = Vec::new();
             for (class, ty, explicit) in &w.items {
                 let t = self.apply(ty);
-                ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), 0)?);
+                ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), &[])?);
             }
             match self.dicts.get(&w.span) {
                 Some(prev) if *prev != ds => {
@@ -145,9 +145,25 @@ impl Tc<'_> {
         t: &Type,
         span: Span,
         explicit: Option<&str>,
-        depth: usize,
+        chain: &[(String, Type)],
     ) -> Result<Dict, TypeError> {
-        if depth > MAX_INSTANCE_DEPTH {
+        // Two distinct non-termination modes. A *cycle* is when an identical goal
+        // reappears on the resolution stack (`Eq(Foo)` needing `Eq(Bar)` needing
+        // `Eq(Foo)`); that is a genuine program error and reported precisely. A
+        // goal that keeps *growing* without repeating (`C(a)` :- `C([a])` :-
+        // `C([[a]])`) never recurs exactly, so no cycle check can catch it; the
+        // depth bound is the standard fuel backstop (cf. GHC's reduction depth).
+        let goal = (class.to_string(), t.clone());
+        if chain.contains(&goal) {
+            return Err(TypeError::Other {
+                span,
+                msg: format!(
+                    "cyclic instance resolution: {class}({}) depends on itself",
+                    t.show()
+                ),
+            });
+        }
+        if chain.len() > MAX_INSTANCE_DEPTH {
             return Err(TypeError::Other {
                 span,
                 msg: format!("instance resolution for {class}({}) is too deep", t.show()),
@@ -256,6 +272,10 @@ impl Tc<'_> {
                 ),
             })
         })?;
+        // This goal joins the resolution stack while we discharge its context and
+        // superclass obligations, so a child that asks for it again is a cycle.
+        let mut child = chain.to_vec();
+        child.push(goal);
         let mut ctx_dicts = Vec::new();
         for (cclass, cty) in &info.context {
             let mut ct = cty.clone();
@@ -263,7 +283,7 @@ impl Tc<'_> {
                 ct = ct.subst_var(*n, x);
             }
             let ct = self.apply(&ct);
-            ctx_dicts.push(self.resolve(cclass, &ct, span, None, depth + 1)?);
+            ctx_dicts.push(self.resolve(cclass, &ct, span, None, &child)?);
         }
         // Superclass dictionaries follow the declared context, in the same order
         // the instance constructor lays them out as leading dict-cell fields.
@@ -273,7 +293,7 @@ impl Tc<'_> {
                 st = st.subst_var(*n, x);
             }
             let st = self.apply(&st);
-            ctx_dicts.push(self.resolve(sclass, &st, span, None, depth + 1)?);
+            ctx_dicts.push(self.resolve(sclass, &st, span, None, &child)?);
         }
         Ok(Dict::Global(inst_name, ctx_dicts))
     }

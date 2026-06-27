@@ -363,6 +363,14 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.box_i64(&bits)
     }
 
+    // Every Prism value is a single i64. Pointer tagging keeps the low bit as a
+    // discriminant: `1` marks an immediate (small int, bool, unit packed inline),
+    // `0` marks a heap cell whose i64 is its aligned address (cells are at least
+    // 2-aligned, so a real pointer never sets the low bit). An immediate int `n`
+    // is stored as `(n << 1) | 1`, recovered by an arithmetic `>> 1`. This is what
+    // makes dup/drop no-ops on immediates: the runtime's inc/dec skip any value
+    // with the low bit set or equal to 0 (unit), so emitting refcount ops on a
+    // non-cell is always harmless.
     fn value(&mut self, regs: &Regs, v: &Value) -> Result<String, String> {
         match v {
             Value::Var(x) => regs
