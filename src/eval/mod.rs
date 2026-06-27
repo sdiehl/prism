@@ -957,14 +957,10 @@ fn rv_key_cmp(a: &Rv, b: &Rv) -> Ordering {
     }
 }
 
-// Render a float byte-for-byte like the native runtime's `printf("%g", d)` so
-// the interpreter (the differential oracle) and the backend agree. C `%g` with
-// the default 6 significant digits: branch fixed vs scientific on the rounded
-// decimal exponent, strip trailing zeros, pad the exponent to two digits.
-// The shortest decimal that round-trips back to `d`, then laid out like a
-// Python `repr`: full precision with no truncation, scientific notation only
-// outside the `[-4, 16)` decimal-exponent window. Both the interpreter and the
-// C runtime (`prism_show_float`) and the Lean oracle (`fmtG`) must implement
+// Render a float as the shortest decimal that round-trips back to `d`, laid out
+// like a Python `repr`: full precision with no truncation, scientific notation
+// only outside the `[-4, 16)` decimal-exponent window. Both the interpreter and
+// the C runtime (`prism_show_float`) and the Lean oracle (`fmtG`) must implement
 // the identical algorithm, since they are differentially tested against each
 // other; `Float::to_string`'s exact-integer expansion would not be portable.
 //
@@ -981,16 +977,14 @@ fn fmt_g(d: f64) -> String {
     if d == 0.0 {
         return if d.is_sign_negative() { "-0" } else { "0" }.to_string();
     }
-    // Fewest significant digits (1..=17) whose scientific form round-trips; 17
-    // always suffice for an IEEE double, so `p` is set before the loop ends.
-    let mut p = 17usize;
-    for cand in 1..17usize {
-        if format!("{:.*e}", cand - 1, d).parse::<f64>() == Ok(d) {
-            p = cand;
-            break;
-        }
-    }
-    let sci = format!("{:.*e}", p - 1, d); // "[-]D[.DDD]e±XX"
+    // Shortest scientific form (fewest significant digits, 1..=17) that round-
+    // trips; 17 digits always suffice for an IEEE double, so the fallback always
+    // parses. `find` formats only up to the winning precision, so the chosen
+    // string is reused rather than reformatted.
+    let sci = (1..17usize)
+        .map(|cand| format!("{:.*e}", cand - 1, d))
+        .find(|s| s.parse::<f64>() == Ok(d))
+        .unwrap_or_else(|| format!("{:.*e}", 16, d)); // "[-]D[.DDD]e±XX"
     let neg = sci.starts_with('-');
     let (mant, exp) = sci.trim_start_matches('-').split_once('e').unwrap();
     let e10: i32 = exp.parse().unwrap();
@@ -998,11 +992,9 @@ fn fmt_g(d: f64) -> String {
     let body = if (-4..16).contains(&e10) {
         layout_fixed(&digits, e10)
     } else {
-        let m = if digits.len() == 1 {
-            digits
-        } else {
-            strip_zeros(format!("{}.{}", &digits[..1], &digits[1..]))
-        };
+        // Scientific: one digit before the point, the rest after (`layout_fixed`
+        // at exponent 0 does exactly this), then the `e±XX` suffix.
+        let m = layout_fixed(&digits, 0);
         let sign = if e10 < 0 { '-' } else { '+' };
         format!("{m}e{sign}{:02}", e10.abs())
     };

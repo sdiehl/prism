@@ -1070,7 +1070,7 @@ impl Tc<'_> {
             })
             .collect();
         self.handler_stack.push(HandlerFrame {
-            handled: handled.clone(),
+            handled,
             masked: BTreeSet::new(),
         });
         let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
@@ -1080,7 +1080,7 @@ impl Tc<'_> {
         // A masked effect tunnels past this handler: keep it in the residual row
         // rather than discharging it, so the surrounding function still demands
         // an enclosing handler for it.
-        let discharged: BTreeSet<Sym> = handled.difference(&frame.masked).copied().collect();
+        let discharged: BTreeSet<Sym> = frame.handled.difference(&frame.masked).copied().collect();
         self.discharge_row(body_row, &discharged)
             .map_err(|e| e.at(span))?;
         Ok(body_ty)
