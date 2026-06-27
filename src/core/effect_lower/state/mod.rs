@@ -45,9 +45,11 @@
 //! at least one fold or take. Anything else returns None and falls back to the
 //! free monad.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use super::flow::Loc;
 use super::Lowerer;
-use crate::core::cbpv::{Core, CoreFn};
+use crate::core::cbpv::{Comp, Core, CoreFn};
 use crate::names::ev;
 use crate::sym::Sym;
 
@@ -57,13 +59,42 @@ mod consumer;
 mod producer;
 mod take;
 
+pub(super) use anf::AKind;
+
 // The threaded accumulator parameter every state-mode producer gains.
 pub(super) const ST: &str = "st@";
 
 impl Lowerer {
     // Lower a fold-uniform program by state threading, or None to fall back.
     pub(super) fn try_lower_state(&mut self, core: &Core) -> Option<Core> {
-        let op = self.fold_uniform(core)?;
+        let ops = self.fold_uniform(core)?;
+        // The canonical evidence name per fused op; the producer/consumer threading
+        // dispatches each `do op` to `evs[op]` and appends evidence in op-id order.
+        let mut evs: BTreeMap<Sym, Sym> = BTreeMap::new();
+        for o in &ops {
+            evs.insert(*o, ev(self.op_id(*o).ok()?).into());
+        }
+        // In state mode the threaded loop yields the accumulator but the answer is
+        // the producer value, so fuse only when the two coincide: every fold
+        // handle's body must be value-coincident (its result is a read or a
+        // producer tail-call, not a `return` of a non-state value). Otherwise fall
+        // back to the (correct) `@region`/free-monad path.
+        if self.state_mode {
+            for h in self.fusion_handles(core)? {
+                let Comp::Handle {
+                    body, ops: clauses, ..
+                } = h
+                else {
+                    continue;
+                };
+                if !clauses.is_empty()
+                    && clauses.iter().all(|c| Self::is_fold(c).is_some())
+                    && !self.value_coincident(body, &evs, &core.fns, &mut BTreeSet::new())
+                {
+                    return None;
+                }
+            }
+        }
         let mut fns = Vec::with_capacity(core.fns.len());
         for f in &core.fns {
             let loc: Loc = f
@@ -75,25 +106,25 @@ impl Lowerer {
             let folds = self
                 .latent
                 .get(&f.name)
-                .is_some_and(|s| s.iter().any(|m| m.id == op));
+                .is_some_and(|s| s.iter().any(|m| ops.contains(&m.id)));
             let cf = if folds {
-                // A producer: thread the accumulator from trailing parameters.
-                let ev: Sym = ev(self.op_id(op).ok()?).into();
+                // A producer: thread the accumulator from trailing parameters, one
+                // `ev@<id>` per fused op (in op-id order) plus the accumulator.
                 let st: Sym = ST.into();
                 let mut params = f.params.clone();
-                params.push(ev);
+                params.extend(self.ev_order(&evs)?.into_iter().map(|o| evs[&o]));
                 params.push(st);
                 CoreFn {
                     name: f.name,
                     params,
-                    body: self.thread_st(&f.body, ev, &loc, op, st)?,
+                    body: self.thread_st(&f.body, &evs, &loc, st)?,
                 }
             } else {
                 // A consumer (or plain code): rewrite the fold handles inside.
                 CoreFn {
                     name: f.name,
                     params: f.params.clone(),
-                    body: self.rewrite(&f.body, &loc, op)?,
+                    body: self.rewrite(&f.body, &loc, &evs)?,
                 }
             };
             fns.push(cf);

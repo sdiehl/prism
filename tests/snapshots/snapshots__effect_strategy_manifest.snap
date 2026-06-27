@@ -12,7 +12,7 @@ examples/eff_nontail.pr: selective-free-monad
 examples/eff_poly.pr: whole-program-free-monad
 examples/eff_reader.pr: evidence
 examples/eff_rows.pr: selective-free-monad
-examples/eff_state.pr: selective-free-monad
+examples/eff_state.pr: state-fusion
 examples/eff_writer.pr: state-fusion
 examples/eff_yield.pr: selective-free-monad
 examples/effects.pr: selective-free-monad

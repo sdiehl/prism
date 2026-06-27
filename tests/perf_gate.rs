@@ -69,8 +69,9 @@ fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, 
 
 // The fusion corpus: each program drives a different path to the zero-allocation
 // guarantee (evidence passing under one and two handlers, open re-emit inlining,
-// first-class stream fusion, fold-consumer state threading, and the full stake +
-// mixed-mode showcase). Every one must allocate no `EOp` cells.
+// first-class stream fusion, fold-consumer state threading, get-style multi-op
+// `State`, and the full stake + mixed-mode showcase). Every one must allocate no
+// `EOp` cells.
 const FUSION_PROGRAMS: &[&str] = &[
     "tests/cases/run/effop_tax.pr",
     "tests/cases/run/eff_two_handlers.pr",
@@ -78,6 +79,7 @@ const FUSION_PROGRAMS: &[&str] = &[
     "examples/stream_fuse.pr",
     "examples/stream_fold.pr",
     "examples/streams.pr",
+    "examples/eff_state.pr",
 ];
 
 #[test]
@@ -388,14 +390,13 @@ fn free_monad_loops_run_in_constant_stack() {
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
 
-// A hand-rolled parameter-passing effect loop: the handler answer is a function
-// `S -> A` threaded as state, and the clause applies the resumption's *result* to
-// the new state (`r(s)(s)`), so each iteration would leave a pending-apply frame
-// on the native stack. The native effect runtime (the default) drives such a closed
-// handler with a self-tail-recursive `{n}@region` loop that threads the state in an
-// accumulator and `musttail`s on the resumed continuation, so the loop runs in
-// constant stack. Opting out (`PRISM_NATIVE_EFFECTS=0`) reifies into the free monad
-// and overflows this input instead.
+// A hand-rolled parameter-passing `State` loop: a `get`-style `rd` clause
+// (`r(s)(s)`) and a `put`-style `wr` clause (`r(())(v)`) over one accumulator,
+// with the answer the producer value (`return x => \_s -> x`). State fusion
+// recognizes the two-op shape and threads the accumulator through `spin` as an
+// explicit loop: zero `EOp` cells and constant stack, the same tier-1 guarantee
+// as the writer-style fold. Each iteration would otherwise leave a pending-apply
+// frame on the native stack and reify a continuation cell.
 #[test]
 fn param_passing_effect_loop_runs_in_constant_stack() {
     if !have(&cc()) {
@@ -415,12 +416,16 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
          return x => \\(_s) -> x\n  f(0)\n\
          fn main() = println(run({n}))\n"
     );
-    runs_in_bounded_stack(
-        &prism::with_prelude(&src),
-        "parameter-passing state loop",
-        2048,
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
+    let full = prism::with_prelude(&src);
+    runs_in_bounded_stack(&full, "parameter-passing state loop", 2048)
+        .unwrap_or_else(|e| panic!("{e}"));
+    // Tier-1: the two-op State loop fuses, allocating no `EOp` cells (it ran via
+    // the O(n)-cell `@region` driver before get-style fusion landed).
+    match stat_src(&full, "param-passing state", "PRISM_EFFOP_STATS", "eff ops allocated") {
+        Ok(0) => {}
+        Ok(c) => panic!("parameter-passing State loop allocated {c} eff-op cell(s); want 0 (state fusion regressed)"),
+        Err(e) => panic!("{e}"),
+    }
 }
 
 // Asymptotic-work gate: the counter that would have caught the EBounce regression.

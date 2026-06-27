@@ -151,6 +151,17 @@ struct Lowerer {
     // Set by the state path when a `stake`-style early-terminating handler is
     // present: producers then thread `Step S` and check it after each emit.
     early: bool,
+    // Per fused op, how its `do op` site reconstructs the resume value with no
+    // allocation: `Unit` (a write, result is unit) or `Acc` (a read, result is the
+    // current accumulator). Populated by `fold_uniform`, read by `thread_st`.
+    state_a: BTreeMap<Sym, state::AKind>,
+    // Set by `fold_uniform` when a fold handler's answer is the producer value (a
+    // get-style `return r => \s -> r`), not the accumulator (a writer `\a -> a`).
+    // The threaded loop still carries the accumulator, so this mode is sound only
+    // when the producer value coincides with it; the extra `thread_st` guards (a
+    // non-state `return`, a producer result observed as a value) fall back rather
+    // than miscompile when it does not.
+    state_mode: bool,
     // Default on (opt out with `PRISM_NATIVE_EFFECTS=0`): drive eligible closed
     // handlers with a self-recursive `{n}@region` loop -- a tail resume becomes a
     // queue plus `EResume`, a function-answer state handler threads its state in an
@@ -284,6 +295,8 @@ fn lower_impl(
         fresh: Fresh::new(),
         generated: Vec::new(),
         early: false,
+        state_a: BTreeMap::new(),
+        state_mode: false,
         native: std::env::var("PRISM_NATIVE_EFFECTS").map_or(true, |v| v != "0"),
         native_resume: false,
         used_resume: false,
