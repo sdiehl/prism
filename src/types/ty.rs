@@ -163,7 +163,13 @@ impl EffRow {
             Self::Exist(v) => format!("?r{v}"),
             Self::Extend(..) => unreachable!(),
         };
+        // A row is a set, so render its labels in a canonical (name-sorted)
+        // order rather than the order inference happened to absorb them; the
+        // absorb order is not stable across runs (it follows interner state), and
+        // an unstable signature display would make snapshots flaky. The tail row
+        // variable, if any, stays last.
         let mut parts: Vec<String> = labels.into_iter().map(Label::show).collect();
+        parts.sort();
         if !tail_s.is_empty() {
             parts.push(tail_s);
         }
@@ -447,7 +453,8 @@ pub fn show_effects(e: &Effects) -> String {
     if e.is_empty() {
         "{}".into()
     } else {
-        let v: Vec<String> = e.iter().map(Sym::to_string).collect();
+        let mut v: Vec<String> = e.iter().map(Sym::to_string).collect();
+        v.sort();
         format!("{{{}}}", v.join(", "))
     }
 }

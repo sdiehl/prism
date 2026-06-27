@@ -209,10 +209,10 @@ repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} !
 scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0} ! {}
 sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0} ! {}
 signum : (Int) -> Int ! {}
-skeep : forall a b c e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> (c) -> a ! {Emit(b), e0} ! {}
-skeep_go : forall a b e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
-smap : forall a b c d e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> (d) -> a ! {Emit(b), e0} ! {}
-smap_go : forall a b c e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
+skeep : forall a b c e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> (c) -> a ! {Emit(b), e0} ! {}
+skeep_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
+smap : forall a b c d e0. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> (d) -> a ! {Emit(b), e0} ! {}
+smap_go : forall a b c e0. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
 snd : forall a b. ((a, b)) -> b ! {}
 sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)} ! {}
 sof_go : forall a. (List(a)) -> Unit ! {Emit(a)} ! {Emit}

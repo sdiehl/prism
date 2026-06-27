@@ -133,7 +133,7 @@ Program {
 
 == types ==
 lookup : (String) -> Int ! {NotFound}
-main : () -> Unit ! {NotFound, IO}
+main : () -> Unit ! {IO, NotFound}
 
 == core (cbpv) ==
 fn lookup(k) =
