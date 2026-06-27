@@ -961,27 +961,71 @@ fn rv_key_cmp(a: &Rv, b: &Rv) -> Ordering {
 // the interpreter (the differential oracle) and the backend agree. C `%g` with
 // the default 6 significant digits: branch fixed vs scientific on the rounded
 // decimal exponent, strip trailing zeros, pad the exponent to two digits.
+// The shortest decimal that round-trips back to `d`, then laid out like a
+// Python `repr`: full precision with no truncation, scientific notation only
+// outside the `[-4, 16)` decimal-exponent window. Both the interpreter and the
+// C runtime (`prism_show_float`) and the Lean oracle (`fmtG`) must implement
+// the identical algorithm, since they are differentially tested against each
+// other; `Float::to_string`'s exact-integer expansion would not be portable.
+//
+// `0.1` stays "0.1", `0.1 +. 0.2` shows "0.30000000000000004", `100.0` is
+// "100", `1e100` is "1e+100". Rust's `{:e}` is correctly rounded (round half to
+// even) like the printf family, so the digits and exponent agree with C.
 fn fmt_g(d: f64) -> String {
-    const P: i32 = 6;
     if d.is_nan() {
         return "nan".to_string();
     }
     if d.is_infinite() {
         return if d < 0.0 { "-inf" } else { "inf" }.to_string();
     }
-    // Rust's fixed-precision formatting is correctly rounded (round half to even)
-    // like the printf family, so the exponent it produces is the one `%g` branches
-    // on, including a carry that bumps the exponent (9.999996e5 -> 1e6).
-    let sci = format!("{:.*e}", (P - 1) as usize, d);
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
-    let e: i32 = exp.parse().unwrap_or(0);
-    if (-4..P).contains(&e) {
-        let prec = usize::try_from(P - 1 - e).unwrap_or(0);
-        strip_zeros(format!("{d:.prec$}"))
+    if d == 0.0 {
+        return if d.is_sign_negative() { "-0" } else { "0" }.to_string();
+    }
+    // Fewest significant digits (1..=17) whose scientific form round-trips; 17
+    // always suffice for an IEEE double, so `p` is set before the loop ends.
+    let mut p = 17usize;
+    for cand in 1..17usize {
+        if format!("{:.*e}", cand - 1, d).parse::<f64>() == Ok(d) {
+            p = cand;
+            break;
+        }
+    }
+    let sci = format!("{:.*e}", p - 1, d); // "[-]D[.DDD]e±XX"
+    let neg = sci.starts_with('-');
+    let (mant, exp) = sci.trim_start_matches('-').split_once('e').unwrap();
+    let e10: i32 = exp.parse().unwrap();
+    let digits: String = mant.chars().filter(|c| *c != '.').collect();
+    let body = if (-4..16).contains(&e10) {
+        layout_fixed(&digits, e10)
     } else {
-        let m = strip_zeros(mantissa.to_string());
-        let sign = if e < 0 { '-' } else { '+' };
-        format!("{m}e{sign}{:02}", e.abs())
+        let m = if digits.len() == 1 {
+            digits.clone()
+        } else {
+            strip_zeros(format!("{}.{}", &digits[..1], &digits[1..]))
+        };
+        let sign = if e10 < 0 { '-' } else { '+' };
+        format!("{m}e{sign}{:02}", e10.abs())
+    };
+    if neg {
+        format!("-{body}")
+    } else {
+        body
+    }
+}
+
+// Place the decimal point in `digits` (the significant figures, no point) so the
+// leading digit has place value 10^`e10`. Trailing zeros are stripped.
+fn layout_fixed(digits: &str, e10: i32) -> String {
+    if e10 >= 0 {
+        let k = e10 as usize + 1;
+        if digits.len() <= k {
+            format!("{digits}{}", "0".repeat(k - digits.len()))
+        } else {
+            strip_zeros(format!("{}.{}", &digits[..k], &digits[k..]))
+        }
+    } else {
+        let zeros = "0".repeat((-e10 - 1) as usize);
+        strip_zeros(format!("0.{zeros}{digits}"))
     }
 }
 
@@ -1190,45 +1234,38 @@ mod tests {
 
     use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED};
 
-    // Reference column is the exact output of C `printf("%g", d)` (glibc/BSD).
-    // The interpreter is the differential oracle, so its float rendering must
-    // equal the backend's `%g` byte for byte.
+    // `fmt_g` renders the shortest decimal that round-trips back to the same
+    // double: full precision, no truncation, scientific only outside [-4, 16).
+    // Reference values match Python `repr`. The C runtime and Lean oracle must
+    // agree byte for byte (proven against C by `prism_show_float_matches_fmt_g`).
     #[test]
-    fn fmt_g_matches_c_printf() {
+    fn fmt_g_is_shortest_round_trip() {
         let cases: &[(f64, &str)] = &[
             (0.0, "0"),
             (-0.0, "-0"),
             (1.0, "1"),
             (-1.0, "-1"),
-            (1.0 / 3.0, "0.333333"),
-            (-1.0 / 3.0, "-0.333333"),
             (0.1, "0.1"),
             (0.5, "0.5"),
             (1.5, "1.5"),
-            (100_000_000.0, "1e+08"),
-            (1_000_000.0, "1e+06"),
-            (999_999.0, "999999"),
-            (123_456.7, "123457"),
-            (1_234_567.0, "1.23457e+06"),
-            (9_999_999.0, "1e+07"),
-            (0.000_000_1, "1e-07"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (10.0 / 3.0, "3.3333333333333335"),
+            (std::f64::consts::PI, "3.141592653589793"),
+            (3.14, "3.14"),
+            (100.0, "100"),
+            (1_000_000.0, "1000000"),
             (0.0001, "0.0001"),
             (0.00001, "1e-05"),
-            (1e12, "1e+12"),
-            (1e-12, "1e-12"),
-            (1.234_567_89, "1.23457"),
-            (76.543_21, "76.5432"),
-            (12_345.678, "12345.7"),
-            (100.0, "100"),
-            (0.000_123_456, "0.000123456"),
+            (1e15, "1000000000000000"),
+            (1e16, "1e+16"),
             (1e100, "1e+100"),
             (1e-100, "1e-100"),
-            (123.456, "123.456"),
-            (0.000_999_999_5, "0.001"),
-            (9.999_996e5, "1e+06"),
+            (1.23456789e-5, "1.23456789e-05"),
         ];
         for &(d, want) in cases {
             assert_eq!(fmt_g(d), want, "fmt_g({d})");
+            assert_eq!(fmt_g(d).parse::<f64>(), Ok(d), "round-trip fmt_g({d})");
         }
         assert_eq!(fmt_g(f64::NAN), "nan");
         assert_eq!(fmt_g(f64::INFINITY), "inf");
@@ -1315,6 +1352,55 @@ mod tests {
                 .map(str::to_owned)
                 .collect(),
         )
+    }
+
+    // The C runtime's float printer is the native backend's source of truth and
+    // must match the interpreter's `fmt_g` byte for byte (they are differentially
+    // tested). Pass exact bit patterns so no C literal parsing intervenes, then
+    // run `prism_show_float` as the oracle.
+    #[test]
+    fn prism_show_float_matches_fmt_g() {
+        use std::fmt::Write;
+        let vals: &[f64] = &[
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            0.1,
+            0.5,
+            1.5,
+            0.1 + 0.2,
+            1.0 / 3.0,
+            10.0 / 3.0,
+            std::f64::consts::PI,
+            3.14,
+            100.0,
+            1_000_000.0,
+            0.0001,
+            0.00001,
+            1e15,
+            1e16,
+            1e100,
+            1e-100,
+            1.234_567_89e-5,
+            123.456,
+            9.999_999e5,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+        ];
+        let want: Vec<String> = vals.iter().map(|&d| fmt_g(d)).collect();
+        let mut body = String::from("long prism_show_float(long);\n");
+        for &d in vals {
+            let bits = d.to_bits() as i64;
+            let _ = writeln!(body, "{{ long b = {bits}L; print_str(prism_show_float(b)); }}");
+        }
+        let Some(lines) = rt_oracle(&body) else {
+            return;
+        };
+        assert_eq!(
+            lines, want,
+            "C prism_show_float diverged from interpreter fmt_g"
+        );
     }
 
     // An unseeded `rand` must stream identical values on every backend, so the

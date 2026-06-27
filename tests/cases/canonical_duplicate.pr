@@ -11,6 +11,7 @@ instance ordRev : Ord(Int) {
 }
 
 canonical Ord(Int) = ordInt
+
 canonical Ord(Int) = ordRev
 
 fn main() = cmp(1, 2)

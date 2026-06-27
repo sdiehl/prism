@@ -618,12 +618,63 @@ long prism_show_char(long cp) {
     return prism_str_lit(buf, k);
 }
 
+/* Shortest decimal that round-trips back to `d`, laid out like a Python `repr`:
+ * full precision with no truncation, scientific notation only when the decimal
+ * exponent falls outside [-4, 16). This must stay byte-identical to the
+ * interpreter's `fmt_g` (src/eval) and the Lean oracle's `fmtG` (models), which
+ * are differentially tested against this runtime. Because `p` is the FEWEST
+ * significant digits that round-trip, the last digit is never 0, so no trailing
+ * zeros ever need stripping. */
 long prism_show_float(long f) {
     double d;
     memcpy(&d, &f, 8);
-    char buf[32];
-    int k = snprintf(buf, sizeof buf, "%g", d);
-    return prism_str_lit(buf, k);
+    if (isnan(d)) return prism_str_lit("nan", 3);
+    if (isinf(d)) return d < 0 ? prism_str_lit("-inf", 4) : prism_str_lit("inf", 3);
+    if (d == 0.0) return signbit(d) ? prism_str_lit("-0", 2) : prism_str_lit("0", 1);
+
+    char sci[40];
+    int p = 17;
+    for (int cand = 1; cand < 17; cand++) {
+        snprintf(sci, sizeof sci, "%.*e", cand - 1, d);
+        if (strtod(sci, NULL) == d) { p = cand; break; }
+    }
+    snprintf(sci, sizeof sci, "%.*e", p - 1, d); /* "[-]D[.DDD]e+XX" */
+
+    const char *s = sci;
+    int neg = (*s == '-');
+    if (neg) s++;
+    char digits[20];
+    int nd = 0;
+    while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }
+    int e10 = atoi(s + 1); /* s now points at 'e' */
+
+    char out[64];
+    int o = 0;
+    if (neg) out[o++] = '-';
+    if (e10 >= -4 && e10 < 16) {
+        if (e10 >= 0) {
+            int k = e10 + 1;
+            for (int i = 0; i < k; i++) out[o++] = i < nd ? digits[i] : '0';
+            if (nd > k) {
+                out[o++] = '.';
+                for (int i = k; i < nd; i++) out[o++] = digits[i];
+            }
+        } else {
+            out[o++] = '0';
+            out[o++] = '.';
+            for (int i = 0; i < -e10 - 1; i++) out[o++] = '0';
+            for (int i = 0; i < nd; i++) out[o++] = digits[i];
+        }
+    } else {
+        out[o++] = digits[0];
+        if (nd > 1) {
+            out[o++] = '.';
+            for (int i = 1; i < nd; i++) out[o++] = digits[i];
+        }
+        o += snprintf(out + o, sizeof out - (size_t)o, "e%c%02d",
+                      e10 < 0 ? '-' : '+', e10 < 0 ? -e10 : e10);
+    }
+    return prism_str_lit(out, o);
 }
 
 long prism_substring(long s, long start, long len) {

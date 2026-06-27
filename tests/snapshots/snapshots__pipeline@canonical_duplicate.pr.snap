@@ -226,7 +226,7 @@ Program {
             class: "Ord",
             head: Int,
             name: "ordRev",
-            span: 220..247,
+            span: 221..248,
         },
     ],
     fns: [
@@ -242,7 +242,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 261..264,
+                        span: 262..265,
                     },
                     [
                         Spanned {
@@ -252,7 +252,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 265..266,
+                            span: 266..267,
                         },
                         Spanned {
                             node: Int(
@@ -261,23 +261,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 268..269,
+                            span: 269..270,
                         },
                     ],
                 ),
-                span: 261..270,
+                span: 262..271,
             },
             wheres: [],
-            span: 249..270,
+            span: 250..271,
         },
     ],
 }
 
 == types ==
 Type Error: duplicate canonical designation for Ord(Int)
-    ╭─[ <source>:14:1 ]
+    ╭─[ <source>:15:1 ]
     │
- 14 │ canonical Ord(Int) = ordRev
+ 15 │ canonical Ord(Int) = ordRev
     │ ─────────────┬─────────────  
     │              ╰─────────────── duplicate canonical designation for Ord(Int)
 ────╯
