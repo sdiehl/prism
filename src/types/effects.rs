@@ -255,27 +255,30 @@ fn union(mut a: Effects, b: &Effects) -> Effects {
     a
 }
 
-/// A dependency-respecting order over `prog.fns`: every callee is type-checked
-/// before its non-recursive callers, so a forward reference to a top-level
-/// binding sees its generalized type rather than a structure-free stub. This is
-/// what makes a split library (a function that calls another defined in a module
-/// merged after it) infer the same precise types as a single hand-ordered file.
+/// The strongly-connected components of `prog.fns`'s call graph, in dependency
+/// order (every component a callee belongs to precedes the components that call
+/// it). Each component is a recursion group: a singleton for an acyclic
+/// definition (with a self-edge for self-recursion), or several members for a
+/// mutually recursive cluster. Checking a component only after its callees lets
+/// a forward reference (notably one into a stdlib module merged after the
+/// prelude) see a generalized type rather than a structure-free stub, and lets a
+/// mutually recursive group be inferred against shared monomorphic variables.
 ///
-/// The returned vector is a permutation of `0..prog.fns.len()`. Mutually
-/// recursive groups are emitted contiguously and checked against each other's
-/// stubs, exactly as a single declaration's self-recursion already is. A
-/// shadowing local that happens to share a top-level name only adds a spurious
-/// edge, which is sound (it can never drop a real dependency).
+/// Members within a component are returned in declaration order. A shadowing
+/// local that happens to share a top-level name only adds a spurious edge, which
+/// is sound (it can never drop a real dependency).
 #[must_use]
-pub(crate) fn dep_order(prog: &Program<Core>) -> Vec<usize> {
+pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
+    const UNVISITED: u32 = u32::MAX;
+    let n = prog.fns.len();
     let names: std::collections::BTreeMap<&str, usize> = prog
         .fns
         .iter()
         .enumerate()
         .map(|(i, d)| (d.name.as_str(), i))
         .collect();
-    // Callee indices per function, deduped and in increasing order for a
-    // deterministic post-order.
+    // Callee indices per function, deduped and in increasing order so the DFS is
+    // deterministic.
     let deps: Vec<Vec<usize>> = prog
         .fns
         .iter()
@@ -285,32 +288,76 @@ pub(crate) fn dep_order(prog: &Program<Core>) -> Vec<usize> {
             refs.into_iter().collect()
         })
         .collect();
-    // Iterative DFS post-order (callees emitted before the caller), seeded in
-    // declaration order so the result is stable. An explicit stack avoids
-    // blowing the native stack on a deep prelude call chain.
-    let mut state = vec![0u8; prog.fns.len()]; // 0 unseen, 1 on-stack, 2 done
-    let mut order = Vec::with_capacity(prog.fns.len());
-    for start in 0..prog.fns.len() {
-        if state[start] != 0 {
+    // Iterative Tarjan over the index graph. An explicit work stack avoids
+    // blowing the native stack on a deep prelude call chain. Tarjan emits each
+    // component when its DFS root finishes, which is after all the component's
+    // callees have finished, so components come out callee-before-caller already:
+    // the emission order is the processing order, no reversal needed.
+    let mut index = vec![UNVISITED; n];
+    let mut lowlink = vec![0u32; n];
+    let mut on_stack = vec![false; n];
+    let mut comp_stack: Vec<usize> = Vec::new();
+    let mut next_index: u32 = 0;
+    let mut sccs: Vec<Vec<usize>> = Vec::new();
+    for start in 0..n {
+        if index[start] != UNVISITED {
             continue;
         }
-        let mut stack = vec![(start, 0usize)];
-        state[start] = 1;
-        while let Some(&mut (node, ref mut next)) = stack.last_mut() {
-            if let Some(&callee) = deps[node].get(*next) {
-                *next += 1;
-                if state[callee] == 0 {
-                    state[callee] = 1;
-                    stack.push((callee, 0));
+        index[start] = next_index;
+        lowlink[start] = next_index;
+        next_index += 1;
+        comp_stack.push(start);
+        on_stack[start] = true;
+        let mut work: Vec<(usize, usize)> = vec![(start, 0)];
+        while let Some(&mut (v, ref mut i)) = work.last_mut() {
+            if let Some(&w) = deps[v].get(*i) {
+                *i += 1;
+                if index[w] == UNVISITED {
+                    index[w] = next_index;
+                    lowlink[w] = next_index;
+                    next_index += 1;
+                    comp_stack.push(w);
+                    on_stack[w] = true;
+                    work.push((w, 0));
+                } else if on_stack[w] {
+                    lowlink[v] = lowlink[v].min(index[w]);
                 }
             } else {
-                state[node] = 2;
-                order.push(node);
-                stack.pop();
+                if lowlink[v] == index[v] {
+                    let mut comp = Vec::new();
+                    loop {
+                        let u = comp_stack.pop().expect("Tarjan stack underflow");
+                        on_stack[u] = false;
+                        comp.push(u);
+                        if u == v {
+                            break;
+                        }
+                    }
+                    comp.sort_unstable();
+                    sccs.push(comp);
+                }
+                let low_v = lowlink[v];
+                work.pop();
+                if let Some(&(parent, _)) = work.last() {
+                    lowlink[parent] = lowlink[parent].min(low_v);
+                }
             }
         }
     }
-    order
+    sccs
+}
+
+/// Whether a declaration's body refers to its own name: direct self-recursion,
+/// i.e. a singleton strongly-connected component with a self-edge. Used only to
+/// decide whether a body's type error warrants the polymorphic-recursion remedy
+/// hint, so the over-approximation from a same-named shadowing local is harmless.
+#[must_use]
+pub(crate) fn is_self_recursive(d: &Decl<Core>) -> bool {
+    let names: std::collections::BTreeMap<&str, usize> =
+        std::iter::once((d.name.as_str(), 0)).collect();
+    let mut refs = std::collections::BTreeSet::new();
+    collect_refs(&d.body, &names, &mut refs);
+    !refs.is_empty()
 }
 
 // Every top-level function `e` references, by canonical name. Constructors,

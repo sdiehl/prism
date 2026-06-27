@@ -371,6 +371,32 @@ pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
     }
 }
 
+// The generalized scheme of a fully-annotated function: every parameter and the
+// return type carry an annotation, so the scheme is the contract its recursive
+// and mutual calls check against. This is what keeps annotated polymorphic
+// recursion decidable. `None` when any annotation is missing (the member is
+// mono-seeded instead) or for a constant (handled by its own value branch).
+pub(super) fn annotation_scheme(d: &Decl<Core>) -> Option<Type> {
+    if d.konst {
+        return None;
+    }
+    let annots: Vec<&ast::Ty> = d
+        .params
+        .iter()
+        .map(|p| p.ty.as_ref())
+        .collect::<Option<_>>()?;
+    let ret = d.ret.as_ref()?;
+    let pt: Vec<Type> = annots.into_iter().map(convert_data).collect();
+    let rt = convert_data(ret);
+    let mut vars = BTreeSet::new();
+    for t in &pt {
+        collect_type_vars(t, &mut vars);
+    }
+    collect_type_vars(&rt, &mut vars);
+    let sorted: Vec<Sym> = vars.into_iter().collect();
+    Some(wrap_forall(&sorted, Type::fun(pt, rt)))
+}
+
 pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
     // A constant's stub is its value type: the annotation if given, else a
     // fresh monovar refined when the body is inferred.
@@ -385,23 +411,12 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
             },
         );
     }
-    let n = d.params.len();
-    let annots: Option<Vec<_>> = d.params.iter().map(|p| p.ty.as_ref()).collect();
-    if let Some(annots) = annots {
-        if let Some(ret) = &d.ret {
-            let pt: Vec<Type> = annots.into_iter().map(convert_data).collect();
-            let rt = convert_data(ret);
-            let mut vars = BTreeSet::new();
-            for t in &pt {
-                collect_type_vars(t, &mut vars);
-            }
-            collect_type_vars(&rt, &mut vars);
-            let sorted: Vec<Sym> = vars.into_iter().collect();
-            return wrap_forall(&sorted, Type::fun(pt, rt));
-        }
+    if let Some(scheme) = annotation_scheme(d) {
+        return scheme;
     }
     // Fresh, unforgeable placeholder type vars for the stub scheme, minted from
     // the interner rather than manufactured as `s@{i}` text.
+    let n = d.params.len();
     let vars: Vec<Sym> = (0..=n).map(|_| Sym::fresh()).collect();
     let pt: Vec<Type> = vars[..n].iter().map(|v| Type::Var(*v)).collect();
     let rt = Type::Var(vars[n]);
