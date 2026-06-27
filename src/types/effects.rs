@@ -101,10 +101,13 @@ fn of_expr(
             union(s, &of_expr(e2, fns, ops, locals))
         }
         Expr::Let(_, v, b) => union(of_expr(v, fns, ops, locals), &of_expr(b, fns, ops, locals)),
-        Expr::Lam(ps, b) => {
-            let inner = shadow(locals, ps.iter().map(|p| p.name.as_str()));
-            of_expr(b, fns, ops, &inner)
-        }
+        // A lambda delimits its effects onto its own arrow row; they belong to
+        // the enclosing function only where the closure is applied, which the
+        // call cases below already account for. (Matches the delimited row the
+        // type checker now infers for `Expr::Lam`.) Kept a distinct arm from the
+        // empty literals above for that rationale.
+        #[expect(clippy::match_same_arms, reason = "delimited-lambda rationale")]
+        Expr::Lam(..) => Effects::new(),
         Expr::Call(f, args) => {
             let mut s = head(f, fns, ops, locals);
             s = union(s, &of_expr(f, fns, ops, locals));
@@ -236,14 +239,6 @@ fn head(f: &S<Expr<Core>>, fns: &BTreeMap<String, Effects>, ops: &Ops, locals: &
         return fns.get(name).cloned().unwrap_or_default();
     }
     Effects::new()
-}
-
-fn shadow<'a>(locals: &Locals, names: impl Iterator<Item = &'a str>) -> Locals {
-    let mut out = locals.clone();
-    for n in names {
-        out.remove(n);
-    }
-    out
 }
 
 fn once(s: Sym) -> Effects {

@@ -109,12 +109,37 @@ impl Tc<'_> {
                 self.drop_row_uni(*n);
                 Ok(())
             }
-            (Expr::Lam(ps, body), Type::Fun(doms, _eff, ret)) if ps.len() == doms.len() => {
+            (Expr::Lam(ps, body), Type::Fun(doms, eff, ret)) if ps.len() == doms.len() => {
                 let mut env2 = env.clone();
                 for (p, d) in ps.iter().zip(doms.iter()) {
                     env2.insert(Sym::from(&p.name), d.clone());
                 }
-                self.check(&env2, body, ret)
+                // Scope the body's effects into the expected arrow row: its fixed
+                // labels become the prefix (so a body that performs them adds
+                // nothing) and its tail absorbs anything extra. A flexible tail
+                // means a pure body checks fine against an effectful type (the
+                // closure introduction form admits row subsumption); a closed or
+                // rigid tail is pinned afterward so the body may not exceed it.
+                let eff = self.apply_row(eff);
+                let mut prefix = BTreeSet::new();
+                let mut cursor = &eff;
+                while let EffRow::Extend(l, more) = cursor {
+                    prefix.insert(l.name);
+                    cursor = more;
+                }
+                let (tail, closed) = match cursor {
+                    EffRow::Exist(r) => (*r, None),
+                    other => (self.push_ex_row(), Some(other.clone())),
+                };
+                let saved = self.cur_row.replace(RowScope { tail, prefix });
+                let checked = self.check(&env2, body, ret);
+                self.cur_row = saved;
+                checked?;
+                if let Some(closed) = closed {
+                    self.unify_row(&EffRow::Exist(tail), &closed)
+                        .map_err(|e| e.at(span))?;
+                }
+                Ok(())
             }
             (Expr::If(c, t, e2), _) => {
                 self.check(env, c, &Type::Bool)?;
@@ -365,8 +390,18 @@ impl Tc<'_> {
                     doms.push(Type::Exist(ex));
                 }
                 let ret = self.push_ex();
-                self.check(&env2, body, &Type::Exist(ret))?;
-                Ok(self.apply(&Type::fun(doms, Type::Exist(ret))))
+                // A lambda delimits its own effect row: its body's effects are
+                // captured on the arrow type, not bled into the enclosing
+                // function, and re-emerge only when the closure is applied.
+                let row = self.push_ex_row();
+                let saved = self.cur_row.replace(RowScope {
+                    tail: row,
+                    prefix: BTreeSet::new(),
+                });
+                let checked = self.check(&env2, body, &Type::Exist(ret));
+                self.cur_row = saved;
+                checked?;
+                Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
             }
             Expr::Call(f, args) => {
                 if let Expr::Var(x) = &f.node {
@@ -374,9 +409,21 @@ impl Tc<'_> {
                         if !info.eff_params.is_empty() {
                             let info = info.clone();
                             self.synth(env, f)?;
-                            let fty = self.perform_ty(&info);
+                            let fty = self.perform_ty(&info, span)?;
                             return self.app_synth(env, &fty, args, span);
                         }
+                        // A non-parametric op carries no effect args, so its row
+                        // obligation (rule 1) is a bare label; emit it, then type
+                        // the call through the ordinary env-scheme path below.
+                        let eff = info.effect_name;
+                        self.absorb_row(&EffRow::Extend(
+                            Label {
+                                name: eff,
+                                args: Vec::new(),
+                            },
+                            Box::new(EffRow::Empty),
+                        ))
+                        .map_err(|e| e.at(span))?;
                     }
                 }
                 let tf = self.synth(env, f)?;
@@ -944,8 +991,12 @@ impl Tc<'_> {
 
     // The type of a perform site for a parametric op: the op signature with
     // effect parameters replaced by the instantiation in force, and any
-    // leftover return-only variables opened fresh per site.
-    fn perform_ty(&mut self, info: &super::EffOpInfo) -> Type {
+    // leftover return-only variables opened fresh per site. The op's own effect
+    // label is absorbed into the ambient row here, so a direct `do op` demands
+    // its effect by inference (rule 1); the label's args are the same
+    // existentials that instantiate the op type, so the value- and row-level
+    // views of the effect stay tied. Additive over the set-pass seed.
+    fn perform_ty(&mut self, info: &super::EffOpInfo, span: Span) -> Result<Type, TypeError> {
         let eff_sym = info.effect_name;
         let found = self
             .row_ctx
@@ -959,6 +1010,12 @@ impl Tc<'_> {
                 .map(|_| Type::Exist(self.push_ex()))
                 .collect()
         });
+        let label = Label {
+            name: eff_sym,
+            args: args.clone(),
+        };
+        self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
         let mut params = info.params.clone();
         let mut ret = info.ret.clone();
         for (p, t) in info.eff_params.iter().zip(&args) {
@@ -980,7 +1037,7 @@ impl Tc<'_> {
                 ret = ret.subst_var(v, &Type::Exist(e));
             }
         }
-        Type::fun(params, ret)
+        Ok(Type::fun(params, ret))
     }
 
     // Effect-type parameter count for `eff`. Not-found means zero, correct both

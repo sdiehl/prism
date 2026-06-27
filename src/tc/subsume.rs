@@ -70,7 +70,11 @@ impl Tc<'_> {
                 }
                 let e1 = self.apply_row(eff1);
                 let e2 = self.apply_row(eff2);
-                self.unify_row(&e1, &e2)?;
+                // Effect rows are covariant on the arrow: a value may perform at
+                // most the effects the expected type permits, so a pure function
+                // is usable wherever an effectful one is wanted. (The ambient
+                // model gave this implicitly; the delimited row makes it a rule.)
+                self.sub_row(&e1, &e2)?;
                 let r1 = self.apply(r1);
                 let r2 = self.apply(r2);
                 self.subtype(&r1, &r2)
@@ -238,7 +242,7 @@ impl Tc<'_> {
     // Scoped-label row unification (Leijen / Koka). To unify `l | rest1` with
     // another row, rewrite that row to expose `l` at its head, then unify the
     // tails. A bare existential tail absorbs any missing label by extending.
-    fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
+    pub(super) fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
         let a = self.apply_row(a);
         let b = self.apply_row(b);
         match (&a, &b) {
@@ -287,6 +291,23 @@ impl Tc<'_> {
                 a.show(),
                 b.show()
             ))),
+        }
+    }
+
+    // Covariant row subsumption `a <= b`: every effect the value may perform
+    // (`a`) must be permitted by the expected row (`b`). An empty `a` is a subrow
+    // of anything (a pure value fits any context); a flexible or rigid `a` tail
+    // links into `b` so a row variable still propagates; each concrete label of
+    // `a` must be present in `b`, recursing on the residual.
+    pub(super) fn sub_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
+        let a = self.apply_row(a);
+        match a {
+            EffRow::Empty => Ok(()),
+            EffRow::Exist(_) | EffRow::Var(_) => self.unify_row(&a, b),
+            EffRow::Extend(l, rest) => {
+                let resid = self.rewrite_row(b, &l)?;
+                self.sub_row(&rest, &resid)
+            }
         }
     }
 

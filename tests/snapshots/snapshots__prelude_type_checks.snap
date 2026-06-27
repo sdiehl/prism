@@ -206,23 +206,23 @@ rand_bool : () -> Bool ! {IO} ! {IO}
 rand_range : (Int, Int) -> Int ! {IO} ! {IO}
 repeat : forall a e0. (Int, () -> a ! {e0}) -> Unit ! {e0} ! {}
 repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} ! {}
-scollect : forall a b. ((Unit) -> a) -> List(b) ! {}
-sfold : forall a b c. ((Unit) -> b, a, (a, c) -> a) -> a ! {}
+scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0} ! {}
+sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0} ! {}
 signum : (Int) -> Int ! {}
-skeep : forall a b c e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> (c) -> a ! {Emit(b), e0} ! {Emit}
+skeep : forall a b c e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> (c) -> a ! {Emit(b), e0} ! {}
 skeep_go : forall a b e0. ((Unit) -> a ! {e0}, (b) -> Bool ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
-smap : forall a b c d e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> (d) -> a ! {Emit(b), e0} ! {Emit}
+smap : forall a b c d e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> (d) -> a ! {Emit(b), e0} ! {}
 smap_go : forall a b c e0. ((Unit) -> a ! {e0}, (c) -> b ! {e0}) -> a ! {Emit(b), e0} ! {Emit}
 snd : forall a b. ((a, b)) -> b ! {}
-sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)} ! {Emit}
+sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)} ! {}
 sof_go : forall a. (List(a)) -> Unit ! {Emit(a)} ! {Emit}
 sort : forall a. (List(a)) -> List(a) ! {}
 sort_by_ord : forall a. (List(a)) -> List(a) ! {}
-srange : forall a. (Int, Int) -> (a) -> Unit ! {Emit(Int)} ! {Emit}
+srange : forall a. (Int, Int) -> (a) -> Unit ! {Emit(Int)} ! {}
 srange_go : (Int, Int) -> Unit ! {Emit(Int)} ! {Emit}
-ssum : forall a. ((Unit) -> a) -> Int ! {}
-stake : forall a b c. ((Unit) -> b, Int) -> (c) -> Unit ! {Emit(a)} ! {Emit}
-stake_go : forall a b. ((Unit) -> b, Int) -> Unit ! {Emit(a)} ! {Emit}
+ssum : forall a e0. ((Unit) -> a ! {e0}) -> Int ! {e0} ! {}
+stake : forall a b c e0. ((Unit) -> b ! {Emit(a), e0}, Int) -> (c) -> Unit ! {Emit(a), e0} ! {}
+stake_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0} ! {Emit}
 str_hash : (String) -> U64 ! {}
 succeeds : forall a e0. (() -> a ! {e0}) -> Bool ! {e0} ! {}
 swap : forall a b. ((a, b)) -> (b, a) ! {}
