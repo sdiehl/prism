@@ -1148,14 +1148,9 @@ impl Tc<'_> {
     // are factored so a mutually recursive group (`infer_scc`) can interleave
     // them: seed every member first, infer every body against the shared
     // monomorphic variables, then generalize the whole group.
-    pub(super) fn infer_decl(
-        &mut self,
-        env: &Env,
-        d: &Decl<Core>,
-        latent: &EffRow,
-    ) -> Result<Type, TypeError> {
+    pub(super) fn infer_decl(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
         self.reset_ctx();
-        let seed = self.seed_decl(d, latent)?;
+        let seed = self.seed_decl(d)?;
         self.infer_body(env, d, &seed).map_err(|e| {
             // A self-recursive call typed monomorphically cannot be used at a
             // second type without a signature; name the remedy (only on the error
@@ -1182,7 +1177,7 @@ impl Tc<'_> {
     pub(super) fn infer_scc(
         &mut self,
         env: &mut Env,
-        members: &[(&Decl<Core>, EffRow)],
+        members: &[&Decl<Core>],
     ) -> Result<Vec<Type>, TypeError> {
         let env_outer = env.clone();
         self.reset_ctx();
@@ -1190,11 +1185,11 @@ impl Tc<'_> {
         // schemes so a sibling reference resolves to a real (monomorphic or
         // annotated) type, not a placeholder stub.
         let mut seeds = Vec::with_capacity(members.len());
-        for (d, latent) in members {
+        for d in members {
             let seed = if d.konst {
                 self.seed_konst(d).map_err(|e| e.in_fn(&d.name))?
             } else {
-                self.seed_decl(d, latent).map_err(|e| e.in_fn(&d.name))?
+                self.seed_decl(d).map_err(|e| e.in_fn(&d.name))?
             };
             // A constant or an unannotated function exposes its monomorphic
             // self-type (shared existentials let a sibling unify structure); a
@@ -1205,7 +1200,7 @@ impl Tc<'_> {
             seeds.push(seed);
         }
         // Stage 2: infer every body against the seeded group.
-        for ((d, _), seed) in members.iter().zip(&seeds) {
+        for (d, seed) in members.iter().zip(&seeds) {
             // A monomorphic mutual call that needs the sibling at a second type
             // cannot be typed without a signature; name the remedy.
             self.infer_body(env, d, seed)
@@ -1214,7 +1209,7 @@ impl Tc<'_> {
         // Stage 3: generalize every member once, against the pre-group env, so the
         // group's shared existentials all generalize.
         let mut out = Vec::with_capacity(members.len());
-        for ((d, _), seed) in members.iter().zip(&seeds) {
+        for (d, seed) in members.iter().zip(&seeds) {
             let g = self
                 .finish_decl(&env_outer, d, seed)
                 .map_err(|e| e.in_fn(&d.name))?;
@@ -1228,7 +1223,7 @@ impl Tc<'_> {
     // effect-row existentials and build the monomorphic self-type, without
     // touching any shared environment. Does not reset the context, so a caller
     // can seed several members into one shared context before inferring them.
-    fn seed_decl(&mut self, d: &Decl<Core>, latent: &EffRow) -> Result<DeclSeed, TypeError> {
+    fn seed_decl(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
         for p in &d.params {
             if let Some(ann) = &p.ty {
                 self.check_annot_rows(ann, d.span)?;
@@ -1270,47 +1265,36 @@ impl Tc<'_> {
             let t = self.convert_annot(&c.ty, &mut a);
             cur.push((c.class.clone(), t));
         }
-        // Instantiate the latent row's parametric labels. Arguments come from
-        // the declared annotation (sharing its variable scope) or are opened
-        // fresh. Scope the body so perform sites pick them up.
-        let mut labels = Vec::new();
-        let mut scope = Vec::new();
-        for l in latent.labels() {
-            let arity = self.eff_arity(l.name);
-            let ann = d
-                .eff
-                .as_ref()
-                .and_then(|ls| {
-                    ls.iter()
-                        .find(|al| l.name == al.name.as_str() && !al.args.is_empty())
-                })
-                .cloned();
-            let args: Vec<Type> = match ann {
-                Some(al) => al
+        // Effect inference is principal: the function's row starts empty and
+        // open, and the labels are discovered by inference alone (rule-1 direct
+        // performs, applied effect-carrying callees, builtin rows, and `mask`),
+        // never seeded from the syntactic set pass. The only thing the annotation
+        // contributes here is the *argument* instantiation of a parametric effect
+        // it names: scoping `(effect, declared args)` makes a perform of that
+        // effect unify against the declared types (so `!{Emit(String)}` rejects
+        // `emit(1)`), while the prefix stays empty so the label is still
+        // discovered by inference and a declared-but-unperformed effect still
+        // warns in `finalize_fn`.
+        let mut scope: Vec<(Sym, Vec<Type>)> = Vec::new();
+        if let Some(ls) = &d.eff {
+            for al in ls {
+                if al.args.is_empty() {
+                    continue;
+                }
+                let args: Vec<Type> = al
                     .args
                     .iter()
                     .map(|t| {
                         let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
                         self.convert_annot(t, &mut a)
                     })
-                    .collect(),
-                None => (0..arity).map(|_| Type::Exist(self.push_ex())).collect(),
-            };
-            if !args.is_empty() {
-                scope.push((l.name, args.clone()));
+                    .collect();
+                scope.push((Sym::from(&al.name), args));
             }
-            labels.push(Label { name: l.name, args });
         }
-        // The function's own effect row is open: the set-pass labels plus a
-        // fresh existential tail the body's applications extend, so effects
-        // performed through function values flow into this row.
+        let prefix: BTreeSet<Sym> = BTreeSet::new();
         let mu = self.push_ex_row();
-        let prefix: BTreeSet<Sym> = labels.iter().map(|l| l.name).collect();
-        let latent_row = labels
-            .into_iter()
-            .rev()
-            .fold(EffRow::Exist(mu), |acc, l| EffRow::Extend(l, Box::new(acc)));
-        let self_ty = Type::fun_eff(doms.clone(), latent_row, ret.clone());
+        let self_ty = Type::fun_eff(doms.clone(), EffRow::Exist(mu), ret.clone());
         Ok(DeclSeed {
             doms,
             ret,

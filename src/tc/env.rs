@@ -508,29 +508,27 @@ const BUILTINS: &[(&str, &str)] = &[
     ("u64_cmp", "(U64, U64) -> Int"),
 ];
 
-// A builtin signature carries its latent effects on the arrow. The row feeds
-// the attribution table below; the env keeps the bare arrow, matching how
-// surface fn annotations split the declared row from the type.
+// A builtin signature carries its latent effects on the arrow, and the env type
+// keeps that row: a builtin is a function whose effects inference must attribute
+// at every call site, exactly like a surface function's inferred row. The
+// returned label list mirrors the row for the set-pass cross-check.
 fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
     let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::Ice {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
     })?;
-    let mut ty = TypeSigParser::new()
+    let ty = TypeSigParser::new()
         .parse(tokens)
         .map_err(|e| TypeError::Ice {
             msg: format!("builtin `{name}` signature `{sig}`: {e:?}"),
         })?;
-    let effs = take_sig_row(&mut ty);
+    let effs = sig_row(&ty);
     Ok((convert_data(&ty), effs))
 }
 
-fn take_sig_row(t: &mut ast::Ty) -> Vec<String> {
+fn sig_row(t: &ast::Ty) -> Vec<String> {
     match t {
-        ast::Ty::Forall(_, b) => take_sig_row(b),
-        ast::Ty::Fun(_, row, _) => match std::mem::replace(row, ast::Row::Empty) {
-            ast::Row::Empty => vec![],
-            ast::Row::Cons(ls, _) => ls.into_iter().map(|l| l.name).collect(),
-        },
+        ast::Ty::Forall(_, b) => sig_row(b),
+        ast::Ty::Fun(_, ast::Row::Cons(ls, _), _) => ls.iter().map(|l| l.name.clone()).collect(),
         _ => vec![],
     }
 }

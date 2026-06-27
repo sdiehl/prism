@@ -333,23 +333,17 @@ fn konst_effect_free(
 fn finalize_fn(
     d: &Decl<Core>,
     ty: Type,
-    latent_set: &Effects,
     warnings: &mut Vec<Warning>,
 ) -> Result<DeclInfo, TypeError> {
-    // The labels of the inferred row, which (unlike the set pass) sees effects
-    // laundered through applied function values.
+    // The labels of the inferred row. Effect-row inference is now principal: it
+    // discovers every effect on its own (direct performs, applied effect-carrying
+    // callees, builtin rows, `mask`), so the row is the single source of truth.
+    // The old `set-pass ⊆ inferred` reconciliation is gone with the seed it
+    // guarded: the set pass over-approximates effect-polymorphic and
+    // higher-order-laundered effects as concrete labels, so it can only disagree
+    // by over-reporting now. Real under-coverage is caught downstream by
+    // `reconcile_effects` (lowered ops vs the row) and the parity oracle.
     let inferred = concrete_effects(&ty);
-    // Reconcile the two effect engines on every build, not just in debug: the
-    // call-graph set pass must never over-report relative to the row the unifier
-    // inferred. A mismatch is a compiler bug, not a user error.
-    if !latent_set.is_subset(&inferred) {
-        return Err(TypeError::Ice {
-            msg: format!(
-                "set-pass effects {latent_set:?} exceed inferred row {inferred:?} for `{}`",
-                d.name
-            ),
-        });
-    }
     if d.params.iter().any(|p| p.borrow) && !inferred.is_empty() {
         let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
         return Err(TypeError::Other {
@@ -493,20 +487,13 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                     });
                     continue;
                 }
-                // The set-pass result is a load-bearing *seed* for row inference,
-                // not a redundant parallel computation: it tells `infer_decl` which
-                // effect labels to place in this function's row prefix so direct
-                // `do op` and effect-op calls land in the row. Drop it and a function
-                // that performs `raise` infers as pure. So `effects.rs` cannot be
-                // collapsed into a pure row projection without first making effect-row
-                // inference fully principal (discovering labels on its own).
-                let latent_set = effects.get(&d.name).cloned().unwrap_or_default();
-                let latent = EffRow::from_set(&latent_set);
-                let ty = tc
-                    .infer_decl(&env, d, &latent)
-                    .map_err(|e| e.in_fn(&d.name))?;
+                // Effect-row inference is principal: `infer_decl` discovers the
+                // row on its own, so the set pass no longer seeds it. The set
+                // pass (`effects`) survives only for the syntactic purity checks
+                // (`konst_effect_free` above, instance methods below).
+                let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                 env.insert(Sym::from(&d.name), ty.clone());
-                infos.push(finalize_fn(d, ty, &latent_set, &mut warnings)?);
+                infos.push(finalize_fn(d, ty, &mut warnings)?);
                 continue;
             }
             // A mutually recursive group. Effect-freeness of any constant member is
@@ -518,18 +505,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                     konst_effect_free(d, &effects, &eff_ops)?;
                 }
             }
-            let members: Vec<(&_, EffRow)> = component
-                .iter()
-                .map(|&di| {
-                    let d = &prog.fns[di];
-                    let set = if d.konst {
-                        Effects::new()
-                    } else {
-                        effects.get(&d.name).cloned().unwrap_or_default()
-                    };
-                    (d, EffRow::from_set(&set))
-                })
-                .collect();
+            let members: Vec<&_> = component.iter().map(|&di| &prog.fns[di]).collect();
             let tys = tc.infer_scc(&mut env, &members)?;
             for (&di, ty) in component.iter().zip(tys) {
                 let d = &prog.fns[di];
@@ -541,8 +517,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                         effects: Effects::new(),
                     });
                 } else {
-                    let latent_set = effects.get(&d.name).cloned().unwrap_or_default();
-                    infos.push(finalize_fn(d, ty, &latent_set, &mut warnings)?);
+                    infos.push(finalize_fn(d, ty, &mut warnings)?);
                 }
             }
         }
