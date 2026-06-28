@@ -255,6 +255,8 @@ pub enum Token {
     Class,
     #[token("instance")]
     Instance,
+    #[token("canonical")]
+    Canonical,
     #[token("pattern")]
     Pattern,
     #[token("deriving")]
@@ -291,6 +293,14 @@ pub enum Token {
     In,
     #[token("for")]
     For,
+    #[token("while")]
+    While,
+    #[token("loop")]
+    Loop,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     #[token("do")]
     Do,
     #[token("if")]
@@ -305,12 +315,17 @@ pub enum Token {
     Match,
     #[token("of")]
     Of,
+    // Reserved only to spell the `each` traversal step in an update path.
+    #[token("each")]
+    Each,
     #[token("forall")]
     Forall,
     #[token("true")]
     True,
     #[token("false")]
     False,
+    #[token("using")]
+    Using,
     #[token("Int")]
     KwInt,
     #[token("Bool")]
@@ -378,6 +393,17 @@ pub enum Token {
     PlusDot,
     #[token("-.")]
     MinusDot,
+    // Compound assignment on a `var` (desugars to `x := x <op> e`). No `/=`
+    // form: `/=` is already not-equal. Longest-match keeps these distinct from
+    // the bare operators and the float-dot operators above.
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("%=")]
+    PercentEq,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -392,6 +418,11 @@ pub enum Token {
     Slash,
     #[token("%")]
     Percent,
+    #[token("^")]
+    Caret,
+    // The path-update modify operator, `{ r | f ~ g }`: apply `g` to the focus.
+    #[token("~")]
+    Tilde,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -484,6 +515,7 @@ impl Token {
             Self::Alias => kw::ALIAS,
             Self::Class => kw::CLASS,
             Self::Instance => kw::INSTANCE,
+            Self::Canonical => kw::CANONICAL,
             Self::Pattern => kw::PATTERN,
             Self::Deriving => kw::DERIVING,
             Self::Where => kw::WHERE,
@@ -502,6 +534,10 @@ impl Token {
             Self::Borrow => kw::BORROW,
             Self::In => kw::IN,
             Self::For => kw::FOR,
+            Self::While => kw::WHILE,
+            Self::Loop => kw::LOOP,
+            Self::Break => kw::BREAK,
+            Self::Continue => kw::CONTINUE,
             Self::Do => kw::DO,
             Self::If => kw::IF,
             Self::Then => kw::THEN,
@@ -509,9 +545,11 @@ impl Token {
             Self::Elif => kw::ELIF,
             Self::Match => kw::MATCH,
             Self::Of => kw::OF,
+            Self::Each => kw::EACH,
             Self::Forall => kw::FORALL,
             Self::True => kw::TRUE,
             Self::False => kw::FALSE,
+            Self::Using => kw::USING,
             Self::KwInt => kw::TY_INT,
             Self::KwBool => kw::TY_BOOL,
             Self::KwUnit => kw::TY_UNIT,
@@ -545,6 +583,10 @@ impl Token {
             Self::Lambda => kw::LAMBDA,
             Self::PlusDot => kw::PLUS_DOT,
             Self::MinusDot => kw::MINUS_DOT,
+            Self::PlusEq => kw::PLUS_EQ,
+            Self::MinusEq => kw::MINUS_EQ,
+            Self::StarEq => kw::STAR_EQ,
+            Self::PercentEq => kw::PERCENT_EQ,
             Self::Plus => kw::PLUS,
             Self::Minus => kw::MINUS,
             Self::StarDot => kw::STAR_DOT,
@@ -552,6 +594,7 @@ impl Token {
             Self::SlashDot => kw::SLASH_DOT,
             Self::Slash => kw::SLASH,
             Self::Percent => kw::PERCENT,
+            Self::Caret => kw::CARET,
             Self::LParen => kw::LPAREN,
             Self::RParen => kw::RPAREN,
             Self::LBrace => kw::LBRACE,
@@ -567,6 +610,7 @@ impl Token {
             Self::QuestionQuestion => kw::QUESTION_QUESTION,
             Self::QuestionDot => kw::QUESTION_DOT,
             Self::Question => kw::QUESTION,
+            Self::Tilde => kw::TILDE,
             _ => "",
         }
     }
@@ -653,6 +697,7 @@ mod tests {
             (Token::Alias, kw::ALIAS),
             (Token::Class, kw::CLASS),
             (Token::Instance, kw::INSTANCE),
+            (Token::Canonical, kw::CANONICAL),
             (Token::Pattern, kw::PATTERN),
             (Token::Deriving, kw::DERIVING),
             (Token::Where, kw::WHERE),
@@ -678,6 +723,7 @@ mod tests {
             (Token::Elif, kw::ELIF),
             (Token::Match, kw::MATCH),
             (Token::Of, kw::OF),
+            (Token::Each, kw::EACH),
             (Token::Forall, kw::FORALL),
             (Token::True, kw::TRUE),
             (Token::False, kw::FALSE),
@@ -736,6 +782,7 @@ mod tests {
             (Token::QuestionQuestion, kw::QUESTION_QUESTION),
             (Token::QuestionDot, kw::QUESTION_DOT),
             (Token::Question, kw::QUESTION),
+            (Token::Tilde, kw::TILDE),
         ]
     }
 

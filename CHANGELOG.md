@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0
+
+- New surface syntax, every form sugar over the existing core:
+
+| Sugar                           | Desugars to                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `x += e` (and `-=`, `*=`, `%=`) | `x := x <op> e`                                                                                |
+| `while cond do <block>`         | `repeat_while(\() -> cond, \() -> <block>)`                                                    |
+| `loop <block>` (may `break`)    | `repeat_while(\() -> true, \() -> <block>)`                                                    |
+| `loop <block>` (no `break`)     | `forever(\() -> <block>)` (bottom-typed: never returns)                                        |
+| `break` / `continue`            | `final ctl` perform of an internal `Break`/`Continue` effect, handled at the loop              |
+| `return e`                      | `final ctl` perform of an internal `Return(a)` effect, handled at the function body            |
+| `a ^ b`                         | `pow(a, b)`, the `Pow` class method (`Int` instance bignum-multiplies, `Float` is `pow_float`) |
+| `a[i]`                          | `index(a, i)`, a failable read dispatched on `a`'s head type (`Elem ! {Fail}`)                 |
+| `a[i] := v`                     | `a := index_set(a, i, v)`, the in-place (FBIP) setter, rebinding the `var`                     |
+| `a[i] += e` (and `-=`, `*=`)    | `a[i] := a[i] + e` (the read makes it `! {Fail}`)                                              |
+| `f(args, using d)`              | explicit instance selection (the old `f[d](args)`), `f`'s callee wrapped in the chosen dict    |
+
+- Indexing `a[i]` / `a[i] := v` / `a[i] += e` over `Array` (Int key), `HashMap` (String key), read-only `String` byte, and `List`, dispatched at elaboration on the receiver's head type (no new class). A missing index performs `Fail` (`a[i] : Elem ! {Fail}`), so it composes with `??`/`?.`/`default`; writes are FBIP-in-place when uniquely owned, and nested `grid[i][j] := v` composes.
+- Explicit instance selection moves from `f[name]` to `f(args, using name)`, freeing `[]` for indexing and converging override with first-class dictionary passing; `using` is reserved.
+- Instance coherence: each `(class, type-head)` has one canonical instance that implicit resolution always selects, so ambiguity-at-use is gone. A lone instance is canonical by default; when several share a head one is named with a top-level `canonical Class(Head) = name`, and two undesignated instances are a coherence error at definition (caret plus designation hint). `f(args, using name)` stays the visible override, and a `newtype` is the way to a different default. No Core, runtime, or backend change, so the parity oracle is byte-identical. `canonical` is reserved.
+- A right-associative power operator `^` (tighter than `*`), the method of a new `Pow` class: `2 ^ 10` is bignum-correct `Int`, `2.0 ^ 10.0` is `Float`, mixed `Int ^ Float` a type error. The prior integer `pow` is now `int_pow`.
+- Imperative loops (`while`/`loop`) lower to a tail-recursive prelude driver (constant stack, no per-iteration allocation), an unconditional `loop` to the bottom-typed `forever`. `break`/`continue`/`return` compile to non-resumable performs of internal, fully-handled effects, so none surfaces in a function's row, and a loop installs a handler only for the keyword it uses. The prelude's old `while` is now `repeat_while`.
+- Principal effect-row inference: a lambda delimits its effects onto its own arrow row, the arrow is covariant in that row (a pure function fits any effectful context via row subsumption), and the call-graph set pass is dropped as a row seed so the inferred row is the single source of truth. Builtins carry their effect row on the type, so inference attributes `IO`/`Exn`/`Fail` directly; rows display in canonical name-sorted order; and definitions are inferred in dependency-SCC order so a forward reference sees a generalized type.
+- `mask` over the sole handler of an effect now leaves the operation genuinely unhandled (the label stays in the row) instead of inferring it pure and hitting an effect-reconciliation ICE at lowering.
+- Two source warnings (the prelude is exempt): an unused local binding and a name shadowing one in scope (a leading `_` and a consuming rebind `let s = f(s)` are exempt). Annotations are name-checked uniformly across parameters, returns, constraints, and rows: an undeclared effect or constructor is a hard error, and an annotation broader than the inferred row warns.
+- Standard library split into on-demand modules under `lib/std` (`Data.Char`/`List`/`Map`/`Maybe`/`Result`/`Set`/`String`), shrinking the always-loaded prelude; `Set` gains `set_union`/`set_intersection`/`set_difference`, and a project may replace the built-in prelude via `[package] prelude` in `prism.toml`.
+- CLI: a bare `prism program.pr` compiles a single file to a native binary named after the source (`-o` overrides, `--mlir` selects the backend); `prism build` is the project verb (nearest `prism.toml`) and interpreting is explicit via `prism run`.
+- Local monadification confines the free-monad form to the component entangled with an escaping effect, keeping unrelated functions on their fused evidence/state path and falling back to whole-program lowering only when the split is unclean. The fallback now warns on stderr by default (silence with `PRISM_QUIET`), naming the functions that lost fusion.
+- Constant-stack effect handlers: a closed free-monad handler is driven by one self-tail-recursive `{n}@region` loop, so a tail-resumptive or function-answer state handler resumes via `musttail` in constant native stack (a `perf_gate` `State` loop goes from ~10^5 to millions of iterations in a 2 MB stack). On by default (opt out with `PRISM_NATIVE_EFFECTS=0`); it changes the driver, not the one-`EOp`-cell-per-operation reification.
+- Compiler-internal correctness, with no change to accepted programs or output: existential scope is enforced unconditionally at `solve`; numeric defaulting is deferred to one pass at generalization; and FBIP reuse becomes a scoped `WithReuse`/`Reuse` core node, making free-once and spend-at-one-allocation well-formedness properties of the term.
+- The Lean core model (`models/`) grows from a substitution small-step into a mechanized CEK machine proved to implement a big-step semantics, with unique normal forms, a progress trichotomy, and effect progress/unhandled lemmas, all `sorry`-free over `propext`/`Quot.sound`. It runs as a third differential oracle via a new `prism dump core-json` phase, checked against the interpreter across a fixture corpus.
+- Hardening: the bignum allocator is overflow-checked like every cell, each builtin's calling convention is derived from an exhaustive `Builtin` method (so a new builtin cannot ship without declaring its ABI), and the reference grammar is single-sourced in `models/grammar.ebnf`, sliced into the spec by mdbook anchors.
+
 ## 0.2.0
 
 - Fixed-width bitwise and shift builtins on the I64/U64 lanes: `i64_and`/`i64_or`/`i64_xor`/`i64_shl`/`i64_shr` and their `u64_*` counterparts. and/or/xor share one bit pattern across lanes; `i64_shr` is arithmetic, `u64_shr` logical; shift counts are taken modulo 64.

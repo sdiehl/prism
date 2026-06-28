@@ -2,6 +2,8 @@ instance ordRev : Ord(Int) {
   fn cmp(x, y) = int_cmp(y, x)
 }
 
+canonical Ord(Int) = ordInt
+
 fn print_all(xs) =
   match xs of
     Nil => ()
@@ -10,7 +12,7 @@ fn print_all(xs) =
       print_all(rest)
 
 fn main() =
-  println(cmp[ordInt](1, 2))
-  println(cmp[ordRev](1, 2))
-  print_all(sort_by_ord[ordInt]([3, 1, 2]))
-  print_all(sort_by_ord[ordRev]([3, 1, 2]))
+  println(cmp(1, 2, using ordInt))
+  println(cmp(1, 2, using ordRev))
+  print_all(sort_by_ord([3, 1, 2], using ordInt))
+  print_all(sort_by_ord([3, 1, 2], using ordRev))

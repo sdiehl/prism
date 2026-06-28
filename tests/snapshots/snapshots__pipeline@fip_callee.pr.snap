@@ -78,7 +78,7 @@ Program {
 }
 
 == types ==
-use_it : forall a b. (a) -> b
+use_it : forall a. (a) -> a
 helper : forall a. (a) -> a
 
 == core (cbpv) ==

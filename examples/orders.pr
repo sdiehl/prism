@@ -34,7 +34,7 @@ fn main() =
   -- A line that fits commits and reports the new balance.
   let r1 =
     transact
-      balance := balance - charge(prices.at_map("pad") ?? 0, qty := 2)
+      balance -= charge(prices.at_map("pad") ?? 0, qty := 2)
       guard(balance >= 0)
       balance
     else
@@ -44,7 +44,7 @@ fn main() =
   -- A line that overdraws fails its guard, so the balance rolls back.
   let r2 =
     transact
-      balance := balance - charge(prices.at_map("ink") ?? 0, qty := 5)
+      balance -= charge(prices.at_map("ink") ?? 0, qty := 5)
       guard(balance >= 0)
       balance
     else

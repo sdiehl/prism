@@ -24,6 +24,7 @@ use crate::error::Error;
 use crate::eval::{globals, Machine};
 use crate::lex::{lex_raw, Token};
 use crate::parse::{incomplete, parse, parse_expr, ParseResult};
+use crate::resolve::{default_roots, resolve_modules_in};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Expr, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
@@ -193,6 +194,11 @@ impl Session {
     fn build(&self) -> Result<(String, Built), Error> {
         let src = self.compose()?;
         let ParseResult { program, .. } = parse(&src)?;
+        // The prelude opens the `Data.*` stdlib modules with glob imports, so the
+        // session must resolve modules against the stdlib roots before desugaring,
+        // exactly as the batch driver's `frontend` does. Without this, names that
+        // live in stdlib modules (e.g. `nth` behind `at_list`) are unbound.
+        let program = resolve_modules_in(program, &default_roots(std::path::Path::new(".")))?;
         let program = desugar(program)?;
         let checked = check(&program)?;
         let core = elaborate(&program, &checked)?;
@@ -950,7 +956,7 @@ fn set(session: &mut Session, arg: &str) {
         return;
     }
     for tok in arg.split_whitespace() {
-        let (on, flag) = match tok.split_at(tok.len().min(1)) {
+        let (on, flag) = match tok.split_at(1) {
             ("+", f) => (true, f),
             ("-", f) => (false, f),
             _ => {
@@ -1092,5 +1098,26 @@ fn report(e: &Error, src: &str, name: &str) {
         eprint!("{rendered}");
     } else {
         eprintln!("{rendered}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A fresh REPL session must build the bare prelude on launch. The prelude
+    // opens the `Data.*` stdlib modules with glob imports, so `build` has to
+    // resolve modules against the stdlib roots; regressing that (e.g. dropping
+    // the resolve step) leaves stdlib names like `nth` unbound and the REPL
+    // dies before the first prompt.
+    #[test]
+    fn prelude_loads_on_launch() {
+        let (_, built) = Session::probe(Vec::new(), Vec::new())
+            .build()
+            .expect("bare prelude must build on REPL launch");
+        // A successful build already proves imports resolved: `at_list` (a prelude
+        // function) calls `nth` from the `Data.List` stdlib module, so an
+        // unresolved import would have failed above with an unbound-variable error.
+        assert!(built.arity.contains_key("at_list"));
     }
 }

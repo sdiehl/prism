@@ -34,7 +34,7 @@ fn run_fib(n) =
     handle fib(n) with
       recall(key, k) => \(m) -> k(map_lookup(key, m))(m)
       store(key, value, k) => \(m) -> k(())(map_insert(key, value, m))
-      return r => \(m) -> r
+      return r => \(_m) -> r
   f(map_empty)
 
 fn main() : !{IO} Unit = println(run_fib(30))

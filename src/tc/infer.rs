@@ -3,11 +3,81 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::env::{collect_type_vars, Annot};
-use super::{ClassInfo, Entry, Env, InstInfo, RowScope, SelfRef, Tc, Wanted};
+use super::{
+    ClassInfo, Entry, Env, HandlerFrame, IndexOp, InstInfo, RowScope, SelfRef, Tc, Wanted,
+};
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, S};
+use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, PathStep, S};
 use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
+
+// The existentials and scaffolding a declaration's body is inferred against: its
+// parameter domains, return type, class constraints, parametric-effect scope,
+// open row tail (`mu`) with its fixed-label prefix, and the assembled
+// monomorphic self-type. Produced by `seed_decl`, consumed by `infer_body` and
+// `finish_decl`, so a recursion group can seed every member before inferring any.
+struct DeclSeed {
+    doms: Vec<Type>,
+    ret: Type,
+    cur: Vec<(String, Type)>,
+    scope: Vec<(Sym, Vec<Type>)>,
+    mu: u32,
+    prefix: std::collections::BTreeSet<Sym>,
+    self_ty: Type,
+}
+
+// Append the "add a type signature" remedy to a recursive-call type mismatch in
+// an unannotated function: a monomorphic recursive call that needs the callee at
+// a second type is polymorphic recursion, which only a signature can type. An
+// annotated function already checks against its signature (and so supports
+// polymorphic recursion), so its errors pass through unchanged.
+fn poly_recursion_hint(e: TypeError, d: &Decl<Core>) -> TypeError {
+    if super::env::annotation_scheme(d).is_some() {
+        return e;
+    }
+    match e {
+        TypeError::Mismatch {
+            span,
+            expected,
+            found,
+        } => TypeError::Other {
+            span,
+            msg: format!(
+                "type mismatch in recursive `{name}`: expected {expected}, got {found}. \
+                 If `{name}` is called at more than one type within its recursion group that is \
+                 polymorphic recursion; add a type signature to `{name}`.",
+                name = d.name
+            ),
+        },
+        other => other,
+    }
+}
+
+// Whether the `Field`-only path `short` is a prefix of `long`. tc only ever
+// sees `Field` steps (optic steps are desugared away), so this decides overlap.
+fn field_prefix<P: crate::syntax::ast::Phase>(short: &[PathStep<P>], long: &[PathStep<P>]) -> bool {
+    short.len() <= long.len()
+        && short.iter().zip(long).all(|(a, b)| match (a, b) {
+            (PathStep::Field(x), PathStep::Field(y)) => x == y,
+            _ => false,
+        })
+}
+
+// Render an update path for diagnostics; optic steps are gone by tc, but the
+// match is kept total.
+fn show_path<P: crate::syntax::ast::Phase>(steps: &[PathStep<P>]) -> String {
+    steps
+        .iter()
+        .map(|s| match s {
+            PathStep::Field(f) => f.clone(),
+            PathStep::Each => crate::kw::EACH.into(),
+            PathStep::Case(c) => format!("{}{c}", crate::kw::QUESTION),
+            PathStep::Index(_) => "[..]".into(),
+            PathStep::Where(_) => crate::kw::WHERE.into(),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
 
 impl Tc<'_> {
     fn lit_range(lit: &ast::IntLit, ty: &Type, span: Span) -> Result<(), TypeError> {
@@ -39,12 +109,37 @@ impl Tc<'_> {
                 self.drop_row_uni(*n);
                 Ok(())
             }
-            (Expr::Lam(ps, body), Type::Fun(doms, _eff, ret)) if ps.len() == doms.len() => {
+            (Expr::Lam(ps, body), Type::Fun(doms, eff, ret)) if ps.len() == doms.len() => {
                 let mut env2 = env.clone();
                 for (p, d) in ps.iter().zip(doms.iter()) {
                     env2.insert(Sym::from(&p.name), d.clone());
                 }
-                self.check(&env2, body, ret)
+                // Scope the body's effects into the expected arrow row: its fixed
+                // labels become the prefix (so a body that performs them adds
+                // nothing) and its tail absorbs anything extra. A flexible tail
+                // means a pure body checks fine against an effectful type (the
+                // closure introduction form admits row subsumption); a closed or
+                // rigid tail is pinned afterward so the body may not exceed it.
+                let eff = self.apply_row(eff);
+                let mut prefix = BTreeSet::new();
+                let mut cursor = &eff;
+                while let EffRow::Extend(l, more) = cursor {
+                    prefix.insert(l.name);
+                    cursor = more;
+                }
+                let (tail, closed) = match cursor {
+                    EffRow::Exist(r) => (*r, None),
+                    other => (self.push_ex_row(), Some(other.clone())),
+                };
+                let saved = self.cur_row.replace(RowScope { tail, prefix });
+                let checked = self.check(&env2, body, ret);
+                self.cur_row = saved;
+                checked?;
+                if let Some(closed) = closed {
+                    self.unify_row(&EffRow::Exist(tail), &closed)
+                        .map_err(|e| e.at(span))?;
+                }
+                Ok(())
             }
             (Expr::If(c, t, e2), _) => {
                 self.check(env, c, &Type::Bool)?;
@@ -238,7 +333,7 @@ impl Tc<'_> {
                 let Expr::Var(x) = &f.node else {
                     return Err(TypeError::Other {
                         span,
-                        msg: "explicit instance application `f[..]` requires a named function"
+                        msg: "explicit instance selection `f(using ..)` requires a named function"
                             .into(),
                     });
                 };
@@ -269,6 +364,8 @@ impl Tc<'_> {
                     }),
                 }
             }
+            Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
+            Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
             Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, span),
             Expr::If(c, t, e2) => {
                 self.check(env, c, &Type::Bool)?;
@@ -293,8 +390,18 @@ impl Tc<'_> {
                     doms.push(Type::Exist(ex));
                 }
                 let ret = self.push_ex();
-                self.check(&env2, body, &Type::Exist(ret))?;
-                Ok(self.apply(&Type::fun(doms, Type::Exist(ret))))
+                // A lambda delimits its own effect row: its body's effects are
+                // captured on the arrow type, not bled into the enclosing
+                // function, and re-emerge only when the closure is applied.
+                let row = self.push_ex_row();
+                let saved = self.cur_row.replace(RowScope {
+                    tail: row,
+                    prefix: BTreeSet::new(),
+                });
+                let checked = self.check(&env2, body, &Type::Exist(ret));
+                self.cur_row = saved;
+                checked?;
+                Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
             }
             Expr::Call(f, args) => {
                 if let Expr::Var(x) = &f.node {
@@ -302,9 +409,21 @@ impl Tc<'_> {
                         if !info.eff_params.is_empty() {
                             let info = info.clone();
                             self.synth(env, f)?;
-                            let fty = self.perform_ty(&info);
+                            let fty = self.perform_ty(&info, span)?;
                             return self.app_synth(env, &fty, args, span);
                         }
+                        // A non-parametric op carries no effect args, so its row
+                        // obligation (rule 1) is a bare label; emit it, then type
+                        // the call through the ordinary env-scheme path below.
+                        let eff = info.effect_name;
+                        self.absorb_row(&EffRow::Extend(
+                            Label {
+                                name: eff,
+                                args: Vec::new(),
+                            },
+                            Box::new(EffRow::Empty),
+                        ))
+                        .map_err(|e| e.at(span))?;
                     }
                 }
                 let tf = self.synth(env, f)?;
@@ -467,30 +586,7 @@ impl Tc<'_> {
                 }
                 Ok(self.apply(&Type::Exist(ret_ex)))
             }
-            Expr::Mask(eff, body) => {
-                let eff_sym = Sym::from(eff);
-                if !self.eff_ops.values().any(|i| i.effect_name == eff_sym) {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("unknown effect `{eff}` in mask"),
-                    });
-                }
-                let t = self.synth(env, body)?;
-                // The masked ops bypass the innermost handler, so the expression
-                // still demands an enclosing handler. Inject one label into the
-                // ambient row, mirroring the set pass (effects.rs `Expr::Mask`),
-                // so the unifier does not under-report a masked effect.
-                let args = (0..self.eff_arity(eff_sym))
-                    .map(|_| Type::Exist(self.push_ex()))
-                    .collect();
-                let label = Label {
-                    name: eff_sym,
-                    args,
-                };
-                self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
-                    .map_err(|e| e.at(span))?;
-                Ok(t)
-            }
+            Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
                 let mut ty_ex = BTreeMap::new();
@@ -518,30 +614,39 @@ impl Tc<'_> {
         &mut self,
         env: &Env,
         base: &S<Expr<Core>>,
-        ups: &[(Vec<String>, S<Expr<Core>>)],
+        ups: &[(Vec<PathStep<Core>>, PathOp<Core>)],
         span: Span,
     ) -> Result<Type, TypeError> {
         let tb = self.synth(env, base)?;
         let tb = self.apply(&tb);
         for (i, (p, _)) in ups.iter().enumerate() {
             for (q, _) in &ups[i + 1..] {
-                if p.starts_with(q) || q.starts_with(p) {
+                // Post-desugar paths are `Field`-only, so a plain field-name
+                // prefix decides overlap.
+                if field_prefix(p, q) || field_prefix(q, p) {
                     return Err(TypeError::Other {
                         span,
                         msg: format!(
                             "conflicting update paths `{}` and `{}`",
-                            p.join("."),
-                            q.join(".")
+                            show_path(p),
+                            show_path(q)
                         ),
                     });
                 }
             }
         }
         let mut chains = Vec::new();
-        for (path, val) in ups {
+        for (path, op) in ups {
             let mut cur = tb.clone();
             let mut chain = Vec::new();
             for seg in path {
+                // Optic steps are lowered in desugar, so only `Field` reaches here.
+                let PathStep::Field(seg) = seg else {
+                    return Err(TypeError::Other {
+                        span,
+                        msg: "internal: optic path step survived desugaring".into(),
+                    });
+                };
                 let Type::Con(tname, _) = cur.clone() else {
                     return Err(TypeError::Other {
                         span,
@@ -570,7 +675,16 @@ impl Tc<'_> {
                 chain.push((cname, fi, arity));
                 cur = ft;
             }
-            self.check(env, val, &cur)?;
+            // `= v` sets, so `v` must have the focus type; `~ f` modifies, so `f`
+            // must be a pure endo-function on the focus. The modify function is
+            // required pure: its call is synthesized in elaboration, where a
+            // residual effect row would escape the syntactic effect analysis.
+            match op {
+                PathOp::Set(val) => self.check(env, val, &cur)?,
+                PathOp::Modify(f) => {
+                    self.check(env, f, &Type::fun(vec![cur.clone()], cur.clone()))?;
+                }
+            }
             chains.push(chain);
         }
         self.path_res.insert(span, chains);
@@ -582,7 +696,92 @@ impl Tc<'_> {
     // the ordered and arithmetic operators invoke it for any operand that is not
     // already a fixed-width integer. This is the only site the `Int` literal and
     // its `subtype` decision live, so Eq and Ord share one rule.
-    fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
+    // `recv[key]`: a failable read dispatched on `recv`'s head. Dispatch eagerly
+    // when the receiver type is already a concrete container; defer it (to
+    // `resolve_all`) when the receiver is still an unsolved existential, since a
+    // `var`'s state type is only fixed once its initializer is checked.
+    fn synth_index(
+        &mut self,
+        env: &Env,
+        recv: &S<Expr<Core>>,
+        key: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let recv_ty = self.synth(env, recv)?;
+        let recv_ty = self.apply(&recv_ty);
+        let fail = Label {
+            name: Sym::from(crate::names::FAIL_EFFECT),
+            args: vec![],
+        };
+        self.absorb_row(&EffRow::Extend(fail, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
+        if let Some((kty, elem, _)) = index_container(&recv_ty) {
+            self.check(env, key, &kty)?;
+            Ok(self.apply(&elem))
+        } else if matches!(recv_ty, Type::Exist(_)) {
+            let key_ty = self.synth(env, key)?;
+            let result = self.push_ex();
+            self.index_ops.push(IndexOp {
+                span,
+                recv_span: recv.span,
+                recv: recv_ty,
+                key: key_ty,
+                result,
+                val: None,
+            });
+            Ok(Type::Exist(result))
+        } else {
+            Err(TypeError::Other {
+                span: recv.span,
+                msg: format!("type `{}` is not indexable with `[]`", recv_ty.show()),
+            })
+        }
+    }
+
+    // `recv[key] := val`: a total in-place write returning the container. Same
+    // eager/deferred split as `synth_index`; only `Array`/`HashMap` are writable.
+    fn synth_index_set(
+        &mut self,
+        env: &Env,
+        recv: &S<Expr<Core>>,
+        key: &S<Expr<Core>>,
+        val: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let recv_ty = self.synth(env, recv)?;
+        let recv_ty = self.apply(&recv_ty);
+        match index_container(&recv_ty) {
+            Some((kty, elem, true)) => {
+                self.check(env, key, &kty)?;
+                let elem = self.apply(&elem);
+                self.check(env, val, &elem)?;
+                Ok(recv_ty)
+            }
+            None if matches!(recv_ty, Type::Exist(_)) => {
+                let key_ty = self.synth(env, key)?;
+                let val_ty = self.synth(env, val)?;
+                let result = self.push_ex();
+                self.index_ops.push(IndexOp {
+                    span,
+                    recv_span: recv.span,
+                    recv: recv_ty.clone(),
+                    key: key_ty,
+                    result,
+                    val: Some(val_ty),
+                });
+                Ok(recv_ty)
+            }
+            _ => Err(TypeError::Other {
+                span: recv.span,
+                msg: format!(
+                    "type `{}` does not support indexed assignment `a[i] := v`",
+                    recv_ty.show()
+                ),
+            }),
+        }
+    }
+
+    pub(super) fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
         self.subtype(ty, &Type::Int).map_err(|e| {
             e.or(TypeError::Mismatch {
                 span,
@@ -628,9 +827,9 @@ impl Tc<'_> {
                     Type::I64 | Type::U64 | Type::Float | Type::Bool | Type::Str => {
                         self.fixed.insert(span, ta);
                     }
-                    Type::Exist(_) => {
-                        self.default_numeric(&ta, a.span)?;
-                    }
+                    // Defer like the arithmetic arm: a later use may still pin
+                    // this to a fixed-width lane before the `Int` default applies.
+                    Type::Exist(_) => self.num_default.push((span, ta)),
                     _ => self.wanted.push(Wanted {
                         span,
                         items: vec![(EQ_CLASS.into(), ta, None)],
@@ -641,14 +840,43 @@ impl Tc<'_> {
             _ => {
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                let t = match ta {
-                    Type::I64 | Type::U64 => ta,
-                    other => self.default_numeric(&other, a.span)?,
+                // A concrete or rigid left operand drives the operator, exactly as
+                // before: a fixed-width lane fixes both sides, and a non-numeric
+                // one is rejected at its own span (good blame). The new case is an
+                // unsolved existential left operand: rather than defaulting it to
+                // `Int` here, check the right operand against it (so the right can
+                // pin the lane) and, if both stay ambiguous, defer to one pass at
+                // `resolve_all` where a later use can still fix the width. This is
+                // what lets `y + x` with `x : I64` type when `y` was left open.
+                let t = match &ta {
+                    Type::I64 | Type::U64 => {
+                        self.check(env, b, &ta)?;
+                        self.fixed.insert(span, ta.clone());
+                        ta
+                    }
+                    Type::Int => {
+                        self.check(env, b, &ta)?;
+                        ta
+                    }
+                    Type::Exist(_) => {
+                        self.check(env, b, &ta)?;
+                        let t = self.apply(&ta);
+                        match &t {
+                            Type::I64 | Type::U64 => {
+                                self.fixed.insert(span, t.clone());
+                            }
+                            Type::Int => {}
+                            Type::Exist(_) => self.num_default.push((span, t.clone())),
+                            other => {
+                                self.default_numeric(other, b.span)?;
+                            }
+                        }
+                        t
+                    }
+                    // Float belongs to the dotted operators; anything else is not
+                    // numeric. `default_numeric` rejects both, blaming the left.
+                    other => self.default_numeric(other, a.span)?,
                 };
-                self.check(env, b, &t)?;
-                if t != Type::Int {
-                    self.fixed.insert(span, t.clone());
-                }
                 Ok(if is_cmp(op) { Type::Bool } else { t })
             }
         }
@@ -676,8 +904,7 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(*a, &arg_exs, row, ret)
-                    .map_err(|e| e.at(span))?;
+                self.articulate(*a, &arg_exs, row, ret);
                 for (ex, arg) in arg_exs.iter().zip(args) {
                     self.check(env, arg, &Type::Exist(*ex))?;
                 }
@@ -698,9 +925,18 @@ impl Tc<'_> {
                         ),
                     });
                 }
-                for (d, arg) in doms.iter().zip(args) {
-                    let d = self.apply(d);
-                    self.check(env, arg, &d)?;
+                // Check non-lambda arguments before lambda ones: a concrete
+                // argument can solve type variables a sibling lambda's body
+                // depends on. `map(\e -> e.f, xs)` solves the element type from
+                // `xs` first, so the annotation-free lambda checks against it.
+                for lam_pass in [false, true] {
+                    for (d, arg) in doms.iter().zip(args) {
+                        if matches!(arg.node, Expr::Lam(..)) != lam_pass {
+                            continue;
+                        }
+                        let d = self.apply(d);
+                        self.check(env, arg, &d)?;
+                    }
                 }
                 if args.len() == doms.len() {
                     self.link_row(eff, span)?;
@@ -755,8 +991,12 @@ impl Tc<'_> {
 
     // The type of a perform site for a parametric op: the op signature with
     // effect parameters replaced by the instantiation in force, and any
-    // leftover return-only variables opened fresh per site.
-    fn perform_ty(&mut self, info: &super::EffOpInfo) -> Type {
+    // leftover return-only variables opened fresh per site. The op's own effect
+    // label is absorbed into the ambient row here, so a direct `do op` demands
+    // its effect by inference (rule 1); the label's args are the same
+    // existentials that instantiate the op type, so the value- and row-level
+    // views of the effect stay tied. Additive over the set-pass seed.
+    fn perform_ty(&mut self, info: &super::EffOpInfo, span: Span) -> Result<Type, TypeError> {
         let eff_sym = info.effect_name;
         let found = self
             .row_ctx
@@ -770,6 +1010,12 @@ impl Tc<'_> {
                 .map(|_| Type::Exist(self.push_ex()))
                 .collect()
         });
+        let label = Label {
+            name: eff_sym,
+            args: args.clone(),
+        };
+        self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
         let mut params = info.params.clone();
         let mut ret = info.ret.clone();
         for (p, t) in info.eff_params.iter().zip(&args) {
@@ -791,7 +1037,7 @@ impl Tc<'_> {
                 ret = ret.subst_var(v, &Type::Exist(e));
             }
         }
-        Type::fun(params, ret)
+        Ok(Type::fun(params, ret))
     }
 
     // Effect-type parameter count for `eff`. Not-found means zero, correct both
@@ -803,6 +1049,49 @@ impl Tc<'_> {
             .values()
             .find(|i| i.effect_name == eff)
             .map_or(0, |i| i.eff_params.len())
+    }
+
+    // `mask<E>(body)`: the masked ops bypass the innermost `E` handler, so the
+    // expression still demands an enclosing one. Inject one `E` label into the
+    // ambient row (mirroring the set pass, effects.rs `Expr::Mask`) so the
+    // unifier does not under-report it, and mark the nearest enclosing `E`
+    // handler so it leaves the label in its residual row instead of discharging
+    // it.
+    fn synth_mask(
+        &mut self,
+        env: &Env,
+        eff: &str,
+        body: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let eff_sym = Sym::from(eff);
+        if !self.eff_ops.values().any(|i| i.effect_name == eff_sym)
+            && !super::env::is_builtin_effect(eff)
+        {
+            return Err(TypeError::Other {
+                span,
+                msg: format!("unknown effect `{eff}` in mask"),
+            });
+        }
+        let t = self.synth(env, body)?;
+        let args = (0..self.eff_arity(eff_sym))
+            .map(|_| Type::Exist(self.push_ex()))
+            .collect();
+        let label = Label {
+            name: eff_sym,
+            args,
+        };
+        self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
+            .map_err(|e| e.at(span))?;
+        if let Some(frame) = self
+            .handler_stack
+            .iter_mut()
+            .rev()
+            .find(|f| f.handled.contains(&eff_sym))
+        {
+            frame.masked.insert(eff_sym);
+        }
+        Ok(t)
     }
 
     // Synthesize a handler body under a fresh effect obligation, then discharge
@@ -828,9 +1117,8 @@ impl Tc<'_> {
             tail: body_row,
             prefix,
         });
-        let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
-        self.cur_row = saved_row;
-        let body_ty = self.apply(&body_ty?);
+        // This handler joins the active stack while its body is checked, so a
+        // `mask` inside the body can find it and tunnel an effect past it.
         let handled: BTreeSet<Sym> = arms
             .iter()
             .filter_map(|a| match a {
@@ -838,19 +1126,104 @@ impl Tc<'_> {
                 _ => None,
             })
             .collect();
-        self.discharge_row(body_row, &handled)
+        self.handler_stack.push(HandlerFrame {
+            handled,
+            masked: BTreeSet::new(),
+        });
+        let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
+        let frame = self.handler_stack.pop().expect("handler frame");
+        self.cur_row = saved_row;
+        let body_ty = self.apply(&body_ty?);
+        // A masked effect tunnels past this handler: keep it in the residual row
+        // rather than discharging it, so the surrounding function still demands
+        // an enclosing handler for it.
+        let discharged: BTreeSet<Sym> = frame.handled.difference(&frame.masked).copied().collect();
+        self.discharge_row(body_row, &discharged)
             .map_err(|e| e.at(span))?;
         Ok(body_ty)
     }
 
-    pub(super) fn infer_decl(
-        &mut self,
-        env: &Env,
-        d: &Decl<Core>,
-        latent: &EffRow,
-    ) -> Result<Type, TypeError> {
+    // A single acyclic (or self-recursive) function: seed its monomorphic
+    // self-type, infer its body against it, then generalize. The three stages
+    // are factored so a mutually recursive group (`infer_scc`) can interleave
+    // them: seed every member first, infer every body against the shared
+    // monomorphic variables, then generalize the whole group.
+    pub(super) fn infer_decl(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
         self.reset_ctx();
-        self.wanted.clear();
+        let seed = self.seed_decl(d)?;
+        self.infer_body(env, d, &seed).map_err(|e| {
+            // A self-recursive call typed monomorphically cannot be used at a
+            // second type without a signature; name the remedy (only on the error
+            // path, and only for an actually self-recursive function).
+            if crate::types::effects::is_self_recursive(d) {
+                poly_recursion_hint(e, d)
+            } else {
+                e
+            }
+        })?;
+        self.finish_decl(env, d, &seed)
+    }
+
+    // SCC-granular inference for a mutually recursive group (two or more members
+    // that reference each other). Seed every member's environment entry before
+    // inferring any body: an unannotated member is seeded with its monomorphic
+    // self-type (existentials shared between its entry and its own body), so a
+    // mutual call unifies structure between siblings rather than instantiating a
+    // structure-free stub. An annotated member is seeded with its generalized
+    // annotation scheme, so calls to it check against the annotation (decidable
+    // polymorphic recursion). Every member is then generalized against the
+    // environment that held before the group, exactly as textbook Hindley-Milner
+    // generalizes a recursion group once, after the whole group is inferred.
+    pub(super) fn infer_scc(
+        &mut self,
+        env: &mut Env,
+        members: &[&Decl<Core>],
+    ) -> Result<Vec<Type>, TypeError> {
+        let env_outer = env.clone();
+        self.reset_ctx();
+        // Stage 1: seed every member. `env` accumulates the group's env-visible
+        // schemes so a sibling reference resolves to a real (monomorphic or
+        // annotated) type, not a placeholder stub.
+        let mut seeds = Vec::with_capacity(members.len());
+        for d in members {
+            let seed = if d.konst {
+                self.seed_konst(d).map_err(|e| e.in_fn(&d.name))?
+            } else {
+                self.seed_decl(d).map_err(|e| e.in_fn(&d.name))?
+            };
+            // A constant or an unannotated function exposes its monomorphic
+            // self-type (shared existentials let a sibling unify structure); a
+            // fully annotated function exposes its generalized annotation scheme
+            // (a sibling call checks against it, supporting polymorphic recursion).
+            let visible = super::env::annotation_scheme(d).unwrap_or_else(|| seed.self_ty.clone());
+            env.insert(Sym::from(&d.name), visible);
+            seeds.push(seed);
+        }
+        // Stage 2: infer every body against the seeded group.
+        for (d, seed) in members.iter().zip(&seeds) {
+            // A monomorphic mutual call that needs the sibling at a second type
+            // cannot be typed without a signature; name the remedy.
+            self.infer_body(env, d, seed)
+                .map_err(|e| poly_recursion_hint(e, d).in_fn(&d.name))?;
+        }
+        // Stage 3: generalize every member once, against the pre-group env, so the
+        // group's shared existentials all generalize.
+        let mut out = Vec::with_capacity(members.len());
+        for (d, seed) in members.iter().zip(&seeds) {
+            let g = self
+                .finish_decl(&env_outer, d, seed)
+                .map_err(|e| e.in_fn(&d.name))?;
+            env.insert(Sym::from(&d.name), g.clone());
+            out.push(g);
+        }
+        Ok(out)
+    }
+
+    // Stage 1 of declaration inference: allocate the parameter, return, and
+    // effect-row existentials and build the monomorphic self-type, without
+    // touching any shared environment. Does not reset the context, so a caller
+    // can seed several members into one shared context before inferring them.
+    fn seed_decl(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
         for p in &d.params {
             if let Some(ann) = &p.ty {
                 self.check_annot_rows(ann, d.span)?;
@@ -865,7 +1238,6 @@ impl Tc<'_> {
         for c in &d.constraints {
             self.check_annot_rows(&c.ty, c.span)?;
         }
-        let mut env2 = env.clone();
         let mut ty_ex = BTreeMap::new();
         let mut row_ex = BTreeMap::new();
         let no_rigid = BTreeSet::new();
@@ -878,7 +1250,6 @@ impl Tc<'_> {
                 }
                 None => Type::Exist(self.push_ex()),
             };
-            env2.insert(Sym::from(&p.name), t.clone());
             doms.push(t);
         }
         let ret = match &d.ret {
@@ -894,65 +1265,146 @@ impl Tc<'_> {
             let t = self.convert_annot(&c.ty, &mut a);
             cur.push((c.class.clone(), t));
         }
-        // Instantiate the latent row's parametric labels. Arguments come from
-        // the declared annotation (sharing its variable scope) or are opened
-        // fresh. Scope the body so perform sites pick them up.
-        let mut labels = Vec::new();
-        let mut scope = Vec::new();
-        for l in latent.labels() {
-            let arity = self.eff_arity(l.name);
-            let ann = d
-                .eff
-                .as_ref()
-                .and_then(|ls| {
-                    ls.iter()
-                        .find(|al| l.name == al.name.as_str() && !al.args.is_empty())
-                })
-                .cloned();
-            let args: Vec<Type> = match ann {
-                Some(al) => al
+        // Effect inference is principal: the function's row starts empty and
+        // open, and the labels are discovered by inference alone (rule-1 direct
+        // performs, applied effect-carrying callees, builtin rows, and `mask`),
+        // never seeded from the syntactic set pass. The only thing the annotation
+        // contributes here is the *argument* instantiation of a parametric effect
+        // it names: scoping `(effect, declared args)` makes a perform of that
+        // effect unify against the declared types (so `!{Emit(String)}` rejects
+        // `emit(1)`), while the prefix stays empty so the label is still
+        // discovered by inference and a declared-but-unperformed effect still
+        // warns in `finalize_fn`.
+        let mut scope: Vec<(Sym, Vec<Type>)> = Vec::new();
+        if let Some(ls) = &d.eff {
+            for al in ls {
+                if al.args.is_empty() {
+                    continue;
+                }
+                let args: Vec<Type> = al
                     .args
                     .iter()
                     .map(|t| {
                         let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
                         self.convert_annot(t, &mut a)
                     })
-                    .collect(),
-                None => (0..arity).map(|_| Type::Exist(self.push_ex())).collect(),
-            };
-            if !args.is_empty() {
-                scope.push((l.name, args.clone()));
+                    .collect();
+                scope.push((Sym::from(&al.name), args));
             }
-            labels.push(Label { name: l.name, args });
         }
-        // The function's own effect row is open: the set-pass labels plus a
-        // fresh existential tail the body's applications extend, so effects
-        // performed through function values flow into this row.
+        let prefix: BTreeSet<Sym> = BTreeSet::new();
         let mu = self.push_ex_row();
-        let prefix: BTreeSet<Sym> = labels.iter().map(|l| l.name).collect();
-        let latent = labels
-            .into_iter()
-            .rev()
-            .fold(EffRow::Exist(mu), |acc, l| EffRow::Extend(l, Box::new(acc)));
-        let self_ty = Type::fun_eff(doms, latent, ret.clone());
-        env2.insert(Sym::from(&d.name), self_ty.clone());
-        let saved_row = self.cur_row.replace(RowScope { tail: mu, prefix });
-        let checked = self.in_row_scope(&scope, |tc| {
-            tc.with_self(d.name.clone(), self_ty.clone(), cur.clone(), |tc| {
-                tc.check(&env2, &d.body, &ret)?;
-                tc.resolve_all()
-            })
+        let self_ty = Type::fun_eff(doms.clone(), EffRow::Exist(mu), ret.clone());
+        Ok(DeclSeed {
+            doms,
+            ret,
+            cur,
+            scope,
+            mu,
+            prefix,
+            self_ty,
+        })
+    }
+
+    // Stage 1 for a constant member of a recursion group: its self-type is its
+    // value type (no arrow, no effects), from the annotation if given else a fresh
+    // existential. A constant is generalized by value restriction in `finish_decl`
+    // exactly as `infer_const` does; the dummy row tail keeps the shared seed shape
+    // and never carries a label, so it defaults to empty.
+    fn seed_konst(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
+        let val = match &d.ret {
+            Some(ann) => {
+                self.check_annot_rows(ann, d.span)?;
+                let mut ty_ex = BTreeMap::new();
+                let mut row_ex = BTreeMap::new();
+                let no_rigid = BTreeSet::new();
+                let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+                self.convert_annot(ann, &mut a)
+            }
+            None => Type::Exist(self.push_ex()),
+        };
+        let mu = self.push_ex_row();
+        Ok(DeclSeed {
+            doms: Vec::new(),
+            ret: val.clone(),
+            cur: Vec::new(),
+            scope: Vec::new(),
+            mu,
+            prefix: std::collections::BTreeSet::new(),
+            self_ty: val,
+        })
+    }
+
+    // Stage 2: check the body against the seeded self-type. `env` holds the
+    // entry for this member's own name (a recursive call) and the env-visible
+    // schemes of any siblings (a mutual call). The self-entry is re-inserted last
+    // so it wins over any colliding parameter name, matching the pre-split order.
+    //
+    // The self-entry for a plain annotated function is its generalized annotation
+    // scheme, so a recursive call instantiates it and may be used at a second type
+    // (annotated polymorphic recursion, e.g. over a nested datatype). An
+    // unannotated function uses its monomorphic self-type, so a recursive call
+    // unifies against the same variables (monomorphic recursion, the only sound
+    // option without a signature). A *constrained* function keeps the monomorphic
+    // self-type so its recursive call still discharges the constraint against the
+    // enclosing dictionary parameter (`cur_self`) rather than re-resolving it.
+    // Reset the per-declaration obligation buffers (class constraints, numeric
+    // defaulting candidates, index-op resolutions) before checking a new body.
+    fn clear_obligations(&mut self) {
+        self.wanted.clear();
+        self.num_default.clear();
+        self.index_ops.clear();
+    }
+
+    fn infer_body(&mut self, env: &Env, d: &Decl<Core>, seed: &DeclSeed) -> Result<(), TypeError> {
+        self.clear_obligations();
+        let mut env2 = env.clone();
+        for (p, t) in d.params.iter().zip(&seed.doms) {
+            env2.insert(Sym::from(&p.name), t.clone());
+        }
+        let self_entry = if d.constraints.is_empty() {
+            super::env::annotation_scheme(d).unwrap_or_else(|| seed.self_ty.clone())
+        } else {
+            seed.self_ty.clone()
+        };
+        env2.insert(Sym::from(&d.name), self_entry);
+        let saved_row = self.cur_row.replace(RowScope {
+            tail: seed.mu,
+            prefix: seed.prefix.clone(),
+        });
+        let checked = self.in_row_scope(&seed.scope, |tc| {
+            tc.with_self(
+                d.name.clone(),
+                seed.self_ty.clone(),
+                seed.cur.clone(),
+                |tc| {
+                    tc.check(&env2, &d.body, &seed.ret)?;
+                    tc.resolve_all()
+                },
+            )
         });
         self.cur_row = saved_row;
         checked?;
         self.flush_spans();
+        Ok(())
+    }
+
+    // Stage 3: generalize the inferred self-type against `env` (the environment
+    // as it was before this member or its group was seeded, so the group's shared
+    // existentials all generalize) and record any class constraints.
+    fn finish_decl(
+        &mut self,
+        env: &Env,
+        d: &Decl<Core>,
+        seed: &DeclSeed,
+    ) -> Result<Type, TypeError> {
         // Unconstrained ambient rows default to empty (pure); only rows tied to
         // a parameter's row variable survive as effect polymorphism.
-        let self_ty = default_open_rows(&self.apply(&self_ty));
+        let self_ty = default_open_rows(&self.apply(&seed.self_ty));
         let (g, mapping) = self.generalize_map(env, &self_ty);
         if !d.constraints.is_empty() {
             let mut final_cs = Vec::new();
-            for ((class, t), c) in cur.iter().zip(&d.constraints) {
+            for ((class, t), c) in seed.cur.iter().zip(&d.constraints) {
                 let mut t2 = self.apply(t);
                 for (e, name) in &mapping {
                     t2 = t2.subst_exist(*e, &Type::Var(Sym::from(name)));
@@ -986,7 +1438,7 @@ impl Tc<'_> {
     // instantiate fresh at each reference.
     pub(super) fn infer_const(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
         self.reset_ctx();
-        self.wanted.clear();
+        self.clear_obligations();
         let ty = if let Some(ann) = &d.ret {
             self.check_annot_rows(ann, d.span)?;
             let mut ty_ex = BTreeMap::new();
@@ -1014,7 +1466,7 @@ impl Tc<'_> {
     ) -> Result<(), TypeError> {
         for m in &inst.methods {
             self.reset_ctx();
-            self.wanted.clear();
+            self.clear_obligations();
             let (_, sig) = class
                 .methods
                 .iter()
@@ -1063,6 +1515,27 @@ fn default_open_rows(ty: &Type) -> Type {
         out = out.subst_row_exist(*r, &EffRow::Empty);
     }
     out
+}
+
+// For a known indexable container head, the (expected key type, element type,
+// writable) triple; `None` for any other (or not-yet-resolved) type. `Array`/
+// `HashMap` are writable; `List`/`String` are read-only.
+pub(super) fn index_container(ty: &Type) -> Option<(Type, Type, bool)> {
+    match ty {
+        Type::Con(n, args) if n.as_str() == "Array" && args.len() == 1 => {
+            Some((Type::Int, args[0].clone(), true))
+        }
+        Type::Con(n, args) if n.as_str() == "HashMap" && args.len() == 1 => {
+            Some((Type::Str, args[0].clone(), true))
+        }
+        // Writable through `list_set` (functional, O(n)); the in-place `array_set`
+        // is the `Array` case above.
+        Type::Con(n, args) if n.as_str() == LIST && args.len() == 1 => {
+            Some((Type::Int, args[0].clone(), true))
+        }
+        Type::Str => Some((Type::Int, Type::Int, false)),
+        _ => None,
+    }
 }
 
 const fn is_cmp(op: BinOp) -> bool {

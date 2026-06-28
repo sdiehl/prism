@@ -1,0 +1,8 @@
+[package]
+name = "withdep"
+
+[bin]
+entry = "src/main.pr"
+
+[dependencies]
+geometry = { path = "../geometry" }

@@ -28,6 +28,35 @@ pub(super) fn is_id_transformer(rb: &Comp) -> bool {
                 && matches!(b.as_ref(), Comp::Return(Value::Var(v)) if v == &ps[0])))
 }
 
+// A one-parameter state-transformer return clause `return thunk { \s. <body> }`.
+// The identity transformer is the writer special case; a get-style handler's
+// `\s -> r` (yield the producer value, discard the final state) is the general
+// shape, lowered by applying it to the final accumulator at the use site.
+pub(super) fn is_state_transformer(rb: &Comp) -> bool {
+    matches!(rb, Comp::Return(Value::Thunk(t))
+        if matches!(t.as_ref(), Comp::Lam(ps, _) if ps.len() == 1))
+}
+
+// The resume value `A` a fold clause's `k(A)(B)` tail resumes the op with. Tier-1
+// fusion admits only the two shapes whose `A` the producer can reconstruct with no
+// allocation: `Unit` (a write/`put`, the op's result is unit) and `Acc` (a
+// read/`get`, the op's result is the current accumulator). Any other pure `A`
+// falls back to the `@region` driver.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::core::effect_lower) enum AKind {
+    Unit,
+    Acc,
+}
+
+// Classify a resume value against the fold lambda's accumulator parameter.
+fn a_kind(a: &Value, acc: Sym) -> Option<AKind> {
+    match a {
+        Value::Unit => Some(AKind::Unit),
+        Value::Var(v) if *v == acc => Some(AKind::Acc),
+        _ => None,
+    }
+}
+
 pub(super) fn smore(v: Value) -> Value {
     Value::Ctor(SMORE.into(), 0, vec![v])
 }
@@ -110,12 +139,26 @@ pub(super) fn ctor_pat1(name: &str, var: Sym) -> CorePat {
     CorePat::Ctor(Sym::from(name), vec![Some(var)])
 }
 
-// Rewrite a fold clause's tail `k(())(ns)` to `return ns`, dropping the resume
-// binder. Mirrors [`strip_resume`] but for the parameter-passing double
-// application: `k(())` is its own ANF sub-block whose result is then applied to
-// the new accumulator `ns`. Returns None when the clause is not
-// state-tail-resumptive.
-pub(super) fn strip_state(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
+// Rewrite a fold clause's tail `k(A)(B)` to `return B`, dropping the resume
+// binder, and report the resume value's [`AKind`] (`Unit` for a write `k(())(B)`,
+// `Acc` for a read `k(s)(B)` where `s` is the accumulator). Mirrors
+// [`strip_resume`] but for the parameter-passing double application: `k(A)` is its
+// own ANF sub-block whose result is then applied to the new accumulator `B`.
+// Returns None when the clause is not state-tail-resumptive or `A` is outside the
+// admitted set, and None when the clause's branches disagree on the read kind.
+pub(super) fn strip_state(c: &Comp, aliases: &BTreeSet<Sym>, acc: Sym) -> Option<(Comp, AKind)> {
+    strip_state_go(c, aliases, acc, &BTreeMap::new())
+}
+
+// `subst` accumulates the pure `return v to x` aliases seen so far, so the resume
+// argument (an ANF binder like `t` for `return s to t; k(t)(..)`) resolves back to
+// the accumulator before its [`AKind`] is classified.
+fn strip_state_go(
+    c: &Comp,
+    aliases: &BTreeSet<Sym>,
+    acc: Sym,
+    subst: &BTreeMap<Sym, Value>,
+) -> Option<(Comp, AKind)> {
     match c {
         Comp::Bind(m, x, n) => {
             // Drop a rebinding of the resume (`return k to k'`).
@@ -123,12 +166,13 @@ pub(super) fn strip_state(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
                 if aliases.contains(v) {
                     let mut a2 = aliases.clone();
                     a2.insert(*x);
-                    return strip_state(n, &a2);
+                    return strip_state_go(n, &a2, acc, subst);
                 }
             }
-            // The double application: `m` computes the resumption `k(())` and
-            // binds it to `x`; the tail `n` applies it to `ns`.
-            if resume_call(m, aliases) {
+            // The double application: `m` computes the resumption `k(A)` and
+            // binds it to `x`; the tail `n` applies it to `B`.
+            if let Some(a) = resume_arg(m, aliases, subst) {
+                let kind = a_kind(&a, acc)?;
                 let Comp::App(g, gargs) = n.as_ref() else {
                     return None;
                 };
@@ -141,63 +185,97 @@ pub(super) fn strip_state(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
                 if !fv::value(ns).is_disjoint(aliases) {
                     return None;
                 }
-                return Some(Comp::Return(ns.clone()));
+                return Some((Comp::Return(ns.clone()), kind));
             }
-            // A pure leading bind (the `f(acc, x)` block): keep and thread on.
+            // A pure leading bind (the `f(acc, x)` block): keep, record any value
+            // alias for resume-argument resolution, and thread on.
             if !fv::comp(m).is_disjoint(aliases) {
                 return None;
             }
-            Some(Comp::Bind(
-                m.clone(),
-                *x,
-                Box::new(strip_state(n, aliases)?),
-            ))
+            let mut subst2 = subst.clone();
+            if let Comp::Return(v) = m.as_ref() {
+                subst2.insert(*x, v.clone());
+            }
+            let (tail, kind) = strip_state_go(n, aliases, acc, &subst2)?;
+            Some((Comp::Bind(m.clone(), *x, Box::new(tail)), kind))
         }
         Comp::If(v, t, e) => {
             if !fv::value(v).is_disjoint(aliases) {
                 return None;
             }
-            Some(Comp::If(
-                v.clone(),
-                Box::new(strip_state(t, aliases)?),
-                Box::new(strip_state(e, aliases)?),
-            ))
+            let (tt, kt) = strip_state_go(t, aliases, acc, subst)?;
+            let (te, ke) = strip_state_go(e, aliases, acc, subst)?;
+            if kt != ke {
+                return None;
+            }
+            Some((Comp::If(v.clone(), Box::new(tt), Box::new(te)), kt))
         }
         Comp::Case(v, arms) => {
             if !fv::value(v).is_disjoint(aliases) {
                 return None;
             }
-            Some(Comp::Case(
-                v.clone(),
-                arms.iter()
-                    .map(|(p, b)| Some((p.clone(), strip_state(b, aliases)?)))
-                    .collect::<Option<_>>()?,
-            ))
+            let mut kind: Option<AKind> = None;
+            let mut out = Vec::with_capacity(arms.len());
+            for (p, b) in arms {
+                let (tb, kb) = strip_state_go(b, aliases, acc, subst)?;
+                match kind {
+                    Some(k) if k != kb => return None,
+                    _ => kind = Some(kb),
+                }
+                out.push((p.clone(), tb));
+            }
+            Some((Comp::Case(v.clone(), out), kind?))
         }
         _ => None,
     }
 }
 
-// Whether a computation evaluates to `resume(rv)` for a single argument `rv`
-// disjoint from the aliases: a unary application of an alias, allowing leading
-// pure binds and resume rebindings (the argument is discarded, so its binders
-// may be too).
-pub(super) fn resume_call(c: &Comp, aliases: &BTreeSet<Sym>) -> bool {
+// The argument `rv` of `resume(rv)` when a computation evaluates to a unary
+// application of an alias, allowing leading pure binds and resume rebindings. The
+// argument must be disjoint from the aliases (it is not the resume itself). `subst`
+// (the caller's value aliases, extended with the sub-block's own pure binds)
+// resolves the returned value, since the resume argument is itself an ANF binder
+// defined inside this sub-block (`return s to t; k(t)`).
+pub(super) fn resume_arg(
+    c: &Comp,
+    aliases: &BTreeSet<Sym>,
+    subst: &BTreeMap<Sym, Value>,
+) -> Option<Value> {
     match c {
         Comp::App(f, args) => {
-            matches!(f.as_ref(), Comp::Force(Value::Var(k)) if aliases.contains(k))
-                && matches!(args.as_slice(), [rv] if fv::value(rv).is_disjoint(aliases))
+            if !matches!(f.as_ref(), Comp::Force(Value::Var(k)) if aliases.contains(k)) {
+                return None;
+            }
+            let [rv] = args.as_slice() else {
+                return None;
+            };
+            fv::value(rv)
+                .is_disjoint(aliases)
+                .then(|| anf_resolve_val(rv, subst))
         }
         Comp::Bind(m, x, n) => {
             if let Comp::Return(Value::Var(v)) = m.as_ref() {
                 if aliases.contains(v) {
                     let mut a2 = aliases.clone();
                     a2.insert(*x);
-                    return resume_call(n, &a2);
+                    return resume_arg(n, &a2, subst);
                 }
             }
-            fv::comp(m).is_disjoint(aliases) && resume_call(n, aliases)
+            if !fv::comp(m).is_disjoint(aliases) {
+                return None;
+            }
+            let mut s2 = subst.clone();
+            if let Comp::Return(v) = m.as_ref() {
+                s2.insert(*x, v.clone());
+            }
+            resume_arg(n, aliases, &s2)
         }
-        _ => false,
+        _ => None,
     }
+}
+
+// Whether a computation evaluates to `resume(rv)` for a single argument `rv`
+// disjoint from the aliases (the argument is discarded, so its binders may be).
+pub(super) fn resume_call(c: &Comp, aliases: &BTreeSet<Sym>) -> bool {
+    resume_arg(c, aliases, &BTreeMap::new()).is_some()
 }

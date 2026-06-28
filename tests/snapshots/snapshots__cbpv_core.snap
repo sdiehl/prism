@@ -10,7 +10,10 @@ fn noisy(x) =
   return x to t@3
   t@2 * t@3
 fn suspend(x) =
-  return thunk { \. return x to t@4; noisy(t@4) }
+  thunk { \.
+    return x to t@4
+    noisy(t@4)
+  }
 fn force_twice(t) =
   return t to t@5
   (force t@5)() to t@7

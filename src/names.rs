@@ -5,11 +5,51 @@
 
 pub const ENTRY_POINT: &str = "main";
 
+// The two ambient builtin effects, available without an `effect` declaration:
+// console I/O and the `error`/`throw` exception channel.
+pub const IO_EFFECT: &str = "IO";
+pub const EXN_EFFECT: &str = "Exn";
+
 // The builtin failure effect: `fail()` is the anonymous, recoverable twin of an
 // `error`. Reserved surface names (not `@`-mangled), so `fail()` is an ordinary
 // call and the row tracks it as `Fail`. User redeclaration is rejected.
 pub const FAIL_EFFECT: &str = "Fail";
 pub const FAIL_OP: &str = "fail";
+
+// The internal loop-control effects. `break`/`continue` desugar to non-resumable
+// performs of these, discharged by the loop's own handlers so the labels never
+// surface. The effect names follow the error convention (clean, for a row that
+// should never leak); the op names are `@`-mangled so no source program can
+// perform or handle them directly. Injected only when a program uses the keywords.
+pub const BREAK_EFFECT: &str = "Break";
+pub const CONTINUE_EFFECT: &str = "Continue";
+pub const BREAK_OP: &str = "loop@break";
+pub const CONTINUE_OP: &str = "loop@continue";
+
+// Recognizers for the loop-control ops, used by `erase_control` to match the
+// handler templates the desugar emits (op names only; binders are alpha-renamed).
+#[must_use]
+pub fn is_break_op(name: &str) -> bool {
+    name == BREAK_OP
+}
+
+#[must_use]
+pub fn is_continue_op(name: &str) -> bool {
+    name == CONTINUE_OP
+}
+
+// Early `return e` desugars to a non-resumable perform of this one-op effect,
+// discharged by a handler the fn-body desugar installs, so it never surfaces. The
+// op carries the returned value: a polymorphic param (`RETURN_VAL`, instantiated
+// to the function's result type per site) and a never-resume result (THROW_RET).
+pub const RETURN_EFFECT: &str = "Return";
+pub const RETURN_OP: &str = "fn@return";
+pub const RETURN_VAL: &str = "a@retval";
+
+#[must_use]
+pub fn is_return_op(name: &str) -> bool {
+    name == RETURN_OP
+}
 
 pub const DICT_PREFIX: &str = "_D";
 
@@ -145,6 +185,19 @@ pub fn pat_tmp(n: u32) -> String {
 #[must_use]
 pub fn snapshot(n: u32) -> String {
     format!("snap@{n}")
+}
+
+// Per-element binder for an `each` path step desugared to `map`.
+#[must_use]
+pub fn path_each(n: u32) -> String {
+    format!("each@{n}")
+}
+
+// The base of a path update, bound once so an `each` step's `map` reads it
+// without re-evaluating the (possibly effectful) base expression.
+#[must_use]
+pub fn path_base(n: u32) -> String {
+    format!("base@{n}")
 }
 
 // Binders of a partial-application closure stub: the captured given arguments

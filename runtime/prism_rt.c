@@ -2,6 +2,13 @@
  * Uses __attribute__((destructor)) for the leak/reuse/effop report hooks and
  * __builtin_add_overflow/sub/mul for checked arithmetic. */
 
+/* getline is POSIX.1-2008; under -std=c11 glibc hides it unless a feature-test
+ * macro requests it. macOS exposes it regardless, so this only bites on Linux.
+ * Must precede every system header (including mimalloc's <stddef.h> below). */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard feature-test macro */
+#endif
+
 /* Opt-in mimalloc (cargo --features mimalloc): route every libc allocation
  * through mi_* so alloc/free pairing flips together. Must precede any use. The
  * symbols come from the libmimalloc-sys crate; declare them here so no mimalloc
@@ -18,6 +25,7 @@ extern void *mi_calloc(size_t, size_t);
 #define calloc(a, b) mi_calloc(a, b)
 #endif
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,6 +221,33 @@ void prism_rc_dec(long v) {
     }
 }
 
+/* A var cell: an arity-1 mutable cell holding one owned value. Escape-checked
+ * local mutable state (`var x := e`) compiles to one of these, so reads and
+ * writes are loads/stores and a `var` loop is a real constant-stack loop instead
+ * of the algebraic-effect free monad. `prism_ref_set` overwrites the field in
+ * place regardless of the cell's refcount: sound because escape analysis proves
+ * every reference is the same logical variable, never an alias of a distinct
+ * value. The cell is an ordinary arity-1 cell, so `prism_rc_dec` frees its field
+ * with it; the caller (codegen) owns the cell reference and rc_decs it after each
+ * read/write, the rc pass having dup'd so each use has its own reference. */
+long prism_ref_new(long v) {
+    long *p = prism_alloc(1); /* rc=1, arity=1 */
+    p[PRISM_HDR_WORDS] = v;   /* v moves into the cell */
+    return (long)p;
+}
+
+long prism_ref_get(long c) {
+    long e = ((long *)c)[PRISM_HDR_WORDS];
+    prism_rc_inc(e); /* an owned snapshot; the caller rc_decs the cell */
+    return e;
+}
+
+void prism_ref_set(long c, long v) {
+    long *p = (long *)c;
+    prism_rc_dec(p[PRISM_HDR_WORDS]); /* free the old value */
+    p[PRISM_HDR_WORDS] = v;           /* v moves into the cell */
+}
+
 /* FBIP reuse (Lorenzen and Leijen, "Reference Counting with Frame-Limited
  * Reuse"): a uniquely-owned cell about to be dropped is turned into a reuse
  * token and handed to the matching constructor allocation in the same arm, so
@@ -243,6 +278,23 @@ __attribute__((destructor)) static void prism_effop_report(void) {
 }
 
 void prism_effop_alloc(void) { prism_effop_allocs++; }
+
+/* Driver work-step counter: every structural reduction turn of the residual
+ * free-monad driver (an `ebind`/handler/mask driver entry) bumps this. With
+ * PRISM_DRIVE_STATS set a destructor reports the total to stderr (stdout, the
+ * parity-checked channel, stays untouched). Unlike the allocation counter this
+ * tracks the driver's actual *work*, so it scales ~n on a deep non-tail effectful
+ * recursion when the trampoline is linear and flips to ~n^2 when it is not (the
+ * EBounce-class re-association blowup that allocation counts are blind to). */
+static long prism_drive_steps = 0;
+
+__attribute__((destructor)) static void prism_drive_report(void) {
+    if (getenv("PRISM_DRIVE_STATS")) {
+        fprintf(stderr, "prism: %ld drive steps\n", prism_drive_steps);
+    }
+}
+
+void prism_drive_step(void) { prism_drive_steps++; }
 
 long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
@@ -275,6 +327,186 @@ long prism_tag(void *p) {
 
 long prism_field(void *p, long i) {
     return ((long *)p)[PRISM_HDR_WORDS + i];
+}
+
+/* Type-aligned continuation queue (the Freer representation of an EOp's
+ * continuation). A queue is a persistent binary tree of Kleisli arrows (thunks):
+ * the empty queue is 0 (unit, rc-skipped), a Leaf holds one arrow, a Node joins
+ * two non-empty queues. snoc and concat are O(1) (one Node); uncons walks the
+ * left spine, re-associating Node(Node(a,b),c) -> Node(a,Node(b,c)) so a queue
+ * built by repeated snoc drains in amortized O(1) per element -- the exact
+ * re-association the old EBounce trampoline redid on every bounce (O(n^2)), done
+ * here once. The tree is never mutated, only rebuilt sharing its leaves, so a
+ * captured continuation is cloneable for multishot; rc is the existing Perceus
+ * discipline (a retained child is rc_inc'd; the runtime-call wrapper rc_decs the
+ * borrowed args). Leaf/Node carry distinct tags so rc_dec still frees them
+ * field-recursively; the TQNil/TQCons results uncons returns are ordinary
+ * constructor cells (tags 0/1) the Core `qApply` template pattern-matches. */
+#define PRISM_TAQ_LEAF 0x5441514cL /* 'TAQL' */
+#define PRISM_TAQ_NODE 0x5441514eL /* 'TAQN' */
+
+static long prism_taq_leaf(long arrow) {
+    long *p = prism_alloc(1);
+    p[PRISM_TAG_W] = PRISM_TAQ_LEAF;
+    prism_rc_inc(arrow);
+    p[PRISM_HDR_WORDS] = arrow;
+    return (long)p;
+}
+
+/* Build a Node taking ownership of l and r (no rc_inc; the caller transfers its
+ * references in). */
+static long prism_taq_node_own(long l, long r) {
+    long *p = prism_alloc(2);
+    p[PRISM_TAG_W] = PRISM_TAQ_NODE;
+    p[PRISM_HDR_WORDS] = l;
+    p[PRISM_HDR_WORDS + 1] = r;
+    return (long)p;
+}
+
+/* snoc(Q, arrow): append one arrow at the right. Q and arrow are borrowed. */
+long prism_taq_snoc(long q, long arrow) {
+    long leaf = prism_taq_leaf(arrow);
+    if (!q) return leaf;
+    prism_rc_inc(q);
+    return prism_taq_node_own(q, leaf);
+}
+
+/* concat(Q1, Q2): O(1) join. Both borrowed. */
+long prism_taq_concat(long q1, long q2) {
+    if (!q1) {
+        prism_rc_inc(q2);
+        return q2;
+    }
+    if (!q2) {
+        prism_rc_inc(q1);
+        return q1;
+    }
+    prism_rc_inc(q1);
+    prism_rc_inc(q2);
+    return prism_taq_node_own(q1, q2);
+}
+
+/* uncons(Q): the leftmost arrow and the remaining queue, as TQCons(head, tail);
+ * the empty queue gives TQNil. Q is borrowed and never mutated -- the result
+ * shares Q's leaves (rc_inc'd) and rebuilds only the spine -- so unconsing a
+ * shared queue leaves the original intact for another resumption. */
+long prism_taq_uncons(long q) {
+    if (!q) return prism_ctor(0, 0, 0); /* TQNil */
+    long cur = q;
+    long acc = 0; /* accumulated right tail (owned) */
+    while (prism_tag((void *)cur) == PRISM_TAQ_NODE) {
+        long l = prism_field((void *)cur, 0);
+        long r = prism_field((void *)cur, 1);
+        prism_rc_inc(r);
+        acc = acc ? prism_taq_node_own(r, acc) : r;
+        cur = l;
+    }
+    /* cur is a Leaf */
+    long head = prism_field((void *)cur, 0);
+    prism_rc_inc(head);
+    long fields[2] = {head, acc};
+    return prism_ctor(1, 2, fields); /* TQCons(head, tail) */
+}
+
+/* Heap-allocated continuation frames for the native effect machine: the pending
+ * work that the interpreter keeps in a `Vec<Frame>` lives here as a chain of
+ * counted cells so object-program recursion across an effect boundary never
+ * grows the C stack. Field 0 is always `next`, the link to the frame below
+ * (toward the handler); a chain whose deepest frame links to 0 is a delimited
+ * slice. Because `next` is an ordinary field, `prism_rc_dec` frees a whole
+ * abandoned continuation through its existing iterative worklist, in O(1) C
+ * stack regardless of depth.
+ *
+ *   Bind(next, kfn, env)    a sequencing frame: resume the value into `kfn`
+ *                           under `env` (the analogue of `Frame::Bind`/`Args`).
+ *   Handle(next, table, env) a prompt: `table` carries the handler clauses,
+ *                           `env` their closure environment.
+ *   Mask(next, ops)         skips `ops` for one capture, so an inner handler
+ *                           does not intercept an effect meant for an outer one.
+ *
+ * Constructors borrow their arguments and retain (rc_inc) what they store, the
+ * same convention as the queue cells above, so a codegen call site rc_decs the
+ * borrowed operands afterward. Distinct tags keep the cells self-describing when
+ * a capture walks the chain. */
+#define PRISM_FRAME_BIND 0x46524d42L   /* 'FRMB' */
+#define PRISM_FRAME_HANDLE 0x46524d48L /* 'FRMH' */
+#define PRISM_FRAME_MASK 0x46524d4dL   /* 'FRMM' */
+
+long prism_frame_bind(long next, long kfn, long env) {
+    long *p = prism_alloc(3);
+    p[PRISM_TAG_W] = PRISM_FRAME_BIND;
+    prism_rc_inc(next);
+    prism_rc_inc(kfn);
+    prism_rc_inc(env);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = kfn;
+    p[PRISM_HDR_WORDS + 2] = env;
+    return (long)p;
+}
+
+long prism_frame_handle(long next, long table, long env) {
+    long *p = prism_alloc(3);
+    p[PRISM_TAG_W] = PRISM_FRAME_HANDLE;
+    prism_rc_inc(next);
+    prism_rc_inc(table);
+    prism_rc_inc(env);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = table;
+    p[PRISM_HDR_WORDS + 2] = env;
+    return (long)p;
+}
+
+long prism_frame_mask(long next, long ops) {
+    long *p = prism_alloc(2);
+    p[PRISM_TAG_W] = PRISM_FRAME_MASK;
+    prism_rc_inc(next);
+    prism_rc_inc(ops);
+    p[PRISM_HDR_WORDS] = next;
+    p[PRISM_HDR_WORDS + 1] = ops;
+    return (long)p;
+}
+
+/* Splice a copy of the delimited slice `top` (a `next`-chain ending at 0) on top
+ * of `base`, returning the new top. Resuming a captured continuation re-pushes a
+ * clone so it can be entered again (multishot); a fresh copy also lets `base`
+ * differ from the stack the slice was captured on. The slice itself is never
+ * mutated, so a still-live capture is unaffected. The copy is built in one
+ * forward pass (each new cell links to the previously built one, leaving the
+ * clone in reverse order) and then reversed in place; both passes run in O(1) C
+ * stack, so a deep continuation splices without recursion. Stored payloads are
+ * rc_inc'd into the clone; `base` is retained once, as the deepest frame's
+ * `next`. `top` and `base` are borrowed. */
+long prism_kont_splice(long top, long base) {
+    prism_rc_inc(base);
+    if (!top) return base; /* empty slice resumes straight into base */
+    long rev = 0;          /* clone, accumulated in reverse (deepest first) */
+    long cur = top;
+    while (cur) {
+        long *src = (long *)cur;
+        long n = src[PRISM_ARITY_W];
+        long *cp = prism_alloc(n);
+        cp[PRISM_TAG_W] = src[PRISM_TAG_W];
+        cp[PRISM_HDR_WORDS] = rev; /* link toward the deepest clone so far */
+        for (long i = 1; i < n; i++) {
+            long f = src[PRISM_HDR_WORDS + i];
+            prism_rc_inc(f);
+            cp[PRISM_HDR_WORDS + i] = f;
+        }
+        rev = (long)cp;
+        cur = src[PRISM_HDR_WORDS]; /* original next */
+    }
+    /* `rev` heads the clone in reverse (the slice's deepest frame). Reverse it
+     * in place so the original top heads it again, and link the deepest frame's
+     * `next` to `base`. */
+    long prev = base, node = rev;
+    while (node) {
+        long *np = (long *)node;
+        long nxt = np[PRISM_HDR_WORDS];
+        np[PRISM_HDR_WORDS] = prev;
+        prev = node;
+        node = nxt;
+    }
+    return prev;
 }
 
 long prism_read_int(void) {
@@ -386,12 +618,63 @@ long prism_show_char(long cp) {
     return prism_str_lit(buf, k);
 }
 
+/* Shortest decimal that round-trips back to `d`, laid out like a Python `repr`:
+ * full precision with no truncation, scientific notation only when the decimal
+ * exponent falls outside [-4, 16). This must stay byte-identical to the
+ * interpreter's `fmt_g` (src/eval) and the Lean oracle's `fmtG` (models), which
+ * are differentially tested against this runtime. Because `p` is the FEWEST
+ * significant digits that round-trip, the last digit is never 0, so no trailing
+ * zeros ever need stripping. */
 long prism_show_float(long f) {
     double d;
     memcpy(&d, &f, 8);
-    char buf[32];
-    int k = snprintf(buf, sizeof buf, "%g", d);
-    return prism_str_lit(buf, k);
+    if (isnan(d)) return prism_str_lit("nan", 3);
+    if (isinf(d)) return d < 0 ? prism_str_lit("-inf", 4) : prism_str_lit("inf", 3);
+    if (d == 0.0) return signbit(d) ? prism_str_lit("-0", 2) : prism_str_lit("0", 1);
+
+    char sci[40];
+    int p = 17;
+    for (int cand = 1; cand < 17; cand++) {
+        snprintf(sci, sizeof sci, "%.*e", cand - 1, d);
+        if (strtod(sci, NULL) == d) { p = cand; break; }
+    }
+    snprintf(sci, sizeof sci, "%.*e", p - 1, d); /* "[-]D[.DDD]e+XX" */
+
+    const char *s = sci;
+    int neg = (*s == '-');
+    if (neg) s++;
+    char digits[20] = {0};
+    int nd = 0;
+    while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }
+    int e10 = atoi(s + 1); /* s now points at 'e' */
+
+    char out[64];
+    int o = 0;
+    if (neg) out[o++] = '-';
+    if (e10 >= -4 && e10 < 16) {
+        if (e10 >= 0) {
+            int k = e10 + 1;
+            for (int i = 0; i < k; i++) out[o++] = i < nd ? digits[i] : '0';
+            if (nd > k) {
+                out[o++] = '.';
+                for (int i = k; i < nd; i++) out[o++] = digits[i];
+            }
+        } else {
+            out[o++] = '0';
+            out[o++] = '.';
+            for (int i = 0; i < -e10 - 1; i++) out[o++] = '0';
+            for (int i = 0; i < nd; i++) out[o++] = digits[i];
+        }
+    } else {
+        out[o++] = digits[0];
+        if (nd > 1) {
+            out[o++] = '.';
+            for (int i = 1; i < nd; i++) out[o++] = digits[i];
+        }
+        o += snprintf(out + o, sizeof out - (size_t)o, "e%c%02d",
+                      e10 < 0 ? '-' : '+', e10 < 0 ? -e10 : e10);
+    }
+    return prism_str_lit(out, o);
 }
 
 long prism_substring(long s, long start, long len) {
@@ -443,7 +726,10 @@ long prism_str_cmp(long a, long b) {
 }
 
 static long *prism_big_alloc(long nlimbs) {
-    long *p = malloc((PRISM_HDR_WORDS + nlimbs) * 8);
+    /* Same overflow-checked sizing as ordinary cells: a hostile or computed
+     * limb count must never under-allocate and let the limb stores below write
+     * out of bounds. */
+    long *p = malloc(prism_cell_bytes(nlimbs));
     if (!p) abort();
     p[PRISM_RC_W] = 1;
     p[PRISM_TAG_W] = PRISM_BIG_TAG;
@@ -473,7 +759,10 @@ static long mag_trim(const unsigned long *m, long n) {
 static long big_make(const unsigned long *m, long n, int neg) {
     n = mag_trim(m, n);
     long *p = prism_big_alloc(n);
-    if (n) memcpy(p + PRISM_HDR_WORDS, m, (size_t)n * 8);
+    // n > 0 implies m is non-null (mag_trim already read it); the explicit `&& m`
+    // says so to the analyzer, which otherwise loses the constraint through the
+    // zero-bignum call big_make(0, 0, 0) and flags memcpy's nonnull `src`.
+    if (n && m) memcpy(p + PRISM_HDR_WORDS, m, (size_t)n * 8);
     p[PRISM_ARITY_W] = neg ? -n : n;
     return (long)p;
 }
@@ -696,7 +985,10 @@ long prism_big_show(long a) {
 #define PRISM_IMM_MIN (-(1L << 62))
 
 static long int_imm(long v) {
-    return (v << 1) | 1;
+    /* Shift in unsigned: a signed left-shift of a negative value is UB in C
+     * (works at -O2, but UBSan flags it). This wraps mod 2^64, matching the
+     * codegen side's wrapping_shl(1) | 1 (src/codegen/emit.rs). */
+    return (long)(((unsigned long)v << 1) | 1UL);
 }
 
 static long big_norm(long b) {
@@ -710,7 +1002,7 @@ static long big_norm(long b) {
 }
 
 static long int_as_big(long w, int *fresh) {
-    *fresh = w & 1;
+    *fresh = (int)(w & 1);
     return *fresh ? prism_big_from_int(w >> 1) : w;
 }
 
@@ -974,7 +1266,22 @@ long prism_rand(void) {
 }
 
 long prism_parse_float(long s) {
-    double d = strtod(prism_str_data(s), NULL);
+    // Mirror the interpreter's `s.trim().parse::<f64>()`: the whole trimmed
+    // string must be a valid decimal float, else 0.0. strtod alone diverges by
+    // accepting trailing garbage (`3.14x` -> 3.14) and hex (`0x10` -> 16), which
+    // the Rust parser rejects.
+    const char *data = prism_str_data(s);
+    while (isspace((unsigned char)*data)) data++;
+    const char *digits = data + (*data == '+' || *data == '-' ? 1 : 0);
+    int hex = digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
+    char *end;
+    double d = strtod(data, &end);
+    if (hex || end == data) {
+        d = 0.0;
+    } else {
+        while (isspace((unsigned char)*end)) end++;
+        if (*end != '\0') d = 0.0;
+    }
     long bits;
     memcpy(&bits, &d, 8);
     return prism_box(bits);

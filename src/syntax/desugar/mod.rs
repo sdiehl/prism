@@ -25,12 +25,12 @@ mod synonyms;
 
 use aliases::expand_aliases;
 use derive::derive_instances;
-use effects::{rw, Binding, Vars};
+use effects::{rw, wrap_return, Binding, Vars};
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    dot_call, interp_lit, let_pat, let_stmt, open_if, pattern_decl, seq_stmt, try_mark, with_rest,
-    with_stmt, IfTail,
+    assign_stmt, compound_assign, compound_stmt, dot_call, interp_lit, let_pat, let_stmt, open_if,
+    pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -46,6 +46,12 @@ pub(super) type FnSig = Vec<(String, Option<S<Expr>>)>;
 pub(super) struct Cx {
     pub(super) next: Fresh,
     pub(super) ctors: BTreeSet<String>,
+    // Per constructor: arity and field names (empty when positional). Drives the
+    // `?Ctor` prism lowering, which rebuilds the constructor positionally.
+    pub(super) ctor_shapes: BTreeMap<String, (usize, Vec<String>)>,
+    // Per constructor: how many constructors its type has, so the prism `match`
+    // drops its pass-through arm when the paths already cover every constructor.
+    pub(super) ctor_total: BTreeMap<String, usize>,
     pub(super) effects: Vec<EffectDecl>,
     pub(super) op_sigs: BTreeMap<String, OpSig>,
     pub(super) errors: BTreeSet<String>,
@@ -57,17 +63,68 @@ pub(super) struct Cx {
 // instantiates it fresh at each throw site.
 const THROW_RET: &str = "a@throw";
 
-// `fail()` is the anonymous twin of an `error`: a builtin one-op effect always
-// in scope, so any expression can short-circuit and the row tracks it. Reusing
-// THROW_RET makes the checker instantiate its return fresh per site and restrict
-// it to `final ctl`, exactly the throw path.
-fn inject_fail(prog: &mut Program) {
-    prog.effects.push(EffectDecl {
-        name: names::FAIL_EFFECT.into(),
+// A one-op effect whose op never resumes (its result is the freshened-per-site
+// THROW_RET var pinned to `final ctl`). `fail`, `break`/`continue`, and every
+// `error` are all this exact shape, differing only in name and op params.
+fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -> EffectDecl {
+    EffectDecl {
+        name,
         params: Vec::new(),
         ops: vec![EffOp {
-            name: names::FAIL_OP.into(),
-            params: Vec::new(),
+            name: op_name,
+            params: op_params,
+            ret: Ty::Var(THROW_RET.into()),
+        }],
+        span,
+    }
+}
+
+// `fail()` is the anonymous twin of an `error`: a builtin one-op effect always
+// in scope, so any expression can short-circuit and the row tracks it.
+fn inject_fail(prog: &mut Program) {
+    prog.effects.push(throw_effect(
+        names::FAIL_EFFECT.into(),
+        names::FAIL_OP.into(),
+        Vec::new(),
+        Span::empty(0),
+    ));
+}
+
+// `break` / `continue` desugar to non-resumable performs of these one-op effects,
+// each discharged by a handler the loop desugar installs, so neither ever appears
+// in a surfaced row. Always in scope (like `fail`), reusing THROW_RET so the
+// checker instantiates the op's result fresh per site and pins it to `final ctl`.
+fn inject_loop_effects(prog: &mut Program) {
+    for (eff, op) in [
+        (names::BREAK_EFFECT, names::BREAK_OP),
+        (names::CONTINUE_EFFECT, names::CONTINUE_OP),
+    ] {
+        prog.effects.push(throw_effect(
+            eff.into(),
+            op.into(),
+            Vec::new(),
+            Span::empty(0),
+        ));
+    }
+}
+
+// `return e` desugars to a non-resumable perform of this one-op effect, caught by
+// a handler the fn-body desugar wraps around a function that uses it. The op
+// carries the value: a polymorphic param (instantiated to the function's result
+// type at each `return`) and a never-resume result, so `return` type-checks in any
+// position and the surfaced row stays clean.
+fn inject_return_effect(prog: &mut Program) {
+    // `Return(a)` is parametric in the carried value `a`: a handler picks one `a`
+    // for its scope, so every `return` in the same function unifies its value with
+    // that one type (the function's result type), exactly as `Emit(a)` ties a
+    // stream's element type. The op result is the never-resume var, freshened and
+    // restricted to `final ctl` per site.
+    prog.effects.push(EffectDecl {
+        name: names::RETURN_EFFECT.into(),
+        params: vec![names::RETURN_VAL.into()],
+        ops: vec![EffOp {
+            name: names::RETURN_OP.into(),
+            params: vec![Ty::Var(names::RETURN_VAL.into())],
             ret: Ty::Var(THROW_RET.into()),
         }],
         span: Span::empty(0),
@@ -79,16 +136,12 @@ fn lower_errors(prog: &mut Program) -> BTreeSet<String> {
     let mut names_out = BTreeSet::new();
     for e in std::mem::take(&mut prog.errors) {
         names_out.insert(e.name.clone());
-        prog.effects.push(EffectDecl {
-            name: e.name.clone(),
-            params: Vec::new(),
-            ops: vec![EffOp {
-                name: names::throw_op(&e.name),
-                params: e.params,
-                ret: Ty::Var(THROW_RET.into()),
-            }],
-            span: e.span,
-        });
+        prog.effects.push(throw_effect(
+            e.name.clone(),
+            names::throw_op(&e.name),
+            e.params,
+            e.span,
+        ));
     }
     names_out
 }
@@ -221,21 +274,12 @@ fn fold_wheres(d: &mut Decl) {
         return;
     }
     let span = d.body.span;
-    let body = std::mem::replace(
-        &mut d.body,
-        Spanned {
-            synth: false,
-            node: Expr::Unit,
-            span,
-        },
-    );
+    let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
     d.body = std::mem::take(&mut d.wheres)
         .into_iter()
         .rev()
-        .fold(body, |acc, (n, v)| Spanned {
-            synth: false,
-            node: Expr::Let(n, Box::new(v), Box::new(acc)),
-            span,
+        .fold(body, |acc, (n, v)| {
+            sp(Expr::Let(n, Box::new(v), Box::new(acc)), span)
         });
 }
 
@@ -304,6 +348,8 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
 pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     shadow_fns(&mut prog);
     inject_fail(&mut prog);
+    inject_loop_effects(&mut prog);
+    inject_return_effect(&mut prog);
     check_effect_dups(&prog)?;
     let errors = lower_errors(&mut prog);
     expand_synonyms(&mut prog)?;
@@ -313,6 +359,24 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         .types
         .iter()
         .flat_map(|d| d.ctors.iter().map(|c| c.name.clone()))
+        .collect();
+    let ctor_shapes: BTreeMap<String, (usize, Vec<String>)> = prog
+        .types
+        .iter()
+        .flat_map(|d| &d.ctors)
+        .map(|c| {
+            let fields = c
+                .fields
+                .as_ref()
+                .map(|fs| fs.iter().map(|(n, _)| n.clone()).collect())
+                .unwrap_or_default();
+            (c.name.clone(), (c.args.len(), fields))
+        })
+        .collect();
+    let ctor_total: BTreeMap<String, usize> = prog
+        .types
+        .iter()
+        .flat_map(|d| d.ctors.iter().map(move |c| (c.name.clone(), d.ctors.len())))
         .collect();
     let patterns = lower_patterns(&mut prog, &ctors)?;
     let op_sigs = prog
@@ -342,6 +406,8 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     let mut cx = Cx {
         next: Fresh::new(),
         ctors,
+        ctor_shapes,
+        ctor_total,
         effects: Vec::new(),
         op_sigs,
         errors,
@@ -379,6 +445,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         synonyms: prog.synonyms,
         classes: prog.classes,
         instances,
+        canonicals: prog.canonicals,
         patterns: Vec::new(),
         fns,
         imports: prog.imports,
@@ -391,7 +458,10 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
 // `where`s are already folded, and parameter defaults (consumed by the call
 // rewrite) drop, so no surface expression survives.
 fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
-    let body = rw(&d.body, &seed(&d.params), cx)?;
+    // A `return` in the body desugars to a perform discharged by a handler wrapped
+    // here, at the function boundary, so the early exit cannot leak past the fn.
+    let src = wrap_return(d.body, cx);
+    let body = rw(&src, &seed(&d.params), cx)?;
     let params = d
         .params
         .into_iter()
@@ -422,6 +492,8 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
     let mut cx = Cx {
         next: Fresh::new(),
         ctors: BTreeSet::new(),
+        ctor_shapes: BTreeMap::new(),
+        ctor_total: BTreeMap::new(),
         effects: Vec::new(),
         op_sigs: BTreeMap::new(),
         errors: BTreeSet::new(),

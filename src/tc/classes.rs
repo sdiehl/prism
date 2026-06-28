@@ -4,7 +4,8 @@ use marginalia::Span;
 
 use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
-    ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted, Warning,
+    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted,
+    Warning,
 };
 use crate::error::TypeError;
 use crate::names::{dict_ctor, module_of};
@@ -71,12 +72,57 @@ impl Tc<'_> {
     }
 
     pub(super) fn resolve_all(&mut self) -> Result<(), TypeError> {
+        // Resolve deferred indexed reads/writes before everything else: by now a
+        // `var`'s state existential is solved by its initializer, so the
+        // receiver's head type is known. Dispatch it, constrain the key/element
+        // (and value, for a write), and solve the read's result existential.
+        for op in std::mem::take(&mut self.index_ops) {
+            let recv = self.apply(&op.recv);
+            let Some((kty, elem, writable)) = super::infer::index_container(&recv) else {
+                return Err(TypeError::Other {
+                    span: op.recv_span,
+                    msg: format!("type `{}` is not indexable with `[]`", recv.show()),
+                });
+            };
+            let elem = self.apply(&elem);
+            self.subtype(&op.key, &kty).map_err(|e| e.at(op.span))?;
+            self.subtype(&Type::Exist(op.result), &elem)
+                .map_err(|e| e.at(op.span))?;
+            if let Some(val) = op.val {
+                if !writable {
+                    return Err(TypeError::Other {
+                        span: op.recv_span,
+                        msg: format!(
+                            "type `{}` does not support indexed assignment `a[i] := v`",
+                            recv.show()
+                        ),
+                    });
+                }
+                self.subtype(&val, &elem).map_err(|e| e.at(op.span))?;
+            }
+        }
+        // Resolve deferred numeric operands next, so dictionary resolution below
+        // sees their final types. An operand a later use already pinned to a
+        // fixed-width lane is recorded; one still ambiguous defaults to `Int`; a
+        // `Float` or non-numeric one (an int operator on a float) is rejected.
+        for (span, t) in std::mem::take(&mut self.num_default) {
+            let t = self.apply(&t);
+            match &t {
+                Type::Int => {}
+                Type::I64 | Type::U64 => {
+                    self.fixed.insert(span, t);
+                }
+                other => {
+                    self.default_numeric(other, span)?;
+                }
+            }
+        }
         let wanted = std::mem::take(&mut self.wanted);
         for w in wanted {
             let mut ds = Vec::new();
             for (class, ty, explicit) in &w.items {
                 let t = self.apply(ty);
-                ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), 0)?);
+                ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), &[])?);
             }
             match self.dicts.get(&w.span) {
                 Some(prev) if *prev != ds => {
@@ -99,9 +145,25 @@ impl Tc<'_> {
         t: &Type,
         span: Span,
         explicit: Option<&str>,
-        depth: usize,
+        chain: &[(String, Type)],
     ) -> Result<Dict, TypeError> {
-        if depth > MAX_INSTANCE_DEPTH {
+        // Two distinct non-termination modes. A *cycle* is when an identical goal
+        // reappears on the resolution stack (`Eq(Foo)` needing `Eq(Bar)` needing
+        // `Eq(Foo)`); that is a genuine program error and reported precisely. A
+        // goal that keeps *growing* without repeating (`C(a)` :- `C([a])` :-
+        // `C([[a]])`) never recurs exactly, so no cycle check can catch it; the
+        // depth bound is the standard fuel backstop (cf. GHC's reduction depth).
+        let goal = (class.to_string(), t.clone());
+        if chain.contains(&goal) {
+            return Err(TypeError::Other {
+                span,
+                msg: format!(
+                    "cyclic instance resolution: {class}({}) depends on itself",
+                    t.show()
+                ),
+            });
+        }
+        if chain.len() > MAX_INSTANCE_DEPTH {
             return Err(TypeError::Other {
                 span,
                 msg: format!("instance resolution for {class}({}) is too deep", t.show()),
@@ -150,30 +212,35 @@ impl Tc<'_> {
             let key = Self::head_key(class, t, span)?;
             match self
                 .inst_keys
-                .get(&(class.to_string(), key))
+                .get(&(class.to_string(), key.clone()))
                 .map(Vec::as_slice)
             {
                 Some([one]) => one.clone(),
                 Some(many @ [_, _, ..]) => {
-                    // Name the defining module of each candidate when they span
-                    // more than one; for purely root-local named instances the
-                    // bare list is clearer (and keeps the message stable).
-                    let cross_module = many
-                        .iter()
-                        .filter_map(|n| self.instances.get(n))
-                        .any(|i| !i.module.is_empty());
-                    let listed = if cross_module {
-                        provenance_list(self.instances, many)
-                    } else {
-                        many.join(", ")
+                    // Several instances share this head, so implicit resolution
+                    // uses the canonical designation. Coherence checking rejects
+                    // 2+ undesignated instances at definition, so a missing entry
+                    // here is a backstop, not a reachable user error.
+                    let Some(name) = self.canonical.get(&(class.to_string(), key)) else {
+                        let cross_module = many
+                            .iter()
+                            .filter_map(|n| self.instances.get(n))
+                            .any(|i| !i.module.is_empty());
+                        let listed = if cross_module {
+                            provenance_list(self.instances, many)
+                        } else {
+                            many.join(", ")
+                        };
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!(
+                                "ambiguous instance for {class}({h}): {listed}; \
+                                 designate one with `canonical {class}({h}) = name`",
+                                h = t.show(),
+                            ),
+                        });
                     };
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!(
-                            "ambiguous instance for {class}({}): {listed}; select one with f[name]",
-                            t.show(),
-                        ),
-                    });
+                    name.clone()
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -204,6 +271,10 @@ impl Tc<'_> {
                 ),
             })
         })?;
+        // This goal joins the resolution stack while we discharge its context and
+        // superclass obligations, so a child that asks for it again is a cycle.
+        let mut child = chain.to_vec();
+        child.push(goal);
         let mut ctx_dicts = Vec::new();
         for (cclass, cty) in &info.context {
             let mut ct = cty.clone();
@@ -211,7 +282,7 @@ impl Tc<'_> {
                 ct = ct.subst_var(*n, x);
             }
             let ct = self.apply(&ct);
-            ctx_dicts.push(self.resolve(cclass, &ct, span, None, depth + 1)?);
+            ctx_dicts.push(self.resolve(cclass, &ct, span, None, &child)?);
         }
         // Superclass dictionaries follow the declared context, in the same order
         // the instance constructor lays them out as leading dict-cell fields.
@@ -221,7 +292,7 @@ impl Tc<'_> {
                 st = st.subst_var(*n, x);
             }
             let st = self.apply(&st);
-            ctx_dicts.push(self.resolve(sclass, &st, span, None, depth + 1)?);
+            ctx_dicts.push(self.resolve(sclass, &st, span, None, &child)?);
         }
         Ok(Dict::Global(inst_name, ctx_dicts))
     }
@@ -274,6 +345,7 @@ type BuildClassResult = (
     BTreeMap<String, ClassInfo>,
     BTreeMap<String, InstInfo>,
     InstKeys,
+    Canon,
     BTreeMap<String, (String, usize)>,
     BTreeMap<String, (Type, Vec<(String, Type)>)>,
     Vec<Warning>,
@@ -666,39 +738,89 @@ pub(super) fn build_classes(
             },
         );
     }
-    // Overlap: two or more instances for the same (class, head) are allowed (the
-    // use site disambiguates with `f[name]`), but when they come from different
-    // modules the conflict is invisible at definition time, so flag it. Instances
-    // from a single module (or all root-local, the deliberate named-instance
-    // case) are left alone.
-    for ((class, _key), names) in &inst_keys {
-        if names.len() < 2 {
-            continue;
-        }
-        let mods: BTreeSet<&str> = names
-            .iter()
-            .filter_map(|n| instances.get(n))
-            .map(|i| i.module.as_str())
-            .collect();
-        if mods.len() < 2 {
-            continue;
-        }
-        warnings.push(Warning {
-            span: Span::default(),
-            msg: format!(
-                "overlapping instances for {class}: {}; uses must disambiguate with f[name]",
-                provenance_list(&instances, names)
-            ),
-        });
-    }
+    let canonical = build_canonical(prog, &inst_keys, &instances)?;
     Ok((
         classes,
         instances,
         inst_keys,
+        canonical,
         methods,
         constrained,
         warnings,
     ))
+}
+
+// Build the canonical-instance store from `canonical Class(Head) = name` decls
+// and enforce coherence. Each designation must name a registered instance for
+// its `(class, head)` and may appear once; then every head shared by two or more
+// instances must have a designation, else implicit resolution would be ambient.
+// The error is raised at definition, not deferred to each use site.
+fn build_canonical(
+    prog: &Program<Core>,
+    inst_keys: &InstKeys,
+    instances: &BTreeMap<String, InstInfo>,
+) -> Result<Canon, TypeError> {
+    let mut canonical: Canon = BTreeMap::new();
+    for c in &prog.canonicals {
+        let head = convert_data(&c.head);
+        let key = head_name(&head).ok_or_else(|| TypeError::Other {
+            span: c.span,
+            msg: "canonical head must be a primitive type or a data type constructor".to_string(),
+        })?;
+        let registered = inst_keys
+            .get(&(c.class.clone(), key.clone()))
+            .is_some_and(|ns| ns.contains(&c.name));
+        if !registered {
+            return Err(TypeError::Other {
+                span: c.span,
+                msg: format!(
+                    "`{}` is not an instance of {}({})",
+                    c.name,
+                    c.class,
+                    head.show()
+                ),
+            });
+        }
+        if canonical
+            .insert((c.class.clone(), key), c.name.clone())
+            .is_some()
+        {
+            return Err(TypeError::Other {
+                span: c.span,
+                msg: format!(
+                    "duplicate canonical designation for {}({})",
+                    c.class,
+                    head.show()
+                ),
+            });
+        }
+    }
+    for ((class, key), names) in inst_keys {
+        if names.len() < 2 || canonical.contains_key(&(class.clone(), key.clone())) {
+            continue;
+        }
+        let head = instances
+            .get(&names[0])
+            .map(|i| i.head.show())
+            .unwrap_or_default();
+        // Caret a root-local instance decl when one exists; an imported decl's
+        // span belongs to another file, so fall back to a plain line.
+        let span = prog
+            .instances
+            .iter()
+            .find(|i| names.contains(&i.name) && i.module.is_empty())
+            .map_or_else(Span::default, |i| i.span);
+        return Err(TypeError::Other {
+            span,
+            msg: format!(
+                "{n} instances for {class}({head}): {listed}; \
+                 designate one with `canonical {class}({head}) = name`",
+                n = names.len(),
+                listed = provenance_list(instances, names),
+            ),
+        });
+    }
+    Ok(canonical)
 }
 
 /// Render a list of instance names with their defining module, for overlap and

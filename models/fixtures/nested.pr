@@ -1,0 +1,8 @@
+type Tree = Leaf(Int) | Node(Tree, Tree)
+
+fn sum(t : Tree) : Int =
+  match t of
+    Leaf(n) => n
+    Node(l, r) => sum(l) + sum(r)
+
+fn main() : Int = sum(Node(Leaf(3), Node(Leaf(4), Leaf(5))))

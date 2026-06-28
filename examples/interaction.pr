@@ -67,8 +67,8 @@ fn band(xs : List(Int)) : String =
 fn main() =
   let thermostat = Sys { state = 0, read = \(c) -> c, step = ctrl_step }
   let room = Sys { state = 10, read = \(t) -> t, step = plant_step }
-  let loop = feedback(thermostat, room)
-  let temps = run_closed(loop, 24)
+  let system = feedback(thermostat, room)
+  let temps = run_closed(system, 24)
   println(show(temps))
   -- |> pipeline: drop the warm-up, then read the steady-state band.
   let steady = temps |> drop(12)
@@ -76,4 +76,4 @@ fn main() =
   -- another |> stage: count the peaks within the steady window.
   println(concat("peaks per window: ", show(steady |> filter(\(t) -> t == 22) |> length)))
   -- dot-chain: a fused stream of stateful handlers, no intermediate list.
-  println(concat("time at or above setpoint: ", show(sof(steady).skeep(\(t) -> t >= 20).smap(\(t) -> 1).ssum())))
+  println(concat("time at or above setpoint: ", show(sof(steady).skeep(\(t) -> t >= 20).smap(\(_t) -> 1).ssum())))

@@ -1,6 +1,8 @@
--- After effect lowering. The state handler is tail-resumptive, so evidence
--- passing turns it into threaded arguments; the loop is a self tail call, so it
--- lowers to a constant-stack loop with no allocation. The get/set effect is gone.
+-- After effect lowering. The escape analysis proved the var never leaves its
+-- block, so lowering erases the State handler to a mutable cell: each `get` is a
+-- cell read and each `set` a cell write. The loop is a self tail call, so it
+-- lowers to a constant-stack loop with no per-iteration allocation. The get/set
+-- effect is gone, leaving code equivalent to the threaded-argument loop below.
 fn fib_iter(n) = loop(n, 0, 1)            -- (count, a, b) as plain arguments
 
 fn loop(n, a, b) =

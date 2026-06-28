@@ -1,0 +1,5 @@
+type Vec2 = Vec2(Int, Int)
+
+fn main() : Vec2 =
+  match Vec2(3, 4) of
+    Vec2(x, y) => Vec2(9, y)

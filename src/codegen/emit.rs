@@ -199,8 +199,11 @@ pub(super) trait Isa {
     fn open_merge(&self, b: &mut Buf, l: &str, dst: &str, preds: &[(String, String)]);
     fn fn_define(&self, name: &str, params: &[String]) -> String;
     fn fn_close(&self) -> String;
-    fn prelude(&self, out: &mut String);
-    fn declare(&self, out: &mut String, sym: &str, arity: usize);
+    fn prelude(&self, out: &mut String, seen: &mut BTreeSet<String>);
+    // Declares `sym` once: a backend that emits text (MLIR) must not re-declare a
+    // symbol the prelude or an earlier use already wrote, or the module fails to
+    // verify. `seen` tracks what has been declared.
+    fn declare(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str, arity: usize);
     fn str_global(&self, out: &mut String, idx: usize, s: &str);
 }
 
@@ -360,6 +363,14 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.box_i64(&bits)
     }
 
+    // Every Prism value is a single i64. Pointer tagging keeps the low bit as a
+    // discriminant: `1` marks an immediate (small int, bool, unit packed inline),
+    // `0` marks a heap cell whose i64 is its aligned address (cells are at least
+    // 2-aligned, so a real pointer never sets the low bit). An immediate int `n`
+    // is stored as `(n << 1) | 1`, recovered by an arithmetic `>> 1`. This is what
+    // makes dup/drop no-ops on immediates: the runtime's inc/dec skip any value
+    // with the low bit set or equal to 0 (unit), so emitting refcount ops on a
+    // non-cell is always harmless.
     fn value(&mut self, regs: &Regs, v: &Value) -> Result<String, String> {
         match v {
             Value::Var(x) => regs
@@ -577,7 +588,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 if !matches!(builtin(b.name()), Some((_, BuiltinKind::Str))) {
                     self.used_rt.insert(sym.clone(), args.len());
                 }
-                let (imm_args, float_args, imm_res) = str_builtin_kinds(&sym);
+                let (imm_args, float_args, imm_res) = b.abi();
                 let mut avs = Vec::new();
                 let mut owned = Vec::new();
                 for (i, a) in args.iter().enumerate() {
@@ -608,12 +619,15 @@ impl<'a, I: Isa> Cg<'a, I> {
                 self.isa.call_void(&mut self.b, "prism_rc_dec", &[r]);
                 Ok(self.isa.fresh_zero(&mut self.b))
             }
-            Comp::ReuseToken(v) => {
-                let r = self.value(regs, v)?;
-                Ok(self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r))))
+            Comp::WithReuse { token, freed, body } => {
+                let r = self.value(regs, freed)?;
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let mut r2 = regs.clone();
+                r2.insert(*token, t);
+                self.lower(&r2, body)
             }
             Comp::Reuse(tok, ctor) => {
-                let t = self.value(regs, tok)?;
+                let t = self.value(regs, &Value::Var(*tok))?;
                 let (tag, fields) = match ctor {
                     Value::Ctor(_, tg, fs) => (idx64(*tg), fs),
                     Value::Tuple(fs) => (0, fs),
@@ -621,6 +635,28 @@ impl<'a, I: Isa> Cg<'a, I> {
                 };
                 let fvs = self.values(regs, fields)?;
                 Ok(self.reuse_obj(&t, tag, &fvs))
+            }
+            // Mutable-cell ops for an erased `var`. The cell flows as an ordinary
+            // owned value; `value` returns the dup'd reference the rc pass gave
+            // this use, which read/write consume (rc_dec the cell after). The
+            // stored/initial value moves into the cell, so it is not dropped here.
+            Comp::RefNew(v) => {
+                let r = self.value(regs, v)?;
+                Ok(self.dst(|i, b, d| i.call(b, d, "prism_ref_new", slice::from_ref(&r))))
+            }
+            Comp::RefGet(c) => {
+                let cv = self.value(regs, c)?;
+                let r = self.dst(|i, b, d| i.call(b, d, "prism_ref_get", slice::from_ref(&cv)));
+                self.rc_dec(&cv);
+                Ok(r)
+            }
+            Comp::RefSet(c, v) => {
+                let cv = self.value(regs, c)?;
+                let rv = self.value(regs, v)?;
+                self.isa
+                    .call_void(&mut self.b, "prism_ref_set", &[cv.clone(), rv]);
+                self.rc_dec(&cv);
+                Ok(self.isa.fresh_zero(&mut self.b))
             }
         }
     }
@@ -642,6 +678,16 @@ impl<'a, I: Isa> Cg<'a, I> {
             }
             Comp::If(v, t, e) => self.lower_if(regs, v, t, e, true).map(|_| ()),
             Comp::Case(val, arms) => self.lower_case(regs, val, arms, true).map(|_| ()),
+            // Free the cell into a token, bind it, then lower the body in tail
+            // position so a `Reuse`-shaped TRMC tail inside it still loops. Same
+            // instruction sequence the threaded `bind (reuse_token ..)` emitted.
+            Comp::WithReuse { token, freed, body } => {
+                let r = self.value(regs, freed)?;
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let mut r2 = regs.clone();
+                r2.insert(*token, t);
+                self.lower_tail(&r2, body)
+            }
             Comp::Call(name, args) => {
                 if let Some(t) = self.trmc.clone() {
                     if *name == t.name && args.len() == t.arity {
@@ -1015,6 +1061,12 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.cur_arity = f.params.len();
         let header = self.isa.fn_define(&Self::sym(f.name.as_str()), &params);
         self.isa.open_entry(&mut self.b);
+        // Count one driver work-step per entry to a free-monad driver (stderr-only
+        // under PRISM_DRIVE_STATS, so stdout is untouched). This is the counter
+        // whose asymptotics track the trampoline's actual work.
+        if crate::core::effect_lower::is_free_monad_driver(f.name.as_str()) {
+            self.isa.call_void(&mut self.b, "prism_drive_step", &[]);
+        }
         self.lower_tail(&regs, &body)?;
         Ok(format!("{header}{}{}", self.b.body, self.isa.fn_close()))
     }
@@ -1156,6 +1208,14 @@ impl<I: Isa> Cg<'_, I> {
     // the fixpoint finite, since an n == 0 under-application would mint a
     // same-arity adapter that regenerates forever. Every other adapter has arity
     // m - n < m, so the chain of adapters-of-adapters strictly shrinks.
+    // Every lambda arity plus every arity an `App` actually calls. The planning
+    // fixpoint and the final dispatcher emission both iterate exactly this set.
+    fn apply_arities(&self) -> BTreeSet<usize> {
+        let mut a: BTreeSet<usize> = self.lams.iter().map(|l| l.params.len()).collect();
+        a.extend(self.used_apply.iter().copied());
+        a
+    }
+
     fn plan_dispatch(&mut self, n: usize) {
         if n == 0 {
             return;
@@ -1334,12 +1394,7 @@ pub(super) fn emit_with<I: Isa>(
     // the fixpoint terminates.
     loop {
         let before = (cg.lams.len(), cg.used_apply.len());
-        let arities: Vec<usize> = {
-            let mut a: BTreeSet<usize> = cg.lams.iter().map(|l| l.params.len()).collect();
-            a.extend(cg.used_apply.iter().copied());
-            a.into_iter().collect()
-        };
-        for n in arities {
+        for n in cg.apply_arities() {
             cg.plan_dispatch(n);
         }
         if (cg.lams.len(), cg.used_apply.len()) == before {
@@ -1358,23 +1413,20 @@ pub(super) fn emit_with<I: Isa>(
     // Every lambda arity needs a dispatcher, as does every arity an `App` calls,
     // even with no matching lambda (a 0-arg apply on a dead path still has to
     // resolve as a symbol).
-    let arities: BTreeSet<usize> = {
-        let mut a: BTreeSet<usize> = cg.lams.iter().map(|l| l.params.len()).collect();
-        a.extend(cg.used_apply.iter().copied());
-        a
-    };
     let mut dispatch = String::new();
-    for n in arities {
+    for n in cg.apply_arities() {
         dispatch.push_str(&cg.apply_dispatch(n));
         dispatch.push('\n');
     }
 
     let mut out = String::new();
-    isa.prelude(&mut out);
+    let mut seen = BTreeSet::new();
+    isa.prelude(&mut out, &mut seen);
     // Runtime declares beyond the static prelude are per-use, so modules that
-    // never leave the immediate fast path stay byte-stable.
+    // never leave the immediate fast path stay byte-stable. `declare` dedups
+    // against the prelude, since some runtime symbols appear in both.
     for (sym, arity) in &cg.used_rt {
-        isa.declare(&mut out, sym, *arity);
+        isa.declare(&mut out, &mut seen, sym, *arity);
     }
     for (i, s) in cg.strs.iter().enumerate() {
         isa.str_global(&mut out, i, s);
@@ -1399,31 +1451,6 @@ pub(super) fn escape_str(s: &str) -> String {
         }
     }
     escaped
-}
-
-/// Argument and result conventions for a runtime-call builtin. `imm_args` are
-/// pointer-tagged immediates (int/bool) untagged before the call, `float_args`
-/// are boxed doubles. Every other argument is passed raw (string cell, boxed
-/// 64-bit cell, or tagged Int word). `imm_res` is true when the result is a
-/// bare integer to retag; false results are already cells or tagged words.
-fn str_builtin_kinds(sym: &str) -> (&'static [usize], &'static [usize], bool) {
-    match sym {
-        "prism_str_len" | "prism_str_eq" | "prism_str_cmp" | "prism_args_count"
-        | "prism_i64_cmp" | "prism_u64_cmp" | "prism_file_exists" | "prism_system"
-        | "prism_array_len" | "prism_byte_len" => (&[], &[], true),
-        "prism_char_at" | "prism_byte_at" => (&[1], &[], true),
-        // Index/count args are raw integers; the element/array args and the
-        // result (cell or polymorphic value) pass through unchanged.
-        "prism_array_get" | "prism_array_set" => (&[1], &[], false),
-        "prism_show_bool" | "prism_show_char" | "prism_arg" | "prism_exit" | "prism_array_new" => {
-            (&[0], &[], false)
-        }
-        "prism_show_float" => (&[], &[0], false),
-        "prism_show_float_prec" => (&[1], &[0], false),
-        "prism_pow_float" => (&[], &[0, 1], false),
-        "prism_substring" => (&[1, 2], &[], false),
-        _ => (&[], &[], false),
-    }
 }
 
 fn partial_app_body(name: &str, n_given: usize, arity: usize) -> (Vec<Sym>, Vec<Sym>, Comp) {
@@ -1494,78 +1521,32 @@ mod tests {
         );
     }
 
-    // `str_builtin_kinds` is a hand-maintained mirror of the per-arg calling
-    // convention, which `BUILTINS` does not carry. Pin it to the one table so
-    // adding, removing, or re-arity-ing a string builtin (or keying an arm on a
-    // symbol no `Builtin` emits) fails loudly rather than drifting into a silent
-    // runtime mismatch.
+    // `Builtin::abi` is exhaustive (no wildcard), so the compiler already forces
+    // every variant to declare its convention and rejects a symbol that no
+    // `Builtin` produces. This pins the remaining well-formedness invariant the
+    // type system cannot: every tagged arg index stays within the builtin's
+    // arity and no arg is both immediate and float, so re-arity-ing a builtin
+    // trips here rather than mis-tagging a call at runtime.
     #[test]
-    fn str_builtin_kinds_agree_with_table() {
+    fn builtin_abi_within_arity() {
         use crate::core::builtins::{Builtin, BuiltinKind, BUILTINS};
 
-        // Every surface string builtin's tagged-arg convention must stay within
-        // its arity from the one table, so shrinking arity (or re-typing an arg)
-        // trips a bound rather than mis-tagging a call at runtime.
         for &(name, arity, kind) in BUILTINS {
             if kind != BuiltinKind::Str {
                 continue;
             }
-            let sym = Builtin::from_name(name)
-                .expect("str builtin in BUILTINS has no Builtin variant")
-                .sym();
-            let (imm, float, _) = super::str_builtin_kinds(&sym);
+            let b =
+                Builtin::from_name(name).expect("str builtin in BUILTINS has no Builtin variant");
+            let (imm, float, _) = b.abi();
             for i in imm {
                 assert!(
                     !float.contains(i),
-                    "{sym} arg {i} is both immediate and float"
+                    "{name} arg {i} is both immediate and float"
                 );
             }
             for i in imm.iter().chain(float) {
-                assert!(*i < arity, "{sym} tags arg {i} but arity is {arity}");
+                assert!(*i < arity, "{name} tags arg {i} but arity is {arity}");
             }
         }
-
-        // No arm may key on a symbol that no Builtin produces: a rename in the
-        // enum without a matching rename here would leave such an arm dead and
-        // the builtin silently on the default convention.
-        for sym in STR_BUILTIN_KINDS_KEYS {
-            let resolved = if *sym == "prism_str_concat" {
-                Some(Builtin::Concat)
-            } else {
-                sym.strip_prefix("prism_").and_then(Builtin::from_name)
-            };
-            assert!(
-                resolved.is_some_and(|b| &b.sym() == sym),
-                "str_builtin_kinds arm `{sym}` is not produced by any Builtin"
-            );
-        }
     }
-
-    // The symbols `str_builtin_kinds` matches on explicitly, kept beside it so
-    // the dead-arm check above stays exhaustive when an arm is added.
-    const STR_BUILTIN_KINDS_KEYS: &[&str] = &[
-        "prism_str_len",
-        "prism_str_eq",
-        "prism_str_cmp",
-        "prism_args_count",
-        "prism_i64_cmp",
-        "prism_u64_cmp",
-        "prism_file_exists",
-        "prism_system",
-        "prism_show_bool",
-        "prism_show_char",
-        "prism_arg",
-        "prism_exit",
-        "prism_show_float",
-        "prism_show_float_prec",
-        "prism_pow_float",
-        "prism_substring",
-        "prism_char_at",
-        "prism_array_len",
-        "prism_array_new",
-        "prism_array_get",
-        "prism_array_set",
-        "prism_byte_len",
-        "prism_byte_at",
-    ];
 }

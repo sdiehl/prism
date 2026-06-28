@@ -78,6 +78,9 @@ pub struct Program<P: Phase = Surface> {
     pub synonyms: Vec<SynonymDecl>,
     pub classes: Vec<ClassDecl>,
     pub instances: Vec<InstanceDecl<P>>,
+    // Canonical-instance designations: which instance implicit resolution picks
+    // when several share a `(class, type-head)`. Phase-independent (no exprs).
+    pub canonicals: Vec<CanonicalDecl>,
     pub patterns: Vec<PatternDecl<P>>,
     pub fns: Vec<Decl<P>>,
     // Module imports, resolved away by the name-resolution pass.
@@ -126,6 +129,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
         }
         d.field("classes", &self.classes)
             .field("instances", &self.instances);
+        if !self.canonicals.is_empty() {
+            d.field("canonicals", &self.canonicals);
+        }
         if !self.patterns.is_empty() {
             d.field("patterns", &self.patterns);
         }
@@ -140,15 +146,18 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
     }
 }
 
-// `import Data.Map`, `import List (map, filter)`, `import Json as J`. The path
-// is the dotted module path. `names` present means a selective unqualified
-// import; absent means a qualified import bound under `alias` or the last path
-// component.
+// `import Data.Map`, `import List (map, filter)`, `import Json as J`,
+// `import Data.List (..)`. The path is the dotted module path. `names` present
+// means a selective unqualified import; absent means a qualified import bound
+// under `alias` or the last path component. `glob` is the `(..)` form: every
+// exported name enters unqualified scope, the mechanism the layered prelude uses
+// to re-open its stdlib modules.
 #[derive(Clone, Debug)]
 pub struct ImportDecl {
     pub path: Vec<String>,
     pub alias: Option<String>,
     pub names: Option<Vec<String>>,
+    pub glob: bool,
     // A `pub import` re-exports the imported names from this module, so a
     // downstream importer can reach them through this module too.
     pub reexport: bool,
@@ -165,6 +174,7 @@ pub enum Item {
     Synonym(SynonymDecl),
     Class(ClassDecl),
     Instance(InstanceDecl),
+    Canonical(CanonicalDecl),
     Pattern(PatternDecl),
     Fn(Decl),
 }
@@ -258,6 +268,19 @@ pub struct InstanceDecl<P: Phase = Surface> {
     // provenance diagnostics. Empty for a root-program instance. A user instance
     // is tagged by the renamer; a derived one by its data type's canonical name.
     pub module: String,
+    pub span: Span,
+}
+
+// `canonical Class(Head) = name`: designates the canonical instance for a
+// `(class, type-head)` so implicit resolution is deterministic when several
+// instances share the head. `name` references a global instance (stays bare,
+// like every instance reference); `class`/`head` are canonicalized by the
+// renamer to match the keys the instance store is built under.
+#[derive(Clone, Debug)]
+pub struct CanonicalDecl {
+    pub class: String,
+    pub head: Ty,
+    pub name: String,
     pub span: Span,
 }
 
@@ -370,6 +393,7 @@ pub enum Ty {
     // A `var x := e` state cell, lowered straight to the pinned existential
     // `Exist(n)` so every read/write/handler of one var unifies through it. Only
     // desugar produces it. It never appears in source or surviving annotations.
+    #[doc(hidden)]
     State(u32),
     Forall(Vec<String>, Box<Self>),
     Fun(Vec<Self>, Row, Box<Self>),
@@ -408,6 +432,11 @@ pub enum BinOp {
     Lef,
     Gtf,
     Gef,
+    // Exponentiation, one operator over Int and Float. Unlike the other
+    // arithmetic ops it has no single primitive: elaboration lowers it to an
+    // integer or floating power call by the operand types, promoting a mixed pair
+    // to Float. Not a `CoreOp`.
+    Pow,
 }
 
 impl BinOp {
@@ -439,6 +468,7 @@ impl BinOp {
             Self::Lef => kw::LE_DOT,
             Self::Gtf => kw::GT_DOT,
             Self::Gef => kw::GE_DOT,
+            Self::Pow => kw::CARET,
         }
     }
 }
@@ -511,11 +541,26 @@ pub enum Sugar<P: Phase> {
     NamedHandle(String, Box<S<Expr<P>>>, Vec<HandlerArm<P>>),
     VarDecl(String, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
     Assign(String, Box<S<Expr<P>>>),
+    // `recv[key] := value` on a `var`: a functional indexed write that rebinds
+    // the root variable. Desugars to `root := index_set(...)` (nested for
+    // `grid[i][j] := v`); the formatter restores this surface form.
+    IndexAssign(Box<S<Expr<P>>>, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
     Throw(String, Vec<S<Expr<P>>>),
     TryCatch(Box<S<Expr<P>>>, Vec<CatchArm<P>>),
     // `for x in s, <quals> do body`: the generator drives an emit-consumer. The
     // qualifiers (guards, binders) fold inside-out around the body.
     For(String, Box<S<Expr<P>>>, Vec<Qualifier<P>>, Box<S<Expr<P>>>),
+    // `while cond do body` (`Some(cond)`) or `loop body` (`None`, an unconditional
+    // loop). Desugars to the tail-recursive prelude `repeat_while`; `break`/
+    // `continue` in the body add internal, fully-handled `Break`/`Continue` effects.
+    While(Option<Box<S<Expr<P>>>>, Box<S<Expr<P>>>),
+    // `break` / `continue` inside a loop body: non-resumable performs of the
+    // internal loop-control effects, caught by the enclosing loop's handlers.
+    Break,
+    Continue,
+    // `return e`: a non-resumable perform of the internal `Return` effect, caught
+    // by the handler wrapped around the enclosing function's body.
+    Return(Box<S<Expr<P>>>),
     // `[ head for x in s, <quals> ]`: the comprehension. Lowers to a stream that
     // emits `head` per surviving element, collected with `scollect`.
     Comp(Box<S<Expr<P>>>, String, Box<S<Expr<P>>>, Vec<Qualifier<P>>),
@@ -537,6 +582,67 @@ pub enum Sugar<P: Phase> {
     // (backward, `false`). Kept as sugar so the surface operator survives
     // formatting; desugar lowers it to `\x -> g(f(x))` / `\x -> f(g(x))`.
     Compose(bool, Box<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // `s.[ path ]`: read every focus the path selects into a `List`, the read
+    // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
+    ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),
+}
+
+// One step of an update path, read left to right. `Field(f)` descends into a
+// record field; `Each` fans out over every element of a functor; `Case(C)`
+// focuses through a sum constructor (a prism), leaving other constructors
+// untouched; `Index(i)` focuses one element of an array/list; `Where(p)` keeps
+// only foci satisfying `p`. All but `Field` are removed by desugar (lowered to
+// `fmap`, a `match`, `index_set`, and a guard), so a path that reaches
+// tc/elaborate is `Field`-only.
+#[derive(Clone, Debug)]
+pub enum PathStep<P: Phase = Surface> {
+    Field(String),
+    Each,
+    Case(String),
+    Index(S<Expr<P>>),
+    Where(S<Expr<P>>),
+}
+
+impl<P: Phase> PathStep<P> {
+    // The subterm an `[i]` index or a `where p` filter carries, the steps a
+    // surface traversal must descend into.
+    pub const fn sub_expr(&self) -> Option<&S<Expr<P>>> {
+        match self {
+            Self::Index(e) | Self::Where(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub const fn sub_expr_mut(&mut self) -> Option<&mut S<Expr<P>>> {
+        match self {
+            Self::Index(e) | Self::Where(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+// The terminal action of an update path. `= e` (`Set`) replaces the focus with
+// `e`; `~ f` (`Modify`) applies `f` to the current focus. The distinction is
+// purely in the desugaring: `Set` ignores the old focus, `Modify` reads it and
+// calls `f`. Both carry an ordinary expression, so neither reaches the core.
+#[derive(Clone, Debug)]
+pub enum PathOp<P: Phase = Surface> {
+    Set(S<Expr<P>>),
+    Modify(S<Expr<P>>),
+}
+
+impl<P: Phase> PathOp<P> {
+    pub const fn expr(&self) -> &S<Expr<P>> {
+        match self {
+            Self::Set(e) | Self::Modify(e) => e,
+        }
+    }
+
+    pub const fn expr_mut(&mut self) -> &mut S<Expr<P>> {
+        match self {
+            Self::Set(e) | Self::Modify(e) => e,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -560,12 +666,23 @@ pub enum Expr<P: Phase = Surface> {
     FieldAccess(Box<S<Self>>, String),
     RecordCreate(String, Vec<(String, S<Self>)>),
     RecordUpdate(Box<S<Self>>, String, Vec<(String, S<Self>)>),
-    // `{ base | a.b.c = v, d = w }`: nested functional update along field
-    // paths, each level a single-constructor rebuild (reusable under Perceus).
-    RecordUpdatePath(Box<S<Self>>, Vec<(Vec<String>, S<Self>)>),
+    // `{ base | a.b.c = v, xs.each ~ f }`: nested functional update along paths
+    // of steps (`Field`/`Each`/`Case`/`Index`). Each path ends in a `PathOp`:
+    // `= v` sets the focus, `~ f` modifies it. `Field`-only paths rebuild
+    // single-constructor records (reusable under Perceus); the optic steps
+    // desugar to `fmap`/`match`/`index_set`.
+    RecordUpdatePath(Box<S<Self>>, Vec<(Vec<PathStep<P>>, PathOp<P>)>),
     Handle(Box<S<Self>>, Vec<HandlerArm<P>>),
     Mask(String, Box<S<Self>>),
     Inst(Box<S<Self>>, Vec<String>),
+    // `recv[key]`: a failable indexed read, dispatched at elaboration on the
+    // head type of `recv` (Array/HashMap/String/List) to a builtin accessor.
+    // Reads perform `Fail` when the index or key is absent.
+    Index(Box<S<Self>>, Box<S<Self>>),
+    // A functional indexed write `index_set(recv, key, val)` returning the new
+    // container, dispatched at elaboration on `recv`'s head type to the in-place
+    // (FBIP) setter. Produced by desugaring `recv[key] := val`, never written.
+    IndexSet(Box<S<Self>>, Box<S<Self>>, Box<S<Self>>),
     Ann(Box<S<Self>>, Ty),
     // A compiler-synthesized parse-time marker, never a source variable. Each is
     // consumed (or rejected) by desugar; the formatter restores its surface form.

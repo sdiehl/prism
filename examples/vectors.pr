@@ -1,9 +1,11 @@
 -- 3D vector math where the "size" of a vector is a typeclass, not a function.
 -- A norm collapses a vector to one Float, but there is no single right way to do
 -- it: Euclidean length and Manhattan distance disagree. So Norm is a class with
--- two NAMED instances over Vec3, and the caller picks which yardstick to use by
--- writing norm[l1] vs the default. Only ==/= are overloaded, so add/scale/dot/
--- cross are ordinary named functions and we lean on UFCS dot-chains to read them.
+-- two NAMED instances over Vec3. One must be the canonical default that implicit
+-- norm(u) resolves to (coherence: a head with two instances designates one);
+-- the other yardstick stays reachable by writing norm(u, using l1). Only ==/= are
+-- overloaded, so add/scale/dot/cross are ordinary named functions and we lean on
+-- UFCS dot-chains to read them.
 
 type Vec3 = V(Float, Float, Float) deriving (Show, Eq)
 
@@ -48,6 +50,9 @@ instance l1 : Norm(Vec3) {
   fn norm(v) = manhattan(v)
 }
 
+-- Euclidean length is the canonical Norm, so a bare norm(u) means the L2 norm.
+canonical Norm(Vec3) = l2
+
 fn main() : !{IO} Unit =
   let u = V(1.0, 2.0, 2.0)
   let v = V(3.0, 0.0, 4.0)
@@ -55,6 +60,6 @@ fn main() : !{IO} Unit =
   println("v = {v}")
   println("dot(u, v) = {dot(u, v)}")
   println("cross(u, v) = {cross(u, v)}")
-  -- Two instances at one head are ambiguous, so name each yardstick explicitly.
-  println("l2 norm of u = {norm[l2](u)}")
-  println("l1 norm of u = {norm[l1](u)}")
+  -- Bare norm(u) resolves to the canonical l2; the other yardstick is explicit.
+  println("l2 norm of u = {norm(u)}")
+  println("l1 norm of u = {norm(u, using l1)}")

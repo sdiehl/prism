@@ -1,0 +1,5 @@
+import Geo.Shapes (square_area, circle_area_approx)
+
+fn main() =
+  println(square_area(5))
+  println(circle_area_approx(4))

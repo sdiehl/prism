@@ -42,9 +42,17 @@ pub(super) fn free_resume(e: &S<Expr>, sh: bool) -> Option<Span> {
         Expr::Call(f, args) => fr(f).or_else(|| args.iter().find_map(fr)),
         Expr::List(es) | Expr::Tuple(es) => es.iter().find_map(fr),
         Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => fr(b),
+        Expr::Index(recv, key) => fr(recv).or_else(|| fr(key)),
         Expr::RecordCreate(_, fs) => fs.iter().find_map(|(_, v)| fr(v)),
         Expr::RecordUpdate(b, _, fs) => fr(b).or_else(|| fs.iter().find_map(|(_, v)| fr(v))),
-        Expr::RecordUpdatePath(b, ups) => fr(b).or_else(|| ups.iter().find_map(|(_, v)| fr(v))),
+        Expr::RecordUpdatePath(b, ups) => fr(b).or_else(|| {
+            ups.iter().find_map(|(steps, op)| {
+                steps
+                    .iter()
+                    .find_map(|s| s.sub_expr().and_then(fr))
+                    .or_else(|| fr(op.expr()))
+            })
+        }),
         Expr::Sugar(s) => free_resume_sugar(s),
         _ => None,
     }
@@ -69,6 +77,7 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::VarDecl(x, v, b) => fr(v).or_else(|| free_resume(b, x == RESUME)),
         Sugar::NamedHandle(_, b, arms) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
         Sugar::Assign(_, b) | Sugar::OptChain(b, _) => fr(b),
+        Sugar::IndexAssign(recv, key, v) => fr(recv).or_else(|| fr(key)).or_else(|| fr(v)),
         Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
             fr(a).or_else(|| fr(b))
         }
@@ -80,6 +89,12 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::For(_, s, _, b) => fr(s).or_else(|| fr(b)),
         Sugar::Comp(h, _, s, _) => fr(h).or_else(|| fr(s)),
         Sugar::Range(pre, hi) => pre.iter().find_map(fr).or_else(|| fr(hi)),
+        Sugar::While(cond, b) => cond.as_deref().and_then(fr).or_else(|| fr(b)),
+        Sugar::Break | Sugar::Continue => None,
+        Sugar::Return(e) => fr(e),
+        Sugar::ReadPath(b, steps) => {
+            fr(b).or_else(|| steps.iter().find_map(|s| s.sub_expr().and_then(fr)))
+        }
     }
 }
 
@@ -128,6 +143,10 @@ fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
         | Expr::Mask(_, a) => {
             walk(a, f);
         }
+        Expr::Index(recv, key) => {
+            walk(recv, f);
+            walk(key, f);
+        }
         Expr::Call(h, args) => {
             walk(h, f);
             for a in args {
@@ -174,8 +193,13 @@ fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
         }
         Expr::RecordUpdatePath(b, ups) => {
             walk(b, f);
-            for (_, a) in ups {
-                walk(a, f);
+            for (steps, op) in ups {
+                for s in steps {
+                    if let Some(e) = s.sub_expr() {
+                        walk(e, f);
+                    }
+                }
+                walk(op.expr(), f);
             }
         }
         _ => {}
@@ -249,8 +273,15 @@ pub(super) fn escapes(
         }
         Expr::RecordUpdatePath(b, ups) => {
             escapes(b, ops, ctors, &mut tainted.clone()).or_else(|| {
-                ups.iter()
-                    .find_map(|(_, v)| escapes(v, ops, ctors, &mut tainted.clone()))
+                ups.iter().find_map(|(steps, op)| {
+                    steps
+                        .iter()
+                        .find_map(|s| {
+                            s.sub_expr()
+                                .and_then(|e| escapes(e, ops, ctors, &mut tainted.clone()))
+                        })
+                        .or_else(|| escapes(op.expr(), ops, ctors, &mut tainted.clone()))
+                })
             })
         }
         Expr::Handle(b, _)
@@ -258,6 +289,8 @@ pub(super) fn escapes(
         | Expr::Ann(b, _)
         | Expr::Inst(b, _)
         | Expr::Mask(_, b) => escapes(b, ops, ctors, tainted),
+        Expr::Index(recv, key) => escapes(recv, ops, ctors, &mut tainted.clone())
+            .or_else(|| escapes(key, ops, ctors, &mut tainted.clone())),
         _ => None,
     }
 }

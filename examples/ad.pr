@@ -39,8 +39,8 @@ instance numDual : Num(Dual) {
 fn poly(x : a) : a given Num(a) = add(mul(mul(x, x), x), mul(fromI(2), x))
 
 fn main() =
-  let value = poly[numFloat](5.0)
-  let slope = poly[numDual](D(5.0, 1.0))
+  let value = poly(5.0, using numFloat)
+  let slope = poly(D(5.0, 1.0), using numDual)
   println(concat("poly(5)        = ", show(value)))
   println(concat("poly(5)  [dual] = ", show(re(slope))))
   println(concat("poly'(5)       = ", show(im(slope))))

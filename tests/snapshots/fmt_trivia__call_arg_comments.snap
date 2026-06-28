@@ -1,0 +1,9 @@
+---
+source: tests/fmt_trivia.rs
+expression: "fmt(\"fn main() : Int =\\n\\\n     \\x20 foo(\\n\\\n     \\x20   1,  -- keep me\\n\\\n     \\x20   2,\\n\\\n     \\x20 )\\n\")"
+---
+fn main() : Int =
+  foo(
+    1,  -- keep me
+    2,
+  )

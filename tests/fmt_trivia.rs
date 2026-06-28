@@ -44,6 +44,16 @@ trivia_case!(
      \x20 x\n"
 );
 
+// A comment trailing a binding on the same line stays on that line instead of
+// being relocated above the next statement.
+trivia_case!(
+    trailing_same_line_comments,
+    "fn test() =\n\
+     \x20 let x = 1 -- trailing on x\n\
+     \x20 let y = x + 2 -- and on y\n\
+     \x20 y\n"
+);
+
 // Comments above match arms and inside an arm's body block.
 trivia_case!(
     match_arm_comments,
@@ -175,7 +185,7 @@ trivia_case!(
 // A trailing-lambda call whose block body carries comments.
 trivia_case!(
     trailing_lambda_comments,
-    "fn each(xs : List(Int)) : Unit =\n\
+    "fn walk(xs : List(Int)) : Unit =\n\
      \x20 xs.foreach() fn(x)\n\
      \x20   -- handle one item\n\
      \x20   println(show(x))\n"
@@ -190,4 +200,35 @@ trivia_case!(
      \x20 -- bump it\n\
      \x20 n := n + 1\n\
      \x20 n\n"
+);
+
+// A comment between call arguments must survive: the flat one-line join would
+// drop it, so the formatter keeps the call in its laid-out source form.
+trivia_case!(
+    call_arg_comments,
+    "fn main() : Int =\n\
+     \x20 foo(\n\
+     \x20   1,  -- keep me\n\
+     \x20   2,\n\
+     \x20 )\n"
+);
+
+// Comments inside a list literal are preserved the same way.
+trivia_case!(
+    list_element_comments,
+    "fn main() : List(Int) =\n\
+     \x20 [\n\
+     \x20   1,  -- one\n\
+     \x20   2,  -- two\n\
+     \x20 ]\n"
+);
+
+// Comments inside a tuple literal are preserved the same way.
+trivia_case!(
+    tuple_element_comments,
+    "fn main() =\n\
+     \x20 (\n\
+     \x20   1,  -- x coord\n\
+     \x20   2,  -- y coord\n\
+     \x20 )\n"
 );

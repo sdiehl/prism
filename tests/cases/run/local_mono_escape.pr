@@ -1,0 +1,26 @@
+-- An effectful closure escapes: three `\() -> log(weight(n))` thunks buried in a
+-- list, applied dynamically through `run_all`. No static analysis can tell the
+-- monadified closures apart at that apply site, so the Log component reifies into
+-- the free monad. `weight` is a pure, closure-inert helper the escaping closures
+-- share with the rest of the program: local monadification leaves it shared
+-- rather than dragging it into the monadic region. Paired with
+-- `local_mono_combined.pr`, which adds an unrelated fused stream pipeline; the
+-- perf gate asserts the pipeline allocates zero extra eff-op cells.
+effect Log {
+  ctl log(Int) : Int
+}
+
+fn weight(x) = x * 3
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f())
+
+fn logged() =
+  let fs = [\() -> log(weight(1)), \() -> log(weight(2)), \() -> log(weight(3))]
+  handle run_all(fs, 0) with
+    log(n, k) => k(n)
+    return r => r
+
+fn main() = println(logged())

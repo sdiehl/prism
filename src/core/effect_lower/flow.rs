@@ -118,6 +118,26 @@ pub(super) fn escapes(core: &Core, lat: &Latent, flow: &ThunkFlow) -> bool {
     })
 }
 
+// The functions whose body lets an effectful thunk escape untrackably (the
+// per-function witnesses of [`escapes`]). Local monadification seeds its
+// monadic region from these: only the component entangled with one of them
+// pays the free-monad cost, the rest stays fusable.
+pub(super) fn escaping_fns(core: &Core, lat: &Latent, flow: &ThunkFlow) -> BTreeSet<Sym> {
+    core.fns
+        .iter()
+        .filter(|f| {
+            let loc: Loc = f
+                .params
+                .iter()
+                .copied()
+                .zip(flow.param[&f.name].iter().cloned())
+                .collect();
+            esc(&f.body, &loc, lat, flow)
+        })
+        .map(|f| f.name)
+        .collect()
+}
+
 // An effectful thunk buried inside a constructor or tuple (a top-level thunk
 // value is not buried: it is tracked wherever it flows).
 fn buried(v: &Value, loc: &Loc, lat: &Latent) -> bool {

@@ -1,0 +1,43 @@
+-- `break` / `continue` over `loop` and `while`. The internal control effects are
+-- fully handled at each loop, so `collatz_len` and `count_odds` stay pure `(Int)
+-- -> Int`; a nested loop's `break` binds to the nearest loop only.
+fn collatz_len(start : Int) : Int =
+  var n := start
+  var steps := 0
+  loop
+    if n <= 1 then
+      break
+    if n % 2 == 0 then
+      n := n / 2
+    else
+      n := 3 * n + 1
+    steps += 1
+  steps
+
+fn count_odds(limit : Int) : Int =
+  var i := 0
+  var odds := 0
+  while i < limit do
+    i += 1
+    if i % 2 == 0 then
+      continue
+    odds += 1
+  odds
+
+fn rectangle(rows : Int, cols : Int) : Int =
+  var r := 0
+  var cells := 0
+  while r < rows do
+    var c := 0
+    loop
+      if c >= cols then
+        break
+      cells += 1
+      c += 1
+    r += 1
+  cells
+
+fn main() =
+  println(collatz_len(27))
+  println(count_odds(10))
+  println(rectangle(3, 4))

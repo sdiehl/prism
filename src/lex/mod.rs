@@ -29,6 +29,8 @@ const fn opens_block(t: &Token) -> bool {
             | Token::Transact
             | Token::Do
             | Token::Where
+            // `loop <block>` opens directly; `while cond do <block>` opens at `do`.
+            | Token::Loop
     )
 }
 

@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optics_where.pr
+---
+[Player(a, 15, [Item(sword, 1)]), Player(b, 0, [Item(sword, 1)]), Player(c, 13, [Item(sword, 1)])]
+[Player(X, 5, [Item(sword, 1)]), Player(b, 0, [Item(sword, 1)]), Player(X, 3, [Item(sword, 1)])]
+World([Player(a, 5, [Item(sword, 6)]), Player(b, 0, [Item(sword, 1)]), Player(c, 3, [Item(sword, 6)])], 1)
+=> ()

@@ -59,7 +59,9 @@ impl CoreOp {
             BinOp::Lef => Self::Lef,
             BinOp::Gtf => Self::Gtf,
             BinOp::Gef => Self::Gef,
-            BinOp::And | BinOp::Or => return None,
+            // `And`/`Or` short-circuit and `Pow` lowers to a class method call;
+            // none is a primitive core op.
+            BinOp::And | BinOp::Or | BinOp::Pow => return None,
         })
     }
 }
@@ -132,8 +134,35 @@ pub enum Comp {
     StrBuiltin(Builtin, Vec<Value>),
     Dup(Value),
     Drop(Value),
-    ReuseToken(Value),
-    Reuse(Value, Value),
+    // Free `freed` (a cell the matched scrutinee owned and that is now dead) and
+    // bind its shell as a reuse `token` scoped over `body`. The token is a binder,
+    // so the cell is freed at exactly one point; only `Reuse` can name the token,
+    // and it spends it building a constructor in place. Freed-once and
+    // spent-at-an-allocation are thus structural properties of the term, not a
+    // post-hoc check. Built by the reuse pass from a `drop` paired with a later
+    // allocation; lowers to the same `prism_reuse_token` call the threaded form
+    // did (it is just the `drop`+`bind` fused into one scoped node).
+    WithReuse {
+        token: Sym,
+        freed: Value,
+        body: Box<Self>,
+    },
+    // Build `ctor` in place over the cell held by reuse `token` (a binder of an
+    // enclosing `WithReuse`). Allocation-free: it overwrites the freed shell
+    // instead of calling the allocator. The token is the only operand position
+    // that may name a reuse token.
+    Reuse(Sym, Value),
+    // A local mutable cell, the runtime form of an escape-checked `var`. The
+    // effect-lowering pass `erase_local_vars` rewrites a closed var/State handler
+    // into these, so a `var` loop runs as a real loop (constant stack, no
+    // per-operation reification) instead of the free monad.
+    //   RefNew(v)      allocate a one-field cell holding v; result owns the cell
+    //   RefGet(c)      read the cell's field (an owned snapshot; c is borrowed)
+    //   RefSet(c, v)   overwrite the cell's field with v in place (c borrowed, v
+    //                  moved in); yields Unit
+    RefNew(Value),
+    RefGet(Value),
+    RefSet(Value, Value),
 }
 
 impl Comp {
@@ -165,8 +194,11 @@ impl Comp {
             Self::StrBuiltin(..) => "StrBuiltin",
             Self::Dup(_) => "Dup",
             Self::Drop(_) => "Drop",
-            Self::ReuseToken(_) => "ReuseToken",
+            Self::WithReuse { .. } => "WithReuse",
             Self::Reuse(..) => "Reuse",
+            Self::RefNew(_) => "RefNew",
+            Self::RefGet(_) => "RefGet",
+            Self::RefSet(..) => "RefSet",
         }
     }
 }
@@ -240,8 +272,18 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
-        | Comp::ReuseToken(v) => {
+        | Comp::Reuse(_, v)
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => {
             calls_in_val(v, out);
+        }
+        Comp::RefSet(c, v) => {
+            calls_in_val(c, out);
+            calls_in_val(v, out);
+        }
+        Comp::WithReuse { freed, body, .. } => {
+            calls_in_val(freed, out);
+            calls_in(body, out);
         }
         Comp::Bind(m, _, n) => {
             calls_in(m, out);
@@ -268,10 +310,6 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         Comp::Prim(_, a, b) => {
             calls_in_val(a, out);
             calls_in_val(b, out);
-        }
-        Comp::Reuse(t, v) => {
-            calls_in_val(t, out);
-            calls_in_val(v, out);
         }
         Comp::StrBuiltin(_, args) | Comp::Do(_, args) => {
             for a in args {

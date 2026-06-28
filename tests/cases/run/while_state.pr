@@ -4,7 +4,7 @@ effect Counter {
 }
 
 fn count_up() : !{Counter, IO} Unit =
-  while(\() -> get(()) < 4) fn
+  while get(()) < 4 do
     println(get(()) * 10)
     bump(())
 

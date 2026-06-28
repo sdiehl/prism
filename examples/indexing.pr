@@ -1,0 +1,44 @@
+-- Indexing sugar. `a[i]` reads, `a[i] := v` writes in place (FBIP, when the
+-- container is uniquely owned), and `a[i] += e` updates. A read of a missing
+-- index or key performs the `Fail` effect (the Verse failure axis), so it
+-- composes with `??` to supply a default instead of forcing an `Option` unwrap
+-- at every access: the partiality lives in the effect row, not in a wrapper
+-- type. Arrays (Int keys) and hashmaps (String keys) are mutable; strings (byte
+-- reads) and lists are read-only. Dispatch is on the receiver's type, so no new
+-- class is needed.
+--
+-- Prints:
+--   99
+--   999
+--   3
+--   1
+--   104
+--   20
+
+-- Tally the words into a hashmap. The counter idiom `m[k] := (m[k] ?? 0) + 1`
+-- is honest that an absent key starts at zero; the `??` discharges the read's
+-- `Fail`, so this whole function stays pure.
+fn word_counts(ws : List(String)) : HashMap(Int) =
+  var m := hm_new()
+  for w in sof(ws) do
+    m[w] := (m[w] ?? 0) + 1
+  m
+
+fn main() : !{IO} Unit =
+  var a := array_of_list([10, 20, 30])
+  a[1] := 99
+  println(show(a[1] ?? 0))
+  -- 99: the in-place write
+  println(show(a[9] ?? 999))
+  -- 999: out of range, defaulted through ??
+  let counts = word_counts(["pear", "apple", "pear", "pear", "fig"])
+  println(show(counts["pear"] ?? 0))
+  -- 3
+  println(show(counts["fig"] ?? 0))
+  -- 1
+  let s = "hello"
+  println(show(s[0] ?? 0))
+  -- 104: the byte 'h'
+  let xs = [10, 20, 30]
+  println(show(xs[1] ?? 0))
+-- 20: lists index too (read-only)

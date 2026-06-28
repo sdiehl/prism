@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{Core, Expr, Program, S};
+use crate::syntax::ast::{Core, Decl, Expr, Program, S};
 use crate::types::effects;
 use crate::types::ty::{EffRow, Effects, Type};
 
@@ -66,6 +66,12 @@ pub enum HeadKey {
 }
 
 pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
+
+// The canonical-instance designation: for a `(class, head)` that several
+// instances share, the one implicit resolution selects. Built from `canonical`
+// decls beside `inst_keys`, keying each `(class, head)` to the chosen instance
+// name so resolution is deterministic instead of ambiguous.
+pub type Canon = BTreeMap<(String, HeadKey), String>;
 
 // How a constraint is discharged at a use site: a top-level instance dictionary
 // (applied to its context dictionaries) or the i-th hidden dictionary parameter
@@ -135,6 +141,7 @@ pub struct Checked {
     pub classes: BTreeMap<String, ClassInfo>,
     pub instances: BTreeMap<String, InstInfo>,
     pub inst_keys: InstKeys,
+    pub canonical: Canon,
     pub methods: BTreeMap<String, (String, usize)>,
     pub constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     pub dicts: DictTable,
@@ -194,11 +201,26 @@ struct Wanted {
     items: Vec<(String, Type, Option<String>)>,
 }
 
+// A deferred indexed read/write, resolved by head-type dispatch at the end of
+// the declaration. `recv`/`key` are the synthed operand types (applied at
+// resolution); `result` is the element existential to solve (and the read's
+// result type); `val` is `Some(value type)` for a write (checked against the
+// element type), `None` for a read (which also performs `Fail`).
+struct IndexOp {
+    span: Span,
+    recv_span: Span,
+    recv: Type,
+    key: Type,
+    result: u32,
+    val: Option<Type>,
+}
+
 struct Tc<'a> {
     ctx: Vec<Entry>,
     next: u32,
     seeds: u32,
     ctors: &'a BTreeMap<String, CtorInfo>,
+    data: &'a BTreeMap<String, DataInfo>,
     eff_ops: &'a BTreeMap<String, EffOpInfo>,
     field_res: BTreeMap<Span, (String, usize, usize)>,
     path_res: PathRes,
@@ -208,6 +230,7 @@ struct Tc<'a> {
     classes: &'a BTreeMap<String, ClassInfo>,
     instances: &'a BTreeMap<String, InstInfo>,
     inst_keys: &'a InstKeys,
+    canonical: &'a Canon,
     constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
     // The named function whose body is currently being checked, with its self
     // type and the class constraints in force. `None` when no self scope is
@@ -215,6 +238,17 @@ struct Tc<'a> {
     // and the non-nesting invariant enforceable by save/restore.
     cur_self: Option<SelfRef>,
     wanted: Vec<Wanted>,
+    // Numeric operands left ambiguous at an arithmetic/comparison operator: each
+    // (span, operand type) is resolved in one pass at the end of the declaration
+    // (`resolve_all`), so a later use can fix the type to a fixed-width lane
+    // before the otherwise-`Int` default applies. Symmetric in the two operands.
+    num_default: Vec<(Span, Type)>,
+    // Indexed reads/writes (`a[i]`, `a[i] := v`) whose receiver type was not yet
+    // resolved at synth (a `var`'s state existential is solved only once its
+    // initializer is checked). Each is dispatched on the receiver's head type in
+    // one pass at the end of the declaration (`resolve_all`, before `num_default`
+    // so an index's element type is known to numeric defaulting).
+    index_ops: Vec<IndexOp>,
     dicts: BTreeMap<Span, Vec<Dict>>,
     // Innermost-last instantiation scopes for parametric effects: each entry
     // ties an effect name to the type args in force (handler or latent row).
@@ -226,6 +260,18 @@ struct Tc<'a> {
     // body; `None` when no scope is active. Tail and prefix move in lockstep so
     // they cannot desync.
     cur_row: Option<RowScope>,
+    // Innermost-last stack of active handler bodies. A `mask<E>` marks the
+    // nearest frame that handles `E` as not discharging it, so the masked
+    // operation tunnels past that one handler and stays in the residual row
+    // (the handler it skips is the innermost enclosing one, by construction).
+    handler_stack: Vec<HandlerFrame>,
+}
+
+// One active handler while its body is checked: the effects its arms handle,
+// and those a `mask` inside the body has tunnelled past it.
+struct HandlerFrame {
+    handled: BTreeSet<Sym>,
+    masked: BTreeSet<Sym>,
 }
 
 // Ambient self-reference state for the body of a named declaration.
@@ -257,40 +303,134 @@ fn concrete_effects(ty: &Type) -> Effects {
     }
 }
 
+// A top-level constant must be effect-free: its initializer runs once at load
+// with no handler in scope. This is a syntactic check over the call graph,
+// independent of type inference, so it runs before the constant is inferred.
+fn konst_effect_free(
+    d: &Decl<Core>,
+    effects: &BTreeMap<String, Effects>,
+    eff_ops: &BTreeMap<String, EffOpInfo>,
+) -> Result<(), TypeError> {
+    let effs = effects::of_decl(d, effects, eff_ops);
+    if !effs.is_empty() {
+        let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
+        return Err(TypeError::Other {
+            span: d.body.span,
+            msg: format!(
+                "top-level constant `{}` must be effect-free; it performs {}",
+                d.name,
+                list.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
+// The post-inference checks for a function: reconcile the call-graph set pass
+// against the inferred row, enforce `borrow`-implies-pure, and check the declared
+// effect annotation. Returns the `DeclInfo` to record. Shared by the singleton
+// and mutually recursive driver paths.
+fn finalize_fn(
+    d: &Decl<Core>,
+    ty: Type,
+    warnings: &mut Vec<Warning>,
+) -> Result<DeclInfo, TypeError> {
+    // The labels of the inferred row. Effect-row inference is now principal: it
+    // discovers every effect on its own (direct performs, applied effect-carrying
+    // callees, builtin rows, `mask`), so the row is the single source of truth.
+    // The old `set-pass ⊆ inferred` reconciliation is gone with the seed it
+    // guarded: the set pass over-approximates effect-polymorphic and
+    // higher-order-laundered effects as concrete labels, so it can only disagree
+    // by over-reporting now. Real under-coverage is caught downstream by
+    // `reconcile_effects` (lowered ops vs the row) and the parity oracle.
+    let inferred = concrete_effects(&ty);
+    if d.params.iter().any(|p| p.borrow) && !inferred.is_empty() {
+        let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
+        return Err(TypeError::Other {
+            span: d.span,
+            msg: format!(
+                "`{}` has a `borrow` parameter but is not pure; it performs {}",
+                d.name,
+                list.join(", ")
+            ),
+        });
+    }
+    if let Some(declared) = &d.eff {
+        let declared_set: BTreeSet<Sym> = declared.iter().map(|l| Sym::from(&l.name)).collect();
+        for eff in &inferred {
+            if !declared_set.contains(eff) {
+                return Err(TypeError::Other {
+                    span: d.body.span,
+                    msg: format!("in `{}`: effect `{eff}` not declared in annotation", d.name),
+                });
+            }
+        }
+        // The reverse direction is sound (a pure body satisfies an effectful
+        // annotation by subsumption) but the annotation then disagrees with the
+        // inferred row, so warn rather than reject: a declared effect the body
+        // never performs is dead weight.
+        for eff in &declared_set {
+            if !inferred.contains(eff) {
+                warnings.push(Warning {
+                    span: d.span,
+                    msg: format!(
+                        "in `{}`: effect `{eff}` declared in the annotation but never performed",
+                        d.name
+                    ),
+                });
+            }
+        }
+    }
+    Ok(DeclInfo {
+        name: d.name.clone(),
+        params: d.params.iter().map(|p| p.name.clone()).collect(),
+        ty,
+        effects: inferred,
+    })
+}
+
 /// # Errors
 /// Fails when the program does not type check.
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
     let seeds = env::seed_var_states(&eff_ops);
-    let (classes, instances, inst_keys, methods, mut constrained, warnings) =
+    let (classes, instances, inst_keys, canonical, methods, mut constrained, mut warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
     let effects = effects::fixpoint(prog, &eff_ops);
+    // Validate where-clauses and record each constrained function's scheme up
+    // front; this is order-independent and must precede inference. Functions are
+    // *not* seeded into `env` here: a referenced top-level binding is seeded into
+    // `env` by its own strongly-connected component just before that component is
+    // inferred (callee components first), so by the time it is referenced it
+    // already holds either a real generalized scheme (an earlier component) or
+    // the monomorphic self-type of a mutually recursive sibling (the same
+    // component). A constrained function is fully annotated, so its stored scheme
+    // is its annotation scheme, which is exactly what its component seeds.
     for d in &prog.fns {
-        let stub = env::fn_stub(d);
-        if !d.constraints.is_empty() {
-            if d.params.iter().any(|p| p.ty.is_none()) || d.ret.is_none() {
+        if d.constraints.is_empty() {
+            continue;
+        }
+        if d.params.iter().any(|p| p.ty.is_none()) || d.ret.is_none() {
+            return Err(TypeError::Other {
+                span: d.span,
+                msg: format!(
+                    "`{}` has a where clause and needs full parameter and return type annotations",
+                    d.name
+                ),
+            });
+        }
+        let mut cs = Vec::new();
+        for c in &d.constraints {
+            if !classes.contains_key(&c.class) {
                 return Err(TypeError::Other {
-                    span: d.span,
-                    msg: format!(
-                        "`{}` has a where clause and needs full parameter and return type annotations",
-                        d.name
-                    ),
+                    span: c.span,
+                    msg: format!("unknown class {}", c.class),
                 });
             }
-            let mut cs = Vec::new();
-            for c in &d.constraints {
-                if !classes.contains_key(&c.class) {
-                    return Err(TypeError::Other {
-                        span: c.span,
-                        msg: format!("unknown class {}", c.class),
-                    });
-                }
-                cs.push((c.class.clone(), env::convert_data(&c.ty)));
-            }
-            constrained.insert(d.name.clone(), (stub.clone(), cs));
+            cs.push((c.class.clone(), env::convert_data(&c.ty)));
         }
-        env.insert(Sym::from(&d.name), stub);
+        constrained.insert(d.name.clone(), (env::fn_stub(d), cs));
     }
     let field_res;
     let path_res;
@@ -304,6 +444,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             next: seeds,
             seeds,
             ctors: &ctors,
+            data: &data,
             eff_ops: &eff_ops,
             field_res: BTreeMap::new(),
             path_res: PathRes::new(),
@@ -313,96 +454,72 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             classes: &classes,
             instances: &instances,
             inst_keys: &inst_keys,
+            canonical: &canonical,
             constrained,
             cur_self: None,
             wanted: Vec::new(),
+            num_default: Vec::new(),
+            index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,
+            handler_stack: Vec::new(),
         };
-        for d in &prog.fns {
-            if d.konst {
-                let effs = effects::of_decl(d, &effects, &eff_ops);
-                if !effs.is_empty() {
-                    let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
-                    return Err(TypeError::Other {
-                        span: d.body.span,
-                        msg: format!(
-                            "top-level constant `{}` must be effect-free; it performs {}",
-                            d.name,
-                            list.join(", ")
-                        ),
+        // Check each strongly-connected component after its callee components, so
+        // a forward reference (notably one into a stdlib module merged after the
+        // prelude) sees a generalized type, not a structure-free stub. A singleton
+        // (the common case, including a self-recursive function) is inferred on its
+        // own; a mutually recursive group is inferred together against shared
+        // monomorphic variables. `infos` is rebuilt in declaration order afterward
+        // so downstream output is unaffected by the visiting order.
+        for component in effects::dep_sccs(prog) {
+            if component.len() == 1 {
+                let d = &prog.fns[component[0]];
+                if d.konst {
+                    konst_effect_free(d, &effects, &eff_ops)?;
+                    let ty = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
+                    env.insert(Sym::from(&d.name), ty.clone());
+                    infos.push(DeclInfo {
+                        name: d.name.clone(),
+                        params: Vec::new(),
+                        ty,
+                        effects: Effects::new(),
                     });
+                    continue;
                 }
-                let ty = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
+                // Effect-row inference is principal: `infer_decl` discovers the
+                // row on its own, so the set pass no longer seeds it. The set
+                // pass (`effects`) survives only for the syntactic purity checks
+                // (`konst_effect_free` above, instance methods below).
+                let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                 env.insert(Sym::from(&d.name), ty.clone());
-                infos.push(DeclInfo {
-                    name: d.name.clone(),
-                    params: Vec::new(),
-                    ty,
-                    effects: Effects::new(),
-                });
+                infos.push(finalize_fn(d, ty, &mut warnings)?);
                 continue;
             }
-            // The set-pass result is a load-bearing *seed* for row inference,
-            // not a redundant parallel computation: it tells `infer_decl` which
-            // effect labels to place in this function's row prefix so direct
-            // `do op` and effect-op calls land in the row. Drop it and a function
-            // that performs `raise` infers as pure. So `effects.rs` cannot be
-            // collapsed into a pure row projection without first making effect-row
-            // inference fully principal (discovering labels on its own).
-            let latent_set = effects.get(&d.name).cloned().unwrap_or_default();
-            let latent = EffRow::from_set(&latent_set);
-            let ty = tc
-                .infer_decl(&env, d, &latent)
-                .map_err(|e| e.in_fn(&d.name))?;
-            env.insert(Sym::from(&d.name), ty.clone());
-            // The labels of the inferred row, which (unlike the set pass) sees
-            // effects laundered through applied function values.
-            let inferred = concrete_effects(&ty);
-            // Reconcile the two effect engines on every build, not just in debug:
-            // the call-graph set pass must never over-report relative to the row
-            // the unifier inferred. A mismatch is a compiler bug, not a user error.
-            if !latent_set.is_subset(&inferred) {
-                return Err(TypeError::Ice {
-                    msg: format!(
-                        "set-pass effects {latent_set:?} exceed inferred row {inferred:?} for `{}`",
-                        d.name
-                    ),
-                });
-            }
-            if d.params.iter().any(|p| p.borrow) && !inferred.is_empty() {
-                let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
-                return Err(TypeError::Other {
-                    span: d.span,
-                    msg: format!(
-                        "`{}` has a `borrow` parameter but is not pure; it performs {}",
-                        d.name,
-                        list.join(", ")
-                    ),
-                });
-            }
-            if let Some(declared) = &d.eff {
-                let declared_set: BTreeSet<Sym> =
-                    declared.iter().map(|l| Sym::from(&l.name)).collect();
-                for eff in &inferred {
-                    if !declared_set.contains(eff) {
-                        return Err(TypeError::Other {
-                            span: d.body.span,
-                            msg: format!(
-                                "in `{}`: effect `{eff}` not declared in annotation",
-                                d.name
-                            ),
-                        });
-                    }
+            // A mutually recursive group. Effect-freeness of any constant member is
+            // checked up front (syntactic, independent of the type inference), then
+            // the whole group is inferred together.
+            for &di in &component {
+                let d = &prog.fns[di];
+                if d.konst {
+                    konst_effect_free(d, &effects, &eff_ops)?;
                 }
             }
-            infos.push(DeclInfo {
-                name: d.name.clone(),
-                params: d.params.iter().map(|p| p.name.clone()).collect(),
-                ty,
-                effects: inferred,
-            });
+            let members: Vec<&_> = component.iter().map(|&di| &prog.fns[di]).collect();
+            let tys = tc.infer_scc(&mut env, &members)?;
+            for (&di, ty) in component.iter().zip(tys) {
+                let d = &prog.fns[di];
+                if d.konst {
+                    infos.push(DeclInfo {
+                        name: d.name.clone(),
+                        params: Vec::new(),
+                        ty,
+                        effects: Effects::new(),
+                    });
+                } else {
+                    infos.push(finalize_fn(d, ty, &mut warnings)?);
+                }
+            }
         }
         for inst in &prog.instances {
             for m in &inst.methods {
@@ -448,6 +565,17 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         dicts = tc.dicts;
         constrained_final = tc.constrained;
     }
+    // Restore declaration order: `infos` was filled in dependency order, but
+    // consumers (signatures listing, snapshots) expect source order.
+    {
+        let pos: BTreeMap<&str, usize> = prog
+            .fns
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.name.as_str(), i))
+            .collect();
+        infos.sort_by_key(|info| pos.get(info.name.as_str()).copied().unwrap_or(usize::MAX));
+    }
     Ok(Checked {
         env,
         effects,
@@ -462,6 +590,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         classes,
         instances,
         inst_keys,
+        canonical,
         methods,
         constrained: constrained_final,
         dicts,
@@ -511,6 +640,7 @@ fn infer_expr_full(
         next: checked.seeds,
         seeds: checked.seeds,
         ctors: &checked.ctors,
+        data: &checked.data,
         eff_ops: &checked.eff_ops,
         field_res: BTreeMap::new(),
         path_res: PathRes::new(),
@@ -520,12 +650,16 @@ fn infer_expr_full(
         classes: &checked.classes,
         instances: &checked.instances,
         inst_keys: &checked.inst_keys,
+        canonical: &checked.canonical,
         constrained: checked.constrained.clone(),
         cur_self: None,
         wanted: Vec::new(),
+        num_default: Vec::new(),
+        index_ops: Vec::new(),
         dicts: BTreeMap::new(),
         row_ctx: Vec::new(),
         cur_row: None,
+        handler_stack: Vec::new(),
     };
     let t = tc.synth(&env, e)?;
     tc.resolve_all()?;

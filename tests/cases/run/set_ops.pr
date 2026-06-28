@@ -1,0 +1,12 @@
+-- Set algebra over the ordered `Map(k, Unit)` representation: union, intersection,
+-- and difference, plus size and a sorted to-list. Iteration order is the key
+-- order, so the union list is deterministic.
+fn main() : !{IO} Unit =
+  let a = set_from_list([1, 2, 3, 4])
+  let b = set_from_list([3, 4, 5, 6])
+  println(show_int(set_size(set_union(a, b))))
+  println(show_int(set_size(set_intersection(a, b))))
+  println(show_int(set_size(set_difference(a, b))))
+  println(show_int(sum(set_to_list(set_union(a, b)))))
+  println(show_int(sum(set_to_list(set_intersection(a, b)))))
+  println(show_int(sum(set_to_list(set_difference(a, b)))))

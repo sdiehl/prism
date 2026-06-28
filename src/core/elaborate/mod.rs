@@ -11,8 +11,8 @@ use crate::fresh::Fresh;
 use crate::names::{self, dict_ctor, instance_method};
 use crate::sym::Sym;
 use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, Pattern, Program, Spanned,
-    Suffix, S,
+    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, PathOp, PathStep, Pattern,
+    Program, Spanned, Suffix, S,
 };
 use crate::types::{infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL};
 
@@ -41,6 +41,14 @@ type Locals = BTreeMap<String, Option<Type>>;
 
 // A resolved update path: (ctor name, field index, arity) per segment.
 type Chain = Vec<(String, usize, usize)>;
+
+// The terminal action a path applies to the focus it reaches. `Set` replaces
+// the focus with the value; `Modify` forces the value (a function) and applies
+// it to the old focus, so the old field is read before the rebuild.
+enum PathTerm {
+    Set(Value),
+    Modify(Value),
+}
 
 // An integer literal fits the immediate (tagged) form below this many bits.
 // The low bit is the tag, so the payload is 63 bits.
@@ -84,9 +92,12 @@ impl Elab<'_> {
 
     // Name-based chain resolution for REPL re-elaboration, mirroring
     // `field_index_for`. Checked programs carry exact chains in `path_res`.
-    fn path_chain_fallback(&self, path: &[String]) -> Result<Chain, Error> {
+    fn path_chain_fallback(&self, path: &[PathStep<CorePhase>]) -> Result<Chain, Error> {
         path.iter()
             .map(|seg| {
+                let PathStep::Field(seg) = seg else {
+                    return Err(Error::Ice("optic path step survived desugaring".into()));
+                };
                 self.ctors
                     .iter()
                     .find_map(|(cn, info)| {
@@ -105,7 +116,7 @@ impl Elab<'_> {
         &mut self,
         span: Span,
         base_expr: &S<Expr<CorePhase>>,
-        ups: &[(Vec<String>, S<Expr<CorePhase>>)],
+        ups: &[(Vec<PathStep<CorePhase>>, PathOp<CorePhase>)],
         locals: &Locals,
     ) -> Result<Comp, Error> {
         let chains: Vec<Chain> = match self.checked.path_res.get(&span) {
@@ -119,11 +130,16 @@ impl Elab<'_> {
         let bv = self.fresh();
         let mut binds = Vec::new();
         let mut items = Vec::new();
-        for ((_, val), chain) in ups.iter().zip(chains) {
-            let c = self.elab(val, locals)?;
+        for ((_, op), chain) in ups.iter().zip(chains) {
+            let c = self.elab(op.expr(), locals)?;
             let v = self.fresh();
             binds.push((c, v.clone()));
-            items.push((chain, Value::Var(v.into())));
+            let val = Value::Var(v.into());
+            let term = match op {
+                PathOp::Set(_) => PathTerm::Set(val),
+                PathOp::Modify(_) => PathTerm::Modify(val),
+            };
+            items.push((chain, term));
         }
         let rebuilt = wrap_binds(binds, self.rebuild_path(&bv, items)?);
         Ok(Comp::Bind(
@@ -136,7 +152,7 @@ impl Elab<'_> {
     // One Case per level: bind every field, rebuild the constructor with the
     // updated slots, recurse for paths that go deeper. Items at one level
     // share the level's single constructor.
-    fn rebuild_path(&mut self, scrut: &str, items: Vec<(Chain, Value)>) -> Result<Comp, Error> {
+    fn rebuild_path(&mut self, scrut: &str, items: Vec<(Chain, PathTerm)>) -> Result<Comp, Error> {
         let (cname, _, n) = items
             .first()
             .and_then(|(chain, _)| chain.first())
@@ -148,18 +164,32 @@ impl Elab<'_> {
             .iter()
             .map(|f| Value::Var(f.clone().into()))
             .collect();
-        let mut groups: BTreeMap<usize, Vec<(Chain, Value)>> = BTreeMap::new();
+        let mut groups: BTreeMap<usize, Vec<(Chain, PathTerm)>> = BTreeMap::new();
         for (chain, v) in items {
             groups.entry(chain[0].1).or_default().push((chain, v));
         }
         let mut binds = Vec::new();
         for (fi, group) in groups {
             if group[0].0.len() == 1 {
-                vals[fi] = group
+                let term = group
                     .into_iter()
                     .next()
                     .ok_or_else(|| Error::Ice("empty record-update path group".into()))?
                     .1;
+                vals[fi] = match term {
+                    PathTerm::Set(v) => v,
+                    // `~ f`: force the function value and apply it to the old
+                    // field, binding the result as the new field.
+                    PathTerm::Modify(f) => {
+                        let nv = self.fresh();
+                        let app = Comp::App(
+                            Box::new(Comp::Force(f)),
+                            vec![Value::Var(fields[fi].clone().into())],
+                        );
+                        binds.push((app, nv.clone()));
+                        Value::Var(nv.into())
+                    }
+                };
             } else {
                 let sub = group
                     .into_iter()
@@ -386,6 +416,8 @@ impl Elab<'_> {
                 };
                 self.constrained_value(x, e.span)?
             }
+            Expr::Index(recv, key) => self.elab_index(recv, key, locals)?,
+            Expr::IndexSet(recv, key, val) => self.elab_index_set(recv, key, val, locals)?,
             Expr::Ann(inner, _) => self.elab(inner, locals)?,
             Expr::Bin(BinOp::And, a, b) => {
                 let ca = self.elab(a, locals)?;
@@ -783,6 +815,78 @@ impl Elab<'_> {
         };
         Ok(wrap_binds(binds, body))
     }
+
+    // `recv[key]`: dispatch on the receiver's checked head type to the failable
+    // accessor for that container, the type-directed pattern of `show_dispatch`.
+    // tc already proved the receiver indexable, so an unresolved or unexpected
+    // type here is a compiler bug.
+    fn elab_index(
+        &mut self,
+        recv: &S<Expr<CorePhase>>,
+        key: &S<Expr<CorePhase>>,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let accessor = match self.checked.span_types.get(&recv.span) {
+            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "at_array",
+            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "at_hashmap",
+            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "at_list",
+            Some(Type::Str) => "at_byte",
+            other => {
+                return Err(Error::Ice(format!(
+                    "indexing receiver is not a known container at {:?}: {other:?}",
+                    recv.span
+                )))
+            }
+        };
+        let cr = self.elab(recv, locals)?;
+        let vr = self.fresh();
+        let ck = self.elab(key, locals)?;
+        let vk = self.fresh();
+        let body = Comp::Call(
+            accessor.into(),
+            vec![Value::Var(vr.clone().into()), Value::Var(vk.clone().into())],
+        );
+        Ok(wrap_binds(vec![(cr, vr), (ck, vk)], body))
+    }
+
+    // `recv[key] := val`: dispatch on the receiver's head type to the in-place
+    // (FBIP) setter builtin. tc restricts writes to `Array`/`HashMap`.
+    fn elab_index_set(
+        &mut self,
+        recv: &S<Expr<CorePhase>>,
+        key: &S<Expr<CorePhase>>,
+        val: &S<Expr<CorePhase>>,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let setter = match self.checked.span_types.get(&recv.span) {
+            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "array_set",
+            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "hm_insert",
+            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "list_set",
+            other => {
+                return Err(Error::Ice(format!(
+                    "indexed assignment target is not a writable container at {:?}: {other:?}",
+                    recv.span
+                )))
+            }
+        };
+        let cr = self.elab(recv, locals)?;
+        let vr = self.fresh();
+        let ck = self.elab(key, locals)?;
+        let vk = self.fresh();
+        let cv = self.elab(val, locals)?;
+        let vv = self.fresh();
+        // `array_set` is a builtin, `hm_insert` a prelude function; `head_call`
+        // emits the right form (StrBuiltin vs Call) for each.
+        let body = Self::head_call(
+            setter,
+            vec![
+                Value::Var(vr.clone().into()),
+                Value::Var(vk.clone().into()),
+                Value::Var(vv.clone().into()),
+            ],
+        )?;
+        Ok(wrap_binds(vec![(cr, vr), (ck, vk), (cv, vv)], body))
+    }
 }
 
 fn subst_ty(ty: &Type, subst: &BTreeMap<String, Type>) -> Type {
@@ -946,9 +1050,13 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             all.extend(params);
             params = all;
         }
+        let body = elab.elab(&d.body, &locals).map_err(|e| match e {
+            Error::Ice(m) => Error::Ice(format!("in `{}`: {m}", d.name)),
+            other => other,
+        })?;
         fns.push(CoreFn {
             name: d.name.clone().into(),
-            body: elab.elab(&d.body, &locals)?,
+            body,
             params: params.into_iter().map(Sym::from).collect(),
         });
     }

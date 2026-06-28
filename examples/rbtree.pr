@@ -39,7 +39,7 @@ fn ins(x, t) : ! RB =
 fn blacken(t) : ! RB =
   match t of
     E => E
-    T(c, l, x, r) => T(B, l, x, r)
+    T(_c, l, x, r) => T(B, l, x, r)
 
 fn insert(x, t) : ! RB = blacken(ins(x, t))
 
@@ -51,17 +51,17 @@ fn from_list(xs, t) : ! RB =
 fn size(t) : ! Int =
   match t of
     E => 0
-    T(c, l, x, r) => 1 + size(l) + size(r)
+    T(_c, l, _x, r) => 1 + size(l) + size(r)
 
 fn sum_rb(t) : ! Int =
   match t of
     E => 0
-    T(c, l, x, r) => x + sum_rb(l) + sum_rb(r)
+    T(_c, l, x, r) => x + sum_rb(l) + sum_rb(r)
 
 fn member(x, t) : ! Bool =
   match t of
     E => false
-    T(c, l, v, r) =>
+    T(_c, l, v, r) =>
       if x == v then
         true
       elif x < v then
@@ -72,7 +72,7 @@ fn member(x, t) : ! Bool =
 fn black_height(t) : ! Int =
   match t of
     E => 1
-    T(c, l, x, r) =>
+    T(c, l, _x, r) =>
       let lh = black_height(l)
       let rh = black_height(r)
       if lh < 0 || rh < 0 || lh /= rh then

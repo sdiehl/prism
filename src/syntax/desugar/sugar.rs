@@ -6,7 +6,9 @@ use super::effects::{rw, Vars};
 use super::{call, evar, sp, sp_sugar, Cx};
 use crate::error::TypeError;
 use crate::names;
-use crate::syntax::ast::{Arm, Core, Expr, Marker, Param, Pattern, PatternDecl, Spanned, S};
+use crate::syntax::ast::{
+    Arm, BinOp, Core, Expr, Marker, Param, Pattern, PatternDecl, Spanned, Sugar, S,
+};
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
 // clause); any other keyword is the optional `make` clause.
@@ -297,6 +299,82 @@ pub fn let_stmt(x: String, v: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<E
         Ok(scrut) => try_stmt(Some(x), scrut, rest, l),
         Err(v) => sp(Expr::Let(x, Box::new(v), Box::new(rest)), Span::new(l, r)),
     }
+}
+
+// `lvalue := value`: assign to a `var` (`Sugar::Assign`) or an index target
+// `a[i]` (`Sugar::IndexAssign`). Any other left side is a parse error.
+/// # Errors
+/// Fails when the left side is neither a variable nor an index.
+pub fn assign_stmt(
+    lhs: S<Expr>,
+    value: S<Expr>,
+    l: usize,
+    r: usize,
+) -> Result<S<Expr>, (Span, String)> {
+    let span = Span::new(l, r);
+    match lhs.node {
+        Expr::Var(name) => Ok(sp(Expr::Sugar(Sugar::Assign(name, Box::new(value))), span)),
+        Expr::Index(recv, key) => Ok(sp(
+            Expr::Sugar(Sugar::IndexAssign(recv, key, Box::new(value))),
+            span,
+        )),
+        _ => Err((
+            lhs.span,
+            "the left side of `:=` must be a variable or an index `a[i]`".into(),
+        )),
+    }
+}
+
+// `lvalue <op>= e` on a `var` or index target. The index form reads the element
+// with a synth `Index` so the formatter restores the `a[i] <op>= e` surface.
+/// # Errors
+/// Fails when the left side is neither a variable nor an index.
+pub fn compound_stmt(
+    lhs: S<Expr>,
+    op: BinOp,
+    value: S<Expr>,
+    l: usize,
+    r: usize,
+) -> Result<S<Expr>, (Span, String)> {
+    let span = Span::new(l, r);
+    match lhs.node {
+        Expr::Var(name) => Ok(compound_assign(name, op, value, l, r)),
+        Expr::Index(recv, key) => {
+            let read = Spanned {
+                synth: true,
+                node: Expr::Index(recv.clone(), key.clone()),
+                span,
+            };
+            let rhs = Spanned {
+                synth: true,
+                node: Expr::Bin(op, Box::new(read), Box::new(value)),
+                span,
+            };
+            Ok(sp(
+                Expr::Sugar(Sugar::IndexAssign(recv, key, Box::new(rhs))),
+                span,
+            ))
+        }
+        _ => Err((
+            lhs.span,
+            "the left side of a compound assignment must be a variable or an index `a[i]`".into(),
+        )),
+    }
+}
+
+// `x <op>= e` is sugar for `x := x <op> e`. The synthesized RHS `Bin` is marked
+// `synth` so the formatter restores the compound surface, while a hand-written
+// `x := x + e` (a non-synth `Bin`) keeps its explicit form.
+#[must_use]
+pub fn compound_assign(x: String, op: BinOp, v: S<Expr>, l: usize, r: usize) -> S<Expr> {
+    let span = Span::new(l, r);
+    let lhs = sp(Expr::Var(x.clone()), span);
+    let rhs = Spanned {
+        synth: true,
+        node: Expr::Bin(op, Box::new(lhs), Box::new(v)),
+        span,
+    };
+    sp(Expr::Sugar(Sugar::Assign(x, Box::new(rhs))), span)
 }
 
 // Assemble a `pattern` declaration from its parsed clauses: exactly one

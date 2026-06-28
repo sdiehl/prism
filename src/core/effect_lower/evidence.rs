@@ -345,7 +345,23 @@ pub(super) fn resume_set(resume: Sym) -> BTreeSet<Sym> {
 // `resume(v)` into `return v`. Returns None when the clause is not
 // tail-resumptive (resume captured, used off the tail, or some path never
 // resumes), which is exactly the eligibility test.
+//
+// Post-condition guard: a successful strip erases the continuation, so no resume
+// alias may survive in the result. This is an IR-level enforcement of the
+// structural assumption about elaborator output. An upstream change that emitted
+// a clause shape this matcher misreads (accepting it yet leaving a live resume
+// reference) is caught here as an assertion failure rather than
+// miscompiling. Asserts at every level since each recursive call re-enters here.
 pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
+    let stripped = strip_resume_go(c, aliases)?;
+    debug_assert!(
+        fv::comp(&stripped).is_disjoint(aliases),
+        "strip_resume accepted a clause but left a resume reference: elaborated shape drifted"
+    );
+    Some(stripped)
+}
+
+fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
     match c {
         Comp::App(f, args) if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) =>
         {

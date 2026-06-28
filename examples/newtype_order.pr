@@ -1,0 +1,26 @@
+-- The coherence-preserving way to get "a different Ord" is a newtype, not an
+-- override of the base instance. Int has one canonical Ord (ascending), and
+-- coherence keeps it that way: there is no second implicit Ord(Int). To sort
+-- descending we wrap in a newtype whose OWN canonical Ord reverses the order.
+-- This changes the type, not the instance-for-a-type, so the difference is
+-- visible in the signature and no `canonical ... = ...` designation is needed:
+-- Down has exactly one Ord, so it is canonical by default.
+
+newtype Down = Down(Int) deriving (Show)
+
+instance eqDown : Eq(Down) {
+  fn eq(a, b) = match (a, b) of { (Down(x), Down(y)) => x == y }
+}
+
+-- Reverse the base ordering: a larger inner Int sorts first.
+instance ordDown : Ord(Down) {
+  fn cmp(a, b) = match (a, b) of { (Down(x), Down(y)) => int_cmp(y, x) }
+}
+
+fn main() : !{IO} Unit =
+  let xs = [3, 1, 2]
+  -- sort here resolves the canonical Ord(Int): ascending.
+  println("ascending  (canonical Ord Int) = {sort(xs)}")
+  -- Same sort, resolving Down's own canonical Ord: descending.
+  let ds = [Down(3), Down(1), Down(2)]
+  println("descending (Down's own Ord)    = {sort(ds)}")

@@ -5,10 +5,23 @@ use marginalia::Span;
 use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
 use crate::error::TypeError;
 use crate::lex::lex_raw;
+use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
 use crate::types::ty::{EffRow, Effects, Label, Type};
+
+// Effects the compiler knows without an `effect` declaration: the IO/Exn
+// builtins, the indexing/`??` `Fail`, and the internal loop/return control
+// effects desugaring injects. Anything else named in a row must be declared.
+pub(super) fn is_builtin_effect(name: &str) -> bool {
+    name == names::IO_EFFECT
+        || name == names::EXN_EFFECT
+        || name == names::FAIL_EFFECT
+        || name == names::BREAK_EFFECT
+        || name == names::CONTINUE_EFFECT
+        || name == names::RETURN_EFFECT
+}
 
 pub(super) struct Annot<'a> {
     ty_ex: &'a mut BTreeMap<String, u32>,
@@ -48,7 +61,16 @@ impl Tc<'_> {
                 self.check_annot_rows(r, span)
             }
             ast::Ty::Con(n, ts) => {
+                // Impredicativity is a structural property of the written type,
+                // independent of whether the head constructor is declared, so it
+                // is reported before the existence check.
                 no_polytype_args(ts, n, span)?;
+                if !self.data.contains_key(n) {
+                    return Err(TypeError::Other {
+                        span,
+                        msg: format!("unknown type `{n}`"),
+                    });
+                }
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
             ast::Ty::App(v, ts) => {
@@ -71,18 +93,27 @@ impl Tc<'_> {
                 .values()
                 .find(|i| i.effect_name == l.name)
                 .map(|i| i.eff_params.len());
-            if let Some(want) = known {
-                if !l.args.is_empty() && l.args.len() != want {
+            match known {
+                Some(want) => {
+                    if !l.args.is_empty() && l.args.len() != want {
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!(
+                                "effect `{}` expects {} type argument(s), got {}",
+                                l.name,
+                                want,
+                                l.args.len()
+                            ),
+                        });
+                    }
+                }
+                None if !is_builtin_effect(&l.name) => {
                     return Err(TypeError::Other {
                         span,
-                        msg: format!(
-                            "effect `{}` expects {} type argument(s), got {}",
-                            l.name,
-                            want,
-                            l.args.len()
-                        ),
+                        msg: format!("unknown effect `{}`", l.name),
                     });
                 }
+                None => {}
             }
             for arg in &l.args {
                 self.check_annot_rows(arg, span)?;
@@ -340,6 +371,32 @@ pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
     }
 }
 
+// The generalized scheme of a fully-annotated function: every parameter and the
+// return type carry an annotation, so the scheme is the contract its recursive
+// and mutual calls check against. This is what keeps annotated polymorphic
+// recursion decidable. `None` when any annotation is missing (the member is
+// mono-seeded instead) or for a constant (handled by its own value branch).
+pub(super) fn annotation_scheme(d: &Decl<Core>) -> Option<Type> {
+    if d.konst {
+        return None;
+    }
+    let annots: Vec<&ast::Ty> = d
+        .params
+        .iter()
+        .map(|p| p.ty.as_ref())
+        .collect::<Option<_>>()?;
+    let ret = d.ret.as_ref()?;
+    let pt: Vec<Type> = annots.into_iter().map(convert_data).collect();
+    let rt = convert_data(ret);
+    let mut vars = BTreeSet::new();
+    for t in &pt {
+        collect_type_vars(t, &mut vars);
+    }
+    collect_type_vars(&rt, &mut vars);
+    let sorted: Vec<Sym> = vars.into_iter().collect();
+    Some(wrap_forall(&sorted, Type::fun(pt, rt)))
+}
+
 pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
     // A constant's stub is its value type: the annotation if given, else a
     // fresh monovar refined when the body is inferred.
@@ -354,23 +411,12 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
             },
         );
     }
-    let n = d.params.len();
-    let annots: Option<Vec<_>> = d.params.iter().map(|p| p.ty.as_ref()).collect();
-    if let Some(annots) = annots {
-        if let Some(ret) = &d.ret {
-            let pt: Vec<Type> = annots.into_iter().map(convert_data).collect();
-            let rt = convert_data(ret);
-            let mut vars = BTreeSet::new();
-            for t in &pt {
-                collect_type_vars(t, &mut vars);
-            }
-            collect_type_vars(&rt, &mut vars);
-            let sorted: Vec<Sym> = vars.into_iter().collect();
-            return wrap_forall(&sorted, Type::fun(pt, rt));
-        }
+    if let Some(scheme) = annotation_scheme(d) {
+        return scheme;
     }
     // Fresh, unforgeable placeholder type vars for the stub scheme, minted from
     // the interner rather than manufactured as `s@{i}` text.
+    let n = d.params.len();
     let vars: Vec<Sym> = (0..=n).map(|_| Sym::fresh()).collect();
     let pt: Vec<Type> = vars[..n].iter().map(|v| Type::Var(*v)).collect();
     let rt = Type::Var(vars[n]);
@@ -462,29 +508,27 @@ const BUILTINS: &[(&str, &str)] = &[
     ("u64_cmp", "(U64, U64) -> Int"),
 ];
 
-// A builtin signature carries its latent effects on the arrow. The row feeds
-// the attribution table below; the env keeps the bare arrow, matching how
-// surface fn annotations split the declared row from the type.
+// A builtin signature carries its latent effects on the arrow, and the env type
+// keeps that row: a builtin is a function whose effects inference must attribute
+// at every call site, exactly like a surface function's inferred row. The
+// returned label list mirrors the row for the set-pass cross-check.
 fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
     let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::Ice {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
     })?;
-    let mut ty = TypeSigParser::new()
+    let ty = TypeSigParser::new()
         .parse(tokens)
         .map_err(|e| TypeError::Ice {
             msg: format!("builtin `{name}` signature `{sig}`: {e:?}"),
         })?;
-    let effs = take_sig_row(&mut ty);
+    let effs = sig_row(&ty);
     Ok((convert_data(&ty), effs))
 }
 
-fn take_sig_row(t: &mut ast::Ty) -> Vec<String> {
+fn sig_row(t: &ast::Ty) -> Vec<String> {
     match t {
-        ast::Ty::Forall(_, b) => take_sig_row(b),
-        ast::Ty::Fun(_, row, _) => match std::mem::replace(row, ast::Row::Empty) {
-            ast::Row::Empty => vec![],
-            ast::Row::Cons(ls, _) => ls.into_iter().map(|l| l.name).collect(),
-        },
+        ast::Ty::Forall(_, b) => sig_row(b),
+        ast::Ty::Fun(_, ast::Row::Cons(ls, _), _) => ls.iter().map(|l| l.name.clone()).collect(),
         _ => vec![],
     }
 }

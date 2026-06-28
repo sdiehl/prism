@@ -2,6 +2,8 @@
 //! head into the active evidence, and re-emit forwarding handles under fresh
 //! shadowing evidence.
 
+use std::collections::BTreeMap;
+
 use super::super::evidence::{resume_set, strip_resume};
 use super::super::flow::{self, Loc};
 use super::super::Lowerer;
@@ -12,18 +14,17 @@ use crate::sym::Sym;
 use super::anf::is_id_return;
 
 impl Lowerer {
-    // Thread the accumulator through a producer body. `ev` is the evidence name
-    // active for the op here (a forwarding handler shadows it for its source);
-    // `st` names the accumulator currently in scope. The result is a computation
-    // returning the final accumulator. A producer head (`do op`, a producer
-    // call, or a force of an op-carrying thunk) folds the accumulator; a
+    // Thread the accumulator through a producer body. `evs` maps each fused op to
+    // the evidence name active for it here (a forwarding handler shadows one for
+    // its source); `st` names the accumulator currently in scope. The result is a
+    // computation returning the final accumulator. A producer head (`do op`, a
+    // producer call, or a force of an op-carrying thunk) folds the accumulator; a
     // forwarding handle re-emits under fresh evidence; any other tail returns it.
     pub(super) fn thread_st(
         &mut self,
         c: &Comp,
-        ev: Sym,
+        evs: &BTreeMap<Sym, Sym>,
         loc: &Loc,
-        op: Sym,
         st: Sym,
     ) -> Option<Comp> {
         Some(match c {
@@ -31,19 +32,50 @@ impl Lowerer {
             // early-terminating handler. Lower it via the Step protocol.
             Comp::Bind(m, g, rest) if self.take_seed(m, *g, rest).is_some() => {
                 let seed = self.take_seed(m, *g, rest)?;
-                self.thread_take(m, &seed, ev, loc, op, st)?
+                self.thread_take(m, &seed, evs, loc, st)?
             }
-            // A bind whose head performs the op: thread the accumulator through
-            // it and rebind. The op's unit result is bound only if the tail
-            // still needs it.
-            Comp::Bind(m, x, n) if self.produces(m, loc, op) => {
+            // Re-associate a let-bound compound computation so its inner ops
+            // surface as flat producing binds: `let x = (let y = a in b) in n`
+            // becomes `let y = a in let x = b in n` (state threading is
+            // associative). Without this a `do op` buried in a bound computation
+            // (`let x = acc + get() in ..`) is opaque to the per-op threading and
+            // its value would be lost.
+            Comp::Bind(m, x, n) if matches!(m.as_ref(), Comp::Bind(..)) => {
+                let Comp::Bind(a, y, b) = m.as_ref() else {
+                    unreachable!()
+                };
+                let flat = Comp::Bind(
+                    a.clone(),
+                    *y,
+                    Box::new(Comp::Bind(b.clone(), *x, n.clone())),
+                );
+                self.thread_st(&flat, evs, loc, st)?
+            }
+            // A bind whose head performs an op: thread the accumulator through it
+            // and rebind. The op's result is bound only if the tail still needs it:
+            // a read (`AKind::Acc`) observes the pre-op accumulator `st`, a write
+            // (`AKind::Unit`) or any other producing head yields unit.
+            Comp::Bind(m, x, n) if self.produces(m, loc, evs) => {
                 let st2 = self.fresh("st");
-                let tm = self.thread_st(m, ev, loc, op, st)?;
+                let tm = self.thread_st(m, evs, loc, st)?;
                 let mut loc2 = loc.clone();
                 loc2.insert(*x, flow::result_sig(m, loc, &self.latent, &self.flow));
-                let tn = self.thread_st(n, ev, &loc2, op, st2)?;
+                let tn = self.thread_st(n, evs, &loc2, st2)?;
                 let tn = if fv::comp(n).contains(x) {
-                    Comp::Bind(Box::new(Comp::Return(Value::Unit)), *x, Box::new(tn))
+                    match self.op_tail_kind(m, loc, evs) {
+                        Some(super::AKind::Acc) => {
+                            Comp::Bind(Box::new(Comp::Return(Value::Var(st))), *x, Box::new(tn))
+                        }
+                        Some(super::AKind::Unit) => {
+                            Comp::Bind(Box::new(Comp::Return(Value::Unit)), *x, Box::new(tn))
+                        }
+                        // A producer call/app result observed as a value: in state
+                        // mode the threaded call yields the accumulator, not the
+                        // semantic value, so fall back rather than miscompile. In
+                        // writer mode the result is genuinely unit (kept as today).
+                        None if self.state_mode => return None,
+                        None => Comp::Bind(Box::new(Comp::Return(Value::Unit)), *x, Box::new(tn)),
+                    }
                 } else {
                     tn
                 };
@@ -60,56 +92,97 @@ impl Lowerer {
                 let mut loc2 = loc.clone();
                 loc2.insert(*x, flow::result_sig(m, loc, &self.latent, &self.flow));
                 Comp::Bind(
-                    Box::new(self.rewrite(m, loc, op)?),
+                    Box::new(self.rewrite(m, loc, evs)?),
                     *x,
-                    Box::new(self.thread_st(n, ev, &loc2, op, st)?),
+                    Box::new(self.thread_st(n, evs, &loc2, st)?),
                 )
             }
             // A forwarding handler (smap/skeep): re-emit the op to the source
             // under fresh shadowing evidence that threads the accumulator into
             // the outer evidence, then thread the handled body.
-            Comp::Handle { .. } => self.thread_forward(c, ev, loc, op, st)?,
+            Comp::Handle { .. } => self.thread_forward(c, evs, loc, st)?,
             // Tail producer heads: append evidence and accumulator, returning
             // the new accumulator directly.
-            Comp::Do(o, args) if *o == op => {
-                let mut a = self.rewrite_values(args, loc, op)?;
+            Comp::Do(o, args) if evs.contains_key(o) => {
+                let ev = evs[o];
+                let mut a = self.rewrite_values(args, loc, evs)?;
                 a.push(Value::Var(st));
                 Comp::App(Box::new(Comp::Force(Value::Var(ev))), a)
             }
-            Comp::Call(g, args) if self.produces(c, loc, op) => {
-                let mut a = self.rewrite_values(args, loc, op)?;
-                a.push(Value::Var(ev));
+            Comp::Call(g, args) if self.produces(c, loc, evs) => {
+                let mut a = self.rewrite_values(args, loc, evs)?;
+                a.extend(self.ev_call_args(evs)?);
                 a.push(Value::Var(st));
                 Comp::Call(*g, a)
             }
-            Comp::App(f, args) if self.produces(c, loc, op) => {
-                let mut a = self.rewrite_values(args, loc, op)?;
-                a.push(Value::Var(ev));
+            Comp::App(f, args) if self.produces(c, loc, evs) => {
+                let mut a = self.rewrite_values(args, loc, evs)?;
+                a.extend(self.ev_call_args(evs)?);
                 a.push(Value::Var(st));
-                Comp::App(Box::new(self.rewrite(f, loc, op)?), a)
+                Comp::App(Box::new(self.rewrite(f, loc, evs)?), a)
             }
             Comp::Return(_) => Comp::Return(Value::Var(st)),
             Comp::If(v, t, e) => Comp::If(
                 v.clone(),
-                Box::new(self.thread_st(t, ev, loc, op, st)?),
-                Box::new(self.thread_st(e, ev, loc, op, st)?),
+                Box::new(self.thread_st(t, evs, loc, st)?),
+                Box::new(self.thread_st(e, evs, loc, st)?),
             ),
             Comp::Case(v, arms) => Comp::Case(
                 v.clone(),
                 arms.iter()
-                    .map(|(p, b)| Some((p.clone(), self.thread_st(b, ev, loc, op, st)?)))
+                    .map(|(p, b)| Some((p.clone(), self.thread_st(b, evs, loc, st)?)))
                     .collect::<Option<_>>()?,
             ),
             // A pure tail computation: run it, discard, return the accumulator.
             other => {
                 let d = self.fresh("d");
                 Comp::Bind(
-                    Box::new(self.rewrite(other, loc, op)?),
+                    Box::new(self.rewrite(other, loc, evs)?),
                     d,
                     Box::new(Comp::Return(Value::Var(st))),
                 )
             }
         })
+    }
+
+    // The evidence arguments a producer call appends, one per fused op in op-id
+    // order (the order producers take their `ev@<id>` parameters in), using the
+    // currently active (possibly shadowed) evidence names.
+    pub(super) fn ev_call_args(&self, evs: &BTreeMap<Sym, Sym>) -> Option<Vec<Value>> {
+        Some(
+            self.ev_order(evs)?
+                .into_iter()
+                .map(|o| Value::Var(evs[&o]))
+                .collect(),
+        )
+    }
+
+    // The fused ops in ascending op-id order, the stable order producer evidence
+    // parameters and call arguments agree on.
+    pub(super) fn ev_order(&self, evs: &BTreeMap<Sym, Sym>) -> Option<Vec<Sym>> {
+        let mut v: Vec<(i64, Sym)> = evs
+            .keys()
+            .map(|o| Some((self.op_id(*o).ok()?, *o)))
+            .collect::<Option<_>>()?;
+        v.sort_by_key(|(id, _)| *id);
+        Some(v.into_iter().map(|(_, o)| o).collect())
+    }
+
+    // The [`AKind`] of the op at `m`'s tail, when `m` is a pure prefix (no
+    // producing head) followed by a single `do op`. The prefix advances no op, so
+    // a read's result is exactly the accumulator entering `m`. None when `m` is not
+    // that shape (a producer call, or an op buried under another op), in which case
+    // its result is treated as the writer-style unit.
+    fn op_tail_kind(&self, m: &Comp, loc: &Loc, evs: &BTreeMap<Sym, Sym>) -> Option<super::AKind> {
+        match m {
+            Comp::Do(o, _) if evs.contains_key(o) => self.state_a.get(o).copied(),
+            Comp::Bind(mm, x, n) if !self.produces(mm, loc, evs) => {
+                let mut loc2 = loc.clone();
+                loc2.insert(*x, flow::result_sig(mm, loc, &self.latent, &self.flow));
+                self.op_tail_kind(n, &loc2, evs)
+            }
+            _ => None,
+        }
     }
 
     // Thread a forwarding handle `handle s(()) with fun op(x) => <re-emit>`. The
@@ -122,9 +195,8 @@ impl Lowerer {
     pub(super) fn thread_forward(
         &mut self,
         c: &Comp,
-        ev: Sym,
+        evs: &BTreeMap<Sym, Sym>,
         loc: &Loc,
-        op: Sym,
         st: Sym,
     ) -> Option<Comp> {
         let Comp::Handle {
@@ -139,17 +211,21 @@ impl Lowerer {
         let [clause] = ops.as_slice() else {
             return None;
         };
-        if clause.name != op || !is_id_return(*return_var, return_body.as_deref()) {
+        if !evs.contains_key(&clause.name) || !is_id_return(*return_var, return_body.as_deref()) {
             return None;
         }
         let stripped = strip_resume(&clause.body, &resume_set(clause.resume))?;
         let acc = self.fresh("acc");
-        let ev_body = self.thread_st(&stripped, ev, loc, op, acc)?;
+        let ev_body = self.thread_st(&stripped, evs, loc, acc)?;
         let mut ev_params = clause.params.clone();
         ev_params.push(acc);
         let inner_thunk = Value::Thunk(Box::new(Comp::Lam(ev_params, Box::new(ev_body))));
         let inner = self.fresh("ev");
-        let threaded = self.thread_st(body, inner, loc, op, st)?;
+        // Shadow the forwarded op's evidence with the fresh source evidence while
+        // threading the handled body; the other ops keep their active evidence.
+        let mut evs2 = evs.clone();
+        evs2.insert(clause.name, inner);
+        let threaded = self.thread_st(body, &evs2, loc, st)?;
         Some(Comp::Bind(
             Box::new(Comp::Return(inner_thunk)),
             inner,

@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/local_mono_escape.pr
+---
+18
+=> ()

@@ -1,6 +1,6 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, IfTail};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
 grammar;
@@ -32,6 +32,7 @@ extern {
         "alias"  => Token::Alias,
         "class"  => Token::Class,
         "instance" => Token::Instance,
+        "canonical" => Token::Canonical,
         "pattern" => Token::Pattern,
         "deriving" => Token::Deriving,
         "where"  => Token::Where,
@@ -50,6 +51,10 @@ extern {
         "borrow" => Token::Borrow,
         "in"     => Token::In,
         "for"    => Token::For,
+        "while"  => Token::While,
+        "loop"   => Token::Loop,
+        "break"  => Token::Break,
+        "continue" => Token::Continue,
         "do"     => Token::Do,
         "if"     => Token::If,
         "then"   => Token::Then,
@@ -57,9 +62,11 @@ extern {
         "elif"   => Token::Elif,
         "match"  => Token::Match,
         "of"     => Token::Of,
+        "each"   => Token::Each,
         "forall" => Token::Forall,
         "true"   => Token::True,
         "false"  => Token::False,
+        "using"  => Token::Using,
         "Int"    => Token::KwInt,
         "Bool"   => Token::KwBool,
         "Unit"   => Token::KwUnit,
@@ -85,6 +92,10 @@ extern {
         "\\"    => Token::Lambda,
         "+."    => Token::PlusDot,
         "-."    => Token::MinusDot,
+        "+="    => Token::PlusEq,
+        "-="    => Token::MinusEq,
+        "*="    => Token::StarEq,
+        "%="    => Token::PercentEq,
         "+"     => Token::Plus,
         "-"     => Token::Minus,
         "*."    => Token::StarDot,
@@ -92,6 +103,8 @@ extern {
         "/."    => Token::SlashDot,
         "/"     => Token::Slash,
         "%"     => Token::Percent,
+        "^"     => Token::Caret,
+        "~"     => Token::Tilde,
         "==."   => Token::EqDot,
         "/=."   => Token::NeDot,
         "<."    => Token::LtDot,
@@ -171,6 +184,7 @@ Item: Item = {
     <a:AliasOrSynonym> => a,
     <c:ClassD> => Item::Class(c),
     <i:InstanceD> => Item::Instance(i),
+    <c:CanonicalD> => Item::Canonical(c),
     <p:PatternD> => Item::Pattern(p),
     <c:ConstD> => Item::Fn(c),
     <f:Fn> => Item::Fn(f),
@@ -178,7 +192,9 @@ Item: Item = {
 
 ImportD: ImportDecl = {
     <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> <ns:("(" <Comma<ImportName>> ")")?> <r:@R> =>
-        ImportDecl { path: p, alias: a, names: ns, reexport: false, span: Span::new(l, r) },
+        ImportDecl { path: p, alias: a, names: ns, glob: false, reexport: false, span: Span::new(l, r) },
+    <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> "(" ".." ")" <r:@R> =>
+        ImportDecl { path: p, alias: a, names: None, glob: true, reexport: false, span: Span::new(l, r) },
 };
 
 ModPath: Vec<String> = {
@@ -235,6 +251,14 @@ InstanceD: InstanceDecl = {
 
 InstFns: Vec<Decl> = {
     <v:(<Fn> ArmSep)*> <e:Fn?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+// Designate the canonical instance for a (class, type-head): the one implicit
+// resolution selects when several instances share a head. The named instance
+// stays a bare global symbol, like every instance reference.
+CanonicalD: CanonicalDecl = {
+    <l:@L> "canonical" <class:"uid"> "(" <head:Type> ")" "=" <name:"ident"> <r:@R> =>
+        CanonicalDecl { class, head, name, span: Span::new(l, r) },
 };
 
 // Constraint qualifier on a signature uses `given`; Haskell-style `where` is
@@ -516,9 +540,29 @@ pub Expr: S<Expr> = {
         Spanned { synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
     <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
-    <l:@L> <x:"ident"> ":=" <v:Expr> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Assign(x, Box::new(v))), span: Span::new(l, r) },
+    <l:@L> "while" <c:Expr> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "return" <e:Expr> <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
+    // The left side is parsed as a general `Call` so an index target `a[i]`
+    // (an `Expr::Index`) is accepted alongside a bare `var`; `assign_stmt`/
+    // `compound_stmt` dispatch on its shape and reject a non-assignable one.
+    <l:@L> <lhs:Call> ":=" <v:Expr> <r:@R> =>?
+        assign_stmt(lhs, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
+    <l:@L> <lhs:Call> <op:CompoundOp> <v:Expr> <r:@R> =>?
+        compound_stmt(lhs, op, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
     Default,
+};
+
+// `x <op>= e` is sugar for `x := x <op> e` on a `var`. `/=` is omitted (it is
+// not-equal); float vars use the explicit `x := x +. e` form.
+CompoundOp: BinOp = {
+    "+=" => BinOp::Add,
+    "-=" => BinOp::Sub,
+    "*=" => BinOp::Mul,
+    "%=" => BinOp::Rem,
 };
 
 // `a ?? b`: failable fallback. Right-associative and looser than comparison so
@@ -725,16 +769,27 @@ Add: S<Expr> = {
 };
 
 Mul: S<Expr> = {
-    <l:@L> <la:Mul> "*" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "*" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "/" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "%" <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "%" <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "*." <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "*." <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/." <ra:Call> <r:@R> =>
+    <l:@L> <la:Mul> "/." <ra:Pow> <r:@R> =>
         Spanned { synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Pow,
+};
+
+// Exponentiation binds tighter than multiplication and is right-associative, so
+// `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)`. One operator spans Int and Float (and
+// mixed, which promotes to Float); the type-directed lowering in elaboration
+// picks integer or floating power and coerces an Int operand when the result is
+// Float.
+Pow: S<Expr> = {
+    <l:@L> <base:Call> "^" <exp:Pow> <r:@R> =>
+        Spanned { synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
     Call,
 };
 
@@ -744,6 +799,9 @@ Mul: S<Expr> = {
 Call: S<Expr> = {
     <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
         Spanned { synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+    // `e.[ path ]`: read the foci a path selects into a list.
+    <l:@L> <e:Call> "." "[" <p:PathSteps> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?." <field:"ident"> <r:@R> =>
         Spanned { synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?" <r:@R> => try_mark(e, l, r),
@@ -751,17 +809,26 @@ Call: S<Expr> = {
 };
 
 CallTight: S<Expr> = {
-    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> ")" <r:@R> =>
-        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) },
+    // An optional trailing `using name, ...` clause selects explicit instances
+    // for the call, wrapping the callee in `Expr::Inst` (the same node the old
+    // `f[name]` form produced, so everything downstream is unchanged).
+    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> <inst:("using" <CommaPlus<"ident">>)?> ")" <r:@R> => {
+        let span = Span::new(l, r);
+        let callee = match inst {
+            Some(names) => Spanned { synth: false, node: Expr::Inst(Box::new(f), names), span },
+            None => f,
+        };
+        Spanned { synth: false, node: Expr::Call(Box::new(callee), a), span }
+    },
     <l:@L> <f:CallTight> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
         let span = Span::new(l, r);
         a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span });
         Spanned { synth: false, node: Expr::Call(Box::new(f), a), span }
     },
-    <l:@L> <f:CallTight> "[" <first:"ident"> <rest:("," <"ident">)*> "]" <r:@R> => {
-        let mut is = vec![first]; is.extend(rest);
-        Spanned { synth: false, node: Expr::Inst(Box::new(f), is), span: Span::new(l, r) }
-    },
+    // Indexed read `recv[key]` (a single index expression). Nested indexing is
+    // `a[i][j]`; multiple comma-separated indices are not a form.
+    <l:@L> <f:CallTight> "[" <k:Expr> "]" <r:@R> =>
+        Spanned { synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
     <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
         dot_call(e, m, a, l, r),
     <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
@@ -804,6 +871,10 @@ Atom: S<Expr> = {
         Spanned { synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
     <l:@L> "false" <r:@R> =>
         Spanned { synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
+    <l:@L> "break" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Break), span: Span::new(l, r) },
+    <l:@L> "continue" <r:@R> =>
+        Spanned { synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
     <l:@L> "(" ")" <r:@R> =>
         Spanned { synth: false, node: Expr::Unit, span: Span::new(l, r) },
     <l:@L> <id:"ident"> <r:@R> =>
@@ -838,10 +909,42 @@ Atom: S<Expr> = {
         Spanned { synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
 };
 
-PathUpdate: (Vec<String>, S<Expr>) = {
-    <first:"ident"> <rest:("." <"ident">)*> "=" <e:Expr> => {
-        let mut p = vec![first]; p.extend(rest); (p, e)
+// `[i]` indexes the focus postfix (no dot), so it attaches to a segment or
+// leads a path. `Box`ing the index keeps the step lightweight.
+PathIndex: PathStep = "[" <e:Expr> "]" => PathStep::Index(e);
+
+// A segment yields one or more steps, with optional trailing `[i]` indices.
+// `?Ctor.field` lexes as `?` + a single qualified-name token (`Circle.radius`),
+// so that form is split here into the prism step plus its field steps.
+PathSeg: Vec<PathStep> = {
+    <id:"ident"> <ix:PathIndex*> => { let mut p = vec![PathStep::Field(id)]; p.extend(ix); p },
+    "each" <ix:PathIndex*>        => { let mut p = vec![PathStep::Each]; p.extend(ix); p },
+    "?" <c:"uid"> <ix:PathIndex*> => { let mut p = vec![PathStep::Case(c)]; p.extend(ix); p },
+    "?" <q:"qual"> <ix:PathIndex*> => {
+        let mut parts = q.split('.');
+        let ctor = parts.next().unwrap_or_default().to_string();
+        let mut p = vec![PathStep::Case(ctor)];
+        p.extend(parts.map(|f| PathStep::Field(f.to_string())));
+        p.extend(ix);
+        p
     },
+    // `(steps where p)`: a filtered traversal. The predicate trails the steps it
+    // guards as a `Where` step.
+    "(" <inner:PathSteps> "where" <pred:Expr> ")" <ix:PathIndex*> => {
+        let mut p = inner; p.push(PathStep::Where(pred)); p.extend(ix); p
+    },
+    <ix:PathIndex+> => ix,
+};
+
+PathSteps: Vec<PathStep> = {
+    <first:PathSeg> <rest:("." <PathSeg>)*> => {
+        let mut p = first; for r in rest { p.extend(r); } p
+    },
+};
+
+PathUpdate: (Vec<PathStep>, PathOp) = {
+    <p:PathSteps> "=" <e:Expr> => (p, PathOp::Set(e)),
+    <p:PathSteps> "~" <e:Expr> => (p, PathOp::Modify(e)),
 };
 
 RecordExprField: (String, S<Expr>) = {

@@ -48,7 +48,7 @@ fn run_eff(m : Moore(Int, Int, Int), ins : List(Int)) : List(Int) =
       push(b, k) => \(rem, acc) -> k(())(rem, Cons(b, acc))
       pull(u, k) =>
         \(rem, acc) -> match rem of { Nil => reverse(acc), Cons(x, rest) => k(x)(rest, acc) }
-      return r => \(rem, acc) -> reverse(acc)
+      return r => \(_rem, acc) -> reverse(acc)
   prog(ins, Nil)
 
 -- Parallel wiring (the tensor): both machines run on paired inputs.

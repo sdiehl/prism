@@ -1,5 +1,6 @@
--- Hailstone (Collatz) sequence, tail-recursive with an accumulator.
--- Counts steps to reach 1 and tracks the peak value along the way.
+-- Hailstone (Collatz) sequence as imperative loops over `var`s. Counts steps to
+-- reach 1 and tracks the peak value along the way; both functions stay pure
+-- `(Int) -> Int` because `var` is a discharged State effect.
 
 fn collatz_step(n) =
   if even(n) then
@@ -7,18 +8,22 @@ fn collatz_step(n) =
   else
     3 * n + 1
 
-fn collatz_len(n, acc) =
-  if n == 1 then
-    acc + 1
-  else
-    collatz_len(collatz_step(n), acc + 1)
+fn collatz_len(start : Int) : Int =
+  var n := start
+  var acc := 0
+  while n /= 1 do
+    n := collatz_step(n)
+    acc += 1
+  acc + 1
 
-fn collatz_max(n, peak) =
-  if n == 1 then
-    peak
-  else
-    collatz_max(collatz_step(n), max(n, peak))
+fn collatz_max(start : Int) : Int =
+  var n := start
+  var peak := start
+  while n /= 1 do
+    peak := max(n, peak)
+    n := collatz_step(n)
+  peak
 
 fn main() =
-  println(collatz_len(27, 0))
-  println(collatz_max(27, 27))
+  println(collatz_len(27))
+  println(collatz_max(27))

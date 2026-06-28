@@ -1,0 +1,283 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/canonical_duplicate.pr
+---
+== tokens ==
+VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordRev") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "Ord",
+            param: "a",
+            supers: [],
+            methods: [
+                (
+                    "cmp",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Empty,
+                        Int,
+                    ),
+                ),
+            ],
+            span: 0..38,
+        },
+    ],
+    instances: [
+        InstanceDecl {
+            name: "ordInt",
+            class: "Ord",
+            head: Int,
+            context: [],
+            methods: [
+                Decl {
+                    name: "cmp",
+                    params: [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                        Param {
+                            name: "y",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    ret: None,
+                    eff: None,
+                    constraints: [],
+                    body: Spanned {
+                        node: If(
+                            Spanned {
+                                node: Bin(
+                                    Lt,
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 89..90,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "y",
+                                        ),
+                                        span: 93..94,
+                                    },
+                                ),
+                                span: 89..94,
+                            },
+                            Spanned {
+                                node: Bin(
+                                    Sub,
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 100..101,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 104..105,
+                                    },
+                                ),
+                                span: 100..105,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 111..112,
+                            },
+                        ),
+                        span: 86..112,
+                    },
+                    wheres: [],
+                    span: 71..112,
+                },
+            ],
+            module: "",
+            span: 40..114,
+        },
+        InstanceDecl {
+            name: "ordRev",
+            class: "Ord",
+            head: Int,
+            context: [],
+            methods: [
+                Decl {
+                    name: "cmp",
+                    params: [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                        Param {
+                            name: "y",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    ret: None,
+                    eff: None,
+                    constraints: [],
+                    body: Spanned {
+                        node: If(
+                            Spanned {
+                                node: Bin(
+                                    Lt,
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 165..166,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "y",
+                                        ),
+                                        span: 169..170,
+                                    },
+                                ),
+                                span: 165..170,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 176..177,
+                            },
+                            Spanned {
+                                node: Bin(
+                                    Sub,
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 0,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 183..184,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 187..188,
+                                    },
+                                ),
+                                span: 183..188,
+                            },
+                        ),
+                        span: 162..188,
+                    },
+                    wheres: [],
+                    span: 147..188,
+                },
+            ],
+            module: "",
+            span: 116..190,
+        },
+    ],
+    canonicals: [
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "ordInt",
+            span: 192..219,
+        },
+        CanonicalDecl {
+            class: "Ord",
+            head: Int,
+            name: "ordRev",
+            span: 221..248,
+        },
+    ],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "cmp",
+                        ),
+                        span: 262..265,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 266..267,
+                        },
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 2,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 269..270,
+                        },
+                    ],
+                ),
+                span: 262..271,
+            },
+            wheres: [],
+            span: 250..271,
+        },
+    ],
+}
+
+== types ==
+Type Error: duplicate canonical designation for Ord(Int)
+    ╭─[ <source>:15:1 ]
+    │
+ 15 │ canonical Ord(Int) = ordRev
+    │ ─────────────┬─────────────  
+    │              ╰─────────────── duplicate canonical designation for Ord(Int)
+────╯

@@ -1,0 +1,31 @@
+-- Early `return` exits the enclosing function. The internal `Return` effect is
+-- fully handled at the fn boundary, so each function stays pure `(Int) -> Int`
+-- even with a guard return, a return out of a loop, and a return inside a match.
+fn classify(n : Int) : Int =
+  if n < 0 then
+    return 0 - 1
+  if n == 0 then
+    return 0
+  1
+
+fn first_factor(n : Int) : Int =
+  var d := 2
+  while d < n do
+    if n % d == 0 then
+      return d
+    d += 1
+  n
+
+fn describe(n : Int) : Int =
+  match n of
+    0 => return 100
+    _ => n * 2
+
+fn main() =
+  println(classify(0 - 8))
+  println(classify(0))
+  println(classify(42))
+  println(first_factor(15))
+  println(first_factor(13))
+  println(describe(0))
+  println(describe(7))

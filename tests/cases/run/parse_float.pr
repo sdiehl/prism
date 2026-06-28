@@ -1,0 +1,15 @@
+-- parse_float must reject trailing garbage, hex, and empty input identically
+-- in the interpreter and the native runtime: anything not a whole valid decimal
+-- float parses to 0.0. This pins the interp/native agreement the parity harness
+-- guards (strtod alone would accept `3.14x` and `0x10`).
+fn main() =
+  println(parse_float("3.14"))
+  println(parse_float("-2.5"))
+  println(parse_float("  6.25  "))
+  println(parse_float("1e3"))
+  println(parse_float("3.14x"))
+  println(parse_float("0x10"))
+  println(parse_float("-0x1p4"))
+  println(parse_float(""))
+  println(parse_float("abc"))
+  println(parse_float("  "))

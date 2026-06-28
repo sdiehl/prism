@@ -1,0 +1,3 @@
+-- A project-supplied prelude that replaces the built-in one. Compiler builtins
+-- (show_int, println) remain available; only the .pr prelude is swapped.
+fn triple(x : Int) : Int = x + x + x

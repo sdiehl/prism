@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::kw;
 use crate::sym::Sym;
 
 pub type Effects = BTreeSet<Sym>;
@@ -162,7 +163,13 @@ impl EffRow {
             Self::Exist(v) => format!("?r{v}"),
             Self::Extend(..) => unreachable!(),
         };
+        // A row is a set, so render its labels in a canonical (name-sorted)
+        // order rather than the order inference happened to absorb them; the
+        // absorb order is not stable across runs (it follows interner state), and
+        // an unstable signature display would make snapshots flaky. The tail row
+        // variable, if any, stays last.
         let mut parts: Vec<String> = labels.into_iter().map(Label::show).collect();
+        parts.sort();
         if !tail_s.is_empty() {
             parts.push(tail_s);
         }
@@ -394,14 +401,14 @@ impl Type {
 
     pub fn show(&self) -> String {
         match self {
-            Self::Unit => "Unit".into(),
-            Self::Int => "Int".into(),
-            Self::I64 => "I64".into(),
-            Self::U64 => "U64".into(),
-            Self::Bool => "Bool".into(),
-            Self::Float => "Float".into(),
-            Self::Char => "Char".into(),
-            Self::Str => "String".into(),
+            Self::Unit => kw::TY_UNIT.into(),
+            Self::Int => kw::TY_INT.into(),
+            Self::I64 => kw::TY_I64.into(),
+            Self::U64 => kw::TY_U64.into(),
+            Self::Bool => kw::TY_BOOL.into(),
+            Self::Float => kw::TY_FLOAT.into(),
+            Self::Char => kw::TY_CHAR.into(),
+            Self::Str => kw::TY_STRING.into(),
             Self::Var(n) => n.to_string(),
             Self::Exist(v) => format!("?{v}"),
             Self::Forall(..) | Self::RowForall(..) => {
@@ -446,7 +453,8 @@ pub fn show_effects(e: &Effects) -> String {
     if e.is_empty() {
         "{}".into()
     } else {
-        let v: Vec<String> = e.iter().map(Sym::to_string).collect();
+        let mut v: Vec<String> = e.iter().map(Sym::to_string).collect();
+        v.sort();
         format!("{{{}}}", v.join(", "))
     }
 }

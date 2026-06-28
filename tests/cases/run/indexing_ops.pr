@@ -1,0 +1,17 @@
+-- Compound and nested indexed assignment. Both read the element first, so they
+-- perform `Fail`; `main` declares it (every index here is in range, so the run
+-- never actually fails). Plain `a[i] := v` is total and needs no `Fail`.
+--
+-- Prints:
+--   15
+--   30
+--   102
+fn main() : !{Fail, IO} Unit =
+  var a := array_of_list([10, 20, 30])
+  a[0] += 5
+  println(show(a[0] ?? 0))
+  var grid := array_of_list([array_of_list([1, 2]), array_of_list([3, 4])])
+  grid[1][0] := 30
+  grid[0][1] += 100
+  println(show(grid[1][0] ?? 0))
+  println(show(grid[0][1] ?? 0))

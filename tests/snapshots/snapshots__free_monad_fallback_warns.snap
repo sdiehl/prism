@@ -1,0 +1,5 @@
+---
+source: tests/snapshots.rs
+expression: "warnings.join(\"\\n\")"
+---
+effect lowering fell off the fused path: a handler reifies its continuation (not tail-resumptive). 1 function(s) now reify into EOp cells per operation instead of fusing: risky. Call effectful functions directly instead of through a first-class value, or restructure the handler, to refuse.

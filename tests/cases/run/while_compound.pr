@@ -1,0 +1,25 @@
+-- `while` sugar with compound assignment over a `var`, plus a nested `while`.
+-- The loop body mutates vars through the ambient State effect, so the function
+-- stays observably pure (row `{}`) even though it reads imperatively.
+fn triangle(n : Int) : Int =
+  var i := 0
+  var sum := 0
+  while i < n do
+    i += 1
+    sum += i
+  sum
+
+fn grid(rows : Int, cols : Int) : Int =
+  var r := 0
+  var total := 0
+  while r < rows do
+    var c := 0
+    while c < cols do
+      total += 1
+      c += 1
+    r += 1
+  total
+
+fn main() =
+  println(triangle(5))
+  println(grid(3, 4))

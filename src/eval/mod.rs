@@ -193,11 +193,18 @@ fn node(c: &Comp) -> Node {
         })),
         Comp::Mask(ops, b) => Node::Mask(Rc::from(ops.as_slice()), lower(b)),
         Comp::StrBuiltin(n, args) => Node::StrBuiltin(*n, args.iter().map(atom_of).collect()),
-        // The interpreter runs un-lowered core; Dup/Drop/ReuseToken/Reuse are
-        // injected only by codegen-side RC lowering and must never reach here.
-        // Masking them to a silent sink would hide the invariant breaking.
-        Comp::Dup(_) | Comp::Drop(_) | Comp::ReuseToken(_) | Comp::Reuse(..) => {
-            unreachable!("RC reuse node reached the interpreter; it runs un-lowered core")
+        // The interpreter runs un-lowered core; Dup/Drop/WithReuse/Reuse and the
+        // mutable-cell Ref ops are injected only by codegen-side lowering (RC
+        // reuse, var erasure) and must never reach here. Masking them to a silent
+        // sink would hide the invariant breaking.
+        Comp::Dup(_)
+        | Comp::Drop(_)
+        | Comp::WithReuse { .. }
+        | Comp::Reuse(..)
+        | Comp::RefNew(_)
+        | Comp::RefGet(_)
+        | Comp::RefSet(..) => {
+            unreachable!("lowering-only node reached the interpreter; it runs un-lowered core")
         }
     }
 }
@@ -746,6 +753,8 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             Ok(Rv::Str(s))
         }
         (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(a.powf(*b))),
+        // Strict full-consume parse: trailing garbage and hex yield 0.0, matching
+        // `prism_parse_float` in the runtime (see its note on the strtod divergence).
         (B::ParseFloat, [Rv::Str(s)]) => Ok(Rv::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
         (B::Substring, [Rv::Str(s), Rv::Int(start), Rv::Int(len)]) => {
             let st = usize::try_from(*start).unwrap_or(0);
@@ -948,31 +957,67 @@ fn rv_key_cmp(a: &Rv, b: &Rv) -> Ordering {
     }
 }
 
-// Render a float byte-for-byte like the native runtime's `printf("%g", d)` so
-// the interpreter (the differential oracle) and the backend agree. C `%g` with
-// the default 6 significant digits: branch fixed vs scientific on the rounded
-// decimal exponent, strip trailing zeros, pad the exponent to two digits.
+// Render a float as the shortest decimal that round-trips back to `d`, laid out
+// like a Python `repr`: full precision with no truncation, scientific notation
+// only outside the `[-4, 16)` decimal-exponent window. Both the interpreter and
+// the C runtime (`prism_show_float`) and the Lean oracle (`fmtG`) must implement
+// the identical algorithm, since they are differentially tested against each
+// other; `Float::to_string`'s exact-integer expansion would not be portable.
+//
+// `0.1` stays "0.1", `0.1 +. 0.2` shows "0.30000000000000004", `100.0` is
+// "100", `1e100` is "1e+100". Rust's `{:e}` is correctly rounded (round half to
+// even) like the printf family, so the digits and exponent agree with C.
 fn fmt_g(d: f64) -> String {
-    const P: i32 = 6;
     if d.is_nan() {
         return "nan".to_string();
     }
     if d.is_infinite() {
         return if d < 0.0 { "-inf" } else { "inf" }.to_string();
     }
-    // Rust's fixed-precision formatting is correctly rounded (round half to even)
-    // like the printf family, so the exponent it produces is the one `%g` branches
-    // on, including a carry that bumps the exponent (9.999996e5 -> 1e6).
-    let sci = format!("{:.*e}", (P - 1) as usize, d);
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
-    let e: i32 = exp.parse().unwrap_or(0);
-    if (-4..P).contains(&e) {
-        let prec = usize::try_from(P - 1 - e).unwrap_or(0);
-        strip_zeros(format!("{d:.prec$}"))
+    if d == 0.0 {
+        return if d.is_sign_negative() { "-0" } else { "0" }.to_string();
+    }
+    // Shortest scientific form (fewest significant digits, 1..=17) that round-
+    // trips; 17 digits always suffice for an IEEE double, so the fallback always
+    // parses. `find` formats only up to the winning precision, so the chosen
+    // string is reused rather than reformatted.
+    let sci = (1..17usize)
+        .map(|cand| format!("{:.*e}", cand - 1, d))
+        .find(|s| s.parse::<f64>() == Ok(d))
+        .unwrap_or_else(|| format!("{:.*e}", 16, d)); // "[-]D[.DDD]e±XX"
+    let neg = sci.starts_with('-');
+    let (mant, exp) = sci.trim_start_matches('-').split_once('e').unwrap();
+    let e10: i32 = exp.parse().unwrap();
+    let digits: String = mant.chars().filter(|c| *c != '.').collect();
+    let body = if (-4..16).contains(&e10) {
+        layout_fixed(&digits, e10)
     } else {
-        let m = strip_zeros(mantissa.to_string());
-        let sign = if e < 0 { '-' } else { '+' };
-        format!("{m}e{sign}{:02}", e.abs())
+        // Scientific: one digit before the point, the rest after (`layout_fixed`
+        // at exponent 0 does exactly this), then the `e±XX` suffix.
+        let m = layout_fixed(&digits, 0);
+        let sign = if e10 < 0 { '-' } else { '+' };
+        format!("{m}e{sign}{:02}", e10.abs())
+    };
+    if neg {
+        format!("-{body}")
+    } else {
+        body
+    }
+}
+
+// Place the decimal point in `digits` (the significant figures, no point) so the
+// leading digit has place value 10^`e10`. Trailing zeros are stripped.
+fn layout_fixed(digits: &str, e10: i32) -> String {
+    if e10 >= 0 {
+        let k = e10.unsigned_abs() as usize + 1;
+        if digits.len() <= k {
+            format!("{digits}{}", "0".repeat(k - digits.len()))
+        } else {
+            strip_zeros(format!("{}.{}", &digits[..k], &digits[k..]))
+        }
+    } else {
+        let zeros = "0".repeat((-e10 - 1).unsigned_abs() as usize);
+        strip_zeros(format!("0.{zeros}{digits}"))
     }
 }
 
@@ -1005,9 +1050,26 @@ fn dispatch_float_op(op: CoreOp, x: f64, y: f64) -> Result<Rv, String> {
 }
 
 // i64 fast path: arithmetic that overflows i64 promotes to a normalized Big.
+// The six ordering/equality ops are identical across every numeric type; only
+// the arithmetic arms differ, so each `dispatch_*_op` consults this first.
+fn cmp_op<T: Ord>(op: CoreOp, x: &T, y: &T) -> Option<Rv> {
+    Some(Rv::Bool(match op {
+        CoreOp::Eq => x == y,
+        CoreOp::Ne => x != y,
+        CoreOp::Lt => x < y,
+        CoreOp::Le => x <= y,
+        CoreOp::Gt => x > y,
+        CoreOp::Ge => x >= y,
+        _ => return None,
+    }))
+}
+
 fn dispatch_int_op(op: CoreOp, x: i64, y: i64) -> Result<Rv, String> {
     if matches!(op, CoreOp::Div | CoreOp::Rem) && y == 0 {
         return Err("division by zero".into());
+    }
+    if let Some(r) = cmp_op(op, &x, &y) {
+        return Ok(r);
     }
     let wide = |r: Option<i64>, f: fn(BigInt, BigInt) -> BigInt| {
         r.map_or_else(|| norm(f(BigInt::from(x), BigInt::from(y))), Rv::Int)
@@ -1018,12 +1080,6 @@ fn dispatch_int_op(op: CoreOp, x: i64, y: i64) -> Result<Rv, String> {
         CoreOp::Mul => wide(x.checked_mul(y), |a, b| a * b),
         CoreOp::Div => wide(x.checked_div(y), |a, b| a / b),
         CoreOp::Rem => Rv::Int(x.wrapping_rem(y)),
-        CoreOp::Eq => Rv::Bool(x == y),
-        CoreOp::Ne => Rv::Bool(x != y),
-        CoreOp::Lt => Rv::Bool(x < y),
-        CoreOp::Le => Rv::Bool(x <= y),
-        CoreOp::Gt => Rv::Bool(x > y),
-        CoreOp::Ge => Rv::Bool(x >= y),
         _ => return Err(format!("op {op:?} not defined for Int")),
     })
 }
@@ -1032,18 +1088,15 @@ fn dispatch_bigint_op(op: CoreOp, x: BigInt, y: BigInt) -> Result<Rv, String> {
     if matches!(op, CoreOp::Div | CoreOp::Rem) && y.sign() == Sign::NoSign {
         return Err("division by zero".into());
     }
+    if let Some(r) = cmp_op(op, &x, &y) {
+        return Ok(r);
+    }
     Ok(match op {
         CoreOp::Add => norm(x + y),
         CoreOp::Sub => norm(x - y),
         CoreOp::Mul => norm(x * y),
         CoreOp::Div => norm(x / y),
         CoreOp::Rem => norm(x % y),
-        CoreOp::Eq => Rv::Bool(x == y),
-        CoreOp::Ne => Rv::Bool(x != y),
-        CoreOp::Lt => Rv::Bool(x < y),
-        CoreOp::Le => Rv::Bool(x <= y),
-        CoreOp::Gt => Rv::Bool(x > y),
-        CoreOp::Ge => Rv::Bool(x >= y),
         _ => return Err(format!("op {op:?} not defined for Int")),
     })
 }
@@ -1181,69 +1234,191 @@ mod tests {
 
     use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED};
 
-    // Reference column is the exact output of C `printf("%g", d)` (glibc/BSD).
-    // The interpreter is the differential oracle, so its float rendering must
-    // equal the backend's `%g` byte for byte.
+    // `fmt_g` renders the shortest decimal that round-trips back to the same
+    // double: full precision, no truncation, scientific only outside [-4, 16).
+    // Reference values match Python `repr`. The C runtime and Lean oracle must
+    // agree byte for byte (proven against C by `prism_show_float_matches_fmt_g`).
     #[test]
-    fn fmt_g_matches_c_printf() {
+    fn fmt_g_is_shortest_round_trip() {
         let cases: &[(f64, &str)] = &[
             (0.0, "0"),
             (-0.0, "-0"),
             (1.0, "1"),
             (-1.0, "-1"),
-            (1.0 / 3.0, "0.333333"),
-            (-1.0 / 3.0, "-0.333333"),
             (0.1, "0.1"),
             (0.5, "0.5"),
             (1.5, "1.5"),
-            (100_000_000.0, "1e+08"),
-            (1_000_000.0, "1e+06"),
-            (999_999.0, "999999"),
-            (123_456.7, "123457"),
-            (1_234_567.0, "1.23457e+06"),
-            (9_999_999.0, "1e+07"),
-            (0.000_000_1, "1e-07"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (10.0 / 3.0, "3.3333333333333335"),
+            (std::f64::consts::PI, "3.141592653589793"),
+            (12.34, "12.34"),
+            (100.0, "100"),
+            (1_000_000.0, "1000000"),
             (0.0001, "0.0001"),
             (0.00001, "1e-05"),
-            (1e12, "1e+12"),
-            (1e-12, "1e-12"),
-            (1.234_567_89, "1.23457"),
-            (76.543_21, "76.5432"),
-            (12_345.678, "12345.7"),
-            (100.0, "100"),
-            (0.000_123_456, "0.000123456"),
+            (1e15, "1000000000000000"),
+            (1e16, "1e+16"),
             (1e100, "1e+100"),
             (1e-100, "1e-100"),
-            (123.456, "123.456"),
-            (0.000_999_999_5, "0.001"),
-            (9.999_996e5, "1e+06"),
+            (1.234_567_89e-5, "1.23456789e-05"),
         ];
         for &(d, want) in cases {
             assert_eq!(fmt_g(d), want, "fmt_g({d})");
+            assert_eq!(fmt_g(d).parse::<f64>(), Ok(d), "round-trip fmt_g({d})");
         }
         assert_eq!(fmt_g(f64::NAN), "nan");
         assert_eq!(fmt_g(f64::INFINITY), "inf");
         assert_eq!(fmt_g(f64::NEG_INFINITY), "-inf");
     }
 
-    fn runtime_src() -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/prism_rt.c");
-        std::fs::read_to_string(path).expect("read runtime/prism_rt.c")
+    // Compile the C runtime with a small `prism_main` body and run it, returning
+    // the lines it prints. The C runtime is the native backend's source of truth,
+    // so executing it pins behavior here directly: a divergence fails because the
+    // streams differ, not because a magic substring went missing. That survives a
+    // behavior-preserving refactor (rename `z`, hoist a helper, regroup a
+    // constant) where a `contains(...)` grep of the source would not, and it
+    // actually proves equivalence rather than textual presence. Returns None when
+    // no C compiler is available, so the test skips like the parity corpus (CI
+    // sets PRISM_CC).
+    fn rt_oracle(body: &str) -> Option<Vec<String>> {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        // Unique per call: tests run concurrently in one process, so a pid-only
+        // path would let two oracles clobber each other's source and binary.
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
+        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
+        if !Command::new(&cc)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skipping runtime oracle: C compiler `{cc}` not found (set PRISM_CC)");
+            return None;
+        }
+
+        let stem = format!(
+            "prism_oracle_{}_{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let dir = std::env::temp_dir();
+        let src = dir.join(format!("{stem}.c"));
+        let bin = dir.join(&stem);
+        let rt = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/prism_rt.c");
+        // The runtime owns `main` and calls `prism_main`; the harness supplies it
+        // and returns a tagged immediate 0 (exit code 0).
+        std::fs::write(
+            &src,
+            format!(
+                "#include <stdio.h>\n#include <string.h>\n\
+                 long prism_rand(void);\n\
+                 long prism_str_lit(const char *, long);\n\
+                 long prism_big_of_str(long, int *);\n\
+                 long prism_big_show(long);\n\
+                 void print_str(long);\n\
+                 long prism_main(void) {{\n{body}\nreturn 1;\n}}\n"
+            ),
+        )
+        .unwrap();
+        let comp = Command::new(&cc)
+            .args(["-O0", "-w"])
+            .arg(&src)
+            .arg(&rt)
+            .arg("-lm")
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&src);
+        assert!(
+            comp.status.success(),
+            "runtime oracle failed to compile:\n{}",
+            String::from_utf8_lossy(&comp.stderr)
+        );
+        let run = Command::new(&bin).output().unwrap();
+        let _ = std::fs::remove_file(&bin);
+        assert!(
+            run.status.success(),
+            "runtime oracle crashed: {:?}",
+            run.status
+        );
+        Some(
+            String::from_utf8(run.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
+    // The C runtime's float printer is the native backend's source of truth and
+    // must match the interpreter's `fmt_g` byte for byte (they are differentially
+    // tested). Pass exact bit patterns so no C literal parsing intervenes, then
+    // run `prism_show_float` as the oracle.
+    #[test]
+    fn prism_show_float_matches_fmt_g() {
+        use std::fmt::Write;
+        let vals: &[f64] = &[
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            0.1,
+            0.5,
+            1.5,
+            0.1 + 0.2,
+            1.0 / 3.0,
+            10.0 / 3.0,
+            std::f64::consts::PI,
+            12.34,
+            100.0,
+            1_000_000.0,
+            0.0001,
+            0.00001,
+            1e15,
+            1e16,
+            1e100,
+            1e-100,
+            1.234_567_89e-5,
+            123.456,
+            9.999_999e5,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+        ];
+        let want: Vec<String> = vals.iter().map(|&d| fmt_g(d)).collect();
+        let mut body = String::from("long prism_show_float(long);\n");
+        for &d in vals {
+            let bits = d.to_bits().cast_signed();
+            let _ = writeln!(
+                body,
+                "{{ long b = {bits}L; print_str(prism_show_float(b)); }}"
+            );
+        }
+        let Some(lines) = rt_oracle(&body) else {
+            return;
+        };
+        assert_eq!(
+            lines, want,
+            "C prism_show_float diverged from interpreter fmt_g"
+        );
     }
 
     // An unseeded `rand` must stream identical values on every backend, so the
     // interpreter's SplitMix64 and the C runtime's must be the same generator.
-    // Like `layout_matches_runtime`: pin the interpreter's stream to a
-    // hand-verified golden vector and assert the C source carries byte-identical
-    // constants and structure, so drift in either implementation fails here
-    // rather than only in the end-to-end corpus.
+    // Pin the interpreter to a hand-verified golden vector, then run the C
+    // runtime as the oracle: its `prism_rand()` (which drops the low 2 bits) must
+    // equal `splitmix64() >> 2`. Drift in either implementation fails here, not
+    // only in the end-to-end corpus.
     #[test]
     fn splitmix64_matches_runtime() {
         assert_eq!(DEFAULT_SEED, 0x9E37_79B9_7F4A_7C15);
         let mut state = DEFAULT_SEED;
-        let seq: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
+        let golden: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
         assert_eq!(
-            seq,
+            golden,
             [
                 0x6E78_9E6A_A1B9_65F4,
                 0x06C4_5D18_8009_454F,
@@ -1252,26 +1427,23 @@ mod tests {
             ]
         );
 
-        let rt = runtime_src();
-        for needle in [
-            "prism_rng = 0x9E3779B97F4A7C15UL",  // default seed
-            "prism_rng += 0x9E3779B97F4A7C15UL", // increment
-            "(z >> 30)) * 0xBF58476D1CE4E5B9UL", // mix 1
-            "(z >> 27)) * 0x94D049BB133111EBUL", // mix 2
-            "z ^= z >> 31",                      // final xor
-            "(long)(z >> 2)",                    // rand() drops the low 2 bits
-        ] {
-            assert!(
-                rt.contains(needle),
-                "SplitMix64 drift: C runtime missing `{needle}`"
-            );
-        }
+        let Some(lines) =
+            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_rand());")
+        else {
+            return;
+        };
+        let want: Vec<String> = golden.iter().map(|z| (z >> 2).to_string()).collect();
+        assert_eq!(
+            lines, want,
+            "C runtime rand() stream diverged from interpreter"
+        );
     }
 
     // Bignum decimal parsing must agree with the C runtime's `prism_big_of_str`
     // so a literal that overflows the immediate parses to the same value on every
-    // backend. Pin the interpreter against golden values and assert the C source
-    // still carries the same trim/sign/base-10 fold.
+    // backend. Pin the interpreter against golden values, then run the C runtime
+    // as the oracle: it must parse each literal to the same value and reject the
+    // same inputs (ok=0, surfaced as "ERR") the interpreter rejects with None.
     #[test]
     fn big_of_str_matches_runtime() {
         use std::str::FromStr;
@@ -1289,7 +1461,7 @@ mod tests {
             ),
             ("+1000000000000000000000", "1000000000000000000000"),
         ];
-        for (input, want) in cases {
+        for &(input, want) in &cases {
             assert_eq!(
                 big_of_str(input),
                 Some(BigInt::from_str(want).unwrap()),
@@ -1299,10 +1471,30 @@ mod tests {
         assert_eq!(big_of_str("12x3"), None);
         assert_eq!(big_of_str(""), None);
 
-        let rt = runtime_src();
-        assert!(
-            rt.contains("long prism_big_of_str(long s, int *ok)"),
-            "C runtime missing prism_big_of_str"
+        // Both the accepted literals and the rejected ones go through the C
+        // parser; "ERR" mirrors the interpreter's None.
+        let inputs: Vec<&str> = cases.iter().map(|&(i, _)| i).chain(["12x3", ""]).collect();
+        let want: Vec<String> = inputs
+            .iter()
+            .map(|s| big_of_str(s).map_or_else(|| "ERR".to_owned(), |b| b.to_string()))
+            .collect();
+        let mut body = String::new();
+        for s in &inputs {
+            use std::fmt::Write;
+            let _ = writeln!(
+                body,
+                "{{ const char *t = \"{esc}\"; long c = prism_str_lit(t, (long)strlen(t)); \
+                 int ok = 0; long b = prism_big_of_str(c, &ok); \
+                 if (!ok) printf(\"ERR\\n\"); else print_str(prism_big_show(b)); }}",
+                esc = s.escape_default()
+            );
+        }
+        let Some(lines) = rt_oracle(&body) else {
+            return;
+        };
+        assert_eq!(
+            lines, want,
+            "C runtime big_of_str diverged from interpreter"
         );
     }
 }

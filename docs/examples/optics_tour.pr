@@ -1,0 +1,53 @@
+-- A tour of optics by path. A path is a sequence of steps between `|` and the
+-- operator (or inside `s.[ ... ]`): `.field` descends, `each` traverses a
+-- functor, `[i]` indexes, `?Ctor` focuses a constructor, `(each where p)`
+-- filters. End with `= v` to set or `~ f` to modify; wrap in `s.[ path ]` to
+-- read every focus into a list. Every form is sugar over `map`/`with`/`match`,
+-- so in-place reuse and fusion come for free; nothing reaches a new core form.
+--
+-- Expected output:
+--   Vec2(1, 4)
+--   Player(hero, Vec2(7, 4), 30, [])
+--   [Player(a, Vec2(0, 0), 15, []), Player(b, Vec2(0, 0), 10, [])]
+--   World([Player(a, Vec2(1, 2), 100, []), Player(b, Vec2(1, 2), 0, [])], 1)
+--   Circle(20)
+--   Square(3)
+--   [Player(a, Vec2(1, 2), 15, []), Player(b, Vec2(1, 2), 0, [])]
+--   [5, 0]
+--   [5]
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Player = Player { name: String, pos: Vec2, hp: Int, bag: List(Int) }
+
+type World = World { party: List(Player), turn: Int }
+
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn alive(p : Player) : Bool = p.hp > 0
+
+fn heal(h : Int) : Int = h + 10
+
+fn mk(n : String, h : Int) : Player =
+  Player { name = n, pos = Vec2 { x = 1, y = 2 }, hp = h, bag = Nil }
+
+fn main() =
+  -- Set and modify a (possibly nested) field.
+  let v = Vec2 { x = 3, y = 4 }
+  println({ v | x ~ \(n) -> n - 2 })
+  let hero = Player { name = "hero", pos = v, hp = 20, bag = Nil }
+  println({ hero | pos.x = 7, hp ~ heal })
+  -- Traverse with `each`, then descend; modify and set per element.
+  let party = Cons(mk("a", 5), Cons(mk("b", 0), Nil))
+  println({ party | each.hp ~ heal, each.pos = Vec2 { x = 0, y = 0 } })
+  -- A field, an index, then a field, mixed with a plain field.
+  let world = World { party = party, turn = 1 }
+  println({ world | party[0].hp = 100 })
+  -- A prism focuses one constructor and passes the others through.
+  println({ Circle { radius = 10 } | ?Circle.radius ~ \(r) -> r * 2 })
+  println({ Square { side = 3 } | ?Circle.radius = 0 })
+  -- Filter a traversal: only the living are healed.
+  println({ party | (each where alive).hp ~ heal })
+  -- Read every focus a path selects into a list.
+  println(party.[each.hp])
+  println(party.[(each where alive).hp])

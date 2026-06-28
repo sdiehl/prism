@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optics_read.pr
+---
+[5, 0, 3]
+[a]
+[5, 3]
+[1, 2, 1, 2, 1, 2]
+[7, 9]
+=> ()

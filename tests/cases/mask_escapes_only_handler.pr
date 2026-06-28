@@ -1,0 +1,14 @@
+-- `mask<E>` over the sole `E` handler makes `op` genuinely unhandled, so `f`'s
+-- row is `!{E}` and `main` (which neither handles nor declares `E`) is rejected.
+-- Regression: this was once inferred pure and reached an effect-reconciliation
+-- ICE at lowering.
+effect E {
+  ctl op(Int) : Int
+}
+
+fn f() =
+  handle mask<E>(op(1)) with
+    op(x, k) => k(x)
+    return r => r
+
+fn main() : !{IO} Unit = println(f())

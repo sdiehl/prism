@@ -16,20 +16,20 @@ effect Say {
 fn twice(f : (Unit) -> Int ! {| e}) = f(()) + f(())
 
 -- e = {}: pure code needs no handler at all.
-fn pure_use() = twice(\(u) -> 21)
+fn pure_use() = twice(\(_u) -> 21)
 
 -- e = {Tick}: a counting handler hands out 1 then 2, so the same thunk
 -- answers differently per force.
 fn tick_use() =
   let g =
-    handle twice(\(u) -> tick(())) with
+    handle twice(\(_u) -> tick(())) with
       tick(u, k) => \(n) -> k(n)(n + 1)
-      return r => \(n) -> r
+      return r => \(_n) -> r
   g(1)
 
 -- e = {Say}: each force shouts before answering.
 fn say_use() =
-  handle twice(\(u) -> let _ = say(9) in 9) with
+  handle twice(\(_u) -> let _ = say(9) in 9) with
     say(m, k) =>
       println(m)
       k(())

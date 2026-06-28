@@ -62,6 +62,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let mut synonyms = Vec::new();
     let mut classes = Vec::new();
     let mut instances = Vec::new();
+    let mut canonicals = Vec::new();
     let mut patterns = Vec::new();
     let mut fns = Vec::new();
     let mut imports = Vec::new();
@@ -90,6 +91,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             Item::Synonym(s) => synonyms.push(s),
             Item::Class(c) => classes.push(c),
             Item::Instance(i) => instances.push(i),
+            Item::Canonical(c) => canonicals.push(c),
             Item::Pattern(p) => patterns.push(p),
             Item::Fn(f) => fns.push(f),
         }
@@ -103,6 +105,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             synonyms,
             classes,
             instances,
+            canonicals,
             patterns,
             fns,
             imports,
@@ -125,7 +128,7 @@ fn export_name(item: &Item) -> Option<&str> {
         Item::Class(c) => Some(&c.name),
         Item::Pattern(p) => Some(&p.name),
         Item::Fn(f) => Some(&f.name),
-        Item::Instance(_) | Item::Import(_) => None,
+        Item::Instance(_) | Item::Canonical(_) | Item::Import(_) => None,
     }
 }
 

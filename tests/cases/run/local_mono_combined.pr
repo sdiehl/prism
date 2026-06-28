@@ -1,0 +1,33 @@
+-- The same escaping Log component as `local_mono_escape.pr`, now sharing a
+-- program with an unrelated, fully fused stream pipeline (a `smap`/`ssum` fold
+-- over `srange`). The two use disjoint effects (Log vs the stream's emit), so
+-- local monadification confines the free monad to the Log component and keeps the
+-- pipeline fused: it allocates zero eff-op cells despite the escape. `weight` is a
+-- pure helper called from both the escaping closures (in the region) and `main`
+-- (in the fused rest); it stays shared, not pulled into the region, which is what
+-- keeps the split clean. Before local monadification one escaping closure flipped
+-- the whole program monadic and the pipeline would have allocated per element.
+-- The perf gate pins that the combined program allocates exactly as many eff-op
+-- cells as the escape alone.
+effect Log {
+  ctl log(Int) : Int
+}
+
+fn weight(x) = x * 3
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f())
+
+fn logged() =
+  let fs = [\() -> log(weight(1)), \() -> log(weight(2)), \() -> log(weight(3))]
+  handle run_all(fs, 0) with
+    log(n, k) => k(n)
+    return r => r
+
+fn square(n) = n * n
+
+fn main() =
+  println(weight(srange(1, 100).smap(square).ssum()))
+  println(logged())

@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/loop_control.pr
+---
+64
+8
+10
+=> ()

@@ -167,6 +167,14 @@ pub enum Builtin {
     // instance. Not surface-callable; emitted only by the elaborator. Args are
     // `(kind, list)` where kind selects the key (see `prism_sort_prim`).
     SortPrim,
+    // Type-aligned continuation queue ops, the Freer representation of an `EOp`'s
+    // continuation. Emitted only by the free-monad effect lowering; never
+    // surface-callable. `snoc(q, arrow)` appends, `concat(q1, q2)` joins, both
+    // O(1); `uncons(q)` returns `TQNil`/`TQCons(head, tail)` for the Core `qApply`
+    // template to match. The empty queue is `Unit`.
+    TaqSnoc,
+    TaqConcat,
+    TaqUncons,
 }
 
 impl Builtin {
@@ -237,6 +245,9 @@ impl Builtin {
         Self::ArrayPush,
         Self::StringOfArray,
         Self::SortPrim,
+        Self::TaqSnoc,
+        Self::TaqConcat,
+        Self::TaqUncons,
     ];
 
     #[must_use]
@@ -308,6 +319,9 @@ impl Builtin {
             Self::ArrayPush => "array_push",
             Self::StringOfArray => "string_of_array",
             Self::SortPrim => "sort_prim",
+            Self::TaqSnoc => "taq_snoc",
+            Self::TaqConcat => "taq_concat",
+            Self::TaqUncons => "taq_uncons",
         }
     }
 
@@ -324,6 +338,97 @@ impl Builtin {
     #[must_use]
     pub fn from_name(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|b| b.name() == s)
+    }
+
+    /// Per-argument calling convention for the `prism_*` runtime call this
+    /// builtin lowers to, read by codegen at `Comp::StrBuiltin`. `imm_args` are
+    /// pointer-tagged immediates (int/bool) untagged before the call,
+    /// `float_args` are boxed doubles unboxed before the call; every other
+    /// argument passes raw (string cell, boxed 64-bit cell, or tagged Int word).
+    /// `imm_res` is true when the result is a bare integer to retag.
+    ///
+    /// The match is exhaustive with no wildcard, so a new `Builtin` variant
+    /// cannot ship without declaring its convention here: the compiler rejects
+    /// the omission rather than letting a typo silently desync codegen untagging
+    /// from the C runtime (the footgun the old string-keyed table carried).
+    #[must_use]
+    pub const fn abi(self) -> (&'static [usize], &'static [usize], bool) {
+        match self {
+            // Bare-integer result to retag (predicates, lengths, exit codes).
+            Self::StrLen
+            | Self::StrEq
+            | Self::StrCmp
+            | Self::ArgsCount
+            | Self::I64Cmp
+            | Self::U64Cmp
+            | Self::FileExists
+            | Self::System
+            | Self::ArrayLen
+            | Self::ByteLen => (&[], &[], true),
+            // Index arg raw; bare-integer (char/byte) result to retag.
+            Self::CharAt | Self::ByteAt => (&[1], &[], true),
+            // Index arg raw; element/array result (cell or polymorphic) passes through.
+            Self::ArrayGet | Self::ArraySet => (&[1], &[], false),
+            // Single immediate arg (bool/char/index/exit/capacity); raw result.
+            Self::ShowBool | Self::ShowChar | Self::Arg | Self::Exit | Self::ArrayNew => {
+                (&[0], &[], false)
+            }
+            Self::ShowFloat => (&[], &[0], false),
+            Self::ShowFloatPrec => (&[1], &[0], false),
+            Self::PowFloat => (&[], &[0, 1], false),
+            Self::Substring => (&[1, 2], &[], false),
+            // Default: every argument passes raw and the result is a cell or an
+            // already-tagged word. String ops, fixed-width arithmetic on boxed
+            // 64-bit cells, and the elaborator-only ops all sit here.
+            Self::Concat
+            | Self::ParseInt
+            | Self::BigLit
+            | Self::ParseFloat
+            | Self::Getenv
+            | Self::ReadFile
+            | Self::WriteFile
+            | Self::AppendFile
+            | Self::RemoveFile
+            | Self::Eprint
+            | Self::ShowInt
+            | Self::ShowI64
+            | Self::ShowU64
+            | Self::ToI64
+            | Self::ToU64
+            | Self::IntOfI64
+            | Self::IntOfU64
+            | Self::I64Add
+            | Self::I64Sub
+            | Self::I64Mul
+            | Self::I64Div
+            | Self::U64Div
+            | Self::I64Rem
+            | Self::U64Rem
+            | Self::U64Add
+            | Self::U64Sub
+            | Self::U64Mul
+            | Self::StringOfBytes
+            | Self::ArrayPop
+            | Self::I64And
+            | Self::I64Or
+            | Self::I64Xor
+            | Self::I64Shl
+            | Self::I64Shr
+            | Self::U64And
+            | Self::U64Or
+            | Self::U64Xor
+            | Self::U64Shl
+            | Self::U64Shr
+            | Self::ArrayEmpty
+            | Self::ArrayPush
+            | Self::StringOfArray
+            | Self::SortPrim
+            // Queue ops: arguments (queue cells, the Unit-typed empty, arrow
+            // thunks) pass raw, result is a cell.
+            | Self::TaqSnoc
+            | Self::TaqConcat
+            | Self::TaqUncons => (&[], &[], false),
+        }
     }
 
     // Touches the host OS (file IO, env, process, args), so it has no

@@ -4,8 +4,8 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, CatchArm, Expr, HandlerArm, Marker, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
-    S,
+    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern, Program, Qualifier,
+    Sugar, SugarArm, Surface, S,
 };
 
 mod decl;
@@ -92,6 +92,16 @@ const fn callee_parens(e: &Expr) -> bool {
     low_prec_operand(e) || matches!(e, Expr::Handle(..) | Expr::FieldAccess(..))
 }
 
+// Wrap an already-rendered operand in parens when the surrounding precedence
+// demands it; the no-paren case returns the string untouched.
+fn paren_if(parens: bool, s: String) -> String {
+    if parens {
+        format!("({s})")
+    } else {
+        s
+    }
+}
+
 // In statement position, `match` and `if` always lay out across lines, even
 // when they would fit on one: their arms and branches read better stacked, the
 // way other languages write them. Synth matches (pattern-let / `?` desugar) are
@@ -99,7 +109,7 @@ const fn callee_parens(e: &Expr) -> bool {
 const fn forces_break(e: &S<Expr>) -> bool {
     matches!(
         e.node,
-        Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..))
+        Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..) | Sugar::While(..))
     ) && !e.synth
 }
 
@@ -127,6 +137,7 @@ fn block_trailing_call(e: &S<Expr>) -> bool {
                     | Sugar::Throw(..)
                     | Sugar::TryCatch(..)
                     | Sugar::For(..)
+                    | Sugar::While(..)
                     | Sugar::Transact(..)
                     | Sugar::NamedHandle(..)
             )
@@ -169,6 +180,47 @@ fn escape_str(s: &str) -> String {
         }
     }
     out
+}
+
+// Recognize the compound-assignment shape `compound_assign` produces: a `var`
+// assignment whose RHS is a synth `Bin(op, Var(x), rhs)` with a matching target
+// and a compound-eligible op. Returns the op and right operand so the formatter
+// restores `x <op>= rhs`. A hand-written `x := x + e` (non-synth `Bin`) returns
+// `None` and keeps its explicit `:=` form.
+fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::Bin(op, lhs, rhs) = &v.node else {
+        return None;
+    };
+    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
+        && matches!(&lhs.node, Expr::Var(n) if n == x)
+    {
+        Some((*op, rhs))
+    } else {
+        None
+    }
+}
+
+// The index analogue of `as_compound_assign`: an `IndexAssign` whose value is a
+// synth `Bin(op, Index(..), rhs)` (the shape `compound_stmt` builds), so the
+// formatter restores `a[i] <op>= rhs`. A hand-written `a[i] := a[i] + e` (a
+// non-synth `Bin`) keeps its explicit `:=` form.
+fn as_index_compound(v: &S<Expr>) -> Option<(BinOp, &S<Expr>)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::Bin(op, lhs, rhs) = &v.node else {
+        return None;
+    };
+    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
+        && matches!(&lhs.node, Expr::Index(..))
+    {
+        Some((*op, rhs))
+    } else {
+        None
+    }
 }
 
 // One offside statement and where the chain continues. `prev` is the byte offset
@@ -244,6 +296,25 @@ impl Fmt<'_> {
             })
     }
 
+    // A line comment that opens on the same source line as `after` (no newline
+    // in between), i.e. a trailing comment like `let x = 1 -- note`. Returns its
+    // text and the offset just past it, so the caller can both append it inline
+    // and skip it when emitting the following statement's leading comments.
+    fn trailing_comment(&self, after: usize) -> Option<(&str, usize)> {
+        let eol = self.source[after..]
+            .find('\n')
+            .map_or(self.source.len(), |i| after + i);
+        self.trivia
+            .between(after, eol)
+            .find_map(|ev| match &ev.trivia {
+                Trivia::Comment {
+                    kind: BuiltinKind::Line,
+                    text,
+                } => Some((text.as_str(), ev.span.end)),
+                _ => None,
+            })
+    }
+
     fn emit_leading_trivia(&self, lo: usize, hi: usize, out: &mut String) {
         for ev in self.trivia.between(lo, hi) {
             match &ev.trivia {
@@ -314,6 +385,16 @@ impl Fmt<'_> {
         for i in &prog.instances {
             items.push((i.span.start, i.span.end, self.fmt_instance(i)));
         }
+        for c in &prog.canonicals {
+            let line = format!(
+                "{} {}({}) = {}",
+                kw::CANONICAL,
+                c.class,
+                fmt_ty(&c.head),
+                c.name
+            );
+            items.push((c.span.start, c.span.end, line));
+        }
         for p in &prog.patterns {
             items.push((
                 p.span.start,
@@ -366,11 +447,7 @@ impl Fmt<'_> {
 
     fn fmt_dot_recv(&self, recv: &S<Expr>, indent: usize) -> String {
         let s = self.fmt_expr(recv, indent, Mode::Flat);
-        if dot_recv_parens(&recv.node) {
-            format!("({s})")
-        } else {
-            s
-        }
+        paren_if(dot_recv_parens(&recv.node), s)
     }
 
     // A call head in flat form: either `f(args)` or the restored `recv.f(rest)`.
@@ -393,11 +470,7 @@ impl Fmt<'_> {
             );
         }
         let f_s = self.fmt_expr(f, indent, Mode::Flat);
-        let f_s = if callee_parens(&f.node) {
-            format!("({f_s})")
-        } else {
-            f_s
-        };
+        let f_s = paren_if(callee_parens(&f.node), f_s);
         let args_s: Vec<String> = args
             .iter()
             .map(|a| self.fmt_expr(a, indent, Mode::Flat))
@@ -417,12 +490,23 @@ impl Fmt<'_> {
         // is uniform and lives only here; the stepper renders the bare statement.
         while let Some(step) = self.block_step(cur, indent) {
             let lead = self.lead_comments(prev, cur.span.start, indent);
-            lines.push(if lead.is_empty() {
+            let single_line = !step.rendered.contains('\n');
+            let mut rendered = if lead.is_empty() {
                 step.rendered
             } else {
                 format!("{lead}{}", step.rendered)
-            });
+            };
             prev = step.prev;
+            // Keep a same-line trailing comment on the statement it follows rather
+            // than relocating it onto its own line above the next statement.
+            if single_line {
+                if let Some((text, end)) = self.trailing_comment(prev) {
+                    rendered.push_str("  ");
+                    rendered.push_str(text);
+                    prev = end;
+                }
+            }
+            lines.push(rendered);
             cur = step.next;
             // The sentinel marks an ill-formed trailing `with`. Nothing follows.
             if matches!(&cur.node, Expr::Marker(Marker::With)) {
@@ -670,6 +754,49 @@ impl Fmt<'_> {
         Some(out)
     }
 
+    // A path-update path. `Field`/`each`/`?Ctor` join with dots; an `[i]` index
+    // attaches to the preceding step with no dot; a `where p` filter wraps the
+    // step it follows as `(step where p)`, the form it parses from.
+    fn fmt_path(&self, steps: &[PathStep]) -> Option<String> {
+        // Each segment is (joins_with_dot, text). Index segments attach.
+        let mut segs: Vec<(bool, String)> = Vec::new();
+        let mut i = 0;
+        while i < steps.len() {
+            match &steps[i] {
+                PathStep::Index(e) => {
+                    segs.push((false, format!("[{}]", self.fmt_expr_inline(e, Mode::Flat)?)));
+                    i += 1;
+                }
+                // A bare `where` not preceded by a step never parses; skip defensively.
+                PathStep::Where(_) => i += 1,
+                step => {
+                    let base = match step {
+                        PathStep::Field(f) => f.clone(),
+                        PathStep::Each => kw::EACH.to_string(),
+                        PathStep::Case(c) => format!("{}{c}", kw::QUESTION),
+                        _ => unreachable!("index/where handled above"),
+                    };
+                    if let Some(PathStep::Where(p)) = steps.get(i + 1) {
+                        let ps = self.fmt_expr_inline(p, Mode::Flat)?;
+                        segs.push((true, format!("({base} {} {ps})", kw::WHERE)));
+                        i += 2;
+                    } else {
+                        segs.push((true, base));
+                        i += 1;
+                    }
+                }
+            }
+        }
+        let mut out = String::new();
+        for (k, (dot, text)) in segs.iter().enumerate() {
+            if k > 0 && *dot {
+                out.push('.');
+            }
+            out.push_str(text);
+        }
+        Some(out)
+    }
+
     fn fmt_expr_inline(&self, e: &S<Expr>, mode: Mode) -> Option<String> {
         match &e.node {
             Expr::Int(n) => Some(n.to_string()),
@@ -679,7 +806,13 @@ impl Fmt<'_> {
             Expr::Unit => Some("()".into()),
             Expr::Str(s) => Some(format!("\"{}\"", escape_str(s))),
             Expr::Var(x) => Some(x.clone()),
+            // A delimited list collapses onto one line only when nothing inside
+            // carries a comment; an interior `--` line comment cannot survive a
+            // flat join, so refuse and let the break path emit it verbatim.
             Expr::Tuple(elems) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
                 let parts: Option<Vec<_>> = elems
                     .iter()
                     .map(|x| self.fmt_expr_inline(x, Mode::Flat))
@@ -688,6 +821,9 @@ impl Fmt<'_> {
             }
             Expr::List(elems) if elems.is_empty() => Some("[]".into()),
             Expr::List(elems) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
                 let parts: Option<Vec<_>> = elems
                     .iter()
                     .map(|x| self.fmt_expr_inline(x, Mode::Flat))
@@ -700,8 +836,8 @@ impl Fmt<'_> {
                 let b_paren = needs_right_paren(&b.node, *op, p);
                 let a_s = self.fmt_expr_inline(a, if a_paren { Mode::Flat } else { mode })?;
                 let b_s = self.fmt_expr_inline(b, if b_paren { Mode::Flat } else { mode })?;
-                let a_s = if a_paren { format!("({a_s})") } else { a_s };
-                let b_s = if b_paren { format!("({b_s})") } else { b_s };
+                let a_s = paren_if(a_paren, a_s);
+                let b_s = paren_if(b_paren, b_s);
                 Some(format!("{a_s} {} {b_s}", op.spelling()))
             }
             Expr::If(..) => {
@@ -724,34 +860,45 @@ impl Fmt<'_> {
                 if is_with_call(args) {
                     return None;
                 }
+                // A comment between the arguments would be dropped by the flat
+                // join below; refuse so the break path preserves it verbatim.
+                if self.has_comments(f.span.end, e.span.end) {
+                    return None;
+                }
                 if let Some(recv) = try_recv(f, args) {
                     let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = if dot_recv_parens(&recv.node) {
-                        format!("({recv_s})")
-                    } else {
-                        recv_s
-                    };
+                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
                     return Some(format!("{recv_s}{}", kw::QUESTION));
                 }
                 if let Some((name, recv, rest)) = dot_parts(f, args) {
                     let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = if dot_recv_parens(&recv.node) {
-                        format!("({recv_s})")
-                    } else {
-                        recv_s
-                    };
+                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
                     let rest_s: Option<Vec<_>> = rest
                         .iter()
                         .map(|a| self.fmt_expr_inline(a, Mode::Flat))
                         .collect();
                     return rest_s.map(|a| format!("{recv_s}.{name}({})", a.join(", ")));
                 }
+                // Explicit instance selection: the callee is an `Expr::Inst`, so
+                // fold its names back into a trailing `using` clause on this call.
+                if let Expr::Inst(inner, names) = &f.node {
+                    let inner_s = self.fmt_expr_inline(inner, mode)?;
+                    let inner_s = paren_if(callee_parens(&inner.node), inner_s);
+                    let args: Option<Vec<_>> = args
+                        .iter()
+                        .map(|a| self.fmt_expr_inline(a, Mode::Flat))
+                        .collect();
+                    return args.map(|a| {
+                        let using = format!("{} {}", kw::USING, names.join(", "));
+                        if a.is_empty() {
+                            format!("{inner_s}({using})")
+                        } else {
+                            format!("{inner_s}({}, {using})", a.join(", "))
+                        }
+                    });
+                }
                 let f_s = self.fmt_expr_inline(f, mode)?;
-                let f_s = if callee_parens(&f.node) {
-                    format!("({f_s})")
-                } else {
-                    f_s
-                };
+                let f_s = paren_if(callee_parens(&f.node), f_s);
                 let args: Option<Vec<_>> = args
                     .iter()
                     .map(|a| self.fmt_expr_inline(a, Mode::Flat))
@@ -809,6 +956,20 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{e_s}.{field}"))
             }
+            Expr::Index(recv, key) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let recv_s = paren_if(callee_parens(&recv.node), recv_s);
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                Some(format!("{recv_s}[{key_s}]"))
+            }
+            // Only produced by desugar, so the surface formatter never sees it;
+            // a faithful fallback for completeness.
+            Expr::IndexSet(recv, key, val) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                let val_s = self.fmt_expr_inline(val, Mode::Flat)?;
+                Some(format!("{recv_s}[{key_s}] {} {val_s}", kw::COLON_EQ))
+            }
             Expr::RecordCreate(name, fields) => {
                 let fs: Option<Vec<_>> = fields
                     .iter()
@@ -834,16 +995,23 @@ impl Fmt<'_> {
                 let base_s = self.fmt_expr_inline(base, Mode::Flat)?;
                 let us: Option<Vec<_>> = ups
                     .iter()
-                    .map(|(p, e)| {
-                        self.fmt_expr_inline(e, Mode::Flat)
-                            .map(|e_s| format!("{} = {e_s}", p.join(".")))
+                    .map(|(p, op)| {
+                        let (sigil, e) = match op {
+                            PathOp::Set(e) => (kw::EQ, e),
+                            PathOp::Modify(e) => (kw::TILDE, e),
+                        };
+                        let ps = self.fmt_path(p)?;
+                        let e_s = self.fmt_expr_inline(e, Mode::Flat)?;
+                        Some(format!("{ps} {sigil} {e_s}"))
                     })
                     .collect();
                 us.map(|us| format!("{{ {base_s} | {} }}", us.join(", ")))
             }
+            // An `Inst` not wrapped in a call (rare): the parser only produces it
+            // as a call callee, so this prints the bare zero-argument form.
             Expr::Inst(f, names) => {
                 let f_s = self.fmt_expr_inline(f, mode)?;
-                Some(format!("{f_s}[{}]", names.join(", ")))
+                Some(format!("{f_s}({} {})", kw::USING, names.join(", ")))
             }
             Expr::Ann(inner, ty) => {
                 let s = self.fmt_expr_inline(inner, Mode::Flat)?;
@@ -882,9 +1050,31 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{e_s}{}{field}", kw::QUESTION_DOT))
             }
+            Sugar::ReadPath(base, steps) => {
+                let base_s = self.fmt_expr_inline(base, mode)?;
+                let path = self.fmt_path(steps)?;
+                Some(format!("{base_s}.[{path}]"))
+            }
             Sugar::Assign(x, v) => {
-                let v_s = self.fmt_expr_inline(v, mode)?;
-                Some(format!("{x} {} {v_s}", kw::COLON_EQ))
+                if let Some((op, rhs)) = as_compound_assign(x, v) {
+                    let rhs_s = self.fmt_expr_inline(rhs, mode)?;
+                    Some(format!("{x} {}= {rhs_s}", op.spelling()))
+                } else {
+                    let v_s = self.fmt_expr_inline(v, mode)?;
+                    Some(format!("{x} {} {v_s}", kw::COLON_EQ))
+                }
+            }
+            Sugar::IndexAssign(recv, key, value) => {
+                let recv_s = self.fmt_expr_inline(recv, mode)?;
+                let recv_s = paren_if(callee_parens(&recv.node), recv_s);
+                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                if let Some((op, rhs)) = as_index_compound(value) {
+                    let rhs_s = self.fmt_expr_inline(rhs, mode)?;
+                    Some(format!("{recv_s}[{key_s}] {}= {rhs_s}", op.spelling()))
+                } else {
+                    let v_s = self.fmt_expr_inline(value, mode)?;
+                    Some(format!("{recv_s}[{key_s}] {} {v_s}", kw::COLON_EQ))
+                }
             }
             Sugar::Throw(name, args) => {
                 if args.is_empty() {
@@ -948,6 +1138,21 @@ impl Fmt<'_> {
                     pre.iter().map(|e| self.fmt_expr_inline(e, mode)).collect();
                 let hi_s = self.fmt_expr_inline(hi, mode)?;
                 parts.map(|p| format!("[{}..{hi_s}]", p.join(", ")))
+            }
+            Sugar::While(cond, body) => {
+                let b = self.fmt_expr_inline(body, Mode::Flat)?;
+                if let Some(c) = cond {
+                    let c_s = self.fmt_expr_inline(c, Mode::Flat)?;
+                    Some(format!("{} {c_s} {} {b}", kw::WHILE, kw::DO))
+                } else {
+                    Some(format!("{} {b}", kw::LOOP))
+                }
+            }
+            Sugar::Break => Some(kw::BREAK.to_string()),
+            Sugar::Continue => Some(kw::CONTINUE.to_string()),
+            Sugar::Return(e) => {
+                let e_s = self.fmt_expr_inline(e, mode)?;
+                Some(format!("{} {e_s}", kw::RETURN))
             }
             Sugar::VarDecl(..) | Sugar::NamedHandle(..) => None,
         }
@@ -1085,6 +1290,11 @@ impl Fmt<'_> {
             }
             (Expr::Let(x, v, b), _) => self.fmt_let_break(x, v, b, indent, mode),
             (Expr::Pipe(x, f), _) => self.fmt_pipe_break(x, f, indent, mode),
+            // A flat call drops comments sitting between its arguments; when any
+            // are present, reproduce the call from source so they survive.
+            (Expr::Call(f, args), _) if self.has_comments(f.span.end, e.span.end) => {
+                self.verbatim(e.span.start, e.span.end)
+            }
             (Expr::Call(f, args), _) => self.fmt_call_flat(f, args, indent),
             (Expr::Handle(body, arms), Mode::Layout) => self.fmt_handle_layout(body, arms, indent),
             (Expr::Sugar(Sugar::TryCatch(body, arms)), Mode::Layout) => {
@@ -1096,16 +1306,27 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::Transact(body, fallback)), Mode::Layout) => {
                 self.fmt_transact_layout(e, body, fallback, indent)
             }
+            (Expr::Sugar(Sugar::While(cond, body)), Mode::Layout) => {
+                self.fmt_while_layout(cond.as_deref(), body, indent)
+            }
             (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => self
                 .fmt_block(e, indent, e.span.start)
                 .trim_start()
                 .to_string(),
             (Expr::Sugar(Sugar::Assign(x, v)), _) => {
-                format!(
-                    "{x} {} {}",
-                    kw::COLON_EQ,
-                    self.fmt_expr(v, indent, Mode::Flat)
-                )
+                if let Some((op, rhs)) = as_compound_assign(x, v) {
+                    format!(
+                        "{x} {}= {}",
+                        op.spelling(),
+                        self.fmt_expr(rhs, indent, Mode::Flat)
+                    )
+                } else {
+                    format!(
+                        "{x} {} {}",
+                        kw::COLON_EQ,
+                        self.fmt_expr(v, indent, Mode::Flat)
+                    )
+                }
             }
             (Expr::Handle(body, arms), _) => self.fmt_handle_flat(body, arms, indent, mode),
             _ => self
@@ -1337,6 +1558,21 @@ impl Fmt<'_> {
             kw::DO,
             self.fmt_block(body, indent + 1, from)
         )
+    }
+
+    // `while cond do <block>` / `loop <block>`: the header closes (`do` for
+    // `while`, nothing for `loop`) and the body follows as an offside block.
+    fn fmt_while_layout(&self, cond: Option<&S<Expr>>, body: &S<Expr>, indent: usize) -> String {
+        let (header, from) = cond.map_or_else(
+            || (kw::LOOP.to_string(), body.span.start),
+            |c| {
+                (
+                    format!("{} {} {}", kw::WHILE, self.fmt_head(c, indent), kw::DO),
+                    c.span.end,
+                )
+            },
+        );
+        format!("{header}\n{}", self.fmt_block(body, indent + 1, from))
     }
 
     fn fmt_transact_layout(

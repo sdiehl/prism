@@ -1,0 +1,3 @@
+fn g() : Quux = 1
+
+fn main() = println(g())

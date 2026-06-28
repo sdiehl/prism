@@ -22,7 +22,9 @@ pub(super) fn fmt_import(i: &ImportDecl) -> String {
     if let Some(a) = &i.alias {
         write!(s, " {} {a}", kw::AS).unwrap();
     }
-    if let Some(names) = &i.names {
+    if i.glob {
+        s.push_str(" (..)");
+    } else if let Some(names) = &i.names {
         write!(s, " ({})", names.join(", ")).unwrap();
     }
     s

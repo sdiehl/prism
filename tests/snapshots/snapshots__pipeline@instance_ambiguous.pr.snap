@@ -260,10 +260,12 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: ambiguous instance for Ord(Int): ordInt, ordRev; select one with f[name]
-    ╭─[ <source>:13:13 ]
-    │
- 13 │ fn main() = cmp(1, 2)
-    │             ─┬─  
-    │              ╰─── in `main`: ambiguous instance for Ord(Int): ordInt, ordRev; select one with f[name]
-────╯
+Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ ╭─▶ instance ordInt : Ord(Int) {
+   ┆ ┆   
+ 7 │ ├─▶ }
+   │ │       
+   │ ╰─────── 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
+───╯

@@ -133,12 +133,13 @@ fn reuse_arm(scrut: &Value, p: &CorePat, body: &Comp) -> Comp {
         _ => return body.clone(),
     };
     let tok: Sym = reuse_token(s.as_str()).into();
-    // Reuse is a pure optimization: if the rewrite ever came back unbalanced
-    // (a token freed without a matching consume on some path), decline it and
-    // keep the safe no-reuse body. Same observable output, no ICE.
-    try_reuse(body, *s, tok, arity)
-        .filter(|out| token_balanced(out, tok))
-        .unwrap_or_else(|| body.clone())
+    // Reuse is a pure optimization, so a scrutinee `try_reuse` cannot place into a
+    // scoped `WithReuse` is left as the safe no-reuse body. When it does succeed,
+    // the result is balanced by construction: `WithReuse` frees the cell at one
+    // point and `consume_alloc` spends the token on every control path (it returns
+    // `None`, declining the whole rewrite, if any path fails to allocate), so no
+    // post-hoc balance check is needed.
+    try_reuse(body, *s, tok, arity).unwrap_or_else(|| body.clone())
 }
 
 // Pair the `drop s` (the cell freed when the scrutinee is consumed) with a later
@@ -154,8 +155,11 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
             if let Comp::Drop(Value::Var(d)) = m.as_ref() {
                 if *d == s {
                     let n2 = consume_alloc(n, tok, cap)?;
-                    let token = Comp::ReuseToken(Value::Var(s));
-                    return Some(Comp::Bind(Box::new(token), tok, Box::new(n2)));
+                    return Some(Comp::WithReuse {
+                        token: tok,
+                        freed: Value::Var(s),
+                        body: Box::new(n2),
+                    });
                 }
             }
             if let Some(m2) = try_reuse(m, s, tok, cap) {
@@ -193,52 +197,19 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
                 .collect();
             hit.then(|| Comp::Case(scrut.clone(), arms))
         }
+        // A nested pattern's inner arm reuses first, wrapping its body in a
+        // `WithReuse` that the outer scrutinee's `drop` now sits inside. Keep
+        // searching through it, then rewrap with the inner token untouched.
+        Comp::WithReuse { token, freed, body } => {
+            let body2 = try_reuse(body, s, tok, cap)?;
+            Some(Comp::WithReuse {
+                token: *token,
+                freed: freed.clone(),
+                body: Box::new(body2),
+            })
+        }
         _ => None,
     }
-}
-
-// Soundness net: along every root-to-leaf path the token is freed (ReuseToken)
-// and consumed (Reuse) the same number of times, so it never leaks or double
-// frees. Consumes hidden inside a Lam body run later and do not count here.
-// A divergent leaf (`Comp::Error`) aborts the process, which reclaims the held
-// shell, so reaching it with a live token discharges the obligation rather than
-// leaking: the path counts as balanced (false). Modelling divergence this way
-// keeps the analysis precise (a branch that consumes on one side and crashes on
-// the other still earns reuse) instead of conservatively declining.
-fn token_balanced(c: &Comp, tok: Sym) -> bool {
-    fn walk(c: &Comp, tok: Sym, live: bool) -> Option<bool> {
-        match c {
-            Comp::Error(_) => Some(false),
-            Comp::Bind(m, x, n) => {
-                let live = if matches!(m.as_ref(), Comp::ReuseToken(_)) && *x == tok {
-                    true
-                } else {
-                    // `m` runs on the same path before `n`, so the credit flows
-                    // through it; its exit state is what enters `n`.
-                    walk(m, tok, live)?
-                };
-                walk(n, tok, live)
-            }
-            Comp::Reuse(Value::Var(t), _) if *t == tok => live.then_some(false),
-            Comp::If(_, t, e) => {
-                let a = walk(t, tok, live)?;
-                let b = walk(e, tok, live)?;
-                (a == b).then_some(a)
-            }
-            Comp::Case(_, arms) => {
-                let mut it = arms.iter().map(|(_, b)| walk(b, tok, live));
-                let first = it.next().unwrap_or(Some(live))?;
-                for r in it {
-                    if r? != first {
-                        return None;
-                    }
-                }
-                Some(first)
-            }
-            _ => Some(live),
-        }
-    }
-    matches!(walk(c, tok, false), Some(false))
 }
 
 // Reuse credit (FP^2): a freed token feeds the first constructor allocation that
@@ -266,7 +237,7 @@ fn consume_alloc(c: &Comp, tok: Sym, cap: usize) -> Option<Comp> {
             ))
         }
         Comp::Return(v @ (Value::Ctor(..) | Value::Tuple(..))) if ctor_arity(v) <= cap => {
-            Some(Comp::Reuse(Value::Var(tok), v.clone()))
+            Some(Comp::Reuse(tok, v.clone()))
         }
         Comp::If(cond, t, e) => Some(Comp::If(
             cond.clone(),
@@ -279,6 +250,16 @@ fn consume_alloc(c: &Comp, tok: Sym, cap: usize) -> Option<Comp> {
                 .map(|(p, b)| Some((p.clone(), consume_alloc(b, tok, cap)?)))
                 .collect::<Option<Vec<_>>>()?;
             Some(Comp::Case(scrut.clone(), arms))
+        }
+        // The fitting allocation may live past an inner reuse's `WithReuse` (a
+        // deeper-nested pattern); walk into it so the credit can reach the tail.
+        Comp::WithReuse { token, freed, body } => {
+            let body2 = consume_alloc(body, tok, cap)?;
+            Some(Comp::WithReuse {
+                token: *token,
+                freed: freed.clone(),
+                body: Box::new(body2),
+            })
         }
         _ => None,
     }
@@ -446,6 +427,9 @@ fn rc_thunks(c: &Comp, sigs: &Sigs) -> Comp {
         Comp::App(f, args) => {
             Comp::App(Box::new(rc_thunks(f, sigs)), args.iter().map(rv).collect())
         }
+        Comp::RefNew(v) => Comp::RefNew(rv(v)),
+        Comp::RefGet(v) => Comp::RefGet(rv(v)),
+        Comp::RefSet(c, v) => Comp::RefSet(rv(c), rv(v)),
         other => other.clone(),
     }
 }
@@ -486,7 +470,17 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
         | Comp::PrintS(v)
         | Comp::Error(v)
         | Comp::Srand(v)
-        | Comp::FloatBuiltin(_, v) => count_val(v, out),
+        | Comp::FloatBuiltin(_, v)
+        // A `var` cell flows as an ordinary owned value: each read/write consumes
+        // a reference (the rc pass dups so each use has one), and `ref_set`
+        // overwrites the cell in place. So a Ref op counts its cell and value like
+        // any other consuming leaf.
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => count_val(v, out),
+        Comp::RefSet(c, v) => {
+            count_val(c, out);
+            count_val(v, out);
+        }
         Comp::App(f, args) => {
             for x in freev(f) {
                 *out.entry(x).or_default() += 1;
@@ -668,7 +662,21 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         | Comp::Error(v)
         | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
-        | Comp::ReuseToken(v) => use_val(v, env, sigs),
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => use_val(v, env, sigs),
+        Comp::RefSet(c, v) => {
+            use_val(c, env, sigs)?;
+            use_val(v, env, sigs)
+        }
+        // Free the dropped cell, then bind its token (one credit) over the body;
+        // a `Reuse` inside the body spends it, so the body brings the token back
+        // to zero on every path (enforced by the branch-merge and end-of-scope
+        // checks), exactly as the threaded `bind (reuse_token ..)` form did.
+        Comp::WithReuse { token, freed, body } => {
+            use_val(freed, env, sigs)?;
+            env.insert(*token, 1);
+            sim(body, env, sigs)
+        }
         Comp::App(f, args) => {
             for x in freev(f) {
                 consume(x, 1, env)?;
@@ -697,8 +705,8 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
             }
             Ok(())
         }
-        Comp::Reuse(t, v) => {
-            use_val(t, env, sigs)?;
+        Comp::Reuse(tok, v) => {
+            consume(*tok, 1, env)?;
             use_val(v, env, sigs)
         }
         Comp::Mask(_, b) => sim(b, env, sigs),
@@ -1037,8 +1045,14 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
-        | Comp::ReuseToken(v) => occ(v),
-        Comp::Reuse(t, v) => occ(t) + occ(v),
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => occ(v),
+        Comp::RefSet(c, v) => occ(c) + occ(v),
+        // `token` shadows `x` over `body`; the freed cell is named in scope.
+        Comp::WithReuse { token, freed, body } => {
+            occ(freed) + if *token == x { 0 } else { max_uses(x, body) }
+        }
+        Comp::Reuse(tok, v) => usize::from(*tok == x) + occ(v),
         Comp::Prim(_, a, b) => occ(a) + occ(b),
         Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
             args.iter().map(occ).sum()
@@ -1097,6 +1111,12 @@ fn fip_comp(
     let val = |v: &Value| fip_value(v, want, fname, fips, users);
     match c {
         Comp::Reuse(_, v) => fip_value_under_reuse(v, want, fname, fips, users),
+        // Freeing the dropped cell is the allocation-free shell a `Reuse` in the
+        // body then spends; check the body like any other scope.
+        Comp::WithReuse { freed, body, .. } => {
+            val(freed)?;
+            recur(body)
+        }
         Comp::Call(g, args) => {
             if users.contains(g) {
                 // `fbip` may call either discipline; `fip` may call only `fip`,
@@ -1151,7 +1171,15 @@ fn fip_comp(
         | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Drop(v)
-        | Comp::ReuseToken(v) => val(v),
+        // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
+        // only by `erase_local_vars` during effect lowering) is unreachable here;
+        // check its values for completeness.
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => val(v),
+        Comp::RefSet(c, v) => {
+            val(c)?;
+            val(v)
+        }
         Comp::Do(_, args) | Comp::StrBuiltin(_, args) => args.iter().try_for_each(val),
         Comp::Handle {
             body,
@@ -1262,7 +1290,7 @@ mod tests {
         }
     }
 
-    // `f(x) to t; <k>` — the recursive-call-feeding-continuation shape.
+    // `f(x) to t; <k>`, the recursive-call-feeding-continuation shape.
     fn rec(k: Comp) -> Comp {
         Comp::Bind(
             Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),

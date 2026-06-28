@@ -1,8 +1,28 @@
 name = "prism"
-defaultTargets = ["Prism", "Sanity"]
+defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Certificates", "oracle"]
 
+# Proof libraries: theorems only, no examples, no IO.
 [[lean_lib]]
 name = "Prism"
 
 [[lean_lib]]
-name = "Sanity"
+name = "CEK"
+
+[[lean_lib]]
+name = "Dynamics"
+
+[[lean_lib]]
+name = "Meta"
+
+# Kernel-checked differential certificates (model output == live `prism run` output).
+[[lean_lib]]
+name = "Certificates"
+
+# JSON core-IR decoder (consumer of `prism dump core-json`); exe-only support.
+[[lean_lib]]
+name = "Json"
+
+# Executable: ad-hoc examples, the JSON bridge endpoint, and the CEK oracle demo.
+[[lean_exe]]
+name = "oracle"
+root = "Oracle"

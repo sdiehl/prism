@@ -53,6 +53,13 @@ impl<'a> SourceMap<'a> {
         &self.full[self.prelude..]
     }
 
+    /// Byte offset where the user's own source begins (0 when no prelude prefix
+    /// is present). Spans below it belong to the prepended prelude.
+    #[must_use]
+    pub const fn prelude_len(&self) -> usize {
+        self.prelude
+    }
+
     #[must_use]
     pub fn at(&self, byte: usize) -> String {
         if byte < self.prelude {
@@ -65,7 +72,7 @@ impl<'a> SourceMap<'a> {
     }
 }
 
-fn line_col(src: &str, byte: usize) -> (u32, u32) {
+pub(crate) fn line_col(src: &str, byte: usize) -> (u32, u32) {
     let (mut line, mut col) = (1u32, 1u32);
     for (i, c) in src.char_indices() {
         if i >= byte {

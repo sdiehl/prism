@@ -1,6 +1,6 @@
 -- Parametric effects: the prelude's one Emit, many instantiations.
 --
--- each() walks any list, performing Emit(a) at the element type, so one
+-- walk() walks any list, performing Emit(a) at the element type, so one
 -- producer serves both uses below. Emit(Int) and Emit(String) are distinct
 -- row labels. total() folds emitted numbers into a sum, shout() prints emitted
 -- words, and neither handler sees the other's values. Expected output:
@@ -9,22 +9,22 @@
 --   lo
 --   hi
 
-fn each(xs : List(a)) : !{Emit(a)} Unit =
+fn walk(xs : List(a)) : !{Emit(a)} Unit =
   match xs of
     Nil => ()
     Cons(x, rest) =>
       emit(x)
-      each(rest)
+      walk(rest)
 
 fn total(xs : List(Int)) : Int =
   let f =
-    handle each(xs) with
+    handle walk(xs) with
       emit(v, k) => \(acc) -> k(())(acc + v)
       return r => \(acc) -> acc
   f(0)
 
 fn shout(xs : List(String)) : !{IO} Unit =
-  handle each(xs) with
+  handle walk(xs) with
     emit(w, k) =>
       println(w)
       k(())

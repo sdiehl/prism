@@ -1,0 +1,27 @@
+-- The `where` filter keeps only the foci a predicate selects: `(each where p)`
+-- applies the rest only to elements satisfying `p`, passing the others through.
+-- It composes with the other steps; the last case is the whole vocabulary in one
+-- path (field, filtered traversal, field, traversal, field).
+
+type Item = Item { name: String, count: Int }
+
+type Player = Player { name: String, hp: Int, bag: List(Item) }
+
+type World = World { party: List(Player), turn: Int }
+
+fn alive(p : Player) : Bool = p.hp > 0
+
+fn heal(h : Int) : Int = h + 10
+
+fn mk(n : String, h : Int) : Player =
+  Player { name = n, hp = h, bag = Cons(Item { name = "sword", count = 1 }, Nil) }
+
+fn main() =
+  let ps = Cons(mk("a", 5), Cons(mk("b", 0), Cons(mk("c", 3), Nil)))
+  -- modify only the living
+  println({ ps | (each where alive).hp ~ heal })
+  -- set a field on the kept foci
+  println({ ps | (each where alive).name = "X" })
+  -- the whole vocabulary: for every living member, bump every item's count
+  let world = World { party = ps, turn = 1 }
+  println({ world | party.(each where alive).bag.each.count ~ \(n) -> n + 5 })

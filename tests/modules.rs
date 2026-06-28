@@ -253,10 +253,22 @@ fn instance_far_from_class_and_type_warns_orphan() {
 }
 
 #[test]
-fn overlap_across_modules_warns() {
-    let ws = warnings("import Orphan\nimport OrphanB\nfn main() = print(0)");
+fn overlap_across_modules_is_coherence_error() {
+    // Two independently-authored Eq(Widget) instances assembled into one program:
+    // coherence forbids silent ambiguity, so it is a definition-site error unless
+    // the importer designates a canonical one (the open-world "importer decides").
+    let e = err("import Orphan\nimport OrphanB\nfn main() = print(0)");
     assert!(
-        ws.iter().any(|w| w.contains("overlapping instances")),
-        "{ws:?}"
+        e.contains("instances for") && e.contains("canonical"),
+        "{e}"
     );
+}
+
+#[test]
+fn canonical_designation_resolves_cross_module_overlap() {
+    // The importer breaks the tie with a canonical binding; the program checks.
+    let ws = warnings(
+        "import Typ (Widget)\nimport Orphan\nimport OrphanB\ncanonical Eq(Widget) = weq\nfn main() = print(0)",
+    );
+    assert!(!ws.iter().any(|w| w.contains("instances for")), "{ws:?}");
 }

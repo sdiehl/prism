@@ -101,7 +101,44 @@ impl Tc<'_> {
 
     pub(super) fn solve(&mut self, v: u32, t: Type) {
         if let Some(i) = self.index_ex(v) {
+            // Scope guard at the origin: the solution may only reference entries
+            // to the left of `v`, so truncation never strands a referenced var
+            // and the downstream `index_ex` lookups can never miss. A forward or
+            // out-of-scope reference here is a compiler bug, caught at its cause.
+            debug_assert!(
+                self.well_formed_before(v, &t),
+                "solve: solution references a forward or out-of-scope variable"
+            );
             self.ctx[i] = Entry::Solved(v, t);
+        }
+    }
+
+    // Truncating to `i` drops every existential in `ctx[i..]`. `solve` keeps every
+    // type solution strictly left-referencing (the `well_formed_before` guard), so
+    // a surviving solution (in `ctx[..i]`) never names a dropped *type* existential;
+    // this asserts that at the boundary, the compiler-bug the downstream `index_ex`
+    // `expect`s guard against. Row existentials are deliberately not asserted: the
+    // row context keeps no such ordering invariant (see `unify_row`), so its lookups
+    // stay defensive ICEs. Compiled out of release builds.
+    fn assert_no_escape(&self, i: usize) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let mut dropped_ty = BTreeSet::new();
+        for e in &self.ctx[i..] {
+            if let Entry::Ex(w) | Entry::Solved(w, _) = e {
+                dropped_ty.insert(*w);
+            }
+        }
+        for e in &self.ctx[..i] {
+            if let Entry::Solved(_, t) = e {
+                let mut ty = BTreeSet::new();
+                t.free_exist(&mut ty);
+                debug_assert!(
+                    ty.is_disjoint(&dropped_ty),
+                    "context truncation strands a type existential referenced by a surviving solution"
+                );
+            }
         }
     }
 
@@ -111,6 +148,7 @@ impl Tc<'_> {
             .iter()
             .position(|e| matches!(e, Entry::Marker(w) if *w == m))
         {
+            self.assert_no_escape(i);
             self.ctx.truncate(i);
         }
     }
@@ -121,6 +159,7 @@ impl Tc<'_> {
             .iter()
             .position(|e| matches!(e, Entry::Uni(w) if *w == n))
         {
+            self.assert_no_escape(i);
             self.ctx.truncate(i);
         }
     }
@@ -131,6 +170,7 @@ impl Tc<'_> {
             .iter()
             .position(|e| matches!(e, Entry::RowUni(w) if *w == n))
         {
+            self.assert_no_escape(i);
             self.ctx.truncate(i);
         }
     }
@@ -165,42 +205,34 @@ impl Tc<'_> {
             .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
     }
 
-    pub(super) fn articulate(
-        &mut self,
-        a: u32,
-        arg_exs: &[u32],
-        row: u32,
-        ret: u32,
-    ) -> Result<(), TcErr> {
+    pub(super) fn articulate(&mut self, a: u32, arg_exs: &[u32], row: u32, ret: u32) {
         let fun = Type::Fun(
             arg_exs.iter().map(|e| Type::Exist(*e)).collect(),
             EffRow::Exist(row),
             Box::new(Type::Exist(ret)),
         );
+        // `a` is the live existential `inst` is articulating; the solve invariant
+        // keeps it in context, so absence is a compiler bug, not user-reachable:
+        // this is infallible, hence no `Result`.
         let pos = self
             .index_ex(a)
-            .ok_or_else(|| TcErr::Ice(format!("articulate: ^{a} not in context")))?;
+            .expect("articulate: existential escaped scope");
         let mut repl: Vec<Entry> = arg_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::ExRow(row));
         repl.push(Entry::Ex(ret));
         repl.push(Entry::Solved(a, fun));
         self.ctx.splice(pos..=pos, repl);
-        Ok(())
     }
 
-    pub(super) fn splice_solved(
-        &mut self,
-        a: u32,
-        new_exs: &[u32],
-        solved: Type,
-    ) -> Result<(), TcErr> {
+    pub(super) fn splice_solved(&mut self, a: u32, new_exs: &[u32], solved: Type) {
+        // Same invariant as `articulate`: a live existential is always in
+        // context, so this is infallible too.
         let pos = self
             .index_ex(a)
-            .ok_or_else(|| TcErr::Ice(format!("splice_solved: ^{a} not in context")))?;
+            .expect("splice_solved: existential escaped scope");
         let mut repl: Vec<Entry> = new_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::Solved(a, solved));
         self.ctx.splice(pos..=pos, repl);
-        Ok(())
     }
 
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
@@ -211,9 +243,15 @@ impl Tc<'_> {
         let t = self.apply(ty);
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
+        // One zonk per env binding feeds both the existential and the row-existential
+        // free-variable sets; the env is often the whole prelude, so walking it once
+        // rather than twice is the cheaper of two identical passes.
         let mut env_exs = BTreeSet::new();
+        let mut env_row_exs = BTreeSet::new();
         for v in env.values() {
-            self.apply(v).free_exist(&mut env_exs);
+            let av = self.apply(v);
+            av.free_exist(&mut env_exs);
+            av.free_exist_row(&mut env_row_exs);
         }
         let gen: Vec<u32> = exs.into_iter().filter(|e| !env_exs.contains(e)).collect();
         let mut out = t;

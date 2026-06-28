@@ -70,7 +70,11 @@ impl Tc<'_> {
                 }
                 let e1 = self.apply_row(eff1);
                 let e2 = self.apply_row(eff2);
-                self.unify_row(&e1, &e2)?;
+                // Effect rows are covariant on the arrow: a value may perform at
+                // most the effects the expected type permits, so a pure function
+                // is usable wherever an effectful one is wanted. (The ambient
+                // model gave this implicitly; the delimited row makes it a rule.)
+                self.sub_row(&e1, &e2)?;
                 let r1 = self.apply(r1);
                 let r2 = self.apply(r2);
                 self.subtype(&r1, &r2)
@@ -134,12 +138,14 @@ impl Tc<'_> {
                 // to the older one, so a solution only references entries to its
                 // left and survives later truncation at a marker. Every live
                 // existential is in the context, so absence means it escaped scope.
+                // A live existential is always in the context: `solve` only ever
+                // records a solution referencing entries to its left (asserted
+                // there), so truncation never strands a referenced var. Absence is
+                // therefore a compiler bug, not user-reachable.
                 let oi = self
                     .index_ex(other)
-                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{other} not in context")))?;
-                let ei = self
-                    .index_ex(ex)
-                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{ex} not in context")))?;
+                    .expect("inst: existential escaped scope");
+                let ei = self.index_ex(ex).expect("inst: existential escaped scope");
                 if oi > ei {
                     self.solve(other, Type::Exist(ex));
                 } else {
@@ -151,7 +157,7 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(ex, &arg_exs, row, ret)?;
+                self.articulate(ex, &arg_exs, row, ret);
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, !left)?;
@@ -164,7 +170,7 @@ impl Tc<'_> {
             Type::Con(name, args) => {
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
                 let con = Type::Con(name, arg_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &arg_exs, con)?;
+                self.splice_solved(ex, &arg_exs, con);
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, left)?;
@@ -178,7 +184,7 @@ impl Tc<'_> {
                 let he = self.fresh_id();
                 let ae = self.fresh_id();
                 let app = Type::App(Box::new(Type::Exist(he)), Box::new(Type::Exist(ae)));
-                self.splice_solved(ex, &[he, ae], app)?;
+                self.splice_solved(ex, &[he, ae], app);
                 let h = self.apply(&h);
                 self.inst(he, &h, left)?;
                 let a = self.apply(&a);
@@ -187,7 +193,7 @@ impl Tc<'_> {
             Type::Tuple(elems) => {
                 let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();
                 let tup = Type::Tuple(elem_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &elem_exs, tup)?;
+                self.splice_solved(ex, &elem_exs, tup);
                 for (e, elem) in elem_exs.iter().zip(&elems) {
                     let elem = self.apply(elem);
                     self.inst(*e, &elem, left)?;
@@ -236,7 +242,7 @@ impl Tc<'_> {
     // Scoped-label row unification (Leijen / Koka). To unify `l | rest1` with
     // another row, rewrite that row to expose `l` at its head, then unify the
     // tails. A bare existential tail absorbs any missing label by extending.
-    fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
+    pub(super) fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
         let a = self.apply_row(a);
         let b = self.apply_row(b);
         match (&a, &b) {
@@ -247,6 +253,9 @@ impl Tc<'_> {
             // to the older, so a solution only references entries to its left and
             // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
             (EffRow::Exist(x), EffRow::Exist(y)) => {
+                // Unlike the type context, the row context does not keep every
+                // solution strictly left-referencing, so absence here is not
+                // provably dead: keep it a defensive ICE rather than a panic.
                 let xi = self
                     .index_ex_row(*x)
                     .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{x} not in context")))?;
@@ -282,6 +291,23 @@ impl Tc<'_> {
                 a.show(),
                 b.show()
             ))),
+        }
+    }
+
+    // Covariant row subsumption `a <= b`: every effect the value may perform
+    // (`a`) must be permitted by the expected row (`b`). An empty `a` is a subrow
+    // of anything (a pure value fits any context); a flexible or rigid `a` tail
+    // links into `b` so a row variable still propagates; each concrete label of
+    // `a` must be present in `b`, recursing on the residual.
+    pub(super) fn sub_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
+        let a = self.apply_row(a);
+        match a {
+            EffRow::Empty => Ok(()),
+            EffRow::Exist(_) | EffRow::Var(_) => self.unify_row(&a, b),
+            EffRow::Extend(l, rest) => {
+                let resid = self.rewrite_row(b, &l)?;
+                self.sub_row(&rest, &resid)
+            }
         }
     }
 
@@ -446,16 +472,19 @@ mod tests {
     // A bare Tc with empty environments, enough to drive row rewriting.
     fn tc<'a>(
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
+        data: &'a BTreeMap<String, super::super::DataInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
         classes: &'a BTreeMap<String, super::super::ClassInfo>,
         instances: &'a BTreeMap<String, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
+        canonical: &'a super::super::Canon,
     ) -> Tc<'a> {
         Tc {
             ctx: Vec::new(),
             next: 0,
             seeds: 0,
             ctors,
+            data,
             eff_ops,
             field_res: BTreeMap::new(),
             path_res: PathRes::new(),
@@ -465,12 +494,16 @@ mod tests {
             classes,
             instances,
             inst_keys,
+            canonical,
             constrained: BTreeMap::new(),
             cur_self: None,
             wanted: Vec::new(),
+            num_default: Vec::new(),
+            index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
             cur_row: None,
+            handler_stack: Vec::new(),
         }
     }
 
@@ -510,11 +543,15 @@ mod tests {
     #[test]
     fn rewrite_row_is_order_insensitive() {
         let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
         let eff_ops = BTreeMap::new();
         let classes = BTreeMap::new();
         let instances = BTreeMap::new();
         let inst_keys = BTreeMap::new();
-        let mut t = tc(&ctors, &eff_ops, &classes, &instances, &inst_keys);
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
 
         let io = Label::bare("IO");
         let head = |a: &str, b: &str| {

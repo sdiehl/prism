@@ -2,7 +2,7 @@
 //! every producer, stopping on `SDone`, and the `step_*`/seed helpers that fold,
 //! guard, and unwrap that wrapper.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::evidence::resume_set;
 use super::super::flow::Loc;
@@ -16,12 +16,14 @@ use super::anf::{
 };
 
 // Constant threading context for the `stake` (early-termination) lowering: the
-// downstream evidence, the flow env, the op, and the live resume aliases.
+// downstream evidence, the flow env, the op, the active evidences (for rewriting
+// non-producer subterms), and the live resume aliases.
 #[derive(Clone, Copy)]
 pub(super) struct Take<'a> {
     pub(super) ev: Sym,
     pub(super) loc: &'a Loc,
     pub(super) op: Sym,
+    pub(super) evs: &'a BTreeMap<Sym, Sym>,
     pub(super) aliases: &'a BTreeSet<Sym>,
 }
 
@@ -54,9 +56,8 @@ impl Lowerer {
         &mut self,
         handle: &Comp,
         seed: &Value,
-        ev: Sym,
+        evs: &BTreeMap<Sym, Sym>,
         loc: &Loc,
-        op: Sym,
         st: Sym,
     ) -> Option<Comp> {
         let Comp::Handle { body, ops, .. } = handle else {
@@ -65,6 +66,8 @@ impl Lowerer {
         let [clause] = ops.as_slice() else {
             return None;
         };
+        let op = clause.name;
+        let ev = *evs.get(&op)?;
         let Comp::Return(Value::Thunk(t)) = &clause.body else {
             return None;
         };
@@ -85,6 +88,7 @@ impl Lowerer {
             ev,
             loc,
             op,
+            evs,
             aliases: &aliases,
         };
         let smore_body = self.take_clause(inner, &take, dstep, cnt)?;
@@ -106,7 +110,10 @@ impl Lowerer {
         // step the loop carried (SMore or SDone, same payload).
         let seedvar = self.fresh("st");
         let combined = smore(Value::Tuple(vec![Value::Var(st), seed.clone()]));
-        let threaded = self.thread_st(body, evt, loc, op, seedvar)?;
+        // Thread the source with the take's own evidence shadowing its op.
+        let mut evs_src = evs.clone();
+        evs_src.insert(op, evt);
+        let threaded = self.thread_st(body, &evs_src, loc, seedvar)?;
         let fin = self.fresh("fin");
         let d1 = self.fresh("d");
         let w1 = self.fresh("w");
@@ -154,7 +161,7 @@ impl Lowerer {
                 let more = self.take_thread(resume_b, t, dstep)?;
                 let d = self.fresh("d");
                 let dropped = Comp::Bind(
-                    Box::new(self.rewrite(drop_b, t.loc, t.op)?),
+                    Box::new(self.rewrite(drop_b, t.loc, t.evs)?),
                     d,
                     Box::new(Comp::Return(sdone(Value::Tuple(vec![
                         Value::Var(dstep),
@@ -201,7 +208,7 @@ impl Lowerer {
                 let Comp::Do(_, args) = m.as_ref() else {
                     return None;
                 };
-                let mut a = self.rewrite_values(args, t.loc, t.op)?;
+                let mut a = self.rewrite_values(args, t.loc, t.evs)?;
                 a.push(Value::Var(dstep));
                 let ds2 = self.fresh("ds");
                 let call = Comp::App(Box::new(Comp::Force(Value::Var(t.ev))), a);

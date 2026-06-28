@@ -1,0 +1,165 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/mask_escapes_only_handler.pr
+---
+== tokens ==
+VOpen Effect UIdent("E") LBrace Ctl Ident("op") LParen KwInt RParen Colon KwInt RBrace VSemi Fn Ident("f") LParen RParen Eq VOpen Handle Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq Ident("println") LParen Ident("f") LParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "E",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "op",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                },
+            ],
+            span: 262..294,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "f",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Mask(
+                            "E",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "op",
+                                        ),
+                                        span: 322..324,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 325..326,
+                                        },
+                                    ],
+                                ),
+                                span: 322..327,
+                            },
+                        ),
+                        span: 314..328,
+                    },
+                    [
+                        Op(
+                            "op",
+                            [
+                                "x",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 350..351,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 352..353,
+                                        },
+                                    ],
+                                ),
+                                span: 350..354,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 371..372,
+                            },
+                        ),
+                    ],
+                ),
+                span: 307..372,
+            },
+            wheres: [],
+            span: 296..372,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 399..406,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "f",
+                                    ),
+                                    span: 407..408,
+                                },
+                                [],
+                            ),
+                            span: 407..410,
+                        },
+                    ],
+                ),
+                span: 399..411,
+            },
+            wheres: [],
+            span: 374..411,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: effect `E` not declared in annotation
+    ╭─[ <source>:14:26 ]
+    │
+ 14 │ fn main() : !{IO} Unit = println(f())
+    │                          ──────┬─────  
+    │                                ╰─────── in `main`: effect `E` not declared in annotation
+────╯
