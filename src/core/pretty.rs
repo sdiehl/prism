@@ -44,16 +44,22 @@ fn pp_block(c: &Comp, depth: usize) -> String {
 // into its producer's statements followed by its body's, so an ANF chain reads
 // top to bottom. `binder` is the name the whole sequence's result binds to (the
 // last producer statement carries it), or `None` in tail position. Control-flow
-// constructs recurse into nested blocks. One that appears as a bound producer
-// (rare) falls back to the one-line form.
+// constructs and thunked lambda bodies recurse into nested blocks even when they
+// are a bound producer, closing with their `to <binder>` on its own line.
 fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
     let pad = STEP.repeat(depth);
+    // Close a multi-line construct with its result binder, aligned under the
+    // opening keyword. `None` (tail position) adds nothing.
+    let with_binder = |s: String| match binder {
+        Some(x) => format!("{s}\n{pad}to {x}"),
+        None => s,
+    };
     match c {
         Comp::Bind(m, x, n) => {
             let bx = (*x != "_").then_some(x.as_str());
             format!("{}\n{}", pp_seq(m, depth, bx), pp_seq(n, depth, binder))
         }
-        Comp::If(v, t, e) if binder.is_none() => format!(
+        Comp::If(v, t, e) => with_binder(format!(
             "{pad}{} {} {}\n{}\n{pad}{}\n{}",
             kw::IF,
             pp_value(v),
@@ -61,8 +67,8 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
             pp_block(t, depth + 1),
             kw::ELSE,
             pp_block(e, depth + 1)
-        ),
-        Comp::Case(v, arms) if binder.is_none() => {
+        )),
+        Comp::Case(v, arms) => {
             let mut s = format!("{pad}case {} of", pp_value(v));
             for (p, b) in arms {
                 write!(
@@ -74,14 +80,14 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
                 )
                 .unwrap();
             }
-            s
+            with_binder(s)
         }
         Comp::Handle {
             body,
             return_var,
             return_body,
             ops,
-        } if binder.is_none() => {
+        } => {
             let mut s = format!(
                 "{pad}{}\n{}\n{pad}{}",
                 kw::HANDLE,
@@ -111,15 +117,32 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
                 )
                 .unwrap();
             }
-            s
+            with_binder(s)
         }
-        Comp::Mask(ops, b) if binder.is_none() => {
-            format!(
-                "{pad}{}<{}>\n{}",
-                kw::MASK,
-                join_syms(ops),
-                pp_block(b, depth + 1)
-            )
+        Comp::Mask(ops, b) => with_binder(format!(
+            "{pad}{}<{}>\n{}",
+            kw::MASK,
+            join_syms(ops),
+            pp_block(b, depth + 1)
+        )),
+        // A thunked lambda (the shape effect lowering emits everywhere) breaks
+        // its body into a block, so the statements inside read top to bottom
+        // instead of being crushed onto one `;`-joined line. A single-statement
+        // body stays inline.
+        Comp::Return(Value::Thunk(t)) if matches!(t.as_ref(), Comp::Lam(..)) => {
+            let Comp::Lam(ps, b) = t.as_ref() else {
+                unreachable!()
+            };
+            let inner = pp_block(b, depth + 1);
+            if inner.contains('\n') {
+                let params = ps.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
+                let close =
+                    binder.map_or_else(|| format!("{pad}}}"), |x| format!("{pad}}} to {x}"));
+                format!("{pad}thunk {{ \\{params}.\n{inner}\n{close}")
+            } else {
+                let s = pp_comp(c);
+                binder.map_or_else(|| format!("{pad}{s}"), |x| format!("{pad}{s} to {x}"))
+            }
         }
         // Flatten the scoped reuse like a bind: the token statement, then the
         // body's sequence carrying the same result binder.

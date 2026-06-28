@@ -26,9 +26,10 @@ export function core_ir(src) {
  * Compiler diagnostics for `src` as JSON.
  *
  * Each entry is `{s,e,line,col,endLine,endCol,kind,msg}` with spans in the
- * snippet's own coordinates (the prepended prelude is subtracted). Empty when
- * the snippet compiles. The front-end stops at the first error, so this
- * carries at most one entry today.
+ * snippet's own coordinates (the prepended prelude is subtracted). A hard
+ * error aborts the front-end at the first one, so on failure this carries a
+ * single `*Error` entry; on success it carries the type checker's non-fatal
+ * `Warning`s (orphan/overlapping instances), of which there may be several.
  * @param {string} src
  * @returns {string}
  */
