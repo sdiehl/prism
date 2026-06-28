@@ -94,11 +94,16 @@ jobs:
           echo "PKG=$pkg" >> "$GITHUB_ENV"
 
       # Smoke-test the packaged binary (not target/release/prism): compile and
-      # run an example end to end, so a broken artifact fails here, not later.
+      # run a program end to end, so a broken artifact fails here, not later.
+      # main returns Unit so the process exits 0 (a program whose main returns an
+      # Int would exit with that value); assert the printed output instead.
       - name: Smoke test packaged binary
         run: |
-          "./${PKG}/prism" examples/factorial.pr -o /tmp/factorial
-          /tmp/factorial
+          printf 'fn main() : !{IO} Unit =\n  println(42)\n' > /tmp/hello.pr
+          "./${PKG}/prism" /tmp/hello.pr -o /tmp/hello
+          out="$(/tmp/hello)"
+          echo "output: $out"
+          [ "$out" = "42" ] || { echo "unexpected output: $out"; exit 1; }
 
       - name: Attest build provenance
         if: startsWith(github.ref, 'refs/tags/v')
