@@ -38,32 +38,32 @@ use walk::{contains_mask, each_subcomp, each_value, latent, thunks_in_value};
 //   EOp(id, skip, arg, k) a suspended `do op(arg)` whose continuation is k
 //
 // `ebind` threads a continuation through this representation. Each `handle`
-// becomes a recursive driver that pattern-matches the result: EPure runs the
-// return clause, EOp dispatches to the matching operation with `resume` bound
-// to a closure that re-enters the driver. Because `k` is an ordinary reusable
-// closure, resumptions are multishot.
+// becomes a recursive driver matching the result: EPure runs the return clause,
+// EOp dispatches to the matching operation with `resume` bound to a closure that
+// re-enters the driver. Since `k` is an ordinary reusable closure, resumptions
+// are multishot.
 //
-// A handler is "open" when its body performs effects it does not itself
-// catch: the driver then forwards (re-emits) the unhandled `EOp` outward with
-// a continuation that re-enters this driver, so an outer handler discharges it
-// and resumption flows back through here. Open drivers return Eff values and
-// their clauses are monadified. "Closed" drivers (the common case, including
-// the parameter-passing `k(v)(s)` idiom) return bare values and are unchanged.
+// A handler is "open" when its body performs effects it does not itself catch.
+// Its driver forwards the unhandled `EOp` outward with a continuation that
+// re-enters this driver, so an outer handler discharges it and resumption flows
+// back through here. Open drivers return Eff values and monadify their clauses.
+// "Closed" drivers (the common case, including the parameter-passing `k(v)(s)`
+// idiom) return bare values and are unchanged.
 //
 // When effectful code escapes first-class through a thunk, no static analysis
 // can tell monadified callees apart at dynamic call sites, so lowering falls
-// back to whole-program monadic mode: every function, lambda and thunk body is
+// back to whole-program monadic mode. Every function, lambda, and thunk body is
 // monadified, every handler is driven open-style, and `main` unwraps the final
 // EPure, trapping on an op that reaches the top like the interpreter's
 // unhandled-effect error.
 //
-// Mask is an explicit depth, mirroring the interpreter's `skip` counter
-// (`eval/mod.rs`): an in-flight `EOp` carries `skip`, the number of matching
+// Mask is an explicit depth mirroring the interpreter's `skip` counter
+// (`eval/mod.rs`). An in-flight `EOp` carries `skip`, the number of matching
 // handlers it must still bypass. A mask driver increments `skip` on ops of its
-// effect passing through it. A handler driver matches purely on `id` equality;
-// when an op is its own but `skip > 0`, it forwards with `skip - 1`, consuming
-// one level, exactly as the interpreter decrements on a `Frame::Handle`
-// crossing. Fresh ops start at `skip = 0`.
+// effect passing through it. A handler driver matches on `id` equality; when an
+// op is its own but `skip > 0`, it forwards with `skip - 1`, consuming one level
+// exactly as the interpreter decrements on a `Frame::Handle` crossing. Fresh ops
+// start at `skip = 0`.
 
 const PURE_TAG: usize = 0;
 const OP_TAG: usize = 1;
@@ -164,9 +164,9 @@ struct Lowerer {
     // than miscompile when it does not.
     state_mode: bool,
     // Default on (opt out with `PRISM_NATIVE_EFFECTS=0`): drive eligible closed
-    // handlers with a self-recursive `{n}@region` loop -- a tail resume becomes a
-    // queue plus `EResume`, a function-answer state handler threads its state in an
-    // accumulator -- instead of a continuation thunk re-entering a mutually
+    // handlers with a self-recursive `{n}@region` loop (a tail resume becomes a
+    // queue plus `EResume`, and a function-answer state handler threads its state
+    // in an accumulator) instead of a continuation thunk re-entering a mutually
     // recursive driver, so the resumed continuation is driven by a musttail
     // self-call and a parameter-passing loop runs in constant stack.
     native: bool,

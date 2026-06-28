@@ -21,7 +21,7 @@
 //! = `continue`, `2` = `break`), short-circuiting the body on any non-zero so the
 //! discarded tail matches the dropped continuation of the `final ctl` handler.
 //! `continue` needs no driver change (`repeat_while`/`forever` already ignore the
-//! body result, so a `continue`-only body just yields `0`/`1`); `break` emits a
+//! body result, so a `continue`-only body just yields `0`/`1`). `break` emits a
 //! fresh tail-recursive `{n}@loopdrv` that exits on `ctl == 2`.
 //!
 //! `return` threads `Step` (`SMore` = no return yet, `SDone v` = a `return` is

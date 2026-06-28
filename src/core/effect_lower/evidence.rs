@@ -348,9 +348,9 @@ pub(super) fn resume_set(resume: Sym) -> BTreeSet<Sym> {
 //
 // Post-condition guard: a successful strip erases the continuation, so no resume
 // alias may survive in the result. This is an IR-level enforcement of the
-// structural assumption about elaborator output -- an upstream change that
-// emitted a clause shape this matcher misreads (accepting it yet leaving a live
-// resume reference) is caught here as an assertion failure rather than
+// structural assumption about elaborator output. An upstream change that emitted
+// a clause shape this matcher misreads (accepting it yet leaving a live resume
+// reference) is caught here as an assertion failure rather than
 // miscompiling. Asserts at every level since each recursive call re-enters here.
 pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
     let stripped = strip_resume_go(c, aliases)?;

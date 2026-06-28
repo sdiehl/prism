@@ -54,6 +54,10 @@ web: wasm
 web-build:
     cd web && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
+docs:
+    mdbook build docs
+    mdbook serve docs --open
+
 smoke: build
     # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
     for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done

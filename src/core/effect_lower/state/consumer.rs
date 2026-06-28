@@ -98,9 +98,9 @@ impl Lowerer {
 
     // Apply a fold's state-transformer return clause to the threaded body's final
     // accumulator. The identity transformer is absorbed (the threaded body already
-    // yields the accumulator); a get-style `return r => \s -> body` binds both the
-    // producer value `r` and the final state `s` to the final accumulator -- they
-    // coincide for a Moore-shaped producer (its tail return reads the state) -- and
+    // yields the accumulator). A get-style `return r => \s -> body` binds both the
+    // producer value `r` and the final state `s` to the final accumulator (they
+    // coincide for a Moore-shaped producer, whose tail return reads the state) and
     // runs `body`. Returns None for any other return clause.
     fn apply_state_return(
         &mut self,

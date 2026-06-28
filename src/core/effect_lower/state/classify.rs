@@ -60,7 +60,7 @@ fn forces_param_bare(c: &Comp, params: &BTreeSet<Sym>, in_handle: bool) -> bool 
             .any(|(_, b)| forces_param_bare(b, params, in_handle)),
         Comp::Lam(_, b) | Comp::Mask(_, b) => forces_param_bare(b, params, in_handle),
         // A handle drives any thunk forced in its body/clauses through the consumer
-        // lowering, which threads it -- so those forces are not bare.
+        // lowering, which threads it, so those forces are not bare.
         Comp::Handle {
             body,
             ops,

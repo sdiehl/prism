@@ -18,8 +18,8 @@
 //! Soundness: a mutable cell shares state across resumptions, but pure State gives
 //! each resumption an independent copy. They agree iff the var's continuation is
 //! never resumed more than once. So erasure is skipped entirely when the program
-//! contains any multishot handler (a clause that uses its `resume` more than once);
-//! the var's own single-resume parameter-passing clauses are not multishot.
+//! contains any multishot handler (a clause that uses its `resume` more than
+//! once). The var's own single-resume parameter-passing clauses are not multishot.
 
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
 use crate::fresh::Fresh;

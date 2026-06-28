@@ -39,7 +39,7 @@ prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml)
 prism check program.pr               # type check only
 prism fmt program.pr                 # format source
-prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|fbip|llvm
+prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|fbip|llvm
 ```
 
 ## License

@@ -505,7 +505,7 @@ impl Lowerer {
         Ok(Some((Core { fns }, ctors, warning)))
     }
 
-    // Emit an op outward: `EOp(id, skip, arg, taq_snoc(Unit, resume))` -- a fresh
+    // Emit an op outward: `EOp(id, skip, arg, taq_snoc(Unit, resume))`, a fresh
     // singleton queue holding `resume`, the continuation that re-enters the
     // forwarding driver. The empty queue is `Unit`.
     pub(super) fn forward_eop(

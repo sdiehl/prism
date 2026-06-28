@@ -18,8 +18,8 @@ pub(super) fn epure(v: Value) -> Comp {
 //   }
 //
 // The Freer monad: binding a continuation onto a suspended op is one O(1) queue
-// snoc -- no spine re-walk, no nested closure tree. `CONT` binds the op's queue
-// (its 4th field); `f` (`EBIND_FN`) is the new Kleisli arrow.
+// snoc, with no spine re-walk and no nested closure tree. `CONT` binds the op's
+// queue (its 4th field) and `f` (`EBIND_FN`) is the new Kleisli arrow.
 //
 // Closed top-level template: its binders (`names::OP_ID`/`OP_SKIP`/`OP_ARG`/
 // `CONT`/`EBIND_FN`/`RESUME_KONT`) are fixed `@`-names, disjoint from program

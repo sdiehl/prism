@@ -1290,7 +1290,7 @@ mod tests {
         }
     }
 
-    // `f(x) to t; <k>` — the recursive-call-feeding-continuation shape.
+    // `f(x) to t; <k>`, the recursive-call-feeding-continuation shape.
     fn rec(k: Comp) -> Comp {
         Comp::Bind(
             Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),

@@ -33,8 +33,10 @@ pub enum Root {
 
 impl Root {
     /// Fetch the source of module `path` from this root, or `None` if absent
-    /// here (so the next root is tried). A directory read that fails for a
-    /// reason other than "not found" is a hard error.
+    /// here (so the next root is tried). A "not found" miss falls through, as
+    /// does an "unsupported" miss: a `Dir` root on a platform with no filesystem
+    /// (wasm) cannot supply the file, so resolution proceeds to the embedded
+    /// stdlib rather than failing. Any other read error is a hard error.
     fn fetch(&self, path: &[String]) -> Result<Option<String>, Error> {
         match self {
             Self::Dir(base) => {
@@ -45,7 +47,14 @@ impl Root {
                 p.set_extension(crate::driver::SOURCE_EXT);
                 match fs::read_to_string(&p) {
                     Ok(src) => Ok(Some(src)),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::NotFound | std::io::ErrorKind::Unsupported
+                        ) =>
+                    {
+                        Ok(None)
+                    }
                     Err(e) => Err(Error::Resolve(format!(
                         "cannot load module `{}`: {} ({})",
                         path.join("."),

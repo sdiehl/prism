@@ -1,4 +1,4 @@
-//! The embedded standard library (Phase 1): curated `Data.*` modules resolve
+//! The embedded standard library: curated `Data.*` modules resolve
 //! like any import from the in-binary stdlib root, the always-on prelude opens
 //! them with glob imports, and a glob import (`import M (..)`) brings every
 //! export into unqualified scope.

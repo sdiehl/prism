@@ -217,11 +217,10 @@ impl Tc<'_> {
             {
                 Some([one]) => one.clone(),
                 Some(many @ [_, _, ..]) => {
-                    // Several instances share this head; implicit resolution is
-                    // the canonical designation, deterministic and never
-                    // ambient. Phase-2 coherence checking rejects 2+ undesignated
-                    // instances at definition, so a missing entry here is a
-                    // backstop, not a reachable user error.
+                    // Several instances share this head, so implicit resolution
+                    // uses the canonical designation. Coherence checking rejects
+                    // 2+ undesignated instances at definition, so a missing entry
+                    // here is a backstop, not a reachable user error.
                     let Some(name) = self.canonical.get(&(class.to_string(), key)) else {
                         let cross_module = many
                             .iter()
