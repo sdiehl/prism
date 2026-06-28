@@ -16,7 +16,13 @@ The [`examples/`](./examples) directory contains a tour of most advanced feature
 
 ## Install
 
-The compiler links against LLVM 22, so the dev libraries must be present:
+On Apple Silicon, the Homebrew tap installs the prebuilt binary and pulls in LLVM 22:
+
+```shell
+brew install sdiehl/prism/prism
+```
+
+To build from source on any platform, the LLVM 22 dev libraries must be present, since the compiler links against them:
 
 ```shell
 brew install llvm                    # macOS

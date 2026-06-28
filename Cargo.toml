@@ -74,3 +74,15 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
+
+# `cargo release <version>` bumps the manifest, stamps the changelog, tags
+# v<version>, and pushes; the Release workflow builds and publishes from the tag.
+# Not published to crates.io (the crate links system LLVM), so `cargo install`
+# builds from git instead.
+[package.metadata.release]
+publish = false
+tag-name = "v{{version}}"
+sign-tag = false
+pre-release-replacements = [
+  { file = "CHANGELOG.md", search = "## Unreleased", replace = "## {{version}}", exactly = 1 },
+]

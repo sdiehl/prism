@@ -58,6 +58,13 @@ docs:
     mdbook build docs
     mdbook serve docs --open
 
+# Cut a release: bump the version, stamp the changelog, tag v<version>, and push.
+# The Release workflow then builds and publishes the macOS arm64 binary and bumps
+# the Homebrew tap. Write the changes under `## Unreleased` in CHANGELOG.md first.
+# Requires: cargo install cargo-release
+release VERSION:
+    cargo release {{VERSION}} --execute
+
 smoke: build
     # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
     for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done
