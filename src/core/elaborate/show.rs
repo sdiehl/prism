@@ -20,7 +20,7 @@ impl Elab<'_> {
         // A *free* rigid var is an enclosing function's parameter, which needs
         // runtime type info, so it stays unresolved and the caller falls back.
         [
-            self.checked.span_types.get(&e.span).cloned(),
+            self.checked.span_types.get(&e.id).cloned(),
             self.local_ty(e, locals),
         ]
         .into_iter()
@@ -218,7 +218,7 @@ impl Elab<'_> {
             let (fvars, body) = self.show_arm_body(cn.clone(), &field_tys, span)?;
             let subs = fvars
                 .iter()
-                .map(|fv| Spanned {
+                .map(|fv| Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                     synth: false,
                     node: Pattern::Var(fv.clone()),
                     span: Span::new(0, 0),
@@ -242,7 +242,7 @@ impl Elab<'_> {
         span: Span,
     ) -> Result<String, Error> {
         let tail = format!("{fname}_tl");
-        let pvar = |n: &str| Spanned {
+        let pvar = |n: &str| Spanned { id: crate::syntax::ast::NodeId::DUMMY,
             synth: false,
             node: Pattern::Var(n.into()),
             span: Span::new(0, 0),
@@ -294,7 +294,7 @@ impl Elab<'_> {
         let body = self.concat_comps(comps);
         let subs = fvars
             .iter()
-            .map(|fv| Spanned {
+            .map(|fv| Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                 synth: false,
                 node: Pattern::Var(fv.clone()),
                 span: Span::new(0, 0),

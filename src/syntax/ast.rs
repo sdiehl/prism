@@ -25,10 +25,28 @@ impl std::fmt::Display for IntLit {
     }
 }
 
+// A stable, unique identity for an expression node, the key under which the
+// typechecker records a node's resolution (dictionaries, field/path rebuilds,
+// numeric width) for the elaborator to read back. Assigned by `assign_ids`
+// after desugar, so identity is decoupled from `Span`: a synthesized node may
+// carry any real source span (even a duplicated one) for diagnostics without
+// ever aliasing another node's resolution. `DUMMY` is the unassigned id, worn
+// by patterns/types (which are never dispatch sites) and by elaborator-local
+// nodes that do no table lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct NodeId(pub u32);
+
+impl NodeId {
+    pub const DUMMY: Self = Self(0);
+}
+
 #[derive(Clone)]
 pub struct Spanned<T> {
     pub node: T,
     pub span: Span,
+    // Node identity for the typechecker's per-node side tables; see `NodeId`.
+    // Inert until `assign_ids` stamps it; never printed (identity, not content).
+    pub id: NodeId,
     // Set by parse-time sugar so the formatter can restore the surface form
     // (dot calls, `with`, pattern lets, `?`, handler blocks) rather than print
     // the desugared tree. Inert for every pass except the formatter.
@@ -43,6 +61,7 @@ impl<T> Spanned<T> {
         Self {
             node,
             span,
+            id: NodeId::DUMMY,
             synth: false,
         }
     }
@@ -51,13 +70,19 @@ impl<T> Spanned<T> {
         Self {
             node,
             span,
+            id: NodeId::DUMMY,
             synth: true,
         }
     }
 }
 
 // Show `synth` only when set, so a sugar node stands out and non-sugar nodes
-// render identically to the derived form.
+// render identically to the derived form. `id` is identity, not content, so it
+// is never shown: an AST dump stays byte-identical across id assignment.
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "`id` is node identity, deliberately omitted so AST dumps are stable"
+)]
 impl<T: std::fmt::Debug> std::fmt::Debug for Spanned<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Spanned");

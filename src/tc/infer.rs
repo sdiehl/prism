@@ -8,7 +8,7 @@ use super::{
 };
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, PathStep, S};
+use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, NodeId, PathOp, PathStep, S};
 use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
@@ -96,6 +96,7 @@ impl Tc<'_> {
 
     fn check(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
         let span = e.span;
+        let id = e.id;
         match (&e.node, ty) {
             (_, Type::Forall(n, b)) => {
                 self.ctx.push(Entry::Uni(*n));
@@ -174,7 +175,7 @@ impl Tc<'_> {
             }
             (Expr::Int(lit), Type::I64 | Type::U64) if lit.suffix == ast::Suffix::None => {
                 Self::lit_range(lit, ty, span)?;
-                self.fixed.insert(span, ty.clone());
+                self.fixed.insert(id, ty.clone());
                 Ok(())
             }
             _ => {
@@ -194,7 +195,7 @@ impl Tc<'_> {
 
     pub(super) fn synth(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
         let t = self.synth_node(env, e)?;
-        self.pending.push((e.span, t.clone()));
+        self.pending.push((e.id, t.clone()));
         Ok(t)
     }
 
@@ -219,9 +220,9 @@ impl Tc<'_> {
 
     // Zonk after resolve_all, while this declaration's solutions are still in ctx.
     fn flush_spans(&mut self) {
-        for (span, t) in std::mem::take(&mut self.pending) {
+        for (id, t) in std::mem::take(&mut self.pending) {
             let t = self.apply(&t);
-            self.span_types.insert(span, t);
+            self.span_types.insert(id, t);
         }
     }
 
@@ -287,6 +288,7 @@ impl Tc<'_> {
 
     fn synth_node(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
         let span = e.span;
+        let id = e.id;
         match &e.node {
             Expr::Int(lit) => {
                 let ty = match lit.suffix {
@@ -295,7 +297,7 @@ impl Tc<'_> {
                     ast::Suffix::U64 => Type::U64,
                 };
                 Self::lit_range(lit, &ty, span)?;
-                self.fixed.insert(span, ty.clone());
+                self.fixed.insert(id, ty.clone());
                 Ok(ty)
             }
             Expr::Float(_) => Ok(Type::Float),
@@ -313,7 +315,7 @@ impl Tc<'_> {
                     })?;
                 if let Some((scheme, cs)) = self.constrained.get(x).cloned() {
                     if t == scheme && !cs.is_empty() {
-                        return Ok(self.instantiate_constrained(&scheme, &cs, span, None));
+                        return Ok(self.instantiate_constrained(&scheme, &cs, id, span, None));
                     }
                 }
                 if let Some(s) = &self.cur_self {
@@ -324,7 +326,7 @@ impl Tc<'_> {
                             .into_iter()
                             .map(|(class, cty)| (class, cty, None))
                             .collect();
-                        self.wanted.push(Wanted { span, items });
+                        self.wanted.push(Wanted { id, span, items });
                     }
                 }
                 Ok(t)
@@ -356,7 +358,7 @@ impl Tc<'_> {
                                 ),
                             });
                         }
-                        Ok(self.instantiate_constrained(&scheme, &cs, span, Some(names)))
+                        Ok(self.instantiate_constrained(&scheme, &cs, id, span, Some(names)))
                     }
                     _ => Err(TypeError::Other {
                         span,
@@ -366,7 +368,7 @@ impl Tc<'_> {
             }
             Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
             Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
-            Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, span),
+            Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, id, span),
             Expr::If(c, t, e2) => {
                 self.check(env, c, &Type::Bool)?;
                 let tt = self.synth(env, t)?;
@@ -481,7 +483,7 @@ impl Tc<'_> {
                     .find(|(_, c)| c.type_name == ctor_name && c.fields.iter().any(|f| *f == field))
                 {
                     self.field_res
-                        .insert(span, (cname.clone(), fi, info.args.len()));
+                        .insert(id, (cname.clone(), fi, info.args.len()));
                 }
                 Ok(field_ty)
             }
@@ -519,7 +521,7 @@ impl Tc<'_> {
                 }
                 Ok(self.apply(&result_ty))
             }
-            Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, span),
+            Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, id, span),
             Expr::Handle(body, arms) => {
                 // The handler picks one instantiation per parametric effect it
                 // handles. The body checks under that scope, so every perform
@@ -615,6 +617,7 @@ impl Tc<'_> {
         env: &Env,
         base: &S<Expr<Core>>,
         ups: &[(Vec<PathStep<Core>>, PathOp<Core>)],
+        id: NodeId,
         span: Span,
     ) -> Result<Type, TypeError> {
         let tb = self.synth(env, base)?;
@@ -687,7 +690,7 @@ impl Tc<'_> {
             }
             chains.push(chain);
         }
-        self.path_res.insert(span, chains);
+        self.path_res.insert(id, chains);
         Ok(self.apply(&tb))
     }
 
@@ -798,6 +801,7 @@ impl Tc<'_> {
         op: BinOp,
         a: &S<Expr<Core>>,
         b: &S<Expr<Core>>,
+        id: NodeId,
         span: Span,
     ) -> Result<Type, TypeError> {
         match op {
@@ -819,18 +823,19 @@ impl Tc<'_> {
             BinOp::Eq | BinOp::Ne => {
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                let ta = self.instantiate_constrained(&ta, &[], span, None);
+                let ta = self.instantiate_constrained(&ta, &[], id, span, None);
                 self.check(env, b, &ta)?;
                 let ta = self.apply(&ta);
                 match &ta {
                     Type::Int => {}
                     Type::I64 | Type::U64 | Type::Float | Type::Bool | Type::Str => {
-                        self.fixed.insert(span, ta);
+                        self.fixed.insert(id, ta);
                     }
                     // Defer like the arithmetic arm: a later use may still pin
                     // this to a fixed-width lane before the `Int` default applies.
-                    Type::Exist(_) => self.num_default.push((span, ta)),
+                    Type::Exist(_) => self.num_default.push((id, span, ta)),
                     _ => self.wanted.push(Wanted {
+                        id,
                         span,
                         items: vec![(EQ_CLASS.into(), ta, None)],
                     }),
@@ -851,7 +856,7 @@ impl Tc<'_> {
                 let t = match &ta {
                     Type::I64 | Type::U64 => {
                         self.check(env, b, &ta)?;
-                        self.fixed.insert(span, ta.clone());
+                        self.fixed.insert(id, ta.clone());
                         ta
                     }
                     Type::Int => {
@@ -863,10 +868,10 @@ impl Tc<'_> {
                         let t = self.apply(&ta);
                         match &t {
                             Type::I64 | Type::U64 => {
-                                self.fixed.insert(span, t.clone());
+                                self.fixed.insert(id, t.clone());
                             }
                             Type::Int => {}
-                            Type::Exist(_) => self.num_default.push((span, t.clone())),
+                            Type::Exist(_) => self.num_default.push((id, span, t.clone())),
                             other => {
                                 self.default_numeric(other, b.span)?;
                             }

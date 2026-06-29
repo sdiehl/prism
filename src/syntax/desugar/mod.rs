@@ -20,11 +20,13 @@ use crate::names;
 mod aliases;
 mod derive;
 mod effects;
+mod ids;
 mod sugar;
 mod synonyms;
 
 use aliases::expand_aliases;
 use derive::derive_instances;
+use ids::assign_ids;
 use effects::{rw, wrap_return, Binding, Vars};
 use synonyms::expand_synonyms;
 
@@ -439,7 +441,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         });
     }
     prog.effects.append(&mut cx.effects);
-    Ok(Program {
+    let mut out = Program {
         types: prog.types,
         effects: prog.effects,
         errors: prog.errors,
@@ -453,7 +455,9 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         imports: prog.imports,
         exports: prog.exports,
         opaques: prog.opaques,
-    })
+    };
+    assign_ids(&mut out);
+    Ok(out)
 }
 
 // Surface wrappers that perform a capability effect (Console/FileSystem/Random/
@@ -573,7 +577,9 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
         patterns: PatMap::new(),
         fn_sigs: BTreeMap::new(),
     };
-    rw(e, &Vars::new(), &mut cx)
+    let mut out = rw(e, &Vars::new(), &mut cx)?;
+    ids::assign_expr_ids(&mut out);
+    Ok(out)
 }
 
 // A function body's initial scope: its parameters, so a call of a global fn
@@ -586,7 +592,7 @@ fn seed(params: &[Param]) -> Vars {
 }
 
 pub(super) const fn spat(node: Pattern, span: Span) -> S<Pattern> {
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -604,7 +610,7 @@ pub(super) fn eint<P: Phase>(i: usize, span: Span) -> S<Expr<P>> {
 }
 
 pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -613,7 +619,7 @@ pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
 
 // Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
 pub(super) const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node,
         span,

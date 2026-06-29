@@ -11,8 +11,8 @@ use crate::fresh::Fresh;
 use crate::names::{self, dict_ctor, instance_method};
 use crate::sym::Sym;
 use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, PathOp, PathStep, Pattern,
-    Program, Spanned, Suffix, S,
+    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
+    Pattern, Program, Spanned, Suffix, S,
 };
 use crate::types::{infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL};
 
@@ -28,7 +28,7 @@ struct Elab<'a> {
     // than calling, so a constant pushes no frame.
     consts: BTreeMap<String, &'a S<Expr<CorePhase>>>,
     checked: &'a Checked,
-    dicts: &'a BTreeMap<Span, Vec<Dict>>,
+    dicts: &'a BTreeMap<NodeId, Vec<Dict>>,
     effect_ops: BTreeSet<String>,
     // True when the `Output` capability is in scope (the prelude declares it), so
     // `print`/`println` route through the interceptable `out_print`/`out_println`
@@ -36,8 +36,8 @@ struct Elab<'a> {
     route_output: bool,
     show_fns: Vec<CoreFn>,
     show_seen: BTreeSet<String>,
-    // True when `dicts` and the span tables come from the same check() pass.
-    // REPL re-inference uses fresh spans, so span-keyed integrity checks are off.
+    // True when `dicts` and the node tables come from the same check() pass.
+    // REPL re-inference assigns fresh ids, so id-keyed integrity checks are off.
     strict: bool,
 }
 
@@ -118,12 +118,12 @@ impl Elab<'_> {
     // reuse when the spine is uniquely owned.
     fn elab_update_path(
         &mut self,
-        span: Span,
+        id: NodeId,
         base_expr: &S<Expr<CorePhase>>,
         ups: &[(Vec<PathStep<CorePhase>>, PathOp<CorePhase>)],
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let chains: Vec<Chain> = match self.checked.path_res.get(&span) {
+        let chains: Vec<Chain> = match self.checked.path_res.get(&id) {
             Some(c) => c.clone(),
             None => ups
                 .iter()
@@ -245,7 +245,7 @@ impl Elab<'_> {
     fn local_ty(&self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Option<Type> {
         self.checked
             .span_types
-            .get(&e.span)
+            .get(&e.id)
             .filter(|t| {
                 let mut ex = BTreeSet::new();
                 t.free_exist(&mut ex);
@@ -257,11 +257,11 @@ impl Elab<'_> {
 
     // Canonical form: an Int literal is an immediate when it fits the 63-bit
     // payload, otherwise it is built at runtime through big_lit (a big cell).
-    fn int_value(&self, lit: &IntLit, span: Span) -> Comp {
+    fn int_value(&self, lit: &IntLit, id: NodeId) -> Comp {
         let fixed = match lit.suffix {
             Suffix::I64 => Some(Type::I64),
             Suffix::U64 => Some(Type::U64),
-            Suffix::None => self.checked.fixed.get(&span).cloned(),
+            Suffix::None => self.checked.fixed.get(&id).cloned(),
         };
         match fixed {
             Some(Type::I64) => Comp::Return(Value::I64(to_wrapped_i64(&lit.value))),
@@ -316,6 +316,7 @@ impl Elab<'_> {
         op: BinOp,
         a: &S<Expr<CorePhase>>,
         b: &S<Expr<CorePhase>>,
+        id: NodeId,
         span: marginalia::Span,
         locals: &Locals,
     ) -> Result<Comp, Error> {
@@ -325,7 +326,7 @@ impl Elab<'_> {
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
         let ne = op == BinOp::Ne;
-        let (cmp, neg) = if let Some(ds) = self.dicts.get(&span).cloned() {
+        let (cmp, neg) = if let Some(ds) = self.dicts.get(&id).cloned() {
             let idx = self
                 .checked
                 .classes
@@ -334,7 +335,7 @@ impl Elab<'_> {
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
             (self.method_invoke(EQ_CLASS, idx, &ds[0], args), ne)
         } else {
-            match self.checked.fixed.get(&span).cloned() {
+            match self.checked.fixed.get(&id).cloned() {
                 Some(ty @ (Type::I64 | Type::U64)) => (self.fixed_bin(op, &ty, args)?, false),
                 Some(Type::Float) => (
                     Comp::Prim(
@@ -359,7 +360,7 @@ impl Elab<'_> {
                 ),
                 _ => {
                     if self.strict {
-                        if let Some(t) = self.checked.span_types.get(&a.span) {
+                        if let Some(t) = self.checked.span_types.get(&a.id) {
                             if !matches!(t, Type::Int | Type::Exist(_)) {
                                 return Err(Error::Ice(format!(
                                     "missing Eq dispatch record at {:?} for type {}",
@@ -392,7 +393,7 @@ impl Elab<'_> {
 
     fn elab(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         Ok(match &e.node {
-            Expr::Int(lit) => self.int_value(lit, e.span),
+            Expr::Int(lit) => self.int_value(lit, e.id),
             Expr::Float(f) => Comp::Return(Value::Float(*f)),
             Expr::Char(c) => Comp::Return(Value::Int(i64::from(u32::from(*c)))),
             Expr::Bool(b) => Comp::Return(Value::Bool(*b)),
@@ -403,8 +404,8 @@ impl Elab<'_> {
                     Comp::Return(Value::Var(x.clone().into()))
                 } else if let Some(body) = self.consts.get(x).copied() {
                     self.elab(body, &Locals::new())?
-                } else if self.dicts.contains_key(&e.span) {
-                    self.constrained_value(x, e.span)?
+                } else if self.dicts.contains_key(&e.id) {
+                    self.constrained_value(x, e.id)?
                 } else if self.needs_dict(x) {
                     return Err(Error::Ice(format!(
                         "no dict record for `{x}` at {:?}",
@@ -418,7 +419,7 @@ impl Elab<'_> {
                 let Expr::Var(x) = &inner.node else {
                     return Err(Error::Ice("instance application on a non-variable".into()));
                 };
-                self.constrained_value(x, e.span)?
+                self.constrained_value(x, e.id)?
             }
             Expr::Index(recv, key) => self.elab_index(recv, key, locals)?,
             Expr::IndexSet(recv, key, val) => self.elab_index_set(recv, key, val, locals)?,
@@ -452,7 +453,7 @@ impl Elab<'_> {
                 )
             }
             Expr::Bin(op @ (BinOp::Eq | BinOp::Ne), a, b) => {
-                self.elab_eq(*op, a, b, e.span, locals)?
+                self.elab_eq(*op, a, b, e.id, e.span, locals)?
             }
             Expr::Bin(op, a, b) => {
                 let ca = self.elab(a, locals)?;
@@ -461,7 +462,7 @@ impl Elab<'_> {
                 let vb = self.fresh();
                 let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
                 let prim = if let Some(ty @ (Type::I64 | Type::U64)) =
-                    self.checked.fixed.get(&e.span).cloned()
+                    self.checked.fixed.get(&e.id).cloned()
                 {
                     self.fixed_bin(*op, &ty, args)?
                 } else {
@@ -554,7 +555,7 @@ impl Elab<'_> {
                 let ce = self.elab(recv, locals)?;
                 let ve = self.fresh();
                 let vf = self.fresh();
-                let extract = if let Some((ctor, fi, n)) = self.checked.field_res.get(&e.span) {
+                let extract = if let Some((ctor, fi, n)) = self.checked.field_res.get(&e.id) {
                     Self::extract_field_of(Value::Var(ve.clone().into()), ctor, *fi, *n, vf)
                 } else {
                     let (ctor, fi, n) = self.field_res_fallback(field)?;
@@ -671,7 +672,7 @@ impl Elab<'_> {
                 }
             }
             Expr::RecordUpdatePath(base_expr, ups) => {
-                self.elab_update_path(e.span, base_expr, ups, locals)?
+                self.elab_update_path(e.id, base_expr, ups, locals)?
             }
             Expr::Mask(eff, body) => {
                 let ops = self
@@ -723,8 +724,8 @@ impl Elab<'_> {
     // Missing-argument count if the function-typed expression at `span` is
     // applied to `given` arguments, or None if it is saturated or its checked
     // type is not a known arrow (then the application is left as-is).
-    fn under_arity(&self, span: Span, given: usize) -> Option<usize> {
-        let mut ty = self.checked.span_types.get(&span)?;
+    fn under_arity(&self, id: NodeId, given: usize) -> Option<usize> {
+        let mut ty = self.checked.span_types.get(&id)?;
         while let Type::Forall(_, b) | Type::RowForall(_, b) = ty {
             ty = b;
         }
@@ -749,14 +750,14 @@ impl Elab<'_> {
             vals.push(Value::Var(v.into()));
         }
         let body = match &f.node {
-            Expr::Var(name) if !locals.contains_key(name) && self.dicts.contains_key(&f.span) => {
-                self.dict_call(name, f.span, vals, &mut binds)?
+            Expr::Var(name) if !locals.contains_key(name) && self.dicts.contains_key(&f.id) => {
+                self.dict_call(name, f.id, vals, &mut binds)?
             }
             Expr::Inst(inner, _) => {
                 let Expr::Var(name) = &inner.node else {
                     return Err(Error::Ice("instance application on a non-variable".into()));
                 };
-                self.dict_call(name, f.span, vals, &mut binds)?
+                self.dict_call(name, f.id, vals, &mut binds)?
             }
             Expr::Var(name) if !locals.contains_key(name) => {
                 if let Some(info) = self.ctor(name) {
@@ -806,7 +807,7 @@ impl Elab<'_> {
                 // A closure value applied to fewer arguments than its type's
                 // arity is a partial application; eta-expand it like a known
                 // function so an effectful closure lowers correctly.
-                match self.under_arity(f.span, vals.len()) {
+                match self.under_arity(f.id, vals.len()) {
                     Some(extra) => {
                         let ps: Vec<String> = (0..extra).map(|i| format!("_p{i}")).collect();
                         let mut all = vals;
@@ -834,7 +835,7 @@ impl Elab<'_> {
         key: &S<Expr<CorePhase>>,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let accessor = match self.checked.span_types.get(&recv.span) {
+        let accessor = match self.checked.span_types.get(&recv.id) {
             Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "at_array",
             Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "at_hashmap",
             Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "at_list",
@@ -866,7 +867,7 @@ impl Elab<'_> {
         val: &S<Expr<CorePhase>>,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let setter = match self.checked.span_types.get(&recv.span) {
+        let setter = match self.checked.span_types.get(&recv.id) {
             Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "array_set",
             Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "hm_insert",
             Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "list_set",
@@ -967,7 +968,7 @@ fn pat_vars(p: &S<Pattern>, acc: &mut Locals) {
 }
 
 const fn spanned(p: Pattern) -> S<Pattern> {
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node: p,
         span: Span::new(0, 0),
@@ -1156,7 +1157,7 @@ pub fn elaborate_expr(
     checked: &Checked,
     e: &S<Expr<CorePhase>>,
     arity: &BTreeMap<String, usize>,
-    dicts: &BTreeMap<Span, Vec<Dict>>,
+    dicts: &BTreeMap<NodeId, Vec<Dict>>,
     consts: &BTreeMap<String, S<Expr<CorePhase>>>,
 ) -> Result<Comp, Error> {
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();

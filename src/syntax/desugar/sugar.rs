@@ -16,7 +16,7 @@ const VIEW_KW: &str = "view";
 
 #[must_use]
 const fn with_sentinel(l: usize, r: usize) -> S<Expr> {
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node: Expr::Marker(Marker::With),
         span: Span::new(l, r),
@@ -37,14 +37,14 @@ pub fn with_rest(rest: Option<S<Expr>>, l: usize, r: usize) -> S<Expr> {
 // type side-tables, so a shared span would collide).
 #[must_use]
 pub fn dot_call(recv: S<Expr>, name: String, args: Vec<S<Expr>>, l: usize, r: usize) -> S<Expr> {
-    let callee = Spanned {
+    let callee = Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node: Expr::Var(name),
         span: Span::empty(l),
     };
     let mut all = vec![recv];
     all.extend(args);
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node: Expr::Call(Box::new(callee), all),
         span: Span::new(l, r),
@@ -73,7 +73,7 @@ pub fn with_stmt(
             }]
         })
         .unwrap_or_default();
-    let lam = Spanned {
+    let lam = Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node: Expr::Lam(params, Box::new(rest)),
         span: Span::empty(l),
@@ -84,7 +84,7 @@ pub fn with_stmt(
             Expr::Call(f, args)
         }
         other => Expr::Call(
-            Box::new(Spanned {
+            Box::new(Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                 synth: false,
                 node: other,
                 span: call.span,
@@ -92,7 +92,7 @@ pub fn with_stmt(
             vec![lam],
         ),
     };
-    Spanned {
+    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span: Span::new(l, r),
@@ -233,14 +233,14 @@ pub(super) fn unwrap_try(e: S<Expr>) -> Result<S<Expr>, S<Expr>> {
         Expr::Call(f, args) if matches!(&f.node, Expr::Marker(Marker::Try)) => {
             match <[S<Expr>; 1]>::try_from(args) {
                 Ok([arg]) => Ok(arg),
-                Err(args) => Err(Spanned {
+                Err(args) => Err(Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                     synth: e.synth,
                     node: Expr::Call(f, args),
                     span: e.span,
                 }),
             }
         }
-        node => Err(Spanned {
+        node => Err(Spanned { id: crate::syntax::ast::NodeId::DUMMY,
             synth: e.synth,
             node,
             span: e.span,
@@ -253,7 +253,7 @@ pub(super) fn unwrap_try(e: S<Expr>) -> Result<S<Expr>, S<Expr>> {
 // `sp_sugar`) marks it for the formatter.
 fn try_stmt(binder: Option<String>, scrut: S<Expr>, rest: S<Expr>, l: usize) -> S<Expr> {
     let s = scrut.span;
-    let pat = |node| Spanned {
+    let pat = |node| Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span: s,
@@ -340,12 +340,12 @@ pub fn compound_stmt(
     match lhs.node {
         Expr::Var(name) => Ok(compound_assign(name, op, value, l, r)),
         Expr::Index(recv, key) => {
-            let read = Spanned {
+            let read = Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                 synth: true,
                 node: Expr::Index(recv.clone(), key.clone()),
                 span,
             };
-            let rhs = Spanned {
+            let rhs = Spanned { id: crate::syntax::ast::NodeId::DUMMY,
                 synth: true,
                 node: Expr::Bin(op, Box::new(read), Box::new(value)),
                 span,
@@ -369,7 +369,7 @@ pub fn compound_stmt(
 pub fn compound_assign(x: String, op: BinOp, v: S<Expr>, l: usize, r: usize) -> S<Expr> {
     let span = Span::new(l, r);
     let lhs = sp(Expr::Var(x.clone()), span);
-    let rhs = Spanned {
+    let rhs = Spanned { id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node: Expr::Bin(op, Box::new(lhs), Box::new(v)),
         span,

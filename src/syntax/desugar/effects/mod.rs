@@ -160,11 +160,11 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             let handled = sp(Expr::Handle(Box::new(b2), arms2), span);
             return Ok(wrap_vals(vals, handled, span));
         }
-        // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head takes a
-        // reserved-band span so the dictionary it carries never aliases a real
-        // dispatch site (see `synth_span`). Lowering through the class keeps int
-        // exponentiation bignum-correct (its `Int` instance multiplies) and float
-        // exponentiation a `pow_float` call.
+        // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head is a
+        // synthesized node, so its dictionary keys on its own `NodeId` and never
+        // aliases a real dispatch site (see `synth_span`). Lowering through the
+        // class keeps int exponentiation bignum-correct (its `Int` instance
+        // multiplies) and float exponentiation a `pow_float` call.
         Expr::Bin(BinOp::Pow, a, b) => {
             let head = evar(POW_METHOD, synth_span(cx));
             return rw(
@@ -586,8 +586,8 @@ fn rw_sugar(
 // constant-`true` condition. `while_loop`'s self-call is in tail position, so the
 // loop runs in constant stack with no per-iteration allocation, and because
 // `while_loop` is unconstrained and effect-polymorphic, a break/continue-free loop
-// adds no effect of its own (pay-as-you-go). The call head takes a reserved-band
-// span so it never aliases a real dispatch site.
+// adds no effect of its own (pay-as-you-go). The call head is a synthesized node,
+// keyed for dispatch by its own `NodeId`, so it never aliases a real dispatch site.
 fn rw_while(
     cond: Option<&S<Expr>>,
     body: &S<Expr>,
@@ -884,19 +884,16 @@ impl CtlScan {
     }
 }
 
-// Dictionary resolution keys on span (like derive.rs's `SpanAlloc`). The head of
-// a synthesized call to a monomorphic prelude helper must not reuse a real source
-// span: if a comprehension guard `g` is itself an overloaded operator (say
-// `t == A` for a derived `Eq`), the checker records that instance at `g.span`,
-// and reusing it for the synthesized `guard`/`succeeds` head would make
-// elaboration thread the dictionary into that helper, over-applying it and
-// crashing monadification. Minting zero-width spans from a high reserved band no
-// real offset can occupy (and above derive's lower band, so the two never alias)
-// keeps these heads off every dispatch site.
-const SYNTH_SPAN_BASE: usize = usize::MAX / 4 * 3;
-
+// A span for a synthesized node. Dispatch identity is the node's `NodeId`
+// (assigned after desugar), not its span, so a synthesized call head can no
+// longer alias a real dispatch site by reusing a source span -- the source of
+// the old "or it crashes monadification" hazard. The span is now purely a
+// diagnostic, and a synthesized node has no source location, so it collapses to
+// the empty span. The fresh id is still consumed (it is shared with generated
+// variable names) to keep that numbering stable.
 const fn synth_span(cx: &mut Cx) -> Span {
-    Span::empty(SYNTH_SPAN_BASE + cx.next.bump() as usize)
+    let _ = cx.next.bump();
+    Span::empty(0)
 }
 
 // Fold a comprehension's qualifiers inside-out around its body. A `Guard` keeps

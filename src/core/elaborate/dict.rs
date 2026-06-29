@@ -1,6 +1,6 @@
 use super::{
     builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
-    Elab, Error, FloatOp, Span, Sym, Type, Value,
+    Elab, Error, FloatOp, NodeId, Sym, Type, Value,
 };
 
 impl Elab<'_> {
@@ -131,9 +131,9 @@ impl Elab<'_> {
 
     // A constrained global at value position: a closure that captures the
     // resolved dictionaries.
-    pub(super) fn constrained_value(&mut self, name: &str, span: Span) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&span).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {span:?}"))
+    pub(super) fn constrained_value(&mut self, name: &str, id: NodeId) -> Result<Comp, Error> {
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         if let Some((class, idx)) = self.checked.methods.get(name).cloned() {
             let (_, arity) = self.method_sig(&class, idx);
@@ -164,12 +164,12 @@ impl Elab<'_> {
     pub(super) fn dict_call(
         &mut self,
         name: &str,
-        span: Span,
+        id: NodeId,
         vals: Vec<Value>,
         binds: &mut Vec<(Comp, String)>,
     ) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&span).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {span:?}"))
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         // A `sort`/`sort_by_ord` whose `Ord` is a canonical primitive instance
         // lowers to the native sort kernel. A user instance (e.g. a reversed
@@ -193,7 +193,7 @@ impl Elab<'_> {
                 return Ok(Comp::Call(name.into(), all));
             }
         }
-        let cf = self.constrained_value(name, span)?;
+        let cf = self.constrained_value(name, id)?;
         let fv = self.fresh();
         binds.push((cf, fv.clone()));
         Ok(Comp::App(

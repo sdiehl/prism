@@ -10,7 +10,7 @@ use super::{
 use crate::error::TypeError;
 use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
-use crate::syntax::ast::{self, Core, Program};
+use crate::syntax::ast::{self, Core, NodeId, Program};
 use crate::types::ty::{EffRow, Type};
 
 // Cap on recursive instance resolution: a cyclic or diverging instance set
@@ -24,6 +24,7 @@ impl Tc<'_> {
         &mut self,
         scheme: &Type,
         cs: &[(String, Type)],
+        id: NodeId,
         span: Span,
         explicit: Option<&[String]>,
     ) -> Type {
@@ -66,7 +67,7 @@ impl Tc<'_> {
             })
             .collect();
         if !items.is_empty() {
-            self.wanted.push(Wanted { span, items });
+            self.wanted.push(Wanted { id, span, items });
         }
         body
     }
@@ -105,12 +106,12 @@ impl Tc<'_> {
         // sees their final types. An operand a later use already pinned to a
         // fixed-width lane is recorded; one still ambiguous defaults to `Int`; a
         // `Float` or non-numeric one (an int operator on a float) is rejected.
-        for (span, t) in std::mem::take(&mut self.num_default) {
+        for (id, span, t) in std::mem::take(&mut self.num_default) {
             let t = self.apply(&t);
             match &t {
                 Type::Int => {}
                 Type::I64 | Type::U64 => {
-                    self.fixed.insert(span, t);
+                    self.fixed.insert(id, t);
                 }
                 other => {
                     self.default_numeric(other, span)?;
@@ -124,7 +125,7 @@ impl Tc<'_> {
                 let t = self.apply(ty);
                 ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), &[])?);
             }
-            match self.dicts.get(&w.span) {
+            match self.dicts.get(&w.id) {
                 Some(prev) if *prev != ds => {
                     return Err(TypeError::Ice {
                         msg: format!("conflicting dict records at {:?}", w.span),
@@ -132,7 +133,7 @@ impl Tc<'_> {
                 }
                 Some(_) => {}
                 None => {
-                    self.dicts.insert(w.span, ds);
+                    self.dicts.insert(w.id, ds);
                 }
             }
         }

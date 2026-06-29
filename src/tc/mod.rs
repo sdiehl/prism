@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{Core, Decl, Expr, Program, S};
+use crate::syntax::ast::{Core, Decl, Expr, NodeId, Program, S};
 use crate::types::effects;
 use crate::types::ty::{EffRow, Effects, Type};
 
@@ -86,10 +86,10 @@ pub enum Dict {
     Super(Box<Self>, String, usize),
 }
 
-// Spans are the identity of dispatch sites. Desugar must keep them unique per
-// site and stable between typecheck and elaboration, or dispatch is silently
-// corrupted; resolve_all ICEs on conflicting records at one span.
-pub type DictTable = BTreeMap<Span, Vec<Dict>>;
+// `NodeId` is the identity of a dispatch site, assigned once by `assign_ids`
+// after desugar so it is unique per node and stable between typecheck and
+// elaboration; resolve_all ICEs on conflicting records at one id.
+pub type DictTable = BTreeMap<NodeId, Vec<Dict>>;
 
 #[derive(Clone, Debug)]
 pub struct ClassInfo {
@@ -114,8 +114,8 @@ pub struct InstInfo {
 }
 
 // Per update path, the rebuild chain: one (ctor name, field index, arity)
-// step per path segment, resolved at the update expression's span.
-pub type PathRes = BTreeMap<Span, Vec<Vec<(String, usize, usize)>>>;
+// step per path segment, resolved at the update expression's node.
+pub type PathRes = BTreeMap<NodeId, Vec<Vec<(String, usize, usize)>>>;
 
 /// A non-fatal diagnostic raised during checking (an orphan or overlapping
 /// instance). Carries a span so it can be rendered like an error but does not
@@ -134,10 +134,10 @@ pub struct Checked {
     pub ctors: BTreeMap<String, CtorInfo>,
     pub decls: Vec<DeclInfo>,
     pub eff_ops: BTreeMap<String, EffOpInfo>,
-    pub field_res: BTreeMap<Span, (String, usize, usize)>,
+    pub field_res: BTreeMap<NodeId, (String, usize, usize)>,
     pub path_res: PathRes,
-    pub fixed: BTreeMap<Span, Type>,
-    pub span_types: BTreeMap<Span, Type>,
+    pub fixed: BTreeMap<NodeId, Type>,
+    pub span_types: BTreeMap<NodeId, Type>,
     pub classes: BTreeMap<String, ClassInfo>,
     pub instances: BTreeMap<String, InstInfo>,
     pub inst_keys: InstKeys,
@@ -197,6 +197,9 @@ enum Entry {
 // One dispatch site: the constraints instantiated at `span`, resolved together
 // into the site's dict vector at the end of the declaration.
 struct Wanted {
+    // Identity of the dispatch site, the key its resolved dicts land under.
+    id: NodeId,
+    // Source span, kept for the ambiguity/no-instance diagnostic's caret.
     span: Span,
     items: Vec<(String, Type, Option<String>)>,
 }
@@ -222,11 +225,11 @@ struct Tc<'a> {
     ctors: &'a BTreeMap<String, CtorInfo>,
     data: &'a BTreeMap<String, DataInfo>,
     eff_ops: &'a BTreeMap<String, EffOpInfo>,
-    field_res: BTreeMap<Span, (String, usize, usize)>,
+    field_res: BTreeMap<NodeId, (String, usize, usize)>,
     path_res: PathRes,
-    fixed: BTreeMap<Span, Type>,
-    span_types: BTreeMap<Span, Type>,
-    pending: Vec<(Span, Type)>,
+    fixed: BTreeMap<NodeId, Type>,
+    span_types: BTreeMap<NodeId, Type>,
+    pending: Vec<(NodeId, Type)>,
     classes: &'a BTreeMap<String, ClassInfo>,
     instances: &'a BTreeMap<String, InstInfo>,
     inst_keys: &'a InstKeys,
@@ -239,17 +242,19 @@ struct Tc<'a> {
     cur_self: Option<SelfRef>,
     wanted: Vec<Wanted>,
     // Numeric operands left ambiguous at an arithmetic/comparison operator: each
-    // (span, operand type) is resolved in one pass at the end of the declaration
-    // (`resolve_all`), so a later use can fix the type to a fixed-width lane
-    // before the otherwise-`Int` default applies. Symmetric in the two operands.
-    num_default: Vec<(Span, Type)>,
+    // (node id, span, operand type) is resolved in one pass at the end of the
+    // declaration (`resolve_all`), so a later use can fix the type to a
+    // fixed-width lane before the otherwise-`Int` default applies. The id keys
+    // the `fixed` record; the span blames a non-numeric operand. Symmetric in
+    // the two operands.
+    num_default: Vec<(NodeId, Span, Type)>,
     // Indexed reads/writes (`a[i]`, `a[i] := v`) whose receiver type was not yet
     // resolved at synth (a `var`'s state existential is solved only once its
     // initializer is checked). Each is dispatched on the receiver's head type in
     // one pass at the end of the declaration (`resolve_all`, before `num_default`
     // so an index's element type is known to numeric defaulting).
     index_ops: Vec<IndexOp>,
-    dicts: BTreeMap<Span, Vec<Dict>>,
+    dicts: BTreeMap<NodeId, Vec<Dict>>,
     // Innermost-last instantiation scopes for parametric effects: each entry
     // ties an effect name to the type args in force (handler or latent row).
     row_ctx: Vec<(Sym, Vec<Type>)>,
