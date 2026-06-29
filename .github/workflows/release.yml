@@ -82,6 +82,30 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      # LLVM drags in z3 and zstd, and the linker bakes in their exact versioned
+      # dylib name (e.g. libz3.4.15.dylib). z3 bumps that name every minor
+      # release and Homebrew keeps only the current one, so the binary fails to
+      # launch on any machine whose z3 differs from the build runner's. Repoint
+      # both at the unversioned symlink Homebrew always keeps current, then
+      # re-sign (install_name_tool invalidates the ad-hoc signature arm64
+      # requires). The smoke test below cannot catch this since the runner has
+      # the exact z3 it built against; this step is what makes the binary
+      # portable across z3 versions.
+      - name: Make dylib references version-independent
+        run: |
+          set -euo pipefail
+          bin=target/release/prism
+          for lib in z3 zstd; do
+            old="$(otool -L "$bin" | awk -v l="$lib" '$1 ~ ("/"l"/lib/lib"l) {print $1; exit}')"
+            if [ -n "$old" ]; then
+              new="$(brew --prefix "$lib")/lib/lib${lib}.dylib"
+              install_name_tool -change "$old" "$new" "$bin"
+              echo "repointed $old -> $new"
+            fi
+          done
+          codesign --force --sign - "$bin"
+          otool -L "$bin" | grep -iE 'z3|zstd' || true
+
       - name: Package tarball
         run: |
           set -euo pipefail

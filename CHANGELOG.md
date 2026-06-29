@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Packaging: the macOS Apple Silicon binary now references the unversioned z3 and zstd dylibs (`libz3.dylib`/`libzstd.dylib`) rather than the exact versioned names baked in at build time. The 0.3.0 binary was linked against z3 4.15 and aborted at launch on any machine with a different z3 minor version; it now runs against whatever current z3 Homebrew provides.
+
 ## 0.3.0
 
 - New surface syntax, every form sugar over the existing core:
