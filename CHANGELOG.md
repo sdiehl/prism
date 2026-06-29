@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.4.0
+## Unreleased
 
 - Packaging: the macOS Apple Silicon binary now references the unversioned z3 and zstd dylibs (`libz3.dylib`/`libzstd.dylib`) rather than the exact versioned names baked in at build time. The 0.3.0 binary was linked against z3 4.15 and aborted at launch on any machine with a different z3 minor version; it now runs against whatever current z3 Homebrew provides.
+- Dependencies: `toml` 0.8 to 1.1, `wasm-bindgen` 0.2.125 to 0.2.126, `rustyline` 18.0.0 to 18.0.1, and `actions/checkout` 6 to 7 in the CI, Pages, and Release workflows.
 
 ## 0.3.0
 

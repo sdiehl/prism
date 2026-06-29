@@ -33,7 +33,7 @@ jobs:
     name: macOS arm64 binary
     runs-on: macos-14  # Apple Silicon runner; host target is aarch64-apple-darwin
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The tag must name the version the manifest will ship. Catches a stray
       # `git tag v0.5.0` while Cargo.toml still says 0.4.0 before anything builds.

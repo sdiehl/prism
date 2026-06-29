@@ -25,7 +25,7 @@ jobs:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       PRISM_CC: /usr/lib/llvm-22/bin/clang
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Toolchain version + components come from rust-toolchain.toml, so CI and
       # local fmt/clippy always run the identical rustc/rustfmt/clippy.
@@ -117,7 +117,7 @@ jobs:
     name: Web playground
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Rust toolchain
         run: rustup target add wasm32-unknown-unknown
@@ -153,7 +153,7 @@ jobs:
     name: MLIR backend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Toolchain pinned via rust-toolchain.toml (single source of truth).
       - name: Setup Rust toolchain
