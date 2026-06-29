@@ -6,18 +6,18 @@ This document describes the `prism` compiler, from source text to native binary 
 
 Compilation is a pipeline from source text to a native binary. Each phase is a total function over the program, and there are no per-module artifacts.
 
-| Phase                                                    | Role                                                                                                              | Owner                                      |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| [Lex](#lexing-and-layout)                                | text to tokens, then layout                                                                                       | `src/lex/`                                 |
-| [Parse](#parsing)                                        | tokens to surface AST                                                                                             | `src/parse/`, `src/syntax/grammar.lalrpop` |
-| [Resolve](#name-resolution-and-modules)                  | load imports, canonicalize names, merge                                                                           | `src/resolve/`                             |
-| [Desugar](#desugaring)                                   | surface sugar to core surface                                                                                     | `src/syntax/desugar/`                      |
-| [Check](#type-and-effect-inference)                      | type and effect inference                                                                                         | `src/tc/`                                  |
-| Elaborate                                                | surface to [CBPV / ANF core](#the-core-calculus) (match compilation, [pattern-match compilation](#pattern-match-compilation)) | `src/core/elaborate/`          |
-| [Optimize](#optimization)                                | Core-to-Core passes, in two stages around effect lowering                                                         | `src/core/opt/`                            |
-| [Effect lower](#effect-lowering)                         | remove handlers and operations                                                                                    | `src/core/effect_lower/`                   |
-| [Reference count](#reference-counting-and-fbip-reuse)    | insert `dup`/`drop`, then reuse                                                                                   | `src/core/fbip.rs`                         |
-| [Codegen](#backends)                                     | core to interpreter, LLVM, or MLIR                                                                                | `src/eval/`, `src/codegen/`                |
+| Phase                                                 | Role                                                                                                                          | Owner                                      |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [Lex](#lexing-and-layout)                             | text to tokens, then layout                                                                                                   | `src/lex/`                                 |
+| [Parse](#parsing)                                     | tokens to surface AST                                                                                                         | `src/parse/`, `src/syntax/grammar.lalrpop` |
+| [Resolve](#name-resolution-and-modules)               | load imports, canonicalize names, merge                                                                                       | `src/resolve/`                             |
+| [Desugar](#desugaring)                                | surface sugar to core surface                                                                                                 | `src/syntax/desugar/`                      |
+| [Check](#type-and-effect-inference)                   | type and effect inference                                                                                                     | `src/tc/`                                  |
+| Elaborate                                             | surface to [CBPV / ANF core](#the-core-calculus) (match compilation, [pattern-match compilation](#pattern-match-compilation)) | `src/core/elaborate/`                      |
+| [Optimize](#optimization)                             | Core-to-Core passes, in two stages around effect lowering                                                                     | `src/core/opt/`                            |
+| [Effect lower](#effect-lowering)                      | remove handlers and operations                                                                                                | `src/core/effect_lower/`                   |
+| [Reference count](#reference-counting-and-fbip-reuse) | insert `dup`/`drop`, then reuse                                                                                               | `src/core/fbip.rs`                         |
+| [Codegen](#backends)                                  | core to interpreter, LLVM, or MLIR                                                                                            | `src/eval/`, `src/codegen/`                |
 
 The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `core-json` (the core as a JSON tree the Lean model reads, covered under [verification](#verification)), `core-hash` (a content-addressed hash of each definition's elaborated core, `src/core/hash.rs`), `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
 
@@ -601,11 +601,11 @@ The pipeline spans two stages around effect lowering, so passes are not freely r
 
 The `-O`/`--opt` flag selects a level; the default is `-O1`.
 
-| Level | Passes                                                                                                                                                                                                                |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `-O0` | Representation only: newtype erasure, which both backends depend on.                                                                                                                                                  |
+| Level | Passes                                                                                                                                                                                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `-O0` | Representation only: newtype erasure, which both backends depend on.                                                                                                                                                                             |
 | `-O1` | Adds dictionary specialization (pre-lowering) and a gentle simplifier run to a fixed point in the late stage: case-of-known-constructor, trivial copy-propagation, dead-let elimination, integer constant folding, and used-once-thunk inlining. |
-| `-O2` | Adds a bounded inliner (single-call-site non-recursive functions, with every callee binder alpha-renamed) and a conservative scalar common-subexpression elimination over pure, non-trapping `Prim`s.                  |
+| `-O2` | Adds a bounded inliner (single-call-site non-recursive functions, with every callee binder alpha-renamed) and a conservative scalar common-subexpression elimination over pure, non-trapping `Prim`s.                                            |
 
 ### 14.2 Explicit Pass Lists {#explicit-pass-lists}
 

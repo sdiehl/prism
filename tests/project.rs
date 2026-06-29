@@ -136,7 +136,11 @@ fn clean_removes_target_at_package_root() {
     let dir = env::temp_dir().join(format!("prism_clean_{}", process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("prism.toml"), "[package]\nname = \"c\"\n\n[bin]\nentry = \"src/main.pr\"\n").unwrap();
+    fs::write(
+        dir.join("prism.toml"),
+        "[package]\nname = \"c\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+    )
+    .unwrap();
     let target = dir.join("target");
     fs::create_dir_all(&target).unwrap();
     fs::write(target.join("c"), b"artifact").unwrap();
@@ -146,11 +150,21 @@ fn clean_removes_target_at_package_root() {
     let prism = env!("CARGO_BIN_EXE_prism");
     // From a nested subdirectory: clean still finds the enclosing manifest.
     let sub = dir.join("src");
-    assert!(Command::new(prism).arg("clean").arg(&sub).status().unwrap().success());
+    assert!(Command::new(prism)
+        .arg("clean")
+        .arg(&sub)
+        .status()
+        .unwrap()
+        .success());
     assert!(!target.exists(), "target/ removed");
     assert!(keep.exists(), "source untouched");
     // Second run is a no-op success.
-    assert!(Command::new(prism).arg("clean").arg(&dir).status().unwrap().success());
+    assert!(Command::new(prism)
+        .arg("clean")
+        .arg(&dir)
+        .status()
+        .unwrap()
+        .success());
 
     let _ = fs::remove_dir_all(&dir);
 }

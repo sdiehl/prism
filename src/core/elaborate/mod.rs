@@ -333,7 +333,10 @@ impl Elab<'_> {
                 .get(&Sym::from(EQ_CLASS))
                 .and_then(|c| c.methods.iter().position(|(n, _)| n == "eq"))
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
-            (self.method_invoke(Sym::from(EQ_CLASS), idx, &ds[0], args), ne)
+            (
+                self.method_invoke(Sym::from(EQ_CLASS), idx, &ds[0], args),
+                ne,
+            )
         } else {
             match self.checked.fixed.get(&id).cloned() {
                 Some(ty @ (Type::I64 | Type::U64)) => (self.fixed_bin(op, &ty, args)?, false),
@@ -968,7 +971,8 @@ fn pat_vars(p: &S<Pattern>, acc: &mut Locals) {
 }
 
 const fn spanned(p: Pattern) -> S<Pattern> {
-    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
+    Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node: p,
         span: Span::new(0, 0),
@@ -1143,7 +1147,11 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         fns.push(CoreFn {
             name: inst.name.clone().into(),
             params: dps.into_iter().map(Sym::from).collect(),
-            body: Comp::Return(Value::Ctor(dict_ctor(info.class.as_str()).into(), 0, fields)),
+            body: Comp::Return(Value::Ctor(
+                dict_ctor(info.class.as_str()).into(),
+                0,
+                fields,
+            )),
         });
     }
 

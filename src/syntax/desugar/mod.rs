@@ -26,8 +26,8 @@ mod synonyms;
 
 use aliases::expand_aliases;
 use derive::derive_instances;
-use ids::assign_ids;
 use effects::{rw, wrap_return, Binding, Vars};
+use ids::assign_ids;
 use synonyms::expand_synonyms;
 
 pub use sugar::{
@@ -592,7 +592,8 @@ fn seed(params: &[Param]) -> Vars {
 }
 
 pub(super) const fn spat(node: Pattern, span: Span) -> S<Pattern> {
-    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
+    Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -610,7 +611,8 @@ pub(super) fn eint<P: Phase>(i: usize, span: Span) -> S<Expr<P>> {
 }
 
 pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
-    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
+    Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -619,7 +621,8 @@ pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
 
 // Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
 pub(super) const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
-    Spanned { id: crate::syntax::ast::NodeId::DUMMY,
+    Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node,
         span,

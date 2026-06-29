@@ -462,9 +462,15 @@ const BUILTINS: &[(&str, &str)] = &[
     ("parse_int", "(String) -> Option(Int)"),
     ("prim_getenv", "(String) -> String ! {IO}"),
     ("prim_read_file", "(String) -> String ! {IO}"),
-    ("write_file", "(String, String) -> Result(Unit, String) ! {IO}"),
+    (
+        "write_file",
+        "(String, String) -> Result(Unit, String) ! {IO}",
+    ),
     ("prim_file_exists", "(String) -> Bool ! {IO}"),
-    ("append_file", "(String, String) -> Result(Unit, String) ! {IO}"),
+    (
+        "append_file",
+        "(String, String) -> Result(Unit, String) ! {IO}",
+    ),
     ("remove_file", "(String) -> Unit ! {IO}"),
     ("exit", "forall a. (Int) -> a"),
     ("system", "(String) -> Int ! {IO}"),
@@ -566,7 +572,10 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         )
     }) {
         for n in ["print", "println"] {
-            env.insert(Sym::from(n), parse_sig(n, "forall a. (a) -> Unit ! {Output}")?.0);
+            env.insert(
+                Sym::from(n),
+                parse_sig(n, "forall a. (a) -> Unit ! {Output}")?.0,
+            );
         }
     }
     // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface

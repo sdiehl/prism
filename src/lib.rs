@@ -39,11 +39,11 @@ pub mod types;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+pub use core::{CorePass, OptLevel, PassSpec};
 #[cfg(feature = "native")]
 pub use driver::{build, build_at, build_on, emit_ir};
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
-pub use core::{CorePass, OptLevel, PassSpec};
 pub use driver::{
     check, check_at, check_on, core_ir, core_ir_full, core_of, dump, dump_at, dump_on,
     effect_strategy_full, effect_warnings_full, interpret, interpret_at, interpret_io_at,

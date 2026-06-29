@@ -106,7 +106,12 @@ jobs:
       - name: Build release
         run: cargo build --all --release
 
+      # PRISM_CORE_LINT runs Core Lint between every optimization pass, so the
+      # whole example corpus is the lint's gate: a pass that produces ill-formed
+      # Core (an escaped binder, a reuse token spent twice) aborts the compile.
       - name: Compile every example
+        env:
+          PRISM_CORE_LINT: 1
         run: |
           for f in examples/*.pr; do
             echo "== $f"
@@ -148,6 +153,24 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm build
+
+  lean:
+    name: Lean model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Kernel-checks every theorem in the core model (CEK adequacy, determinism,
+      # progress, effect-safety) and the differential `Certificates` whose `rfl`
+      # proofs pin model output to live `prism run` output. The toolchain is read
+      # from models/lean-toolchain (single source of truth); no mathlib, so the
+      # build is self-contained and fast. This is the one formal-methods gate that
+      # used to be able to silently break (Lean was outside CI).
+      - name: Build Lean model
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: models
+          build-args: --wfail
 
   mlir:
     name: MLIR backend

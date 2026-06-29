@@ -24,11 +24,11 @@ mod inline;
 mod lint;
 mod simplify;
 mod specialize;
-pub use lint::lint;
-pub use specialize::specialize;
 use cse::cse_counted;
 use inline::inline_counted;
+pub use lint::lint;
 use simplify::simplify_counted;
+pub use specialize::specialize;
 use specialize::specialize_counted;
 
 /// Optimization level: the knob that selects which passes run.
@@ -381,7 +381,12 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
 /// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
 /// compiler bug), naming the pass responsible.
 #[must_use]
-pub fn run(core: &Core, nt: &BTreeSet<Sym>, level: OptLevel, stage: PassStage) -> (Core, PassStats) {
+pub fn run(
+    core: &Core,
+    nt: &BTreeSet<Sym>,
+    level: OptLevel,
+    stage: PassStage,
+) -> (Core, PassStats) {
     let passes: Vec<CorePass> = pipeline(level)
         .into_iter()
         .filter(|p| p.stage() == stage)

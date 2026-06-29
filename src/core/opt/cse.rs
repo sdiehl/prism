@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use super::super::cbpv::{Comp, CoreFn, CoreOp, Core, CorePat, HandleOp, Value};
+use super::super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use super::super::traverse::Rewrite;
 use crate::sym::Sym;
 
@@ -212,7 +212,11 @@ mod tests {
             Box::new(Comp::Bind(
                 Box::new(mul("a", "b")),
                 s("q"),
-                Box::new(Comp::Prim(CoreOp::Add, Value::Var(s("p")), Value::Var(s("q")))),
+                Box::new(Comp::Prim(
+                    CoreOp::Add,
+                    Value::Var(s("p")),
+                    Value::Var(s("q")),
+                )),
             )),
         );
         let core = Core {

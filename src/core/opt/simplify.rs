@@ -194,7 +194,11 @@ fn const_fold(op: CoreOp, a: &Value, b: &Value) -> Option<Value> {
     let (x, y) = (*x, *y);
     // The immediate (untagged 63-bit) range a `Value::Int` may hold, matching
     // `small_int` in elaboration.
-    let imm = |r: i64| ((-(1i64 << 62))..(1i64 << 62)).contains(&r).then_some(Value::Int(r));
+    let imm = |r: i64| {
+        ((-(1i64 << 62))..(1i64 << 62))
+            .contains(&r)
+            .then_some(Value::Int(r))
+    };
     match op {
         CoreOp::Eq => Some(Value::Bool(x == y)),
         CoreOp::Ne => Some(Value::Bool(x != y)),
@@ -522,25 +526,35 @@ mod tests {
     #[test]
     fn const_folds_only_the_parity_safe_integer_cases() {
         let fold = |op, x, y| {
-            let (out, _) = simplify_counted(&one(
-                vec![],
-                Comp::Prim(op, Value::Int(x), Value::Int(y)),
-            ));
+            let (out, _) =
+                simplify_counted(&one(vec![], Comp::Prim(op, Value::Int(x), Value::Int(y))));
             out.fns.into_iter().next().unwrap().body
         };
         match fold(CoreOp::Add, 2, 3) {
             Comp::Return(Value::Int(5)) => {}
             other => panic!("expected `return 5`, got {other:?}"),
         }
-        assert!(matches!(fold(CoreOp::Lt, 2, 3), Comp::Return(Value::Bool(true))));
+        assert!(matches!(
+            fold(CoreOp::Lt, 2, 3),
+            Comp::Return(Value::Bool(true))
+        ));
         // div by zero: unfolded (preserves the runtime error)
-        assert!(matches!(fold(CoreOp::Div, 1, 0), Comp::Prim(CoreOp::Div, ..)));
+        assert!(matches!(
+            fold(CoreOp::Div, 1, 0),
+            Comp::Prim(CoreOp::Div, ..)
+        ));
         // i64 overflow: unfolded (result would be a bignum)
-        assert!(matches!(fold(CoreOp::Add, i64::MAX, 1), Comp::Prim(CoreOp::Add, ..)));
+        assert!(matches!(
+            fold(CoreOp::Add, i64::MAX, 1),
+            Comp::Prim(CoreOp::Add, ..)
+        ));
         // fits i64 but leaves the tagged-immediate range: unfolded, since a
         // `Value::Int` cannot represent it (this was a real parity bug).
         let big = (1i64 << 62) - 1;
-        assert!(matches!(fold(CoreOp::Add, big, big), Comp::Prim(CoreOp::Add, ..)));
+        assert!(matches!(
+            fold(CoreOp::Add, big, big),
+            Comp::Prim(CoreOp::Add, ..)
+        ));
     }
 
     // Float `Prim`s fold like the evaluator: arithmetic to a `Float`, comparison
@@ -558,8 +572,14 @@ mod tests {
             Comp::Return(Value::Float(f)) => assert!((f - 3.0).abs() < f64::EPSILON),
             other => panic!("expected `return 3.0`, got {other:?}"),
         }
-        assert!(matches!(fold(CoreOp::Ltf, 1.0, 2.0), Comp::Return(Value::Bool(true))));
-        assert!(matches!(fold(CoreOp::Eqf, 1.0, 2.0), Comp::Return(Value::Bool(false))));
+        assert!(matches!(
+            fold(CoreOp::Ltf, 1.0, 2.0),
+            Comp::Return(Value::Bool(true))
+        ));
+        assert!(matches!(
+            fold(CoreOp::Eqf, 1.0, 2.0),
+            Comp::Return(Value::Bool(false))
+        ));
         // Divf by zero is inf, not a trap, so it folds (a finite over +0.0).
         match fold(CoreOp::Divf, 1.0, 0.0) {
             Comp::Return(Value::Float(f)) => assert!(f.is_infinite() && f > 0.0),
@@ -574,7 +594,9 @@ mod tests {
     fn used_once_thunk_inlines_at_its_force() {
         let n = s("n");
         let body = Comp::Bind(
-            Box::new(Comp::Return(Value::Thunk(Box::new(Comp::Return(Value::Var(n)))))),
+            Box::new(Comp::Return(Value::Thunk(Box::new(Comp::Return(
+                Value::Var(n),
+            ))))),
             s("t"),
             Box::new(Comp::Bind(
                 Box::new(Comp::Force(Value::Var(s("t")))),
@@ -604,14 +626,20 @@ mod tests {
                     CorePat::Ctor(s("Some"), vec![Some(s("n"))]),
                     Comp::Return(Value::Var(s("n"))),
                 ),
-                (CorePat::Ctor(s("None"), vec![]), Comp::Return(Value::Int(0))),
+                (
+                    CorePat::Ctor(s("None"), vec![]),
+                    Comp::Return(Value::Int(0)),
+                ),
             ],
         );
         let outer = Comp::Bind(
             Box::new(Comp::Case(
                 Value::Var(s("sv")),
                 vec![
-                    (CorePat::Ctor(s("A"), vec![]), Comp::Return(some(Value::Int(1)))),
+                    (
+                        CorePat::Ctor(s("A"), vec![]),
+                        Comp::Return(some(Value::Int(1))),
+                    ),
                     (CorePat::Ctor(s("B"), vec![]), Comp::Return(none)),
                 ],
             )),
@@ -640,7 +668,11 @@ mod tests {
         let body = Comp::Bind(
             Box::new(Comp::Return(Value::Var(y))),
             s("x"),
-            Box::new(Comp::Prim(CoreOp::Add, Value::Var(s("x")), Value::Var(s("x")))),
+            Box::new(Comp::Prim(
+                CoreOp::Add,
+                Value::Var(s("x")),
+                Value::Var(s("x")),
+            )),
         );
         let (out, ticks) = simplify_counted(&one(vec![y], body));
         assert!(ticks > 0);

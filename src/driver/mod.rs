@@ -13,13 +13,12 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 #[cfg(feature = "native")]
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
+use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
-    replayable_annots,
-    lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, run_opt, run_opt_spec, Core,
-    OptLevel, PassSpec,
+    lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
+    run_opt_spec, Core, OptLevel, PassSpec,
 };
-use crate::core::opt::PassStage;
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
 use crate::lex::lex;

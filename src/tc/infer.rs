@@ -1555,7 +1555,8 @@ impl Tc<'_> {
                     .map(|(c, t)| (c.to_string(), t.clone()))
                     .collect();
                 tc.with_self(qual.clone(), expected.clone(), ctx, |tc| {
-                    tc.check(&env2, &m.body, ret).and_then(|()| tc.resolve_all())
+                    tc.check(&env2, &m.body, ret)
+                        .and_then(|()| tc.resolve_all())
                 })
                 .map_err(|e| e.in_fn(&qual))
             })?;

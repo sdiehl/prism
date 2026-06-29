@@ -171,10 +171,13 @@ impl Tc<'_> {
             });
         }
         let inst_name = if let Some(name) = explicit {
-            let info = self.instances.get(&Sym::from(name)).ok_or_else(|| TypeError::Other {
-                span,
-                msg: format!("unknown instance `{name}`"),
-            })?;
+            let info = self
+                .instances
+                .get(&Sym::from(name))
+                .ok_or_else(|| TypeError::Other {
+                    span,
+                    msg: format!("unknown instance `{name}`"),
+                })?;
             if info.class != class {
                 return Err(TypeError::Other {
                     span,
@@ -230,7 +233,10 @@ impl Tc<'_> {
                         let listed = if cross_module {
                             provenance_list(self.instances, many)
                         } else {
-                            many.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                            many.iter()
+                                .map(|s| s.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         };
                         return Err(TypeError::Other {
                             span,
@@ -558,10 +564,12 @@ pub(super) fn build_classes(
     // into unbounded recursion at the first use site.
     check_superclass_cycles(&classes, &prog.classes)?;
     for i in &prog.instances {
-        let class = classes.get(&Sym::from(&i.class)).ok_or_else(|| TypeError::Other {
-            span: i.span,
-            msg: format!("unknown class {}", i.class),
-        })?;
+        let class = classes
+            .get(&Sym::from(&i.class))
+            .ok_or_else(|| TypeError::Other {
+                span: i.span,
+                msg: format!("unknown class {}", i.class),
+            })?;
         if instances.contains_key(&Sym::from(&i.name))
             || env.contains_key(&Sym::from(&i.name))
             || fn_names.contains(i.name.as_str())
@@ -631,7 +639,10 @@ pub(super) fn build_classes(
                     msg: format!("duplicate method `{}` in instance `{}`", m.name, i.name),
                 });
             }
-            let Some((_, sig)) = class.methods.iter().find(|(n, _)| n.as_str() == m.name.as_str())
+            let Some((_, sig)) = class
+                .methods
+                .iter()
+                .find(|(n, _)| n.as_str() == m.name.as_str())
             else {
                 return Err(TypeError::Other {
                     span: m.span,

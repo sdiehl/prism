@@ -36,19 +36,19 @@ Prism distinguishes identifiers by initial case. A `varid` begins with a lower-c
 
 The following are reserved and may not be used as identifiers.
 
-|            |             |            |           |            |
-| ---------- | ----------- | ---------- | --------- | ---------- |
-| `fn`       | `fip`       | `fbip`     | `pub`     | `import`   |
-| `as`       | `type`      | `newtype`  | `opaque`  | `alias`    |
-| `effect`   | `error`     | `throw`    | `try`     | `catch`    |
-| `transact` | `class`     | `instance` | `pattern` | `deriving` |
-| `where`    | `given`     | `handle`   | `with`    | `handler`  |
-| `mask`     | `ctl`       | `final`    | `fun`     | `val`      |
-| `return`   | `let`       | `var`      | `borrow`  | `in`       |
-| `for`      | `do`        | `if`       | `then`    | `else`     |
-| `elif`     | `match`     | `of`       | `forall`  | `true`     |
-| `false`    | `while`     | `loop`     | `break`   | `continue` |
-| `using`    | `canonical` | `replayable` |        |           |
+|            |             |              |           |            |
+| ---------- | ----------- | ------------ | --------- | ---------- |
+| `fn`       | `fip`       | `fbip`       | `pub`     | `import`   |
+| `as`       | `type`      | `newtype`    | `opaque`  | `alias`    |
+| `effect`   | `error`     | `throw`      | `try`     | `catch`    |
+| `transact` | `class`     | `instance`   | `pattern` | `deriving` |
+| `where`    | `given`     | `handle`     | `with`    | `handler`  |
+| `mask`     | `ctl`       | `final`      | `fun`     | `val`      |
+| `return`   | `let`       | `var`        | `borrow`  | `in`       |
+| `for`      | `do`        | `if`         | `then`    | `else`     |
+| `elif`     | `match`     | `of`         | `forall`  | `true`     |
+| `false`    | `while`     | `loop`       | `break`   | `continue` |
+| `using`    | `canonical` | `replayable` |           |            |
 
 The built-in type names `Int`, `I64`, `U64`, `Bool`, `Unit`, `Float`, `Char`, and `String` are also reserved. The prelude effect names `Console`, `FileSystem`, `Random`, and `Env`, the [capability effects](#capability-effects-and-io), are reserved as well.
 

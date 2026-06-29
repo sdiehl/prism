@@ -257,9 +257,15 @@ impl Rewrite for Freshen<'_> {
                         let n = self.next();
                         let mut r2 = ren.clone();
                         r2.insert(*v, n);
-                        (Some(n), return_body.as_ref().map(|b| Box::new(self.comp(b, &r2))))
+                        (
+                            Some(n),
+                            return_body.as_ref().map(|b| Box::new(self.comp(b, &r2))),
+                        )
                     }
-                    None => (None, return_body.as_ref().map(|b| Box::new(self.comp(b, ren)))),
+                    None => (
+                        None,
+                        return_body.as_ref().map(|b| Box::new(self.comp(b, ren))),
+                    ),
                 };
                 let mut ops2 = Vec::with_capacity(ops.len());
                 for o in ops {

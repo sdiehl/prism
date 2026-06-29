@@ -336,9 +336,11 @@ impl Rewrite for Subst {
 
     fn comp(&mut self, c: &Comp, s: &Self::Ctx) -> Comp {
         match c {
-            Comp::Bind(a, x, b) => {
-                Comp::Bind(Box::new(self.comp(a, s)), *x, Box::new(self.under(b, s, &[*x])))
-            }
+            Comp::Bind(a, x, b) => Comp::Bind(
+                Box::new(self.comp(a, s)),
+                *x,
+                Box::new(self.under(b, s, &[*x])),
+            ),
             Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(self.under(b, s, ps))),
             Comp::Case(scrut, arms) => Comp::Case(
                 self.value(scrut, s),

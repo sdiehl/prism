@@ -96,10 +96,7 @@ fn derive_lens(d: &DataDecl, cspan: Span) -> Result<Vec<Decl>, TypeError> {
         let set = sp(
             Expr::RecordUpdatePath(
                 Box::new(evar("_r", z)),
-                vec![(
-                    vec![PathStep::Field(f.clone())],
-                    PathOp::Set(evar("_v", z)),
-                )],
+                vec![(vec![PathStep::Field(f.clone())], PathOp::Set(evar("_v", z)))],
             ),
             z,
         );
@@ -309,11 +306,7 @@ fn derive_show(d: &DataDecl) -> InstanceDecl {
             } else {
                 let mut acc = sp(Expr::Str(")".into()), z);
                 for i in (0..n).rev() {
-                    let s = call(
-                        evar("show_c", Z),
-                        vec![evar(&format!("_f{i}"), z)],
-                        z,
-                    );
+                    let s = call(evar("show_c", Z), vec![evar(&format!("_f{i}"), z)], z);
                     acc = concat(s, acc);
                     if i > 0 {
                         acc = concat(sp(Expr::Str(", ".into()), z), acc);

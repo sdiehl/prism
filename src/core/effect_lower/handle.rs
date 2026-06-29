@@ -770,15 +770,22 @@ fn state_clause(op: &HandleOp) -> Option<StateClause> {
             // Post-condition guard for the `\s -> let t = resume(A) in t(B)` shape:
             // a matched clause must fully consume the resume, so neither the resume
             // argument `a`, the tail argument `b`, nor any re-emitted prefix bind
-            // may still reference it. Enforced here at the integration point, so an
-            // elaborator shape drift that slips past the per-helper checks is caught
-            // rather than threading a live resume into the accumulator rewrite.
-            debug_assert!(
-                !mentions(&fv::value(&a), &aliases)
-                    && !mentions(&fv::value(&b), &aliases)
-                    && prefix.iter().all(|(pm, _)| !mentions(&fv::comp(pm), &aliases)),
-                "state_clause matched a clause that still references the resume: elaborated shape drifted"
-            );
+            // may still reference it. An elaborator shape drift that slips past the
+            // per-helper checks must NOT be threaded into the accumulator rewrite:
+            // debug builds panic to surface it; release builds reject the match and
+            // return None so the caller falls back to general handler lowering.
+            if mentions(&fv::value(&a), &aliases)
+                || mentions(&fv::value(&b), &aliases)
+                || prefix
+                    .iter()
+                    .any(|(pm, _)| mentions(&fv::comp(pm), &aliases))
+            {
+                debug_assert!(
+                    false,
+                    "state_clause matched a clause that still references the resume: elaborated shape drifted"
+                );
+                return None;
+            }
             return Some(StateClause {
                 s: *s,
                 prefix,

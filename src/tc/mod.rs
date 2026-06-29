@@ -16,7 +16,6 @@ mod infer;
 mod pat;
 mod subsume;
 
-
 pub type Env = BTreeMap<Sym, Type>;
 
 #[derive(Clone, Debug)]
@@ -518,11 +517,11 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             // its principal inferred purity (an effect-polymorphic method like
             // `fmap` may perform the effects flowing through its row variable).
             tc.check_instance(
-            &env,
-            inst,
-            &instances[&Sym::from(&inst.name)],
-            &classes[&Sym::from(&inst.class)],
-        )?;
+                &env,
+                inst,
+                &instances[&Sym::from(&inst.name)],
+                &classes[&Sym::from(&inst.class)],
+            )?;
         }
         field_res = tc.field_res;
         path_res = tc.path_res;

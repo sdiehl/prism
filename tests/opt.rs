@@ -75,12 +75,18 @@ fn pass_spec_parse() {
     use prism::{CorePass, PassSpec};
 
     let spec = PassSpec::parse("pre:EraseNewtypes,Specialize;late:Simplify").expect("valid spec");
-    assert_eq!(spec.pre, vec![CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert_eq!(
+        spec.pre,
+        vec![CorePass::EraseNewtypes, CorePass::Specialize]
+    );
     assert_eq!(spec.late, vec![CorePass::Simplify]);
 
     // A bare comma-list with no marker is the pre stage.
     let bare = PassSpec::parse("EraseNewtypes,Specialize").expect("valid bare spec");
-    assert_eq!(bare.pre, vec![CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert_eq!(
+        bare.pre,
+        vec![CorePass::EraseNewtypes, CorePass::Specialize]
+    );
     assert!(bare.late.is_empty());
 
     assert!(PassSpec::parse("pre:Bogus").is_err());
