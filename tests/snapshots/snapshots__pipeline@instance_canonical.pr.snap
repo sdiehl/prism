@@ -335,34 +335,16 @@ b2:                                               ; preds = %b1, %b0
 
 b3:                                               ; preds = %b2
   call void @prism_rc_dec(i64 %t12)
-  br i1 true, label %b5, label %b6
+  ret i64 -1
 
 b4:                                               ; preds = %b2
   call void @prism_rc_dec(i64 %t12)
   ret i64 3
-
-b5:                                               ; preds = %b3
-  br i1 true, label %b8, label %b6
-
-b6:                                               ; preds = %b5, %b3
-  %t25 = call i64 @prism_rt_int_sub(i64 1, i64 3)
-  br label %b7
-
-b8:                                               ; preds = %b5
-  br label %b7
-
-b7:                                               ; preds = %b6, %b8
-  %t26 = phi i64 [ -1, %b8 ], [ %t25, %b6 ]
-  call void @prism_rc_dec(i64 1)
-  call void @prism_rc_dec(i64 3)
-  ret i64 %t26
 }
 
 declare i64 @prism_rt_int_cmp(i64, i64)
 
 declare void @prism_rc_dec(i64)
-
-declare i64 @prism_rt_int_sub(i64, i64)
 
 == run ==
 output: []

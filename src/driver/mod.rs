@@ -15,7 +15,8 @@ use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
-    lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, run_opt, Core, OptLevel,
+    lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, run_opt, run_opt_spec, Core,
+    OptLevel, PassSpec,
 };
 use crate::core::opt::PassStage;
 use crate::error::Error;
@@ -63,6 +64,27 @@ fn opt_level() -> OptLevel {
             .and_then(|s| OptLevel::parse(&s))
             .unwrap_or_default(),
     }
+}
+
+// An explicit `--passes` spec, set once from the CLI before compilation, that
+// overrides the `-O` level. Like `OPT_LEVEL`, a process-level knob rather than a
+// parameter threaded through every entrypoint; when unset, the level path runs
+// exactly as before. The two are mutually exclusive at the CLI, so only one is
+// ever in force.
+static PASS_SPEC: std::sync::Mutex<Option<PassSpec>> = std::sync::Mutex::new(None);
+
+/// Use an explicit ordered pass list for subsequent compiles (the CLI
+/// `--passes` flag), overriding the `-O` level.
+///
+/// # Panics
+/// Panics if the spec lock is poisoned (a prior set panicked), which cannot
+/// happen for this infallible store.
+pub fn set_pass_spec(spec: PassSpec) {
+    *PASS_SPEC.lock().unwrap() = Some(spec);
+}
+
+fn pass_spec() -> Option<PassSpec> {
+    PASS_SPEC.lock().unwrap().clone()
 }
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
@@ -155,13 +177,13 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     // holds by construction). Placed after the fip/effect validators so they
     // still judge the program as written. Newtype erasure is mandatory (a
     // representation both backends depend on); specialization is opt-out via
-    // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1).
-    let (core, _stats) = run_opt(
-        &core,
-        &newtype_ctors(&program),
-        opt_level(),
-        PassStage::PreLowering,
-    );
+    // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1),
+    // unless an explicit `--passes` spec overrides it with its pre-stage list.
+    let nt = newtype_ctors(&program);
+    let (core, _stats) = match pass_spec() {
+        Some(spec) => run_opt_spec(&core, &nt, &spec.pre),
+        None => run_opt(&core, &nt, opt_level(), PassStage::PreLowering),
+    };
     Ok((program, checked, core))
 }
 
@@ -329,12 +351,11 @@ type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
 // compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
 fn lower_opt(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered, Error> {
     let (lowered, ctors, warning) = lower_effects(core, ctors)?;
-    let (lowered, _stats) = run_opt(
-        &lowered,
-        &std::collections::BTreeSet::new(),
-        opt_level(),
-        PassStage::Late,
-    );
+    let empty = std::collections::BTreeSet::new();
+    let (lowered, _stats) = match pass_spec() {
+        Some(spec) => run_opt_spec(&lowered, &empty, &spec.late),
+        None => run_opt(&lowered, &empty, opt_level(), PassStage::Late),
+    };
     Ok((lowered, ctors, warning))
 }
 

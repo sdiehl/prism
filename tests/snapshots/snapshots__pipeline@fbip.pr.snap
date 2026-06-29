@@ -250,78 +250,8 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  br i1 true, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  br i1 true, label %b3, label %b1
-
-b1:                                               ; preds = %b0, %entry
-  %t10 = call i64 @prism_rt_int_add(i64 3, i64 5)
-  br label %b2
-
-b3:                                               ; preds = %b0
-  br label %b2
-
-b2:                                               ; preds = %b1, %b3
-  %t11 = phi i64 [ 7, %b3 ], [ %t10, %b1 ]
-  call void @prism_rc_dec(i64 3)
-  call void @prism_rc_dec(i64 5)
-  %t12 = and i64 %t11, 3
-  %t13 = and i64 %t12, 1
-  %t14 = icmp eq i64 %t13, 1
-  br i1 %t14, label %b4, label %b5
-
-b4:                                               ; preds = %b2
-  %t15 = ashr i64 %t11, 1
-  %t17 = add i64 %t15, 1
-  %t18 = shl i64 %t17, 1
-  %t19 = ashr i64 %t18, 1
-  %t20 = icmp eq i64 %t19, %t17
-  br i1 %t20, label %b7, label %b5
-
-b5:                                               ; preds = %b4, %b2
-  %t22 = call i64 @prism_rt_int_add(i64 %t11, i64 3)
-  br label %b6
-
-b7:                                               ; preds = %b4
-  %t21 = or i64 %t18, 1
-  br label %b6
-
-b6:                                               ; preds = %b5, %b7
-  %t23 = phi i64 [ %t21, %b7 ], [ %t22, %b5 ]
-  call void @prism_rc_dec(i64 %t11)
-  call void @prism_rc_dec(i64 3)
-  %t24 = and i64 %t23, 5
-  %t25 = and i64 %t24, 1
-  %t26 = icmp eq i64 %t25, 1
-  br i1 %t26, label %b8, label %b9
-
-b8:                                               ; preds = %b6
-  %t27 = ashr i64 %t23, 1
-  %t29 = add i64 %t27, 2
-  %t30 = shl i64 %t29, 1
-  %t31 = ashr i64 %t30, 1
-  %t32 = icmp eq i64 %t31, %t29
-  br i1 %t32, label %b11, label %b9
-
-b9:                                               ; preds = %b8, %b6
-  %t34 = call i64 @prism_rt_int_add(i64 %t23, i64 5)
-  br label %b10
-
-b11:                                              ; preds = %b8
-  %t33 = or i64 %t30, 1
-  br label %b10
-
-b10:                                              ; preds = %b9, %b11
-  %t35 = phi i64 [ %t33, %b11 ], [ %t34, %b9 ]
-  call void @prism_rc_dec(i64 %t23)
-  call void @prism_rc_dec(i64 5)
-  ret i64 %t35
+  ret i64 13
 }
-
-declare i64 @prism_rt_int_add(i64, i64)
-
-declare void @prism_rc_dec(i64)
 
 == run ==
 output: []

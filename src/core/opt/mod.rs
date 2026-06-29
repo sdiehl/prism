@@ -74,12 +74,23 @@ pub enum CorePass {
 }
 
 impl CorePass {
-    const fn name(self) -> &'static str {
+    /// The pass's spelling in dumps, stats, and the `--passes` spec.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
             Self::Simplify => "Simplify",
         }
+    }
+
+    /// The pass named by `s`, matching [`CorePass::name`] exactly. `None` for an
+    /// unknown name.
+    #[must_use]
+    pub fn from_name(s: &str) -> Option<Self> {
+        [Self::EraseNewtypes, Self::Specialize, Self::Simplify]
+            .into_iter()
+            .find(|p| p.name() == s)
     }
 
     /// Which stage of the pipeline this pass runs in.
@@ -104,6 +115,120 @@ pub enum PassStage {
     PreLowering,
     /// After effect lowering, on the lowered core (before reference counting).
     Late,
+}
+
+impl PassStage {
+    /// The stage's spelling in the `--passes` spec (`pre`/`late`).
+    const fn label(self) -> &'static str {
+        match self {
+            Self::PreLowering => "pre",
+            Self::Late => "late",
+        }
+    }
+}
+
+/// An explicit ordered pass list per stage, the parsed `--passes` flag.
+///
+/// The LLVM `opt -passes=` / GHC `[CoreToDo]` analogue. It overrides the `-O`
+/// level entirely: each section is exactly the passes named, in order, with no
+/// level defaults filled in.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PassSpec {
+    /// Pre-lowering passes, in run order.
+    pub pre: Vec<CorePass>,
+    /// Late (post-lowering) passes, in run order.
+    pub late: Vec<CorePass>,
+}
+
+impl PassSpec {
+    /// Parse a pass spec of the form `[pre:<names>][;late:<names>]`, where
+    /// `<names>` is a comma-separated list of [`CorePass::name`] spellings. A bare
+    /// comma-list with no `pre:`/`late:` marker is taken as the pre stage. An
+    /// omitted section is empty (it is NOT defaulted to a level's passes), so the
+    /// result lists exactly the passes named, in order.
+    ///
+    /// # Errors
+    /// Returns a human-readable message when a name is unknown, a pass is placed
+    /// in the wrong stage, the pre section orders `Specialize` before
+    /// `EraseNewtypes`, or both sections are empty.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let mut out = Self::default();
+        for segment in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            let (stage, names) = split_section(segment);
+            let target = match stage {
+                PassStage::PreLowering => &mut out.pre,
+                PassStage::Late => &mut out.late,
+            };
+            for name in names.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                let pass = CorePass::from_name(name).ok_or_else(|| unknown_pass(name))?;
+                if pass.stage() != stage {
+                    return Err(format!(
+                        "{} runs in the {} stage",
+                        pass.name(),
+                        pass.stage().label()
+                    ));
+                }
+                target.push(pass);
+            }
+        }
+        let erase = out.pre.iter().position(|p| *p == CorePass::EraseNewtypes);
+        let spec_pos = out.pre.iter().position(|p| *p == CorePass::Specialize);
+        if let (Some(e), Some(s)) = (erase, spec_pos) {
+            if s < e {
+                return Err("EraseNewtypes must precede Specialize".into());
+            }
+        }
+        if out.pre.is_empty() && out.late.is_empty() {
+            return Err("pass specification is empty".into());
+        }
+        Ok(out)
+    }
+}
+
+// Split one `;`-delimited segment into its stage and the comma-list of names. A
+// `pre:`/`late:` marker selects the stage; a bare list (no marker) is the pre
+// stage.
+fn split_section(segment: &str) -> (PassStage, &str) {
+    for (prefix, stage) in [("pre:", PassStage::PreLowering), ("late:", PassStage::Late)] {
+        if let Some(rest) = segment.strip_prefix(prefix) {
+            return (stage, rest);
+        }
+    }
+    (PassStage::PreLowering, segment)
+}
+
+// An "unknown pass" message, suggesting the closest known name when one is near.
+fn unknown_pass(name: &str) -> String {
+    let suggestion = [
+        CorePass::EraseNewtypes,
+        CorePass::Specialize,
+        CorePass::Simplify,
+    ]
+    .into_iter()
+    .map(|p| (edit_distance(name, p.name()), p.name()))
+    .filter(|(d, _)| *d <= 3)
+    .min()
+    .map(|(_, n)| n);
+    suggestion.map_or_else(
+        || format!("unknown pass `{name}`"),
+        |n| format!("unknown pass `{name}` (did you mean `{n}`?)"),
+    )
+}
+
+// Levenshtein distance, for the closest-name suggestion only.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for (i, ca) in a.chars().enumerate() {
+        cur[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
 }
 
 /// Per-pass tick counts (rewrites fired), in run order. Dumped under
@@ -141,12 +266,11 @@ impl PassStats {
     }
 }
 
-/// The optimization context (the GHC `CoreM` analogue): the level, the
-/// program-derived newtype constructor set a pass needs, and the tick counter.
-/// A fresh-name supply (`Sym::fresh`) is added here when a clone-generating pass
-/// first needs it.
+/// The optimization context (the GHC `CoreM` analogue): the program-derived
+/// newtype constructor set a pass needs, and the tick counter. A fresh-name
+/// supply (`Sym::fresh`) is added here when a clone-generating pass first needs
+/// it.
 struct OptCx {
-    level: OptLevel,
     newtype_ctors: BTreeSet<Sym>,
     stats: PassStats,
 }
@@ -227,10 +351,36 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
 /// compiler bug), naming the pass responsible.
 #[must_use]
 pub fn run(core: &Core, nt: &BTreeSet<Sym>, level: OptLevel, stage: PassStage) -> (Core, PassStats) {
+    let passes: Vec<CorePass> = pipeline(level)
+        .into_iter()
+        .filter(|p| p.stage() == stage)
+        .collect();
+    run_passes(core, nt, &passes)
+}
+
+/// Run an explicit ordered list of `passes` over `core`, the `--passes` analogue
+/// of [`run`].
+///
+/// `passes` is one stage's worth (the driver calls this twice, once per stage);
+/// `nt` is the newtype constructor set `EraseNewtypes` needs (empty for a late
+/// run). Uses the same lint/dump/stats machinery and `PRISM_*` switches as
+/// [`run`].
+///
+/// # Panics
+/// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
+/// compiler bug), naming the pass responsible.
+#[must_use]
+pub fn run_spec_stage(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, PassStats) {
+    run_passes(core, nt, passes)
+}
+
+// The shared pass-running loop behind [`run`] and [`run_spec_stage`]: Core Lint
+// between passes under `PRISM_CORE_LINT`, dumps under `PRISM_DUMP_CORE`, the
+// `PRISM_NO_SPECIALIZE` skip, and per-pass ticks dumped under `PRISM_OPT_STATS`.
+fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, PassStats) {
     let lint_on = std::env::var_os("PRISM_CORE_LINT").is_some();
     let no_spec = std::env::var_os("PRISM_NO_SPECIALIZE").is_some();
     let mut cx = OptCx {
-        level,
         newtype_ctors: nt.clone(),
         stats: PassStats::default(),
     };
@@ -257,10 +407,7 @@ pub fn run(core: &Core, nt: &BTreeSet<Sym>, level: OptLevel, stage: PassStage) -
     }
     check(core, "<input>");
     let mut cur = core.clone();
-    for pass in pipeline(cx.level) {
-        if pass.stage() != stage {
-            continue;
-        }
+    for &pass in passes {
         if pass == CorePass::Specialize && no_spec {
             continue;
         }

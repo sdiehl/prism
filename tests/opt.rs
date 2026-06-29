@@ -67,6 +67,31 @@ fn core_lint_clean_on_corpus() {
     assert!(checked > 0, "corpus produced no lintable Core");
 }
 
+// The `--passes` spec parser: a two-stage spec lands each pass in the right
+// section, in order; a bare list defaults to the pre stage; and the validation
+// rules each reject their bad input with a message.
+#[test]
+fn pass_spec_parse() {
+    use prism::{CorePass, PassSpec};
+
+    let spec = PassSpec::parse("pre:EraseNewtypes,Specialize;late:Simplify").expect("valid spec");
+    assert_eq!(spec.pre, vec![CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert_eq!(spec.late, vec![CorePass::Simplify]);
+
+    // A bare comma-list with no marker is the pre stage.
+    let bare = PassSpec::parse("EraseNewtypes,Specialize").expect("valid bare spec");
+    assert_eq!(bare.pre, vec![CorePass::EraseNewtypes, CorePass::Specialize]);
+    assert!(bare.late.is_empty());
+
+    assert!(PassSpec::parse("pre:Bogus").is_err());
+    // A late-only pass placed in the pre section is rejected.
+    assert!(PassSpec::parse("pre:Simplify").is_err());
+    // Pre passes out of order are rejected.
+    assert!(PassSpec::parse("pre:Specialize,EraseNewtypes").is_err());
+    // An empty spec is rejected.
+    assert!(PassSpec::parse("").is_err());
+}
+
 // The optimization tier reaches a fixed point: re-running specialization on the
 // already-optimized Core changes nothing (no new clones, no further reductions).
 // A pass that churned its own output would fail here.

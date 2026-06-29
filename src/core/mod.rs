@@ -19,7 +19,7 @@ pub use fbip::{balanced, check_fip, check_fip_linear, fip_annots, insert_rc, reu
 pub use hash::{hash_program, Hashes};
 pub use json::core_to_json;
 pub use opt::{
-    erase_newtypes, lint as lint_core, newtype_ctors, run as run_opt, specialize, OptLevel,
-    PassStats,
+    erase_newtypes, lint as lint_core, newtype_ctors, run as run_opt,
+    run_spec_stage as run_opt_spec, specialize, CorePass, OptLevel, PassSpec, PassStats,
 };
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};

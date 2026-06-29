@@ -39,6 +39,13 @@ struct Cli {
         default_missing_value = "2"
     )]
     opt: Option<String>,
+    /// Run an explicit ordered pass list, overriding `-O` (mutually exclusive
+    /// with it). Syntax `[pre:<names>][;late:<names>]`, names comma-separated;
+    /// a bare list is the pre stage. Pre passes: `EraseNewtypes`, `Specialize`;
+    /// late pass: `Simplify`. Example:
+    /// `--passes 'pre:EraseNewtypes,Specialize;late:Simplify'`.
+    #[arg(long = "passes", value_name = "SPEC", global = true)]
+    passes: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -93,12 +100,25 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if cli.opt.is_some() && cli.passes.is_some() {
+        eprintln!("error: `--passes` and `-O` are mutually exclusive");
+        return ExitCode::FAILURE;
+    }
     if let Some(s) = &cli.opt {
         let Some(level) = prism::OptLevel::parse(s) else {
             eprintln!("invalid optimization level `-O{s}` (expected 0, 1, or 2)");
             return ExitCode::FAILURE;
         };
         prism::set_opt_level(level);
+    }
+    if let Some(s) = &cli.passes {
+        match prism::PassSpec::parse(s) {
+            Ok(spec) => prism::set_pass_spec(spec),
+            Err(e) => {
+                eprintln!("error: invalid pass specification: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
     }
     let result = match (cli.cmd, cli.file) {
         (Some(cmd), _) => dispatch(cmd),

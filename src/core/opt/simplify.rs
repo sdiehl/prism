@@ -1,7 +1,7 @@
 //! The gentle simplifier: the fixed-point local-rewrite workhorse.
 //!
 //! Bundles the cheap, parity-safe Core simplifications and runs them to a fixed
-//! point. This first slice does three rewrites:
+//! point:
 //!
 //! - Case-of-known-constructor: a `Case` whose scrutinee is a known constructor,
 //!   tuple, or literal (directly, or through a `let`) reduces to the matching
@@ -10,16 +10,18 @@
 //!   at its uses (a trivial value duplicates for free and carries no effect).
 //! - Dead-let elimination: a `let` whose right-hand side is a pure `Return` and
 //!   whose binder is unused is dropped.
+//! - Constant folding: a `Prim` over integer literals reduces to its result. It
+//!   mirrors the evaluator's i64 fast path exactly and folds only the cases that
+//!   path keeps in i64, so it stays parity-safe (see `const_fold`).
 //!
-//! It runs before reference counting and effect lowering, on the high-level Core,
-//! so it never encounters rc (`Dup`/`Drop`/`WithReuse`/`Reuse`) or local-ref
-//! nodes. Constant folding of `Prim` is deliberately not here yet: it must mirror
-//! the evaluator's arithmetic exactly to stay parity-safe, so it lands as its own
-//! increment.
+//! The simplifier is a late pass, run after effect lowering (the var/State fusion
+//! analysis matches Core shapes that copy-propagation would otherwise destroy);
+//! it never introduces rc (`Dup`/`Drop`/`WithReuse`/`Reuse`) nodes, though it
+//! descends through any present.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
+use super::super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use super::super::fv;
 use super::super::traverse::Rewrite;
 use crate::sym::Sym;
@@ -143,6 +145,38 @@ fn resolve(scrut: &Value, env: &Env) -> Option<Value> {
     }
 }
 
+// Fold a `Prim` over integer literals, mirroring the evaluator's i64 fast path
+// (`dispatch_int_op`). Comparisons fold always; arithmetic folds only when the
+// result is representable as a `Value::Int`, i.e. it neither overflows i64 nor
+// leaves the tagged-immediate range the elaborator uses (`small_int`) -- a result
+// outside that range is a heap bignum the Core has no literal for, so its `Prim`
+// is left for the runtime to build. A `Div`/`Rem` by zero never folds (the
+// runtime error must still raise). Float and machine-int (`I64`/`U64`) operands
+// are left alone, so the fold is parity-exact.
+fn const_fold(op: CoreOp, a: &Value, b: &Value) -> Option<Value> {
+    let (Value::Int(x), Value::Int(y)) = (a, b) else {
+        return None;
+    };
+    let (x, y) = (*x, *y);
+    // The immediate (untagged 63-bit) range a `Value::Int` may hold, matching
+    // `small_int` in elaboration.
+    let imm = |r: i64| ((-(1i64 << 62))..(1i64 << 62)).contains(&r).then_some(Value::Int(r));
+    match op {
+        CoreOp::Eq => Some(Value::Bool(x == y)),
+        CoreOp::Ne => Some(Value::Bool(x != y)),
+        CoreOp::Lt => Some(Value::Bool(x < y)),
+        CoreOp::Le => Some(Value::Bool(x <= y)),
+        CoreOp::Gt => Some(Value::Bool(x > y)),
+        CoreOp::Ge => Some(Value::Bool(x >= y)),
+        CoreOp::Add => x.checked_add(y).and_then(imm),
+        CoreOp::Sub => x.checked_sub(y).and_then(imm),
+        CoreOp::Mul => x.checked_mul(y).and_then(imm),
+        CoreOp::Div if y != 0 => x.checked_div(y).and_then(imm),
+        CoreOp::Rem if y != 0 => imm(x.wrapping_rem(y)),
+        _ => None,
+    }
+}
+
 // The selected arm: bind each matched field, then the original body.
 fn build_arm(binds: Vec<(Sym, Value)>, body: &Comp) -> Comp {
     let mut out = body.clone();
@@ -249,6 +283,16 @@ impl Rewrite for Simplifier {
                     body: Box::new(self.comp(body, &e)),
                 }
             }
+            Comp::Prim(op, a, b) => {
+                let a2 = self.value(a, env);
+                let b2 = self.value(b, env);
+                if let Some(folded) = const_fold(*op, &a2, &b2) {
+                    self.ticks += 1;
+                    Comp::Return(folded)
+                } else {
+                    Comp::Prim(*op, a2, b2)
+                }
+            }
             _ => self.descend_comp(c, env),
         }
     }
@@ -299,6 +343,33 @@ mod tests {
             Comp::Return(Value::Var(x)) => assert_eq!(*x, v),
             other => panic!("expected `return v`, got {other:?}"),
         }
+    }
+
+    // Integer `Prim` over literals folds to its result, but a div-by-zero and an
+    // overflowing add are left intact (the error must still raise; the overflow
+    // result is a bignum the Core cannot spell).
+    #[test]
+    fn const_folds_only_the_parity_safe_integer_cases() {
+        let fold = |op, x, y| {
+            let (out, _) = simplify_counted(&one(
+                vec![],
+                Comp::Prim(op, Value::Int(x), Value::Int(y)),
+            ));
+            out.fns.into_iter().next().unwrap().body
+        };
+        match fold(CoreOp::Add, 2, 3) {
+            Comp::Return(Value::Int(5)) => {}
+            other => panic!("expected `return 5`, got {other:?}"),
+        }
+        assert!(matches!(fold(CoreOp::Lt, 2, 3), Comp::Return(Value::Bool(true))));
+        // div by zero: unfolded (preserves the runtime error)
+        assert!(matches!(fold(CoreOp::Div, 1, 0), Comp::Prim(CoreOp::Div, ..)));
+        // i64 overflow: unfolded (result would be a bignum)
+        assert!(matches!(fold(CoreOp::Add, i64::MAX, 1), Comp::Prim(CoreOp::Add, ..)));
+        // fits i64 but leaves the tagged-immediate range: unfolded, since a
+        // `Value::Int` cannot represent it (this was a real parity bug).
+        let big = (1i64 << 62) - 1;
+        assert!(matches!(fold(CoreOp::Add, big, big), Comp::Prim(CoreOp::Add, ..)));
     }
 
     // A let of a variable is copy-propagated into its uses and then dropped.
