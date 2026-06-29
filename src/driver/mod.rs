@@ -15,8 +15,9 @@ use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
-    lower_effects, pp_core, pp_core_pretty, reuse, run_opt, Core, OptLevel,
+    lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, run_opt, Core, OptLevel,
 };
+use crate::core::opt::PassStage;
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
 use crate::lex::lex;
@@ -37,9 +38,10 @@ pub const SOURCE_EXT: &str = "pr";
 // The Core-to-Core optimization level every compile uses, set once from the CLI
 // `-O` flag and read by `frontend`. A process-level default (like the other opt
 // knobs `opt::run` consults) rather than a parameter threaded through every
-// entrypoint. Defaults to `O1`, the tier we ship: newtype erasure plus dictionary
-// specialization.
-static OPT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+// entrypoint. `255` is the unset sentinel: an explicit CLI flag wins, else the
+// `PRISM_OPT_LEVEL` env var (handy for testing a pass at O2 without the CLI),
+// else `O1`, the tier we ship (newtype erasure plus dictionary specialization).
+static OPT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255);
 
 /// Set the optimization level for subsequent compiles (the CLI `-O` flag).
 pub fn set_opt_level(level: OptLevel) {
@@ -54,8 +56,12 @@ pub fn set_opt_level(level: OptLevel) {
 fn opt_level() -> OptLevel {
     match OPT_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
         0 => OptLevel::O0,
+        1 => OptLevel::O1,
         2 => OptLevel::O2,
-        _ => OptLevel::O1,
+        _ => std::env::var("PRISM_OPT_LEVEL")
+            .ok()
+            .and_then(|s| OptLevel::parse(&s))
+            .unwrap_or_default(),
     }
 }
 #[cfg(feature = "native")]
@@ -150,7 +156,12 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     // still judge the program as written. Newtype erasure is mandatory (a
     // representation both backends depend on); specialization is opt-out via
     // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1).
-    let (core, _stats) = run_opt(&core, &program, opt_level());
+    let (core, _stats) = run_opt(
+        &core,
+        &newtype_ctors(&program),
+        opt_level(),
+        PassStage::PreLowering,
+    );
     Ok((program, checked, core))
 }
 
@@ -301,11 +312,30 @@ pub fn interpret_io_on(
 fn prepared_core(src: &str, roots: &[Root]) -> Result<Core, Error> {
     let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, _, warning) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, _, warning) = lower_opt(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
     Ok(core)
+}
+
+// The effect-lowered core, its constructor table, and any fallback warning.
+type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
+
+// Effect-lower `core`, then run the late (post-lowering) optimization passes on
+// the result. The late stage is where the simplifier lives: lowering has already
+// fixed the var/State fusion strategy, so simplifying here cannot defeat it. Every
+// path that produces or shows the lowered native core goes through this, so the
+// compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
+fn lower_opt(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered, Error> {
+    let (lowered, ctors, warning) = lower_effects(core, ctors)?;
+    let (lowered, _stats) = run_opt(
+        &lowered,
+        &std::collections::BTreeSet::new(),
+        opt_level(),
+        PassStage::Late,
+    );
+    Ok((lowered, ctors, warning))
 }
 
 fn lowered_core(
@@ -314,7 +344,7 @@ fn lowered_core(
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors, warning) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
     Ok((checked, lowered, ctors, sigs))
 }
@@ -777,7 +807,7 @@ pub fn report_on(src: &str, roots: &[Root]) -> String {
     );
 
     #[cfg(feature = "native")]
-    match lower_effects(&core, &checked.ctors) {
+    match lower_opt(&core, &checked.ctors) {
         Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
             Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
             Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),

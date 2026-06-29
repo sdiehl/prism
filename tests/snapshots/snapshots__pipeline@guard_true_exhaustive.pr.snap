@@ -185,28 +185,22 @@ b3:                                               ; preds = %b2
   ret i64 1
 
 b4:                                               ; preds = %b2
-  call void @prism_rc_dec(i64 %t13)
-  call void @prism_rc_inc(i64 %a0)
-  call void @prism_rc_inc(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
   br i1 true, label %b5, label %b6
 
 b5:                                               ; preds = %b4
-  call void @prism_rc_dec(i64 3)
-  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %t13)
   call void @prism_rc_dec(i64 %a0)
   ret i64 3
 
 b6:                                               ; preds = %b4
-  %t25 = inttoptr i64 %a0 to ptr
+  %t20 = inttoptr i64 %a0 to ptr
   br label %b9
 
 b9:                                               ; preds = %b8, %b6
-  call void @prism_rc_dec(i64 3)
+  call void @prism_rc_dec(i64 %t13)
   call void @prism_rc_dec(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
-  %t29 = call i64 @prism_str_lit(ptr @.str0, i64 31)
-  call void @prism_fatal(i64 %t29)
+  %t23 = call i64 @prism_str_lit(ptr @.str0, i64 31)
+  call void @prism_fatal(i64 %t23)
   ret i64 0
 
 b8:                                               ; No predecessors!

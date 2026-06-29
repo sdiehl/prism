@@ -31,9 +31,9 @@ use specialize::specialize_counted;
 ///
 /// `O0` keeps only the mandatory representation passes (newtype erasure, which
 /// both backends depend on). `O1`, the default, adds dictionary specialization
-/// and preserves effect/var-loop fusion. `O2` additionally runs the gentle
-/// simplifier; it is parity-clean but currently trades that fusion (see
-/// [`pipeline`]), so it is opt-in until the passes are made to cooperate.
+/// (pre-lowering) and the gentle simplifier (late, after effect lowering, so it
+/// composes with the var/State fusion rather than defeating it). `O2` currently
+/// matches `O1`; it is where further late passes (inliner, CSE) will land.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     O0,
@@ -81,6 +81,29 @@ impl CorePass {
             Self::Simplify => "Simplify",
         }
     }
+
+    /// Which stage of the pipeline this pass runs in.
+    #[must_use]
+    pub const fn stage(self) -> PassStage {
+        match self {
+            // Erasure is a representation both backends consume; specialization
+            // needs the pre-lowering dictionary shapes.
+            Self::EraseNewtypes | Self::Specialize => PassStage::PreLowering,
+            // The simplifier must run after effect lowering: pre-lowering it
+            // rewrites the Core shapes the var/State fusion analysis matches on.
+            Self::Simplify => PassStage::Late,
+        }
+    }
+}
+
+/// The point in compilation a pass runs, relative to effect lowering. Passes are
+/// not freely reorderable across this boundary, so the pipeline is split by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassStage {
+    /// Before effect lowering, in the front end.
+    PreLowering,
+    /// After effect lowering, on the lowered core (before reference counting).
+    Late,
 }
 
 /// Per-pass tick counts (rewrites fired), in run order. Dumped under
@@ -132,15 +155,12 @@ struct OptCx {
 /// erase first (it exposes inner values), then specialize.
 #[must_use]
 pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
+    // The list spans both stages; `run` executes the passes of one stage at a
+    // time. The simplifier is a late (post-lowering) pass, so it composes with
+    // the var/State fusion instead of defeating it.
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        OptLevel::O1 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
-        // The simplifier is correct (parity-clean) but, running before effect
-        // lowering, it rewrites the Core shapes the var/State fusion analysis
-        // matches on, so it currently degrades that fusion (a `perf_gate`
-        // regression). It is opt-in at O2 until the two passes are made to
-        // cooperate; O1 stays the fusion-preserving default.
-        OptLevel::O2 => vec![
+        OptLevel::O1 | OptLevel::O2 => vec![
             CorePass::EraseNewtypes,
             CorePass::Specialize,
             CorePass::Simplify,
@@ -192,23 +212,26 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
     out
 }
 
-/// Run the Core-to-Core pipeline for `level` over `core`.
+/// Run the `stage` passes of the Core-to-Core pipeline for `level` over `core`.
 ///
-/// Folds the passes built by [`pipeline`], honoring two env opt-outs
-/// (`PRISM_NO_SPECIALIZE` drops specialization for before/after measurement) and
-/// running Core Lint between passes under `PRISM_CORE_LINT`. Per-pass ticks are
-/// returned, and dumped to stderr under `PRISM_OPT_STATS`.
+/// The pipeline spans two stages around effect lowering ([`PassStage`]); this
+/// runs only the passes of the requested stage, so the driver calls it twice (the
+/// pre-lowering passes in the front end, the late passes on the lowered core).
+/// `nt` is the program's newtype constructor set, needed by `EraseNewtypes` (pass
+/// an empty set for a late run, which has no use for it). Honors
+/// `PRISM_NO_SPECIALIZE`, runs Core Lint between passes under `PRISM_CORE_LINT`,
+/// returns per-pass ticks, and dumps them to stderr under `PRISM_OPT_STATS`.
 ///
 /// # Panics
 /// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
 /// compiler bug), naming the pass responsible.
 #[must_use]
-pub fn run(core: &Core, prog: &Program<CorePhase>, level: OptLevel) -> (Core, PassStats) {
+pub fn run(core: &Core, nt: &BTreeSet<Sym>, level: OptLevel, stage: PassStage) -> (Core, PassStats) {
     let lint_on = std::env::var_os("PRISM_CORE_LINT").is_some();
     let no_spec = std::env::var_os("PRISM_NO_SPECIALIZE").is_some();
     let mut cx = OptCx {
         level,
-        newtype_ctors: newtype_ctors(prog),
+        newtype_ctors: nt.clone(),
         stats: PassStats::default(),
     };
     let check = |c: &Core, after: &str| {
@@ -235,6 +258,9 @@ pub fn run(core: &Core, prog: &Program<CorePhase>, level: OptLevel) -> (Core, Pa
     check(core, "<input>");
     let mut cur = core.clone();
     for pass in pipeline(cx.level) {
+        if pass.stage() != stage {
+            continue;
+        }
         if pass == CorePass::Specialize && no_spec {
             continue;
         }
