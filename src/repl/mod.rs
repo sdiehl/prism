@@ -906,7 +906,7 @@ fn info(session: &Session, built: &Built, name: &str) {
         };
         out.push(format!("type {head} = {}", d.ctors.join(" | ")));
     }
-    if let Some(c) = ck.classes.get(name) {
+    if let Some(c) = ck.classes.get(&Sym::from(name)) {
         let mut s = format!("class {name} {}", c.param);
         for (m, ty) in &c.methods {
             let _ = write!(s, "\n  {m} : {}", ty.show());

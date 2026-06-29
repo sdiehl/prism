@@ -163,8 +163,8 @@ b2:                                               ; preds = %b1
   ret i64 3
 
 b3:                                               ; preds = %b1
-  %t2 = call i64 @prism_str_lit(ptr @.str0, i64 31)
-  call void @prism_fatal(i64 %t2)
+  %t8 = call i64 @prism_str_lit(ptr @.str0, i64 31)
+  call void @prism_fatal(i64 %t8)
   ret i64 0
 }
 

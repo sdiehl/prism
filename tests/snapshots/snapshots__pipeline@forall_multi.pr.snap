@@ -254,28 +254,28 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
+  %t1 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t1 to i64
   %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  call void @prism_rc_inc(i64 %t2)
-  %t4 = call i64 @prism_apply_2(i64 %t2, i64 3, i64 3)
-  call void @prism_rc_dec(i64 %t2)
-  %t5 = call i64 @prism_str_lit(ptr @.str0, i64 1)
-  %t6 = call i64 @prism_apply_2(i64 %t2, i64 %t4, i64 %t5)
-  call void @prism_rc_dec(i64 %t2)
-  %t7 = call ptr @prism_alloc(i64 0)
-  %2 = ptrtoint ptr %t7 to i64
+  %t2 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t2, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  call void @prism_rc_inc(i64 %t4)
+  %t8 = call i64 @prism_apply_2(i64 %t4, i64 3, i64 3)
+  call void @prism_rc_dec(i64 %t4)
+  %t9 = call i64 @prism_str_lit(ptr @.str0, i64 1)
+  %t10 = call i64 @prism_apply_2(i64 %t4, i64 %t8, i64 %t9)
+  call void @prism_rc_dec(i64 %t4)
+  %t12 = call ptr @prism_alloc(i64 0)
+  %2 = ptrtoint ptr %t12 to i64
   %3 = add i64 %2, 8
-  %t8 = inttoptr i64 %3 to ptr
-  store i64 1, ptr %t8, align 8
-  %t9 = ptrtoint ptr %t7 to i64
-  %t10 = call i64 @prism_apply_2(i64 %t9, i64 %t6, i64 5)
-  call void @prism_rc_dec(i64 %t9)
-  call void @prism_print_int(i64 %t10)
-  call void @prism_rc_dec(i64 %t10)
+  %t13 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t13, align 8
+  %t15 = ptrtoint ptr %t12 to i64
+  %t17 = call i64 @prism_apply_2(i64 %t15, i64 %t10, i64 5)
+  call void @prism_rc_dec(i64 %t15)
+  call void @prism_print_int(i64 %t17)
+  call void @prism_rc_dec(i64 %t17)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0

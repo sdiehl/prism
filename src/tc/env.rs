@@ -9,7 +9,7 @@ use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
-use crate::types::ty::{EffRow, Effects, Label, Type};
+use crate::types::ty::{EffRow, Label, Type};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -540,22 +540,6 @@ fn base_env() -> Result<Env, TypeError> {
         .iter()
         .map(|(n, s)| Ok((Sym::from(*n), parse_sig(n, s)?.0)))
         .collect()
-}
-
-pub(crate) fn builtin_effects() -> &'static BTreeMap<String, Effects> {
-    static MAP: std::sync::OnceLock<BTreeMap<String, Effects>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| {
-        BUILTINS
-            .iter()
-            .filter_map(|(n, s)| {
-                // A malformed signature is reported by `base_env` during
-                // `check`; here we cannot return through the static, so we skip.
-                let effs = parse_sig(n, s).ok()?.1;
-                (!effs.is_empty())
-                    .then(|| ((*n).to_string(), effs.into_iter().map(Sym::from).collect()))
-            })
-            .collect()
-    })
 }
 
 type BuildDataResult = (

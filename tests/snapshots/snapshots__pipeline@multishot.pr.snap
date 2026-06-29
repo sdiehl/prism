@@ -308,67 +308,67 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
+  %t1 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t1 to i64
   %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  call void @prism_rc_inc(i64 %t2)
-  %t4 = call i64 @prism_apply_1(i64 %t2, i64 3)
-  call void @prism_rc_dec(i64 %t2)
-  call void @prism_rc_inc(i64 %t2)
-  %t6 = call i64 @prism_apply_1(i64 %t2, i64 5)
-  call void @prism_rc_dec(i64 %t2)
-  %t7 = call i64 @prism_apply_1(i64 %t2, i64 7)
-  call void @prism_rc_dec(i64 %t2)
-  %t8 = icmp ne i64 %t4, 1
-  br i1 %t8, label %b0, label %b1
+  %t2 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t2, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  call void @prism_rc_inc(i64 %t4)
+  %t7 = call i64 @prism_apply_1(i64 %t4, i64 3)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_rc_inc(i64 %t4)
+  %t10 = call i64 @prism_apply_1(i64 %t4, i64 5)
+  call void @prism_rc_dec(i64 %t4)
+  %t12 = call i64 @prism_apply_1(i64 %t4, i64 7)
+  call void @prism_rc_dec(i64 %t4)
+  %t14 = icmp ne i64 %t7, 1
+  br i1 %t14, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t9 = icmp ne i64 %t6, 1
-  br i1 %t9, label %b3, label %b4
+  %t16 = icmp ne i64 %t10, 1
+  br i1 %t16, label %b3, label %b4
 
 b1:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 %t7)
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_rc_dec(i64 %t4)
   br label %b2
 
 b3:                                               ; preds = %b0
-  %t10 = icmp ne i64 %t7, 1
-  br i1 %t10, label %b6, label %b7
+  %t18 = icmp ne i64 %t12, 1
+  br i1 %t18, label %b6, label %b7
 
 b4:                                               ; preds = %b0
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 %t7)
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_rc_dec(i64 %t4)
   br label %b5
 
 b6:                                               ; preds = %b3
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 %t7)
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_rc_dec(i64 %t4)
   br label %b8
 
 b7:                                               ; preds = %b3
+  call void @prism_rc_dec(i64 %t12)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 %t7)
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_rc_dec(i64 %t4)
   br label %b8
 
 b8:                                               ; preds = %b7, %b6
-  %t17 = phi i64 [ 15, %b6 ], [ 13, %b7 ]
+  %t27 = phi i64 [ 15, %b6 ], [ 13, %b7 ]
   br label %b5
 
 b5:                                               ; preds = %b4, %b8
-  %t21 = phi i64 [ %t17, %b8 ], [ 11, %b4 ]
+  %t32 = phi i64 [ %t27, %b8 ], [ 11, %b4 ]
   br label %b2
 
 b2:                                               ; preds = %b1, %b5
-  %t25 = phi i64 [ %t21, %b5 ], [ 9, %b1 ]
-  call void @prism_print_int(i64 %t25)
-  call void @prism_rc_dec(i64 %t25)
+  %t37 = phi i64 [ %t32, %b5 ], [ 9, %b1 ]
+  call void @prism_print_int(i64 %t37)
+  call void @prism_rc_dec(i64 %t37)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
@@ -410,31 +410,31 @@ declare void @prism_print_nl()
 
 define i64 @prism_lam_0(i64 %_p0) {
 entry:
-  %t0 = and i64 %_p0, 3
-  %t1 = and i64 %t0, 1
-  %t2 = icmp eq i64 %t1, 1
-  br i1 %t2, label %b0, label %b1
+  %t1 = and i64 %_p0, 3
+  %t3 = and i64 %t1, 1
+  %t4 = icmp eq i64 %t3, 1
+  br i1 %t4, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t3 = icmp sgt i64 %_p0, 3
-  %t4 = zext i1 %t3 to i64
-  %t5 = shl i64 %t4, 1
-  %t6 = or i64 %t5, 1
+  %t5 = icmp sgt i64 %_p0, 3
+  %t6 = zext i1 %t5 to i64
+  %t8 = shl i64 %t6, 1
+  %t9 = or i64 %t8, 1
   br label %b2
 
 b1:                                               ; preds = %entry
-  %t7 = call i64 @prism_rt_int_cmp(i64 %_p0, i64 3)
-  %t8 = icmp sgt i64 %t7, 0
-  %t9 = zext i1 %t8 to i64
-  %t10 = shl i64 %t9, 1
-  %t11 = or i64 %t10, 1
+  %t10 = call i64 @prism_rt_int_cmp(i64 %_p0, i64 3)
+  %t12 = icmp sgt i64 %t10, 0
+  %t13 = zext i1 %t12 to i64
+  %t15 = shl i64 %t13, 1
+  %t16 = or i64 %t15, 1
   br label %b2
 
 b2:                                               ; preds = %b1, %b0
-  %t12 = phi i64 [ %t6, %b0 ], [ %t11, %b1 ]
+  %t17 = phi i64 [ %t9, %b0 ], [ %t16, %b1 ]
   call void @prism_rc_dec(i64 %_p0)
   call void @prism_rc_dec(i64 3)
-  ret i64 %t12
+  ret i64 %t17
 }
 
 declare i64 @prism_rt_int_cmp(i64, i64)

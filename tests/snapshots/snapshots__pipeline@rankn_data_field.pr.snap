@@ -213,49 +213,49 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
+  %t1 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t1 to i64
   %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  %t3 = call ptr @prism_alloc(i64 1)
-  %2 = ptrtoint ptr %t3 to i64
+  %t2 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t2, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  %t6 = call ptr @prism_alloc(i64 1)
+  %2 = ptrtoint ptr %t6 to i64
   %3 = add i64 %2, 8
-  %t4 = inttoptr i64 %3 to ptr
-  store i64 0, ptr %t4, align 8
-  %4 = ptrtoint ptr %t3 to i64
+  %t7 = inttoptr i64 %3 to ptr
+  store i64 0, ptr %t7, align 8
+  %4 = ptrtoint ptr %t6 to i64
   %5 = add i64 %4, 24
-  %t5 = inttoptr i64 %5 to ptr
-  store i64 %t2, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t3 to i64
-  %t7 = inttoptr i64 %t6 to ptr
-  %6 = ptrtoint ptr %t7 to i64
+  %t9 = inttoptr i64 %5 to ptr
+  store i64 %t4, ptr %t9, align 8
+  %t10 = ptrtoint ptr %t6 to i64
+  %t11 = inttoptr i64 %t10 to ptr
+  %6 = ptrtoint ptr %t11 to i64
   %7 = add i64 %6, 8
-  %t8 = inttoptr i64 %7 to ptr
-  %t9 = load i64, ptr %t8, align 8
-  switch i64 %t9, label %b1 [
+  %t12 = inttoptr i64 %7 to ptr
+  %t13 = load i64, ptr %t12, align 8
+  switch i64 %t13, label %b1 [
     i64 0, label %b2
   ]
 
 b2:                                               ; preds = %entry
-  %8 = ptrtoint ptr %t7 to i64
+  %8 = ptrtoint ptr %t11 to i64
   %9 = add i64 %8, 24
-  %t10 = inttoptr i64 %9 to ptr
-  %t11 = load i64, ptr %t10, align 8
-  call void @prism_rc_inc(i64 %t11)
-  call void @prism_rc_dec(i64 %t6)
-  %t14 = call i64 @prism_apply_1(i64 %t11, i64 85)
-  call void @prism_rc_dec(i64 %t11)
+  %t14 = inttoptr i64 %9 to ptr
+  %t15 = load i64, ptr %t14, align 8
+  call void @prism_rc_inc(i64 %t15)
+  call void @prism_rc_dec(i64 %t10)
+  %t19 = call i64 @prism_apply_1(i64 %t15, i64 85)
+  call void @prism_rc_dec(i64 %t15)
   br label %b0
 
 b1:                                               ; preds = %entry
   unreachable
 
 b0:                                               ; preds = %b2
-  %t15 = phi i64 [ %t14, %b2 ]
-  call void @prism_print_int(i64 %t15)
-  call void @prism_rc_dec(i64 %t15)
+  %t20 = phi i64 [ %t19, %b2 ]
+  call void @prism_print_int(i64 %t20)
+  call void @prism_rc_dec(i64 %t20)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0

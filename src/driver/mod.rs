@@ -292,11 +292,16 @@ fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(
             .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
             .map(Sym::from)
             .collect();
+    let inferred: std::collections::BTreeMap<&str, &crate::types::ty::Effects> = checked
+        .decls
+        .iter()
+        .map(|i| (i.name.as_str(), &i.effects))
+        .collect();
     for d in &program.fns {
         if !annots.contains(&Sym::from(&d.name)) {
             continue;
         }
-        let Some(row) = checked.effects.get(&d.name) else {
+        let Some(row) = inferred.get(d.name.as_str()).copied() else {
             continue;
         };
         let offending: Vec<&str> = row

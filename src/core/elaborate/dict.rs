@@ -5,7 +5,8 @@ use super::{
 
 impl Elab<'_> {
     pub(super) fn needs_dict(&self, name: &str) -> bool {
-        self.checked.methods.contains_key(name) || self.checked.constrained.contains_key(name)
+        self.checked.methods.contains_key(&Sym::from(name))
+            || self.checked.constrained.contains_key(&Sym::from(name))
     }
 
     pub(super) fn value_global(&self, name: &str) -> Result<Comp, Error> {
@@ -36,13 +37,13 @@ impl Elab<'_> {
         )))))
     }
 
-    pub(super) fn method_sig(&self, class: &str, idx: usize) -> (String, usize) {
-        let (name, sig) = &self.checked.classes[class].methods[idx];
+    pub(super) fn method_sig(&self, class: Sym, idx: usize) -> (String, usize) {
+        let (name, sig) = &self.checked.classes[&class].methods[idx];
         let arity = match sig {
             Type::Fun(doms, _, _) => doms.len(),
             _ => 0,
         };
-        (name.clone(), arity)
+        (name.to_string(), arity)
     }
 
     // A dictionary as a core value: the i-th hidden parameter of the enclosing
@@ -63,7 +64,7 @@ impl Elab<'_> {
             // fields lead the cell, so the field index is the super index.
             Dict::Super(d, subclass, idx) => {
                 let parent = self.dict_value(d, binds);
-                let cls = &self.checked.classes[subclass];
+                let cls = &self.checked.classes[&Sym::from(subclass)];
                 let n = cls.supers.len() + cls.methods.len();
                 let fv = self.fresh();
                 let binders = (0..n)
@@ -84,7 +85,7 @@ impl Elab<'_> {
     // its method function. A dictionary parameter is projected and forced.
     pub(super) fn method_invoke(
         &mut self,
-        class: &str,
+        class: Sym,
         idx: usize,
         d: &Dict,
         vals: Vec<Value>,
@@ -106,7 +107,7 @@ impl Elab<'_> {
             other => {
                 let mut binds = Vec::new();
                 let dv = self.dict_value(other, &mut binds);
-                let cls = &self.checked.classes[class];
+                let cls = &self.checked.classes[&class];
                 let nsup = cls.supers.len();
                 let n = nsup + cls.methods.len();
                 let field = nsup + idx;
@@ -114,7 +115,7 @@ impl Elab<'_> {
                 let binders = (0..n)
                     .map(|j| (j == field).then(|| Sym::from(&mv)))
                     .collect();
-                let pat = CorePat::Ctor(Sym::from(&dict_ctor(class)), binders);
+                let pat = CorePat::Ctor(Sym::from(&dict_ctor(class.as_str())), binders);
                 wrap_binds(
                     binds,
                     Comp::Case(
@@ -135,11 +136,11 @@ impl Elab<'_> {
         let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
             Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
-        if let Some((class, idx)) = self.checked.methods.get(name).cloned() {
-            let (_, arity) = self.method_sig(&class, idx);
+        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+            let (_, arity) = self.method_sig(class, idx);
             let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
             let vals = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
-            let body = self.method_invoke(&class, idx, &ds[0], vals);
+            let body = self.method_invoke(class, idx, &ds[0], vals);
             return Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
                 ps.into_iter().map(Sym::from).collect(),
                 Box::new(body),
@@ -181,10 +182,10 @@ impl Elab<'_> {
                 return Ok(Comp::StrBuiltin(Builtin::SortPrim, args));
             }
         }
-        if let Some((class, idx)) = self.checked.methods.get(name).cloned() {
-            let (_, arity) = self.method_sig(&class, idx);
+        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+            let (_, arity) = self.method_sig(class, idx);
             if vals.len() == arity {
-                return Ok(self.method_invoke(&class, idx, &ds[0], vals));
+                return Ok(self.method_invoke(class, idx, &ds[0], vals));
             }
         } else if let Some(n) = self.arity.get(name).copied() {
             if vals.len() == n {

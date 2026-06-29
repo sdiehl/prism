@@ -26,11 +26,6 @@ struct Inkwell<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     vals: RefCell<HashMap<String, BasicValueEnum<'ctx>>>,
-    // Integer constants are uniqued by their value, kept apart from the
-    // name-keyed `vals` map so a value-named constant cannot pollute the SSA
-    // name space. LLVM constants are module-global, so this outlives the
-    // per-function `vals` clear.
-    consts: RefCell<HashMap<i64, BasicValueEnum<'ctx>>>,
     blocks: RefCell<HashMap<String, BasicBlock<'ctx>>>,
     func: Cell<Option<FunctionValue<'ctx>>>,
     // First codegen-internal failure (a builder error or an unbound SSA name).
@@ -89,7 +84,6 @@ impl<'ctx> Inkwell<'ctx> {
             module,
             builder: ctx.create_builder(),
             vals: RefCell::default(),
-            consts: RefCell::default(),
             blocks: RefCell::default(),
             func: Cell::new(None),
             err: RefCell::default(),
@@ -162,11 +156,6 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn get(&self, n: &str) -> BasicValueEnum<'ctx> {
-        if let Some(v) = n.strip_prefix("$c").and_then(|d| d.parse::<i64>().ok()) {
-            if let Some(c) = self.consts.borrow().get(&v).copied() {
-                return c;
-            }
-        }
         self.vals.borrow().get(n).copied().unwrap_or_else(|| {
             self.ice(&format!("unbound ssa {n}"));
             self.i64t().const_zero().into()
@@ -275,12 +264,10 @@ impl<'ctx> Inkwell<'ctx> {
 }
 
 impl Isa for Inkwell<'_> {
-    fn const_int(&self, _b: &mut Buf, n: i64) -> String {
-        self.consts
-            .borrow_mut()
-            .entry(n)
-            .or_insert_with(|| self.i64t().const_int(n.cast_unsigned(), false).into());
-        format!("$c{n}")
+    fn const_int(&self, b: &mut Buf, n: i64) -> String {
+        let t = b.tmp();
+        self.set(&t, self.i64t().const_int(n.cast_unsigned(), false).into());
+        t
     }
 
     fn const_float(&self, b: &mut Buf, f: f64) -> String {

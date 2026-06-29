@@ -349,66 +349,66 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t1 = call i64 @prism_show_bool(i64 1)
+  %t3 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
-  %t2 = inttoptr i64 %t1 to ptr
-  %0 = ptrtoint ptr %t2 to i64
+  %t4 = inttoptr i64 %t3 to ptr
+  %0 = ptrtoint ptr %t4 to i64
   %1 = add i64 %0, 24
-  %t3 = inttoptr i64 %1 to ptr
-  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t3)
-  call void @prism_rc_dec(i64 %t1)
+  %t5 = inttoptr i64 %1 to ptr
+  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t5)
+  call void @prism_rc_dec(i64 %t3)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t6 = call i64 @prism_str_lit(ptr @.str0, i64 1)
-  %t7 = call i64 @prism_str_lit(ptr @.str1, i64 1)
-  %t8 = call i64 @prism_str_eq(i64 %t6, i64 %t7)
-  %t9 = shl i64 %t8, 1
-  %t10 = or i64 %t9, 1
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_rc_dec(i64 %t7)
-  %t11 = ashr i64 %t10, 1
-  %t12 = call i64 @prism_show_bool(i64 %t11)
+  %t10 = call i64 @prism_str_lit(ptr @.str0, i64 1)
+  %t11 = call i64 @prism_str_lit(ptr @.str1, i64 1)
+  %t12 = call i64 @prism_str_eq(i64 %t10, i64 %t11)
+  %t14 = shl i64 %t12, 1
+  %t15 = or i64 %t14, 1
   call void @prism_rc_dec(i64 %t10)
-  %t13 = inttoptr i64 %t12 to ptr
-  %3 = ptrtoint ptr %t13 to i64
-  %4 = add i64 %3, 24
-  %t14 = inttoptr i64 %4 to ptr
-  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t14)
-  call void @prism_rc_dec(i64 %t12)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  call void @prism_rc_dec(i64 0)
-  %t18 = call i64 @prism_show_bool(i64 0)
-  call void @prism_rc_dec(i64 1)
+  call void @prism_rc_dec(i64 %t11)
+  %t17 = ashr i64 %t15, 1
+  %t18 = call i64 @prism_show_bool(i64 %t17)
+  call void @prism_rc_dec(i64 %t15)
   %t19 = inttoptr i64 %t18 to ptr
-  %6 = ptrtoint ptr %t19 to i64
-  %7 = add i64 %6, 24
-  %t20 = inttoptr i64 %7 to ptr
-  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
+  %3 = ptrtoint ptr %t19 to i64
+  %4 = add i64 %3, 24
+  %t20 = inttoptr i64 %4 to ptr
+  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
   call void @prism_rc_dec(i64 %t18)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t24 = call i64 @prism_show_bool(i64 1)
-  call void @prism_rc_dec(i64 3)
-  %t25 = inttoptr i64 %t24 to ptr
-  %9 = ptrtoint ptr %t25 to i64
-  %10 = add i64 %9, 24
-  %t26 = inttoptr i64 %10 to ptr
-  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t26)
-  call void @prism_rc_dec(i64 %t24)
+  %t28 = call i64 @prism_show_bool(i64 0)
+  call void @prism_rc_dec(i64 1)
+  %t29 = inttoptr i64 %t28 to ptr
+  %6 = ptrtoint ptr %t29 to i64
+  %7 = add i64 %6, 24
+  %t30 = inttoptr i64 %7 to ptr
+  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t30)
+  call void @prism_rc_dec(i64 %t28)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t30 = call i64 @prism_show_bool(i64 1)
+  %t38 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
-  %t31 = inttoptr i64 %t30 to ptr
-  %12 = ptrtoint ptr %t31 to i64
+  %t39 = inttoptr i64 %t38 to ptr
+  %9 = ptrtoint ptr %t39 to i64
+  %10 = add i64 %9, 24
+  %t40 = inttoptr i64 %10 to ptr
+  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t40)
+  call void @prism_rc_dec(i64 %t38)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t48 = call i64 @prism_show_bool(i64 1)
+  call void @prism_rc_dec(i64 3)
+  %t49 = inttoptr i64 %t48 to ptr
+  %12 = ptrtoint ptr %t49 to i64
   %13 = add i64 %12, 24
-  %t32 = inttoptr i64 %13 to ptr
-  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t32)
-  call void @prism_rc_dec(i64 %t30)
+  %t50 = inttoptr i64 %13 to ptr
+  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t50)
+  call void @prism_rc_dec(i64 %t48)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0

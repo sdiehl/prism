@@ -9,7 +9,7 @@ use super::{
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, NodeId, PathOp, PathStep, S};
-use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
+use crate::types::ty::{EffRow, Effects, Label, Type, EQ_CLASS, LIST};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
@@ -313,7 +313,7 @@ impl Tc<'_> {
                         span,
                         name: x.clone(),
                     })?;
-                if let Some((scheme, cs)) = self.constrained.get(x).cloned() {
+                if let Some((scheme, cs)) = self.constrained.get(&Sym::from(x)).cloned() {
                     if t == scheme && !cs.is_empty() {
                         return Ok(self.instantiate_constrained(&scheme, &cs, id, span, None));
                     }
@@ -346,7 +346,7 @@ impl Tc<'_> {
                         span: f.span,
                         name: x.clone(),
                     })?;
-                match self.constrained.get(x).cloned() {
+                match self.constrained.get(&Sym::from(x)).cloned() {
                     Some((scheme, cs)) if t == scheme && !cs.is_empty() => {
                         if names.len() != cs.len() {
                             return Err(TypeError::Other {
@@ -1210,6 +1210,17 @@ impl Tc<'_> {
             // cannot be typed without a signature; name the remedy.
             self.infer_body(env, d, seed)
                 .map_err(|e| poly_recursion_hint(e, d).in_fn(&d.name))?;
+            // A `konst` member must be pure: its body's effects accumulated into
+            // the seeded ambient row, so hold it to an empty inferred row.
+            if d.konst {
+                let effs: Effects = self
+                    .apply_row(&EffRow::Exist(seed.mu))
+                    .labels()
+                    .iter()
+                    .map(|l| l.name)
+                    .collect();
+                super::require_pure_konst(d, &effs)?;
+            }
         }
         // Stage 3: generalize every member once, against the pre-group env, so the
         // group's shared existentials all generalize.
@@ -1429,37 +1440,74 @@ impl Tc<'_> {
                         ),
                     });
                 }
-                final_cs.push((class.clone(), t2));
+                final_cs.push((Sym::from(class), t2));
             }
             self.constrained
-                .insert(d.name.clone(), (g.clone(), final_cs));
+                .insert(Sym::from(&d.name), (g.clone(), final_cs));
         }
         Ok(g)
+    }
+
+    // Run `f` (a body inference ending in `resolve_all`) under a fresh ambient
+    // effect row, and return the concrete labels the body accumulated alongside
+    // its result. A value or expression has no function arrow to read its row
+    // off, so the purity checks (konst, pure instance methods) and the REPL get
+    // the principal inferred effects this way instead of a syntactic set pass.
+    pub(super) fn scoped_effects<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<R, TypeError>,
+    ) -> Result<(R, Effects), TypeError> {
+        let mu = self.push_ex_row();
+        let saved = self.cur_row.replace(RowScope {
+            tail: mu,
+            prefix: BTreeSet::new(),
+        });
+        let r = f(self);
+        let effs = if r.is_ok() {
+            self.apply_row(&EffRow::Exist(mu))
+                .labels()
+                .iter()
+                .map(|l| l.name)
+                .collect()
+        } else {
+            Effects::new()
+        };
+        self.cur_row = saved;
+        Ok((r?, effs))
     }
 
     // A top-level constant: its type is the body's value type (no arrow). With
     // an annotation the body is checked against it, else it is synthesized. The
     // result is generalized so polymorphic constants (`map_empty = Tip`)
-    // instantiate fresh at each reference.
-    pub(super) fn infer_const(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
+    // instantiate fresh at each reference. The inferred effects are returned so
+    // the caller can hold a `konst` to purity.
+    pub(super) fn infer_const(
+        &mut self,
+        env: &Env,
+        d: &Decl<Core>,
+    ) -> Result<(Type, Effects), TypeError> {
         self.reset_ctx();
         self.clear_obligations();
-        let ty = if let Some(ann) = &d.ret {
-            self.check_annot_rows(ann, d.span)?;
-            let mut ty_ex = BTreeMap::new();
-            let mut row_ex = BTreeMap::new();
-            let no_rigid = BTreeSet::new();
-            let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
-            let t = self.convert_annot(ann, &mut a);
-            self.check(env, &d.body, &t)?;
-            t
-        } else {
-            self.synth(env, &d.body)?
-        };
-        self.resolve_all()?;
+        let (ty, effs) = self.scoped_effects(|tc| {
+            let ty = if let Some(ann) = &d.ret {
+                tc.check_annot_rows(ann, d.span)?;
+                let mut ty_ex = BTreeMap::new();
+                let mut row_ex = BTreeMap::new();
+                let no_rigid = BTreeSet::new();
+                let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+                let t = tc.convert_annot(ann, &mut a);
+                tc.check(env, &d.body, &t)?;
+                Ok(t)
+            } else {
+                tc.synth(env, &d.body)
+            };
+            let ty = ty?;
+            tc.resolve_all()?;
+            Ok(ty)
+        })?;
         self.flush_spans();
         let t = self.apply(&ty);
-        Ok(self.generalize(env, &t))
+        Ok((self.generalize(env, &t), effs))
     }
 
     pub(super) fn check_instance(
@@ -1475,11 +1523,21 @@ impl Tc<'_> {
             let (_, sig) = class
                 .methods
                 .iter()
-                .find(|(n, _)| n == &m.name)
+                .find(|(n, _)| n.as_str() == m.name.as_str())
                 .ok_or_else(|| TypeError::Ice {
                     msg: format!("instance method `{}` missing from class", m.name),
                 })?;
-            let expected = sig.subst_var(Sym::from(&class.param), &info.head);
+            // An effect-polymorphic method (its class signature carries a row
+            // variable, like `fmap`) may perform the effects flowing through that
+            // row. A method with a pure signature must be pure: its body is
+            // checked under a fresh ambient row whose inferred labels are held to
+            // empty, replacing the old syntactic set pass.
+            let poly = {
+                let mut rv = BTreeSet::new();
+                super::env::collect_row_vars(sig, &mut rv);
+                !rv.is_empty()
+            };
+            let expected = sig.subst_var(class.param, &info.head);
             let Type::Fun(doms, _, ret) = &expected else {
                 return Err(TypeError::Ice {
                     msg: format!("class method `{}` signature is not a function type", m.name),
@@ -1490,12 +1548,30 @@ impl Tc<'_> {
                 env2.insert(Sym::from(&p.name), t.clone());
             }
             let qual = format!("{}.{}", inst.name, m.name);
-            self.with_self(qual.clone(), expected.clone(), info.context.clone(), |tc| {
-                tc.check(&env2, &m.body, ret)
-                    .and_then(|()| tc.resolve_all())
-            })
-            .map_err(|e| e.in_fn(&qual))?;
+            let ((), effs) = self.scoped_effects(|tc| {
+                let ctx = info
+                    .context
+                    .iter()
+                    .map(|(c, t)| (c.to_string(), t.clone()))
+                    .collect();
+                tc.with_self(qual.clone(), expected.clone(), ctx, |tc| {
+                    tc.check(&env2, &m.body, ret).and_then(|()| tc.resolve_all())
+                })
+                .map_err(|e| e.in_fn(&qual))
+            })?;
             self.flush_spans();
+            if !poly && !effs.is_empty() {
+                let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
+                return Err(TypeError::Other {
+                    span: m.body.span,
+                    msg: format!(
+                        "instance method `{}.{}` must be pure; it performs {}",
+                        inst.name,
+                        m.name,
+                        list.join(", ")
+                    ),
+                });
+            }
         }
         Ok(())
     }

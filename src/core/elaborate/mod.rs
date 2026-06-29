@@ -330,10 +330,10 @@ impl Elab<'_> {
             let idx = self
                 .checked
                 .classes
-                .get(EQ_CLASS)
+                .get(&Sym::from(EQ_CLASS))
                 .and_then(|c| c.methods.iter().position(|(n, _)| n == "eq"))
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
-            (self.method_invoke(EQ_CLASS, idx, &ds[0], args), ne)
+            (self.method_invoke(Sym::from(EQ_CLASS), idx, &ds[0], args), ne)
         } else {
             match self.checked.fixed.get(&id).cloned() {
                 Some(ty @ (Type::I64 | Type::U64)) => (self.fixed_bin(op, &ty, args)?, false),
@@ -1082,7 +1082,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     }
 
     for inst in &prog.instances {
-        let info = &checked.instances[&inst.name];
+        let info = &checked.instances[&Sym::from(&inst.name)];
         let class = &checked.classes[&info.class];
         // Dict params: the declared context first (so method bodies' `_c{i}`
         // indices are unchanged), then one per superclass obligation.
@@ -1097,7 +1097,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
                 .find(|(n, _)| n == &m.name)
                 .ok_or_else(|| Error::Ice(format!("no class signature for `{}`", m.name)))?
                 .1;
-            let expected = sig.subst_var(Sym::from(&class.param), &info.head);
+            let expected = sig.subst_var(class.param, &info.head);
             let doms = match &expected {
                 Type::Fun(d, _, _) => d.clone(),
                 _ => vec![],
@@ -1134,7 +1134,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
             let mut args: Vec<Value> = dps.iter().map(|d| Value::Var(d.clone().into())).collect();
             args.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
-            let call = Comp::Call(instance_method(&inst.name, mname).into(), args);
+            let call = Comp::Call(instance_method(&inst.name, mname.as_str()).into(), args);
             fields.push(Value::Thunk(Box::new(Comp::Lam(
                 ps.into_iter().map(Sym::from).collect(),
                 Box::new(call),
@@ -1143,7 +1143,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         fns.push(CoreFn {
             name: inst.name.clone().into(),
             params: dps.into_iter().map(Sym::from).collect(),
-            body: Comp::Return(Value::Ctor(dict_ctor(&info.class).into(), 0, fields)),
+            body: Comp::Return(Value::Ctor(dict_ctor(info.class.as_str()).into(), 0, fields)),
         });
     }
 

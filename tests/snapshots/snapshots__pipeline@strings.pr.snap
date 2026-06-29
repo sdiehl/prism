@@ -415,49 +415,49 @@ entry:
   call void @prism_rc_inc(i64 %a0)
   %t1 = call i64 @prism_show_int(i64 %a0)
   call void @prism_rc_dec(i64 %a0)
-  %t2 = and i64 %a0, 3
-  %t3 = and i64 %t2, 1
-  %t4 = icmp eq i64 %t3, 1
-  br i1 %t4, label %b0, label %b1
+  %t3 = and i64 %a0, 3
+  %t5 = and i64 %t3, 1
+  %t6 = icmp eq i64 %t5, 1
+  br i1 %t6, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t5 = icmp eq i64 %a0, 3
-  %t6 = zext i1 %t5 to i64
-  %t7 = shl i64 %t6, 1
-  %t8 = or i64 %t7, 1
+  %t7 = icmp eq i64 %a0, 3
+  %t8 = zext i1 %t7 to i64
+  %t10 = shl i64 %t8, 1
+  %t11 = or i64 %t10, 1
   br label %b2
 
 b1:                                               ; preds = %entry
-  %t9 = call i64 @prism_rt_int_cmp(i64 %a0, i64 3)
-  %t10 = icmp eq i64 %t9, 0
-  %t11 = zext i1 %t10 to i64
-  %t12 = shl i64 %t11, 1
-  %t13 = or i64 %t12, 1
+  %t12 = call i64 @prism_rt_int_cmp(i64 %a0, i64 3)
+  %t14 = icmp eq i64 %t12, 0
+  %t15 = zext i1 %t14 to i64
+  %t17 = shl i64 %t15, 1
+  %t18 = or i64 %t17, 1
   br label %b2
 
 b2:                                               ; preds = %b1, %b0
-  %t14 = phi i64 [ %t8, %b0 ], [ %t13, %b1 ]
+  %t19 = phi i64 [ %t11, %b0 ], [ %t18, %b1 ]
   call void @prism_rc_dec(i64 %a0)
   call void @prism_rc_dec(i64 3)
-  %t15 = icmp ne i64 %t14, 1
-  br i1 %t15, label %b3, label %b4
+  %t21 = icmp ne i64 %t19, 1
+  br i1 %t21, label %b3, label %b4
 
 b3:                                               ; preds = %b2
-  call void @prism_rc_dec(i64 %t14)
-  %t17 = call i64 @prism_str_lit(ptr @.str0, i64 5)
+  call void @prism_rc_dec(i64 %t19)
+  %t23 = call i64 @prism_str_lit(ptr @.str0, i64 5)
   br label %b5
 
 b4:                                               ; preds = %b2
-  call void @prism_rc_dec(i64 %t14)
-  %t19 = call i64 @prism_str_lit(ptr @.str1, i64 6)
+  call void @prism_rc_dec(i64 %t19)
+  %t25 = call i64 @prism_str_lit(ptr @.str1, i64 6)
   br label %b5
 
 b5:                                               ; preds = %b4, %b3
-  %t20 = phi i64 [ %t17, %b3 ], [ %t19, %b4 ]
-  %t21 = call i64 @prism_str_concat(i64 %t1, i64 %t20)
+  %t26 = phi i64 [ %t23, %b3 ], [ %t25, %b4 ]
+  %t27 = call i64 @prism_str_concat(i64 %t1, i64 %t26)
   call void @prism_rc_dec(i64 %t1)
-  call void @prism_rc_dec(i64 %t20)
-  ret i64 %t21
+  call void @prism_rc_dec(i64 %t26)
+  ret i64 %t27
 }
 
 declare void @prism_rc_inc(i64)
@@ -488,58 +488,58 @@ entry:
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t7 = call i64 @prism_describe(i64 3)
-  %t8 = inttoptr i64 %t7 to ptr
-  %3 = ptrtoint ptr %t8 to i64
+  %t10 = call i64 @prism_describe(i64 3)
+  %t11 = inttoptr i64 %t10 to ptr
+  %3 = ptrtoint ptr %t11 to i64
   %4 = add i64 %3, 24
-  %t9 = inttoptr i64 %4 to ptr
-  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t9)
-  call void @prism_rc_dec(i64 %t7)
+  %t12 = inttoptr i64 %4 to ptr
+  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t12)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t12 = call i64 @prism_describe(i64 7)
-  %t13 = inttoptr i64 %t12 to ptr
-  %6 = ptrtoint ptr %t13 to i64
+  %t18 = call i64 @prism_describe(i64 7)
+  %t19 = inttoptr i64 %t18 to ptr
+  %6 = ptrtoint ptr %t19 to i64
   %7 = add i64 %6, 24
-  %t14 = inttoptr i64 %7 to ptr
-  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t14)
-  call void @prism_rc_dec(i64 %t12)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  call void @prism_rc_dec(i64 0)
-  %t17 = call i64 @prism_str_lit(ptr @.str4, i64 1)
-  %t18 = call i64 @prism_str_lit(ptr @.str5, i64 1)
-  %t19 = call i64 @prism_str_eq(i64 %t17, i64 %t18)
-  %t20 = shl i64 %t19, 1
-  %t21 = or i64 %t20, 1
-  call void @prism_rc_dec(i64 %t17)
+  %t20 = inttoptr i64 %7 to ptr
+  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
   call void @prism_rc_dec(i64 %t18)
-  %t22 = ashr i64 %t21, 1
-  %t23 = call i64 @prism_show_bool(i64 %t22)
-  call void @prism_rc_dec(i64 %t21)
-  %t24 = inttoptr i64 %t23 to ptr
-  %9 = ptrtoint ptr %t24 to i64
-  %10 = add i64 %9, 24
-  %t25 = inttoptr i64 %10 to ptr
-  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t25)
-  call void @prism_rc_dec(i64 %t23)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t28 = call i64 @prism_str_lit(ptr @.str6, i64 5)
-  %t29 = call i64 @prism_str_len(i64 %t28)
-  %t30 = shl i64 %t29, 1
-  %t31 = or i64 %t30, 1
-  call void @prism_rc_dec(i64 %t28)
-  %t32 = call i64 @prism_show_int(i64 %t31)
-  call void @prism_rc_dec(i64 %t31)
-  %t33 = inttoptr i64 %t32 to ptr
-  %12 = ptrtoint ptr %t33 to i64
+  %t25 = call i64 @prism_str_lit(ptr @.str4, i64 1)
+  %t26 = call i64 @prism_str_lit(ptr @.str5, i64 1)
+  %t27 = call i64 @prism_str_eq(i64 %t25, i64 %t26)
+  %t29 = shl i64 %t27, 1
+  %t30 = or i64 %t29, 1
+  call void @prism_rc_dec(i64 %t25)
+  call void @prism_rc_dec(i64 %t26)
+  %t32 = ashr i64 %t30, 1
+  %t33 = call i64 @prism_show_bool(i64 %t32)
+  call void @prism_rc_dec(i64 %t30)
+  %t34 = inttoptr i64 %t33 to ptr
+  %9 = ptrtoint ptr %t34 to i64
+  %10 = add i64 %9, 24
+  %t35 = inttoptr i64 %10 to ptr
+  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t35)
+  call void @prism_rc_dec(i64 %t33)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t40 = call i64 @prism_str_lit(ptr @.str6, i64 5)
+  %t41 = call i64 @prism_str_len(i64 %t40)
+  %t43 = shl i64 %t41, 1
+  %t44 = or i64 %t43, 1
+  call void @prism_rc_dec(i64 %t40)
+  %t45 = call i64 @prism_show_int(i64 %t44)
+  call void @prism_rc_dec(i64 %t44)
+  %t46 = inttoptr i64 %t45 to ptr
+  %12 = ptrtoint ptr %t46 to i64
   %13 = add i64 %12, 24
-  %t34 = inttoptr i64 %13 to ptr
-  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t34)
-  call void @prism_rc_dec(i64 %t32)
+  %t47 = inttoptr i64 %13 to ptr
+  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t47)
+  call void @prism_rc_dec(i64 %t45)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0

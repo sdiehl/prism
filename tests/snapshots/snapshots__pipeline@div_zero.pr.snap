@@ -68,10 +68,10 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t0 = call i64 @prism_rt_int_div(i64 21, i64 1)
+  %t2 = call i64 @prism_rt_int_div(i64 21, i64 1)
   call void @prism_rc_dec(i64 21)
   call void @prism_rc_dec(i64 1)
-  ret i64 %t0
+  ret i64 %t2
 }
 
 declare i64 @prism_rt_int_div(i64, i64)

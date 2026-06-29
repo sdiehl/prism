@@ -474,8 +474,8 @@ mod tests {
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
         data: &'a BTreeMap<String, super::super::DataInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
-        classes: &'a BTreeMap<String, super::super::ClassInfo>,
-        instances: &'a BTreeMap<String, super::super::InstInfo>,
+        classes: &'a BTreeMap<Sym, super::super::ClassInfo>,
+        instances: &'a BTreeMap<Sym, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
         canonical: &'a super::super::Canon,
     ) -> Tc<'a> {
