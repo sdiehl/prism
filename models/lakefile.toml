@@ -1,5 +1,5 @@
 name = "prism"
-defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Certificates", "oracle"]
+defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Replay", "Certificates", "oracle"]
 
 # Proof libraries: theorems only, no examples, no IO.
 [[lean_lib]]
@@ -13,6 +13,9 @@ name = "Dynamics"
 
 [[lean_lib]]
 name = "Meta"
+
+[[lean_lib]]
+name = "Replay"
 
 # Kernel-checked differential certificates (model output == live `prism run` output).
 [[lean_lib]]

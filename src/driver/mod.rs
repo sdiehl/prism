@@ -15,6 +15,7 @@ use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
+    replayable_annots,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, run_opt, run_opt_spec, Core,
     OptLevel, PassSpec,
 };
@@ -171,6 +172,7 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &checked, &core)?;
+    replayable_check(&program, &checked)?;
     reconcile_effects(&checked, &core)?;
     // Mid-level Core-to-Core optimization tier. Runs above the interpreter/native
     // fork so both backends consume the same optimized Core (the parity oracle
@@ -269,6 +271,55 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
     let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
     check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
+}
+
+// Check every `replayable`-annotated function. The certificate is on the inferred
+// principal row: it must stay within the recordable capabilities (`Console`,
+// `FileSystem`, `Random`, `Env`) plus the deterministic builtin effects (`Exn`,
+// `Fail`). A row containing `IO` (un-logged nondeterminism: output, the system
+// clock, srand) or any user-defined effect cannot be reproduced from a trace, so
+// it is rejected with a caret at the function naming the offending effect(s).
+fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(), Error> {
+    let annots = replayable_annots(program);
+    if annots.is_empty() {
+        return Ok(());
+    }
+    let allowed: std::collections::BTreeSet<Sym> = ["Console", "FileSystem", "Random", "Env"]
+        .into_iter()
+        .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
+        .map(Sym::from)
+        .collect();
+    for d in &program.fns {
+        if !annots.contains(&Sym::from(&d.name)) {
+            continue;
+        }
+        let Some(row) = checked.effects.get(&d.name) else {
+            continue;
+        };
+        let offending: Vec<&str> = row
+            .iter()
+            .filter(|e| !allowed.contains(*e))
+            .map(|e| e.as_str())
+            .collect();
+        if !offending.is_empty() {
+            let msg = format!(
+                "function `{}` is marked `replayable` but performs non-replayable {} `{}`; \
+                 a replayable function may use only Console, FileSystem, Random, Env, Exn, Fail",
+                d.name,
+                if offending.len() == 1 {
+                    "effect"
+                } else {
+                    "effects"
+                },
+                offending.join("`, `")
+            );
+            return Err(Error::Type(crate::error::TypeError::Other {
+                span: d.span,
+                msg,
+            }));
+        }
+    }
+    Ok(())
 }
 
 /// # Examples
@@ -827,6 +878,11 @@ pub fn report_on(src: &str, roots: &[Root]) -> String {
 
     if let Err(e) = fip_check(&program, &checked, &core) {
         section(&mut out, "fip", &render(e));
+        return out;
+    }
+
+    if let Err(e) = replayable_check(&program, &checked) {
+        section(&mut out, "replayable", &render(e));
         return out;
     }
 

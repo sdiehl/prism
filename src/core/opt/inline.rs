@@ -9,10 +9,11 @@
 //! top-level function names (Core Lint's invariant), in scope everywhere.
 //!
 //! It runs after effect lowering (a late pass) so it cannot disturb the var/State
-//! fusion, on the lowered, pre-reference-counting core (so no rc nodes appear). It
-//! is gated to O2: the fresh `%n` names from `Sym::fresh` are process-global, so
-//! they must not reach the O1-default snapshots; promotion to O1 needs a
-//! deterministic fresh-name supply first.
+//! fusion, on the lowered, pre-reference-counting core (so no rc nodes appear).
+//! Freshened binders are named `%i{n}` from a per-compilation counter threaded
+//! through the whole sweep, assigned in deterministic traversal order, so the
+//! output is byte-identical across runs (the `%` prefix cannot collide with a
+//! source identifier). This determinism is what lets the pass run at O1.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -64,6 +65,7 @@ pub(crate) fn inline_counted(core: &Core) -> (Core, u64) {
         fns: core.fns.iter().map(|f| (f.name, f.clone())).collect(),
         inlinable,
         ticks: 0,
+        counter: 0,
     };
     let fns = core
         .fns
@@ -110,6 +112,9 @@ struct Inliner {
     fns: BTreeMap<Sym, CoreFn>,
     inlinable: BTreeSet<Sym>,
     ticks: u64,
+    // Per-compilation freshening counter, threaded across every inlined site so
+    // each freshened binder gets a distinct deterministic `%i{n}` name.
+    counter: u32,
 }
 
 impl Rewrite for Inliner {
@@ -122,7 +127,7 @@ impl Rewrite for Inliner {
                 if callee.params.len() == args.len() {
                     let args2: Vec<Value> = args.iter().map(|a| self.value(a, cx)).collect();
                     self.ticks += 1;
-                    let spliced = inline_call(&callee, &args2);
+                    let spliced = inline_call(&callee, &args2, &mut self.counter);
                     // Recurse into the spliced body: a single-call-site callee
                     // it in turn calls is still single-site (its one site just
                     // moved here), so one sweep inlines the whole chain.
@@ -137,13 +142,17 @@ impl Rewrite for Inliner {
 // The callee body with every binder freshened and its parameters bound to the
 // argument values: `let p0' = a0 in ... let pk' = ak in <freshened body>`. The
 // trivial-let copy-prop and dead-let in the simplifier then erase the parameter
-// lets (arguments are ANF values).
-fn inline_call(callee: &CoreFn, args: &[Value]) -> Comp {
+// lets (arguments are ANF values). `counter` is the caller's per-compilation
+// freshening counter, threaded so every binder across every site gets a distinct
+// deterministic name.
+fn inline_call(callee: &CoreFn, args: &[Value], counter: &mut u32) -> Comp {
+    let mut fresh = Freshen { counter };
     let mut ren: BTreeMap<Sym, Sym> = BTreeMap::new();
     for p in &callee.params {
-        ren.insert(*p, Sym::fresh());
+        let n = fresh.next();
+        ren.insert(*p, n);
     }
-    let mut out = Freshen.comp(&callee.body, &ren);
+    let mut out = fresh.comp(&callee.body, &ren);
     for i in (0..callee.params.len()).rev() {
         let p = ren[&callee.params[i]];
         out = Comp::Bind(Box::new(Comp::Return(args[i].clone())), p, Box::new(out));
@@ -153,17 +162,31 @@ fn inline_call(callee: &CoreFn, args: &[Value]) -> Comp {
 
 // Alpha-renames every bound name in a term to a fresh symbol, threading the
 // old->new map and substituting variable uses. Free variables (top-level function
-// names) are left untouched.
-struct Freshen;
-
-// Record a fresh rename for `s` and return the fresh name.
-fn fresh_for(s: Sym, ren: &mut BTreeMap<Sym, Sym>) -> Sym {
-    let n = Sym::fresh();
-    ren.insert(s, n);
-    n
+// names) are left untouched. The fresh-name supply is a deterministic
+// per-compilation counter (`%i{n}`), borrowed from the inliner so a whole sweep
+// shares one numbering.
+struct Freshen<'a> {
+    counter: &'a mut u32,
 }
 
-impl Rewrite for Freshen {
+impl Freshen<'_> {
+    // The next deterministic fresh name, `%i{n}`. The `%` prefix is unforgeable:
+    // no source identifier contains it.
+    fn next(&mut self) -> Sym {
+        let n = *self.counter;
+        *self.counter += 1;
+        Sym::new(&format!("%i{n}"))
+    }
+
+    // Record a fresh rename for `s` and return the fresh name.
+    fn fresh_for(&mut self, s: Sym, ren: &mut BTreeMap<Sym, Sym>) -> Sym {
+        let n = self.next();
+        ren.insert(s, n);
+        n
+    }
+}
+
+impl Rewrite for Freshen<'_> {
     type Ctx = BTreeMap<Sym, Sym>;
 
     fn value(&mut self, v: &Value, ren: &Self::Ctx) -> Value {
@@ -179,47 +202,47 @@ impl Rewrite for Freshen {
         match c {
             Comp::Bind(rhs, x, body) => {
                 let rhs2 = self.comp(rhs, ren);
-                let nx = Sym::fresh();
+                let nx = self.next();
                 let mut r2 = ren.clone();
                 r2.insert(*x, nx);
                 Comp::Bind(Box::new(rhs2), nx, Box::new(self.comp(body, &r2)))
             }
             Comp::Lam(ps, b) => {
                 let mut r2 = ren.clone();
-                let nps: Vec<Sym> = ps
-                    .iter()
-                    .map(|p| {
-                        let n = Sym::fresh();
-                        r2.insert(*p, n);
-                        n
-                    })
-                    .collect();
+                let mut nps: Vec<Sym> = Vec::with_capacity(ps.len());
+                for p in ps {
+                    let n = self.next();
+                    r2.insert(*p, n);
+                    nps.push(n);
+                }
                 Comp::Lam(nps, Box::new(self.comp(b, &r2)))
             }
             Comp::Case(scrut, arms) => {
                 let scrut2 = self.value(scrut, ren);
-                let arms2 = arms
-                    .iter()
-                    .map(|(p, b)| {
-                        let mut r2 = ren.clone();
-                        let np = match p {
-                            CorePat::Wild => CorePat::Wild,
-                            CorePat::Var(s) => {
-                                let n = Sym::fresh();
-                                r2.insert(*s, n);
-                                CorePat::Var(n)
+                let mut arms2 = Vec::with_capacity(arms.len());
+                for (p, b) in arms {
+                    let mut r2 = ren.clone();
+                    let np = match p {
+                        CorePat::Wild => CorePat::Wild,
+                        CorePat::Var(s) => CorePat::Var(self.fresh_for(*s, &mut r2)),
+                        CorePat::Ctor(c, bs) => {
+                            let mut nbs = Vec::with_capacity(bs.len());
+                            for b in bs {
+                                nbs.push(b.map(|s| self.fresh_for(s, &mut r2)));
                             }
-                            CorePat::Ctor(c, bs) => CorePat::Ctor(
-                                *c,
-                                bs.iter().map(|b| b.map(|s| fresh_for(s, &mut r2))).collect(),
-                            ),
-                            CorePat::Tuple(bs) => CorePat::Tuple(
-                                bs.iter().map(|b| b.map(|s| fresh_for(s, &mut r2))).collect(),
-                            ),
-                        };
-                        (np, self.comp(b, &r2))
-                    })
-                    .collect();
+                            CorePat::Ctor(*c, nbs)
+                        }
+                        CorePat::Tuple(bs) => {
+                            let mut nbs = Vec::with_capacity(bs.len());
+                            for b in bs {
+                                nbs.push(b.map(|s| self.fresh_for(s, &mut r2)));
+                            }
+                            CorePat::Tuple(nbs)
+                        }
+                    };
+                    let nb = self.comp(b, &r2);
+                    arms2.push((np, nb));
+                }
                 Comp::Case(scrut2, arms2)
             }
             Comp::Handle {
@@ -231,36 +254,32 @@ impl Rewrite for Freshen {
                 let body2 = Box::new(self.comp(body, ren));
                 let (rv, rb) = match return_var {
                     Some(v) => {
-                        let n = Sym::fresh();
+                        let n = self.next();
                         let mut r2 = ren.clone();
                         r2.insert(*v, n);
                         (Some(n), return_body.as_ref().map(|b| Box::new(self.comp(b, &r2))))
                     }
                     None => (None, return_body.as_ref().map(|b| Box::new(self.comp(b, ren)))),
                 };
-                let ops2 = ops
-                    .iter()
-                    .map(|o| {
-                        let mut r2 = ren.clone();
-                        let nps: Vec<Sym> = o
-                            .params
-                            .iter()
-                            .map(|p| {
-                                let n = Sym::fresh();
-                                r2.insert(*p, n);
-                                n
-                            })
-                            .collect();
-                        let nres = Sym::fresh();
-                        r2.insert(o.resume, nres);
-                        HandleOp {
-                            name: o.name,
-                            params: nps,
-                            resume: nres,
-                            body: self.comp(&o.body, &r2),
-                        }
-                    })
-                    .collect();
+                let mut ops2 = Vec::with_capacity(ops.len());
+                for o in ops {
+                    let mut r2 = ren.clone();
+                    let mut nps: Vec<Sym> = Vec::with_capacity(o.params.len());
+                    for p in &o.params {
+                        let n = self.next();
+                        r2.insert(*p, n);
+                        nps.push(n);
+                    }
+                    let nres = self.next();
+                    r2.insert(o.resume, nres);
+                    let nbody = self.comp(&o.body, &r2);
+                    ops2.push(HandleOp {
+                        name: o.name,
+                        params: nps,
+                        resume: nres,
+                        body: nbody,
+                    });
+                }
                 Comp::Handle {
                     body: body2,
                     return_var: rv,
@@ -270,7 +289,7 @@ impl Rewrite for Freshen {
             }
             Comp::WithReuse { token, freed, body } => {
                 let freed2 = self.value(freed, ren);
-                let nt = Sym::fresh();
+                let nt = self.next();
                 let mut r2 = ren.clone();
                 r2.insert(*token, nt);
                 Comp::WithReuse {

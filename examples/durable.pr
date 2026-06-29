@@ -1,0 +1,66 @@
+import Replay (..)
+
+-- Durable record/replay: a workflow that reads inputs, does work, and survives a
+-- crash by resuming from a persisted log. `durable(log, action)` replays the
+-- entries already on disk (no real IO) and, once the log is exhausted, performs
+-- each new observation for real and persists the whole trace after it, so a
+-- crash leaves a recoverable prefix.
+--
+-- The workflow reads a config string then draws five randoms, returning the
+-- config length plus their sum. It performs NO printing; the single result line
+-- is printed by `main` only after the action completes, so the replayed prefix
+-- (which re-runs the pure summation) never re-fires output.
+--
+-- Crash + resume is two invocations of `prism run examples/durable.pr`:
+--   * the first finds no log, runs with `stop = 2` so the action errors after two
+--     observations, leaving a two-entry log on disk;
+--   * the second finds the log, replays those two steps, finishes the remaining
+--     reads for real, and prints the final result.
+
+fn log_path() = "target/durable.log"
+
+fn cfg_path() = "target/durable.cfg"
+
+-- A config with ':' and newlines, so the persisted trace exercises the
+-- length-prefixed string encoding on a payload that contains the delimiter.
+fn cfg_text() = "alpha:1\nbeta:22\ngamma:333\n"
+
+fn crash_if(stop, done) =
+  if stop >= 0 && done >= stop then
+    let _ = eprintln("simulated crash after {done} step(s); re-run to resume")
+    error(2)
+  else
+    ()
+
+fn draw(total, stop, done, acc) =
+  if done - 1 >= total then
+    acc
+  else
+    let r = rng_rand(())
+    let done2 = done + 1
+    crash_if(stop, done2)
+    draw(total, stop, done2, acc + r)
+
+-- Reads the config (observation 1), then `total` randoms; crashes after `stop`
+-- observations when `stop >= 0`.
+fn flow(total, stop, u) =
+  let cfg = read_file(cfg_path())
+  crash_if(stop, 1)
+  draw(total, stop, 1, str_len(cfg))
+
+fn cleanup() =
+  let _ = remove_file(log_path())
+  let _ = remove_file(cfg_path())
+  ()
+
+fn main() =
+  let log = log_path()
+  let _ = write_file(cfg_path(), cfg_text())
+  let resuming = prim_file_exists(log) && str_len(prim_read_file(log)) > 0
+  if resuming then
+    let total = durable(log, \(u) -> flow(5, 0 - 1, u))
+    let _ = println("resumed and finished: {total}")
+    cleanup()
+  else
+    let _ = durable(log, \(u) -> flow(5, 2, u))
+    ()

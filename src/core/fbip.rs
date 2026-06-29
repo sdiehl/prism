@@ -758,6 +758,18 @@ pub fn fip_annots(prog: &Program<CorePhase>) -> Fips {
         .collect()
 }
 
+/// The set of `replayable`-annotated functions: each must infer a row within the
+/// recordable capabilities plus the deterministic builtin effects, checked in the
+/// driver against the inferred effects.
+#[must_use]
+pub fn replayable_annots(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
+    prog.fns
+        .iter()
+        .filter(|d| d.replayable)
+        .map(|d| d.name.clone().into())
+        .collect()
+}
+
 // Prims and builtins that allocate no heap cell, so an annotated body may call
 // them. Conservative: only arithmetic/comparison/IO primitives that the backend
 // lowers to immediates or a runtime call returning an immediate. Anything that

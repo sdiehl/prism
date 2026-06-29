@@ -133,7 +133,7 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_mkid() {
+define i64 @prism_main() {
 entry:
   %t0 = call ptr @prism_alloc(i64 0)
   %0 = ptrtoint ptr %t0 to i64
@@ -141,22 +141,16 @@ entry:
   %t1 = inttoptr i64 %1 to ptr
   store i64 0, ptr %t1, align 8
   %t2 = ptrtoint ptr %t0 to i64
-  ret i64 %t2
-}
-
-declare ptr @prism_alloc(i64)
-
-define i64 @prism_main() {
-entry:
-  %t0 = call i64 @prism_mkid()
-  %t1 = call i64 @prism_apply_1(i64 %t0, i64 15)
-  call void @prism_rc_dec(i64 %t0)
-  call void @prism_print_int(i64 %t1)
-  call void @prism_rc_dec(i64 %t1)
+  %t3 = call i64 @prism_apply_1(i64 %t2, i64 15)
+  call void @prism_rc_dec(i64 %t2)
+  call void @prism_print_int(i64 %t3)
+  call void @prism_rc_dec(i64 %t3)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
 }
+
+declare ptr @prism_alloc(i64)
 
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
 entry:

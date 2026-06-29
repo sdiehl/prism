@@ -252,16 +252,36 @@ source_filename = "prism"
 
 @.str0 = private constant [2 x i8] c"x\00"
 
-define i64 @prism_pick(i64 %a0) {
+define i64 @prism_main() {
 entry:
-  call void @prism_rc_inc(i64 %a0)
-  %t1 = call i64 @prism_apply_2(i64 %a0, i64 3, i64 3)
-  call void @prism_rc_dec(i64 %a0)
-  %t2 = call i64 @prism_str_lit(ptr @.str0, i64 1)
-  %t3 = call i64 @prism_apply_2(i64 %a0, i64 %t1, i64 %t2)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t3
+  %t0 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %t2 = ptrtoint ptr %t0 to i64
+  call void @prism_rc_inc(i64 %t2)
+  %t4 = call i64 @prism_apply_2(i64 %t2, i64 3, i64 3)
+  call void @prism_rc_dec(i64 %t2)
+  %t5 = call i64 @prism_str_lit(ptr @.str0, i64 1)
+  %t6 = call i64 @prism_apply_2(i64 %t2, i64 %t4, i64 %t5)
+  call void @prism_rc_dec(i64 %t2)
+  %t7 = call ptr @prism_alloc(i64 0)
+  %2 = ptrtoint ptr %t7 to i64
+  %3 = add i64 %2, 8
+  %t8 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t8, align 8
+  %t9 = ptrtoint ptr %t7 to i64
+  %t10 = call i64 @prism_apply_2(i64 %t9, i64 %t6, i64 5)
+  call void @prism_rc_dec(i64 %t9)
+  call void @prism_print_int(i64 %t10)
+  call void @prism_rc_dec(i64 %t10)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
 }
+
+declare ptr @prism_alloc(i64)
 
 declare void @prism_rc_inc(i64)
 
@@ -297,32 +317,6 @@ _merge:                                           ; preds = %_lam1, %_lam0
 declare void @prism_rc_dec(i64)
 
 declare i64 @prism_str_lit(ptr, i64)
-
-define i64 @prism_main() {
-entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  %t3 = call i64 @prism_pick(i64 %t2)
-  %t4 = call ptr @prism_alloc(i64 0)
-  %2 = ptrtoint ptr %t4 to i64
-  %3 = add i64 %2, 8
-  %t5 = inttoptr i64 %3 to ptr
-  store i64 1, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t4 to i64
-  %t7 = call i64 @prism_apply_2(i64 %t6, i64 %t3, i64 5)
-  call void @prism_rc_dec(i64 %t6)
-  call void @prism_print_int(i64 %t7)
-  call void @prism_rc_dec(i64 %t7)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  ret i64 0
-}
-
-declare ptr @prism_alloc(i64)
 
 declare void @prism_print_int(i64)
 

@@ -186,6 +186,7 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         wheres: Vec::new(),
         konst: false,
         fip: Fip::No,
+        replayable: false,
         span: z,
     }
 }

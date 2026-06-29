@@ -202,63 +202,18 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_get(i64 %a0, i64 %a1) {
-entry:
-  %t0 = inttoptr i64 %a1 to ptr
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  %t2 = load i64, ptr %t1, align 8
-  switch i64 %t2, label %b1 [
-    i64 0, label %b2
-    i64 1, label %b3
-  ]
-
-b2:                                               ; preds = %entry
-  call void @prism_rc_dec(i64 %a1)
-  ret i64 %a0
-
-b3:                                               ; preds = %entry
-  %2 = ptrtoint ptr %t0 to i64
-  %3 = add i64 %2, 24
-  %t4 = inttoptr i64 %3 to ptr
-  %t5 = load i64, ptr %t4, align 8
-  call void @prism_rc_inc(i64 %t5)
-  call void @prism_rc_dec(i64 %a1)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t5
-
-b1:                                               ; preds = %entry
-  unreachable
-}
-
-declare void @prism_rc_dec(i64)
-
-declare void @prism_rc_inc(i64)
-
 define i64 @prism_main() {
 entry:
-  %t0 = call ptr @prism_alloc(i64 1)
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 1, ptr %t1, align 8
-  %2 = ptrtoint ptr %t0 to i64
-  %3 = add i64 %2, 24
-  %t2 = inttoptr i64 %3 to ptr
-  store i64 85, ptr %t2, align 8
-  %t3 = ptrtoint ptr %t0 to i64
-  %t4 = call i64 @prism_get(i64 1, i64 %t3)
-  call void @prism_print_int(i64 %t4)
-  call void @prism_rc_dec(i64 %t4)
+  call void @prism_print_int(i64 85)
+  call void @prism_rc_dec(i64 85)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
 }
 
-declare ptr @prism_alloc(i64)
-
 declare void @prism_print_int(i64)
+
+declare void @prism_rc_dec(i64)
 
 declare void @prism_print_nl()
 

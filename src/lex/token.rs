@@ -225,6 +225,8 @@ pub enum Token {
     Fip,
     #[token("fbip")]
     Fbip,
+    #[token("replayable")]
+    Replayable,
     #[token("pub")]
     Pub,
     #[token("import")]
@@ -500,6 +502,7 @@ impl Token {
             Self::Fn => kw::FN,
             Self::Fip => kw::FIP,
             Self::Fbip => kw::FBIP,
+            Self::Replayable => kw::REPLAYABLE,
             Self::Pub => kw::PUB,
             Self::Import => kw::IMPORT,
             Self::As => kw::AS,
@@ -682,6 +685,7 @@ mod tests {
             (Token::Fn, kw::FN),
             (Token::Fip, kw::FIP),
             (Token::Fbip, kw::FBIP),
+            (Token::Replayable, kw::REPLAYABLE),
             (Token::Pub, kw::PUB),
             (Token::Import, kw::IMPORT),
             (Token::As, kw::AS),

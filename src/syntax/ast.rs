@@ -341,6 +341,10 @@ pub struct Decl<P: Phase = Surface> {
     // The FP^2 in-place annotation (`fip`/`fbip` keyword before `fn`), checked
     // over the reuse-lowered core. `No` for a plain `fn`.
     pub fip: Fip,
+    // The `replayable` annotation (orthogonal to `fip`/`fbip`): the inferred row
+    // must stay within the recordable capabilities plus the deterministic builtin
+    // effects, so a record/replay handler can reproduce every observation.
+    pub replayable: bool,
     pub span: Span,
 }
 
@@ -361,6 +365,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Decl<P> {
         }
         if self.fip != Fip::No {
             d.field("fip", &self.fip);
+        }
+        if self.replayable {
+            d.field("replayable", &self.replayable);
         }
         d.field("span", &self.span).finish()
     }

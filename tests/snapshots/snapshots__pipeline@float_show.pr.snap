@@ -238,91 +238,51 @@ source_filename = "prism"
 
 define i64 @prism_main() {
 entry:
-  %t2 = call i64 @prism_box(i64 4591870180066957722)
-  %t5 = call i64 @prism_box(i64 4596373779694328218)
-  %t6 = call i64 @prism_unbox(i64 %t2)
-  %t7 = bitcast i64 %t6 to double
-  %t8 = call i64 @prism_unbox(i64 %t5)
-  %t9 = bitcast i64 %t8 to double
-  %t10 = fadd double %t7, %t9
-  %t11 = bitcast double %t10 to i64
-  %t12 = call i64 @prism_box(i64 %t11)
+  %t2 = call i64 @prism_box(i64 4599075939470750516)
+  %t3 = call i64 @prism_unbox(i64 %t2)
+  %t4 = bitcast i64 %t3 to double
+  %0 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t4)
   call void @prism_rc_dec(i64 %t2)
-  call void @prism_rc_dec(i64 %t5)
-  %t13 = call i64 @prism_unbox(i64 %t12)
-  %t14 = bitcast i64 %t13 to double
-  %0 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t14)
-  call void @prism_rc_dec(i64 %t12)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t19 = call i64 @prism_box(i64 4621819117588971520)
-  %t22 = call i64 @prism_box(i64 4613937818241073152)
-  %t23 = call i64 @prism_unbox(i64 %t19)
-  %t24 = bitcast i64 %t23 to double
-  %t25 = call i64 @prism_unbox(i64 %t22)
-  %t26 = bitcast i64 %t25 to double
-  %t27 = fdiv double %t24, %t26
-  %t28 = bitcast double %t27 to i64
-  %t29 = call i64 @prism_box(i64 %t28)
-  call void @prism_rc_dec(i64 %t19)
-  call void @prism_rc_dec(i64 %t22)
-  %t30 = call i64 @prism_unbox(i64 %t29)
-  %t31 = bitcast i64 %t30 to double
-  %1 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t31)
-  call void @prism_rc_dec(i64 %t29)
+  %t9 = call i64 @prism_box(i64 4614688418178968235)
+  %t10 = call i64 @prism_unbox(i64 %t9)
+  %t11 = bitcast i64 %t10 to double
+  %1 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t11)
+  call void @prism_rc_dec(i64 %t9)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t36 = call i64 @prism_box(i64 4636737291354636288)
-  %t39 = call i64 @prism_box(i64 4607182418800017408)
-  %t40 = call i64 @prism_unbox(i64 %t36)
-  %t41 = bitcast i64 %t40 to double
-  %t42 = call i64 @prism_unbox(i64 %t39)
-  %t43 = bitcast i64 %t42 to double
-  %t44 = fmul double %t41, %t43
-  %t45 = bitcast double %t44 to i64
-  %t46 = call i64 @prism_box(i64 %t45)
-  call void @prism_rc_dec(i64 %t36)
-  call void @prism_rc_dec(i64 %t39)
-  %t47 = call i64 @prism_unbox(i64 %t46)
-  %t48 = bitcast i64 %t47 to double
-  %2 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t48)
-  call void @prism_rc_dec(i64 %t46)
+  %t16 = call i64 @prism_box(i64 4636737291354636288)
+  %t17 = call i64 @prism_unbox(i64 %t16)
+  %t18 = bitcast i64 %t17 to double
+  %2 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t18)
+  call void @prism_rc_dec(i64 %t16)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t53 = call i64 @prism_box(i64 4846369599423283200)
-  %t54 = call i64 @prism_unbox(i64 %t53)
-  %t55 = bitcast i64 %t54 to double
-  %3 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t55)
-  call void @prism_rc_dec(i64 %t53)
+  %t23 = call i64 @prism_box(i64 4846369599423283200)
+  %t24 = call i64 @prism_unbox(i64 %t23)
+  %t25 = bitcast i64 %t24 to double
+  %3 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t25)
+  call void @prism_rc_dec(i64 %t23)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t60 = call i64 @prism_box(i64 4532020583610935537)
-  %t61 = call i64 @prism_unbox(i64 %t60)
-  %t62 = bitcast i64 %t61 to double
-  %4 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t62)
-  call void @prism_rc_dec(i64 %t60)
+  %t30 = call i64 @prism_box(i64 4532020583610935537)
+  %t31 = call i64 @prism_unbox(i64 %t30)
+  %t32 = bitcast i64 %t31 to double
+  %4 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t32)
+  call void @prism_rc_dec(i64 %t30)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t67 = call i64 @prism_box(i64 0)
-  %t70 = call i64 @prism_box(i64 4612811918334230528)
-  %t71 = call i64 @prism_unbox(i64 %t67)
-  %t72 = bitcast i64 %t71 to double
-  %t73 = call i64 @prism_unbox(i64 %t70)
-  %t74 = bitcast i64 %t73 to double
-  %t75 = fsub double %t72, %t74
-  %t76 = bitcast double %t75 to i64
-  %t77 = call i64 @prism_box(i64 %t76)
-  call void @prism_rc_dec(i64 %t67)
-  call void @prism_rc_dec(i64 %t70)
-  %t78 = call i64 @prism_unbox(i64 %t77)
-  %t79 = bitcast i64 %t78 to double
-  %5 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t79)
-  call void @prism_rc_dec(i64 %t77)
+  %t37 = call i64 @prism_box(i64 -4610560118520545280)
+  %t38 = call i64 @prism_unbox(i64 %t37)
+  %t39 = bitcast i64 %t38 to double
+  %5 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t39)
+  call void @prism_rc_dec(i64 %t37)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
@@ -332,9 +292,9 @@ declare i64 @prism_box(i64)
 
 declare i64 @prism_unbox(i64)
 
-declare void @prism_rc_dec(i64)
-
 declare i32 @printf(ptr, ...)
+
+declare void @prism_rc_dec(i64)
 
 declare void @prism_print_nl()
 

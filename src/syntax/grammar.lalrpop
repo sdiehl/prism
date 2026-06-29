@@ -17,6 +17,7 @@ extern {
         "fn"     => Token::Fn,
         "fip"    => Token::Fip,
         "fbip"   => Token::Fbip,
+        "replayable" => Token::Replayable,
         "pub"    => Token::Pub,
         "import" => Token::Import,
         "as"     => Token::As,
@@ -378,8 +379,8 @@ EffOpParam: Ty = {
 };
 
 Fn: Decl = {
-    <l:@L> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
-        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, span: Span::new(l, r) },
+    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
+        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), span: Span::new(l, r) },
 };
 
 // An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
@@ -394,7 +395,7 @@ FipKw: Fip = {
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings

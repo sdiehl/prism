@@ -6,6 +6,7 @@ examples/calc.pr: evidence
 examples/comprehension.pr: whole-program-free-monad
 examples/condition.pr: selective-free-monad
 examples/delim.pr: selective-free-monad
+examples/durable.pr: whole-program-free-monad
 examples/echo.pr: evidence
 examples/eff_amb.pr: selective-free-monad
 examples/eff_exn.pr: selective-free-monad
@@ -36,6 +37,7 @@ examples/orders.pr: whole-program-free-monad
 examples/os.pr: evidence
 examples/param_effects.pr: state-fusion
 examples/queens.pr: selective-free-monad
+examples/record_replay.pr: whole-program-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
@@ -84,6 +86,7 @@ tests/cases/run/opt_chain.pr: selective-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad
 tests/cases/run/optics_read.pr: selective-free-monad
 tests/cases/run/param_eff.pr: evidence
+tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rollback.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion

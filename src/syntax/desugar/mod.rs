@@ -297,6 +297,7 @@ fn lift_lam(name: String, lam: S<Expr>, span: Span) -> Decl {
         wheres: Vec::new(),
         konst: false,
         fip: Fip::No,
+        replayable: false,
         span,
     }
 }
@@ -534,6 +535,7 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         wheres: Vec::new(),
         konst: d.konst,
         fip: d.fip,
+        replayable: d.replayable,
         span: d.span,
     })
 }

@@ -35,9 +35,10 @@ use specialize::specialize_counted;
 ///
 /// `O0` keeps only the mandatory representation passes (newtype erasure, which
 /// both backends depend on). `O1`, the default, adds dictionary specialization
-/// (pre-lowering) and the gentle simplifier (late, after effect lowering, so it
-/// composes with the var/State fusion rather than defeating it). `O2` currently
-/// matches `O1`; it is where further late passes (inliner, CSE) will land.
+/// (pre-lowering), the gentle simplifier, the bounded inliner, and scalar CSE
+/// (all late, after effect lowering, so they compose with the var/State fusion
+/// rather than defeating it). `O2` currently matches `O1`; it is reserved for
+/// future aggressive passes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     O0,
@@ -285,9 +286,8 @@ impl PassStats {
 }
 
 /// The optimization context (the GHC `CoreM` analogue): the program-derived
-/// newtype constructor set a pass needs, and the tick counter. A fresh-name
-/// supply (`Sym::fresh`) is added here when a clone-generating pass first needs
-/// it.
+/// newtype constructor set a pass needs, and the tick counter. The inliner owns
+/// its own deterministic per-compilation fresh-name counter.
 struct OptCx {
     newtype_ctors: BTreeSet<Sym>,
     stats: PassStats,
@@ -302,18 +302,14 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     // the var/State fusion instead of defeating it.
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        OptLevel::O1 => vec![
-            CorePass::EraseNewtypes,
-            CorePass::Specialize,
-            CorePass::Simplify,
-        ],
-        // O2 adds the inliner, sandwiched in simplifier runs (the GHC
+        // O1 runs the inliner and CSE, sandwiched in simplifier runs (the GHC
         // simplify/inline/simplify shape): the first cleans and exposes call
         // sites, the inliner pastes single-call-site bodies in, the second cleans
         // up the inlined code (wrappers vanish, case-of-known-constructor fires
-        // across the inlined boundary). The inliner is O2-only until its fresh-
-        // name supply is deterministic enough for the O1 snapshots.
-        OptLevel::O2 => vec![
+        // across the inlined boundary), CSE shares the prims it exposed, the last
+        // cleans up after CSE. The inliner's freshened binders are deterministic
+        // (`%i{n}`), so this is safe at the default level's snapshots.
+        OptLevel::O1 | OptLevel::O2 => vec![
             CorePass::EraseNewtypes,
             CorePass::Specialize,
             CorePass::Simplify,

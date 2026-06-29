@@ -317,109 +317,98 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_fst(i64 %a0) {
+define i64 @prism_main() {
 entry:
-  %t0 = inttoptr i64 %a0 to ptr
+  %t0 = call ptr @prism_alloc(i64 2)
+  %0 = ptrtoint ptr %t0 to i64
+  %1 = add i64 %0, 8
+  %t1 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t1, align 8
+  %2 = ptrtoint ptr %t0 to i64
+  %3 = add i64 %2, 24
+  %t2 = inttoptr i64 %3 to ptr
+  store i64 7, ptr %t2, align 8
+  %4 = ptrtoint ptr %t0 to i64
+  %5 = add i64 %4, 32
+  %t3 = inttoptr i64 %5 to ptr
+  store i64 7, ptr %t3, align 8
+  %t4 = ptrtoint ptr %t0 to i64
+  %t5 = call ptr @prism_alloc(i64 2)
+  %6 = ptrtoint ptr %t5 to i64
+  %7 = add i64 %6, 8
+  %t6 = inttoptr i64 %7 to ptr
+  store i64 0, ptr %t6, align 8
+  %8 = ptrtoint ptr %t5 to i64
+  %9 = add i64 %8, 24
+  %t7 = inttoptr i64 %9 to ptr
+  store i64 7, ptr %t7, align 8
+  %10 = ptrtoint ptr %t5 to i64
+  %11 = add i64 %10, 32
+  %t8 = inttoptr i64 %11 to ptr
+  store i64 7, ptr %t8, align 8
+  %t9 = ptrtoint ptr %t5 to i64
+  %t10 = call ptr @prism_alloc(i64 2)
+  %12 = ptrtoint ptr %t10 to i64
+  %13 = add i64 %12, 8
+  %t11 = inttoptr i64 %13 to ptr
+  store i64 0, ptr %t11, align 8
+  %14 = ptrtoint ptr %t10 to i64
+  %15 = add i64 %14, 24
+  %t12 = inttoptr i64 %15 to ptr
+  store i64 %t4, ptr %t12, align 8
+  %16 = ptrtoint ptr %t10 to i64
+  %17 = add i64 %16, 32
+  %t13 = inttoptr i64 %17 to ptr
+  store i64 %t9, ptr %t13, align 8
+  %t14 = ptrtoint ptr %t10 to i64
+  %t15 = inttoptr i64 %t14 to ptr
   br label %b2
 
 b2:                                               ; preds = %entry
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 24
-  %t1 = inttoptr i64 %1 to ptr
-  %t2 = load i64, ptr %t1, align 8
-  %2 = ptrtoint ptr %t0 to i64
-  %3 = add i64 %2, 32
-  %t3 = inttoptr i64 %3 to ptr
-  %t4 = load i64, ptr %t3, align 8
-  call void @prism_rc_inc(i64 %t2)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t2
+  %18 = ptrtoint ptr %t15 to i64
+  %19 = add i64 %18, 24
+  %t16 = inttoptr i64 %19 to ptr
+  %t17 = load i64, ptr %t16, align 8
+  %20 = ptrtoint ptr %t15 to i64
+  %21 = add i64 %20, 32
+  %t18 = inttoptr i64 %21 to ptr
+  %t19 = load i64, ptr %t18, align 8
+  call void @prism_rc_inc(i64 %t17)
+  call void @prism_rc_dec(i64 %t14)
+  %t22 = inttoptr i64 %t17 to ptr
+  br label %b5
 
 b1:                                               ; No predecessors!
   unreachable
-}
 
-declare void @prism_rc_inc(i64)
+b5:                                               ; preds = %b2
+  %22 = ptrtoint ptr %t22 to i64
+  %23 = add i64 %22, 24
+  %t23 = inttoptr i64 %23 to ptr
+  %t24 = load i64, ptr %t23, align 8
+  %24 = ptrtoint ptr %t22 to i64
+  %25 = add i64 %24, 32
+  %t25 = inttoptr i64 %25 to ptr
+  %t26 = load i64, ptr %t25, align 8
+  call void @prism_rc_inc(i64 %t24)
+  call void @prism_rc_dec(i64 %t17)
+  br label %b3
 
-declare void @prism_rc_dec(i64)
+b4:                                               ; No predecessors!
+  unreachable
 
-define i64 @prism_quad(i64 %a0) {
-entry:
-  call void @prism_rc_inc(i64 %a0)
-  call void @prism_rc_inc(i64 %a0)
-  %t2 = call ptr @prism_alloc(i64 2)
-  %0 = ptrtoint ptr %t2 to i64
-  %1 = add i64 %0, 8
-  %t3 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t3, align 8
-  %2 = ptrtoint ptr %t2 to i64
-  %3 = add i64 %2, 24
-  %t4 = inttoptr i64 %3 to ptr
-  store i64 %a0, ptr %t4, align 8
-  %4 = ptrtoint ptr %t2 to i64
-  %5 = add i64 %4, 32
-  %t5 = inttoptr i64 %5 to ptr
-  store i64 %a0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  call void @prism_rc_inc(i64 %a0)
-  %t8 = call ptr @prism_alloc(i64 2)
-  %6 = ptrtoint ptr %t8 to i64
-  %7 = add i64 %6, 8
-  %t9 = inttoptr i64 %7 to ptr
-  store i64 0, ptr %t9, align 8
-  %8 = ptrtoint ptr %t8 to i64
-  %9 = add i64 %8, 24
-  %t10 = inttoptr i64 %9 to ptr
-  store i64 %a0, ptr %t10, align 8
-  %10 = ptrtoint ptr %t8 to i64
-  %11 = add i64 %10, 32
-  %t11 = inttoptr i64 %11 to ptr
-  store i64 %a0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = call ptr @prism_alloc(i64 2)
-  %12 = ptrtoint ptr %t13 to i64
-  %13 = add i64 %12, 8
-  %t14 = inttoptr i64 %13 to ptr
-  store i64 0, ptr %t14, align 8
-  %14 = ptrtoint ptr %t13 to i64
-  %15 = add i64 %14, 24
-  %t15 = inttoptr i64 %15 to ptr
-  store i64 %t6, ptr %t15, align 8
-  %16 = ptrtoint ptr %t13 to i64
-  %17 = add i64 %16, 32
-  %t16 = inttoptr i64 %17 to ptr
-  store i64 %t12, ptr %t16, align 8
-  %t17 = ptrtoint ptr %t13 to i64
-  ret i64 %t17
+b3:                                               ; preds = %b5
+  %t29 = phi i64 [ %t24, %b5 ]
+  call void @prism_print_int(i64 %t29)
+  call void @prism_rc_dec(i64 %t29)
+  ret i64 0
 }
 
 declare ptr @prism_alloc(i64)
 
-define i64 @prism_main() {
-entry:
-  %t0 = call i64 @prism_quad(i64 7)
-  %t1 = inttoptr i64 %t0 to ptr
-  br label %b2
+declare void @prism_rc_inc(i64)
 
-b2:                                               ; preds = %entry
-  %0 = ptrtoint ptr %t1 to i64
-  %1 = add i64 %0, 24
-  %t2 = inttoptr i64 %1 to ptr
-  %t3 = load i64, ptr %t2, align 8
-  %2 = ptrtoint ptr %t1 to i64
-  %3 = add i64 %2, 32
-  %t4 = inttoptr i64 %3 to ptr
-  %t5 = load i64, ptr %t4, align 8
-  call void @prism_rc_inc(i64 %t3)
-  call void @prism_rc_dec(i64 %t0)
-  %t8 = call i64 @prism_fst(i64 %t3)
-  call void @prism_print_int(i64 %t8)
-  call void @prism_rc_dec(i64 %t8)
-  ret i64 0
-
-b1:                                               ; No predecessors!
-  unreachable
-}
+declare void @prism_rc_dec(i64)
 
 declare void @prism_print_int(i64)
 

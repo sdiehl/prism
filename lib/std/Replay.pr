@@ -1,0 +1,169 @@
+import Data.List (..)
+import Data.String (..)
+
+-- Record/replay handlers for the four capability effects (Console, FileSystem,
+-- Random, Env). `record` runs an action against the real world, logging each
+-- observation into a trace; `replay` re-runs the same action against a trace,
+-- performing no real IO. Replaying a recorded trace reproduces the original
+-- result. The trace and its entry type stay private to this module: a caller
+-- only ever threads the opaque trace `record` returns back into `replay`.
+
+type TraceEntry = TInt(Int) | TStr(String) | TBool(Bool)
+
+alias Trace = List(TraceEntry)
+
+
+-- A single multi-effect handle discharges all eight ops, parameter-passing the
+-- trace through every resume (the `sfold` shape). Each arm performs the real op
+-- with the matching prim_*, wraps the result as a TraceEntry, and conses it on;
+-- `return` reverses the log into call order and pairs it with the result. The
+-- prim_* calls give `record` the row ! {IO}.
+fn rec_int(k, t, x) = k(x)(Cons(TInt(x), t))
+
+fn rec_str(k, t, x) = k(x)(Cons(TStr(x), t))
+
+fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
+
+pub fn record(action) =
+  let g =
+    handle action(()) with {
+      con_read_int(u, k) => \(t) -> rec_int(k, t, prim_read_int()),
+      con_read_line(u, k) => \(t) -> rec_str(k, t, prim_read_line()),
+      fs_read_file(p, k) => \(t) -> rec_str(k, t, prim_read_file(p)),
+      fs_file_exists(p, k) => \(t) -> rec_bool(k, t, prim_file_exists(p)),
+      rng_rand(u, k) => \(t) -> rec_int(k, t, prim_rand()),
+      env_get(s, k) => \(t) -> rec_str(k, t, prim_getenv(s)),
+      env_argc(u, k) => \(t) -> rec_int(k, t, prim_args_count()),
+      env_arg(i, k) => \(t) -> rec_str(k, t, prim_arg(i)),
+      return r => \(t) -> (r, reverse(t))
+    }
+  g(Nil)
+
+-- Pop the next entry, unwrap it to the op's result type, and resume with the
+-- remainder. A wrong variant or an exhausted trace is a `fail()`, so a trace
+-- that does not match the action surfaces as a recoverable failure.
+fn rep_int(k, t) =
+  match t of
+    Cons(TInt(x), rest) => k(x)(rest)
+    _ => fail()
+
+fn rep_str(k, t) =
+  match t of
+    Cons(TStr(x), rest) => k(x)(rest)
+    _ => fail()
+
+fn rep_bool(k, t) =
+  match t of
+    Cons(TBool(x), rest) => k(x)(rest)
+    _ => fail()
+
+pub fn replay(trace, action) =
+  let g =
+    handle action(()) with {
+      con_read_int(u, k) => \(t) -> rep_int(k, t),
+      con_read_line(u, k) => \(t) -> rep_str(k, t),
+      fs_read_file(p, k) => \(t) -> rep_str(k, t),
+      fs_file_exists(p, k) => \(t) -> rep_bool(k, t),
+      rng_rand(u, k) => \(t) -> rep_int(k, t),
+      env_get(s, k) => \(t) -> rep_str(k, t),
+      env_argc(u, k) => \(t) -> rep_int(k, t),
+      env_arg(i, k) => \(t) -> rep_str(k, t),
+      return r => \(t) -> r
+    }
+  g(trace)
+
+-- Durable trace serialization over ground types. Each TraceEntry encodes as a
+-- tag char (I/S/B), the char-length of its payload, a ':' delimiter, then the
+-- payload itself. The length prefix makes any payload (newlines, ':' included)
+-- round-trip, so deserialize(serialize(t)) == t for every trace.
+fn enc_field(tag, payload) =
+  concat(tag, concat(show_int(str_len(payload)), concat(":", payload)))
+
+fn enc_entry(e) =
+  match e of
+    TInt(n) => enc_field("I", show_int(n))
+    TStr(s) => enc_field("S", s)
+    TBool(b) => enc_field("B", if b then "1" else "0")
+
+pub fn serialize(trace) = str_join("", map(enc_entry, trace))
+
+fn un_int(o) =
+  match o of
+    Some(x) => x
+    None => 0
+
+fn de_entry(tag, payload) =
+  if str_eq(tag, "I") then
+    TInt(un_int(parse_int(payload)))
+  elif str_eq(tag, "B") then
+    TBool(str_eq(payload, "1"))
+  else
+    TStr(payload)
+
+-- Parse from offset i: one tag char, decimal length up to ':', then that many
+-- payload chars; advance past the payload and continue.
+fn de_go(s, i, colon) =
+  if i >= str_len(s) then
+    Nil
+  else
+    let tag = substring(s, i, 1)
+    let c = index_of_from(colon, s, i + 1)
+    let len = un_int(parse_int(substring(s, i + 1, c - i - 1)))
+    let payload = substring(s, c + 1, len)
+    Cons(de_entry(tag, payload), de_go(s, c + 1 + len, colon))
+
+pub fn deserialize(s) = de_go(s, 0, char_at(":", 0))
+
+-- Durable record/replay driver. A persisted log freezes the observations of an
+-- interrupted run; a re-run replays that prefix (no real IO) and, once it is
+-- exhausted, performs each NEW op for real, appending and persisting the whole
+-- trace after every observation so a crash stays recoverable. The state threaded
+-- through every resume is (remaining-to-replay, full-trace-reversed); the loaded
+-- prefix already lives in the full trace, so replaying it never re-persists.
+fn persist(path, acc) = write_file(path, serialize(reverse(acc)))
+
+fn step_int(path, k, st, real) =
+  match st of
+    (Cons(TInt(x), rest), acc) => k(x)((rest, acc))
+    (Cons(_, _), _) => fail()
+    (Nil, acc) =>
+      let x = real(())
+      let acc2 = Cons(TInt(x), acc)
+      persist(path, acc2)
+      k(x)((Nil, acc2))
+
+fn step_str(path, k, st, real) =
+  match st of
+    (Cons(TStr(x), rest), acc) => k(x)((rest, acc))
+    (Cons(_, _), _) => fail()
+    (Nil, acc) =>
+      let x = real(())
+      let acc2 = Cons(TStr(x), acc)
+      persist(path, acc2)
+      k(x)((Nil, acc2))
+
+fn step_bool(path, k, st, real) =
+  match st of
+    (Cons(TBool(x), rest), acc) => k(x)((rest, acc))
+    (Cons(_, _), _) => fail()
+    (Nil, acc) =>
+      let x = real(())
+      let acc2 = Cons(TBool(x), acc)
+      persist(path, acc2)
+      k(x)((Nil, acc2))
+
+pub fn durable(path, action) =
+  let loaded = if prim_file_exists(path) then deserialize(prim_read_file(path)) else Nil
+  let g =
+    handle action(()) with {
+      con_read_int(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_read_int()),
+      con_read_line(u, k) => \(st) -> step_str(path, k, st, \(z) -> prim_read_line()),
+      fs_read_file(p, k) => \(st) -> step_str(path, k, st, \(z) -> prim_read_file(p)),
+      fs_file_exists(p, k) => \(st) -> step_bool(path, k, st, \(z) -> prim_file_exists(p)),
+      rng_rand(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_rand()),
+      env_get(s, k) => \(st) -> step_str(path, k, st, \(z) -> prim_getenv(s)),
+      env_argc(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_args_count()),
+      env_arg(i, k) => \(st) -> step_str(path, k, st, \(z) -> prim_arg(i)),
+      return r => \(st) -> r
+    }
+  g((loaded, reverse(loaded)))

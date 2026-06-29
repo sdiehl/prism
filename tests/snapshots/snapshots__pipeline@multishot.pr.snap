@@ -306,7 +306,7 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_collect_bools() {
+define i64 @prism_main() {
 entry:
   %t0 = call ptr @prism_alloc(i64 0)
   %0 = ptrtoint ptr %t0 to i64
@@ -367,7 +367,11 @@ b5:                                               ; preds = %b4, %b8
 
 b2:                                               ; preds = %b1, %b5
   %t25 = phi i64 [ %t21, %b5 ], [ 9, %b1 ]
-  ret i64 %t25
+  call void @prism_print_int(i64 %t25)
+  call void @prism_rc_dec(i64 %t25)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
 }
 
 declare ptr @prism_alloc(i64)
@@ -399,16 +403,6 @@ _merge:                                           ; preds = %_lam0
 }
 
 declare void @prism_rc_dec(i64)
-
-define i64 @prism_main() {
-entry:
-  %t0 = call i64 @prism_collect_bools()
-  call void @prism_print_int(i64 %t0)
-  call void @prism_rc_dec(i64 %t0)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  ret i64 0
-}
 
 declare void @prism_print_int(i64)
 

@@ -159,16 +159,10 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_h() {
-entry:
-  ret i64 3
-}
-
 define i64 @prism_main() {
 entry:
-  %t0 = call i64 @prism_h()
-  call void @prism_print_int(i64 %t0)
-  call void @prism_rc_dec(i64 %t0)
+  call void @prism_print_int(i64 3)
+  call void @prism_rc_dec(i64 3)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0

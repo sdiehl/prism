@@ -329,10 +329,15 @@ impl Fmt<'_> {
         } else {
             fmt_constraints(&d.constraints)
         };
-        let key = match d.fip {
+        let fip_key = match d.fip {
             Fip::No => kw::FN.to_string(),
             Fip::Fbip => format!("{} {}", kw::FBIP, kw::FN),
             Fip::Fip => format!("{} {}", kw::FIP, kw::FN),
+        };
+        let key = if d.replayable {
+            format!("{} {fip_key}", kw::REPLAYABLE)
+        } else {
+            fip_key
         };
         let sig = format!("{key} {}({}){}{} =", d.name, params.join(", "), ret_ann, wh);
 
