@@ -265,17 +265,17 @@ impl Builtin {
             Self::ParseFloat => "parse_float",
             Self::PowFloat => "pow_float",
             Self::ShowFloatPrec => "show_float_prec",
-            Self::Getenv => "getenv",
-            Self::ReadFile => "read_file",
+            Self::Getenv => "prim_getenv",
+            Self::ReadFile => "prim_read_file",
             Self::WriteFile => "write_file",
-            Self::FileExists => "file_exists",
+            Self::FileExists => "prim_file_exists",
             Self::AppendFile => "append_file",
             Self::RemoveFile => "remove_file",
             Self::Exit => "exit",
             Self::System => "system",
             Self::Eprint => "eprint",
-            Self::ArgsCount => "args_count",
-            Self::Arg => "arg",
+            Self::ArgsCount => "prim_args_count",
+            Self::Arg => "prim_arg",
             Self::ShowInt => "show_int",
             Self::ShowI64 => "show_i64",
             Self::ShowU64 => "show_u64",
@@ -432,22 +432,20 @@ impl Builtin {
     }
 
     // Touches the host OS (file IO, env, process, args), so it has no
-    // implementation in a browser build. Used to reject a snippet up front.
+    // implementation in a browser build. Used to reject a snippet up front. The
+    // input prims (read_file, file_exists, getenv, args_count, arg) are reached
+    // only through the always-installed world handler, so their off-platform use
+    // is detected from the surface wrappers instead (see `off_platform_builtins`).
     #[must_use]
     pub const fn off_platform(self) -> bool {
         matches!(
             self,
-            Self::Getenv
-                | Self::ReadFile
-                | Self::WriteFile
-                | Self::FileExists
+            Self::WriteFile
                 | Self::AppendFile
                 | Self::RemoveFile
                 | Self::Exit
                 | Self::System
                 | Self::Eprint
-                | Self::ArgsCount
-                | Self::Arg
         )
     }
 }
@@ -455,10 +453,10 @@ impl Builtin {
 pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("print", 1, BuiltinKind::Print),
     ("println", 1, BuiltinKind::Println),
-    ("read_int", 0, BuiltinKind::ReadInt),
-    ("read_line", 0, BuiltinKind::ReadLine),
+    ("prim_read_int", 0, BuiltinKind::ReadInt),
+    ("prim_read_line", 0, BuiltinKind::ReadLine),
     ("error", 1, BuiltinKind::Error),
-    ("rand", 0, BuiltinKind::Rand),
+    ("prim_rand", 0, BuiltinKind::Rand),
     ("srand", 1, BuiltinKind::Srand),
     ("to_float", 1, BuiltinKind::Float),
     ("truncate", 1, BuiltinKind::Float),
@@ -486,17 +484,17 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("ord", 1, BuiltinKind::Coerce),
     ("chr", 1, BuiltinKind::Coerce),
     ("parse_int", 1, BuiltinKind::Str),
-    ("getenv", 1, BuiltinKind::Str),
-    ("read_file", 1, BuiltinKind::Str),
+    ("prim_getenv", 1, BuiltinKind::Str),
+    ("prim_read_file", 1, BuiltinKind::Str),
     ("write_file", 2, BuiltinKind::Str),
-    ("file_exists", 1, BuiltinKind::Str),
+    ("prim_file_exists", 1, BuiltinKind::Str),
     ("append_file", 2, BuiltinKind::Str),
     ("remove_file", 1, BuiltinKind::Str),
     ("exit", 1, BuiltinKind::Str),
     ("system", 1, BuiltinKind::Str),
     ("eprint", 1, BuiltinKind::Str),
-    ("args_count", 0, BuiltinKind::Str),
-    ("arg", 1, BuiltinKind::Str),
+    ("prim_args_count", 0, BuiltinKind::Str),
+    ("prim_arg", 1, BuiltinKind::Str),
     ("to_i64", 1, BuiltinKind::Int),
     ("to_u64", 1, BuiltinKind::Int),
     ("int_of_i64", 1, BuiltinKind::Int),

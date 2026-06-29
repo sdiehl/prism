@@ -25,6 +25,7 @@ mod paths;
 mod vars;
 mod views;
 
+pub(in crate::syntax::desugar) use escape::referenced_names;
 use defaults::fill_call;
 use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;

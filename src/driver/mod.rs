@@ -469,6 +469,11 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
 pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str>, Error> {
     use crate::core::{Comp, Value};
 
+    // The input capability wrappers route host file/env IO through effects, so
+    // the underlying prim builtin lives only in the always-reachable world
+    // handler. Detect that usage from the surface wrapper a program reaches.
+    const INPUT_WRAPPERS: &[&str] = &["read_file", "file_exists", "getenv", "args_count", "arg"];
+
     fn scan_val(v: &Value, out: &mut Vec<&'static str>) {
         match v {
             Value::Thunk(c) => scan_comp(c, out),
@@ -559,6 +564,11 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
     let mut out = Vec::new();
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {
         scan_comp(&f.body, &mut out);
+    }
+    for w in INPUT_WRAPPERS {
+        if reachable.contains(&Sym::new(w)) && !out.contains(w) {
+            out.push(w);
+        }
     }
     Ok(out)
 }

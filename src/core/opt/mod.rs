@@ -19,11 +19,15 @@ use super::traverse::Rewrite;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
+mod cse;
+mod inline;
 mod lint;
 mod simplify;
 mod specialize;
 pub use lint::lint;
 pub use specialize::specialize;
+use cse::cse_counted;
+use inline::inline_counted;
 use simplify::simplify_counted;
 use specialize::specialize_counted;
 
@@ -69,8 +73,13 @@ pub enum CorePass {
     /// Specialize constrained calls on known global dictionaries to direct calls.
     Specialize,
     /// The fixed-point gentle simplifier (case-of-known-constructor, trivial
-    /// copy-propagation, dead-let elimination).
+    /// copy-propagation, dead-let elimination, const-fold, case-of-case,
+    /// used-once-thunk inlining).
     Simplify,
+    /// Inline single-call-site non-recursive functions.
+    Inline,
+    /// Common subexpression elimination of pure scalar `Prim`s.
+    Cse,
 }
 
 impl CorePass {
@@ -81,6 +90,8 @@ impl CorePass {
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
             Self::Simplify => "Simplify",
+            Self::Inline => "Inline",
+            Self::Cse => "Cse",
         }
     }
 
@@ -88,9 +99,15 @@ impl CorePass {
     /// unknown name.
     #[must_use]
     pub fn from_name(s: &str) -> Option<Self> {
-        [Self::EraseNewtypes, Self::Specialize, Self::Simplify]
-            .into_iter()
-            .find(|p| p.name() == s)
+        [
+            Self::EraseNewtypes,
+            Self::Specialize,
+            Self::Simplify,
+            Self::Inline,
+            Self::Cse,
+        ]
+        .into_iter()
+        .find(|p| p.name() == s)
     }
 
     /// Which stage of the pipeline this pass runs in.
@@ -100,9 +117,10 @@ impl CorePass {
             // Erasure is a representation both backends consume; specialization
             // needs the pre-lowering dictionary shapes.
             Self::EraseNewtypes | Self::Specialize => PassStage::PreLowering,
-            // The simplifier must run after effect lowering: pre-lowering it
-            // rewrites the Core shapes the var/State fusion analysis matches on.
-            Self::Simplify => PassStage::Late,
+            // The simplifier, inliner, and CSE must run after effect lowering:
+            // pre-lowering they rewrite the Core shapes the var/State fusion
+            // analysis matches on.
+            Self::Simplify | Self::Inline | Self::Cse => PassStage::Late,
         }
     }
 }
@@ -284,9 +302,24 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     // the var/State fusion instead of defeating it.
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        OptLevel::O1 | OptLevel::O2 => vec![
+        OptLevel::O1 => vec![
             CorePass::EraseNewtypes,
             CorePass::Specialize,
+            CorePass::Simplify,
+        ],
+        // O2 adds the inliner, sandwiched in simplifier runs (the GHC
+        // simplify/inline/simplify shape): the first cleans and exposes call
+        // sites, the inliner pastes single-call-site bodies in, the second cleans
+        // up the inlined code (wrappers vanish, case-of-known-constructor fires
+        // across the inlined boundary). The inliner is O2-only until its fresh-
+        // name supply is deterministic enough for the O1 snapshots.
+        OptLevel::O2 => vec![
+            CorePass::EraseNewtypes,
+            CorePass::Specialize,
+            CorePass::Simplify,
+            CorePass::Inline,
+            CorePass::Simplify,
+            CorePass::Cse,
             CorePass::Simplify,
         ],
     }
@@ -331,6 +364,8 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
         CorePass::EraseNewtypes => erase_newtypes_counted(core, &cx.newtype_ctors),
         CorePass::Specialize => specialize_counted(core),
         CorePass::Simplify => simplify_counted(core),
+        CorePass::Inline => inline_counted(core),
+        CorePass::Cse => cse_counted(core),
     };
     cx.stats.record(pass.name(), ticks);
     out

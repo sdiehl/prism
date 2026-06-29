@@ -509,7 +509,7 @@ long prism_kont_splice(long top, long base) {
     return prev;
 }
 
-long prism_read_int(void) {
+long prism_prim_read_int(void) {
     long n = 0;
     if (scanf("%ld", &n) != 1) {
         fprintf(stderr, "fatal: read_int: no integer on stdin\n");
@@ -518,7 +518,7 @@ long prism_read_int(void) {
     return n;
 }
 
-long prism_read_line(void) {
+long prism_prim_read_line(void) {
     char *buf = 0;
     size_t cap = 0;
     long n = getline(&buf, &cap, stdin);
@@ -1256,7 +1256,7 @@ static unsigned long prism_rng = 0x9E3779B97F4A7C15UL;
 
 void prism_srand(long seed) { prism_rng = (unsigned long)seed; }
 
-long prism_rand(void) {
+long prism_prim_rand(void) {
     prism_rng += 0x9E3779B97F4A7C15UL;
     unsigned long z = prism_rng;
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
@@ -1462,23 +1462,23 @@ static void prism_read_fatal(const char *why, const char *path) {
 static int prism_argc = 0;
 static char **prism_argv = 0;
 
-long prism_args_count(void) {
+long prism_prim_args_count(void) {
     return prism_argc;
 }
 
-long prism_arg(long i) {
+long prism_prim_arg(long i) {
     if (i < 0 || i >= prism_argc) return prism_str_lit("", 0);
     const char *a = prism_argv[i];
     return prism_str_lit(a, (long)strlen(a));
 }
 
-long prism_getenv(long name) {
+long prism_prim_getenv(long name) {
     const char *v = getenv(prism_str_data(name));
     if (!v) return prism_str_lit("", 0);
     return prism_str_lit(v, (long)strlen(v));
 }
 
-long prism_read_file(long path) {
+long prism_prim_read_file(long path) {
     const char *name = prism_str_data(path);
     FILE *f = fopen(name, "rb");
     if (!f) prism_read_fatal("cannot open", name);
@@ -1525,7 +1525,7 @@ long prism_append_file(long path, long contents) {
     return prism_file_write(path, contents, "ab");
 }
 
-long prism_file_exists(long path) {
+long prism_prim_file_exists(long path) {
     FILE *f = fopen(prism_str_data(path), "rb");
     if (f) fclose(f);
     return f != 0;

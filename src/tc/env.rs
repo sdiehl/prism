@@ -426,9 +426,9 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
 const BUILTINS: &[(&str, &str)] = &[
     ("print", "forall a. (a) -> Unit ! {IO}"),
     ("println", "forall a. (a) -> Unit ! {IO}"),
-    ("read_int", "() -> Int ! {IO}"),
-    ("read_line", "() -> String ! {IO}"),
-    ("rand", "() -> Int ! {IO}"),
+    ("prim_read_int", "() -> Int ! {IO}"),
+    ("prim_read_line", "() -> String ! {IO}"),
+    ("prim_rand", "() -> Int ! {IO}"),
     ("srand", "(Int) -> Unit ! {IO}"),
     ("error", "forall a. (Int) -> a ! {Exn}"),
     ("to_float", "(Int) -> Float"),
@@ -458,17 +458,17 @@ const BUILTINS: &[(&str, &str)] = &[
     ("chr", "(Int) -> Char"),
     ("show_char", "(Char) -> String"),
     ("parse_int", "(String) -> Option(Int)"),
-    ("getenv", "(String) -> String"),
-    ("read_file", "(String) -> String"),
-    ("write_file", "(String, String) -> Result(Unit, String)"),
-    ("file_exists", "(String) -> Bool"),
-    ("append_file", "(String, String) -> Result(Unit, String)"),
-    ("remove_file", "(String) -> Unit"),
+    ("prim_getenv", "(String) -> String ! {IO}"),
+    ("prim_read_file", "(String) -> String ! {IO}"),
+    ("write_file", "(String, String) -> Result(Unit, String) ! {IO}"),
+    ("prim_file_exists", "(String) -> Bool ! {IO}"),
+    ("append_file", "(String, String) -> Result(Unit, String) ! {IO}"),
+    ("remove_file", "(String) -> Unit ! {IO}"),
     ("exit", "forall a. (Int) -> a"),
     ("system", "(String) -> Int ! {IO}"),
     ("eprint", "(String) -> Unit ! {IO}"),
-    ("args_count", "() -> Int"),
-    ("arg", "(Int) -> String"),
+    ("prim_args_count", "() -> Int ! {IO}"),
+    ("prim_arg", "(Int) -> String ! {IO}"),
     ("to_i64", "(Int) -> I64"),
     ("to_u64", "(Int) -> U64"),
     ("int_of_i64", "(I64) -> Int"),
@@ -693,8 +693,10 @@ mod tests {
         for (name, sig) in super::BUILTINS {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
             let want: &[&str] = match *name {
-                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" | "system"
-                | "eprint" => &["IO"],
+                "print" | "println" | "prim_read_int" | "prim_read_line" | "prim_rand"
+                | "srand" | "system" | "eprint" | "prim_getenv" | "prim_read_file"
+                | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
+                | "prim_args_count" | "prim_arg" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

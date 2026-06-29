@@ -493,12 +493,12 @@ impl<'a, I: Isa> Cg<'a, I> {
                 Ok(self.isa.const_int(&mut self.b, 0))
             }
             Comp::ReadInt => {
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_read_int", &[]));
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_prim_read_int", &[]));
                 Ok(self.retag(&t))
             }
-            Comp::ReadLine => Ok(self.dst(|i, b, d| i.call(b, d, "prism_read_line", &[]))),
+            Comp::ReadLine => Ok(self.dst(|i, b, d| i.call(b, d, "prism_prim_read_line", &[]))),
             Comp::Rand => {
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_rand", &[]));
+                let t = self.dst(|i, b, d| i.call(b, d, "prism_prim_rand", &[]));
                 Ok(self.retag(&t))
             }
             Comp::Srand(v) => {

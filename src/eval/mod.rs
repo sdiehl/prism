@@ -1314,7 +1314,7 @@ mod tests {
             &src,
             format!(
                 "#include <stdio.h>\n#include <string.h>\n\
-                 long prism_rand(void);\n\
+                 long prism_prim_rand(void);\n\
                  long prism_str_lit(const char *, long);\n\
                  long prism_big_of_str(long, int *);\n\
                  long prism_big_show(long);\n\
@@ -1409,7 +1409,7 @@ mod tests {
     // An unseeded `rand` must stream identical values on every backend, so the
     // interpreter's SplitMix64 and the C runtime's must be the same generator.
     // Pin the interpreter to a hand-verified golden vector, then run the C
-    // runtime as the oracle: its `prism_rand()` (which drops the low 2 bits) must
+    // runtime as the oracle: its `prism_prim_rand()` (which drops the low 2 bits) must
     // equal `splitmix64() >> 2`. Drift in either implementation fails here, not
     // only in the end-to-end corpus.
     #[test]
@@ -1428,7 +1428,7 @@ mod tests {
         );
 
         let Some(lines) =
-            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_rand());")
+            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_prim_rand());")
         else {
             return;
         };

@@ -6,7 +6,7 @@
 --
 -- Input fixture (echo.in): three lines of text.
 
-fn cat(n) : !{IO} Unit =
+fn cat(n) : !{IO, Console} Unit =
   let line = read_line()
   if str_eq(line, "") then
     ()

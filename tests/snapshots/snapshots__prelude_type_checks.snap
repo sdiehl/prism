@@ -125,8 +125,10 @@ Data.String.to_upper : (String) -> String ! {}
 Data.String.trim : (String) -> String ! {}
 abs : (Int) -> Int ! {}
 and : (Bool, Bool) -> Bool ! {}
-args : () -> List(String) ! {}
-args_go : (Int, Int) -> List(String) ! {}
+arg : (Int) -> String ! {Env} ! {Env}
+args : () -> List(String) ! {Env} ! {Env}
+args_count : () -> Int ! {Env} ! {Env}
+args_go : (Int, Int) -> List(String) ! {Env} ! {Env}
 array_foldl : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0} ! {}
 array_foldl_go : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b), Int) -> a ! {e0} ! {}
 array_of_list : forall a. (List(a)) -> Array(a) ! {}
@@ -157,6 +159,7 @@ eprintln : (String) -> Unit ! {IO} ! {IO}
 even : (Int) -> Bool ! {}
 factorial : (Int) -> Int ! {}
 fib : (Int) -> Int ! {}
+file_exists : (String) -> Bool ! {FileSystem} ! {FileSystem}
 flip : forall a b c e0. ((b, c) -> a ! {e0}, c, b) -> a ! {e0} ! {}
 fnv_from : (String, Int, U64) -> U64 ! {}
 for_range : forall a e0. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0} ! {}
@@ -164,6 +167,7 @@ force : forall a. (Option(a)) -> a ! {Fail} ! {Fail}
 forever : forall a b e0. (() -> b ! {e0}) -> a ! {e0} ! {}
 fst : forall a b. ((a, b)) -> a ! {}
 gcd : (Int, Int) -> Int ! {}
+getenv : (String) -> String ! {Env} ! {Env}
 guard : (Bool) -> Unit ! {Fail} ! {Fail}
 hm_adjust : forall a e0. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0} ! {}
 hm_delete : forall a. (HashMap(a), String) -> HashMap(a) ! {}
@@ -201,11 +205,16 @@ pair_map : forall a b c d e0. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, 
 pair_values : forall a b. (List((a, b))) -> List(b) ! {}
 pi : Float ! {}
 push_all : forall a. (Array(a), List(a)) -> Array(a) ! {}
-rand_below : (Int) -> Int ! {IO} ! {IO}
-rand_bool : () -> Bool ! {IO} ! {IO}
-rand_range : (Int, Int) -> Int ! {IO} ! {IO}
+rand : () -> Int ! {Random} ! {Random}
+rand_below : (Int) -> Int ! {Random} ! {Random}
+rand_bool : () -> Bool ! {Random} ! {Random}
+rand_range : (Int, Int) -> Int ! {Random} ! {Random}
+read_file : (String) -> String ! {FileSystem} ! {FileSystem}
+read_int : () -> Int ! {Console} ! {Console}
+read_line : () -> String ! {Console} ! {Console}
 repeat : forall a e0. (Int, () -> a ! {e0}) -> Unit ! {e0} ! {}
 repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} ! {}
+run_io : forall a e0. ((Unit) -> a ! {Console, Env, FileSystem, IO, Random, e0}) -> a ! {IO, e0} ! {IO}
 scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0} ! {}
 sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0} ! {}
 signum : (Int) -> Int ! {}

@@ -419,6 +419,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         fold_wheres(&mut d);
         fns.push(core_decl(d, &mut cx)?);
     }
+    wrap_main_world(&mut fns);
     let mut instances = Vec::with_capacity(prog.instances.len());
     for i in prog.instances {
         let mut methods = Vec::with_capacity(i.methods.len());
@@ -452,6 +453,57 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         exports: prog.exports,
         opaques: prog.opaques,
     })
+}
+
+// Surface wrappers that perform a capability effect (Console/FileSystem/Random/
+// Env). A program needs the world handler iff `main` reaches one of these.
+const CAP_WRAPPERS: &[&str] = &[
+    "read_int",
+    "read_line",
+    "read_file",
+    "file_exists",
+    "rand",
+    "getenv",
+    "args_count",
+    "arg",
+    "args",
+];
+
+// Wrap `main` in the default world handler `run_io` so top-level input IO works
+// without the user installing a handler. Only applied when the program defines
+// `run_io` (the prelude does) and `main` reaches a capability wrapper, so pure
+// programs and the prelude-free corpus stay untouched and pay nothing. Wrapping
+// only on demand also keeps the fused world handler clear of programs whose body
+// reifies an inner handler, where a wrap-over-reified-handler would otherwise
+// surface a backend divergence.
+fn wrap_main_world(fns: &mut [Decl<Core>]) {
+    let names: BTreeSet<&str> = fns.iter().map(|d| d.name.as_str()).collect();
+    if !names.contains("run_io") || !names.contains(names::ENTRY_POINT) {
+        return;
+    }
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for d in fns.iter() {
+        edges.insert(d.name.clone(), effects::referenced_names(&d.body));
+    }
+    let mut reachable: BTreeSet<String> = BTreeSet::new();
+    let mut queue = vec![names::ENTRY_POINT.to_string()];
+    while let Some(n) = queue.pop() {
+        if !reachable.insert(n.clone()) {
+            continue;
+        }
+        if let Some(refs) = edges.get(&n) {
+            queue.extend(refs.iter().filter(|r| names.contains(r.as_str())).cloned());
+        }
+    }
+    if !CAP_WRAPPERS.iter().any(|w| reachable.contains(*w)) {
+        return;
+    }
+    if let Some(d) = fns.iter_mut().find(|d| d.name == names::ENTRY_POINT) {
+        let span = d.body.span;
+        let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
+        let action = lam1(names::UNIT_ARG, body, span);
+        d.body = call(evar("run_io", span), vec![action], span);
+    }
 }
 
 // Rewrite a surface `Decl` into a core one: its body loses all sugar via `rw`,

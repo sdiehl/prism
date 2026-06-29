@@ -266,6 +266,71 @@ effect Emit(a) {
   ctl emit(a) : Unit
 }
 
+-- Capability effects routing the nondeterministic input primitives. User code
+-- calls the surface wrappers (read_int, read_file, ...), which perform an op;
+-- the default world handler run_io discharges each by resuming with the matching
+-- prim_* builtin. The tail-resumptive handlers fuse, so a wrapped read costs no
+-- effect-op allocation.
+effect Console {
+  ctl con_read_int(Unit) : Int,
+  ctl con_read_line(Unit) : String
+}
+
+effect FileSystem {
+  ctl fs_read_file(String) : String,
+  ctl fs_file_exists(String) : Bool
+}
+
+effect Random {
+  ctl rng_rand(Unit) : Int
+}
+
+effect Env {
+  ctl env_get(String) : String,
+  ctl env_argc(Unit) : Int,
+  ctl env_arg(Int) : String
+}
+
+fn read_int() = con_read_int(())
+
+fn read_line() = con_read_line(())
+
+fn read_file(p) = fs_read_file(p)
+
+fn file_exists(p) = fs_file_exists(p)
+
+fn rand() = rng_rand(())
+
+fn getenv(s) = env_get(s)
+
+fn args_count() = env_argc(())
+
+fn arg(i) = env_arg(i)
+
+-- The default world handler the entry point is wrapped in. Each effect is
+-- discharged by a tail-resumptive handler that resumes with the matching prim_*
+-- builtin, so the chain fuses to direct calls (no effect-op allocation). The
+-- action's row is annotated with the four capability effects (open in e), so the
+-- handlers subtract them concretely and run_io leaves only {IO | e}.
+fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env | e}) =
+  handle (handle (handle (handle action(()) with {
+        con_read_int(u, k) => k(prim_read_int()),
+        con_read_line(u, k) => k(prim_read_line()),
+        return r => r
+      }) with {
+        fs_read_file(p, k) => k(prim_read_file(p)),
+        fs_file_exists(p, k) => k(prim_file_exists(p)),
+        return r => r
+      }) with {
+        rng_rand(u, k) => k(prim_rand()),
+        return r => r
+      }) with {
+        env_get(s, k) => k(prim_getenv(s)),
+        env_argc(u, k) => k(prim_args_count()),
+        env_arg(i, k) => k(prim_arg(i)),
+        return r => r
+      }
+
 fn srange_go(lo, hi) =
   if lo < hi then
     emit(lo)

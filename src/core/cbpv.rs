@@ -8,7 +8,7 @@ use crate::syntax::ast::BinOp;
 // Primitive operators that survive elaboration. Short-circuit `&&`/`||` lower to
 // `If` and never reach a `Prim`, so they have no variant here: a downstream pass
 // cannot observe one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CoreOp {
     Add,
     Sub,

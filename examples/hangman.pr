@@ -24,7 +24,7 @@ fn str_contains(hay, needle) : ! Bool =
 
 fn solved(secret, guessed) : ! Bool = str_eq(reveal(secret, guessed, 0), secret)
 
-fn play(secret, guessed, lives) : !{IO} Unit =
+fn play(secret, guessed, lives) : !{IO, Console} Unit =
   println(reveal(secret, guessed, 0))
   if solved(secret, guessed) then
     println(lives)

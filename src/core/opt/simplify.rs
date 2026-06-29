@@ -13,6 +13,9 @@
 //! - Constant folding: a `Prim` over integer literals reduces to its result. It
 //!   mirrors the evaluator's i64 fast path exactly and folds only the cases that
 //!   path keeps in i64, so it stays parity-safe (see `const_fold`).
+//! - Used-once-thunk inlining: a thunk bound and then immediately forced once
+//!   collapses to its computation, dropping the allocation (sound because thunks
+//!   are not memoized).
 //!
 //! The simplifier is a late pass, run after effect lowering (the var/State fusion
 //! analysis matches Core shapes that copy-propagation would otherwise destroy);
@@ -212,6 +215,22 @@ impl Rewrite for Simplifier {
                     }
                 }
                 let body2 = self.comp(body, &benv);
+                // Used-once-thunk inlining (canonical immediate-force shape): a
+                // thunk bound and then immediately forced once collapses to its
+                // computation, dropping the allocation. Sound because Prism thunks
+                // are not memoized (forcing re-runs the computation), so the inline
+                // runs it exactly as often; `x` not free in `rest` confirms the
+                // force was the only use.
+                if let Comp::Return(Value::Thunk(c)) = &rhs2 {
+                    if let Comp::Bind(forced, y, rest) = &body2 {
+                        if matches!(forced.as_ref(), Comp::Force(Value::Var(f)) if f == x)
+                            && !fv::comp(rest).contains(x)
+                        {
+                            self.ticks += 1;
+                            return Comp::Bind(c.clone(), *y, rest.clone());
+                        }
+                    }
+                }
                 if matches!(rhs2, Comp::Return(_)) && !fv::comp(&body2).contains(x) {
                     self.ticks += 1; // dead-let
                     body2
@@ -370,6 +389,29 @@ mod tests {
         // `Value::Int` cannot represent it (this was a real parity bug).
         let big = (1i64 << 62) - 1;
         assert!(matches!(fold(CoreOp::Add, big, big), Comp::Prim(CoreOp::Add, ..)));
+    }
+
+    // A thunk bound and immediately forced once collapses to its computation,
+    // dropping the allocation. `fn f(n) = let t = thunk(return n) in let y =
+    // force t in return y` becomes `let y = (return n) in return y`.
+    #[test]
+    fn used_once_thunk_inlines_at_its_force() {
+        let n = s("n");
+        let body = Comp::Bind(
+            Box::new(Comp::Return(Value::Thunk(Box::new(Comp::Return(Value::Var(n)))))),
+            s("t"),
+            Box::new(Comp::Bind(
+                Box::new(Comp::Force(Value::Var(s("t")))),
+                s("y"),
+                Box::new(Comp::Return(Value::Var(s("y")))),
+            )),
+        );
+        let (out, ticks) = simplify_counted(&one(vec![n], body));
+        assert!(ticks > 0);
+        // The thunk binder `t` is gone; no `Force` remains.
+        let printed = format!("{:?}", out.fns[0].body);
+        assert!(!printed.contains("Force"), "force not inlined: {printed}");
+        assert!(!printed.contains("Thunk"), "thunk not dropped: {printed}");
     }
 
     // A let of a variable is copy-propagated into its uses and then dropped.
