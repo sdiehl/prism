@@ -13,12 +13,157 @@
 
 use std::collections::BTreeSet;
 
-use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
+use super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
+use super::traverse::Rewrite;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
+mod lint;
 mod specialize;
+pub use lint::lint;
 pub use specialize::specialize;
+use specialize::specialize_counted;
+
+/// Optimization level: the knob that selects which passes run.
+///
+/// `O0` keeps only the mandatory representation passes (newtype erasure, which
+/// both backends depend on); `O1`, the default, adds optimization.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OptLevel {
+    O0,
+    #[default]
+    O1,
+}
+
+/// A pass in the pipeline (the GHC `CoreToDo` analogue).
+///
+/// The ordered list a level expands to is data, built by [`pipeline`]; new
+/// passes slot in here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CorePass {
+    /// Erase single-field `newtype` boxes. Mandatory at every level: it is a
+    /// representation decision both backends consume, not an optimization.
+    EraseNewtypes,
+    /// Specialize constrained calls on known global dictionaries to direct calls.
+    Specialize,
+}
+
+impl CorePass {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::EraseNewtypes => "EraseNewtypes",
+            Self::Specialize => "Specialize",
+        }
+    }
+}
+
+/// Per-pass tick counts (rewrites fired), in run order. Dumped under
+/// `PRISM_OPT_STATS`; the `-ddump-simpl-stats` analogue.
+#[derive(Clone, Debug, Default)]
+pub struct PassStats {
+    entries: Vec<(&'static str, u64)>,
+}
+
+impl PassStats {
+    fn record(&mut self, pass: &'static str, ticks: u64) {
+        self.entries.push((pass, ticks));
+    }
+
+    /// Total rewrites fired across all passes.
+    #[must_use]
+    pub fn total(&self) -> u64 {
+        self.entries.iter().map(|(_, t)| t).sum()
+    }
+
+    /// Per-pass tick counts in run order.
+    #[must_use]
+    pub fn entries(&self) -> &[(&'static str, u64)] {
+        &self.entries
+    }
+
+    fn report(&self) -> String {
+        use std::fmt::Write;
+        let mut s = String::from("core-opt ticks:\n");
+        for (pass, ticks) in &self.entries {
+            let _ = writeln!(s, "  {pass:<16} {ticks}");
+        }
+        let _ = writeln!(s, "  {:<16} {}", "total", self.total());
+        s
+    }
+}
+
+/// The optimization context (the GHC `CoreM` analogue): the level, the
+/// program-derived newtype constructor set a pass needs, and the tick counter.
+/// A fresh-name supply (`Sym::fresh`) is added here when a clone-generating pass
+/// first needs it.
+struct OptCx {
+    level: OptLevel,
+    newtype_ctors: BTreeSet<Sym>,
+    stats: PassStats,
+}
+
+/// The ordered pass list for an opt level (the GHC `getCoreToDo`). Order matters:
+/// erase first (it exposes inner values), then specialize.
+#[must_use]
+pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
+    match level {
+        OptLevel::O0 => vec![CorePass::EraseNewtypes],
+        OptLevel::O1 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
+    }
+}
+
+fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
+    let (out, ticks) = match pass {
+        CorePass::EraseNewtypes => erase_newtypes_counted(core, &cx.newtype_ctors),
+        CorePass::Specialize => specialize_counted(core),
+    };
+    cx.stats.record(pass.name(), ticks);
+    out
+}
+
+/// Run the Core-to-Core pipeline for `level` over `core`.
+///
+/// Folds the passes built by [`pipeline`], honoring two env opt-outs
+/// (`PRISM_NO_SPECIALIZE` drops specialization for before/after measurement) and
+/// running Core Lint between passes under `PRISM_CORE_LINT`. Per-pass ticks are
+/// returned, and dumped to stderr under `PRISM_OPT_STATS`.
+///
+/// # Panics
+/// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
+/// compiler bug), naming the pass responsible.
+#[must_use]
+pub fn run(core: &Core, prog: &Program<CorePhase>, level: OptLevel) -> (Core, PassStats) {
+    let lint_on = std::env::var_os("PRISM_CORE_LINT").is_some();
+    let no_spec = std::env::var_os("PRISM_NO_SPECIALIZE").is_some();
+    let mut cx = OptCx {
+        level,
+        newtype_ctors: newtype_ctors(prog),
+        stats: PassStats::default(),
+    };
+    let check = |c: &Core, after: &str| {
+        if lint_on {
+            if let Err(errs) = lint(c) {
+                panic!(
+                    "PRISM_CORE_LINT: ill-formed Core after {after}:\n{}",
+                    errs.join("\n")
+                );
+            }
+        }
+    };
+    check(core, "<input>");
+    let mut cur = core.clone();
+    for pass in pipeline(cx.level) {
+        if pass == CorePass::Specialize && no_spec {
+            continue;
+        }
+        cur = run_pass(pass, &cur, &mut cx);
+        check(&cur, pass.name());
+    }
+    if std::env::var_os("PRISM_OPT_STATS").is_some() {
+        eprint!("{}", cx.stats.report());
+    }
+    (cur, cx.stats)
+}
 
 /// The constructor symbol of every `newtype` in the program (each a single-field
 /// wrapper whose box this tier erases).
@@ -36,111 +181,68 @@ pub fn newtype_ctors(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
 /// program declares no newtypes.
 #[must_use]
 pub fn erase_newtypes(core: &Core, nt: &BTreeSet<Sym>) -> Core {
-    if nt.is_empty() {
-        return core.clone();
-    }
-    Core {
-        fns: core
-            .fns
-            .iter()
-            .map(|f| CoreFn {
-                name: f.name,
-                params: f.params.clone(),
-                body: erase_comp(&f.body, nt),
-            })
-            .collect(),
-    }
+    erase_newtypes_counted(core, nt).0
 }
 
-fn erase_value(v: &Value, nt: &BTreeSet<Sym>) -> Value {
-    match v {
-        // The newtype box is its single field: drop the wrapper.
-        Value::Ctor(name, _, fields) if nt.contains(name) && fields.len() == 1 => {
-            erase_value(&fields[0], nt)
-        }
-        Value::Ctor(name, tag, fields) => Value::Ctor(
-            *name,
-            *tag,
-            fields.iter().map(|f| erase_value(f, nt)).collect(),
-        ),
-        Value::Tuple(fields) => Value::Tuple(fields.iter().map(|f| erase_value(f, nt)).collect()),
-        Value::Thunk(c) => Value::Thunk(Box::new(erase_comp(c, nt))),
-        _ => v.clone(),
+// As `erase_newtypes`, also returning how many boxes were erased (the pass's
+// tick count for telemetry).
+fn erase_newtypes_counted(core: &Core, nt: &BTreeSet<Sym>) -> (Core, u64) {
+    if nt.is_empty() {
+        return (core.clone(), 0);
     }
+    let mut e = Erase { nt, ticks: 0 };
+    let fns = core
+        .fns
+        .iter()
+        .map(|f| CoreFn {
+            name: f.name,
+            params: f.params.clone(),
+            body: e.comp(&f.body, &()),
+        })
+        .collect();
+    (Core { fns }, e.ticks)
+}
+
+struct Erase<'a> {
+    nt: &'a BTreeSet<Sym>,
+    ticks: u64,
 }
 
 fn is_newtype_match(arms: &[(CorePat, Comp)], nt: &BTreeSet<Sym>) -> bool {
     arms.len() == 1 && matches!(&arms[0].0, CorePat::Ctor(n, bs) if nt.contains(n) && bs.len() == 1)
 }
 
-fn erase_comp(c: &Comp, nt: &BTreeSet<Sym>) -> Comp {
-    let ev = |v: &Value| erase_value(v, nt);
-    let ec = |c: &Comp| erase_comp(c, nt);
-    let eb = |c: &Comp| Box::new(erase_comp(c, nt));
-    match c {
-        // A newtype match is one irrefutable arm: rebind the matched value (now
-        // the inner value) and run the body.
-        Comp::Case(v, arms) if is_newtype_match(arms, nt) => {
-            let CorePat::Ctor(_, binders) = &arms[0].0 else {
-                unreachable!("is_newtype_match")
-            };
-            let binder = binders[0].unwrap_or_else(|| Sym::from("_"));
-            Comp::Bind(Box::new(Comp::Return(ev(v))), binder, eb(&arms[0].1))
+impl Rewrite for Erase<'_> {
+    type Ctx = ();
+
+    fn comp(&mut self, c: &Comp, cx: &()) -> Comp {
+        match c {
+            // A newtype match is one irrefutable arm: rebind the matched value
+            // (now the inner value) and run the body.
+            Comp::Case(v, arms) if is_newtype_match(arms, self.nt) => {
+                let CorePat::Ctor(_, binders) = &arms[0].0 else {
+                    unreachable!("is_newtype_match")
+                };
+                self.ticks += 1;
+                let binder = binders[0].unwrap_or_else(|| Sym::from("_"));
+                Comp::Bind(
+                    Box::new(Comp::Return(self.value(v, cx))),
+                    binder,
+                    Box::new(self.comp(&arms[0].1, cx)),
+                )
+            }
+            _ => self.descend_comp(c, cx),
         }
-        Comp::Return(v) => Comp::Return(ev(v)),
-        Comp::Bind(a, x, b) => Comp::Bind(eb(a), *x, eb(b)),
-        Comp::Force(v) => Comp::Force(ev(v)),
-        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), eb(b)),
-        Comp::App(f, args) => Comp::App(eb(f), args.iter().map(ev).collect()),
-        Comp::If(c0, t, e) => Comp::If(ev(c0), eb(t), eb(e)),
-        Comp::Prim(op, a, b) => Comp::Prim(*op, ev(a), ev(b)),
-        Comp::Call(n, args) => Comp::Call(*n, args.iter().map(ev).collect()),
-        Comp::Print(v) => Comp::Print(ev(v)),
-        Comp::PrintF(v) => Comp::PrintF(ev(v)),
-        Comp::PrintS(v) => Comp::PrintS(ev(v)),
-        Comp::PrintNl => Comp::PrintNl,
-        Comp::ReadInt => Comp::ReadInt,
-        Comp::ReadLine => Comp::ReadLine,
-        Comp::Rand => Comp::Rand,
-        Comp::Srand(v) => Comp::Srand(ev(v)),
-        Comp::Error(v) => Comp::Error(ev(v)),
-        Comp::Case(v, arms) => Comp::Case(
-            ev(v),
-            arms.iter().map(|(p, b)| (p.clone(), ec(b))).collect(),
-        ),
-        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, ev(v)),
-        Comp::Do(n, args) => Comp::Do(*n, args.iter().map(ev).collect()),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: eb(body),
-            return_var: *return_var,
-            return_body: return_body.as_ref().map(|b| eb(b)),
-            ops: ops
-                .iter()
-                .map(|o| HandleOp {
-                    name: o.name,
-                    params: o.params.clone(),
-                    resume: o.resume,
-                    body: ec(&o.body),
-                })
-                .collect(),
-        },
-        Comp::Mask(es, b) => Comp::Mask(es.clone(), eb(b)),
-        Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, args.iter().map(ev).collect()),
-        Comp::Dup(v) => Comp::Dup(ev(v)),
-        Comp::Drop(v) => Comp::Drop(ev(v)),
-        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
-            token: *token,
-            freed: ev(freed),
-            body: eb(body),
-        },
-        Comp::Reuse(t, v) => Comp::Reuse(*t, ev(v)),
-        Comp::RefNew(v) => Comp::RefNew(ev(v)),
-        Comp::RefGet(v) => Comp::RefGet(ev(v)),
-        Comp::RefSet(a, b) => Comp::RefSet(ev(a), ev(b)),
+    }
+
+    fn value(&mut self, v: &Value, cx: &()) -> Value {
+        match v {
+            // The newtype box is its single field: drop the wrapper.
+            Value::Ctor(name, _, fields) if self.nt.contains(name) && fields.len() == 1 => {
+                self.ticks += 1;
+                self.value(&fields[0], cx)
+            }
+            _ => self.descend_value(v, cx),
+        }
     }
 }

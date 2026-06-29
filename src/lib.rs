@@ -44,10 +44,10 @@ pub use driver::{build, build_at, build_on, emit_ir};
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
 pub use driver::{
-    check, check_at, check_on, core_ir, core_ir_full, dump, dump_at, dump_on, effect_strategy_full,
-    effect_warnings_full, interpret, interpret_at, interpret_io_at, interpret_io_on,
-    off_platform_builtins, rc_balanced, report, report_at, report_on, with_custom_prelude,
-    with_prelude,
+    check, check_at, check_on, core_ir, core_ir_full, core_of, dump, dump_at, dump_on,
+    effect_strategy_full, effect_warnings_full, interpret, interpret_at, interpret_io_at,
+    interpret_io_on, off_platform_builtins, rc_balanced, report, report_at, report_on,
+    with_custom_prelude, with_prelude,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use fmt::{format, format_check};

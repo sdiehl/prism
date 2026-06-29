@@ -14,8 +14,8 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::{
-    balanced, check_fip, check_fip_linear, elaborate, erase_newtypes, fip_annots, hash_program,
-    insert_rc, lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, specialize, Core,
+    balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
+    lower_effects, pp_core, pp_core_pretty, reuse, run_opt, Core, OptLevel,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -119,20 +119,13 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &checked, &core)?;
     reconcile_effects(&checked, &core)?;
-    // Zero-cost newtypes: erase the one-field box above the backend fork so both
-    // the interpreter and native see the same unwrapped Core. Placed after the
-    // fip/effect validators so they still judge the program as written.
-    let core = erase_newtypes(&core, &newtype_ctors(&program));
-    // Dictionary specialization: a constrained call on a known instance becomes a
-    // direct call to the instance method, with the dictionary build eliminated.
-    // Opt-out (for before/after measurement and as an escape hatch) keeps the
-    // generic dictionary-passing form; both backends still share one Core, so the
-    // parity oracle holds either way.
-    let core = if std::env::var_os("PRISM_NO_SPECIALIZE").is_some() {
-        core
-    } else {
-        specialize(&core)
-    };
+    // Mid-level Core-to-Core optimization tier. Runs above the interpreter/native
+    // fork so both backends consume the same optimized Core (the parity oracle
+    // holds by construction). Placed after the fip/effect validators so they
+    // still judge the program as written. Newtype erasure is mandatory (a
+    // representation both backends depend on); specialization is opt-out via
+    // `PRISM_NO_SPECIALIZE`.
+    let (core, _stats) = run_opt(&core, &program, OptLevel::O1);
     Ok((program, checked, core))
 }
 
@@ -355,6 +348,18 @@ pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Erro
 /// Fails on front-end errors.
 pub fn core_ir(src: &str) -> Result<String, Error> {
     core_ir_full(&with_prelude(src), Path::new("."))
+}
+
+/// The optimized Core IR for `src` (prelude prepended internally), as produced
+/// by the Core-to-Core tier, before reference counting and effect lowering. The
+/// in-memory analogue of [`core_ir`], for callers that need the term itself
+/// (linting, structural checks) rather than its pretty form.
+///
+/// # Errors
+/// Fails on front-end errors.
+pub fn core_of(src: &str) -> Result<Core, Error> {
+    let (_, _, core) = frontend(&with_prelude(src), &default_roots(Path::new(".")))?;
+    Ok(core)
 }
 
 /// Like [`core_ir`], but `full` already carries the prelude (as the REPL's

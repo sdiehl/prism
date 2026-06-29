@@ -242,95 +242,23 @@ pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
     visited
 }
 
-pub(crate) fn calls_in_val(v: &Value, out: &mut Vec<Sym>) {
-    match v {
-        Value::Thunk(c) => calls_in(c, out),
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => {
-            for f in fs {
-                calls_in_val(f, out);
-            }
-        }
-        _ => {}
-    }
-}
-
+// Every direct call head anywhere in `c` (including inside thunks, lambdas, and
+// handler clauses), in occurrence order. A bare function name flowing
+// first-class (a dictionary field) is not a call head; `reachable_fns` unions
+// those in via `fv`.
 pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
-    match c {
-        Comp::Call(name, args) => {
-            out.push(*name);
-            for a in args {
-                calls_in_val(a, out);
-            }
-        }
-        Comp::Return(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
-        | Comp::Error(v)
-        | Comp::Force(v)
-        | Comp::Srand(v)
-        | Comp::FloatBuiltin(_, v)
-        | Comp::Dup(v)
-        | Comp::Drop(v)
-        | Comp::Reuse(_, v)
-        | Comp::RefNew(v)
-        | Comp::RefGet(v) => {
-            calls_in_val(v, out);
-        }
-        Comp::RefSet(c, v) => {
-            calls_in_val(c, out);
-            calls_in_val(v, out);
-        }
-        Comp::WithReuse { freed, body, .. } => {
-            calls_in_val(freed, out);
-            calls_in(body, out);
-        }
-        Comp::Bind(m, _, n) => {
-            calls_in(m, out);
-            calls_in(n, out);
-        }
-        Comp::If(v, t, e) => {
-            calls_in_val(v, out);
-            calls_in(t, out);
-            calls_in(e, out);
-        }
-        Comp::Case(v, arms) => {
-            calls_in_val(v, out);
-            for (_, body) in arms {
-                calls_in(body, out);
-            }
-        }
-        Comp::Lam(_, body) => calls_in(body, out),
-        Comp::App(f, args) => {
-            calls_in(f, out);
-            for a in args {
-                calls_in_val(a, out);
-            }
-        }
-        Comp::Prim(_, a, b) => {
-            calls_in_val(a, out);
-            calls_in_val(b, out);
-        }
-        Comp::StrBuiltin(_, args) | Comp::Do(_, args) => {
-            for a in args {
-                calls_in_val(a, out);
-            }
-        }
-        Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => {}
-        Comp::Mask(_, b) => calls_in(b, out),
-        Comp::Handle {
-            body,
-            return_body,
-            ops,
-            ..
-        } => {
-            calls_in(body, out);
-            if let Some(rb) = return_body {
-                calls_in(rb, out);
-            }
-            for op in ops {
-                calls_in(&op.body, out);
+    struct Calls<'a>(&'a mut Vec<Sym>);
+    impl super::traverse::Visit for Calls<'_> {
+        fn visit_comp(&mut self, c: &Comp) {
+            if let Comp::Call(name, args) = c {
+                self.0.push(*name);
+                for a in args {
+                    self.visit_value(a);
+                }
+            } else {
+                self.descend_comp(c);
             }
         }
     }
+    super::traverse::Visit::visit_comp(&mut Calls(out), c);
 }
