@@ -129,6 +129,32 @@ fn path_dependency_native_build_matches_interpreter() {
     assert_native_matches_interp(withdep());
 }
 
+// `prism clean` removes the package-root `target/` (and nothing else), and is a
+// no-op success when it is already absent.
+#[test]
+fn clean_removes_target_at_package_root() {
+    let dir = env::temp_dir().join(format!("prism_clean_{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("prism.toml"), "[package]\nname = \"c\"\n\n[bin]\nentry = \"src/main.pr\"\n").unwrap();
+    let target = dir.join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("c"), b"artifact").unwrap();
+    let keep = dir.join("src").join("main.pr");
+    fs::write(&keep, b"fn main() = print(1)\n").unwrap();
+
+    let prism = env!("CARGO_BIN_EXE_prism");
+    // From a nested subdirectory: clean still finds the enclosing manifest.
+    let sub = dir.join("src");
+    assert!(Command::new(prism).arg("clean").arg(&sub).status().unwrap().success());
+    assert!(!target.exists(), "target/ removed");
+    assert!(keep.exists(), "source untouched");
+    // Second run is a no-op success.
+    assert!(Command::new(prism).arg("clean").arg(&dir).status().unwrap().success());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
 }

@@ -33,6 +33,31 @@ pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
+
+// The Core-to-Core optimization level every compile uses, set once from the CLI
+// `-O` flag and read by `frontend`. A process-level default (like the other opt
+// knobs `opt::run` consults) rather than a parameter threaded through every
+// entrypoint. Defaults to `O1`, the tier we ship: newtype erasure plus dictionary
+// specialization.
+static OPT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+
+/// Set the optimization level for subsequent compiles (the CLI `-O` flag).
+pub fn set_opt_level(level: OptLevel) {
+    let n = match level {
+        OptLevel::O0 => 0,
+        OptLevel::O1 => 1,
+        OptLevel::O2 => 2,
+    };
+    OPT_LEVEL.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn opt_level() -> OptLevel {
+    match OPT_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => OptLevel::O0,
+        2 => OptLevel::O2,
+        _ => OptLevel::O1,
+    }
+}
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
 
@@ -124,8 +149,8 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     // holds by construction). Placed after the fip/effect validators so they
     // still judge the program as written. Newtype erasure is mandatory (a
     // representation both backends depend on); specialization is opt-out via
-    // `PRISM_NO_SPECIALIZE`.
-    let (core, _stats) = run_opt(&core, &program, OptLevel::O1);
+    // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1).
+    let (core, _stats) = run_opt(&core, &program, opt_level());
     Ok((program, checked, core))
 }
 
@@ -350,10 +375,11 @@ pub fn core_ir(src: &str) -> Result<String, Error> {
     core_ir_full(&with_prelude(src), Path::new("."))
 }
 
-/// The optimized Core IR for `src` (prelude prepended internally), as produced
-/// by the Core-to-Core tier, before reference counting and effect lowering. The
-/// in-memory analogue of [`core_ir`], for callers that need the term itself
-/// (linting, structural checks) rather than its pretty form.
+/// The optimized Core IR for `src` (prelude prepended internally).
+///
+/// As produced by the Core-to-Core tier, before reference counting and effect
+/// lowering. The in-memory analogue of [`core_ir`], for callers that need the
+/// term itself (linting, structural checks) rather than its pretty form.
 ///
 /// # Errors
 /// Fails on front-end errors.

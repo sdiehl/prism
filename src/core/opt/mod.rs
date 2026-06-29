@@ -14,6 +14,7 @@
 use std::collections::BTreeSet;
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
+use super::pretty::pp_core_pretty;
 use super::traverse::Rewrite;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
@@ -27,12 +28,31 @@ use specialize::specialize_counted;
 /// Optimization level: the knob that selects which passes run.
 ///
 /// `O0` keeps only the mandatory representation passes (newtype erasure, which
-/// both backends depend on); `O1`, the default, adds optimization.
+/// both backends depend on). `O1`, the default, is what we built: it adds
+/// dictionary specialization. `O2` is reserved for the heavier passes on the
+/// roadmap (DCE, the simplifier, the bounded inliner, CSE); it currently expands
+/// to the same list as `O1` until those land.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     O0,
     #[default]
     O1,
+    O2,
+}
+
+impl OptLevel {
+    /// Parse a `-O` level argument: the digit `0`, `1`, or `2` (the form the CLI
+    /// `-O0`/`-O1`/`-O2` flags pass after stripping the prefix). `-O` with no
+    /// digit is conventionally the highest level.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "0" => Some(Self::O0),
+            "1" => Some(Self::O1),
+            "2" | "" => Some(Self::O2),
+            _ => None,
+        }
+    }
 }
 
 /// A pass in the pipeline (the GHC `CoreToDo` analogue).
@@ -108,7 +128,41 @@ struct OptCx {
 pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        OptLevel::O1 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
+        OptLevel::O1 | OptLevel::O2 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
+    }
+}
+
+// Each `run` that dumps gets a distinct id, so the several pipeline invocations a
+// process makes (prelude compile, program compile, REPL turns) write to separate
+// places instead of clobbering one another.
+static DUMP_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+// Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows
+// (the `-ddump-simpl`-per-phase analogue). `stdout`/`stderr` stream a banner plus
+// the block; any other value (or a bare flag) is a base directory under which a
+// `run-N/` subdir holds one ordinal-prefixed file per stage, so directory order
+// matches run order. Dump-only: the rendered form is for reading and diffing, not
+// reloading.
+fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: &Core) {
+    let text = pp_core_pretty(core);
+    match sink.to_string_lossy().as_ref() {
+        "stdout" => print!("=== core[run {run}]: {label} ===\n{text}\n"),
+        "stderr" => eprint!("=== core[run {run}]: {label} ===\n{text}\n"),
+        other => {
+            let base = if matches!(other, "" | "1" | "on" | "true") {
+                "target/core-dumps"
+            } else {
+                other
+            };
+            let safe: String = label
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                .collect();
+            let dir = std::path::Path::new(base).join(format!("run-{run}"));
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let _ = std::fs::write(dir.join(format!("{ord:02}-{safe}.core")), text);
+            }
+        }
     }
 }
 
@@ -150,6 +204,17 @@ pub fn run(core: &Core, prog: &Program<CorePhase>, level: OptLevel) -> (Core, Pa
             }
         }
     };
+    let dump_sink = std::env::var_os("PRISM_DUMP_CORE");
+    let dump_run = std::sync::atomic::AtomicUsize::fetch_add(
+        &DUMP_RUN,
+        1,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let mut ord = 0;
+    if let Some(sink) = &dump_sink {
+        dump_core(sink, dump_run, ord, "input", core);
+        ord += 1;
+    }
     check(core, "<input>");
     let mut cur = core.clone();
     for pass in pipeline(cx.level) {
@@ -158,6 +223,10 @@ pub fn run(core: &Core, prog: &Program<CorePhase>, level: OptLevel) -> (Core, Pa
         }
         cur = run_pass(pass, &cur, &mut cx);
         check(&cur, pass.name());
+        if let Some(sink) = &dump_sink {
+            dump_core(sink, dump_run, ord, pass.name(), &cur);
+            ord += 1;
+        }
     }
     if std::env::var_os("PRISM_OPT_STATS").is_some() {
         eprint!("{}", cx.stats.report());
