@@ -426,6 +426,8 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
 const BUILTINS: &[(&str, &str)] = &[
     ("print", "forall a. (a) -> Unit ! {IO}"),
     ("println", "forall a. (a) -> Unit ! {IO}"),
+    ("prim_print", "forall a. (a) -> Unit ! {IO}"),
+    ("prim_println", "forall a. (a) -> Unit ! {IO}"),
     ("prim_read_int", "() -> Int ! {IO}"),
     ("prim_read_line", "() -> String ! {IO}"),
     ("prim_rand", "() -> Int ! {IO}"),
@@ -567,6 +569,22 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     let mut data = BTreeMap::new();
     let mut ctors = BTreeMap::new();
     let mut env = base_env()?;
+    // When the record/replay/durable machinery is imported, `print`/`println`
+    // route through the interceptable `Output` capability instead of the ambient
+    // `IO`, so the replay handlers can drop output during a replayed prefix.
+    // Without it they keep their `{IO}` row, so the rest of the corpus (and any
+    // `!{IO}` annotation) is untouched and a reified-handler body is never wrapped
+    // in a world handler it cannot fuse through.
+    if prog.fns.iter().any(|f| {
+        matches!(
+            f.name.as_str(),
+            "Replay.record" | "Replay.replay" | "Replay.durable"
+        )
+    }) {
+        for n in ["print", "println"] {
+            env.insert(Sym::from(n), parse_sig(n, "forall a. (a) -> Unit ! {Output}")?.0);
+        }
+    }
     // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface
     // constructors, manipulated only through the `array_*` builtins.
     data.insert(
@@ -693,10 +711,10 @@ mod tests {
         for (name, sig) in super::BUILTINS {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
             let want: &[&str] = match *name {
-                "print" | "println" | "prim_read_int" | "prim_read_line" | "prim_rand"
-                | "srand" | "system" | "eprint" | "prim_getenv" | "prim_read_file"
-                | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
-                | "prim_args_count" | "prim_arg" => &["IO"],
+                "print" | "println" | "prim_print" | "prim_println" | "prim_read_int"
+                | "prim_read_line" | "prim_rand" | "srand" | "system" | "eprint"
+                | "prim_getenv" | "prim_read_file" | "write_file" | "prim_file_exists"
+                | "append_file" | "remove_file" | "prim_args_count" | "prim_arg" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

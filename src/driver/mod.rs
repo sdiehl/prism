@@ -275,20 +275,23 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
 
 // Check every `replayable`-annotated function. The certificate is on the inferred
 // principal row: it must stay within the recordable capabilities (`Console`,
-// `FileSystem`, `Random`, `Env`) plus the deterministic builtin effects (`Exn`,
-// `Fail`). A row containing `IO` (un-logged nondeterminism: output, the system
-// clock, srand) or any user-defined effect cannot be reproduced from a trace, so
-// it is rejected with a caret at the function naming the offending effect(s).
+// `FileSystem`, `Random`, `Env`, `Output`) plus the deterministic builtin effects
+// (`Exn`, `Fail`). `Output` is admitted because replay/durable suppress it during
+// the replayed prefix, so re-running it is sound. A row containing `IO` (un-logged
+// nondeterminism: the system clock, srand) or any user-defined effect cannot be
+// reproduced from a trace, so it is rejected with a caret at the function naming
+// the offending effect(s).
 fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(), Error> {
     let annots = replayable_annots(program);
     if annots.is_empty() {
         return Ok(());
     }
-    let allowed: std::collections::BTreeSet<Sym> = ["Console", "FileSystem", "Random", "Env"]
-        .into_iter()
-        .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
-        .map(Sym::from)
-        .collect();
+    let allowed: std::collections::BTreeSet<Sym> =
+        ["Console", "FileSystem", "Random", "Env", "Output"]
+            .into_iter()
+            .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
+            .map(Sym::from)
+            .collect();
     for d in &program.fns {
         if !annots.contains(&Sym::from(&d.name)) {
             continue;
@@ -304,7 +307,7 @@ fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(
         if !offending.is_empty() {
             let msg = format!(
                 "function `{}` is marked `replayable` but performs non-replayable {} `{}`; \
-                 a replayable function may use only Console, FileSystem, Random, Env, Exn, Fail",
+                 a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail",
                 d.name,
                 if offending.len() == 1 {
                     "effect"

@@ -1,0 +1,26 @@
+-- The escaping Log component of `local_mono_escape.pr`, now forced through the
+-- default world handler `run_io`. Wrapping `\(_u) -> logged()` makes a fused,
+-- tail-resumptive handler enclose a body that reifies an inner handler into the
+-- free monad. The region call sits inside the first-class thunk run_io forces, so
+-- the confined-region split is not clean (the entry's bare-return unwrap fires
+-- only on a direct call, never through a closure): lowering monadifies the whole
+-- program, matching the interpreter's uniform free monad. Guards native parity
+-- for a reifying body wrapped in the world handler.
+effect Log {
+  ctl log(Int) : Int
+}
+
+fn weight(x) = x * 3
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f())
+
+fn logged() =
+  let fs = [\() -> log(weight(1)), \() -> log(weight(2)), \() -> log(weight(3))]
+  handle run_all(fs, 0) with
+    log(n, k) => k(n)
+    return r => r
+
+fn main() = println(run_io(\(_u) -> logged()))

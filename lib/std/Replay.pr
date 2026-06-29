@@ -57,6 +57,8 @@ fn rep_bool(k, t) =
     Cons(TBool(x), rest) => k(x)(rest)
     _ => fail()
 
+-- A pure replay reproduces the action's VALUE, not its side effects, so Output is
+-- dropped: resume with Unit, leaving the trace untouched.
 pub fn replay(trace, action) =
   let g =
     handle action(()) with {
@@ -68,6 +70,8 @@ pub fn replay(trace, action) =
       env_get(s, k) => \(t) -> rep_str(k, t),
       env_argc(u, k) => \(t) -> rep_int(k, t),
       env_arg(i, k) => \(t) -> rep_str(k, t),
+      out_print(x, k) => \(t) -> k(())(t),
+      out_println(x, k) => \(t) -> k(())(t),
       return r => \(t) -> r
     }
   g(trace)
@@ -152,6 +156,19 @@ fn step_bool(path, k, st, real) =
       persist(path, acc2)
       k(x)((Nil, acc2))
 
+-- Output during the replayed prefix is dropped (it already fired in the run that
+-- recorded the trace); once the loaded prefix is exhausted (the first state
+-- component is Nil, the same "still-replaying vs live" flag the inputs thread),
+-- output goes live to the real printer. The crash that froze the trace must fall
+-- between an input and its following output for the boundary to be exact: that
+-- output was never performed, so the live run performs it once.
+fn out_step(k, st, real) =
+  match st of
+    (Nil, acc) =>
+      let _ = real(())
+      k(())((Nil, acc))
+    (rem, acc) => k(())((rem, acc))
+
 pub fn durable(path, action) =
   let loaded = if prim_file_exists(path) then deserialize(prim_read_file(path)) else Nil
   let g =
@@ -164,6 +181,8 @@ pub fn durable(path, action) =
       env_get(s, k) => \(st) -> step_str(path, k, st, \(z) -> prim_getenv(s)),
       env_argc(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_args_count()),
       env_arg(i, k) => \(st) -> step_str(path, k, st, \(z) -> prim_arg(i)),
+      out_print(x, k) => \(st) -> out_step(k, st, \(z) -> prim_print(x)),
+      out_println(x, k) => \(st) -> out_step(k, st, \(z) -> prim_println(x)),
       return r => \(st) -> r
     }
   g((loaded, reverse(loaded)))

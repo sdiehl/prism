@@ -453,6 +453,8 @@ impl Builtin {
 pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("print", 1, BuiltinKind::Print),
     ("println", 1, BuiltinKind::Println),
+    ("prim_print", 1, BuiltinKind::Print),
+    ("prim_println", 1, BuiltinKind::Println),
     ("prim_read_int", 0, BuiltinKind::ReadInt),
     ("prim_read_line", 0, BuiltinKind::ReadLine),
     ("error", 1, BuiltinKind::Error),

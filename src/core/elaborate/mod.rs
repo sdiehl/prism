@@ -30,6 +30,10 @@ struct Elab<'a> {
     checked: &'a Checked,
     dicts: &'a BTreeMap<Span, Vec<Dict>>,
     effect_ops: BTreeSet<String>,
+    // True when the `Output` capability is in scope (the prelude declares it), so
+    // `print`/`println` route through the interceptable `out_print`/`out_println`
+    // ops. A prelude-free program has no `Output` handler, so it prints directly.
+    route_output: bool,
     show_fns: Vec<CoreFn>,
     show_seen: BTreeSet<String>,
     // True when `dicts` and the span tables come from the same check() pass.
@@ -767,11 +771,15 @@ impl Elab<'_> {
                         .into_iter()
                         .next()
                         .ok_or_else(|| Error::Ice("empty print args".into()))?;
-                    let p = self.print_dispatch(v, &args[0], locals);
-                    if name == "println" {
-                        Comp::Bind(Box::new(p), self.fresh().into(), Box::new(Comp::PrintNl))
+                    if self.route_output {
+                        self.out_perform(v, &args[0], locals, name == "println")
                     } else {
-                        p
+                        let p = self.print_dispatch(v, &args[0], locals);
+                        if name == "println" {
+                            Comp::Bind(Box::new(p), self.fresh().into(), Box::new(Comp::PrintNl))
+                        } else {
+                            p
+                        }
                     }
                 } else if name == "show" && !vals.is_empty() && !args.is_empty() {
                     let v = vals
@@ -1013,6 +1021,16 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         .collect();
     builtin_arities(&mut arity);
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();
+    // Route `print`/`println` through the interceptable `Output` ops only when the
+    // record/replay/durable machinery is present (the `Replay` module is
+    // imported). Otherwise `print` lowers directly to the runtime printer, so the
+    // whole non-replay corpus keeps its fused, handler-free output and a program
+    // with its own reified handlers is never wrapped in a world handler it cannot
+    // fuse through. `Output` interception only changes behaviour where it matters.
+    let route_output = effect_ops.contains("out_print")
+        && ["Replay.record", "Replay.replay", "Replay.durable"]
+            .iter()
+            .any(|f| arity.contains_key(*f));
     let consts: BTreeMap<String, &S<Expr<CorePhase>>> = prog
         .fns
         .iter()
@@ -1027,6 +1045,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         consts,
         checked,
         dicts: &checked.dicts,
+        route_output,
         effect_ops,
         show_fns: Vec::new(),
         show_seen: BTreeSet::new(),
@@ -1148,6 +1167,10 @@ pub fn elaborate_expr(
         consts: consts.iter().map(|(k, v)| (k.clone(), v)).collect(),
         checked,
         dicts,
+        route_output: effect_ops.contains("out_print")
+            && ["Replay.record", "Replay.replay", "Replay.durable"]
+                .iter()
+                .any(|f| arity.contains_key(*f)),
         effect_ops,
         show_fns: Vec::new(),
         show_seen: BTreeSet::new(),

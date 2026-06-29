@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 34
 expression: "lines.join(\"\\n\")"
 ---
 Data.Char.is_alnum : (Int) -> Bool ! {}
@@ -214,7 +215,7 @@ read_int : () -> Int ! {Console} ! {Console}
 read_line : () -> String ! {Console} ! {Console}
 repeat : forall a e0. (Int, () -> a ! {e0}) -> Unit ! {e0} ! {}
 repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} ! {}
-run_io : forall a e0. ((Unit) -> a ! {Console, Env, FileSystem, IO, Random, e0}) -> a ! {IO, e0} ! {IO}
+run_io : forall a e0. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
 scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0} ! {}
 sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0} ! {}
 signum : (Int) -> Int ! {}

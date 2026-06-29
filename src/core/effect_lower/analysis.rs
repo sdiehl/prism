@@ -175,6 +175,26 @@ pub(super) fn monadic_region(
         }
     }
 
+    // A region call buried in a first-class thunk that the rest builds is a
+    // boundary the entry mechanism cannot cover. An entry's bare-returning
+    // `unwrap_main` fires only on a direct call; reached through a closure, the
+    // region's `Eff` value flows out of the thunk into fused code that forces it
+    // as a bare value. The fused handler forcing such a thunk would have to join
+    // the region for forwarding to stay uniform, which pulls `main` in, so the
+    // split is not confinable. Bail to whole-program (the rest is monadified too,
+    // matching the interpreter's uniform free monad).
+    for f in core.fns.iter().filter(|f| !region.contains(&f.name)) {
+        let mut thunks = Vec::new();
+        thunks_in_comp(&f.body, &mut thunks);
+        for t in thunks {
+            let mut heads = BTreeSet::new();
+            all_calls(t, &mut heads);
+            if !heads.is_disjoint(&region) {
+                return None;
+            }
+        }
+    }
+
     // Entries: region functions a non-region (fused) function calls, plus `main`
     // when it is in the region (the runtime is its caller).
     let mut entries = BTreeSet::new();

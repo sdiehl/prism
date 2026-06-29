@@ -199,6 +199,73 @@ pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Erro
     Ok(merge(root, modules))
 }
 
+/// The bare names a program's imports open into unqualified scope.
+///
+/// Each maps to its canonical symbol, with the program's own definitions removed
+/// (a local definition shadows an import of the same name). The REPL applies this
+/// to interactively typed expressions so a bare `map` resolves through the
+/// prelude's glob imports exactly as it does inside a file body.
+///
+/// # Errors
+/// Fails on a missing or unparseable imported module.
+pub fn import_bindings(
+    program: &Program,
+    roots: &[Root],
+) -> Result<BTreeMap<String, String>, Error> {
+    if program.imports.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let modules = load(program, roots)?;
+    let mut mods: Vec<ModInfo> = modules
+        .iter()
+        .map(|m| {
+            let path = m.path.join(".");
+            let exports = exports_of(&m.prog)
+                .into_iter()
+                .map(|n| {
+                    let canon = format!("{path}.{n}");
+                    (n, canon)
+                })
+                .collect();
+            ModInfo { path, exports }
+        })
+        .collect();
+    let by_path: BTreeMap<String, usize> = mods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.path.clone(), i))
+        .collect();
+    add_reexports(&mut mods, &modules, &by_path)?;
+    let (mut unqual, _) = build_scope(&program.imports, &by_path, &mods)?;
+    for own in binders(program) {
+        unqual.remove(&own);
+    }
+    Ok(unqual)
+}
+
+/// Rewrite an expression's bare references to canonical symbols.
+///
+/// Bare names are resolved against `imports` (from [`import_bindings`]); lambda
+/// and `match` binders shadow imports, and unknown names stay bare for later
+/// phases. The REPL uses this to resolve an interactively typed expression
+/// against the prelude's import scope, which the program-level resolver only
+/// reaches for file bodies.
+///
+/// # Errors
+/// Surfaces the same scope errors the program resolver would for a malformed
+/// reference.
+pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> Result<(), Error> {
+    if imports.is_empty() {
+        return Ok(());
+    }
+    let own = BTreeMap::new();
+    let quals = BTreeMap::new();
+    let mods: &[ModInfo] = &[];
+    let mut rw = Rw::new("", &own, imports, &quals, mods, 0);
+    rw.expr(expr);
+    rw.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
+}
+
 /// Map every top-level name a module binds to its canonical form. An exported
 /// name becomes `Data.Map.insert` (dotted, the symbol an importer reaches); a
 /// private name becomes `Data.Map@helper` (the `@` is unforgeable in source and

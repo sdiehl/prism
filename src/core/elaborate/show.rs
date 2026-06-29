@@ -28,6 +28,9 @@ impl Elab<'_> {
         .find_map(default_printable)
     }
 
+    // Direct lowering of a `print`/`println` argument to the runtime printer,
+    // used when no `Output` handler is in scope (a prelude-free program). The
+    // value reaches the printer immediately, so output is not interceptable.
     pub(super) fn print_dispatch(
         &mut self,
         v: Value,
@@ -55,6 +58,41 @@ impl Elab<'_> {
                     },
                 ),
         }
+    }
+
+    // Lower a `print`/`println` call to a perform of the `Output` capability so
+    // the output is interceptable (run_io discharges it to the real printer,
+    // replay/durable drop it during a replayed prefix). The type-directed show
+    // stays here at the call site: Float and structural types are pre-rendered to
+    // a String because the runtime printer behind `prim_print` cannot show them,
+    // while Int/Str/unknown values pass through raw (it self-dispatches on the
+    // cell tag). `newline` selects `out_println` over `out_print`.
+    pub(super) fn out_perform(
+        &mut self,
+        v: Value,
+        arg_expr: &S<Expr<CorePhase>>,
+        locals: &Locals,
+        newline: bool,
+    ) -> Comp {
+        // The `Output` ops carry a `String`, so every value is rendered here at
+        // the call site where its type is concrete. Str passes through; Int and
+        // unknown render through the integer show (matching the old direct
+        // integer printer); Float and the structural shapes use their show.
+        let val = match self.printable_ty(arg_expr, locals) {
+            Some(Type::Str) => Comp::Return(v),
+            Some(Type::Float) => Comp::StrBuiltin(Builtin::ShowFloat, vec![v]),
+            Some(Type::Int) | None => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),
+            Some(ty) => self
+                .show_for_type(v.clone(), &ty, arg_expr.span)
+                .unwrap_or_else(|_| Comp::StrBuiltin(Builtin::ShowInt, vec![v])),
+        };
+        let op = if newline { "out_println" } else { "out_print" };
+        let s = self.fresh();
+        Comp::Bind(
+            Box::new(val),
+            s.clone().into(),
+            Box::new(Comp::Do(op.into(), vec![Value::Var(s.into())])),
+        )
     }
 
     pub(super) fn show_dispatch(

@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "prism::report(&src)"
 input_file: tests/cases/replayable_reject.pr
 ---
@@ -73,10 +74,10 @@ fn leak() =
   return 1 to t@0; do spew(t@0)
 
 == replayable ==
-Type Error: function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Exn, Fail
+Type Error: function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail
    ╭─[ <source>:5:1 ]
    │
  5 │ replayable fn leak() = spew(1)
    │ ───────────────┬──────────────  
-   │                ╰──────────────── function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Exn, Fail
+   │                ╰──────────────── function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail
 ───╯

@@ -266,6 +266,15 @@ effect Emit(a) {
   ctl emit(a) : Unit
 }
 
+-- Console output as an interceptable capability. `print`/`println` perform these
+-- ops; the default world handler run_io discharges them to the real prim_print/
+-- prim_println, while replay/durable drop them during a replayed prefix so a
+-- durable resume never re-prints work it already did.
+effect Output {
+  ctl out_print(String) : Unit,
+  ctl out_println(String) : Unit
+}
+
 -- Capability effects routing the nondeterministic input primitives. User code
 -- calls the surface wrappers (read_int, read_file, ...), which perform an op;
 -- the default world handler run_io discharges each by resuming with the matching
@@ -312,22 +321,26 @@ fn arg(i) = env_arg(i)
 -- builtin, so the chain fuses to direct calls (no effect-op allocation). The
 -- action's row is annotated with the four capability effects (open in e), so the
 -- handlers subtract them concretely and run_io leaves only {IO | e}.
-fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env | e}) =
-  handle (handle (handle (handle action(()) with {
-        con_read_int(u, k) => k(prim_read_int()),
-        con_read_line(u, k) => k(prim_read_line()),
-        return r => r
-      }) with {
-        fs_read_file(p, k) => k(prim_read_file(p)),
-        fs_file_exists(p, k) => k(prim_file_exists(p)),
-        return r => r
-      }) with {
-        rng_rand(u, k) => k(prim_rand()),
-        return r => r
-      }) with {
-        env_get(s, k) => k(prim_getenv(s)),
-        env_argc(u, k) => k(prim_args_count()),
-        env_arg(i, k) => k(prim_arg(i)),
+fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e}) =
+  handle (handle (handle (handle (handle action(()) with {
+          con_read_int(u, k) => k(prim_read_int()),
+          con_read_line(u, k) => k(prim_read_line()),
+          return r => r
+        }) with {
+          fs_read_file(p, k) => k(prim_read_file(p)),
+          fs_file_exists(p, k) => k(prim_file_exists(p)),
+          return r => r
+        }) with {
+          rng_rand(u, k) => k(prim_rand()),
+          return r => r
+        }) with {
+          env_get(s, k) => k(prim_getenv(s)),
+          env_argc(u, k) => k(prim_args_count()),
+          env_arg(i, k) => k(prim_arg(i)),
+          return r => r
+        }) with {
+        out_print(x, k) => let _ = prim_print(x) in k(()),
+        out_println(x, k) => let _ = prim_println(x) in k(()),
         return r => r
       }
 

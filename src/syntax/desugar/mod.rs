@@ -470,6 +470,11 @@ const CAP_WRAPPERS: &[&str] = &[
     "args",
 ];
 
+// The console-output builtins. Unlike the input wrappers above these are not
+// defined functions (so reachability cannot walk into them); a reachable body
+// that names one performs `Output`, which the world handler must discharge.
+const OUTPUT_BUILTINS: &[&str] = &["print", "println"];
+
 // Wrap `main` in the default world handler `run_io` so top-level input IO works
 // without the user installing a handler. Only applied when the program defines
 // `run_io` (the prelude does) and `main` reaches a capability wrapper, so pure
@@ -496,7 +501,21 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
             queue.extend(refs.iter().filter(|r| names.contains(r.as_str())).cloned());
         }
     }
-    if !CAP_WRAPPERS.iter().any(|w| reachable.contains(*w)) {
+    let reaches_cap = CAP_WRAPPERS.iter().any(|w| reachable.contains(*w));
+    // `print`/`println` route through `Output` only when the Replay machinery is
+    // imported (see `elaborate`); only then does a printing `main` need the world
+    // handler to discharge the output ops. Without it, output lowers directly and
+    // wrapping a reified-handler body in `run_io` would diverge on the backend.
+    let uses_replay = ["Replay.record", "Replay.replay", "Replay.durable"]
+        .iter()
+        .any(|f| names.contains(*f));
+    let reaches_output = uses_replay
+        && reachable.iter().any(|n| {
+            edges
+                .get(n)
+                .is_some_and(|refs| OUTPUT_BUILTINS.iter().any(|o| refs.contains(*o)))
+        });
+    if !reaches_cap && !reaches_output {
         return;
     }
     if let Some(d) = fns.iter_mut().find(|d| d.name == names::ENTRY_POINT) {
