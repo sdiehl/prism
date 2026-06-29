@@ -20,18 +20,20 @@ use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
 mod lint;
+mod simplify;
 mod specialize;
 pub use lint::lint;
 pub use specialize::specialize;
+use simplify::simplify_counted;
 use specialize::specialize_counted;
 
 /// Optimization level: the knob that selects which passes run.
 ///
 /// `O0` keeps only the mandatory representation passes (newtype erasure, which
-/// both backends depend on). `O1`, the default, is what we built: it adds
-/// dictionary specialization. `O2` is reserved for the heavier passes on the
-/// roadmap (DCE, the simplifier, the bounded inliner, CSE); it currently expands
-/// to the same list as `O1` until those land.
+/// both backends depend on). `O1`, the default, adds dictionary specialization
+/// and preserves effect/var-loop fusion. `O2` additionally runs the gentle
+/// simplifier; it is parity-clean but currently trades that fusion (see
+/// [`pipeline`]), so it is opt-in until the passes are made to cooperate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     O0,
@@ -66,6 +68,9 @@ pub enum CorePass {
     EraseNewtypes,
     /// Specialize constrained calls on known global dictionaries to direct calls.
     Specialize,
+    /// The fixed-point gentle simplifier (case-of-known-constructor, trivial
+    /// copy-propagation, dead-let elimination).
+    Simplify,
 }
 
 impl CorePass {
@@ -73,6 +78,7 @@ impl CorePass {
         match self {
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
+            Self::Simplify => "Simplify",
         }
     }
 }
@@ -128,7 +134,17 @@ struct OptCx {
 pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        OptLevel::O1 | OptLevel::O2 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
+        OptLevel::O1 => vec![CorePass::EraseNewtypes, CorePass::Specialize],
+        // The simplifier is correct (parity-clean) but, running before effect
+        // lowering, it rewrites the Core shapes the var/State fusion analysis
+        // matches on, so it currently degrades that fusion (a `perf_gate`
+        // regression). It is opt-in at O2 until the two passes are made to
+        // cooperate; O1 stays the fusion-preserving default.
+        OptLevel::O2 => vec![
+            CorePass::EraseNewtypes,
+            CorePass::Specialize,
+            CorePass::Simplify,
+        ],
     }
 }
 
@@ -170,6 +186,7 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
     let (out, ticks) = match pass {
         CorePass::EraseNewtypes => erase_newtypes_counted(core, &cx.newtype_ctors),
         CorePass::Specialize => specialize_counted(core),
+        CorePass::Simplify => simplify_counted(core),
     };
     cx.stats.record(pass.name(), ticks);
     out
