@@ -1,0 +1,10 @@
+import Replay (..)
+
+-- A workflow whose every input is logged to the path as it runs. If the program
+-- crashes partway, re-running it replays the logged prefix without redoing that
+-- work and continues live from where it stopped.
+replayable fn workflow() = rand() + rand()
+
+fn main() =
+  let total = durable("target/workflow.log", \(_u) -> workflow())
+  println("total: {total}")

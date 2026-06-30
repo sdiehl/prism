@@ -6,7 +6,7 @@ Prism is a strict, impure functional language in the ML family whose type system
 
 A Prism program is a set of modules, each a file of declarations. The surface language elaborates to a strict, call-by-push-value core ([Levy, 2004](bibliography.md#levy-2004)) in A-normal form (the companion [Compiler](./compiler.md) document), compiles to native code through LLVM, and is managed by deterministic reference counting rather than a garbage collector.
 
-Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through monads and track both observability and capability ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site optic paths for nested access and update ([optic paths](#optic-paths)), and fusing stream combinators ([the standard prelude](#the-standard-prelude)).
+Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through monads and track both observability and capability ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site optic paths for nested access and update ([optic paths](#optic-paths)), and fusing stream combinators ([streams](#streams)).
 
 This specification proceeds in dependency order: notation, lexical structure, grammar, types, then the constructs the grammar describes.
 
@@ -356,6 +356,22 @@ The two pieces fit together in a few lines: `roll` is `replayable` because it re
 
 ```prism
 {{#include ../examples/replay_intro.pr}}
+```
+
+`durable(path, action)` persists the trace as each observation is made, so a run that stops partway resumes on re-run: the logged prefix replays performing no real input, then the run continues live once the log is exhausted. Re-running this workflow reaches the same result rather than redrawing its inputs.
+
+```prism
+{{#include ../examples/durable_intro.pr}}
+```
+
+### 7.9 Streams {#streams}
+
+Streams are the prelude's data-processing combinators, built on a single `Emit(a)` effect rather than on intermediate collections. A _producer_ performs `Emit` once per element (`srange`, `sof`); a _transformer_ handles a producer's emissions and re-emits the survivors (`smap`, `skeep`, `stake`); and a _consumer_ handles `Emit` by folding every emission into a result (`sfold`, `ssum`, `scollect`). A pipeline is the consumer wrapped around the transformers wrapped around the producer, one handler stack over one producer loop.
+
+Because emission is an effect the consumer discharges, a pipeline _fuses_: `srange(1, 1000).smap(square).skeep(even).stake(5).ssum()` runs as one loop that allocates neither an intermediate list nor a cell per element, the state-threading path of [effect lowering](./compiler.md#effect-lowering). A transformer that stops early, like `stake`, drops the producer's continuation, so the source halts at once. Comprehensions and the statement `for` desugar to these combinators ([comprehensions](#comprehensions)) and fuse the same way.
+
+```prism
+{{#include ../examples/streams.pr}}
 ```
 
 ## 8. Expressions {#expressions}
