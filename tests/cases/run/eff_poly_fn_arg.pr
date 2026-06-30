@@ -10,8 +10,7 @@ effect Tag {
 }
 
 -- Polymorphic in `a`, effectful in `Tag`: this is the shape that triggered it.
-fn tag(x) : !{Tag} (Int, a) =
-  (fresh(()), x)
+fn tag(x) : !{Tag} (Int, a) = (fresh(()), x)
 
 fn map_eff(f, xs) =
   match xs of

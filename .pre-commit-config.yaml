@@ -63,10 +63,17 @@ repos:
         types: [rust]
         pass_filenames: false
 
+      # Whole-corpus prism format check, identical to the CI "Check prism
+      # formatting" step: `prism fmt --check` with no path walks every *.pr
+      # outside target/. pass_filenames is off so a commit touching any .pr
+      # re-checks the entire corpus, not just its own changed files. A per-file
+      # check let a fixture an unrelated commit left unformatted slip past the
+      # hook yet fail CI; the whole-corpus walk closes that gap. The walk is
+      # non-strict, so an unparseable fixture (interp_empty/interp_unterm) is
+      # skipped with a notice, not failed.
       - id: prism-fmt
         name: prism fmt --check
         language: system
-        entry: cargo run --bin prism -- fmt --check
-        types: [file]
+        entry: cargo run --quiet --bin prism -- fmt --check
         files: \.pr$
-        exclude: ^tests/cases/(interp_empty|interp_unterm)\.pr$
+        pass_filenames: false

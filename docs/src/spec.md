@@ -1,12 +1,12 @@
 # The Prism Language Specification {#the-prism-language-specification}
 
-Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document defines the surface language: its lexical structure, grammar, type system, and evaluation. It describes the language as the `prism` compiler accepts it; limitations are stated precisely where they apply.
+Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document defines the surface language: its lexical structure, grammar, type system, and evaluation. It describes the language as the `prism` compiler accepts it.
 
 ## 1. Introduction {#introduction}
 
 A Prism program is a set of modules, each a file of declarations. The surface language elaborates to a strict, call-by-push-value core ([Levy, 2004](bibliography.md#levy-2004)) in A-normal form (the companion [Compiler](./compiler.md) document), compiles to native code through LLVM, and is managed by deterministic reference counting rather than a garbage collector.
 
-Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through monads and track both observability and capability ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site optic paths for nested access and update ([optic paths](#optic-paths)), and fusing stream combinators ([streams](#streams)). The deterministic core opens the door to globally content-addressed, replayable programs, where a definition is identified by the hash of its core rather than its name ([content-addressed core](./compiler.md#content-addressed-core)).
+Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through monads and track both observability and capability ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site optic paths for deeply nested structure traversal and update ([optic paths](#optic-paths)), and fusing stream combinators ([streams](#streams)). The deterministic core opens the door to globally content-addressed, replayable programs, where a definition is identified by the hash of its core rather than its name ([content-addressed core](./compiler.md#content-addressed-core)).
 
 This specification proceeds in dependency order: notation, lexical structure, grammar, types, then the constructs the grammar describes.
 
@@ -461,9 +461,50 @@ A step is one of:
 | `?Ctor`           | focus through a sum constructor; others pass through   |
 | `(steps where p)` | keep only the foci satisfying the predicate `p`        |
 
-End a path with `= v` to **set** the focus or `~ f` to **modify** it (apply `f`); wrap a path in `s.[ path ]` to **read** every focus it selects into a list. `each` is a reserved keyword; the other steps reuse existing tokens.
+A path is closed by one of three operations:
 
-Each form lowers to ordinary code, shown here over `type Player = Player { name: String, pos: Vec2, hp: Int, bag: List(Int) }` and `type Shape = Circle { radius: Int } | Square { side: Int }`. A field sets through the derived setter, `{ p | hp = 100 }` to `with_hp(p, 100)`, and nests, `{ pl | pos.x = 30 }` to `with_pos(pl, with_x(pl.pos, 30))`. Modify reads the focus, `{ p | hp ~ heal }` to `with_hp(p, heal(p.hp))`. `each` fans out over any functor, `{ players | each.hp ~ heal }` to `fmap(\p -> with_hp(p, heal(p.hp)), players)`, and composes with descent, `{ world | party.each.pos.x = 0 }`. An index focuses one element, `{ world | party[0].hp = 100 }`, lowering through `list_set` (or in-place `array_set`); an out-of-range index leaves the container unchanged. A prism rebuilds a matched constructor and passes the others through, the prism law for update:
+| Form         | Operation                                         |
+| ------------ | ------------------------------------------------- |
+| `path = v`   | **set** the focus to `v`                          |
+| `path ~ f`   | **modify** the focus, applying `f`                |
+| `s.[ path ]` | **read** every focus the path selects into a list |
+
+`each` is a reserved keyword; every other step reuses existing tokens.
+
+Each form lowers to ordinary code. The examples below are written over two types:
+
+```text
+type Player = Player { name: String, pos: Vec2, hp: Int, bag: List(Int) }
+type Shape  = Circle { radius: Int } | Square { side: Int }
+```
+
+A field sets through the derived setter, and nests through the setter of each enclosing field:
+
+```text
+{ p  | hp = 100 }     =>  with_hp(p, 100)
+{ pl | pos.x = 30 }   =>  with_pos(pl, with_x(pl.pos, 30))
+```
+
+Modify reads the focus, applies the function, and writes the result back:
+
+```text
+{ p | hp ~ heal }     =>  with_hp(p, heal(p.hp))
+```
+
+`each` fans out over any functor (lowering to `fmap`) and composes with further descent:
+
+```text
+{ players | each.hp ~ heal }      =>  fmap(\p -> with_hp(p, heal(p.hp)), players)
+{ world | party.each.pos.x = 0 }
+```
+
+An index focuses one element, lowering through `list_set` (or in-place `array_set`); an out-of-range index leaves the container unchanged:
+
+```text
+{ world | party[0].hp = 100 }     =>  element 0 of party, via list_set / array_set
+```
+
+A prism rebuilds a matched constructor and passes the others through, the prism law for update:
 
 ```text
 { shape | ?Circle.radius ~ double }
@@ -483,7 +524,14 @@ A filter guards a traversal, `{ world | party.(each where alive).hp ~ heal }` ap
              world.party))
 ```
 
-The read form `s.[ path ]` collects every focus a path selects into a list, the read twin of the update: `players.[each.hp]` is the list of each `hp`, `each` flat-maps so `world.[party.each.bag.each.count]` flattens, `?Ctor` previews zero or one focus, and a single-focus path yields a one-element list.
+The read form `s.[ path ]` collects every focus a path selects into a list, the read twin of the update:
+
+```text
+players.[each.hp]                  =>  the list of every player's hp
+world.[party.each.bag.each.count]  =>  each flat-maps, so nested traversals flatten
+```
+
+A `?Ctor` step previews zero or one focus, and a single-focus path yields a one-element list.
 
 Paths are deliberately use-site syntax, not first-class values: there is no `Optic` type, no passing an optic to a function, no library of named composable optics, and optic _kinds_ are not tracked in the type system (that a read-only path is read-only is a structural fact of the desugaring, not a typed law). This is the explicit trade: paths cover the great majority of real optic _use_ and give up abstracting over _which_ optic. The mental model is one breath: steps read left to right, `= v`/`~ f` to write, `s.[ ... ]` to read, nothing escaping into a new core construct.
 
@@ -529,7 +577,7 @@ Instances are global, but each records its defining module. An _orphan_ instance
 
 ## 12. The Standard Prelude {#the-standard-prelude}
 
-The prelude in `lib/prelude.pr` is in scope in every module. It is ordinary Prism, not built-in. Its contents, by category:
+The prelude in [`lib/prelude.pr`](https://github.com/sdiehl/prism/blob/main/lib/prelude.pr) is in scope in every module. It is ordinary Prism, not built-in. Its contents, by category:
 
 - **Data types.** `Option(a)`, `Result(a, e)`, `List(a)`, the balanced-tree `Map(k, v)`, and the hash table `HashMap(v)`. A set is a `Map(k, Unit)`, with a `set_*` API rather than a distinct type.
 - **List combinators.** `map`, `filter`, `foldl`, `foldr`, `length`, `append`, `reverse`, `zip`/`unzip`, `take`/`drop`, `sort`, `range`, and the rest of the usual vocabulary.
@@ -540,3 +588,16 @@ The prelude in `lib/prelude.pr` is in scope in every module. It is ordinary Pris
 - **Streams.** The `Emit(a)` effect and the producer/transformer/consumer combinators `srange`, `sof`, `smap`, `skeep`, `stake`, `sfold`, `ssum`, `scollect`, which fuse without intermediate collections.
 - **Numerics and failure.** Fixed-width `i64_*`/`u64_*` operations, common math, and the failure helpers `guard`, `optional`, `succeeds`, `default`.
 - **World and IO.** The capability effects `Console`, `FileSystem`, `Random`, and `Env` ([capability effects and IO](#capability-effects-and-io)), their input wrappers (`read_int`, `read_line`, `read_file`, `file_exists`, `rand`, `getenv`, `args_count`, `arg`), the default `run_io` world handler, and the output builtins (`print`, `write_file`, `append_file`, `remove_file`). The separate `Replay` module (`import Replay`, [record and replay](#record-and-replay)) adds `record`, `replay`, and the durable-execution handler `durable` over those capabilities.
+
+That surface is itself assembled from modules under `lib/std`. The prelude opens the `Data.*` ones with `import M (..)`, so their names are in unqualified scope everywhere; `Replay` is the exception, brought in only by an explicit `import Replay`:
+
+| Module        | Contents                                                                                        | Source                                                                                       |
+| ------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `Data.Char`   | ASCII classifiers and case mapping (`is_digit`, `is_alpha`, `to_upper_c`)                       | [`lib/std/Data/Char.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Char.pr)     |
+| `Data.List`   | list combinators over `List(a)` (`map`, `filter`, `foldl`/`foldr`, `zip`, `take`/`drop`)        | [`lib/std/Data/List.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/List.pr)     |
+| `Data.Map`    | the persistent AVL `Map(k, v)` API (`map_insert`, `map_lookup`, `map_keys`)                     | [`lib/std/Data/Map.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Map.pr)       |
+| `Data.Maybe`  | `Option(a)` combinators (`unwrap_or`, `map_option`, `and_then`)                                 | [`lib/std/Data/Maybe.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Maybe.pr)   |
+| `Data.Result` | `Result(a, e)` combinators (`map_result`, `and_then_result`, `Option` conversions)              | [`lib/std/Data/Result.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Result.pr) |
+| `Data.Set`    | ordered sets as `Map(k, Unit)` (`set_insert`, `set_union`, `set_intersection`)                  | [`lib/std/Data/Set.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Set.pr)       |
+| `Data.String` | string utilities (`str_join`, `split`, `trim`, `starts_with`, `to_upper`)                       | [`lib/std/Data/String.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/String.pr) |
+| `Replay`      | record/replay and durable execution over the capability effects (`record`, `replay`, `durable`) | [`lib/std/Replay.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Replay.pr)           |
