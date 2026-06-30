@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - Runtime: an optional structural backstop for the native runtime, built with `-DPRISM_RT_DEBUG`. Every cell dereference asserts a non-null, aligned, live heap pointer and every field read an in-bounds index, aborting with a diagnostic on a codegen or refcount bug instead of corrupting memory. It compiles out by default at zero overhead, needs no sanitizer toolchain, and a new CI step re-runs the parity corpus under it.
 - Effects: the effect-lowering fast-path matchers now surface drift in release builds. A matcher that accepts a clause but finds its continuation-erasure post-condition violated still falls back to the correct non-fused lowering, but prints a one-time stderr warning, silenced by `PRISM_QUIET`, instead of degrading silently. Debug builds keep the loud assertion.
