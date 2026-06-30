@@ -122,6 +122,17 @@ impl Tc<'_> {
         Ok(())
     }
 
+    // Convert one annotation against fresh (per-annotation) tyvar/row maps. Use
+    // when an annotation stands alone; sites that share named tyvars across
+    // several annotations build the maps once and reuse `convert_annot`.
+    pub(super) fn convert_annot_fresh(&mut self, t: &ast::Ty) -> Type {
+        let mut ty_ex = BTreeMap::new();
+        let mut row_ex = BTreeMap::new();
+        let no_rigid = BTreeSet::new();
+        let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+        self.convert_annot(t, &mut a)
+    }
+
     pub(super) fn convert_annot(&mut self, t: &ast::Ty, a: &mut Annot<'_>) -> Type {
         match t {
             ast::Ty::Int => Type::Int,

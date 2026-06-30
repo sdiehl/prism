@@ -333,10 +333,10 @@ impl Elab<'_> {
                 .get(&Sym::from(EQ_CLASS))
                 .and_then(|c| c.methods.iter().position(|(n, _)| n == "eq"))
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
-            (
-                self.method_invoke(Sym::from(EQ_CLASS), idx, &ds[0], args),
-                ne,
-            )
+            let d0 = ds
+                .first()
+                .ok_or_else(|| Error::Ice("no dictionary for `==`".into()))?;
+            (self.method_invoke(Sym::from(EQ_CLASS), idx, d0, args)?, ne)
         } else {
             match self.checked.fixed.get(&id).cloned() {
                 Some(ty @ (Type::I64 | Type::U64)) => (self.fixed_bin(op, &ty, args)?, false),
@@ -1086,8 +1086,14 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     }
 
     for inst in &prog.instances {
-        let info = &checked.instances[&Sym::from(&inst.name)];
-        let class = &checked.classes[&info.class];
+        let info = checked
+            .instances
+            .get(&Sym::from(&inst.name))
+            .ok_or_else(|| Error::Ice(format!("no instance info for `{}`", inst.name)))?;
+        let class = checked
+            .classes
+            .get(&info.class)
+            .ok_or_else(|| Error::Ice(format!("no class info for `{}`", info.class)))?;
         // Dict params: the declared context first (so method bodies' `_c{i}`
         // indices are unchanged), then one per superclass obligation.
         let nctx = info.context.len();

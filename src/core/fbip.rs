@@ -52,19 +52,19 @@ pub fn insert_rc(core: &Core, sigs: &Sigs) -> Core {
             .fns
             .iter()
             .map(|f| {
-                let mask = sigs.get(&f.name);
+                let mask = sigs.get(&f.name).map(Vec::as_slice);
                 let owned: Set = f
                     .params
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| !mask.is_some_and(|m| m.get(*i).copied().unwrap_or(false)))
+                    .filter(|(i, _)| !borrowed_at(mask, *i))
                     .map(|(_, p)| *p)
                     .collect();
                 let borrowed: Set = f
                     .params
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| mask.is_some_and(|m| m.get(*i).copied().unwrap_or(false)))
+                    .filter(|(i, _)| borrowed_at(mask, *i))
                     .map(|(_, p)| *p)
                     .collect();
                 CoreFn {
@@ -461,6 +461,12 @@ fn borrow_mask(name: Sym, sigs: &Sigs) -> Option<&[bool]> {
     sigs.get(&name).map(Vec::as_slice)
 }
 
+// Whether parameter/argument `i` is borrowed under the given mask. A missing
+// mask, a short mask, or a `false` entry all mean owned.
+fn borrowed_at(mask: Option<&[bool]>, i: usize) -> bool {
+    mask.is_some_and(|m| m.get(i).copied().unwrap_or(false))
+}
+
 fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
     match c {
         Comp::Return(v)
@@ -496,7 +502,7 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
         Comp::Call(g, args) => {
             let mask = borrow_mask(*g, sigs);
             for (i, a) in args.iter().enumerate() {
-                if !mask.is_some_and(|m| m.get(i).copied().unwrap_or(false)) {
+                if !borrowed_at(mask, i) {
                     count_val(a, out);
                 }
             }
@@ -532,15 +538,12 @@ fn count_val(v: &Value, out: &mut BTreeMap<Sym, usize>) {
 /// Fails when refcount tokens are unbalanced.
 pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
     for f in &core.fns {
-        let mask = sigs.get(&f.name);
+        let mask = sigs.get(&f.name).map(Vec::as_slice);
         let mut env: BTreeMap<Sym, i64> = f
             .params
             .iter()
             .enumerate()
-            .map(|(i, p)| {
-                let borrowed = mask.is_some_and(|m| m.get(i).copied().unwrap_or(false));
-                (*p, i64::from(!borrowed))
-            })
+            .map(|(i, p)| (*p, i64::from(!borrowed_at(mask, i))))
             .collect();
         sim(&f.body, &mut env, sigs).map_err(|e| format!("{}: {e}", f.name))?;
         for (v, n) in &env {
@@ -693,7 +696,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         Comp::Call(g, args) => {
             let mask = borrow_mask(*g, sigs);
             for (i, a) in args.iter().enumerate() {
-                if !mask.is_some_and(|m| m.get(i).copied().unwrap_or(false)) {
+                if !borrowed_at(mask, i) {
                     use_val(a, env, sigs)?;
                 }
             }

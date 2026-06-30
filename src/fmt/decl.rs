@@ -182,7 +182,13 @@ pub(super) fn fmt_ty(t: &Ty) -> String {
         }
         Ty::Fun(args, row, ret) => {
             let args: Vec<String> = args.iter().map(fmt_ty).collect();
-            format!("({}) -> {}{}", args.join(", "), fmt_ty(ret), fmt_row(row))
+            format!(
+                "({}) {} {}{}",
+                args.join(", "),
+                kw::ARROW,
+                fmt_ty(ret),
+                fmt_row(row)
+            )
         }
         Ty::Con(name, args) if args.is_empty() => name.clone(),
         Ty::Con(name, args) => {

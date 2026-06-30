@@ -148,26 +148,7 @@ pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Erro
     }
 
     let mut modules = load(&root, roots)?;
-    let mut mods: Vec<ModInfo> = modules
-        .iter()
-        .map(|m| {
-            let path = m.path.join(".");
-            let exports = exports_of(&m.prog)
-                .into_iter()
-                .map(|n| {
-                    let canon = format!("{path}.{n}");
-                    (n, canon)
-                })
-                .collect();
-            ModInfo { path, exports }
-        })
-        .collect();
-    let by_path: BTreeMap<String, usize> = mods
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (m.path.clone(), i))
-        .collect();
-    add_reexports(&mut mods, &modules, &by_path)?;
+    let (mods, by_path) = module_infos(&modules)?;
 
     // The root is the empty-path module: its own names (and the prelude prepended
     // to it) stay bare, so `main` and the prelude keep their global symbols.
@@ -203,26 +184,7 @@ pub fn import_bindings(
         return Ok(BTreeMap::new());
     }
     let modules = load(program, roots)?;
-    let mut mods: Vec<ModInfo> = modules
-        .iter()
-        .map(|m| {
-            let path = m.path.join(".");
-            let exports = exports_of(&m.prog)
-                .into_iter()
-                .map(|n| {
-                    let canon = format!("{path}.{n}");
-                    (n, canon)
-                })
-                .collect();
-            ModInfo { path, exports }
-        })
-        .collect();
-    let by_path: BTreeMap<String, usize> = mods
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (m.path.clone(), i))
-        .collect();
-    add_reexports(&mut mods, &modules, &by_path)?;
+    let (mods, by_path) = module_infos(&modules)?;
     let (mut unqual, _) = build_scope(&program.imports, &by_path, &mods)?;
     for own in binders(program) {
         unqual.remove(&own);
@@ -344,6 +306,33 @@ fn push_unique(v: &mut Vec<usize>, idx: usize) {
     if !v.contains(&idx) {
         v.push(idx);
     }
+}
+
+// Build the per-module export tables (each bare name -> its canonical symbol),
+// the path -> index map, and propagate re-exports to a fixpoint. Shared by
+// `resolve_modules_in` and `import_bindings`.
+fn module_infos(modules: &[Module]) -> Result<(Vec<ModInfo>, BTreeMap<String, usize>), Error> {
+    let mut mods: Vec<ModInfo> = modules
+        .iter()
+        .map(|m| {
+            let path = m.path.join(".");
+            let exports = exports_of(&m.prog)
+                .into_iter()
+                .map(|n| {
+                    let canon = format!("{path}.{n}");
+                    (n, canon)
+                })
+                .collect();
+            ModInfo { path, exports }
+        })
+        .collect();
+    let by_path: BTreeMap<String, usize> = mods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.path.clone(), i))
+        .collect();
+    add_reexports(&mut mods, modules, &by_path)?;
+    Ok((mods, by_path))
 }
 
 /// Propagate `pub import` re-exports: a module that `pub import`s names from
@@ -912,11 +901,7 @@ impl<'a> Rw<'a> {
                 self.record(span, format!("module `{q}` does not export `{n}`"));
                 full.to_string()
             }
-            [m] => m
-                .exports
-                .get(n)
-                .cloned()
-                .unwrap_or_else(|| full.to_string()),
+            [m] => m.exports[n].clone(),
             many => {
                 let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
                 self.record(

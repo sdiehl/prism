@@ -415,14 +415,12 @@ fn rw_sugar(
                         ),
                     });
                 }
-                let harms = vec![
-                    HandlerArm::Sugar(SugarArm::Final(
-                        names::throw_op(&a.name),
-                        a.binders.clone(),
-                        a.body.clone(),
-                    )),
-                    HandlerArm::Return(RET.into(), evar(RET, a.span)),
-                ];
+                let harms = final_handler(
+                    names::throw_op(&a.name),
+                    a.binders.clone(),
+                    a.body.clone(),
+                    a.span,
+                );
                 acc = sp(Expr::Handle(Box::new(acc), harms), a.span);
             }
             rw(&acc, env, cx)
@@ -436,21 +434,15 @@ fn rw_sugar(
         // continuation drops the same way a `??`/`fail` escape does).
         Sugar::For(x, s, quals, body) => {
             let (has_break, has_continue) = loop_ctl_used(body);
-            let mut inner = fold_quals(quals, (**body).clone(), span, cx);
-            if has_continue {
-                inner = loop_ctl_handler(names::CONTINUE_OP, inner, span);
-            }
+            let inner = fold_quals(quals, (**body).clone(), span, cx);
+            let inner = wrap_if(has_continue, names::CONTINUE_OP, inner, span);
             let run = call((**s).clone(), vec![sp(Expr::Unit, s.span)], s.span);
             let arms = vec![
                 HandlerArm::Sugar(SugarArm::Fun("emit".into(), vec![x.clone()], inner)),
                 HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
             ];
             let consumer = sp(Expr::Handle(Box::new(run), arms), span);
-            let full = if has_break {
-                loop_ctl_handler(names::BREAK_OP, consumer, span)
-            } else {
-                consumer
-            };
+            let full = wrap_if(has_break, names::BREAK_OP, consumer, span);
             rw(&full, env, cx)
         }
         Sugar::While(cond, body) => rw_while(cond.as_deref(), body, span, env, cx),
@@ -492,14 +484,7 @@ fn rw_sugar(
         // `a ?? b`: a `Fail`-discarding handler over `a` that returns `b` on
         // failure; a `Fail` raised by `b` itself escapes to the outer context.
         Sugar::Default(a, b) => {
-            let arms = vec![
-                HandlerArm::Sugar(SugarArm::Final(
-                    names::FAIL_OP.into(),
-                    Vec::new(),
-                    (**b).clone(),
-                )),
-                HandlerArm::Return(RET.into(), evar(RET, span)),
-            ];
+            let arms = final_handler(names::FAIL_OP.into(), Vec::new(), (**b).clone(), span);
             rw(&sp(Expr::Handle(a.clone(), arms), span), env, cx)
         }
         // `transact body else fallback`: snapshot every live `var` with its get
@@ -529,10 +514,7 @@ fn rw_sugar(
                     span,
                 );
             }
-            let arms = vec![
-                HandlerArm::Sugar(SugarArm::Final(names::FAIL_OP.into(), Vec::new(), restore)),
-                HandlerArm::Return(RET.into(), evar(RET, span)),
-            ];
+            let arms = final_handler(names::FAIL_OP.into(), Vec::new(), restore, span);
             let mut handled = sp(Expr::Handle(body.clone(), arms), span);
             for ((get, _), snap) in vars.iter().zip(&snaps).rev() {
                 let get_call = call(evar(get, span), vec![sp(Expr::Unit, span)], span);
@@ -603,11 +585,7 @@ fn rw_while(
     // surfaces. A nested loop captures its own break/continue, so the scan stops
     // at one.
     let (has_break, has_continue) = loop_ctl_used(body);
-    let body = if has_continue {
-        loop_ctl_handler(names::CONTINUE_OP, body.clone(), span)
-    } else {
-        body.clone()
-    };
+    let body = wrap_if(has_continue, names::CONTINUE_OP, body.clone(), span);
     let body_thunk = sp(Expr::Lam(Vec::new(), Box::new(body)), span);
     // An unconditional `loop` that cannot `break` never returns, so it lowers to
     // the bottom-typed `forever` and can stand as the body of a function of any
@@ -623,11 +601,7 @@ fn rw_while(
         let head = evar(WHILE_LOOP, synth_span(cx));
         call(head, vec![cond_thunk, body_thunk], span)
     };
-    let full = if has_break {
-        loop_ctl_handler(names::BREAK_OP, driver, span)
-    } else {
-        driver
-    };
+    let full = wrap_if(has_break, names::BREAK_OP, driver, span);
     rw(&full, env, cx)
 }
 
@@ -644,6 +618,26 @@ fn loop_ctl_handler(op: &str, body: S<Expr>, span: Span) -> S<Expr> {
     sp(Expr::Handle(Box::new(body), arms), span)
 }
 
+// Wrap `body` in `loop_ctl_handler` for `op` only when the loop actually uses
+// that control keyword (pay-as-you-go); otherwise return `body` untouched.
+fn wrap_if(used: bool, op: &str, body: S<Expr>, span: Span) -> S<Expr> {
+    if used {
+        loop_ctl_handler(op, body, span)
+    } else {
+        body
+    }
+}
+
+// A `final ctl` handler that catches one op, binds its carried values and yields
+// the clause body, with an identity return arm (the handled block keeps its
+// normal result). The twin of `loop_ctl_handler`, which instead yields Unit.
+fn final_handler(op: String, binders: Vec<String>, body: S<Expr>, span: Span) -> Vec<HandlerArm> {
+    vec![
+        HandlerArm::Sugar(SugarArm::Final(op, binders, body)),
+        HandlerArm::Return(RET.into(), evar(RET, span)),
+    ]
+}
+
 // Wrap a function body in a `final ctl` handler for the internal `Return` effect
 // when it uses `return`, so `return e` exits the function with `e`. The op arm
 // binds the carried value and yields it; the return arm passes the normal result
@@ -655,14 +649,12 @@ pub(super) fn wrap_return(body: S<Expr>, cx: &mut Cx) -> S<Expr> {
     }
     let span = body.span;
     let v = format!("{}{}", names::VAL, cx.next.bump());
-    let arms = vec![
-        HandlerArm::Sugar(SugarArm::Final(
-            names::RETURN_OP.into(),
-            vec![v.clone()],
-            evar(&v, span),
-        )),
-        HandlerArm::Return(RET.into(), evar(RET, span)),
-    ];
+    let arms = final_handler(
+        names::RETURN_OP.into(),
+        vec![v.clone()],
+        evar(&v, span),
+        span,
+    );
     sp(Expr::Handle(Box::new(body), arms), span)
 }
 

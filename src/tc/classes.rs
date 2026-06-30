@@ -226,18 +226,7 @@ impl Tc<'_> {
                     // 2+ undesignated instances at definition, so a missing entry
                     // here is a backstop, not a reachable user error.
                     let Some(name) = self.canonical.get(&(Sym::from(class), key)) else {
-                        let cross_module = many
-                            .iter()
-                            .filter_map(|n| self.instances.get(n))
-                            .any(|i| !i.module.is_empty());
-                        let listed = if cross_module {
-                            provenance_list(self.instances, many)
-                        } else {
-                            many.iter()
-                                .map(|s| s.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        };
+                        let listed = provenance_list(self.instances, many);
                         return Err(TypeError::Other {
                             span,
                             msg: format!(
@@ -489,15 +478,7 @@ pub(super) fn build_classes(
                 });
             }
             let sorted: Vec<Sym> = vars.into_iter().collect();
-            let mut scheme = wrap_forall(&sorted, t.clone());
-            // Generalize over the method's effect-row variables too, so an
-            // effect-polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`)
-            // is row-polymorphic rather than carrying a free row var.
-            let mut rvars = BTreeSet::new();
-            collect_row_vars(&t, &mut rvars);
-            for rv in rvars {
-                scheme = Type::RowForall(rv, Box::new(scheme));
-            }
+            let scheme = quantify(&t, &sorted);
             env.insert(Sym::from(mname), scheme.clone());
             methods.insert(Sym::from(mname), (Sym::from(&c.name), idx));
             constrained.insert(
@@ -525,12 +506,7 @@ pub(super) fn build_classes(
             let mut tvars = BTreeSet::new();
             collect_type_vars(mt, &mut tvars);
             tvars.remove(&param);
-            let mut scheme = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), mt.clone());
-            let mut rvars = BTreeSet::new();
-            collect_row_vars(mt, &mut rvars);
-            for rv in rvars {
-                scheme = Type::RowForall(rv, Box::new(scheme));
-            }
+            let scheme = quantify(mt, &tvars.into_iter().collect::<Vec<_>>());
             dict_args.push(scheme);
         }
         data.insert(
@@ -848,6 +824,20 @@ fn build_canonical(
 /// Render a list of instance names with their defining module, for overlap and
 /// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
 /// program) ``.
+// Generalize a method/dictionary-field type over the given type variables and,
+// additionally, over every effect-row variable it mentions, so an effect-
+// polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`) is row-polymorphic
+// rather than carrying a free row var.
+fn quantify(ty: &Type, tvars: &[Sym]) -> Type {
+    let mut scheme = wrap_forall(tvars, ty.clone());
+    let mut rvars = BTreeSet::new();
+    collect_row_vars(ty, &mut rvars);
+    for rv in rvars {
+        scheme = Type::RowForall(rv, Box::new(scheme));
+    }
+    scheme
+}
+
 fn provenance_list(instances: &BTreeMap<Sym, InstInfo>, names: &[Sym]) -> String {
     names
         .iter()

@@ -710,11 +710,18 @@ pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 /// # Errors
 /// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
+fn require_main(checked: &Checked) -> Result<(), Error> {
+    if checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
+        Ok(())
+    } else {
+        Err(Error::Codegen("no main function to build".into()))
+    }
+}
+
+#[cfg(feature = "native")]
 pub fn build_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
     let (checked, core, ctors) = compiled(src, roots)?;
-    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
-        return Err(Error::Codegen("no main function to build".into()));
-    }
+    require_main(&checked)?;
     let bc = out.with_extension("bc");
     emit_llvm_bc(&core, &ctors, &bc).map_err(Error::Codegen)?;
     cc_link(&bc, out)
@@ -809,9 +816,7 @@ pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 #[cfg(feature = "mlir")]
 pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
     let (checked, core, ctors) = compiled(src, roots)?;
-    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
-        return Err(Error::Codegen("no main function to build".into()));
-    }
+    require_main(&checked)?;
     let mlir_text = emit_mlir(&core, &ctors).map_err(Error::Codegen)?;
     let mlir_file = out.with_extension("mlir");
     fs::write(&mlir_file, &mlir_text)?;

@@ -187,20 +187,22 @@ fn escape_str(s: &str) -> String {
 // and a compound-eligible op. Returns the op and right operand so the formatter
 // restores `x <op>= rhs`. A hand-written `x := x + e` (non-synth `Bin`) returns
 // `None` and keeps its explicit `:=` form.
-fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>)> {
+// The shared shape of `as_compound_assign`/`as_index_compound`: a synth
+// `Bin(op, lhs, rhs)` with a compound-eligible op whose `lhs` matches the
+// caller's target predicate. Returns the op and right operand.
+fn as_compound<'a>(v: &'a S<Expr>, lhs_ok: impl Fn(&Expr) -> bool) -> Option<(BinOp, &'a S<Expr>)> {
     if !v.synth {
         return None;
     }
     let Expr::Bin(op, lhs, rhs) = &v.node else {
         return None;
     };
-    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
-        && matches!(&lhs.node, Expr::Var(n) if n == x)
-    {
-        Some((*op, rhs))
-    } else {
-        None
-    }
+    (matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem) && lhs_ok(&lhs.node))
+        .then_some((*op, rhs))
+}
+
+fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>)> {
+    as_compound(v, |lhs| matches!(lhs, Expr::Var(n) if n == x))
 }
 
 // The index analogue of `as_compound_assign`: an `IndexAssign` whose value is a
@@ -208,19 +210,7 @@ fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, &'a S<Expr>
 // formatter restores `a[i] <op>= rhs`. A hand-written `a[i] := a[i] + e` (a
 // non-synth `Bin`) keeps its explicit `:=` form.
 fn as_index_compound(v: &S<Expr>) -> Option<(BinOp, &S<Expr>)> {
-    if !v.synth {
-        return None;
-    }
-    let Expr::Bin(op, lhs, rhs) = &v.node else {
-        return None;
-    };
-    if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem)
-        && matches!(&lhs.node, Expr::Index(..))
-    {
-        Some((*op, rhs))
-    } else {
-        None
-    }
+    as_compound(v, |lhs| matches!(lhs, Expr::Index(..)))
 }
 
 // One offside statement and where the chain continues. `prev` is the byte offset
@@ -239,6 +229,38 @@ const fn arm_body(arm: &HandlerArm) -> &S<Expr> {
         | HandlerArm::Sugar(
             SugarArm::Fun(_, _, b) | SugarArm::Final(_, _, b) | SugarArm::Val(_, b),
         ) => b,
+    }
+}
+
+// A handler arm's head (everything up to and including the `=>`/`=`) at the
+// given indent. The body is rendered separately, so both the flat and offside
+// handler printers share one source of arm-head syntax.
+fn arm_head(arm: &HandlerArm, ind: &str) -> String {
+    match arm {
+        HandlerArm::Return(x, _) => format!("{ind}{} {x} {}", kw::RETURN, kw::FAT_ARROW),
+        HandlerArm::Op(name, params, k, _) => {
+            let mut ps: Vec<String> = params.clone();
+            ps.push(k.clone());
+            format!("{ind}{}({}) {}", name, ps.join(", "), kw::FAT_ARROW)
+        }
+        HandlerArm::Sugar(SugarArm::Fun(name, params, _)) => {
+            format!(
+                "{ind}{} {}({}) {}",
+                kw::FUN,
+                name,
+                params.join(", "),
+                kw::FAT_ARROW
+            )
+        }
+        HandlerArm::Sugar(SugarArm::Final(name, params, _)) => format!(
+            "{ind}{} {} {}({}) {}",
+            kw::FINAL,
+            kw::CTL,
+            name,
+            params.join(", "),
+            kw::FAT_ARROW
+        ),
+        HandlerArm::Sugar(SugarArm::Val(x, _)) => format!("{ind}{} {x} =", kw::VAL),
     }
 }
 
@@ -1231,32 +1253,7 @@ impl Fmt<'_> {
         let mut arm_strs: Vec<String> = Vec::with_capacity(arms.len());
         for arm in arms {
             let body = arm_body(arm);
-            let head = match arm {
-                HandlerArm::Return(x, _) => format!("{ind}{} {x} {}", kw::RETURN, kw::FAT_ARROW),
-                HandlerArm::Op(name, params, k, _) => {
-                    let mut ps: Vec<String> = params.clone();
-                    ps.push(k.clone());
-                    format!("{ind}{}({}) {}", name, ps.join(", "), kw::FAT_ARROW)
-                }
-                HandlerArm::Sugar(SugarArm::Fun(name, params, _)) => {
-                    format!(
-                        "{ind}{} {}({}) {}",
-                        kw::FUN,
-                        name,
-                        params.join(", "),
-                        kw::FAT_ARROW
-                    )
-                }
-                HandlerArm::Sugar(SugarArm::Final(name, params, _)) => format!(
-                    "{ind}{} {} {}({}) {}",
-                    kw::FINAL,
-                    kw::CTL,
-                    name,
-                    params.join(", "),
-                    kw::FAT_ARROW
-                ),
-                HandlerArm::Sugar(SugarArm::Val(x, _)) => format!("{ind}{} {x} =", kw::VAL),
-            };
+            let head = arm_head(arm, &ind);
             let lead = self.lead_comments(prev, body.span.start, indent);
             let rendered = format!(
                 "{head}{}",
@@ -1604,54 +1601,12 @@ impl Fmt<'_> {
         let body_s = self.fmt_expr(body, indent, mode);
         let arm_strs: Vec<String> = arms
             .iter()
-            .map(|arm| match arm {
-                HandlerArm::Return(x, arm_body) => {
-                    format!(
-                        "{ind1}{} {x} {} {}",
-                        kw::RETURN,
-                        kw::FAT_ARROW,
-                        self.fmt_expr(arm_body, indent + 1, mode)
-                    )
-                }
-                HandlerArm::Op(name, params, k, arm_body) => {
-                    let mut ps: Vec<String> = params.clone();
-                    ps.push(k.clone());
-                    format!(
-                        "{ind1}{}({}) {} {}",
-                        name,
-                        ps.join(", "),
-                        kw::FAT_ARROW,
-                        self.fmt_expr(arm_body, indent + 1, mode)
-                    )
-                }
-                HandlerArm::Sugar(SugarArm::Fun(name, params, arm_body)) => {
-                    format!(
-                        "{ind1}{} {}({}) {} {}",
-                        kw::FUN,
-                        name,
-                        params.join(", "),
-                        kw::FAT_ARROW,
-                        self.fmt_expr(arm_body, indent + 1, mode)
-                    )
-                }
-                HandlerArm::Sugar(SugarArm::Final(name, params, arm_body)) => {
-                    format!(
-                        "{ind1}{} {} {}({}) {} {}",
-                        kw::FINAL,
-                        kw::CTL,
-                        name,
-                        params.join(", "),
-                        kw::FAT_ARROW,
-                        self.fmt_expr(arm_body, indent + 1, mode)
-                    )
-                }
-                HandlerArm::Sugar(SugarArm::Val(x, arm_body)) => {
-                    format!(
-                        "{ind1}{} {x} = {}",
-                        kw::VAL,
-                        self.fmt_expr(arm_body, indent + 1, mode)
-                    )
-                }
+            .map(|arm| {
+                format!(
+                    "{} {}",
+                    arm_head(arm, &ind1),
+                    self.fmt_expr(arm_body(arm), indent + 1, mode)
+                )
             })
             .collect();
         format!(

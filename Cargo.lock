@@ -727,9 +727,9 @@ dependencies = [
 
 [[package]]
 name = "offsides"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aba5b82602a46d03d3eb6d3483e28d0eb11dc9874ed1450aac38366c438d9fe2"
+checksum = "da038d8d8338082be2ca0d8ecd3f096233c7f2b69e69be0e6fbb2c8b193336a4"
 
 [[package]]
 name = "once_cell"

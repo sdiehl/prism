@@ -41,7 +41,7 @@ This builds the `prism` binary. Native compilation also needs `clang` on `$PATH`
 prism                                # interactive shell
 prism program.pr                     # compile to a native binary named `program`
 prism program.pr -o out              # ...with a custom output path
-prism program.pr -O2                  # ...at optimization level 2 (default is -O1)
+prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml), into target/
 prism clean                          # remove the project's target/ directory

@@ -97,14 +97,39 @@ pub fn ev(id: i64) -> String {
     format!("ev@{id}")
 }
 
+const VAR_GET_PREFIX: &str = "get@";
+const VAR_SET_PREFIX: &str = "set@";
+
 #[must_use]
 pub fn var_get(x: &str, n: u32) -> String {
-    format!("get@{x}@{n}")
+    format!("{VAR_GET_PREFIX}{x}@{n}")
 }
 
 #[must_use]
 pub fn var_set(x: &str, n: u32) -> String {
-    format!("set@{x}@{n}")
+    format!("{VAR_SET_PREFIX}{x}@{n}")
+}
+
+#[must_use]
+pub fn is_var_get(name: &str) -> bool {
+    name.starts_with(VAR_GET_PREFIX)
+}
+
+#[must_use]
+pub fn is_var_set(name: &str) -> bool {
+    name.starts_with(VAR_SET_PREFIX)
+}
+
+// "get@x@n" -> (x, n); the inverse of `var_get`.
+#[must_use]
+pub fn parse_var_get(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix(VAR_GET_PREFIX)?.rsplit_once('@')
+}
+
+// "set@x@n" -> (x, n); the inverse of `var_set`.
+#[must_use]
+pub fn parse_var_set(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix(VAR_SET_PREFIX)?.rsplit_once('@')
 }
 
 #[must_use]
@@ -144,6 +169,12 @@ pub fn var_runner(n: u32) -> String {
 #[must_use]
 pub fn is_var_runner(name: &str) -> bool {
     name.starts_with(VAR_RUNNER_PREFIX)
+}
+
+// "run@n" -> n; the inverse of `var_runner`.
+#[must_use]
+pub fn parse_var_runner(name: &str) -> Option<&str> {
+    name.strip_prefix(VAR_RUNNER_PREFIX)
 }
 
 #[must_use]

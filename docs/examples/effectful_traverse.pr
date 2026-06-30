@@ -1,0 +1,110 @@
+-- The synthesis: one generic, effect-polymorphic `traverse` over a custom
+-- recursive `Tree`, run four ways. Nothing about the traversal changes between
+-- them; the behaviour is chosen entirely by the effect the per-element function
+-- performs, and the effect system supplies what a monadic language would reach
+-- for an Applicative instance (or a transformer stack) to get. The signature
+-- `traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}` carries the per-element
+-- row `e` straight through, so each leaf's effects sequence in tree order and a
+-- handler discharges them at the boundary. No Applicative, no do-notation.
+
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
+
+-- The higher-kinded tower for Tree. Traversable names Functor and Foldable as
+-- superclasses, so this instance trio is what lets the prelude's generic
+-- `traverse`/`fmap`/`fold_r` resolve on the `Tree` head. Each delegates to a
+-- top-level recursive walker; `twalk` is itself effect-polymorphic.
+fn tmap(g, t) =
+  match t of
+    Leaf(x) => Leaf(g(x))
+    Branch(l, r) => Branch(tmap(g, l), tmap(g, r))
+
+fn tfold(g, z, t) =
+  match t of
+    Leaf(x) => g(x, z)
+    Branch(l, r) => tfold(g, tfold(g, z, r), l)
+
+fn twalk(g, t) =
+  match t of
+    Leaf(x) => Leaf(g(x))
+    Branch(l, r) => Branch(twalk(g, l), twalk(g, r))
+
+instance functorTree : Functor(Tree) {
+  fn fmap(g, t) = tmap(g, t)
+}
+
+instance foldableTree : Foldable(Tree) {
+  fn fold_r(g, z, t) = tfold(g, z, t)
+}
+
+instance traversableTree : Traversable(Tree) {
+  fn traverse(g, t) = twalk(g, t)
+}
+
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+
+effect Choice {
+  ctl pick(Unit) : Bool
+}
+
+-- A parameter-passing State handler: the handled block becomes a state
+-- transformer, run with an initial counter. The action's row is written
+-- `! {State | e}` so the handler subtracts State concretely and leaves `e`
+-- (any other effects the action performs) untouched for an outer handler.
+fn run_state(s0, action : () -> a ! {State | e}) =
+  let f =
+    handle action() with
+      get(_u, k) => \(s) -> k(s)(s)
+      put(v, k) => \(_s) -> k(())(v)
+      return r => \(_s) -> r
+  f(s0)
+
+-- A Fail handler, likewise annotated `! {Fail | e}`: annotating the action row is
+-- what lets a reusable handler-wrapper discharge its effect in the type (so it
+-- drops out of `main`'s row), not merely at runtime.
+fn attempt(action : () -> a ! {Fail | e}) =
+  handle action() with
+    final ctl fail() => None
+    return r => Some(r)
+
+-- Per-leaf functions, each performing a different effect. Their rows are what
+-- pick the traversal's behaviour; keeping them monomorphic keeps the example
+-- about the effects, not inference.
+fn number(x : Int) : !{State} (Int, Int) =
+  let n = get(())
+  put(n + 1)
+  (n, x)
+
+fn nonneg(x : Int) : !{Fail} Int =
+  guard(x >= 0)
+  x
+
+fn sign(x : Int) : !{Choice} Int =
+  if pick(()) then
+    x
+  else
+    0 - x
+
+fn audit(x : Int) : !{State, Fail} (Int, Int) =
+  guard(x >= 0)
+  number(x)
+
+fn main() : !{IO} Unit =
+  let t = Branch(Branch(Leaf(1), Leaf(2)), Leaf(3))
+  -- State: number the leaves left to right (the State applicative elsewhere).
+  println(show(run_state(0, \() -> traverse(number, t))))
+  -- Fail: short-circuit the whole traversal on a bad leaf (the Maybe applicative).
+  println(show(attempt(\() -> traverse(nonneg, t))))
+  println(show(attempt(\() -> traverse(nonneg, Branch(Leaf(0 - 9), Leaf(2))))))
+  -- Choice, by multishot resumption: one whole tree per sign assignment, all
+  -- 2^3 of them collected (the List applicative; here the continuation is reentered).
+  let worlds =
+    handle traverse(sign, t) with
+      pick(_u, k) => append(k(true), k(false))
+      return r => Cons(r, Nil)
+  println(show(length(worlds)))
+  -- {State, Fail} in a single pass under two stacked handlers: number and
+  -- validate at once, the row the monadic world reaches StateT s Maybe for.
+  println(show(attempt(\() -> run_state(0, \() -> traverse(audit, t)))))

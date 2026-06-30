@@ -553,7 +553,7 @@ impl Eraser {
     // when there is no return-crossing loop here.
     fn return_loop_call(&mut self, c: &Comp) -> Option<(Comp, Option<Comp>)> {
         // A bare `repeat_while`/`forever` spine.
-        if let Some((cond, body, rest)) = match_loop_spine(c) {
+        if let Some((cond, body, rest)) = peel_loop_spine(c) {
             if signals_return(&body) {
                 let call = self.build_driver(cond.as_ref(), &body, true)?;
                 return Some((call, rest));
@@ -729,10 +729,6 @@ fn match_break(c: &Comp) -> Option<(Comp, Comp)> {
 // Recognize a bare `repeat_while`/`forever` loop spine (the thunk binds plus the
 // trailing driver call), returning the inlined condition (None for `forever`), the
 // body, and the continuation after the loop (None when the loop is the tail).
-fn match_loop_spine(c: &Comp) -> Option<(Option<Comp>, Comp, Option<Comp>)> {
-    peel_loop_spine(c)
-}
-
 fn peel_loop_spine(c: &Comp) -> Option<(Option<Comp>, Comp, Option<Comp>)> {
     let mut thunks: std::collections::BTreeMap<Sym, Comp> = std::collections::BTreeMap::new();
     let mut cur = c;

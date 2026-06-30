@@ -145,6 +145,17 @@ impl EffRow {
         v
     }
 
+    // The bare label names of the row (dropping any args), as a set.
+    pub fn label_names(&self) -> Effects {
+        let mut v = Effects::new();
+        let mut cur = self;
+        while let Self::Extend(l, r) = cur {
+            v.insert(l.name);
+            cur = r;
+        }
+        v
+    }
+
     pub fn tail(&self) -> &Self {
         let mut cur = self;
         loop {
@@ -427,7 +438,7 @@ impl Type {
                 } else {
                     format!(" ! {}", row.show())
                 };
-                format!("({}) -> {}{}", ps.join(", "), r.show(), row_s)
+                format!("({}) {} {}{}", ps.join(", "), kw::ARROW, r.show(), row_s)
             }
             // A higher-kinded application spine prints in n-ary form `head(a, b)`.
             Self::App(..) => {

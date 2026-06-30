@@ -59,7 +59,7 @@ impl Tc<'_> {
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
-            .ok_or_else(|| TcErr::Ice(format!("solve_row: ^{v} not in context")))?;
+            .unwrap_or_else(|| panic!("solve_row: ^{v} not in context\nctx={:?}", self.ctx));
         self.ctx[i] = Entry::SolvedRow(v, r);
         Ok(())
     }
@@ -205,36 +205,63 @@ impl Tc<'_> {
             .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
     }
 
-    pub(super) fn articulate(&mut self, a: u32, arg_exs: &[u32], row: u32, ret: u32) {
+    pub(super) fn articulate(
+        &mut self,
+        a: u32,
+        arg_exs: &[u32],
+        row: u32,
+        ret: u32,
+    ) -> Result<(), TcErr> {
         let fun = Type::Fun(
             arg_exs.iter().map(|e| Type::Exist(*e)).collect(),
             EffRow::Exist(row),
             Box::new(Type::Exist(ret)),
         );
         // `a` is the live existential `inst` is articulating; the solve invariant
-        // keeps it in context, so absence is a compiler bug, not user-reachable:
-        // this is infallible, hence no `Result`.
+        // keeps it in context, so absence is a compiler bug, not user-reachable.
+        // It surfaces as a structured ICE rather than a raw panic, matching the
+        // rest of the context/row machinery.
         let pos = self
             .index_ex(a)
-            .expect("articulate: existential escaped scope");
+            .ok_or_else(|| TcErr::Ice(format!("articulate: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = arg_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::ExRow(row));
         repl.push(Entry::Ex(ret));
         repl.push(Entry::Solved(a, fun));
         self.ctx.splice(pos..=pos, repl);
+        Ok(())
     }
 
-    pub(super) fn splice_solved(&mut self, a: u32, new_exs: &[u32], solved: Type) {
+    pub(super) fn splice_solved(
+        &mut self,
+        a: u32,
+        new_exs: &[u32],
+        solved: Type,
+    ) -> Result<(), TcErr> {
         // Same invariant as `articulate`: a live existential is always in
-        // context, so this is infallible too.
+        // context, so absence is a compiler bug surfaced as a structured ICE.
         let pos = self
             .index_ex(a)
-            .expect("splice_solved: existential escaped scope");
+            .ok_or_else(|| TcErr::Ice(format!("splice_solved: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = new_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::Solved(a, solved));
         self.ctx.splice(pos..=pos, repl);
+        Ok(())
     }
 
+    // Generalization is unconditional: a `let` binding generalizes its inferred
+    // type with no value restriction, even for a syntactic non-value such as
+    // `let xs = array_empty()`. This is sound here and stays sound by design,
+    // not by accident. The polymorphic-reference hazard the value restriction
+    // exists to plug needs a generalizable binding that aliases a mutable cell;
+    // Prism has no such thing and never will. There is no ML-style `ref`: the
+    // only mutable binding is `var`, which desugars to a private, monomorphic
+    // State effect (writing two element types into one `var` is a type error),
+    // and `Array`/`HashMap`/`String` are copy-on-write value types with no
+    // shared identity, so a functional allocator can never introduce aliasing.
+    // A first-class polymorphic mutable reference is deliberately outside the
+    // language, so a value restriction would only reject sound programs. Do not
+    // add one (and please leave this note for the next reader who wonders).
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }

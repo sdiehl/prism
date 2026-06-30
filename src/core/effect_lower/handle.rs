@@ -12,6 +12,24 @@ use crate::names;
 use crate::sym::Sym;
 
 impl Lowerer {
+    // Driver call site: reify `body` to an Eff value (`r0`), then drive it
+    // through `driver`, threading the captured free vars as extra arguments.
+    fn drive_from_body(
+        &mut self,
+        body: &Comp,
+        driver: Sym,
+        fvs: &[Sym],
+    ) -> Result<Comp, TypeError> {
+        let r0 = self.fresh("r0");
+        let mut call_args = vec![Value::Var(r0)];
+        call_args.extend(fvs.iter().map(|v| Value::Var(*v)));
+        Ok(Comp::Bind(
+            Box::new(self.mon(body)?),
+            r0,
+            Box::new(Comp::Call(driver, call_args)),
+        ))
+    }
+
     pub(super) fn lower_handle(&mut self, c: &Comp) -> Result<Comp, TypeError> {
         let Comp::Handle {
             body,
@@ -23,21 +41,7 @@ impl Lowerer {
             return Ok(c.clone());
         };
 
-        // Free variables of the handler arms become extra parameters threaded
-        // through the driver and every resumption.
-        let mut fvs = BTreeSet::new();
-        if let Some(rb) = return_body {
-            fvs.extend(fv::comp_without(rb, return_var.iter()));
-        }
-        for op in ops {
-            let mut s = fv::comp_without(&op.body, &op.params);
-            s.remove(&op.resume);
-            fvs.extend(s);
-        }
-        // `Sym` orders by intern id. Sort the captured free vars by name so the
-        // driver's parameter and resumption-argument order stays byte-stable.
-        let mut fvs: Vec<Sym> = fvs.into_iter().collect();
-        fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let fvs = handler_fvs(return_var, return_body, ops);
         let open = self.is_open(body, ops);
 
         let driver = self.fresh("handle");
@@ -169,14 +173,7 @@ impl Lowerer {
         });
 
         // call site: run the monadified body, then drive it
-        let r0 = self.fresh("r0");
-        let mut call_args = vec![Value::Var(r0)];
-        call_args.extend(fvs.iter().map(|v| Value::Var(*v)));
-        Ok(Comp::Bind(
-            Box::new(self.mon(body)?),
-            r0,
-            Box::new(Comp::Call(driver, call_args)),
-        ))
+        self.drive_from_body(body, driver, &fvs)
     }
 
     // A closed handle is driven natively when opted in and every clause resumes
@@ -219,17 +216,7 @@ impl Lowerer {
             return Ok(c.clone());
         };
 
-        let mut fvs = BTreeSet::new();
-        if let Some(rb) = return_body {
-            fvs.extend(fv::comp_without(rb, return_var.iter()));
-        }
-        for op in ops {
-            let mut s = fv::comp_without(&op.body, &op.params);
-            s.remove(&op.resume);
-            fvs.extend(s);
-        }
-        let mut fvs: Vec<Sym> = fvs.into_iter().collect();
-        fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let fvs = handler_fvs(return_var, return_body, ops);
 
         self.used_resume = true;
         let loop_name = self.fresh("region");
@@ -356,14 +343,7 @@ impl Lowerer {
 
         // Call site: reify the body to an Eff value, then drive it; the loop
         // returns the bare answer (closed).
-        let r0 = self.fresh("r0");
-        let mut call_args = vec![Value::Var(r0)];
-        call_args.extend(fvs.iter().map(|v| Value::Var(*v)));
-        Ok(Comp::Bind(
-            Box::new(self.mon(body)?),
-            r0,
-            Box::new(Comp::Call(loop_name, call_args)),
-        ))
+        self.drive_from_body(body, loop_name, &fvs)
     }
 
     // `let f = <closed function-answer handle> in f(arg)`: the handler's answer
@@ -415,20 +395,7 @@ impl Lowerer {
             return Ok(None);
         }
 
-        // Captured free vars threaded through the loop and resumptions. The clause
-        // and return lambda params, the op params and the resume are all bound
-        // within their bodies, so they fall out of `comp_without` already.
-        let mut fvs = BTreeSet::new();
-        if let Some(rb) = return_body {
-            fvs.extend(fv::comp_without(rb, return_var.iter()));
-        }
-        for op in ops {
-            let mut s = fv::comp_without(&op.body, &op.params);
-            s.remove(&op.resume);
-            fvs.extend(s);
-        }
-        let mut fvs: Vec<Sym> = fvs.into_iter().collect();
-        fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let fvs = handler_fvs(return_var, return_body, ops);
 
         let region = self.fresh("region");
         let acc = self.fresh("acc");
@@ -657,6 +624,31 @@ impl Lowerer {
         });
         Ok(driver)
     }
+}
+
+// Free variables of a handler's arms, which become extra parameters threaded
+// through the driver and every resumption. The clause/return-lambda params, the
+// op params and the resume are all bound within their bodies, so they fall out
+// of `comp_without` already. `Sym` orders by intern id, so the result is sorted
+// by name to keep the driver's parameter and resumption-argument order
+// byte-stable across runs.
+fn handler_fvs(
+    return_var: &Option<Sym>,
+    return_body: &Option<Box<Comp>>,
+    ops: &[HandleOp],
+) -> Vec<Sym> {
+    let mut fvs = BTreeSet::new();
+    if let Some(rb) = return_body {
+        fvs.extend(fv::comp_without(rb, return_var.iter()));
+    }
+    for op in ops {
+        let mut s = fv::comp_without(&op.body, &op.params);
+        s.remove(&op.resume);
+        fvs.extend(s);
+    }
+    let mut fvs: Vec<Sym> = fvs.into_iter().collect();
+    fvs.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    fvs
 }
 
 fn bind_params(params: &[Sym], arg: Sym, body: Comp) -> Comp {

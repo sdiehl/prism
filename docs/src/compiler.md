@@ -635,13 +635,13 @@ A Core Lint well-formedness check, pipeline idempotence, and per-pass tick telem
 
 Several environment knobs aid debugging, all off by default.
 
-| Variable | Effect |
-| -------- | ------ |
-| `PRISM_OPT_STATS` | dumps per-pass rewrite counts |
-| `PRISM_CORE_LINT` | lints between passes |
-| `PRISM_DUMP_CORE` | writes the Core after each pass to a stream or to run-namespaced files under `target/` |
-| `PRISM_OPT_LEVEL` | overrides the level when no `-O` flag is given |
-| `PRISM_NO_SPECIALIZE` | disables dictionary specialization |
+| Variable              | Effect                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `PRISM_OPT_STATS`     | dumps per-pass rewrite counts                                                          |
+| `PRISM_CORE_LINT`     | lints between passes                                                                   |
+| `PRISM_DUMP_CORE`     | writes the Core after each pass to a stream or to run-namespaced files under `target/` |
+| `PRISM_OPT_LEVEL`     | overrides the level when no `-O` flag is given                                         |
+| `PRISM_NO_SPECIALIZE` | disables dictionary specialization                                                     |
 
 ## 15. The Interactive Shell {#the-interactive-shell}
 

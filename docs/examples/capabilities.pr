@@ -1,0 +1,19 @@
+-- Each input operation names the slice of the world it reads. `roll` performs
+-- Random and nothing else, so its row is !{Random}, never a blanket !{IO}. A
+-- function that reads several capabilities unions them structurally: `summary`
+-- carries !{Env, Random}. Only at the program boundary does the default run_io
+-- handler discharge each capability against the real world (tail-resumptively,
+-- so it fuses to a direct call), collapsing the capabilities to !{IO} there.
+
+fn roll() : !{Random} Int = rand_below(6) + 1
+
+fn user() : !{Env} String =
+  let name = getenv("USER")
+  if name == "" then
+    "anonymous"
+  else
+    name
+
+fn summary() : !{Env, Random} String = "{user()} rolled {roll()}"
+
+fn main() = println(summary())

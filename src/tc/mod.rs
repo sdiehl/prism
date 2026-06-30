@@ -49,6 +49,22 @@ pub struct EffOpInfo {
     pub ret: Type,
 }
 
+impl EffOpInfo {
+    // Instantiate the op's param/return types with the effect's type arguments,
+    // substituting each declared effect parameter for the supplied argument.
+    pub fn instantiate(&self, args: &[Type]) -> (Vec<Type>, Type) {
+        let mut params = self.params.clone();
+        let mut ret = self.ret.clone();
+        for (p, t) in self.eff_params.iter().zip(args) {
+            for q in &mut params {
+                *q = q.subst_var(*p, t);
+            }
+            ret = ret.subst_var(*p, t);
+        }
+        (params, ret)
+    }
+}
+
 // Instance dispatch key: the head constructor of an instance head type.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HeadKey {
@@ -300,7 +316,7 @@ fn concrete_effects(ty: &Type) -> Effects {
         t = b;
     }
     match t {
-        Type::Fun(_, row, _) => row.labels().iter().map(|l| l.name).collect(),
+        Type::Fun(_, row, _) => row.label_names(),
         _ => Effects::new(),
     }
 }

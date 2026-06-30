@@ -308,7 +308,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         // `Sym` orders by intern id, so sort captures by name to keep the closure
         // cell layout (and `_fv` numbering) byte-stable across runs.
         let mut free_vars: Vec<Sym> = fv::comp_without(body, params).into_iter().collect();
-        free_vars.sort_by_key(|s| s.as_str());
+        free_vars.sort_by_cached_key(|s| s.as_str());
 
         let tag = self.lams.len();
         self.lams.push(LamInfo {
@@ -535,29 +535,29 @@ impl<'a, I: Isa> Cg<'a, I> {
                         let r = self.dst(|i, b, d| i.fptosi(b, d, &fa));
                         self.retag(&r)
                     }
-                    FloatOp::FloorToInt => {
+                    FloatOp::FloorToInt | FloatOp::CeilToInt => {
+                        let intr = if matches!(op, FloatOp::FloorToInt) {
+                            "floor"
+                        } else {
+                            "ceil"
+                        };
                         let fa = self.f_in(&a);
-                        let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, "floor", &fa));
+                        let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, intr, &fa));
                         let r = self.dst(|i, b, d| i.fptosi(b, d, &ff));
                         self.retag(&r)
                     }
-                    FloatOp::CeilToInt => {
-                        let fa = self.f_in(&a);
-                        let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, "ceil", &fa));
-                        let r = self.dst(|i, b, d| i.fptosi(b, d, &ff));
-                        self.retag(&r)
-                    }
-                    FloatOp::AbsFloat => {
-                        let fa = self.f_in(&a);
-                        let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, "fabs", &fa));
-                        self.f_out(&ff)
-                    }
-                    FloatOp::Sqrt | FloatOp::Sin | FloatOp::Cos | FloatOp::Exp | FloatOp::Ln => {
+                    FloatOp::Sqrt
+                    | FloatOp::Sin
+                    | FloatOp::Cos
+                    | FloatOp::Exp
+                    | FloatOp::Ln
+                    | FloatOp::AbsFloat => {
                         let intr = match op {
                             FloatOp::Sqrt => "sqrt",
                             FloatOp::Sin => "sin",
                             FloatOp::Cos => "cos",
                             FloatOp::Exp => "exp",
+                            FloatOp::AbsFloat => "fabs",
                             _ => "log",
                         };
                         let fa = self.f_in(&a);
@@ -664,10 +664,13 @@ impl<'a, I: Isa> Cg<'a, I> {
     fn lower_tail(&mut self, regs: &Regs, c: &Comp) -> Result<(), String> {
         match c {
             Comp::Bind(m, x, n) => {
-                if let (Some(t), Comp::Call(g, args)) = (self.trmc.clone(), m.as_ref()) {
-                    if *g == t.name && args.len() == t.arity {
-                        if let Some(shape) = trmc_shape(n, x.as_str()) {
-                            return self.trmc_step(regs, args, &shape, &t);
+                if let Comp::Call(g, args) = m.as_ref() {
+                    if let Some(t) = self.trmc.as_ref() {
+                        if *g == t.name && args.len() == t.arity {
+                            if let Some(shape) = trmc_shape(n, x.as_str()) {
+                                let t = t.clone();
+                                return self.trmc_step(regs, args, &shape, &t);
+                            }
                         }
                     }
                 }
@@ -1041,15 +1044,10 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.dst(|i, bf, d| i.icmp(bf, d, "eq", &bit, &one))
     }
 
-    fn function(&mut self, f: &CoreFn) -> Result<String, String> {
-        let body = reassoc(&f.body);
-        if let Some(mode) = trmc_mode(f.name.as_str(), f.params.len(), &body) {
-            return self.trmc_function(f, &body, mode);
-        }
-        self.b.reset();
-        let mut regs = Regs::new();
-        let params: Vec<String> = f
-            .params
+    // Bind each function parameter to its `%a{i}` SSA register and return the
+    // ordered list of register names for the function header.
+    fn bind_a_params(regs: &mut Regs, params: &[Sym]) -> Vec<String> {
+        params
             .iter()
             .enumerate()
             .map(|(i, p)| {
@@ -1057,7 +1055,17 @@ impl<'a, I: Isa> Cg<'a, I> {
                 regs.insert(*p, r.clone());
                 r
             })
-            .collect();
+            .collect()
+    }
+
+    fn function(&mut self, f: &CoreFn) -> Result<String, String> {
+        let body = reassoc(&f.body);
+        if let Some(mode) = trmc_mode(f.name.as_str(), f.params.len(), &body) {
+            return self.trmc_function(f, &body, mode);
+        }
+        self.b.reset();
+        let mut regs = Regs::new();
+        let params = Self::bind_a_params(&mut regs, &f.params);
         self.cur_arity = f.params.len();
         let header = self.isa.fn_define(&Self::sym(f.name.as_str()), &params);
         self.isa.open_entry(&mut self.b);
@@ -1077,16 +1085,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         let sym = format!("{}.trmc", Self::sym(f.name.as_str()));
         self.b.reset();
         let mut regs = Regs::new();
-        let mut params: Vec<String> = f
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let r = format!("%a{i}");
-                regs.insert(*p, r.clone());
-                r
-            })
-            .collect();
+        let mut params = Self::bind_a_params(&mut regs, &f.params);
         let extra = format!("%a{}", f.params.len());
         params.push(extra.clone());
         self.cur_arity = params.len();

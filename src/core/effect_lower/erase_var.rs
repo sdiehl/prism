@@ -105,9 +105,9 @@ fn match_var_block(c: &Comp) -> Option<VarBlock> {
     };
     // Identify which op is get and which is set; both must share name@id.
     let (get_op, set_op) = order_get_set(a, b)?;
-    let (gx, gn) = parse_var_op(get_op.name.as_str(), "get@")?;
-    let (sx, sn) = parse_var_op(set_op.name.as_str(), "set@")?;
-    let rn = run_sym.as_str().strip_prefix("run@")?;
+    let (gx, gn) = names::parse_var_get(get_op.name.as_str())?;
+    let (sx, sn) = names::parse_var_set(set_op.name.as_str())?;
+    let rn = names::parse_var_runner(run_sym.as_str())?;
     if gx != sx || gn != sn || gn != rn {
         return None;
     }
@@ -123,18 +123,13 @@ fn match_var_block(c: &Comp) -> Option<VarBlock> {
 }
 
 fn order_get_set<'a>(a: &'a HandleOp, b: &'a HandleOp) -> Option<(&'a HandleOp, &'a HandleOp)> {
-    if a.name.as_str().starts_with("get@") && b.name.as_str().starts_with("set@") {
+    if names::is_var_get(a.name.as_str()) && names::is_var_set(b.name.as_str()) {
         Some((a, b))
-    } else if b.name.as_str().starts_with("get@") && a.name.as_str().starts_with("set@") {
+    } else if names::is_var_get(b.name.as_str()) && names::is_var_set(a.name.as_str()) {
         Some((b, a))
     } else {
         None
     }
-}
-
-// "get@x@n" / "set@x@n" with the given prefix -> (x, n).
-fn parse_var_op<'a>(name: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
-    name.strip_prefix(prefix)?.rsplit_once('@')
 }
 
 // Peel `Bind(<init>, it, Bind(Return(run_sym), ra, (force ra)(it)))`, returning
