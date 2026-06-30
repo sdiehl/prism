@@ -40,7 +40,7 @@ Comments are one form only: `--` to the end of the line. There are no block comm
 > 2. Lexical syntax
 > 3. Lexical syntax of comments
 
-It is a [notoriously fraught](https://wiki.haskell.org/Wadler's_Law) topic, in functional languages especially. Prism ends the argument before it starts by taking Haskell-style `--` line comments and moving on. Deal with it.
+Lexical syntax is a [notoriously fraught](https://wiki.haskell.org/Wadler's_Law) topic, in functional languages especially. Every engineer is certain they alone know what "readable" is, and not one can tell you why; it is governed by fashion more than science.
 
 ## 3. Parsing {#parsing}
 
@@ -919,7 +919,7 @@ Prism is an unusually good host for the Unison-style managed codebase this point
 
 ## 19. Metaprogramming {#metaprogramming}
 
-Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having been burned by Template Haskell and OCaml's metaprogramming fire and watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [email me](mailto:stephen.m.diehl@gmail.com). Until then it stays an open problem.
+Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having been burned by Template Haskell and OCaml's metaprogramming fire and watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [get in touch](https://www.stephendiehl.com/hire/). Until then it stays an open problem.
 
 ## 20. Bootstrapping Plan {#bootstrapping-and-self-hosting}
 
