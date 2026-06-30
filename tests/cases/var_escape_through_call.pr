@@ -1,0 +1,14 @@
+-- A `var`-using closure smuggled out through a non-constructor call that
+-- returns it. The syntactic escape analysis (desugar/effects/escape.rs) treats a
+-- non-ctor `Call` result as opaque and does not flag this, yet the program is
+-- still rejected: the closure carries the var's private effect (`Var@x@0`) on its
+-- arrow row, so principal effect inference reports it as unhandled. Principal
+-- effect rows are the sound backstop for the escape analysis's residual hole, so
+-- the in-place `var`/`Ref` lowering never sees an escaped mutable cell.
+fn idf(g : (Int) -> Int) : (Int) -> Int = g
+
+fn leak() : (Int) -> Int =
+  var x := 0
+  idf(\(n) -> x + n)
+
+fn main() = println(leak()(1))

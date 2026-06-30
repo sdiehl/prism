@@ -1,0 +1,12 @@
+-- Arrays have value semantics under sharing: `array_set` mutates in place only
+-- when the cell is uniquely owned (rc 1) and copies otherwise. With `a` still
+-- live, the `array_set` that builds `b` copies, so the write is not observable
+-- through `a`. This copy-on-write is what makes the type system's covariant
+-- treatment of `Array` element types sound without an invariant-array rule: two
+-- live aliases can never share a cell across a mutation, so you can never write
+-- through one typed view and read the change back through another. Prints 0, 99.
+fn main() =
+  let a = array_new(3, 0)
+  let b = array_set(a, 0, 99)
+  println(array_get(a, 0))
+  println(array_get(b, 0))

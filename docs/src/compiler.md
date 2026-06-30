@@ -631,7 +631,15 @@ The parser rejects an unknown name (suggesting the closest known one), a pass pl
 
 A Core Lint well-formedness check, pipeline idempotence, and per-pass tick telemetry gate every pass, alongside the triple-backend parity oracle (see [verification](#verification)). Parity is the invariant: compiled behavior at every level, and under any `--passes` spec, is byte-identical under the oracle, so optimization can only change cost, never meaning.
 
-Several environment knobs aid debugging, all off by default. `PRISM_OPT_STATS` dumps per-pass rewrite counts; `PRISM_CORE_LINT` lints between passes; `PRISM_DUMP_CORE` writes the Core after each pass to a stream or to run-namespaced files under `target/`; `PRISM_OPT_LEVEL` overrides the level when no `-O` flag is given; and `PRISM_NO_SPECIALIZE` disables dictionary specialization.
+Several environment knobs aid debugging, all off by default.
+
+| Variable | Effect |
+| -------- | ------ |
+| `PRISM_OPT_STATS` | dumps per-pass rewrite counts |
+| `PRISM_CORE_LINT` | lints between passes |
+| `PRISM_DUMP_CORE` | writes the Core after each pass to a stream or to run-namespaced files under `target/` |
+| `PRISM_OPT_LEVEL` | overrides the level when no `-O` flag is given |
+| `PRISM_NO_SPECIALIZE` | disables dictionary specialization |
 
 ## 15. The Interactive Shell {#the-interactive-shell}
 

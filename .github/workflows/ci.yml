@@ -98,6 +98,17 @@ jobs:
           ASAN_OPTIONS: "detect_leaks=0:abort_on_error=1"
         run: cargo test --test parity native_matches_interpreter
 
+      # Re-run the native parity corpus with the C runtime's in-binary structural
+      # backstop (-DPRISM_RT_DEBUG): every cell dereference asserts a non-null,
+      # aligned, positive-rc pointer with in-bounds field index, aborting on a
+      # codegen tagging/rc bug instead of corrupting memory. Unlike ASan this
+      # needs no instrumentation toolchain, so it is the net a shipped binary can
+      # carry; here it must stay silent (a fired check fails parity).
+      - name: Runtime structural backstop
+        env:
+          PRISM_CC_FLAGS: "-DPRISM_RT_DEBUG"
+        run: cargo test --test parity native_matches_interpreter
+
       - name: Check prism formatting
         run: |
           cargo build --release 2>/dev/null

@@ -784,6 +784,7 @@ fn state_clause(op: &HandleOp) -> Option<StateClause> {
                     false,
                     "state_clause matched a clause that still references the resume: elaborated shape drifted"
                 );
+                super::diagnostics::report_shape_drift("state_clause");
                 return None;
             }
             return Some(StateClause {

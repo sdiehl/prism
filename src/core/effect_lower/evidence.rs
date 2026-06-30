@@ -362,6 +362,7 @@ pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
             false,
             "strip_resume accepted a clause but left a resume reference: elaborated shape drifted"
         );
+        super::diagnostics::report_shape_drift("strip_resume");
         return None;
     }
     Some(stripped)

@@ -260,9 +260,12 @@ void prism_rc_dec(long v) {
  * local mutable state (`var x := e`) compiles to one of these, so reads and
  * writes are loads/stores and a `var` loop is a real constant-stack loop instead
  * of the algebraic-effect free monad. `prism_ref_set` overwrites the field in
- * place regardless of the cell's refcount: sound because escape analysis proves
- * every reference is the same logical variable, never an alias of a distinct
- * value. The cell is an ordinary arity-1 cell, so `prism_rc_dec` frees its field
+ * place regardless of the cell's refcount: sound because the cell never aliases a
+ * distinct value, established before this lowering by two independent compile-time
+ * checks (an escape analysis over the handled block, with principal effect-row
+ * inference as the backstop: a `var` op that slips past the syntactic check still
+ * surfaces as an unhandled private `Var@..` effect). The cell is an ordinary
+ * arity-1 cell, so `prism_rc_dec` frees its field
  * with it; the caller (codegen) owns the cell reference and rc_decs it after each
  * read/write, the rc pass having dup'd so each use has its own reference. */
 long prism_ref_new(long v) {

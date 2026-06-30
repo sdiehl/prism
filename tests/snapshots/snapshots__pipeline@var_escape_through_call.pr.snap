@@ -1,0 +1,194 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/var_escape_through_call.pr
+---
+== tokens ==
+VOpen Fn Ident("idf") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt RParen Colon LParen KwInt RParen Arrow KwInt Eq Ident("g") VSemi Fn Ident("leak") LParen RParen Colon LParen KwInt RParen Arrow KwInt Eq VOpen Var Ident("x") ColonEq Int(IntLit { value: 0, suffix: None }) VSemi Ident("idf") LParen Lambda LParen Ident("n") RParen Arrow Ident("x") Plus Ident("n") RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("leak") LParen RParen LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "idf",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Fun(
+                            [
+                                Int,
+                            ],
+                            Empty,
+                            Int,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Fun(
+                    [
+                        Int,
+                    ],
+                    Empty,
+                    Int,
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Var(
+                    "g",
+                ),
+                span: 594..595,
+            },
+            wheres: [],
+            span: 552..595,
+        },
+        Decl {
+            name: "leak",
+            params: [],
+            ret: Some(
+                Fun(
+                    [
+                        Int,
+                    ],
+                    Empty,
+                    Int,
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    VarDecl(
+                        "x",
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 635..636,
+                        },
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "idf",
+                                    ),
+                                    span: 639..642,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "n",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "x",
+                                                        ),
+                                                        span: 651..652,
+                                                    },
+                                                    Spanned {
+                                                        node: Var(
+                                                            "n",
+                                                        ),
+                                                        span: 655..656,
+                                                    },
+                                                ),
+                                                span: 651..656,
+                                            },
+                                        ),
+                                        span: 643..656,
+                                    },
+                                ],
+                            ),
+                            span: 639..657,
+                        },
+                    ),
+                ),
+                span: 626..657,
+            },
+            wheres: [],
+            span: 597..657,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 671..678,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "leak",
+                                            ),
+                                            span: 679..683,
+                                        },
+                                        [],
+                                    ),
+                                    span: 679..685,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 686..687,
+                                    },
+                                ],
+                            ),
+                            span: 679..688,
+                        },
+                    ],
+                ),
+                span: 671..689,
+            },
+            wheres: [],
+            span: 659..689,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `leak`: missing effect `Var@x@0`
+    ╭─[ <source>:12:7 ]
+    │
+ 12 │   idf(\(n) -> x + n)
+    │       ──────┬──────  
+    │             ╰──────── in `leak`: missing effect `Var@x@0`
+────╯

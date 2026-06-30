@@ -228,7 +228,11 @@ fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
 // yields a scalar and literals carry nothing. Residual hole: a non-ctor Call or
 // Pipe result is opaque, since without types we cannot tell a call that consumes
 // a tainted closure from one that returns it, and flagging every tainted
-// argument would reject valid code.
+// argument would reject valid code. This check is therefore a friendlier early
+// diagnostic, not the soundness boundary: a closure that does slip out this way
+// still carries the var's private effect on its arrow row, so principal effect
+// inference rejects it as an unhandled effect before the in-place `var` lowering
+// runs (see tests/cases/var_escape_through_call.pr).
 pub(super) fn escapes(
     e: &S<Expr<Core>>,
     ops: &BTreeSet<String>,
