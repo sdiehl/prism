@@ -258,6 +258,7 @@ impl Rv {
         }
     }
 
+    #[must_use]
     pub fn show(&self) -> String {
         self.render(false)
     }
@@ -267,6 +268,7 @@ impl Rv {
     // constructors. Used for result display (the REPL), where a bare `foo` is
     // ambiguous with an identifier; `print` keeps using `show` for raw output so
     // the backends stay byte-identical.
+    #[must_use]
     pub fn repr(&self) -> String {
         self.render(true)
     }

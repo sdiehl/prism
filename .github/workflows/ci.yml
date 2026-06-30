@@ -50,6 +50,14 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # rustdoc held to the same zero-warning bar as clippy and the C runtime:
+      # a broken intra-doc link or a public doc pointing at a private item fails
+      # CI rather than silently shipping degraded API docs.
+      - name: Build docs (-D warnings)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
       # The C runtime is held to the same zero-warning bar as the Rust (clippy
       # -D warnings). A broad warning set under -Werror; -Wmissing-prototypes is
       # the one omission, since the prism_* functions are the runtime ABI called

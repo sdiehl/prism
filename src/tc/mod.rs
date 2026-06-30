@@ -52,6 +52,7 @@ pub struct EffOpInfo {
 impl EffOpInfo {
     // Instantiate the op's param/return types with the effect's type arguments,
     // substituting each declared effect parameter for the supplied argument.
+    #[must_use]
     pub fn instantiate(&self, args: &[Type]) -> (Vec<Type>, Type) {
         let mut params = self.params.clone();
         let mut ret = self.ret.clone();

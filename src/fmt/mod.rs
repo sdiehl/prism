@@ -190,7 +190,7 @@ fn escape_str(s: &str) -> String {
 // The shared shape of `as_compound_assign`/`as_index_compound`: a synth
 // `Bin(op, lhs, rhs)` with a compound-eligible op whose `lhs` matches the
 // caller's target predicate. Returns the op and right operand.
-fn as_compound<'a>(v: &'a S<Expr>, lhs_ok: impl Fn(&Expr) -> bool) -> Option<(BinOp, &'a S<Expr>)> {
+fn as_compound(v: &S<Expr>, lhs_ok: impl Fn(&Expr) -> bool) -> Option<(BinOp, &S<Expr>)> {
     if !v.synth {
         return None;
     }

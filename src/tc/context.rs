@@ -59,8 +59,29 @@ impl Tc<'_> {
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
-            .unwrap_or_else(|| panic!("solve_row: ^{v} not in context\nctx={:?}", self.ctx));
+            .ok_or_else(|| TcErr::Ice(format!("solve_row: ^{v} not in context")))?;
         self.ctx[i] = Entry::SolvedRow(v, r);
+        Ok(())
+    }
+
+    // The row analogue of `splice_solved`: open row existential `a` to `solved`,
+    // inserting the fresh `new_rows` at `a`'s position (not appended at the end),
+    // so the solution references only entries to its left. Appending instead lets
+    // `a` point at a younger row existential to its right, which a later
+    // truncation can drop while `a`'s solution survives, stranding the reference
+    // (the `solve_row`/`unify_row` "not in context" ICE).
+    pub(super) fn splice_solved_row(
+        &mut self,
+        a: u32,
+        new_rows: &[u32],
+        solved: EffRow,
+    ) -> Result<(), TcErr> {
+        let pos = self
+            .index_ex_row(a)
+            .ok_or_else(|| TcErr::Ice(format!("splice_solved_row: ^{a} not in context")))?;
+        let mut repl: Vec<Entry> = new_rows.iter().map(|r| Entry::ExRow(*r)).collect();
+        repl.push(Entry::SolvedRow(a, solved));
+        self.ctx.splice(pos..=pos, repl);
         Ok(())
     }
 

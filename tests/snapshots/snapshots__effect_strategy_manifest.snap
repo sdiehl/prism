@@ -3,6 +3,7 @@ source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
 examples/calc.pr: evidence
+examples/capabilities.pr: evidence
 examples/comprehension.pr: whole-program-free-monad
 examples/condition.pr: selective-free-monad
 examples/delim.pr: selective-free-monad
@@ -18,6 +19,7 @@ examples/eff_rows.pr: selective-free-monad
 examples/eff_state.pr: state-fusion
 examples/eff_writer.pr: state-fusion
 examples/eff_yield.pr: selective-free-monad
+examples/effectful_traverse.pr: whole-program-free-monad
 examples/effects.pr: selective-free-monad
 examples/errors.pr: selective-free-monad
 examples/exceptions.pr: selective-free-monad
@@ -63,6 +65,7 @@ tests/cases/run/eff_eta_thunk.pr: whole-program-free-monad
 tests/cases/run/eff_fn_list.pr: whole-program-free-monad
 tests/cases/run/eff_fuse.pr: evidence
 tests/cases/run/eff_pending_arg.pr: evidence
+tests/cases/run/eff_poly_fn_arg.pr: whole-program-free-monad
 tests/cases/run/eff_two_handlers.pr: evidence
 tests/cases/run/effop_tax.pr: evidence
 tests/cases/run/errors.pr: selective-free-monad

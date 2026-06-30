@@ -1,0 +1,29 @@
+-- Regression: a polymorphic AND effectful function passed to a higher-order
+-- function. The combination (a `forall a` scheme whose arrow carries a non-empty
+-- effect row) used to ICE in row unification: `rewrite_row` opened an existential
+-- row tail by appending the fresh tail to the right, a forward reference that a
+-- later truncation stranded ("solve_row: ^N not in context"). It must now type
+-- check and run.
+
+effect Tag {
+  ctl fresh(Unit) : Int
+}
+
+-- Polymorphic in `a`, effectful in `Tag`: this is the shape that triggered it.
+fn tag(x) : !{Tag} (Int, a) =
+  (fresh(()), x)
+
+fn map_eff(f, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => Cons(f(x), map_eff(f, rest))
+
+fn run_tags(action) =
+  let go =
+    handle action() with
+      fresh(_u, k) => \(n) -> k(n)(n + 1)
+      return r => \(_n) -> r
+  go(0)
+
+fn main() =
+  println(show(run_tags(\() -> map_eff(tag, Cons(10, Cons(20, Cons(30, Nil)))))))

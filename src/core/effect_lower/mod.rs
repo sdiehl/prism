@@ -194,7 +194,7 @@ pub fn lower(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered,
 
 /// The lowering strategy a program takes.
 ///
-/// The single source of truth is [`lower_impl`] itself, so the classification can
+/// The single source of truth is `lower_impl` itself, so the classification can
 /// never drift from the decision the compiler actually makes. One of: `pure` (no
 /// effects survive), `evidence`, `state-fusion`, `local-partial` (free monad
 /// confined to a component, rest fused), `whole-program-free-monad`, or

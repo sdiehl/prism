@@ -41,7 +41,7 @@ impl Lowerer {
             return Ok(c.clone());
         };
 
-        let fvs = handler_fvs(return_var, return_body, ops);
+        let fvs = handler_fvs(*return_var, return_body.as_deref(), ops);
         let open = self.is_open(body, ops);
 
         let driver = self.fresh("handle");
@@ -216,7 +216,7 @@ impl Lowerer {
             return Ok(c.clone());
         };
 
-        let fvs = handler_fvs(return_var, return_body, ops);
+        let fvs = handler_fvs(*return_var, return_body.as_deref(), ops);
 
         self.used_resume = true;
         let loop_name = self.fresh("region");
@@ -395,7 +395,7 @@ impl Lowerer {
             return Ok(None);
         }
 
-        let fvs = handler_fvs(return_var, return_body, ops);
+        let fvs = handler_fvs(*return_var, return_body.as_deref(), ops);
 
         let region = self.fresh("region");
         let acc = self.fresh("acc");
@@ -632,11 +632,7 @@ impl Lowerer {
 // of `comp_without` already. `Sym` orders by intern id, so the result is sorted
 // by name to keep the driver's parameter and resumption-argument order
 // byte-stable across runs.
-fn handler_fvs(
-    return_var: &Option<Sym>,
-    return_body: &Option<Box<Comp>>,
-    ops: &[HandleOp],
-) -> Vec<Sym> {
+fn handler_fvs(return_var: Option<Sym>, return_body: Option<&Comp>, ops: &[HandleOp]) -> Vec<Sym> {
     let mut fvs = BTreeSet::new();
     if let Some(rb) = return_body {
         fvs.extend(fv::comp_without(rb, return_var.iter()));

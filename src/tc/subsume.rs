@@ -344,9 +344,15 @@ impl Tc<'_> {
                 Box::new(self.rewrite_row(rest, label)?),
             )),
             EffRow::Exist(alpha) => {
-                let beta = self.push_ex_row();
-                self.solve_row(
+                // Open the existential tail to `label | beta`, splicing the fresh
+                // `beta` in at `alpha`'s position so the solution references only
+                // entries to its left (mirrors `splice_solved` for type vars);
+                // appending `beta` would make `alpha` point right and strand it on
+                // a later truncation.
+                let beta = self.fresh_id();
+                self.splice_solved_row(
                     *alpha,
+                    &[beta],
                     EffRow::Extend(label.clone(), Box::new(EffRow::Exist(beta))),
                 )?;
                 Ok(EffRow::Exist(beta))

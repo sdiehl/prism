@@ -704,11 +704,6 @@ pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
     build_on(src, &default_roots(base), out)
 }
 
-/// Like [`build_at`], but against an explicit module search path (a project's
-/// source root, its path dependencies, and the stdlib).
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
 fn require_main(checked: &Checked) -> Result<(), Error> {
     if checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
@@ -718,6 +713,11 @@ fn require_main(checked: &Checked) -> Result<(), Error> {
     }
 }
 
+/// Like [`build_at`], but against an explicit module search path (a project's
+/// source root, its path dependencies, and the stdlib).
+///
+/// # Errors
+/// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
 pub fn build_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
     let (checked, core, ctors) = compiled(src, roots)?;
