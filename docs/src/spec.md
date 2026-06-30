@@ -308,7 +308,7 @@ An escape analysis keeps the purity honest: the compiler rejects any closure or 
 
 ### 7.5 Errors and Failure {#errors-and-failure}
 
-Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of the [clause sugar](#clause-sugar).
+Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of the [clause sugar](#clause-sugar). With the imperative `break`, `continue`, and `return` of [imperative control flow](#imperative-control-flow), they are one mechanism wearing several faces: each is a single-operation effect whose handler never resumes the captured continuation, installed only where the corresponding keyword actually occurs, so non-local control costs nothing where it is not used and (being handled at its boundary) surfaces in no effect row where it is.
 
 **Extensible errors.** An `error N(t)` declaration introduces a one-operation effect whose operation never resumes; `throw N(x)` performs it. A function's error row is exactly the set of errors it may raise and has not caught, and distinct `error` declarations union structurally as functions compose, with no umbrella sum type and no conversion glue: `find_port` carrying `{NotFound}` and `parse_port` carrying `{Malformed}` compose to `{NotFound, Malformed}`. `try e catch { ... }` is subtractive handler sugar (one nested `final ctl` per arm): a partial catch discharges the labels it names and lets the rest flow to an enclosing handler, and an uncaught error is an unhandled-effect error naming exactly the labels that remain. Each catch arm names an error and binds its fields to variables.
 

@@ -8,6 +8,9 @@
 .DS_Store
 *.ll
 *.mlir
+*.bc
+*.o
+*.prism_rt.c
 /a.out
 /models/.lake
 /docs/src/pkg

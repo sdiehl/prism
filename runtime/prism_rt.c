@@ -179,7 +179,42 @@ long prism_box(long payload) {
     return (long)p;
 }
 
+/* Optional in-binary structural backstop. A compiled program's memory safety
+ * otherwise rests entirely on codegen emitting correct tags, refcounts, and
+ * field indices: a tagging or rc bug is plain UB with no trap in a shipped
+ * binary. Building the runtime with -DPRISM_RT_DEBUG (e.g.
+ * PRISM_CC_FLAGS=-DPRISM_RT_DEBUG) inserts a cheap validity check at every cell
+ * dereference: the value must be a non-null, 8-byte-aligned heap pointer (low
+ * tag bit clear) carrying a positive refcount, and a constructor field read must
+ * be in bounds. A violation aborts with a diagnostic instead of corrupting
+ * memory. Compiled out entirely (zero overhead) by default, so release builds
+ * and the parity oracle stay byte-identical. ASan/UBSan remain the gold standard
+ * in CI; this is the always-available, no-instrumentation net for builds where
+ * sanitizers are unavailable. */
+#ifdef PRISM_RT_DEBUG
+static void prism_rt_check(long p, const char *who) {
+    if (p == 0 || (p & 1L)) {
+        fprintf(stderr, "prism_rt: %s on non-cell value 0x%lx\n", who, (unsigned long)p);
+        abort();
+    }
+    if (((unsigned long)p) & 7UL) {
+        fprintf(stderr, "prism_rt: %s on misaligned pointer 0x%lx\n", who, (unsigned long)p);
+        abort();
+    }
+    long rc = ((long *)p)[PRISM_RC_W];
+    if (rc <= 0) {
+        fprintf(stderr, "prism_rt: %s on cell 0x%lx with non-positive rc %ld (use-after-free?)\n",
+                who, (unsigned long)p, rc);
+        abort();
+    }
+}
+#define PRISM_RT_CHECK(p, who) prism_rt_check((long)(p), (who))
+#else
+#define PRISM_RT_CHECK(p, who) ((void)0)
+#endif
+
 long prism_unbox(long p) {
+    PRISM_RT_CHECK(p, "prism_unbox");
     return ((long *)p)[PRISM_HDR_WORDS];
 }
 
@@ -322,10 +357,25 @@ void *prism_reuse_alloc(long token, long n_words) {
 }
 
 long prism_tag(void *p) {
+    PRISM_RT_CHECK(p, "prism_tag");
     return ((long *)p)[PRISM_TAG_W];
 }
 
 long prism_field(void *p, long i) {
+    PRISM_RT_CHECK(p, "prism_field");
+#ifdef PRISM_RT_DEBUG
+    {
+        long tag = ((long *)p)[PRISM_TAG_W];
+        long arity = ((long *)p)[PRISM_ARITY_W];
+        /* String/bignum cells carry an inline byte/limb payload, not child
+         * fields, so their arity slot is a length, not a field count: skip the
+         * bounds check for them (prism_field is not a valid accessor there). */
+        if (tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && (i < 0 || i >= arity)) {
+            fprintf(stderr, "prism_rt: prism_field index %ld out of bounds (arity %ld)\n", i, arity);
+            abort();
+        }
+    }
+#endif
     return ((long *)p)[PRISM_HDR_WORDS + i];
 }
 
