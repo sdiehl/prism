@@ -22,15 +22,32 @@ become a `call` to the synthesized view followed by a `case` on its `Option`
 result. The sanity examples in `Sanity.lean` discharge the whole of the
 soundness obligation they add.
 -/
-
 namespace Prism
 
 inductive BinOp where
-  | add | sub | mul | div | rem
-  | eq | ne | lt | le | gt | ge
-  | and | or
-  | addf | subf | mulf | divf
-  | eqf | nef | ltf | lef | gtf | gef
+  | add
+  | sub
+  | mul
+  | div
+  | rem
+  | eq
+  | ne
+  | lt
+  | le
+  | gt
+  | ge
+  | and
+  | or
+  | addf
+  | subf
+  | mulf
+  | divf
+  | eqf
+  | nef
+  | ltf
+  | lef
+  | gtf
+  | gef
 
 inductive Pat where
   | wild
@@ -43,44 +60,46 @@ inductive Pat where
   | record (name : String) (fields : List (String × Pat)) (isOpen : Bool)
 
 mutual
-  inductive Value where
-    | var (x : String)
-    | int (n : Int)
-    | float (f : Float)
-    | bool (b : Bool)
-    | unit
-    | str (s : String)
-    | thunk (c : Comp)
-    | ctor (name : String) (tag : Nat) (args : List Value)
-    | tuple (args : List Value)
 
-  inductive HandleOp where
-    | mk (name : String) (params : List String) (resume : String) (body : Comp)
+inductive Value where
+  | var (x : String)
+  | int (n : Int)
+  | float (f : Float)
+  | bool (b : Bool)
+  | unit
+  | str (s : String)
+  | thunk (c : Comp)
+  | ctor (name : String) (tag : Nat) (args : List Value)
+  | tuple (args : List Value)
 
-  inductive Comp where
-    | ret (v : Value)
-    | bind (m : Comp) (x : String) (n : Comp)
-    | force (v : Value)
-    | lam (xs : List String) (body : Comp)
-    | app (f : Comp) (args : List Value)
-    | ite (c : Value) (t : Comp) (e : Comp)
-    | prim (op : BinOp) (a : Value) (b : Value)
-    | call (name : String) (args : List Value)
-    | print (v : Value)
-    | printf (v : Value)
-    | prints (v : Value)
-    | readInt
-    | err (v : Value)
-    | case (scrut : Value) (arms : List (Pat × Comp))
-    | floatBuiltin (name : String) (v : Value)
-    | doOp (name : String) (args : List Value)
-    | handle (body : Comp) (retVar : Option String) (retBody : Option Comp) (ops : List HandleOp)
-    | mask (ops : List String) (body : Comp)
-    | strBuiltin (name : String) (args : List Value)
-    | dup (v : Value)
-    | drop (v : Value)
-    | withReuse (tok : String) (freed : Value) (body : Comp)
-    | reuse (tok : String) (v : Value)
+inductive HandleOp where
+  | mk (name : String) (params : List String) (resume : String) (body : Comp)
+
+inductive Comp where
+  | ret (v : Value)
+  | bind (m : Comp) (x : String) (n : Comp)
+  | force (v : Value)
+  | lam (xs : List String) (body : Comp)
+  | app (f : Comp) (args : List Value)
+  | ite (c : Value) (t : Comp) (e : Comp)
+  | prim (op : BinOp) (a : Value) (b : Value)
+  | call (name : String) (args : List Value)
+  | print (v : Value)
+  | printf (v : Value)
+  | prints (v : Value)
+  | readInt
+  | err (v : Value)
+  | case (scrut : Value) (arms : List (Pat × Comp))
+  | floatBuiltin (name : String) (v : Value)
+  | doOp (name : String) (args : List Value)
+  | handle (body : Comp) (retVar : Option String) (retBody : Option Comp) (ops : List HandleOp)
+  | mask (ops : List String) (body : Comp)
+  | strBuiltin (name : String) (args : List Value)
+  | dup (v : Value)
+  | drop (v : Value)
+  | withReuse (tok : String) (freed : Value) (body : Comp)
+  | reuse (tok : String) (v : Value)
+
 end
 
 structure CoreFn where
@@ -106,68 +125,64 @@ where
     | (_, p) :: ps => patVars p ++ patVarsF ps
 
 mutual
-  def substV (x : String) (w : Value) : Value → Value
-    | .var y => if x = y then w else .var y
-    | .thunk c => .thunk (substC x w c)
-    | .ctor n t args => .ctor n t (substVL x w args)
-    | .tuple args => .tuple (substVL x w args)
-    | v => v
 
-  def substVL (x : String) (w : Value) : List Value → List Value
-    | [] => []
-    | v :: vs => substV x w v :: substVL x w vs
+def substV (x : String) (w : Value) : Value → Value
+  | .var y => if x = y then w else .var y
+  | .thunk c => .thunk (substC x w c)
+  | .ctor n t args => .ctor n t (substVL x w args)
+  | .tuple args => .tuple (substVL x w args)
+  | v => v
 
-  def substC (x : String) (w : Value) : Comp → Comp
-    | .ret v => .ret (substV x w v)
-    | .bind m y n => .bind (substC x w m) y (if x = y then n else substC x w n)
-    | .force v => .force (substV x w v)
-    | .lam xs b => .lam xs (if xs.contains x then b else substC x w b)
-    | .app f args => .app (substC x w f) (substVL x w args)
-    | .ite c t e => .ite (substV x w c) (substC x w t) (substC x w e)
-    | .prim op a b => .prim op (substV x w a) (substV x w b)
-    | .call n args => .call n (substVL x w args)
-    | .print v => .print (substV x w v)
-    | .printf v => .printf (substV x w v)
-    | .prints v => .prints (substV x w v)
-    | .readInt => .readInt
-    | .err v => .err (substV x w v)
-    | .case s arms => .case (substV x w s) (substArms x w arms)
-    | .floatBuiltin n v => .floatBuiltin n (substV x w v)
-    | .doOp n args => .doOp n (substVL x w args)
-    | .handle b rv rb ops =>
-        .handle (substC x w b) rv (substRet x w rb) (substOps x w ops)
-    | .mask ops b => .mask ops (substC x w b)
-    | .strBuiltin n args => .strBuiltin n (substVL x w args)
-    | .dup v => .dup (substV x w v)
-    | .drop v => .drop (substV x w v)
-    | .withReuse tok freed body =>
-        .withReuse tok (substV x w freed) (if x = tok then body else substC x w body)
-    | .reuse tok v => .reuse tok (substV x w v)
+def substVL (x : String) (w : Value) : List Value → List Value
+  | [] => []
+  | v :: vs => substV x w v :: substVL x w vs
 
-  def substArms (x : String) (w : Value) : List (Pat × Comp) → List (Pat × Comp)
-    | [] => []
-    | (p, c) :: rest =>
-        (p, if (patVars p).contains x then c else substC x w c) :: substArms x w rest
+def substC (x : String) (w : Value) : Comp → Comp
+  | .ret v => .ret (substV x w v)
+  | .bind m y n => .bind (substC x w m) y (if x = y then n else substC x w n)
+  | .force v => .force (substV x w v)
+  | .lam xs b => .lam xs (if xs.contains x then b else substC x w b)
+  | .app f args => .app (substC x w f) (substVL x w args)
+  | .ite c t e => .ite (substV x w c) (substC x w t) (substC x w e)
+  | .prim op a b => .prim op (substV x w a) (substV x w b)
+  | .call n args => .call n (substVL x w args)
+  | .print v => .print (substV x w v)
+  | .printf v => .printf (substV x w v)
+  | .prints v => .prints (substV x w v)
+  | .readInt => .readInt
+  | .err v => .err (substV x w v)
+  | .case s arms => .case (substV x w s) (substArms x w arms)
+  | .floatBuiltin n v => .floatBuiltin n (substV x w v)
+  | .doOp n args => .doOp n (substVL x w args)
+  | .handle b rv rb ops => .handle (substC x w b) rv (substRet x w rb) (substOps x w ops)
+  | .mask ops b => .mask ops (substC x w b)
+  | .strBuiltin n args => .strBuiltin n (substVL x w args)
+  | .dup v => .dup (substV x w v)
+  | .drop v => .drop (substV x w v)
+  | .withReuse tok freed body => .withReuse tok (substV x w freed) (if x = tok then body else substC x w body)
+  | .reuse tok v => .reuse tok (substV x w v)
 
-  def substRet (x : String) (w : Value) : Option Comp → Option Comp
-    | none => none
-    | some c => some (substC x w c)
+def substArms (x : String) (w : Value) : List (Pat × Comp) → List (Pat × Comp)
+  | [] => []
+  | (p, c) :: rest => (p, if (patVars p).contains x then c else substC x w c) :: substArms x w rest
 
-  def substOps (x : String) (w : Value) : List HandleOp → List HandleOp
-    | [] => []
-    | .mk n ps r b :: rest =>
-        .mk n ps r (if ps.contains x || r = x then b else substC x w b) :: substOps x w rest
+def substRet (x : String) (w : Value) : Option Comp → Option Comp
+  | none => none
+  | some c => some (substC x w c)
+
+def substOps (x : String) (w : Value) : List HandleOp → List HandleOp
+  | [] => []
+  | .mk n ps r b :: rest => .mk n ps r (if ps.contains x || r = x then b else substC x w b) :: substOps x w rest
+
 end
 
 def substMany : List (String × Value) → Comp → Comp
   | [], c => c
   | (x, w) :: rest, c => substMany rest (substC x w c)
 
-def bindParams (xs : List String) (vs : List Value) : List (String × Value) :=
-  xs.zip vs
+def bindParams (xs : List String) (vs : List Value) : List (String × Value) := xs.zip vs
 
-def lookupFn (Γ : Core) (name : String) : Option CoreFn :=
-  Γ.fns.find? (·.name == name)
+def lookupFn (Γ : Core) (name : String) : Option CoreFn := Γ.fns.find? (·.name == name)
 
 def delta : BinOp → Value → Value → Option Value
   | .add, .int a, .int b => some (.int (a + b))
@@ -192,8 +207,7 @@ def matchPat : Pat → Value → Option (List (String × Value))
   | .var x, v => some [(x, v)]
   | .int n, .int m => if n = m then some [] else none
   | .bool b, .bool c => if b = c then some [] else none
-  | .ctor name args, .ctor name' _ vs =>
-      if name = name' then matchPatL args vs else none
+  | .ctor name args, .ctor name' _ vs => if name = name' then matchPatL args vs else none
   | .tuple args, .tuple vs => matchPatL args vs
   | _, _ => none
 where
@@ -208,7 +222,7 @@ where
 def matchArms (scrut : Value) : List (Pat × Comp) → Option Comp
   | [] => none
   | (p, c) :: rest =>
-      match matchPat p scrut with
+    match matchPat p scrut with
       | some binds => some (substMany binds c)
       | none => matchArms scrut rest
 
@@ -237,36 +251,55 @@ def Terminal : Comp → Prop
   | .lam _ _ => True
   | _ => False
 
-theorem noStepRet {Γ : Core} {v : Value} {c : Comp} : ¬ Step Γ (.ret v) c := by
-  intro h; cases h
+theorem noStepRet {Γ : Core} {v : Value} {c : Comp} : ¬Step Γ (.ret v) c :=
+  by
+    intro h
+    cases h
 
-theorem noStepLam {Γ : Core} {xs : List String} {b c : Comp} : ¬ Step Γ (.lam xs b) c := by
-  intro h; cases h
+theorem noStepLam {Γ : Core} {xs : List String} {b c : Comp} : ¬Step Γ (.lam xs b) c :=
+  by
+    intro h
+    cases h
 
-theorem Step.deterministic {Γ : Core} {a b c : Comp}
-    (h1 : Step Γ a b) (h2 : Step Γ a c) : b = c := by
-  induction h1 generalizing c with
-  | forceThunk => cases h2 with | forceThunk => rfl
-  | beta => cases h2 with
-    | beta => rfl
-    | appCong hf => exact absurd hf noStepLam
-  | appCong hf ih => cases h2 with
-    | beta => exact absurd hf noStepLam
-    | appCong hf' => rw [ih hf']
-  | bindRet => cases h2 with
-    | bindRet => rfl
-    | bindCong hm => exact absurd hm noStepRet
-  | bindCong hm ih => cases h2 with
-    | bindRet => exact absurd hm noStepRet
-    | bindCong hm' => rw [ih hm']
-  | ifTrue => cases h2 with | ifTrue => rfl
-  | ifFalse => cases h2 with | ifFalse => rfl
-  | prim h => cases h2 with | prim h' => rw [h] at h'; exact congrArg Comp.ret (Option.some.inj h')
-  | call h => cases h2 with | call h' => rw [h] at h'; rw [Option.some.inj h']
-  | caseMatch h => cases h2 with | caseMatch h' => rw [h] at h'; exact Option.some.inj h'
-  | dupStep => cases h2 with | dupStep => rfl
-  | dropStep => cases h2 with | dropStep => rfl
-  | withReuseStep => cases h2 with | withReuseStep => rfl
-  | reuseStep => cases h2 with | reuseStep => rfl
+theorem Step.deterministic {Γ : Core} {a b c : Comp} (h1 : Step Γ a b) (h2 : Step Γ a c) : b = c :=
+  by induction h1 generalizing c with
+      | forceThunk => cases h2 with
+          | forceThunk => rfl
+      | beta => cases h2 with
+          | beta => rfl
+          | appCong hf => exact absurd hf noStepLam
+      | appCong hf ih => cases h2 with
+          | beta => exact absurd hf noStepLam
+          | appCong hf' => rw [ih hf']
+      | bindRet => cases h2 with
+          | bindRet => rfl
+          | bindCong hm => exact absurd hm noStepRet
+      | bindCong hm ih => cases h2 with
+          | bindRet => exact absurd hm noStepRet
+          | bindCong hm' => rw [ih hm']
+      | ifTrue => cases h2 with
+          | ifTrue => rfl
+      | ifFalse => cases h2 with
+          | ifFalse => rfl
+      | prim h => cases h2 with
+          | prim h' =>
+            rw [h] at h'
+            exact congrArg Comp.ret (Option.some.inj h')
+      | call h => cases h2 with
+          | call h' =>
+            rw [h] at h'
+            rw [Option.some.inj h']
+      | caseMatch h => cases h2 with
+          | caseMatch h' =>
+            rw [h] at h'
+            exact Option.some.inj h'
+      | dupStep => cases h2 with
+          | dupStep => rfl
+      | dropStep => cases h2 with
+          | dropStep => rfl
+      | withReuseStep => cases h2 with
+          | withReuseStep => rfl
+      | reuseStep => cases h2 with
+          | reuseStep => rfl
 
 end Prism
