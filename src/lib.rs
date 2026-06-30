@@ -48,7 +48,7 @@ pub use driver::{
     check, check_at, check_on, core_ir, core_ir_full, core_of, dump, dump_at, dump_on,
     effect_strategy_full, effect_warnings_full, interpret, interpret_at, interpret_io_at,
     interpret_io_on, off_platform_builtins, rc_balanced, report, report_at, report_on,
-    set_opt_level, set_pass_spec, with_custom_prelude, with_prelude,
+    set_backend_opt, set_opt_level, set_pass_spec, with_custom_prelude, with_prelude,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use fmt::{format, format_check};

@@ -410,7 +410,8 @@ source_filename = "prism"
 @.str5 = private constant [2 x i8] c"a\00"
 @.str6 = private constant [6 x i8] c"prism\00"
 
-define i64 @prism_describe(i64 %a0) {
+; Function Attrs: nounwind
+define i64 @prism_describe(i64 %a0) #0 {
 entry:
   call void @prism_rc_inc(i64 %a0)
   %t1 = call i64 @prism_show_int(i64 %a0)
@@ -460,19 +461,26 @@ b5:                                               ; preds = %b4, %b3
   ret i64 %t27
 }
 
-declare void @prism_rc_inc(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
 
-declare i64 @prism_show_int(i64)
+; Function Attrs: nounwind
+declare i64 @prism_show_int(i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare i64 @prism_rt_int_cmp(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_cmp(i64, i64) #0
 
-declare i64 @prism_str_lit(ptr, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
 
-declare i64 @prism_str_concat(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_concat(i64, i64) #0
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t0 = call i64 @prism_str_lit(ptr @.str2, i64 6)
   %t1 = call i64 @prism_str_lit(ptr @.str3, i64 5)
@@ -545,15 +553,22 @@ entry:
   ret i64 0
 }
 
-declare i32 @printf(ptr, ...)
+; Function Attrs: nounwind
+declare i32 @printf(ptr, ...) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
 
-declare i64 @prism_str_eq(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_eq(i64, i64) #0
 
-declare i64 @prism_show_bool(i64)
+; Function Attrs: nounwind
+declare i64 @prism_show_bool(i64) #0
 
-declare i64 @prism_str_len(i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_len(i64) #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [hello world, 1 item, 3 items, true, 5]

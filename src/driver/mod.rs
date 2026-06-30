@@ -86,6 +86,33 @@ pub fn set_pass_spec(spec: PassSpec) {
 fn pass_spec() -> Option<PassSpec> {
     PASS_SPEC.lock().unwrap().clone()
 }
+
+// The LLVM-backend optimization level handed to `cc` (the `--backend-opt` CLI
+// flag), distinct from the Core-to-Core `-O` above: this one only tunes clang's
+// own `-O{n}` pipeline over the emitted bitcode, leaving Core untouched. A
+// process-global like the other knobs; `None` means the shipped default of
+// `-O2`. `PRISM_BACKEND_OPT` is the env escape hatch, mirroring
+// `PRISM_OPT_LEVEL`.
+static BACKEND_OPT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Set the LLVM-backend optimization level (clang `-O`) for subsequent builds.
+///
+/// # Panics
+/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
+/// for this infallible store.
+pub fn set_backend_opt(level: String) {
+    *BACKEND_OPT.lock().unwrap() = Some(level);
+}
+
+#[cfg(feature = "native")]
+fn backend_opt() -> String {
+    BACKEND_OPT
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(|| env::var("PRISM_BACKEND_OPT").ok())
+        .unwrap_or_else(|| "2".into())
+}
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
 
@@ -717,8 +744,13 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
     // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
     // the corpus runs under UBSan and any new runtime UB aborts the program.
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
+    // ThinLTO stays on at every level: it is what inlines the C runtime into the
+    // generated code. The `-O` level (default `-O2`) is the one user-facing knob;
+    // a trailing `PRISM_CC_FLAGS` token still wins, since clang takes the last
+    // `-O` it sees.
+    let olevel = format!("-O{}", backend_opt());
     let res = Command::new(&cc)
-        .args(["-O2", "-flto=thin", "-Wno-override-module"])
+        .args([olevel.as_str(), "-flto=thin", "-Wno-override-module"])
         .args(extra.split_whitespace())
         .arg(ir)
         .arg(&rt)

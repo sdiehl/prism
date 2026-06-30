@@ -284,7 +284,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   call void @prism_print_int(i64 27)
   call void @prism_rc_dec(i64 27)
@@ -293,11 +294,16 @@ entry:
   ret i64 0
 }
 
-declare void @prism_print_int(i64)
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [13]

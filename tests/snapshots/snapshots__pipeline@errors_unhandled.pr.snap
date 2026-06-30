@@ -156,7 +156,8 @@ source_filename = "prism"
 @.str2 = private constant [17 x i8] c"unhandled effect\00"
 @.str3 = private constant [2 x i8] c"x\00"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t0 = call i64 @prism_str_lit(ptr @.str0, i64 1)
   %t2 = call ptr @prism_alloc(i64 1)
@@ -264,11 +265,14 @@ b8:                                               ; preds = %b6
   ret i64 0
 }
 
-declare i64 @prism_str_lit(ptr, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
 
-declare ptr @prism_alloc(i64)
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
 
-define i64 @prism_ebind(i64 %a0, i64 %a1) {
+; Function Attrs: nounwind
+define i64 @prism_ebind(i64 %a0, i64 %a1) #0 {
 entry:
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
@@ -345,17 +349,23 @@ b1:                                               ; preds = %entry
   unreachable
 }
 
-declare void @prism_rc_inc(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare i64 @prism_rt_int_cmp(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_cmp(i64, i64) #0
 
-declare void @prism_fatal(i64)
+; Function Attrs: nounwind
+declare void @prism_fatal(i64) #0
 
-declare void @prism_drive_step()
+; Function Attrs: nounwind
+declare void @prism_drive_step() #0
 
-define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+; Function Attrs: nounwind
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %0 = ptrtoint ptr %_cp to i64
@@ -417,13 +427,17 @@ _merge:                                           ; preds = %_lam6, %_lam5, %_la
   ret i64 %_result
 }
 
-declare i64 @prism_reuse_token(i64)
+; Function Attrs: nounwind
+declare i64 @prism_reuse_token(i64) #0
 
-declare i64 @prism_taq_snoc(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_taq_snoc(i64, i64) #0
 
-declare ptr @prism_reuse_alloc(i64, i64)
+; Function Attrs: nounwind
+declare ptr @prism_reuse_alloc(i64, i64) #0
 
-define i64 @prism_lam_0(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_0(i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_p0)
   %t2 = call ptr @prism_alloc(i64 1)
@@ -457,7 +471,8 @@ entry:
   ret i64 %t19
 }
 
-define i64 @prism_lam_1(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_1(i64 %_p0) #0 {
 entry:
   call void @prism_print_int(i64 %_p0)
   call void @prism_rc_dec(i64 %_p0)
@@ -481,9 +496,11 @@ entry:
   ret i64 %t12
 }
 
-declare void @prism_print_int(i64)
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
 
-define i64 @prism_lam_2(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_2(i64 %_p0) #0 {
 entry:
   %t0 = call i64 @prism_str_lit(ptr @.str3, i64 1)
   %t2 = call ptr @prism_alloc(i64 1)
@@ -510,7 +527,8 @@ entry:
   ret i64 %t13
 }
 
-define i64 @prism_lam_3(i64 %_fv0, i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_3(i64 %_fv0, i64 %_p0) #0 {
 entry:
   %t1 = icmp ne i64 %_p0, 1
   br i1 %t1, label %b0, label %b1
@@ -552,7 +570,8 @@ b1:                                               ; preds = %entry
   ret i64 %t23
 }
 
-define i64 @prism_lam_4(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_4(i64 %_p0) #0 {
 entry:
   call void @prism_rc_dec(i64 %_p0)
   call void @prism_print_nl()
@@ -569,9 +588,11 @@ entry:
   ret i64 %t7
 }
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
 
-define i64 @prism_lam_5(i64 %_fv0, i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_5(i64 %_fv0, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
   %t1 = call i64 @prism_str_eq(i64 %_fv0, i64 %_p0)
@@ -592,9 +613,11 @@ entry:
   ret i64 %t10
 }
 
-declare i64 @prism_str_eq(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_eq(i64, i64) #0
 
-define i64 @prism_lam_6(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_6(i64 %_p0) #0 {
 entry:
   %t4 = call ptr @prism_alloc(i64 4)
   %0 = ptrtoint ptr %t4 to i64
@@ -622,9 +645,13 @@ entry:
   ret i64 %t11
 }
 
-declare void @prism_effop_alloc()
+; Function Attrs: nounwind
+declare void @prism_effop_alloc() #0
 
-declare void @prism_apply_error()
+; Function Attrs: nounwind
+declare void @prism_apply_error() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 error: unhandled effect `throw@NotFound`

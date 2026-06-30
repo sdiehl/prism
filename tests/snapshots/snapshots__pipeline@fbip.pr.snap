@@ -248,10 +248,13 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   ret i64 13
 }
+
+attributes #0 = { nounwind }
 
 == run ==
 output: []

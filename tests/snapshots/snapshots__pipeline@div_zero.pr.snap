@@ -66,7 +66,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t2 = call i64 @prism_rt_int_div(i64 21, i64 1)
   call void @prism_rc_dec(i64 21)
@@ -74,9 +75,13 @@ entry:
   ret i64 %t2
 }
 
-declare i64 @prism_rt_int_div(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_div(i64, i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+attributes #0 = { nounwind }
 
 == run ==
 error: division by zero

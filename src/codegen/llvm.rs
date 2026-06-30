@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
+use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
@@ -188,10 +189,27 @@ impl<'ctx> Inkwell<'ctx> {
         bb
     }
 
+    // Mark a function non-unwinding. Every function in a Prism module is: the
+    // language has no exceptions, and this backend emits no invokes or
+    // landingpads, so neither the generated bodies nor the C runtime nor the
+    // libc/intrinsic declarations can unwind. Telling LLVM lets it drop unwind
+    // tables and treat every call as non-throwing, which the `-O2` pipeline
+    // turns into freer code motion and smaller objects.
+    fn set_nounwind(&self, f: FunctionValue<'ctx>) {
+        let kind = Attribute::get_named_enum_kind_id("nounwind");
+        f.add_attribute(
+            AttributeLoc::Function,
+            self.ctx.create_enum_attribute(kind, 0),
+        );
+    }
+
     fn decl(&self, name: &str, ty: FunctionType<'ctx>) -> FunctionValue<'ctx> {
-        self.module
-            .get_function(name)
-            .unwrap_or_else(|| self.module.add_function(name, ty, None))
+        if let Some(f) = self.module.get_function(name) {
+            return f;
+        }
+        let f = self.module.add_function(name, ty, None);
+        self.set_nounwind(f);
+        f
     }
 
     fn call_direct(

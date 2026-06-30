@@ -149,7 +149,8 @@ source_filename = "prism"
 
 @.str0 = private constant [32 x i8] c"ICE: guarded match fell through\00"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   br i1 false, label %b0, label %b1
 
@@ -168,9 +169,13 @@ b3:                                               ; preds = %b1
   ret i64 0
 }
 
-declare i64 @prism_str_lit(ptr, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
 
-declare void @prism_fatal(i64)
+; Function Attrs: nounwind
+declare void @prism_fatal(i64) #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: []

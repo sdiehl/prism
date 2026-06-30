@@ -236,7 +236,8 @@ source_filename = "prism"
 
 @.fmtf = private constant [3 x i8] c"%g\00"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t2 = call i64 @prism_box(i64 4599075939470750516)
   %t3 = call i64 @prism_unbox(i64 %t2)
@@ -288,15 +289,22 @@ entry:
   ret i64 0
 }
 
-declare i64 @prism_box(i64)
+; Function Attrs: nounwind
+declare i64 @prism_box(i64) #0
 
-declare i64 @prism_unbox(i64)
+; Function Attrs: nounwind
+declare i64 @prism_unbox(i64) #0
 
-declare i32 @printf(ptr, ...)
+; Function Attrs: nounwind
+declare i32 @printf(ptr, ...) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [0.30000000000000004, 3.3333333333333335, 100, 1e+16, 1e-05, -2.5]

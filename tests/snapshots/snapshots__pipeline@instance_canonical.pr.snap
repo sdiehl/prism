@@ -298,7 +298,8 @@ fn ordRev() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   br i1 true, label %b0, label %b1
 
@@ -308,6 +309,8 @@ b0:                                               ; preds = %entry
 b1:                                               ; preds = %entry
   ret i64 3
 }
+
+attributes #0 = { nounwind }
 
 == run ==
 output: []

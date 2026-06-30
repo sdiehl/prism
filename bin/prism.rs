@@ -46,6 +46,14 @@ struct Cli {
     /// `--passes 'pre:EraseNewtypes,Specialize;late:Simplify'`.
     #[arg(long = "passes", value_name = "SPEC", global = true)]
     passes: Option<String>,
+    /// LLVM-backend optimization level handed to the C compiler as `-O<LEVEL>`:
+    /// `0`, `1`, `2` (default), `3`, or `s`/`z` for size. This tunes clang's own
+    /// pipeline over the emitted bitcode and is distinct from `-O`, which tunes
+    /// Prism's Core optimizer. Also settable via `PRISM_BACKEND_OPT`. Pick the
+    /// compiler with `PRISM_CC` (default `clang`) and pass it arbitrary extra
+    /// flags with `PRISM_CC_FLAGS` (e.g. `-march=native`, `-g`).
+    #[arg(long = "backend-opt", value_name = "LEVEL", global = true)]
+    backend_opt: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -119,6 +127,13 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+    if let Some(s) = &cli.backend_opt {
+        if !matches!(s.as_str(), "0" | "1" | "2" | "3" | "s" | "z") {
+            eprintln!("invalid backend optimization level `--backend-opt {s}` (expected 0, 1, 2, 3, s, or z)");
+            return ExitCode::FAILURE;
+        }
+        prism::set_backend_opt(s.clone());
     }
     let result = match (cli.cmd, cli.file) {
         (Some(cmd), _) => dispatch(cmd),

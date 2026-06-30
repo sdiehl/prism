@@ -347,7 +347,8 @@ source_filename = "prism"
 @.str0 = private constant [2 x i8] c"a\00"
 @.str1 = private constant [2 x i8] c"b\00"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t3 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
@@ -414,17 +415,25 @@ entry:
   ret i64 0
 }
 
-declare i64 @prism_show_bool(i64)
+; Function Attrs: nounwind
+declare i64 @prism_show_bool(i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare i32 @printf(ptr, ...)
+; Function Attrs: nounwind
+declare i32 @printf(ptr, ...) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
 
-declare i64 @prism_str_lit(ptr, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
 
-declare i64 @prism_str_eq(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_eq(i64, i64) #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [true, false, false, true, true]

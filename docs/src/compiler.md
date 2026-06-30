@@ -511,6 +511,8 @@ Both native backends drive one generic emitter (`src/codegen/emit.rs`) behind an
 
 The LLVM backend (`src/codegen/llvm.rs`) implements `Isa` over inkwell, emitting LLVM IR that `clang` compiles and links against the runtime. This is the default native path.
 
+Prism runs no LLVM optimization passes itself: it verifies the module, writes bitcode, and hands the rest to `clang -O2 -flto=thin`, compiling the emitted bitcode and the C runtime in one invocation so ThinLTO inlines the runtime into the generated code. Every emitted function carries `nounwind` (Prism has no exceptions and this backend emits no invokes or landingpads), which lets the `-O2` pipeline drop unwind tables and treat each call as non-throwing. Three knobs tune this last step, all distinct from the Core-to-Core `-O` of [optimization](#optimization): `--backend-opt <0|1|2|3|s|z>` (or the `PRISM_BACKEND_OPT` env var) sets the `clang -O` level, defaulting to `2`; `PRISM_CC` picks the compiler (default `clang`); and `PRISM_CC_FLAGS` appends arbitrary flags after the defaults, so a trailing `-O0` wins or `-march=native`/`-g` can be added. ThinLTO stays on at every level, since it is what folds the runtime into the program.
+
 ### 11.4 MLIR {#mlir}
 
 The MLIR backend (`src/codegen/mlir.rs`) implements the same `Isa` by writing textual MLIR in the `llvm` dialect. Sharing the emitter makes its output byte-identical to the LLVM backend's, which the parity gate (see [verification](#verification)) enforces.

@@ -203,7 +203,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 0)
   %0 = ptrtoint ptr %t1 to i64
@@ -226,9 +227,11 @@ entry:
   ret i64 0
 }
 
-declare ptr @prism_alloc(i64)
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
 
-define i64 @prism_apply_2(i64 %_clos, i64 %_a0, i64 %_a1) {
+; Function Attrs: nounwind
+define i64 @prism_apply_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %0 = ptrtoint ptr %_cp to i64
@@ -270,20 +273,25 @@ _merge:                                           ; preds = %_lam2, %_lam1, %_la
   ret i64 %_result
 }
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare void @prism_print_int(i64)
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
 
-define i64 @prism_lam_0(i64 %_p0, i64 %_p1) {
+; Function Attrs: nounwind
+define i64 @prism_lam_0(i64 %_p0, i64 %_p1) #0 {
 entry:
   %t0 = call i64 @prism_apply_1(i64 %_p0, i64 %_p1)
   call void @prism_rc_dec(i64 %_p0)
   ret i64 %t0
 }
 
-define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+; Function Attrs: nounwind
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %0 = ptrtoint ptr %_cp to i64
@@ -330,21 +338,27 @@ _merge:                                           ; preds = %_lam2, %_lam1, %_la
   ret i64 %_result
 }
 
-define i64 @prism_lam_1(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_1(i64 %_p0) #0 {
 entry:
   ret i64 %_p0
 }
 
-define i64 @prism_lam_2(i64 %_fv0, i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_2(i64 %_fv0, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
   %t0 = call i64 @prism_lam_0(i64 %_fv0, i64 %_p0)
   ret i64 %t0
 }
 
-declare void @prism_rc_inc(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
 
-declare void @prism_apply_error()
+; Function Attrs: nounwind
+declare void @prism_apply_error() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [0]

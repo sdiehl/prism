@@ -282,7 +282,8 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_length.trmc(i64 %a0, i64 %a1) {
+; Function Attrs: nounwind
+define i64 @prism_length.trmc(i64 %a0, i64 %a1) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
   %0 = ptrtoint ptr %t0 to i64
@@ -366,19 +367,24 @@ b10:                                              ; preds = %b9, %b11
   ret i64 %t44
 }
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare i64 @prism_rt_int_add(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
 
-declare void @prism_rc_inc(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
 
-define i64 @prism_length(i64 %a0) {
+; Function Attrs: nounwind
+define i64 @prism_length(i64 %a0) #0 {
 entry:
   %t1 = call i64 @prism_length.trmc(i64 %a0, i64 1)
   ret i64 %t1
 }
 
-define i64 @prism_main() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 0)
   %0 = ptrtoint ptr %t1 to i64
@@ -436,11 +442,16 @@ entry:
   ret i64 0
 }
 
-declare ptr @prism_alloc(i64)
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
 
-declare void @prism_print_int(i64)
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
 
-declare void @prism_print_nl()
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [3]
