@@ -12,6 +12,14 @@ use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 use crate::types::{CONS, NIL};
 
+// How values that have no surface syntax render in `show`/`repr`. `print` goes
+// through `show`, so these must stay byte-identical to the native runtime's own
+// output; keeping them as named constants makes that contract changeable in one
+// place rather than as ad-hoc literals.
+const UNIT_REPR: &str = "()";
+const FUNCTION_REPR: &str = "<function>";
+const CONTINUATION_REPR: &str = "<continuation>";
+
 #[derive(Clone, Debug)]
 pub enum Rv {
     Int(i64),
@@ -250,37 +258,9 @@ impl Rv {
         }
     }
 
+    #[must_use]
     pub fn show(&self) -> String {
-        match self {
-            Self::Int(n) | Self::I64(n) => n.to_string(),
-            Self::U64(n) => n.to_string(),
-            Self::Float(f) => fmt_g(*f),
-            Self::Bool(b) => b.to_string(),
-            Self::Unit => "()".into(),
-            Self::Str(s) => s.clone(),
-            Self::Big(n) => n.to_string(),
-            Self::Closure(..) | Self::Thunk(..) => "<function>".into(),
-            Self::Resume(..) => "<continuation>".into(),
-            Self::Data(name, fs) => match self.list_elems() {
-                Some(es) => {
-                    let es: Vec<_> = es.iter().map(|e| e.show()).collect();
-                    format!("[{}]", es.join(", "))
-                }
-                None if fs.is_empty() => name.to_string(),
-                None => {
-                    let fs: Vec<_> = fs.iter().map(Self::show).collect();
-                    format!("{name}({})", fs.join(", "))
-                }
-            },
-            Self::Tuple(fs) => {
-                let fs: Vec<_> = fs.iter().map(Self::show).collect();
-                format!("({})", fs.join(", "))
-            }
-            Self::Array(es) => {
-                let es: Vec<_> = es.iter().map(Self::show).collect();
-                format!("[|{}|]", es.join(", "))
-            }
-        }
+        self.render(false)
     }
 
     // Like `show`, but renders a value as it would be written as a literal:
@@ -288,25 +268,46 @@ impl Rv {
     // constructors. Used for result display (the REPL), where a bare `foo` is
     // ambiguous with an identifier; `print` keeps using `show` for raw output so
     // the backends stay byte-identical.
+    #[must_use]
     pub fn repr(&self) -> String {
+        self.render(true)
+    }
+
+    // The shared body of `show`/`repr`: `quote` only affects how strings render
+    // (quoted and escaped vs raw), and it threads through list/tuple/constructor
+    // fields. Arrays always render their elements unquoted (`repr` of an array
+    // historically deferred to `show`), so the `Array` arm recurses via `show`.
+    fn render(&self, quote: bool) -> String {
         match self {
-            Self::Str(s) => format!("{s:?}"),
+            Self::Int(n) | Self::I64(n) => n.to_string(),
+            Self::U64(n) => n.to_string(),
+            Self::Float(f) => fmt_g(*f),
+            Self::Bool(b) => b.to_string(),
+            Self::Unit => UNIT_REPR.into(),
+            Self::Str(s) if quote => format!("{s:?}"),
+            Self::Str(s) => s.clone(),
+            Self::Big(n) => n.to_string(),
+            Self::Closure(..) | Self::Thunk(..) => FUNCTION_REPR.into(),
+            Self::Resume(..) => CONTINUATION_REPR.into(),
             Self::Data(name, fs) => match self.list_elems() {
                 Some(es) => {
-                    let es: Vec<_> = es.iter().map(|e| e.repr()).collect();
+                    let es: Vec<_> = es.iter().map(|e| e.render(quote)).collect();
                     format!("[{}]", es.join(", "))
                 }
                 None if fs.is_empty() => name.to_string(),
                 None => {
-                    let fs: Vec<_> = fs.iter().map(Self::repr).collect();
+                    let fs: Vec<_> = fs.iter().map(|f| f.render(quote)).collect();
                     format!("{name}({})", fs.join(", "))
                 }
             },
             Self::Tuple(fs) => {
-                let fs: Vec<_> = fs.iter().map(Self::repr).collect();
+                let fs: Vec<_> = fs.iter().map(|f| f.render(quote)).collect();
                 format!("({})", fs.join(", "))
             }
-            _ => self.show(),
+            Self::Array(es) => {
+                let es: Vec<_> = es.iter().map(Self::show).collect();
+                format!("[|{}|]", es.join(", "))
+            }
         }
     }
 
@@ -643,22 +644,26 @@ impl<'a> Machine<'a> {
                     }
                     captured.push(Frame::Mask(ops));
                 }
-                Frame::Handle(hi, henv) if hi.ops.contains_key(&op) && skip > 0 => {
-                    skip -= 1;
-                    captured.push(Frame::Handle(hi, henv));
-                }
                 Frame::Handle(hi, henv) if hi.ops.contains_key(&op) => {
-                    let (params, resume_var, body) = &hi.ops[&op];
-                    let body = Rc::clone(body);
-                    let mut env2 = henv.clone();
-                    captured.push(Frame::Handle(Rc::clone(&hi), henv));
-                    captured.reverse();
-                    let e = Rc::make_mut(&mut env2);
-                    for (p, a) in params.iter().zip(args) {
-                        e.insert(*p, a);
+                    // A masked op skips one matching handler; otherwise this
+                    // handler catches it, binding the op args and the captured
+                    // continuation as `resume`.
+                    if skip > 0 {
+                        skip -= 1;
+                        captured.push(Frame::Handle(hi, henv));
+                    } else {
+                        let (params, resume_var, body) = &hi.ops[&op];
+                        let body = Rc::clone(body);
+                        let mut env2 = henv.clone();
+                        captured.push(Frame::Handle(Rc::clone(&hi), henv));
+                        captured.reverse();
+                        let e = Rc::make_mut(&mut env2);
+                        for (p, a) in params.iter().zip(args) {
+                            e.insert(*p, a);
+                        }
+                        e.insert(*resume_var, Rv::Resume(Rc::from(captured)));
+                        return Ok(State::Eval(body, env2));
                     }
-                    e.insert(*resume_var, Rv::Resume(Rc::from(captured)));
-                    return Ok(State::Eval(body, env2));
                 }
                 other => captured.push(other),
             }
@@ -1314,7 +1319,7 @@ mod tests {
             &src,
             format!(
                 "#include <stdio.h>\n#include <string.h>\n\
-                 long prism_rand(void);\n\
+                 long prism_prim_rand(void);\n\
                  long prism_str_lit(const char *, long);\n\
                  long prism_big_of_str(long, int *);\n\
                  long prism_big_show(long);\n\
@@ -1409,7 +1414,7 @@ mod tests {
     // An unseeded `rand` must stream identical values on every backend, so the
     // interpreter's SplitMix64 and the C runtime's must be the same generator.
     // Pin the interpreter to a hand-verified golden vector, then run the C
-    // runtime as the oracle: its `prism_rand()` (which drops the low 2 bits) must
+    // runtime as the oracle: its `prism_prim_rand()` (which drops the low 2 bits) must
     // equal `splitmix64() >> 2`. Drift in either implementation fails here, not
     // only in the end-to-end corpus.
     #[test]
@@ -1428,7 +1433,7 @@ mod tests {
         );
 
         let Some(lines) =
-            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_rand());")
+            rt_oracle("for (int i = 0; i < 4; i++) printf(\"%ld\\n\", prism_prim_rand());")
         else {
             return;
         };

@@ -13,43 +13,22 @@ use crate::syntax::ast::{
 use crate::types::{EQ_CLASS, ORD_CLASS, SHOW_CLASS};
 
 // `deriving (Eq, Ord, Show)` synthesizes ordinary named instances here, so the
-// class machinery checks and elaborates them like hand-written ones. Dictionary
-// resolution keys on span, so each constrained method callee needs a distinct
-// one. The allocator mints zero-width spans from a high reserved region no real
-// source offset can occupy, via a monotonic counter; `zero` is a shared
-// placeholder for nodes that need no dict key.
-const SYNTH_BASE: usize = usize::MAX / 2;
-
-struct SpanAlloc {
-    n: usize,
-}
-
-impl SpanAlloc {
-    const fn new() -> Self {
-        Self { n: 0 }
-    }
-
-    const fn zero() -> Span {
-        Span::empty(SYNTH_BASE)
-    }
-
-    const fn next(&mut self) -> Span {
-        self.n += 1;
-        Span::empty(SYNTH_BASE + self.n)
-    }
-}
+// class machinery checks and elaborates them like hand-written ones. The
+// synthesized nodes carry the empty span: dispatch identity is the node's
+// `NodeId` (assigned after desugar), so a method callee no longer needs a
+// distinct span to key its dictionary.
+const Z: Span = Span::empty(0);
 
 pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
     let declared: BTreeSet<&str> = prog.classes.iter().map(|c| c.name.as_str()).collect();
     let mut out = Vec::new();
     let mut fns = Vec::new();
-    let mut al = SpanAlloc::new();
     for d in &prog.types {
         for (class, cspan) in &d.deriving {
             // Lens is not a class: it synthesizes plain `<f>_of` / `with_<f>`
             // accessors, so it bypasses the class-existence and instance paths.
             if class == "Lens" {
-                fns.extend(derive_lens(d, &mut al, *cspan)?);
+                fns.extend(derive_lens(d, *cspan)?);
                 continue;
             }
             if !declared.contains(class.as_str()) {
@@ -59,9 +38,9 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
                 });
             }
             out.push(match class.as_str() {
-                EQ_CLASS => derive_eq(d, &mut al),
-                ORD_CLASS => derive_ord(d, &mut al),
-                SHOW_CLASS => derive_show(d, &mut al),
+                EQ_CLASS => derive_eq(d),
+                ORD_CLASS => derive_ord(d),
+                SHOW_CLASS => derive_show(d),
                 other => {
                     return Err(TypeError::Other {
                         span: *cspan,
@@ -82,10 +61,9 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
 // `deriving (Lens)` on a record type synthesizes, per field, a getter
 // `<f>_of(r) = r.f` and a functional setter `with_<f>(r, v) = T { ..r, f = v }`.
 // These are ordinary functions (composable with `.`, FBIP-reused on unique
-// values), not optic types. Each getter's field access gets a fresh span so
-// field resolution stays correctly keyed.
-fn derive_lens(d: &DataDecl, al: &mut SpanAlloc, cspan: Span) -> Result<Vec<Decl>, TypeError> {
-    let z = SpanAlloc::zero();
+// values), not optic types.
+fn derive_lens(d: &DataDecl, cspan: Span) -> Result<Vec<Decl>, TypeError> {
+    let z = Z;
     let [ctor] = d.ctors.as_slice() else {
         return Err(TypeError::Other {
             span: cspan,
@@ -110,22 +88,17 @@ fn derive_lens(d: &DataDecl, al: &mut SpanAlloc, cspan: Span) -> Result<Vec<Decl
     );
     let mut out = Vec::new();
     for (f, fty) in fields {
-        let gz = al.next();
-        let get = sp(Expr::FieldAccess(Box::new(evar("_r", gz)), f.clone()), gz);
+        let get = sp(Expr::FieldAccess(Box::new(evar("_r", z)), f.clone()), z);
         let mut g = mdecl(&format!("{f}_of"), &["_r"], get, z);
         g.params[0].ty = Some(self_ty.clone());
         g.ret = Some(fty.clone());
         out.push(g);
-        let sz = al.next();
         let set = sp(
             Expr::RecordUpdatePath(
-                Box::new(evar("_r", sz)),
-                vec![(
-                    vec![PathStep::Field(f.clone())],
-                    PathOp::Set(evar("_v", sz)),
-                )],
+                Box::new(evar("_r", z)),
+                vec![(vec![PathStep::Field(f.clone())], PathOp::Set(evar("_v", z)))],
             ),
-            sz,
+            z,
         );
         let mut s = mdecl(&format!("with_{f}"), &["_r", "_v"], set, z);
         s.params[0].ty = Some(self_ty.clone());
@@ -186,6 +159,7 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         wheres: Vec::new(),
         konst: false,
         fip: Fip::No,
+        replayable: false,
         span: z,
     }
 }
@@ -213,13 +187,13 @@ fn pair_match(d: &DataDecl, z: Span, mut arm_body: impl FnMut(&str, usize) -> S<
         .collect()
 }
 
-fn derive_eq(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
-    let z = SpanAlloc::zero();
+fn derive_eq(d: &DataDecl) -> InstanceDecl {
+    let z = Z;
     let mut arms = pair_match(d, z, |_, n| {
         let mut body = sp(Expr::Bool(true), z);
         for i in (0..n).rev() {
             let f = call(
-                evar("eq", al.next()),
+                evar("eq", Z),
                 vec![evar(&format!("_l{i}"), z), evar(&format!("_r{i}"), z)],
                 z,
             );
@@ -247,13 +221,13 @@ fn derive_eq(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
 // and stop at the first non-equal result (built inner-first, so the loop runs
 // fields in reverse); across distinct constructors, fall back to comparing
 // declaration-order tags.
-fn derive_ord(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
-    let z = SpanAlloc::zero();
+fn derive_ord(d: &DataDecl) -> InstanceDecl {
+    let z = Z;
     let mut arms = pair_match(d, z, |_, n| {
         let mut body = eint(0, z);
         for i in (0..n).rev() {
             let f = call(
-                evar("cmp", al.next()),
+                evar("cmp", Z),
                 vec![evar(&format!("_l{i}"), z), evar(&format!("_r{i}"), z)],
                 z,
             );
@@ -319,8 +293,8 @@ fn derive_ord(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
     inst_skel(d, ORD_CLASS, "ord", mdecl("cmp", &["_x", "_y"], body, z), z)
 }
 
-fn derive_show(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
-    let z = SpanAlloc::zero();
+fn derive_show(d: &DataDecl) -> InstanceDecl {
+    let z = Z;
     let concat = |a: S<Expr>, b: S<Expr>| call(evar("concat", z), vec![a, b], z);
     let arms = d
         .ctors
@@ -332,11 +306,7 @@ fn derive_show(d: &DataDecl, al: &mut SpanAlloc) -> InstanceDecl {
             } else {
                 let mut acc = sp(Expr::Str(")".into()), z);
                 for i in (0..n).rev() {
-                    let s = call(
-                        evar("show_c", al.next()),
-                        vec![evar(&format!("_f{i}"), z)],
-                        z,
-                    );
+                    let s = call(evar("show_c", Z), vec![evar(&format!("_f{i}"), z)], z);
                     acc = concat(s, acc);
                     if i > 0 {
                         acc = concat(sp(Expr::Str(", ".into()), z), acc);

@@ -1,6 +1,7 @@
 //! Free-monad fallback diagnostics.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::analysis::open_resume_escapes;
 use super::checks::{all_calls, raw_effects};
@@ -46,6 +47,29 @@ pub(super) fn free_monad_warning(
         names.len(),
         names.join(", ")
     ))
+}
+
+// A fast-path matcher (`strip_resume` / `state_clause`) accepted a clause but
+// then found its own post-condition violated: a `resume` reference survived a
+// strip that is supposed to erase the continuation. That can only happen if
+// upstream elaboration drifted from the ANF shape these matchers recognize. In
+// debug builds the call site's `debug_assert!` panics so the drift is caught in
+// development; in release the matcher rejects the clause and the caller falls
+// back to the correct (non-fused) lowering. That fallback is silent, so a benign
+// elaborator refactor would read as an unexplained performance cliff. This makes
+// the drift observable on stderr once per process: a compiler-internal signal,
+// not a user error, and output stays correct. `PRISM_QUIET` silences it like the
+// other fallback warnings and keeps it off the byte-checked stdout channel.
+pub(super) fn report_shape_drift(matcher: &str) {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if std::env::var_os("PRISM_QUIET").is_some() || WARNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    eprintln!(
+        "warning: effect-lowering matcher drift in `{matcher}`: an elaborated clause shape \
+         changed, so a fusion fast path was skipped (output is correct but un-fused). This is \
+         a compiler-internal signal; please report it."
+    );
 }
 
 // The genuinely effectful functions: those with a non-empty latent set. This is

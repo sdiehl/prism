@@ -159,67 +159,26 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_h() {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
-  ret i64 3
-}
-
-define i64 @prism_main() {
-entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  call void @prism_rc_dec(i64 %t2)
-  %t4 = call i64 @prism_h()
-  call void @prism_print_int(i64 %t4)
-  call void @prism_rc_dec(i64 %t4)
+  call void @prism_print_int(i64 3)
+  call void @prism_rc_dec(i64 3)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
 }
 
-declare ptr @prism_alloc(i64)
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-declare void @prism_print_int(i64)
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
 
-declare void @prism_print_nl()
-
-define i64 @prism_lam_0(i64 %_p0) {
-entry:
-  call void @prism_rc_dec(i64 %_p0)
-  ret i64 1
-}
-
-define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
-entry:
-  %_cp = inttoptr i64 %_clos to ptr
-  %0 = ptrtoint ptr %_cp to i64
-  %1 = add i64 %0, 8
-  %_tp = inttoptr i64 %1 to ptr
-  %_tag = load i64, ptr %_tp, align 8
-  switch i64 %_tag, label %_dead [
-    i64 0, label %_lam0
-  ]
-
-_lam0:                                            ; preds = %entry
-  %_r0 = call i64 @prism_lam_0(i64 %_a0)
-  br label %_merge
-
-_dead:                                            ; preds = %entry
-  call void @prism_apply_error()
-  unreachable
-
-_merge:                                           ; preds = %_lam0
-  %_result = phi i64 [ %_r0, %_lam0 ]
-  ret i64 %_result
-}
-
-declare void @prism_apply_error()
+attributes #0 = { nounwind }
 
 == run ==
 output: [1]

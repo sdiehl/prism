@@ -8,8 +8,10 @@
 .DS_Store
 *.ll
 *.mlir
+*.bc
+*.o
+*.prism_rt.c
 /a.out
 /models/.lake
-/models/lake-manifest.json
 /docs/src/pkg
 /public

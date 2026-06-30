@@ -15,7 +15,7 @@ fn hint(secret, guess) : ! Hint =
   else
     Exact
 
-fn play(secret, round) : !{IO} Int =
+fn play(secret, round) : !{IO, Console} Int =
   let guess = read_int()
   match hint(secret, guess) of
     Exact => round

@@ -232,9 +232,9 @@ impl Isa for MlirText {
             "llvm.func @prism_unbox(i64) -> i64",
             "llvm.func @prism_print_int(i64)",
             "llvm.func @prism_print_nl()",
-            "llvm.func @prism_read_int() -> i64",
-            "llvm.func @prism_read_line() -> i64",
-            "llvm.func @prism_rand() -> i64",
+            "llvm.func @prism_prim_read_int() -> i64",
+            "llvm.func @prism_prim_read_line() -> i64",
+            "llvm.func @prism_prim_rand() -> i64",
             "llvm.func @prism_srand(i64)",
             "llvm.func @prism_str_lit(!llvm.ptr, i64) -> i64",
         ];

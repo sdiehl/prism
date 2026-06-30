@@ -1,11 +1,12 @@
 use super::{
     builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
-    Elab, Error, FloatOp, Span, Sym, Type, Value,
+    Elab, Error, FloatOp, NodeId, Sym, Type, Value,
 };
 
 impl Elab<'_> {
     pub(super) fn needs_dict(&self, name: &str) -> bool {
-        self.checked.methods.contains_key(name) || self.checked.constrained.contains_key(name)
+        self.checked.methods.contains_key(&Sym::from(name))
+            || self.checked.constrained.contains_key(&Sym::from(name))
     }
 
     pub(super) fn value_global(&self, name: &str) -> Result<Comp, Error> {
@@ -36,24 +37,38 @@ impl Elab<'_> {
         )))))
     }
 
-    pub(super) fn method_sig(&self, class: &str, idx: usize) -> (String, usize) {
-        let (name, sig) = &self.checked.classes[class].methods[idx];
+    pub(super) fn method_sig(&self, class: Sym, idx: usize) -> Result<(String, usize), Error> {
+        let methods = &self
+            .checked
+            .classes
+            .get(&class)
+            .ok_or_else(|| Error::Ice(format!("no class info for `{class}`")))?
+            .methods;
+        let (name, sig) = methods.get(idx).ok_or_else(|| {
+            Error::Ice(format!(
+                "method index {idx} out of range for class `{class}`"
+            ))
+        })?;
         let arity = match sig {
             Type::Fun(doms, _, _) => doms.len(),
             _ => 0,
         };
-        (name.clone(), arity)
+        Ok((name.to_string(), arity))
     }
 
     // A dictionary as a core value: the i-th hidden parameter of the enclosing
     // function, or a top-level instance applied to its context dictionaries.
-    pub(super) fn dict_value(&mut self, d: &Dict, binds: &mut Vec<(Comp, String)>) -> Value {
-        match d {
+    pub(super) fn dict_value(
+        &mut self,
+        d: &Dict,
+        binds: &mut Vec<(Comp, String)>,
+    ) -> Result<Value, Error> {
+        Ok(match d {
             Dict::Param(i) => Value::Var(format!("_c{i}").into()),
             Dict::Global(inst, ctxs) => {
                 let mut vals = Vec::new();
                 for c in ctxs {
-                    vals.push(self.dict_value(c, binds));
+                    vals.push(self.dict_value(c, binds)?);
                 }
                 let v = self.fresh();
                 binds.push((Comp::Call(inst.clone().into(), vals), v.clone()));
@@ -62,8 +77,12 @@ impl Elab<'_> {
             // Project a superclass dict from a subclass dict cell: the super
             // fields lead the cell, so the field index is the super index.
             Dict::Super(d, subclass, idx) => {
-                let parent = self.dict_value(d, binds);
-                let cls = &self.checked.classes[subclass];
+                let parent = self.dict_value(d, binds)?;
+                let cls = self
+                    .checked
+                    .classes
+                    .get(&Sym::from(subclass))
+                    .ok_or_else(|| Error::Ice(format!("no class info for `{subclass}`")))?;
                 let n = cls.supers.len() + cls.methods.len();
                 let fv = self.fresh();
                 let binders = (0..n)
@@ -77,25 +96,25 @@ impl Elab<'_> {
                 ));
                 Value::Var(out.into())
             }
-        }
+        })
     }
 
     // Saturated method invocation: a known instance becomes a direct call to
     // its method function. A dictionary parameter is projected and forced.
     pub(super) fn method_invoke(
         &mut self,
-        class: &str,
+        class: Sym,
         idx: usize,
         d: &Dict,
         vals: Vec<Value>,
-    ) -> Comp {
-        match d {
+    ) -> Result<Comp, Error> {
+        Ok(match d {
             Dict::Global(inst, ctxs) => {
-                let (mname, _) = self.method_sig(class, idx);
+                let (mname, _) = self.method_sig(class, idx)?;
                 let mut binds = Vec::new();
                 let mut all = Vec::new();
                 for c in ctxs.clone() {
-                    all.push(self.dict_value(&c, &mut binds));
+                    all.push(self.dict_value(&c, &mut binds)?);
                 }
                 all.extend(vals);
                 wrap_binds(binds, Comp::Call(instance_method(inst, &mname).into(), all))
@@ -105,8 +124,12 @@ impl Elab<'_> {
             // pull the method out of it. Methods follow the leading super fields.
             other => {
                 let mut binds = Vec::new();
-                let dv = self.dict_value(other, &mut binds);
-                let cls = &self.checked.classes[class];
+                let dv = self.dict_value(other, &mut binds)?;
+                let cls = self
+                    .checked
+                    .classes
+                    .get(&class)
+                    .ok_or_else(|| Error::Ice(format!("no class info for `{class}`")))?;
                 let nsup = cls.supers.len();
                 let n = nsup + cls.methods.len();
                 let field = nsup + idx;
@@ -114,7 +137,7 @@ impl Elab<'_> {
                 let binders = (0..n)
                     .map(|j| (j == field).then(|| Sym::from(&mv)))
                     .collect();
-                let pat = CorePat::Ctor(Sym::from(&dict_ctor(class)), binders);
+                let pat = CorePat::Ctor(Sym::from(&dict_ctor(class.as_str())), binders);
                 wrap_binds(
                     binds,
                     Comp::Case(
@@ -126,20 +149,20 @@ impl Elab<'_> {
                     ),
                 )
             }
-        }
+        })
     }
 
     // A constrained global at value position: a closure that captures the
     // resolved dictionaries.
-    pub(super) fn constrained_value(&mut self, name: &str, span: Span) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&span).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {span:?}"))
+    pub(super) fn constrained_value(&mut self, name: &str, id: NodeId) -> Result<Comp, Error> {
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
-        if let Some((class, idx)) = self.checked.methods.get(name).cloned() {
-            let (_, arity) = self.method_sig(&class, idx);
+        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+            let (_, arity) = self.method_sig(class, idx)?;
             let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
             let vals = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
-            let body = self.method_invoke(&class, idx, &ds[0], vals);
+            let body = self.method_invoke(class, idx, first_dict(&ds, name)?, vals)?;
             return Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
                 ps.into_iter().map(Sym::from).collect(),
                 Box::new(body),
@@ -152,7 +175,10 @@ impl Elab<'_> {
             .ok_or_else(|| Error::Ice(format!("no arity for global `{name}`")))?;
         let ps: Vec<String> = (0..n).map(|i| format!("_p{i}")).collect();
         let mut binds = Vec::new();
-        let mut all: Vec<Value> = ds.iter().map(|d| self.dict_value(d, &mut binds)).collect();
+        let mut all: Vec<Value> = ds
+            .iter()
+            .map(|d| self.dict_value(d, &mut binds))
+            .collect::<Result<_, _>>()?;
         all.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
         let body = wrap_binds(binds, Comp::Call(name.into(), all));
         Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
@@ -164,12 +190,12 @@ impl Elab<'_> {
     pub(super) fn dict_call(
         &mut self,
         name: &str,
-        span: Span,
+        id: NodeId,
         vals: Vec<Value>,
         binds: &mut Vec<(Comp, String)>,
     ) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&span).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {span:?}"))
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         // A `sort`/`sort_by_ord` whose `Ord` is a canonical primitive instance
         // lowers to the native sort kernel. A user instance (e.g. a reversed
@@ -181,19 +207,22 @@ impl Elab<'_> {
                 return Ok(Comp::StrBuiltin(Builtin::SortPrim, args));
             }
         }
-        if let Some((class, idx)) = self.checked.methods.get(name).cloned() {
-            let (_, arity) = self.method_sig(&class, idx);
+        if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
+            let (_, arity) = self.method_sig(class, idx)?;
             if vals.len() == arity {
-                return Ok(self.method_invoke(&class, idx, &ds[0], vals));
+                return self.method_invoke(class, idx, first_dict(&ds, name)?, vals);
             }
         } else if let Some(n) = self.arity.get(name).copied() {
             if vals.len() == n {
-                let mut all: Vec<Value> = ds.iter().map(|d| self.dict_value(d, binds)).collect();
+                let mut all: Vec<Value> = ds
+                    .iter()
+                    .map(|d| self.dict_value(d, binds))
+                    .collect::<Result<_, _>>()?;
                 all.extend(vals);
                 return Ok(Comp::Call(name.into(), all));
             }
         }
-        let cf = self.constrained_value(name, span)?;
+        let cf = self.constrained_value(name, id)?;
         let fv = self.fresh();
         binds.push((cf, fv.clone()));
         Ok(Comp::App(
@@ -235,6 +264,14 @@ impl Elab<'_> {
             None => Comp::Call(name.into(), args),
         })
     }
+}
+
+// The head dictionary of a resolved constraint set. A method/constrained name
+// always resolves to at least one dictionary, so an empty set is a typechecker
+// invariant break surfaced as a structured ICE rather than an index panic.
+fn first_dict<'a>(ds: &'a [Dict], name: &str) -> Result<&'a Dict, Error> {
+    ds.first()
+        .ok_or_else(|| Error::Ice(format!("no dictionary for `{name}`")))
 }
 
 // The native-sort key for a `sort`/`sort_by_ord` call, or `None` to keep the

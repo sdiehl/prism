@@ -149,85 +149,33 @@ source_filename = "prism"
 
 @.str0 = private constant [32 x i8] c"ICE: guarded match fell through\00"
 
-define i64 @prism_classify(i64 %a0) {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
-  call void @prism_rc_inc(i64 %a0)
-  %t1 = and i64 %a0, 1
-  %t2 = and i64 %t1, 1
-  %t3 = icmp eq i64 %t2, 1
-  br i1 %t3, label %b0, label %b1
+  br i1 false, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t4 = icmp eq i64 %a0, 1
-  %t5 = zext i1 %t4 to i64
-  %t6 = shl i64 %t5, 1
-  %t7 = or i64 %t6, 1
-  br label %b2
-
-b1:                                               ; preds = %entry
-  %t8 = call i64 @prism_rt_int_cmp(i64 %a0, i64 1)
-  %t9 = icmp eq i64 %t8, 0
-  %t10 = zext i1 %t9 to i64
-  %t11 = shl i64 %t10, 1
-  %t12 = or i64 %t11, 1
-  br label %b2
-
-b2:                                               ; preds = %b1, %b0
-  %t13 = phi i64 [ %t7, %b0 ], [ %t12, %b1 ]
-  call void @prism_rc_dec(i64 %a0)
-  call void @prism_rc_dec(i64 1)
-  %t14 = icmp ne i64 %t13, 1
-  br i1 %t14, label %b3, label %b4
-
-b3:                                               ; preds = %b2
-  call void @prism_rc_dec(i64 %t13)
-  call void @prism_rc_dec(i64 %a0)
   ret i64 1
 
-b4:                                               ; preds = %b2
-  call void @prism_rc_dec(i64 %t13)
-  call void @prism_rc_inc(i64 %a0)
-  call void @prism_rc_inc(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
-  br i1 true, label %b5, label %b6
+b1:                                               ; preds = %entry
+  br i1 true, label %b2, label %b3
 
-b5:                                               ; preds = %b4
-  call void @prism_rc_dec(i64 3)
-  call void @prism_rc_dec(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
+b2:                                               ; preds = %b1
   ret i64 3
 
-b6:                                               ; preds = %b4
-  %t25 = inttoptr i64 %a0 to ptr
-  br label %b9
-
-b9:                                               ; preds = %b8, %b6
-  call void @prism_rc_dec(i64 3)
-  call void @prism_rc_dec(i64 %a0)
-  call void @prism_rc_dec(i64 %a0)
-  %t29 = call i64 @prism_str_lit(ptr @.str0, i64 31)
-  call void @prism_fatal(i64 %t29)
+b3:                                               ; preds = %b1
+  %t8 = call i64 @prism_str_lit(ptr @.str0, i64 31)
+  call void @prism_fatal(i64 %t8)
   ret i64 0
-
-b8:                                               ; No predecessors!
-  br label %b9
 }
 
-declare void @prism_rc_inc(i64)
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
 
-declare i64 @prism_rt_int_cmp(i64, i64)
+; Function Attrs: nounwind
+declare void @prism_fatal(i64) #0
 
-declare void @prism_rc_dec(i64)
-
-declare i64 @prism_str_lit(ptr, i64)
-
-declare void @prism_fatal(i64)
-
-define i64 @prism_main() {
-entry:
-  %t0 = call i64 @prism_classify(i64 11)
-  ret i64 %t0
-}
+attributes #0 = { nounwind }
 
 == run ==
 output: []

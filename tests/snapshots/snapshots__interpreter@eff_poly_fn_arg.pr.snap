@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/eff_poly_fn_arg.pr
+---
+[(0, 10), (1, 20), (2, 30)]
+=> ()

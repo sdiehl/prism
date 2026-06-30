@@ -413,14 +413,48 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-define i64 @prism_apply_io(i64 %a0) {
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
 entry:
-  %t0 = call i64 @prism_apply_1(i64 %a0, i64 3)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t0
+  %t1 = call ptr @prism_alloc(i64 0)
+  %0 = ptrtoint ptr %t1 to i64
+  %1 = add i64 %0, 8
+  %t2 = inttoptr i64 %1 to ptr
+  store i64 0, ptr %t2, align 8
+  %t4 = ptrtoint ptr %t1 to i64
+  %t6 = call i64 @prism_apply_1(i64 %t4, i64 3)
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_print_int(i64 %t6)
+  call void @prism_rc_dec(i64 %t6)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t12 = call ptr @prism_alloc(i64 0)
+  %2 = ptrtoint ptr %t12 to i64
+  %3 = add i64 %2, 8
+  %t13 = inttoptr i64 %3 to ptr
+  store i64 1, ptr %t13, align 8
+  %t15 = ptrtoint ptr %t12 to i64
+  %t17 = call ptr @prism_alloc(i64 0)
+  %4 = ptrtoint ptr %t17 to i64
+  %5 = add i64 %4, 8
+  %t18 = inttoptr i64 %5 to ptr
+  store i64 2, ptr %t18, align 8
+  %t20 = ptrtoint ptr %t17 to i64
+  %t21 = call i64 @prism_apply_1(i64 %t15, i64 %t20)
+  call void @prism_rc_dec(i64 %t15)
+  call void @prism_print_int(i64 %t21)
+  call void @prism_rc_dec(i64 %t21)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
 }
 
-define i64 @prism_apply_1(i64 %_clos, i64 %_a0) {
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %0 = ptrtoint ptr %_cp to i64
@@ -454,131 +488,92 @@ _merge:                                           ; preds = %_lam2, %_lam1, %_la
   ret i64 %_result
 }
 
-declare void @prism_rc_dec(i64)
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
 
-define i64 @prism_use_pure(i64 %a0) {
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+; Function Attrs: nounwind
+define i64 @prism_lam_0(i64 %_p0) #0 {
 entry:
-  %t0 = musttail call i64 @prism_apply_io(i64 %a0)
-  ret i64 %t0
-}
-
-define i64 @prism_call_poly(i64 %a0, i64 %a1) {
-entry:
-  %t0 = call i64 @prism_apply_1(i64 %a0, i64 %a1)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t0
-}
-
-define i64 @prism_main() {
-entry:
-  %t0 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
-  store i64 0, ptr %t1, align 8
-  %t2 = ptrtoint ptr %t0 to i64
-  %t3 = call i64 @prism_use_pure(i64 %t2)
-  call void @prism_print_int(i64 %t3)
-  call void @prism_rc_dec(i64 %t3)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  call void @prism_rc_dec(i64 0)
-  %t6 = call ptr @prism_alloc(i64 0)
-  %2 = ptrtoint ptr %t6 to i64
-  %3 = add i64 %2, 8
-  %t7 = inttoptr i64 %3 to ptr
-  store i64 1, ptr %t7, align 8
-  %t8 = ptrtoint ptr %t6 to i64
-  %t9 = call ptr @prism_alloc(i64 0)
-  %4 = ptrtoint ptr %t9 to i64
-  %5 = add i64 %4, 8
-  %t10 = inttoptr i64 %5 to ptr
-  store i64 2, ptr %t10, align 8
-  %t11 = ptrtoint ptr %t9 to i64
-  %t12 = call i64 @prism_call_poly(i64 %t8, i64 %t11)
-  call void @prism_print_int(i64 %t12)
-  call void @prism_rc_dec(i64 %t12)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  ret i64 0
-}
-
-declare ptr @prism_alloc(i64)
-
-declare void @prism_print_int(i64)
-
-declare void @prism_print_nl()
-
-define i64 @prism_lam_0(i64 %_p0) {
-entry:
-  %t0 = and i64 %_p0, 83
-  %t1 = and i64 %t0, 1
-  %t2 = icmp eq i64 %t1, 1
-  br i1 %t2, label %b0, label %b1
+  %t1 = and i64 %_p0, 83
+  %t3 = and i64 %t1, 1
+  %t4 = icmp eq i64 %t3, 1
+  br i1 %t4, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t3 = ashr i64 %_p0, 1
-  %t5 = add i64 %t3, 41
-  %t6 = shl i64 %t5, 1
-  %t7 = ashr i64 %t6, 1
-  %t8 = icmp eq i64 %t7, %t5
-  br i1 %t8, label %b3, label %b1
+  %t6 = ashr i64 %_p0, 1
+  %t9 = add i64 %t6, 41
+  %t11 = shl i64 %t9, 1
+  %t12 = ashr i64 %t11, 1
+  %t13 = icmp eq i64 %t12, %t9
+  br i1 %t13, label %b3, label %b1
 
 b1:                                               ; preds = %b0, %entry
-  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
+  %t15 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
   br label %b2
 
 b3:                                               ; preds = %b0
-  %t9 = or i64 %t6, 1
+  %t14 = or i64 %t11, 1
   br label %b2
 
 b2:                                               ; preds = %b1, %b3
-  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
   call void @prism_rc_dec(i64 %_p0)
   call void @prism_rc_dec(i64 83)
-  ret i64 %t11
+  ret i64 %t16
 }
 
-declare i64 @prism_rt_int_add(i64, i64)
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
 
-define i64 @prism_lam_1(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_1(i64 %_p0) #0 {
 entry:
-  %t0 = call i64 @prism_apply_1(i64 %_p0, i64 3)
+  %t1 = call i64 @prism_apply_1(i64 %_p0, i64 3)
   call void @prism_rc_dec(i64 %_p0)
-  ret i64 %t0
+  ret i64 %t1
 }
 
-define i64 @prism_lam_2(i64 %_p0) {
+; Function Attrs: nounwind
+define i64 @prism_lam_2(i64 %_p0) #0 {
 entry:
-  %t0 = and i64 %_p0, 83
-  %t1 = and i64 %t0, 1
-  %t2 = icmp eq i64 %t1, 1
-  br i1 %t2, label %b0, label %b1
+  %t1 = and i64 %_p0, 83
+  %t3 = and i64 %t1, 1
+  %t4 = icmp eq i64 %t3, 1
+  br i1 %t4, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  %t3 = ashr i64 %_p0, 1
-  %t5 = add i64 %t3, 41
-  %t6 = shl i64 %t5, 1
-  %t7 = ashr i64 %t6, 1
-  %t8 = icmp eq i64 %t7, %t5
-  br i1 %t8, label %b3, label %b1
+  %t6 = ashr i64 %_p0, 1
+  %t9 = add i64 %t6, 41
+  %t11 = shl i64 %t9, 1
+  %t12 = ashr i64 %t11, 1
+  %t13 = icmp eq i64 %t12, %t9
+  br i1 %t13, label %b3, label %b1
 
 b1:                                               ; preds = %b0, %entry
-  %t10 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
+  %t15 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
   br label %b2
 
 b3:                                               ; preds = %b0
-  %t9 = or i64 %t6, 1
+  %t14 = or i64 %t11, 1
   br label %b2
 
 b2:                                               ; preds = %b1, %b3
-  %t11 = phi i64 [ %t9, %b3 ], [ %t10, %b1 ]
+  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
   call void @prism_rc_dec(i64 %_p0)
   call void @prism_rc_dec(i64 83)
-  ret i64 %t11
+  ret i64 %t16
 }
 
-declare void @prism_apply_error()
+; Function Attrs: nounwind
+declare void @prism_apply_error() #0
+
+attributes #0 = { nounwind }
 
 == run ==
 output: [42, 42]

@@ -24,7 +24,7 @@ use crate::error::Error;
 use crate::eval::{globals, Machine};
 use crate::lex::{lex_raw, Token};
 use crate::parse::{incomplete, parse, parse_expr, ParseResult};
-use crate::resolve::{default_roots, resolve_modules_in};
+use crate::resolve::{default_roots, import_bindings, resolve_expr, resolve_modules_in};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Expr, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
@@ -124,6 +124,10 @@ struct Built {
     globals: BTreeMap<Sym, CoreFn>,
     arity: BTreeMap<String, usize>,
     consts: BTreeMap<String, S<Expr<Core>>>,
+    // Bare names the prelude's glob imports open into scope, mapped to their
+    // canonical symbols, so a typed-in expression resolves `map` the same way a
+    // file body does (the program resolver only reaches declared bodies).
+    imports: BTreeMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -198,7 +202,11 @@ impl Session {
         // session must resolve modules against the stdlib roots before desugaring,
         // exactly as the batch driver's `frontend` does. Without this, names that
         // live in stdlib modules (e.g. `nth` behind `at_list`) are unbound.
-        let program = resolve_modules_in(program, &default_roots(std::path::Path::new(".")))?;
+        let roots = default_roots(std::path::Path::new("."));
+        // The same import scope, captured for resolving interactively typed
+        // expressions, which never pass through the program resolver below.
+        let imports = import_bindings(&program, &roots)?;
+        let program = resolve_modules_in(program, &roots)?;
         let program = desugar(program)?;
         let checked = check(&program)?;
         let core = elaborate(&program, &checked)?;
@@ -221,6 +229,7 @@ impl Session {
                 checked,
                 arity,
                 consts,
+                imports,
             },
         ))
     }
@@ -253,7 +262,9 @@ impl Session {
 
     fn eval_chained(&self, built: &Built, expr: &str) -> Result<(String, String, String), Error> {
         let text = self.chain(expr);
-        let e = desugar_expr(&parse_expr(&text)?)?;
+        let mut surface = parse_expr(&text)?;
+        resolve_expr(&mut surface, &built.imports)?;
+        let e = desugar_expr(&surface)?;
         let (ty, eff, dicts) = infer_expr_dicts(&built.checked, &e)?;
         let comp = elaborate_expr(&built.checked, &e, &built.arity, &dicts, &built.consts)?;
         // The REPL streams `print` to the terminal and reads from real stdin,
@@ -861,6 +872,9 @@ fn ctor_type(c: &CtorInfo) -> Type {
 
 fn info(session: &Session, built: &Built, name: &str) {
     let ck = &built.checked;
+    // A bare query (`map`) names a glob-imported binding stored under its
+    // canonical symbol (`Data.List.map`); resolve it the way an expression would.
+    let name = built.imports.get(name).map_or(name, String::as_str);
     let mut out: Vec<String> = Vec::new();
     if let Some(d) = ck.decls.iter().find(|d| d.name == name) {
         out.push(format!(
@@ -892,7 +906,7 @@ fn info(session: &Session, built: &Built, name: &str) {
         };
         out.push(format!("type {head} = {}", d.ctors.join(" | ")));
     }
-    if let Some(c) = ck.classes.get(name) {
+    if let Some(c) = ck.classes.get(&Sym::from(name)) {
         let mut s = format!("class {name} {}", c.param);
         for (m, ty) in &c.methods {
             let _ = write!(s, "\n  {m} : {}", ty.show());
@@ -913,6 +927,7 @@ fn info(session: &Session, built: &Built, name: &str) {
 
 // The kind of a named type constructor, from its parameter count.
 fn kind(built: &Built, name: &str) {
+    let name = built.imports.get(name).map_or(name, String::as_str);
     let arity = if Type::SCALARS.iter().any(|t| t.show() == name) {
         Some(0)
     } else {
@@ -987,7 +1002,10 @@ fn show_type(session: &Session, built: &Built, rest: &str) {
     let text = session.chain(rest);
     let desugared = match parse_expr(&text) {
         Err(e) => return report(&e.into(), &text, "<repl>"),
-        Ok(e) => desugar_expr(&e),
+        Ok(mut e) => match resolve_expr(&mut e, &built.imports) {
+            Err(e) => return report(&e, &text, "<repl>"),
+            Ok(()) => desugar_expr(&e),
+        },
     };
     match desugared {
         Err(e) => report(&e.into(), &text, "<repl>"),

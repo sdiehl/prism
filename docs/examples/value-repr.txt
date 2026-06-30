@@ -1,10 +1,14 @@
-A Prism value is one 64-bit word, distinguished by its low bit:
+      63                                        1   0
+     +-------------------------------------------+---+
+     |                 payload                   | t |
+     +-------------------------------------------+---+
 
-  ...xxx1   immediate: a small integer or other unboxed scalar (value in the
-            high 63 bits; a small Int is (n << 1) | 1)
-  00000000  unit (the zero word)
-  ...xxx0   a pointer to a heap cell (word-aligned, so the low bit is clear)
+   t = 1   immediate: an unboxed scalar in the high 63 bits
+           (a small Int is (n << 1) | 1)
+   t = 0   pointer:   a word-aligned heap-cell address
+           (alignment keeps the low bit clear)
+   all 0   unit:      the zero word, an immediate with no payload
 
-prism_rc_inc / prism_rc_dec take the raw word: an immediate or unit is skipped
-without a dereference, so dup and drop are no-ops on non-cell values under
-polymorphism.
+dup / drop (prism_rc_inc / prism_rc_dec) take the raw word and skip an
+immediate or unit without a dereference, so they are no-ops on non-cell
+values under polymorphism.

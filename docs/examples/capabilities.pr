@@ -1,0 +1,20 @@
+-- Capability effects, the parts a browser can serve. `Random` is a deterministic
+-- SplitMix64 stream (pure arithmetic, identical to the native oracle) and `Env`
+-- reads the environment, empty in the playground, so `getenv` falls back. Each
+-- function's row names the slice of the world it reads: `! {Random}` alone,
+-- `! {Env}` alone, and their structural union, never a blanket `! {IO}`. (The
+-- inputs a browser cannot serve, file reads and stdin, would be reported instead.)
+
+fn roll() : !{Random} Int = rand_below(6) + 1
+
+fn user() : !{Env} String =
+  let name = getenv("USER")
+  if name == "" then
+    "anonymous"
+  else
+    name
+
+fn summary() : !{Env, Random} String =
+  "{user()} rolled {roll()}, {roll()}, {roll()}"
+
+fn main() = println(summary())

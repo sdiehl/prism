@@ -350,14 +350,21 @@ pub(super) fn resume_set(resume: Sym) -> BTreeSet<Sym> {
 // alias may survive in the result. This is an IR-level enforcement of the
 // structural assumption about elaborator output. An upstream change that emitted
 // a clause shape this matcher misreads (accepting it yet leaving a live resume
-// reference) is caught here as an assertion failure rather than
-// miscompiling. Asserts at every level since each recursive call re-enters here.
+// reference) must NOT be accepted. In debug builds we panic so the drift is
+// surfaced loudly during development; in release builds we reject the match and
+// return None, so the caller falls back to the general (non-fused) lowering
+// rather than miscompiling. Checked at every level since each recursive call
+// re-enters here.
 pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
     let stripped = strip_resume_go(c, aliases)?;
-    debug_assert!(
-        fv::comp(&stripped).is_disjoint(aliases),
-        "strip_resume accepted a clause but left a resume reference: elaborated shape drifted"
-    );
+    if !fv::comp(&stripped).is_disjoint(aliases) {
+        debug_assert!(
+            false,
+            "strip_resume accepted a clause but left a resume reference: elaborated shape drifted"
+        );
+        super::diagnostics::report_shape_drift("strip_resume");
+        return None;
+    }
     Some(stripped)
 }
 

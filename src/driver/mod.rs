@@ -13,9 +13,11 @@ use crate::codegen::{emit_llvm, emit_llvm_bc};
 #[cfg(feature = "native")]
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
+use crate::core::opt::PassStage;
 use crate::core::{
-    balanced, check_fip, check_fip_linear, elaborate, erase_newtypes, fip_annots, hash_program,
-    insert_rc, lower_effects, newtype_ctors, pp_core, pp_core_pretty, reuse, specialize, Core,
+    balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
+    lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
+    run_opt_spec, Core, CorePass, OptLevel, PassSpec,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -33,6 +35,109 @@ pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
+
+// The Core-to-Core optimization level every compile uses, set once from the CLI
+// `-O` flag and read by `frontend`. A process-level default (like the other opt
+// knobs `opt::run` consults) rather than a parameter threaded through every
+// entrypoint. `255` is the unset sentinel: an explicit CLI flag wins, else the
+// `PRISM_OPT_LEVEL` env var (handy for testing a pass at O2 without the CLI),
+// else `O1`, the tier we ship (newtype erasure plus dictionary specialization).
+static OPT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255);
+
+/// Set the optimization level for subsequent compiles (the CLI `-O` flag).
+pub fn set_opt_level(level: OptLevel) {
+    let n = match level {
+        OptLevel::O0 => 0,
+        OptLevel::O1 => 1,
+        OptLevel::O2 => 2,
+    };
+    OPT_LEVEL.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn opt_level() -> OptLevel {
+    match OPT_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => OptLevel::O0,
+        1 => OptLevel::O1,
+        2 => OptLevel::O2,
+        _ => std::env::var("PRISM_OPT_LEVEL")
+            .ok()
+            .and_then(|s| OptLevel::parse(&s))
+            .unwrap_or_default(),
+    }
+}
+
+// An explicit `--passes` spec, set once from the CLI before compilation, that
+// overrides the `-O` level. Like `OPT_LEVEL`, a process-level knob rather than a
+// parameter threaded through every entrypoint; when unset, the level path runs
+// exactly as before. The two are mutually exclusive at the CLI, so only one is
+// ever in force.
+static PASS_SPEC: std::sync::Mutex<Option<PassSpec>> = std::sync::Mutex::new(None);
+
+/// Use an explicit ordered pass list for subsequent compiles (the CLI
+/// `--passes` flag), overriding the `-O` level.
+///
+/// # Panics
+/// Panics if the spec lock is poisoned (a prior set panicked), which cannot
+/// happen for this infallible store.
+pub fn set_pass_spec(spec: PassSpec) {
+    *PASS_SPEC.lock().unwrap() = Some(spec);
+}
+
+fn pass_spec() -> Option<PassSpec> {
+    PASS_SPEC.lock().unwrap().clone()
+}
+
+// The LLVM-backend optimization level handed to `cc` (the `--backend-opt` CLI
+// flag), distinct from the Core-to-Core `-O` above: this one only tunes clang's
+// own `-O{n}` pipeline over the emitted bitcode, leaving Core untouched. A
+// process-global like the other knobs; `None` means the shipped default of
+// `-O2`. `PRISM_BACKEND_OPT` is the env escape hatch, mirroring
+// `PRISM_OPT_LEVEL`.
+static BACKEND_OPT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Set the LLVM-backend optimization level (clang `-O`) for subsequent builds.
+///
+/// # Panics
+/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
+/// for this infallible store.
+pub fn set_backend_opt(level: String) {
+    *BACKEND_OPT.lock().unwrap() = Some(level);
+}
+
+#[cfg(feature = "native")]
+fn backend_opt() -> String {
+    BACKEND_OPT
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(|| env::var("PRISM_BACKEND_OPT").ok())
+        .unwrap_or_else(|| "2".into())
+}
+
+// The Core passes the user turned off with a `--no-<pass>` flag (e.g.
+// `--no-inline`). The optimizer filters these out of the effective pipeline,
+// whether it came from a `-O` level or an explicit `--passes` list, so the flags
+// compose with both. A process-global like the other opt knobs above;
+// `PRISM_NO_SPECIALIZE` is the env equivalent of `--no-specialize`, unioned in by
+// the optimizer.
+static DISABLED_PASSES: std::sync::Mutex<Vec<CorePass>> = std::sync::Mutex::new(Vec::new());
+
+/// Turn off the named Core passes for subsequent compiles (the CLI
+/// `--no-<pass>` flags). Each is removed from every occurrence in the effective
+/// pipeline, whether it came from `-O` or `--passes`.
+///
+/// # Panics
+/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
+/// for this infallible store.
+pub fn set_disabled_passes(passes: &[CorePass]) {
+    *DISABLED_PASSES.lock().unwrap() = passes.to_vec();
+}
+
+// The passes disabled via `set_disabled_passes`, read by the optimizer when it
+// finalizes the pass vector. Empty when no `--no-<pass>` flag was given.
+pub(crate) fn disabled_passes() -> Vec<CorePass> {
+    DISABLED_PASSES.lock().unwrap().clone()
+}
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
 
@@ -118,20 +223,19 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     emit_warnings(src, &checked);
     let core = elaborate(&program, &checked)?;
     fip_check(&program, &checked, &core)?;
+    replayable_check(&program, &checked)?;
     reconcile_effects(&checked, &core)?;
-    // Zero-cost newtypes: erase the one-field box above the backend fork so both
-    // the interpreter and native see the same unwrapped Core. Placed after the
-    // fip/effect validators so they still judge the program as written.
-    let core = erase_newtypes(&core, &newtype_ctors(&program));
-    // Dictionary specialization: a constrained call on a known instance becomes a
-    // direct call to the instance method, with the dictionary build eliminated.
-    // Opt-out (for before/after measurement and as an escape hatch) keeps the
-    // generic dictionary-passing form; both backends still share one Core, so the
-    // parity oracle holds either way.
-    let core = if std::env::var_os("PRISM_NO_SPECIALIZE").is_some() {
-        core
-    } else {
-        specialize(&core)
+    // Mid-level Core-to-Core optimization tier. Runs above the interpreter/native
+    // fork so both backends consume the same optimized Core (the parity oracle
+    // holds by construction). Placed after the fip/effect validators so they
+    // still judge the program as written. Newtype erasure is mandatory (a
+    // representation both backends depend on); specialization is opt-out via
+    // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1),
+    // unless an explicit `--passes` spec overrides it with its pre-stage list.
+    let nt = newtype_ctors(&program);
+    let (core, _stats) = match pass_spec() {
+        Some(spec) => run_opt_spec(&core, &nt, &spec.pre),
+        None => run_opt(&core, &nt, opt_level(), PassStage::PreLowering),
     };
     Ok((program, checked, core))
 }
@@ -220,6 +324,63 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
     check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
 }
 
+// Check every `replayable`-annotated function. The certificate is on the inferred
+// principal row: it must stay within the recordable capabilities (`Console`,
+// `FileSystem`, `Random`, `Env`, `Output`) plus the deterministic builtin effects
+// (`Exn`, `Fail`). `Output` is admitted because replay/durable suppress it during
+// the replayed prefix, so re-running it is sound. A row containing `IO` (un-logged
+// nondeterminism: the system clock, srand) or any user-defined effect cannot be
+// reproduced from a trace, so it is rejected with a caret at the function naming
+// the offending effect(s).
+fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(), Error> {
+    let annots = replayable_annots(program);
+    if annots.is_empty() {
+        return Ok(());
+    }
+    let allowed: std::collections::BTreeSet<Sym> =
+        ["Console", "FileSystem", "Random", "Env", "Output"]
+            .into_iter()
+            .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
+            .map(Sym::from)
+            .collect();
+    let inferred: std::collections::BTreeMap<&str, &crate::types::ty::Effects> = checked
+        .decls
+        .iter()
+        .map(|i| (i.name.as_str(), &i.effects))
+        .collect();
+    for d in &program.fns {
+        if !annots.contains(&Sym::from(&d.name)) {
+            continue;
+        }
+        let Some(row) = inferred.get(d.name.as_str()).copied() else {
+            continue;
+        };
+        let offending: Vec<&str> = row
+            .iter()
+            .filter(|e| !allowed.contains(*e))
+            .map(|e| e.as_str())
+            .collect();
+        if !offending.is_empty() {
+            let msg = format!(
+                "function `{}` is marked `replayable` but performs non-replayable {} `{}`; \
+                 a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail",
+                d.name,
+                if offending.len() == 1 {
+                    "effect"
+                } else {
+                    "effects"
+                },
+                offending.join("`, `")
+            );
+            return Err(Error::Type(crate::error::TypeError::Other {
+                span: d.span,
+                msg,
+            }));
+        }
+    }
+    Ok(())
+}
+
 /// # Examples
 /// ```
 /// let src = prism::with_prelude("fn main() = print(1 + 2)");
@@ -283,11 +444,29 @@ pub fn interpret_io_on(
 fn prepared_core(src: &str, roots: &[Root]) -> Result<Core, Error> {
     let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, _, warning) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, _, warning) = lower_opt(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
     Ok(core)
+}
+
+// The effect-lowered core, its constructor table, and any fallback warning.
+type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
+
+// Effect-lower `core`, then run the late (post-lowering) optimization passes on
+// the result. The late stage is where the simplifier lives: lowering has already
+// fixed the var/State fusion strategy, so simplifying here cannot defeat it. Every
+// path that produces or shows the lowered native core goes through this, so the
+// compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
+fn lower_opt(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered, Error> {
+    let (lowered, ctors, warning) = lower_effects(core, ctors)?;
+    let empty = std::collections::BTreeSet::new();
+    let (lowered, _stats) = match pass_spec() {
+        Some(spec) => run_opt_spec(&lowered, &empty, &spec.late),
+        None => run_opt(&lowered, &empty, opt_level(), PassStage::Late),
+    };
+    Ok((lowered, ctors, warning))
 }
 
 fn lowered_core(
@@ -296,7 +475,7 @@ fn lowered_core(
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (program, checked, core) = frontend(src, roots)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors, warning) = lower_effects(&core, &checked.ctors)?;
+    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors)?;
     emit_lower_warning(src, warning.as_deref());
     Ok((checked, lowered, ctors, sigs))
 }
@@ -357,6 +536,19 @@ pub fn core_ir(src: &str) -> Result<String, Error> {
     core_ir_full(&with_prelude(src), Path::new("."))
 }
 
+/// The optimized Core IR for `src` (prelude prepended internally).
+///
+/// As produced by the Core-to-Core tier, before reference counting and effect
+/// lowering. The in-memory analogue of [`core_ir`], for callers that need the
+/// term itself (linting, structural checks) rather than its pretty form.
+///
+/// # Errors
+/// Fails on front-end errors.
+pub fn core_of(src: &str) -> Result<Core, Error> {
+    let (_, _, core) = frontend(&with_prelude(src), &default_roots(Path::new(".")))?;
+    Ok(core)
+}
+
 /// Like [`core_ir`], but `full` already carries the prelude (as the REPL's
 /// composed buffer does). Imports resolve relative to `base`.
 ///
@@ -386,6 +578,11 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
 /// Fails on front-end errors (lex, parse, module, type, fip).
 pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str>, Error> {
     use crate::core::{Comp, Value};
+
+    // The input capability wrappers route host file/env IO through effects, so
+    // the underlying prim builtin lives only in the always-reachable world
+    // handler. Detect that usage from the surface wrapper a program reaches.
+    const INPUT_WRAPPERS: &[&str] = &["read_file", "file_exists", "getenv", "args_count", "arg"];
 
     fn scan_val(v: &Value, out: &mut Vec<&'static str>) {
         match v {
@@ -478,6 +675,11 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {
         scan_comp(&f.body, &mut out);
     }
+    for w in INPUT_WRAPPERS {
+        if reachable.contains(&Sym::new(w)) && !out.contains(w) {
+            out.push(w);
+        }
+    }
     Ok(out)
 }
 
@@ -527,6 +729,15 @@ pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
     build_on(src, &default_roots(base), out)
 }
 
+#[cfg(feature = "native")]
+fn require_main(checked: &Checked) -> Result<(), Error> {
+    if checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
+        Ok(())
+    } else {
+        Err(Error::Codegen("no main function to build".into()))
+    }
+}
+
 /// Like [`build_at`], but against an explicit module search path (a project's
 /// source root, its path dependencies, and the stdlib).
 ///
@@ -535,9 +746,7 @@ pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 #[cfg(feature = "native")]
 pub fn build_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
     let (checked, core, ctors) = compiled(src, roots)?;
-    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
-        return Err(Error::Codegen("no main function to build".into()));
-    }
+    require_main(&checked)?;
     let bc = out.with_extension("bc");
     emit_llvm_bc(&core, &ctors, &bc).map_err(Error::Codegen)?;
     cc_link(&bc, out)
@@ -567,8 +776,13 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
     // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
     // the corpus runs under UBSan and any new runtime UB aborts the program.
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
+    // ThinLTO stays on at every level: it is what inlines the C runtime into the
+    // generated code. The `-O` level (default `-O2`) is the one user-facing knob;
+    // a trailing `PRISM_CC_FLAGS` token still wins, since clang takes the last
+    // `-O` it sees.
+    let olevel = format!("-O{}", backend_opt());
     let res = Command::new(&cc)
-        .args(["-O2", "-flto=thin", "-Wno-override-module"])
+        .args([olevel.as_str(), "-flto=thin", "-Wno-override-module"])
         .args(extra.split_whitespace())
         .arg(ir)
         .arg(&rt)
@@ -627,9 +841,7 @@ pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 #[cfg(feature = "mlir")]
 pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
     let (checked, core, ctors) = compiled(src, roots)?;
-    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
-        return Err(Error::Codegen("no main function to build".into()));
-    }
+    require_main(&checked)?;
     let mlir_text = emit_mlir(&core, &ctors).map_err(Error::Codegen)?;
     let mlir_file = out.with_extension("mlir");
     fs::write(&mlir_file, &mlir_text)?;
@@ -738,6 +950,11 @@ pub fn report_on(src: &str, roots: &[Root]) -> String {
         return out;
     }
 
+    if let Err(e) = replayable_check(&program, &checked) {
+        section(&mut out, "replayable", &render(e));
+        return out;
+    }
+
     let sigs = borrow_sigs(&program);
     section(
         &mut out,
@@ -746,7 +963,7 @@ pub fn report_on(src: &str, roots: &[Root]) -> String {
     );
 
     #[cfg(feature = "native")]
-    match lower_effects(&core, &checked.ctors) {
+    match lower_opt(&core, &checked.ctors) {
         Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
             Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
             Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),

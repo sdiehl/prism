@@ -18,7 +18,7 @@ fn step(acc, op, n) : ! Int =
   else
     acc
 
-fn repl(acc) : !{IO} Int =
+fn repl(acc) : !{IO, Console} Int =
   let line = read_line()
   if str_eq(line, "q") || str_eq(line, "") then
     println(acc)

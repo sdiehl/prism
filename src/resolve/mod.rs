@@ -50,17 +50,6 @@ pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
     roots
 }
 
-/// Width of each module's span band. Module `i` shifts its spans by
-/// `(i + 1) << SPAN_BAND_SHIFT`, so no single file exceeding 1 TiB and no run of
-/// fewer than 2^23 modules can collide, while staying clear of the synthesized
-/// span region at `usize::MAX / 2`. On 32-bit targets (wasm32) `usize` is too
-/// narrow for a 40-bit band, so the shift drops to 24 (16 MiB per file, up to
-/// ~128 modules before nearing `usize::MAX / 2`).
-#[cfg(target_pointer_width = "64")]
-const SPAN_BAND_SHIFT: u32 = 40;
-#[cfg(not(target_pointer_width = "64"))]
-const SPAN_BAND_SHIFT: u32 = 24;
-
 /// Bare names a selective import binds in unqualified scope, each mapped to the
 /// canonical symbol it resolves to.
 type Unqualified = BTreeMap<String, String>;
@@ -159,44 +148,71 @@ pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Erro
     }
 
     let mut modules = load(&root, roots)?;
-    let mut mods: Vec<ModInfo> = modules
-        .iter()
-        .map(|m| {
-            let path = m.path.join(".");
-            let exports = exports_of(&m.prog)
-                .into_iter()
-                .map(|n| {
-                    let canon = format!("{path}.{n}");
-                    (n, canon)
-                })
-                .collect();
-            ModInfo { path, exports }
-        })
-        .collect();
-    let by_path: BTreeMap<String, usize> = mods
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (m.path.clone(), i))
-        .collect();
-    add_reexports(&mut mods, &modules, &by_path)?;
+    let (mods, by_path) = module_infos(&modules)?;
 
     // The root is the empty-path module: its own names (and the prelude prepended
     // to it) stay bare, so `main` and the prelude keep their global symbols.
     let root_own = canon_of(&root, None);
     let (root_unqual, root_quals) = build_scope(&root.imports, &by_path, &mods)?;
     let mut root = root;
-    Rw::new("", &root_own, &root_unqual, &root_quals, &mods, 0).program(&mut root)?;
+    Rw::new("", &root_own, &root_unqual, &root_quals, &mods).program(&mut root)?;
 
-    for (i, m) in modules.iter_mut().enumerate() {
+    for m in &mut modules {
         let path = m.path.join(".");
         let own = canon_of(&m.prog, Some(&path));
         let (unqual, quals) = build_scope(&m.prog.imports, &by_path, &mods)?;
-        // Each module lands in its own span band; see `Rw::span_delta`.
-        let delta = (i + 1) << SPAN_BAND_SHIFT;
-        Rw::new(&path, &own, &unqual, &quals, &mods, delta).program(&mut m.prog)?;
+        Rw::new(&path, &own, &unqual, &quals, &mods).program(&mut m.prog)?;
     }
 
     Ok(merge(root, modules))
+}
+
+/// The bare names a program's imports open into unqualified scope.
+///
+/// Each maps to its canonical symbol, with the program's own definitions removed
+/// (a local definition shadows an import of the same name). The REPL applies this
+/// to interactively typed expressions so a bare `map` resolves through the
+/// prelude's glob imports exactly as it does inside a file body.
+///
+/// # Errors
+/// Fails on a missing or unparseable imported module.
+pub fn import_bindings(
+    program: &Program,
+    roots: &[Root],
+) -> Result<BTreeMap<String, String>, Error> {
+    if program.imports.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let modules = load(program, roots)?;
+    let (mods, by_path) = module_infos(&modules)?;
+    let (mut unqual, _) = build_scope(&program.imports, &by_path, &mods)?;
+    for own in binders(program) {
+        unqual.remove(&own);
+    }
+    Ok(unqual)
+}
+
+/// Rewrite an expression's bare references to canonical symbols.
+///
+/// Bare names are resolved against `imports` (from [`import_bindings`]); lambda
+/// and `match` binders shadow imports, and unknown names stay bare for later
+/// phases. The REPL uses this to resolve an interactively typed expression
+/// against the prelude's import scope, which the program-level resolver only
+/// reaches for file bodies.
+///
+/// # Errors
+/// Surfaces the same scope errors the program resolver would for a malformed
+/// reference.
+pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> Result<(), Error> {
+    if imports.is_empty() {
+        return Ok(());
+    }
+    let own = BTreeMap::new();
+    let quals = BTreeMap::new();
+    let mods: &[ModInfo] = &[];
+    let mut rw = Rw::new("", &own, imports, &quals, mods);
+    rw.expr(expr);
+    rw.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
 }
 
 /// Map every top-level name a module binds to its canonical form. An exported
@@ -292,6 +308,33 @@ fn push_unique(v: &mut Vec<usize>, idx: usize) {
     }
 }
 
+// Build the per-module export tables (each bare name -> its canonical symbol),
+// the path -> index map, and propagate re-exports to a fixpoint. Shared by
+// `resolve_modules_in` and `import_bindings`.
+fn module_infos(modules: &[Module]) -> Result<(Vec<ModInfo>, BTreeMap<String, usize>), Error> {
+    let mut mods: Vec<ModInfo> = modules
+        .iter()
+        .map(|m| {
+            let path = m.path.join(".");
+            let exports = exports_of(&m.prog)
+                .into_iter()
+                .map(|n| {
+                    let canon = format!("{path}.{n}");
+                    (n, canon)
+                })
+                .collect();
+            ModInfo { path, exports }
+        })
+        .collect();
+    let by_path: BTreeMap<String, usize> = mods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.path.clone(), i))
+        .collect();
+    add_reexports(&mut mods, modules, &by_path)?;
+    Ok((mods, by_path))
+}
+
 /// Propagate `pub import` re-exports: a module that `pub import`s names from
 /// another adds them to its own export table, each pointing at the original
 /// definition's canonical symbol. Iterated to a fixpoint so a chain of
@@ -366,13 +409,6 @@ struct Rw<'a> {
     unqualified: &'a BTreeMap<String, String>,
     quals: &'a BTreeMap<String, Vec<usize>>,
     mods: &'a [ModInfo],
-    // Per-module span offset. Each module is parsed with byte offsets from 0, so
-    // two modules' nodes can share a span; the type checker's span-keyed maps
-    // (`span_types`, `dicts`, `fixed`, ...) would then collide and the elaborator
-    // would read one module's type for another's expression. Shifting every node
-    // into a disjoint high band keyed by module index makes spans globally
-    // unique. The root module keeps delta 0 (real source offsets).
-    span_delta: usize,
     locals: Vec<String>,
     err: Option<TypeError>,
 }
@@ -384,7 +420,6 @@ impl<'a> Rw<'a> {
         unqualified: &'a BTreeMap<String, String>,
         quals: &'a BTreeMap<String, Vec<usize>>,
         mods: &'a [ModInfo],
-        span_delta: usize,
     ) -> Self {
         Self {
             module,
@@ -392,17 +427,8 @@ impl<'a> Rw<'a> {
             unqualified,
             quals,
             mods,
-            span_delta,
             locals: Vec::new(),
             err: None,
-        }
-    }
-
-    // Shift a node's span into this module's disjoint band.
-    const fn shift(&self, s: &mut Span) {
-        if self.span_delta != 0 {
-            s.start += self.span_delta;
-            s.end += self.span_delta;
         }
     }
 
@@ -563,7 +589,6 @@ impl<'a> Rw<'a> {
     }
 
     fn expr(&mut self, e: &mut S<Expr>) {
-        self.shift(&mut e.span);
         let span = e.span;
         match &mut e.node {
             Expr::Var(n) => *n = self.value(n, span),
@@ -807,7 +832,6 @@ impl<'a> Rw<'a> {
     }
 
     fn pat(&mut self, p: &mut S<Pattern>) {
-        self.shift(&mut p.span);
         match &mut p.node {
             Pattern::Var(n) => self.locals.push(n.clone()),
             Pattern::Ctor(name, args) => {
@@ -877,11 +901,7 @@ impl<'a> Rw<'a> {
                 self.record(span, format!("module `{q}` does not export `{n}`"));
                 full.to_string()
             }
-            [m] => m
-                .exports
-                .get(n)
-                .cloned()
-                .unwrap_or_else(|| full.to_string()),
+            [m] => m.exports[n].clone(),
             many => {
                 let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
                 self.record(

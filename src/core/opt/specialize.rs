@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 
 use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::super::fv;
+use super::super::traverse::Rewrite;
 use crate::names::DICT_PREFIX;
 use crate::sym::Sym;
 
@@ -28,10 +29,16 @@ use crate::sym::Sym;
 /// returned unchanged in spirit.
 #[must_use]
 pub fn specialize(core: &Core) -> Core {
+    specialize_counted(core).0
+}
+
+// As `specialize`, also returning a tick count (clones generated plus method
+// projections reduced) for telemetry.
+pub(crate) fn specialize_counted(core: &Core) -> (Core, u64) {
     let builders = builders(core);
     let constrained = constrained(core);
     if builders.is_empty() || constrained.is_empty() {
-        return core.clone();
+        return (core.clone(), 0);
     }
     let bodies = core.fns.iter().map(|f| (f.name, f.clone())).collect();
     let mut sp = Specializer {
@@ -41,6 +48,7 @@ pub fn specialize(core: &Core) -> Core {
         memo: BTreeMap::new(),
         clones: Vec::new(),
         counter: 0,
+        reductions: 0,
     };
     let empty = BTreeMap::new();
     let mut fns: Vec<CoreFn> = core
@@ -49,14 +57,15 @@ pub fn specialize(core: &Core) -> Core {
         .map(|f| CoreFn {
             name: f.name,
             params: f.params.clone(),
-            body: sp.rewrite_comp(&f.body, &empty),
+            body: sp.comp(&f.body, &empty),
         })
         .collect();
+    let ticks = sp.counter as u64 + sp.reductions;
     fns.extend(sp.clones);
     for f in &mut fns {
         f.body = dce(&f.body, &sp.builders);
     }
-    Core { fns }
+    (Core { fns }, ticks)
 }
 
 // A context-free instance dictionary builder: a nullary function whose body is a
@@ -100,6 +109,7 @@ struct Specializer {
     memo: BTreeMap<(Sym, Vec<Sym>), Sym>,
     clones: Vec<CoreFn>,
     counter: usize,
+    reductions: u64,
 }
 
 impl Specializer {
@@ -127,7 +137,7 @@ impl Specializer {
                 Box::new(body),
             );
         }
-        let body = self.rewrite_comp(&body, &BTreeMap::new());
+        let body = self.comp(&body, &BTreeMap::new());
         self.clones.push(CoreFn {
             name: clone_name,
             params: orig.params[k..].to_vec(),
@@ -148,15 +158,12 @@ impl Specializer {
                     .collect();
                 if let Some(insts) = insts {
                     let clone = self.request(f, &insts);
-                    let rest = args[k..]
-                        .iter()
-                        .map(|a| self.rewrite_value(a, env))
-                        .collect();
+                    let rest = args[k..].iter().map(|a| self.value(a, env)).collect();
                     return Comp::Call(clone, rest);
                 }
             }
         }
-        Comp::Call(f, args.iter().map(|a| self.rewrite_value(a, env)).collect())
+        Comp::Call(f, args.iter().map(|a| self.value(a, env)).collect())
     }
 
     // `case _ci of _DClass(.., m, ..) => (force m)(vals)` on a known global dict
@@ -199,37 +206,30 @@ impl Specializer {
         if ps.len() != vals.len() {
             return None;
         }
-        let vals2 = self.rewrite_values(vals, env);
+        let vals2: Vec<Value> = vals.iter().map(|v| self.value(v, env)).collect();
         let subst: BTreeMap<Sym, Value> = ps.into_iter().zip(vals2).collect();
+        self.reductions += 1;
         Some(subst_comp(&lbody, &subst))
     }
+}
 
-    fn rewrite_value(&mut self, v: &Value, env: &BTreeMap<Sym, Sym>) -> Value {
-        match v {
-            Value::Thunk(c) => Value::Thunk(Box::new(self.rewrite_comp(c, env))),
-            Value::Ctor(n, t, fs) => Value::Ctor(
-                *n,
-                *t,
-                fs.iter().map(|f| self.rewrite_value(f, env)).collect(),
-            ),
-            Value::Tuple(fs) => {
-                Value::Tuple(fs.iter().map(|f| self.rewrite_value(f, env)).collect())
-            }
-            _ => v.clone(),
-        }
-    }
+impl Rewrite for Specializer {
+    // The env maps a let-bound var to the global dictionary builder it names, so a
+    // method projection on it can reduce. Only `Bind` extends it; nothing else
+    // scopes a builder var, so the rest defer to the structural descent.
+    type Ctx = BTreeMap<Sym, Sym>;
 
-    fn rewrite_comp(&mut self, c: &Comp, env: &BTreeMap<Sym, Sym>) -> Comp {
+    fn comp(&mut self, c: &Comp, env: &Self::Ctx) -> Comp {
         match c {
             Comp::Bind(rhs, x, body) => {
-                let rhs2 = self.rewrite_comp(rhs, env);
+                let rhs2 = self.comp(rhs, env);
                 let mut env2 = env.clone();
                 if let Comp::Call(b, a) = &rhs2 {
                     if a.is_empty() && self.builders.contains_key(b) {
                         env2.insert(*x, *b);
                     }
                 }
-                let body2 = self.rewrite_comp(body, &env2);
+                let body2 = self.comp(body, &env2);
                 Comp::Bind(Box::new(rhs2), *x, Box::new(body2))
             }
             Comp::Call(f, args) => self.rewrite_call(*f, args, env),
@@ -237,95 +237,10 @@ impl Specializer {
                 if let Some(reduced) = self.try_reduce_projection(scrut, arms, env) {
                     return reduced;
                 }
-                let scrut2 = self.rewrite_value(scrut, env);
-                let arms2 = arms
-                    .iter()
-                    .map(|(p, b)| (p.clone(), self.rewrite_comp(b, env)))
-                    .collect();
-                Comp::Case(scrut2, arms2)
+                self.descend_comp(c, env)
             }
-            Comp::Return(v) => Comp::Return(self.rewrite_value(v, env)),
-            Comp::Force(v) => Comp::Force(self.rewrite_value(v, env)),
-            Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(self.rewrite_comp(b, env))),
-            Comp::App(f, args) => {
-                let f2 = self.rewrite_comp(f, env);
-                let args2 = self.rewrite_values(args, env);
-                Comp::App(Box::new(f2), args2)
-            }
-            Comp::If(c0, t, e) => {
-                let c2 = self.rewrite_value(c0, env);
-                let t2 = self.rewrite_comp(t, env);
-                let e2 = self.rewrite_comp(e, env);
-                Comp::If(c2, Box::new(t2), Box::new(e2))
-            }
-            Comp::Prim(op, a, b) => {
-                let a2 = self.rewrite_value(a, env);
-                let b2 = self.rewrite_value(b, env);
-                Comp::Prim(*op, a2, b2)
-            }
-            Comp::Print(v) => Comp::Print(self.rewrite_value(v, env)),
-            Comp::PrintF(v) => Comp::PrintF(self.rewrite_value(v, env)),
-            Comp::PrintS(v) => Comp::PrintS(self.rewrite_value(v, env)),
-            Comp::PrintNl => Comp::PrintNl,
-            Comp::ReadInt => Comp::ReadInt,
-            Comp::ReadLine => Comp::ReadLine,
-            Comp::Rand => Comp::Rand,
-            Comp::Srand(v) => Comp::Srand(self.rewrite_value(v, env)),
-            Comp::Error(v) => Comp::Error(self.rewrite_value(v, env)),
-            Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, self.rewrite_value(v, env)),
-            Comp::Do(n, args) => Comp::Do(*n, self.rewrite_values(args, env)),
-            Comp::Handle {
-                body,
-                return_var,
-                return_body,
-                ops,
-            } => {
-                let body2 = self.rewrite_comp(body, env);
-                let return_body2 = return_body
-                    .as_ref()
-                    .map(|b| Box::new(self.rewrite_comp(b, env)));
-                let ops2 = ops
-                    .iter()
-                    .map(|o| HandleOp {
-                        name: o.name,
-                        params: o.params.clone(),
-                        resume: o.resume,
-                        body: self.rewrite_comp(&o.body, env),
-                    })
-                    .collect();
-                Comp::Handle {
-                    body: Box::new(body2),
-                    return_var: *return_var,
-                    return_body: return_body2,
-                    ops: ops2,
-                }
-            }
-            Comp::Mask(es, b) => Comp::Mask(es.clone(), Box::new(self.rewrite_comp(b, env))),
-            Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, self.rewrite_values(args, env)),
-            Comp::Dup(v) => Comp::Dup(self.rewrite_value(v, env)),
-            Comp::Drop(v) => Comp::Drop(self.rewrite_value(v, env)),
-            Comp::WithReuse { token, freed, body } => {
-                let freed2 = self.rewrite_value(freed, env);
-                let body2 = self.rewrite_comp(body, env);
-                Comp::WithReuse {
-                    token: *token,
-                    freed: freed2,
-                    body: Box::new(body2),
-                }
-            }
-            Comp::Reuse(t, v) => Comp::Reuse(*t, self.rewrite_value(v, env)),
-            Comp::RefNew(v) => Comp::RefNew(self.rewrite_value(v, env)),
-            Comp::RefGet(v) => Comp::RefGet(self.rewrite_value(v, env)),
-            Comp::RefSet(a, b) => {
-                let a2 = self.rewrite_value(a, env);
-                let b2 = self.rewrite_value(b, env);
-                Comp::RefSet(a2, b2)
-            }
+            _ => self.descend_comp(c, env),
         }
-    }
-
-    fn rewrite_values(&mut self, vs: &[Value], env: &BTreeMap<Sym, Sym>) -> Vec<Value> {
-        vs.iter().map(|v| self.rewrite_value(v, env)).collect()
     }
 }
 
@@ -386,98 +301,85 @@ fn dce(c: &Comp, builders: &BTreeMap<Sym, Vec<Value>>) -> Comp {
     }
 }
 
-// Capture-respecting substitution of variables by values in a computation. A
-// binder shadowing a substituted name stops the substitution under it.
+// Capture-respecting substitution of variables by values in a computation. The
+// substitution map is the threaded context; a binder shadowing a substituted
+// name removes it from the map under that binder.
 fn subst_comp(c: &Comp, s: &BTreeMap<Sym, Value>) -> Comp {
-    let sc = |c: &Comp| subst_comp(c, s);
-    let sv = |v: &Value| subst_value(v, s);
-    let under = |c: &Comp, bound: &[Sym]| {
+    Subst.comp(c, s)
+}
+
+struct Subst;
+
+impl Subst {
+    fn under(&mut self, c: &Comp, s: &BTreeMap<Sym, Value>, bound: &[Sym]) -> Comp {
         if bound.iter().any(|b| s.contains_key(b)) {
             let mut s2 = s.clone();
             for b in bound {
                 s2.remove(b);
             }
-            subst_comp(c, &s2)
+            self.comp(c, &s2)
         } else {
-            subst_comp(c, s)
+            self.comp(c, s)
         }
-    };
-    match c {
-        Comp::Return(v) => Comp::Return(sv(v)),
-        Comp::Bind(a, x, b) => Comp::Bind(Box::new(sc(a)), *x, Box::new(under(b, &[*x]))),
-        Comp::Force(v) => Comp::Force(sv(v)),
-        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(under(b, ps))),
-        Comp::App(f, args) => Comp::App(Box::new(sc(f)), args.iter().map(sv).collect()),
-        Comp::If(c0, t, e) => Comp::If(sv(c0), Box::new(sc(t)), Box::new(sc(e))),
-        Comp::Prim(op, a, b) => Comp::Prim(*op, sv(a), sv(b)),
-        Comp::Call(n, args) => Comp::Call(*n, args.iter().map(sv).collect()),
-        Comp::Print(v) => Comp::Print(sv(v)),
-        Comp::PrintF(v) => Comp::PrintF(sv(v)),
-        Comp::PrintS(v) => Comp::PrintS(sv(v)),
-        Comp::PrintNl => Comp::PrintNl,
-        Comp::ReadInt => Comp::ReadInt,
-        Comp::ReadLine => Comp::ReadLine,
-        Comp::Rand => Comp::Rand,
-        Comp::Srand(v) => Comp::Srand(sv(v)),
-        Comp::Error(v) => Comp::Error(sv(v)),
-        Comp::Case(scrut, arms) => Comp::Case(
-            sv(scrut),
-            arms.iter()
-                .map(|(p, b)| (p.clone(), under(b, &pat_binders(p))))
-                .collect(),
-        ),
-        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, sv(v)),
-        Comp::Do(n, args) => Comp::Do(*n, args.iter().map(sv).collect()),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: Box::new(sc(body)),
-            return_var: *return_var,
-            return_body: return_body
-                .as_ref()
-                .map(|b| Box::new(under(b, return_var.as_slice()))),
-            ops: ops
-                .iter()
-                .map(|o| {
-                    let mut bound = o.params.clone();
-                    bound.push(o.resume);
-                    HandleOp {
-                        name: o.name,
-                        params: o.params.clone(),
-                        resume: o.resume,
-                        body: under(&o.body, &bound),
-                    }
-                })
-                .collect(),
-        },
-        Comp::Mask(es, b) => Comp::Mask(es.clone(), Box::new(sc(b))),
-        Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, args.iter().map(sv).collect()),
-        Comp::Dup(v) => Comp::Dup(sv(v)),
-        Comp::Drop(v) => Comp::Drop(sv(v)),
-        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
-            token: *token,
-            freed: sv(freed),
-            body: Box::new(under(body, &[*token])),
-        },
-        Comp::Reuse(t, v) => Comp::Reuse(*t, sv(v)),
-        Comp::RefNew(v) => Comp::RefNew(sv(v)),
-        Comp::RefGet(v) => Comp::RefGet(sv(v)),
-        Comp::RefSet(a, b) => Comp::RefSet(sv(a), sv(b)),
     }
 }
 
-fn subst_value(v: &Value, s: &BTreeMap<Sym, Value>) -> Value {
-    match v {
-        Value::Var(x) => s.get(x).cloned().unwrap_or_else(|| v.clone()),
-        Value::Thunk(c) => Value::Thunk(Box::new(subst_comp(c, s))),
-        Value::Ctor(n, t, fs) => {
-            Value::Ctor(*n, *t, fs.iter().map(|f| subst_value(f, s)).collect())
+impl Rewrite for Subst {
+    type Ctx = BTreeMap<Sym, Value>;
+
+    fn value(&mut self, v: &Value, s: &Self::Ctx) -> Value {
+        match v {
+            Value::Var(x) => s.get(x).cloned().unwrap_or_else(|| v.clone()),
+            _ => self.descend_value(v, s),
         }
-        Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| subst_value(f, s)).collect()),
-        _ => v.clone(),
+    }
+
+    fn comp(&mut self, c: &Comp, s: &Self::Ctx) -> Comp {
+        match c {
+            Comp::Bind(a, x, b) => Comp::Bind(
+                Box::new(self.comp(a, s)),
+                *x,
+                Box::new(self.under(b, s, &[*x])),
+            ),
+            Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(self.under(b, s, ps))),
+            Comp::Case(scrut, arms) => Comp::Case(
+                self.value(scrut, s),
+                arms.iter()
+                    .map(|(p, b)| (p.clone(), self.under(b, s, &pat_binders(p))))
+                    .collect(),
+            ),
+            Comp::Handle {
+                body,
+                return_var,
+                return_body,
+                ops,
+            } => Comp::Handle {
+                body: Box::new(self.comp(body, s)),
+                return_var: *return_var,
+                return_body: return_body
+                    .as_ref()
+                    .map(|b| Box::new(self.under(b, s, return_var.as_slice()))),
+                ops: ops
+                    .iter()
+                    .map(|o| {
+                        let mut bound = o.params.clone();
+                        bound.push(o.resume);
+                        HandleOp {
+                            name: o.name,
+                            params: o.params.clone(),
+                            resume: o.resume,
+                            body: self.under(&o.body, s, &bound),
+                        }
+                    })
+                    .collect(),
+            },
+            Comp::WithReuse { token, freed, body } => Comp::WithReuse {
+                token: *token,
+                freed: self.value(freed, s),
+                body: Box::new(self.under(body, s, &[*token])),
+            },
+            _ => self.descend_comp(c, s),
+        }
     }
 }
 

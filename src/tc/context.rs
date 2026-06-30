@@ -64,6 +64,27 @@ impl Tc<'_> {
         Ok(())
     }
 
+    // The row analogue of `splice_solved`: open row existential `a` to `solved`,
+    // inserting the fresh `new_rows` at `a`'s position (not appended at the end),
+    // so the solution references only entries to its left. Appending instead lets
+    // `a` point at a younger row existential to its right, which a later
+    // truncation can drop while `a`'s solution survives, stranding the reference
+    // (the `solve_row`/`unify_row` "not in context" ICE).
+    pub(super) fn splice_solved_row(
+        &mut self,
+        a: u32,
+        new_rows: &[u32],
+        solved: EffRow,
+    ) -> Result<(), TcErr> {
+        let pos = self
+            .index_ex_row(a)
+            .ok_or_else(|| TcErr::Ice(format!("splice_solved_row: ^{a} not in context")))?;
+        let mut repl: Vec<Entry> = new_rows.iter().map(|r| Entry::ExRow(*r)).collect();
+        repl.push(Entry::SolvedRow(a, solved));
+        self.ctx.splice(pos..=pos, repl);
+        Ok(())
+    }
+
     pub(super) fn apply_row(&self, r: &EffRow) -> EffRow {
         match r {
             EffRow::Exist(v) => self
@@ -205,36 +226,63 @@ impl Tc<'_> {
             .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
     }
 
-    pub(super) fn articulate(&mut self, a: u32, arg_exs: &[u32], row: u32, ret: u32) {
+    pub(super) fn articulate(
+        &mut self,
+        a: u32,
+        arg_exs: &[u32],
+        row: u32,
+        ret: u32,
+    ) -> Result<(), TcErr> {
         let fun = Type::Fun(
             arg_exs.iter().map(|e| Type::Exist(*e)).collect(),
             EffRow::Exist(row),
             Box::new(Type::Exist(ret)),
         );
         // `a` is the live existential `inst` is articulating; the solve invariant
-        // keeps it in context, so absence is a compiler bug, not user-reachable:
-        // this is infallible, hence no `Result`.
+        // keeps it in context, so absence is a compiler bug, not user-reachable.
+        // It surfaces as a structured ICE rather than a raw panic, matching the
+        // rest of the context/row machinery.
         let pos = self
             .index_ex(a)
-            .expect("articulate: existential escaped scope");
+            .ok_or_else(|| TcErr::Ice(format!("articulate: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = arg_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::ExRow(row));
         repl.push(Entry::Ex(ret));
         repl.push(Entry::Solved(a, fun));
         self.ctx.splice(pos..=pos, repl);
+        Ok(())
     }
 
-    pub(super) fn splice_solved(&mut self, a: u32, new_exs: &[u32], solved: Type) {
+    pub(super) fn splice_solved(
+        &mut self,
+        a: u32,
+        new_exs: &[u32],
+        solved: Type,
+    ) -> Result<(), TcErr> {
         // Same invariant as `articulate`: a live existential is always in
-        // context, so this is infallible too.
+        // context, so absence is a compiler bug surfaced as a structured ICE.
         let pos = self
             .index_ex(a)
-            .expect("splice_solved: existential escaped scope");
+            .ok_or_else(|| TcErr::Ice(format!("splice_solved: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = new_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::Solved(a, solved));
         self.ctx.splice(pos..=pos, repl);
+        Ok(())
     }
 
+    // Generalization is unconditional: a `let` binding generalizes its inferred
+    // type with no value restriction, even for a syntactic non-value such as
+    // `let xs = array_empty()`. This is sound here and stays sound by design,
+    // not by accident. The polymorphic-reference hazard the value restriction
+    // exists to plug needs a generalizable binding that aliases a mutable cell;
+    // Prism has no such thing and never will. There is no ML-style `ref`: the
+    // only mutable binding is `var`, which desugars to a private, monomorphic
+    // State effect (writing two element types into one `var` is a type error),
+    // and `Array`/`HashMap`/`String` are copy-on-write value types with no
+    // shared identity, so a functional allocator can never introduce aliasing.
+    // A first-class polymorphic mutable reference is deliberately outside the
+    // language, so a value restriction would only reject sound programs. Do not
+    // add one (and please leave this note for the next reader who wonders).
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }

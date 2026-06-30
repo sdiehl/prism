@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/reified_under_world.pr
+---
+18
+=> ()

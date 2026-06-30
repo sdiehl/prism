@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{Core, Decl, Expr, Program, S};
+use crate::syntax::ast::{Core, Decl, Expr, NodeId, Program, S};
 use crate::types::effects;
 use crate::types::ty::{EffRow, Effects, Type};
 
@@ -15,8 +15,6 @@ mod env;
 mod infer;
 mod pat;
 mod subsume;
-
-pub(crate) use env::builtin_effects;
 
 pub type Env = BTreeMap<Sym, Type>;
 
@@ -51,6 +49,23 @@ pub struct EffOpInfo {
     pub ret: Type,
 }
 
+impl EffOpInfo {
+    // Instantiate the op's param/return types with the effect's type arguments,
+    // substituting each declared effect parameter for the supplied argument.
+    #[must_use]
+    pub fn instantiate(&self, args: &[Type]) -> (Vec<Type>, Type) {
+        let mut params = self.params.clone();
+        let mut ret = self.ret.clone();
+        for (p, t) in self.eff_params.iter().zip(args) {
+            for q in &mut params {
+                *q = q.subst_var(*p, t);
+            }
+            ret = ret.subst_var(*p, t);
+        }
+        (params, ret)
+    }
+}
+
 // Instance dispatch key: the head constructor of an instance head type.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HeadKey {
@@ -65,13 +80,13 @@ pub enum HeadKey {
     Con(Sym),
 }
 
-pub type InstKeys = BTreeMap<(String, HeadKey), Vec<String>>;
+pub type InstKeys = BTreeMap<(Sym, HeadKey), Vec<Sym>>;
 
 // The canonical-instance designation: for a `(class, head)` that several
 // instances share, the one implicit resolution selects. Built from `canonical`
 // decls beside `inst_keys`, keying each `(class, head)` to the chosen instance
 // name so resolution is deterministic instead of ambiguous.
-pub type Canon = BTreeMap<(String, HeadKey), String>;
+pub type Canon = BTreeMap<(Sym, HeadKey), Sym>;
 
 // How a constraint is discharged at a use site: a top-level instance dictionary
 // (applied to its context dictionaries) or the i-th hidden dictionary parameter
@@ -86,36 +101,36 @@ pub enum Dict {
     Super(Box<Self>, String, usize),
 }
 
-// Spans are the identity of dispatch sites. Desugar must keep them unique per
-// site and stable between typecheck and elaboration, or dispatch is silently
-// corrupted; resolve_all ICEs on conflicting records at one span.
-pub type DictTable = BTreeMap<Span, Vec<Dict>>;
+// `NodeId` is the identity of a dispatch site, assigned once by `assign_ids`
+// after desugar so it is unique per node and stable between typecheck and
+// elaboration; resolve_all ICEs on conflicting records at one id.
+pub type DictTable = BTreeMap<NodeId, Vec<Dict>>;
 
 #[derive(Clone, Debug)]
 pub struct ClassInfo {
-    pub param: String,
+    pub param: Sym,
     // Superclass class names; each instance carries one resolved superclass
     // dictionary per entry, stored as a leading field of its dict cell.
-    pub supers: Vec<String>,
-    pub methods: Vec<(String, Type)>,
+    pub supers: Vec<Sym>,
+    pub methods: Vec<(Sym, Type)>,
 }
 
 #[derive(Clone, Debug)]
 pub struct InstInfo {
-    pub class: String,
+    pub class: Sym,
     pub head: Type,
     // The module that defines this instance (empty for root), for the orphan and
     // overlap rules and for naming provenance in ambiguity diagnostics.
     pub module: String,
-    pub context: Vec<(String, Type)>,
+    pub context: Vec<(Sym, Type)>,
     // Resolved superclass obligations `(super_class, head)`, one per the class's
     // declared supers, discharged at each use site and embedded in the dict cell.
-    pub supers: Vec<(String, Type)>,
+    pub supers: Vec<(Sym, Type)>,
 }
 
 // Per update path, the rebuild chain: one (ctor name, field index, arity)
-// step per path segment, resolved at the update expression's span.
-pub type PathRes = BTreeMap<Span, Vec<Vec<(String, usize, usize)>>>;
+// step per path segment, resolved at the update expression's node.
+pub type PathRes = BTreeMap<NodeId, Vec<Vec<(String, usize, usize)>>>;
 
 /// A non-fatal diagnostic raised during checking (an orphan or overlapping
 /// instance). Carries a span so it can be rendered like an error but does not
@@ -129,21 +144,20 @@ pub struct Warning {
 #[derive(Clone, Debug)]
 pub struct Checked {
     pub env: Env,
-    pub effects: BTreeMap<String, Effects>,
     pub data: BTreeMap<String, DataInfo>,
     pub ctors: BTreeMap<String, CtorInfo>,
     pub decls: Vec<DeclInfo>,
     pub eff_ops: BTreeMap<String, EffOpInfo>,
-    pub field_res: BTreeMap<Span, (String, usize, usize)>,
+    pub field_res: BTreeMap<NodeId, (String, usize, usize)>,
     pub path_res: PathRes,
-    pub fixed: BTreeMap<Span, Type>,
-    pub span_types: BTreeMap<Span, Type>,
-    pub classes: BTreeMap<String, ClassInfo>,
-    pub instances: BTreeMap<String, InstInfo>,
+    pub fixed: BTreeMap<NodeId, Type>,
+    pub span_types: BTreeMap<NodeId, Type>,
+    pub classes: BTreeMap<Sym, ClassInfo>,
+    pub instances: BTreeMap<Sym, InstInfo>,
     pub inst_keys: InstKeys,
     pub canonical: Canon,
-    pub methods: BTreeMap<String, (String, usize)>,
-    pub constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
+    pub methods: BTreeMap<Sym, (Sym, usize)>,
+    pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     pub dicts: DictTable,
     pub seeds: u32,
     pub warnings: Vec<Warning>,
@@ -197,6 +211,9 @@ enum Entry {
 // One dispatch site: the constraints instantiated at `span`, resolved together
 // into the site's dict vector at the end of the declaration.
 struct Wanted {
+    // Identity of the dispatch site, the key its resolved dicts land under.
+    id: NodeId,
+    // Source span, kept for the ambiguity/no-instance diagnostic's caret.
     span: Span,
     items: Vec<(String, Type, Option<String>)>,
 }
@@ -222,16 +239,16 @@ struct Tc<'a> {
     ctors: &'a BTreeMap<String, CtorInfo>,
     data: &'a BTreeMap<String, DataInfo>,
     eff_ops: &'a BTreeMap<String, EffOpInfo>,
-    field_res: BTreeMap<Span, (String, usize, usize)>,
+    field_res: BTreeMap<NodeId, (String, usize, usize)>,
     path_res: PathRes,
-    fixed: BTreeMap<Span, Type>,
-    span_types: BTreeMap<Span, Type>,
-    pending: Vec<(Span, Type)>,
-    classes: &'a BTreeMap<String, ClassInfo>,
-    instances: &'a BTreeMap<String, InstInfo>,
+    fixed: BTreeMap<NodeId, Type>,
+    span_types: BTreeMap<NodeId, Type>,
+    pending: Vec<(NodeId, Type)>,
+    classes: &'a BTreeMap<Sym, ClassInfo>,
+    instances: &'a BTreeMap<Sym, InstInfo>,
     inst_keys: &'a InstKeys,
     canonical: &'a Canon,
-    constrained: BTreeMap<String, (Type, Vec<(String, Type)>)>,
+    constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     // The named function whose body is currently being checked, with its self
     // type and the class constraints in force. `None` when no self scope is
     // active: the Option makes the "not checking a named body" state explicit
@@ -239,17 +256,19 @@ struct Tc<'a> {
     cur_self: Option<SelfRef>,
     wanted: Vec<Wanted>,
     // Numeric operands left ambiguous at an arithmetic/comparison operator: each
-    // (span, operand type) is resolved in one pass at the end of the declaration
-    // (`resolve_all`), so a later use can fix the type to a fixed-width lane
-    // before the otherwise-`Int` default applies. Symmetric in the two operands.
-    num_default: Vec<(Span, Type)>,
+    // (node id, span, operand type) is resolved in one pass at the end of the
+    // declaration (`resolve_all`), so a later use can fix the type to a
+    // fixed-width lane before the otherwise-`Int` default applies. The id keys
+    // the `fixed` record; the span blames a non-numeric operand. Symmetric in
+    // the two operands.
+    num_default: Vec<(NodeId, Span, Type)>,
     // Indexed reads/writes (`a[i]`, `a[i] := v`) whose receiver type was not yet
     // resolved at synth (a `var`'s state existential is solved only once its
     // initializer is checked). Each is dispatched on the receiver's head type in
     // one pass at the end of the declaration (`resolve_all`, before `num_default`
     // so an index's element type is known to numeric defaulting).
     index_ops: Vec<IndexOp>,
-    dicts: BTreeMap<Span, Vec<Dict>>,
+    dicts: BTreeMap<NodeId, Vec<Dict>>,
     // Innermost-last instantiation scopes for parametric effects: each entry
     // ties an effect name to the type args in force (handler or latent row).
     row_ctx: Vec<(Sym, Vec<Type>)>,
@@ -298,20 +317,16 @@ fn concrete_effects(ty: &Type) -> Effects {
         t = b;
     }
     match t {
-        Type::Fun(_, row, _) => row.labels().iter().map(|l| l.name).collect(),
+        Type::Fun(_, row, _) => row.label_names(),
         _ => Effects::new(),
     }
 }
 
 // A top-level constant must be effect-free: its initializer runs once at load
-// with no handler in scope. This is a syntactic check over the call graph,
-// independent of type inference, so it runs before the constant is inferred.
-fn konst_effect_free(
-    d: &Decl<Core>,
-    effects: &BTreeMap<String, Effects>,
-    eff_ops: &BTreeMap<String, EffOpInfo>,
-) -> Result<(), TypeError> {
-    let effs = effects::of_decl(d, effects, eff_ops);
+// with no handler in scope. The effects are the body's principal inferred row
+// (its `konst` body is checked under a fresh ambient row whose labels are read
+// off here), so the check is exact rather than a syntactic over-approximation.
+pub(super) fn require_pure_konst(d: &Decl<Core>, effs: &Effects) -> Result<(), TypeError> {
     if !effs.is_empty() {
         let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
         return Err(TypeError::Other {
@@ -397,7 +412,6 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     let (classes, instances, inst_keys, canonical, methods, mut constrained, mut warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
     let mut infos = Vec::new();
-    let effects = effects::fixpoint(prog, &eff_ops);
     // Validate where-clauses and record each constrained function's scheme up
     // front; this is order-independent and must precede inference. Functions are
     // *not* seeded into `env` here: a referenced top-level binding is seeded into
@@ -422,15 +436,15 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         }
         let mut cs = Vec::new();
         for c in &d.constraints {
-            if !classes.contains_key(&c.class) {
+            if !classes.contains_key(&Sym::from(&c.class)) {
                 return Err(TypeError::Other {
                     span: c.span,
                     msg: format!("unknown class {}", c.class),
                 });
             }
-            cs.push((c.class.clone(), env::convert_data(&c.ty)));
+            cs.push((Sym::from(&c.class), env::convert_data(&c.ty)));
         }
-        constrained.insert(d.name.clone(), (env::fn_stub(d), cs));
+        constrained.insert(Sym::from(&d.name), (env::fn_stub(d), cs));
     }
     let field_res;
     let path_res;
@@ -476,8 +490,8 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             if component.len() == 1 {
                 let d = &prog.fns[component[0]];
                 if d.konst {
-                    konst_effect_free(d, &effects, &eff_ops)?;
-                    let ty = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
+                    let (ty, effs) = tc.infer_const(&env, d).map_err(|e| e.in_fn(&d.name))?;
+                    require_pure_konst(d, &effs)?;
                     env.insert(Sym::from(&d.name), ty.clone());
                     infos.push(DeclInfo {
                         name: d.name.clone(),
@@ -488,23 +502,16 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                     continue;
                 }
                 // Effect-row inference is principal: `infer_decl` discovers the
-                // row on its own, so the set pass no longer seeds it. The set
-                // pass (`effects`) survives only for the syntactic purity checks
-                // (`konst_effect_free` above, instance methods below).
+                // row on its own. There is no separate set pass: the purity
+                // checks (konst here, instance methods in `check_instance`) read
+                // the same principal inferred row.
                 let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                 env.insert(Sym::from(&d.name), ty.clone());
                 infos.push(finalize_fn(d, ty, &mut warnings)?);
                 continue;
             }
-            // A mutually recursive group. Effect-freeness of any constant member is
-            // checked up front (syntactic, independent of the type inference), then
-            // the whole group is inferred together.
-            for &di in &component {
-                let d = &prog.fns[di];
-                if d.konst {
-                    konst_effect_free(d, &effects, &eff_ops)?;
-                }
-            }
+            // A mutually recursive group; the whole group is inferred together,
+            // and `infer_scc` holds any constant member to its inferred purity.
             let members: Vec<&_> = component.iter().map(|&di| &prog.fns[di]).collect();
             let tys = tc.infer_scc(&mut env, &members)?;
             for (&di, ty) in component.iter().zip(tys) {
@@ -522,41 +529,16 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             }
         }
         for inst in &prog.instances {
-            for m in &inst.methods {
-                // A method whose class signature is effect-polymorphic (carries a
-                // row variable, like `fmap`) may perform the effects flowing
-                // through that row; `check_instance` verifies it against the
-                // signature. Only methods declared pure are held to the syntactic
-                // purity check.
-                let poly = classes.get(&inst.class).is_some_and(|c| {
-                    c.methods
-                        .iter()
-                        .find(|(n, _)| n == &m.name)
-                        .is_some_and(|(_, t)| {
-                            let mut rv = BTreeSet::new();
-                            env::collect_row_vars(t, &mut rv);
-                            !rv.is_empty()
-                        })
-                });
-                let effs = if poly {
-                    Effects::new()
-                } else {
-                    effects::of_decl(m, &effects, &eff_ops)
-                };
-                if !effs.is_empty() {
-                    let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
-                    return Err(TypeError::Other {
-                        span: m.body.span,
-                        msg: format!(
-                            "instance method `{}.{}` must be pure; it performs {}",
-                            inst.name,
-                            m.name,
-                            list.join(", ")
-                        ),
-                    });
-                }
-            }
-            tc.check_instance(&env, inst, &instances[&inst.name], &classes[&inst.class])?;
+            // `check_instance` checks each method against its class signature and,
+            // for a method whose signature is not effect-polymorphic, holds it to
+            // its principal inferred purity (an effect-polymorphic method like
+            // `fmap` may perform the effects flowing through its row variable).
+            tc.check_instance(
+                &env,
+                inst,
+                &instances[&Sym::from(&inst.name)],
+                &classes[&Sym::from(&inst.class)],
+            )?;
         }
         field_res = tc.field_res;
         path_res = tc.path_res;
@@ -578,7 +560,6 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     }
     Ok(Checked {
         env,
-        effects,
         data,
         ctors,
         field_res,
@@ -661,13 +642,12 @@ fn infer_expr_full(
         cur_row: None,
         handler_stack: Vec::new(),
     };
-    let t = tc.synth(&env, e)?;
-    tc.resolve_all()?;
+    let (t, effs) = tc.scoped_effects(|tc| {
+        let t = tc.synth(&env, e)?;
+        tc.resolve_all()?;
+        Ok(t)
+    })?;
     let t = tc.apply(&t);
     let g = tc.generalize(&env, &t);
-    Ok((
-        g,
-        effects::of_expr_top(e, &checked.effects, &checked.eff_ops),
-        tc.dicts,
-    ))
+    Ok((g, effs, tc.dicts))
 }

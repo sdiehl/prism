@@ -20,12 +20,14 @@ use crate::names;
 mod aliases;
 mod derive;
 mod effects;
+mod ids;
 mod sugar;
 mod synonyms;
 
 use aliases::expand_aliases;
 use derive::derive_instances;
 use effects::{rw, wrap_return, Binding, Vars};
+use ids::assign_ids;
 use synonyms::expand_synonyms;
 
 pub use sugar::{
@@ -297,6 +299,7 @@ fn lift_lam(name: String, lam: S<Expr>, span: Span) -> Decl {
         wheres: Vec::new(),
         konst: false,
         fip: Fip::No,
+        replayable: false,
         span,
     }
 }
@@ -419,6 +422,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         fold_wheres(&mut d);
         fns.push(core_decl(d, &mut cx)?);
     }
+    wrap_main_world(&mut fns);
     let mut instances = Vec::with_capacity(prog.instances.len());
     for i in prog.instances {
         let mut methods = Vec::with_capacity(i.methods.len());
@@ -437,7 +441,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         });
     }
     prog.effects.append(&mut cx.effects);
-    Ok(Program {
+    let mut out = Program {
         types: prog.types,
         effects: prog.effects,
         errors: prog.errors,
@@ -451,7 +455,79 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         imports: prog.imports,
         exports: prog.exports,
         opaques: prog.opaques,
-    })
+    };
+    assign_ids(&mut out);
+    Ok(out)
+}
+
+// Surface wrappers that perform a capability effect (Console/FileSystem/Random/
+// Env). A program needs the world handler iff `main` reaches one of these.
+const CAP_WRAPPERS: &[&str] = &[
+    "read_int",
+    "read_line",
+    "read_file",
+    "file_exists",
+    "rand",
+    "getenv",
+    "args_count",
+    "arg",
+    "args",
+];
+
+// The console-output builtins. Unlike the input wrappers above these are not
+// defined functions (so reachability cannot walk into them); a reachable body
+// that names one performs `Output`, which the world handler must discharge.
+const OUTPUT_BUILTINS: &[&str] = &["print", "println"];
+
+// Wrap `main` in the default world handler `run_io` so top-level input IO works
+// without the user installing a handler. Only applied when the program defines
+// `run_io` (the prelude does) and `main` reaches a capability wrapper, so pure
+// programs and the prelude-free corpus stay untouched and pay nothing. Wrapping
+// only on demand also keeps the fused world handler clear of programs whose body
+// reifies an inner handler, where a wrap-over-reified-handler would otherwise
+// surface a backend divergence.
+fn wrap_main_world(fns: &mut [Decl<Core>]) {
+    let names: BTreeSet<&str> = fns.iter().map(|d| d.name.as_str()).collect();
+    if !names.contains("run_io") || !names.contains(names::ENTRY_POINT) {
+        return;
+    }
+    let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for d in fns.iter() {
+        edges.insert(d.name.clone(), effects::referenced_names(&d.body));
+    }
+    let mut reachable: BTreeSet<String> = BTreeSet::new();
+    let mut queue = vec![names::ENTRY_POINT.to_string()];
+    while let Some(n) = queue.pop() {
+        if !reachable.insert(n.clone()) {
+            continue;
+        }
+        if let Some(refs) = edges.get(&n) {
+            queue.extend(refs.iter().filter(|r| names.contains(r.as_str())).cloned());
+        }
+    }
+    let reaches_cap = CAP_WRAPPERS.iter().any(|w| reachable.contains(*w));
+    // `print`/`println` route through `Output` only when the Replay machinery is
+    // imported (see `elaborate`); only then does a printing `main` need the world
+    // handler to discharge the output ops. Without it, output lowers directly and
+    // wrapping a reified-handler body in `run_io` would diverge on the backend.
+    let uses_replay = ["Replay.record", "Replay.replay", "Replay.durable"]
+        .iter()
+        .any(|f| names.contains(*f));
+    let reaches_output = uses_replay
+        && reachable.iter().any(|n| {
+            edges
+                .get(n)
+                .is_some_and(|refs| OUTPUT_BUILTINS.iter().any(|o| refs.contains(*o)))
+        });
+    if !reaches_cap && !reaches_output {
+        return;
+    }
+    if let Some(d) = fns.iter_mut().find(|d| d.name == names::ENTRY_POINT) {
+        let span = d.body.span;
+        let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
+        let action = lam1(names::UNIT_ARG, body, span);
+        d.body = call(evar("run_io", span), vec![action], span);
+    }
 }
 
 // Rewrite a surface `Decl` into a core one: its body loses all sugar via `rw`,
@@ -482,6 +558,7 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         wheres: Vec::new(),
         konst: d.konst,
         fip: d.fip,
+        replayable: d.replayable,
         span: d.span,
     })
 }
@@ -500,7 +577,9 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
         patterns: PatMap::new(),
         fn_sigs: BTreeMap::new(),
     };
-    rw(e, &Vars::new(), &mut cx)
+    let mut out = rw(e, &Vars::new(), &mut cx)?;
+    ids::assign_expr_ids(&mut out);
+    Ok(out)
 }
 
 // A function body's initial scope: its parameters, so a call of a global fn
@@ -514,6 +593,7 @@ fn seed(params: &[Param]) -> Vars {
 
 pub(super) const fn spat(node: Pattern, span: Span) -> S<Pattern> {
     Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -532,6 +612,7 @@ pub(super) fn eint<P: Phase>(i: usize, span: Span) -> S<Expr<P>> {
 
 pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
     Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -541,6 +622,7 @@ pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
 // Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
 pub(super) const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
     Spanned {
+        id: crate::syntax::ast::NodeId::DUMMY,
         synth: true,
         node,
         span,

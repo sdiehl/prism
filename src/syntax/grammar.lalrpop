@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
@@ -17,6 +17,7 @@ extern {
         "fn"     => Token::Fn,
         "fip"    => Token::Fip,
         "fbip"   => Token::Fbip,
+        "replayable" => Token::Replayable,
         "pub"    => Token::Pub,
         "import" => Token::Import,
         "as"     => Token::As,
@@ -378,8 +379,8 @@ EffOpParam: Ty = {
 };
 
 Fn: Decl = {
-    <l:@L> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
-        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, span: Span::new(l, r) },
+    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
+        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), span: Span::new(l, r) },
 };
 
 // An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
@@ -394,7 +395,7 @@ FipKw: Fip = {
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
@@ -417,7 +418,7 @@ BlockExpr: S<Expr> = {
     // Re-span the block to its braces but carry the sugar marker through, so the
     // formatter can still restore `with` / statement `?` from the synth flag.
     <l:@L> "v{" <b:Stmts> "v}" <r:@R> =>
-        Spanned { synth: b.synth, node: b.node, span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: b.synth, node: b.node, span: Span::new(l, r) },
 };
 
 Stmts: S<Expr> = {
@@ -434,19 +435,19 @@ Stmts: S<Expr> = {
     <l:@L> "let" <p:LetPat> "=" <v:BlockExpr> "v;" <rest:Stmts> =>
         let_pat(p, v, rest, l),
     <l:@L> "var" <x:"ident"> ":=" <v:Expr> "v;" <rest:Stmts> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::VarDecl(x, Box::new(v), Box::new(rest))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::VarDecl(x, Box::new(v), Box::new(rest))), span: Span::new(l, r) },
     // The `with` family. Each form takes an optional `; <Stmts>` continuation:
     // present, it is the block the `with` wraps; absent (a trailing `with` with
     // nothing after it), `with_rest` substitutes the rejection sentinel so a
     // single desugar pass reports the one "nothing to wrap" diagnostic.
     <l:@L> "with" <x:"ident"> "<-" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::NamedHandle(x, Box::new(with_rest(rest, l, r)), arms)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::NamedHandle(x, Box::new(with_rest(rest, l, r)), arms)), span: Span::new(l, r) },
     <l:@L> "with" <x:"ident"> "<-" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
         with_stmt(Some(x), c, with_rest(rest, l, r), l, r),
     <l:@L> "with" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
         with_stmt(None, c, with_rest(rest, l, r), l, r),
     <l:@L> "with" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
-        Spanned { synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms), span: Span::empty(l) },
+        Spanned { id: NodeId::DUMMY, synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms), span: Span::empty(l) },
 };
 
 RetAnn: (Option<Vec<EffLabel>>, Option<Ty>) = {
@@ -521,31 +522,31 @@ AType: Ty = {
 
 pub Expr: S<Expr> = {
     <l:@L> "if" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
-        Spanned { synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
     <l:@L> "let" <x:"ident"> "=" <v:Expr> "in" <b:Expr> <r:@R> =>
-        Spanned { synth: false, node: Expr::Let(x, Box::new(v), Box::new(b)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Let(x, Box::new(v), Box::new(b)), span: Span::new(l, r) },
     <l:@L> "let" <p:LetPat> "=" <v:Expr> "in" <b:Expr> =>
         let_pat(p, v, b, l),
     <l:@L> "\\" "(" <ps:Comma<Param>> ")" "->" <b:Expr> <r:@R> =>
-        Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) },
     <l:@L> "match" <s:Pipe> "of" <arms:MatchArms> <r:@R> =>
-        Spanned { synth: false, node: Expr::Match(Box::new(s), arms), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Match(Box::new(s), arms), span: Span::new(l, r) },
     <l:@L> "handle" <body:Expr> "with" <arms:HandleArms> <r:@R> =>
-        Spanned { synth: false, node: Expr::Handle(Box::new(body), arms), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms), span: Span::new(l, r) },
     <l:@L> "throw" <n:"uid"> <args:("(" <Comma<Expr>> ")")?> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Throw(n, args.unwrap_or_default())), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Throw(n, args.unwrap_or_default())), span: Span::new(l, r) },
     <l:@L> "try" <body:ExprOrBlock> ("v;")? "catch" <arms:CatchArms> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::TryCatch(Box::new(body), arms)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::TryCatch(Box::new(body), arms)), span: Span::new(l, r) },
     <l:@L> "transact" <body:ExprOrBlock> ("v;")? "else" <fb:ExprOrBlock> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
     <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
     <l:@L> "while" <c:Expr> "do" <body:ExprOrBlock> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
     <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
     <l:@L> "return" <e:Expr> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
     // The left side is parsed as a general `Call` so an index target `a[i]`
     // (an `Expr::Index`) is accepted alongside a bare `var`; `assign_stmt`/
     // `compound_stmt` dispatch on its shape and reject a non-assignable one.
@@ -569,7 +570,7 @@ CompoundOp: BinOp = {
 // `x.at_list(0) ?? -1` and `a ?? b ?? c` read naturally.
 Default: S<Expr> = {
     <l:@L> <a:Pipe> "??" <b:Default> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Default(Box::new(a), Box::new(b))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Default(Box::new(a), Box::new(b))), span: Span::new(l, r) },
     Pipe,
 };
 
@@ -581,7 +582,7 @@ Qual: Qualifier = {
 IfElse: S<Expr> = {
     ("v;")? "else" <e:ExprOrBlock> => e,
     <l:@L> ("v;")? "elif" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
-        Spanned { synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
 };
 
 OpenIfTail: IfTail = {
@@ -593,12 +594,12 @@ OpenIfTail: IfTail = {
 
 LetPat: S<Pattern> = {
     <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
     <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
     <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
         let mut ps = vec![p]; ps.extend(rest);
-        Spanned { synth: false, node: Pattern::Tuple(ps), span: Span::new(l, r) }
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Tuple(ps), span: Span::new(l, r) }
     },
 };
 
@@ -643,15 +644,15 @@ HandlerArm: HandlerArm = {
 
 Pipe: S<Expr> = {
     <l:@L> <x:Pipe> "|>" <f:Compose> <r:@R> =>
-        Spanned { synth: false, node: Expr::Pipe(Box::new(x), Box::new(f)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Pipe(Box::new(x), Box::new(f)), span: Span::new(l, r) },
     Compose,
 };
 
 Compose: S<Expr> = {
     <l:@L> <f:Compose> ">>" <g:Or> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(true, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Compose(true, Box::new(f), Box::new(g))), span: Span::new(l, r) },
     <l:@L> <f:Compose> "<<" <g:Or> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Compose(false, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Compose(false, Box::new(f), Box::new(g))), span: Span::new(l, r) },
     Or,
 };
 
@@ -668,12 +669,12 @@ Arm: Arm = {
 
 Pattern: S<Pattern> = {
     <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
     <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
     <l:@L> <n:"uid"> "{" <fields:RecordPatFields> "}" <r:@R> => {
         let (named, spread) = fields;
-        Spanned { synth: false, node: Pattern::Record(n, named, spread), span: Span::new(l, r) }
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Record(n, named, spread), span: Span::new(l, r) }
     },
     PatAtom,
 };
@@ -685,7 +686,7 @@ RecordPatFields: (Vec<(String, S<Pattern>)>, bool) = {
 
 RecordPatField: (String, S<Pattern>) = {
     <n:"ident"> "=" <p:Pattern> => (n, p),
-    <l:@L> <n:"ident"> <r:@R> => (n.clone(), Spanned { synth: false,
+    <l:@L> <n:"ident"> <r:@R> => (n.clone(), Spanned { id: NodeId::DUMMY, synth: false,
         node: Pattern::Var(n),
         span: Span::new(l, r),
     }),
@@ -693,31 +694,31 @@ RecordPatField: (String, S<Pattern>) = {
 
 PatAtom: S<Pattern> = {
     <l:@L> <v:"ident"> <r:@R> =>
-        Spanned { synth: false, node: if v == "_" { Pattern::Wild } else { Pattern::Var(v) }, span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: if v == "_" { Pattern::Wild } else { Pattern::Var(v) }, span: Span::new(l, r) },
     <l:@L> <n:"int"> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Int(n), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Int(n), span: Span::new(l, r) },
     <l:@L> <f:"float"> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Float(f), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Float(f), span: Span::new(l, r) },
     <l:@L> <c:"char"> <r:@R> =>
-        Spanned { synth: false, node: Pattern::Char(c), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Char(c), span: Span::new(l, r) },
     <l:@L> "true" <r:@R> =>
-        Spanned { synth: false, node: Pattern::Bool(true), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Bool(true), span: Span::new(l, r) },
     <l:@L> "false" <r:@R> =>
-        Spanned { synth: false, node: Pattern::Bool(false), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Bool(false), span: Span::new(l, r) },
     <l:@L> "[" "]" <r:@R> =>
-        Spanned { synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: Span::new(l, r) },
     <l:@L> "[" <ps:CommaPlus<Pattern>> "]" <r:@R> => {
         let nil_span = Span::new(r, r);
-        let nil = Spanned { synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: nil_span };
+        let nil = Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: nil_span };
         let result = ps.into_iter().rev().fold(nil, |rest, p| {
             let s = p.span;
-            Spanned { synth: false, node: Pattern::Ctor("Cons".into(), vec![p, rest]), span: s }
+            Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Cons".into(), vec![p, rest]), span: s }
         });
-        Spanned { synth: false, node: result.node, span: Span::new(l, r) }
+        Spanned { id: NodeId::DUMMY, synth: false, node: result.node, span: Span::new(l, r) }
     },
     <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
         let mut pats = vec![p]; pats.extend(rest);
-        Spanned { synth: false, node: Pattern::Tuple(pats), span: Span::new(l, r) }
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Tuple(pats), span: Span::new(l, r) }
     },
 };
 
@@ -725,19 +726,19 @@ PatArgs: Vec<S<Pattern>> = { "(" <ps:Comma<Pattern>> ")" => ps };
 
 Or: S<Expr> = {
     <l:@L> <a:Or> "||" <b:And> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Or, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Or, Box::new(a), Box::new(b)), span: Span::new(l, r) },
     And,
 };
 
 And: S<Expr> = {
     <l:@L> <a:And> "&&" <b:Cmp> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::And, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::And, Box::new(a), Box::new(b)), span: Span::new(l, r) },
     Cmp,
 };
 
 Cmp: S<Expr> = {
     <l:@L> <la:Add> <op:CmpOp> <ra:Add> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(op, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(op, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     Add,
 };
 
@@ -758,27 +759,27 @@ CmpOp: BinOp = {
 
 Add: S<Expr> = {
     <l:@L> <la:Add> "+" <ra:Mul> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Add, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Add, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Add> "-" <ra:Mul> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Sub, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Sub, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Add> "+." <ra:Mul> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Addf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Addf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Add> "-." <ra:Mul> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Subf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Subf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     Mul,
 };
 
 Mul: S<Expr> = {
     <l:@L> <la:Mul> "*" <ra:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Mul> "/" <ra:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Mul> "%" <ra:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Mul> "*." <ra:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Mul> "/." <ra:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     Pow,
 };
 
@@ -789,7 +790,7 @@ Mul: S<Expr> = {
 // Float.
 Pow: S<Expr> = {
     <l:@L> <base:Call> "^" <exp:Pow> <r:@R> =>
-        Spanned { synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
     Call,
 };
 
@@ -798,12 +799,12 @@ Pow: S<Expr> = {
 // call an accessed closure via parentheses or a let binding.
 Call: S<Expr> = {
     <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
-        Spanned { synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
     // `e.[ path ]`: read the foci a path selects into a list.
     <l:@L> <e:Call> "." "[" <p:PathSteps> "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?." <field:"ident"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
     <l:@L> <e:Call> "?" <r:@R> => try_mark(e, l, r),
     CallTight,
 };
@@ -815,28 +816,28 @@ CallTight: S<Expr> = {
     <l:@L> <f:CallTight> "(" <a:Comma<Expr>> <inst:("using" <CommaPlus<"ident">>)?> ")" <r:@R> => {
         let span = Span::new(l, r);
         let callee = match inst {
-            Some(names) => Spanned { synth: false, node: Expr::Inst(Box::new(f), names), span },
+            Some(names) => Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Inst(Box::new(f), names), span },
             None => f,
         };
-        Spanned { synth: false, node: Expr::Call(Box::new(callee), a), span }
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(callee), a), span }
     },
     <l:@L> <f:CallTight> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
         let span = Span::new(l, r);
-        a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span });
-        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span }
+        a.push(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span });
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(f), a), span }
     },
     // Indexed read `recv[key]` (a single index expression). Nested indexing is
     // `a[i][j]`; multiple comma-separated indices are not a form.
     <l:@L> <f:CallTight> "[" <k:Expr> "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
     <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
         dot_call(e, m, a, l, r),
     <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
-        a.push(Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) });
+        a.push(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) });
         dot_call(e, m, a, l, r)
     },
     <l:@L> <e:Call> "." <m:"ident"> "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
-        let lam = Spanned { synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) };
+        let lam = Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) };
         dot_call(e, m, vec![lam], l, r)
     },
     Atom,
@@ -851,62 +852,62 @@ TrailerParams: Vec<Param> = {
 
 Atom: S<Expr> = {
     <l:@L> "mask" "<" <eff:"uid"> ">" "(" <e:Expr> ")" <r:@R> =>
-        Spanned { synth: false, node: Expr::Mask(eff, Box::new(e)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Mask(eff, Box::new(e)), span: Span::new(l, r) },
     // `error` is a keyword now, so spell out the call to keep the panic builtin callable.
     <l:@L> "error" "(" <a:Comma<Expr>> ")" <r:@R> => {
-        let f = Spanned { synth: false, node: Expr::Var("error".into()), span: Span::new(l, l + "error".len()) };
-        Spanned { synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) }
+        let f = Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var("error".into()), span: Span::new(l, l + "error".len()) };
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) }
     },
     <l:@L> <n:"int"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Int(n), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Int(n), span: Span::new(l, r) },
     <l:@L> <f:"float"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Float(f), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Float(f), span: Span::new(l, r) },
     <l:@L> <c:"char"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Char(c), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Char(c), span: Span::new(l, r) },
     <l:@L> <s:"str"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Str(s), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Str(s), span: Span::new(l, r) },
     <l:@L> <first:"istart"> <h:Expr> <parts:(<"imid"> <Expr>)*> <last:"iend"> <r:@R> =>
         interp_lit(first, h, parts, last, l, r),
     <l:@L> "true" <r:@R> =>
-        Spanned { synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
     <l:@L> "false" <r:@R> =>
-        Spanned { synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
     <l:@L> "break" <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Break), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Break), span: Span::new(l, r) },
     <l:@L> "continue" <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
     <l:@L> "(" ")" <r:@R> =>
-        Spanned { synth: false, node: Expr::Unit, span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Unit, span: Span::new(l, r) },
     <l:@L> <id:"ident"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Var(id), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(id), span: Span::new(l, r) },
     <l:@L> <c:"uid"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Var(c), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(c), span: Span::new(l, r) },
     <l:@L> <q:"qual"> <r:@R> =>
-        Spanned { synth: false, node: Expr::Var(q), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(q), span: Span::new(l, r) },
     <l:@L> "(" <e:Expr> ")" <r:@R> =>
-        Spanned { synth: e.synth, node: e.node, span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: e.synth, node: e.node, span: Span::new(l, r) },
     <l:@L> "(" <e:Expr> ":" <t:Type> ")" <r:@R> =>
-        Spanned { synth: false, node: Expr::Ann(Box::new(e), t), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Ann(Box::new(e), t), span: Span::new(l, r) },
     <l:@L> "(" <e:Expr> "," <rest:Comma<Expr>> ")" <r:@R> => {
         let mut elems = vec![e]; elems.extend(rest);
-        Spanned { synth: false, node: Expr::Tuple(elems), span: Span::new(l, r) }
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Tuple(elems), span: Span::new(l, r) }
     },
     <l:@L> "[" "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::List(vec![]), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::List(vec![]), span: Span::new(l, r) },
     <l:@L> "[" <elems:CommaPlus<Expr>> "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::List(elems), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::List(elems), span: Span::new(l, r) },
     // Haskell-style arithmetic sequences: [a..z] steps by 1, [a,b..z] (or any
     // prefix) steps by b-a.
     <l:@L> "[" <pre:CommaPlus<Expr>> ".." <hi:Expr> "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Range(pre, Box::new(hi))), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Range(pre, Box::new(hi))), span: Span::new(l, r) },
     <l:@L> "[" <head:Pipe> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "]" <r:@R> =>
-        Spanned { synth: false, node: Expr::Sugar(Sugar::Comp(Box::new(head), x, Box::new(s), qs)), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Comp(Box::new(head), x, Box::new(s), qs)), span: Span::new(l, r) },
     <l:@L> <n:"uid"> "{" <fields:Comma<RecordExprField>> "}" <r:@R> =>
-        Spanned { synth: false, node: Expr::RecordCreate(n, fields), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordCreate(n, fields), span: Span::new(l, r) },
     <l:@L> <n:"uid"> "{" ".." <base:Expr> <rest:("," <RecordExprField>)*> "}" <r:@R> =>
-        Spanned { synth: false, node: Expr::RecordUpdate(Box::new(base), n, rest), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordUpdate(Box::new(base), n, rest), span: Span::new(l, r) },
     <l:@L> "{" <base:Expr> "|" <ups:CommaPlus<PathUpdate>> "}" <r:@R> =>
-        Spanned { synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
 };
 
 // `[i]` indexes the focus postfix (no dot), so it attaches to a segment or

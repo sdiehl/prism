@@ -389,6 +389,7 @@ pub(super) fn desugar_record_pat(
     let n = info.args.len();
     let mut subs: Vec<S<Pattern>> = (0..n)
         .map(|_| Spanned {
+            id: crate::syntax::ast::NodeId::DUMMY,
             synth: false,
             node: Pattern::Wild,
             span: Span::new(0, 0),

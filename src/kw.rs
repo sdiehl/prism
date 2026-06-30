@@ -8,6 +8,7 @@
 pub const FN: &str = "fn";
 pub const FIP: &str = "fip";
 pub const FBIP: &str = "fbip";
+pub const REPLAYABLE: &str = "replayable";
 pub const PUB: &str = "pub";
 pub const IMPORT: &str = "import";
 pub const AS: &str = "as";

@@ -179,7 +179,42 @@ long prism_box(long payload) {
     return (long)p;
 }
 
+/* Optional in-binary structural backstop. A compiled program's memory safety
+ * otherwise rests entirely on codegen emitting correct tags, refcounts, and
+ * field indices: a tagging or rc bug is plain UB with no trap in a shipped
+ * binary. Building the runtime with -DPRISM_RT_DEBUG (e.g.
+ * PRISM_CC_FLAGS=-DPRISM_RT_DEBUG) inserts a cheap validity check at every cell
+ * dereference: the value must be a non-null, 8-byte-aligned heap pointer (low
+ * tag bit clear) carrying a positive refcount, and a constructor field read must
+ * be in bounds. A violation aborts with a diagnostic instead of corrupting
+ * memory. Compiled out entirely (zero overhead) by default, so release builds
+ * and the parity oracle stay byte-identical. ASan/UBSan remain the gold standard
+ * in CI; this is the always-available, no-instrumentation net for builds where
+ * sanitizers are unavailable. */
+#ifdef PRISM_RT_DEBUG
+static void prism_rt_check(long p, const char *who) {
+    if (p == 0 || (p & 1L)) {
+        fprintf(stderr, "prism_rt: %s on non-cell value 0x%lx\n", who, (unsigned long)p);
+        abort();
+    }
+    if (((unsigned long)p) & 7UL) {
+        fprintf(stderr, "prism_rt: %s on misaligned pointer 0x%lx\n", who, (unsigned long)p);
+        abort();
+    }
+    long rc = ((long *)p)[PRISM_RC_W];
+    if (rc <= 0) {
+        fprintf(stderr, "prism_rt: %s on cell 0x%lx with non-positive rc %ld (use-after-free?)\n",
+                who, (unsigned long)p, rc);
+        abort();
+    }
+}
+#define PRISM_RT_CHECK(p, who) prism_rt_check((long)(p), (who))
+#else
+#define PRISM_RT_CHECK(p, who) ((void)0)
+#endif
+
 long prism_unbox(long p) {
+    PRISM_RT_CHECK(p, "prism_unbox");
     return ((long *)p)[PRISM_HDR_WORDS];
 }
 
@@ -225,9 +260,12 @@ void prism_rc_dec(long v) {
  * local mutable state (`var x := e`) compiles to one of these, so reads and
  * writes are loads/stores and a `var` loop is a real constant-stack loop instead
  * of the algebraic-effect free monad. `prism_ref_set` overwrites the field in
- * place regardless of the cell's refcount: sound because escape analysis proves
- * every reference is the same logical variable, never an alias of a distinct
- * value. The cell is an ordinary arity-1 cell, so `prism_rc_dec` frees its field
+ * place regardless of the cell's refcount: sound because the cell never aliases a
+ * distinct value, established before this lowering by two independent compile-time
+ * checks (an escape analysis over the handled block, with principal effect-row
+ * inference as the backstop: a `var` op that slips past the syntactic check still
+ * surfaces as an unhandled private `Var@..` effect). The cell is an ordinary
+ * arity-1 cell, so `prism_rc_dec` frees its field
  * with it; the caller (codegen) owns the cell reference and rc_decs it after each
  * read/write, the rc pass having dup'd so each use has its own reference. */
 long prism_ref_new(long v) {
@@ -322,10 +360,25 @@ void *prism_reuse_alloc(long token, long n_words) {
 }
 
 long prism_tag(void *p) {
+    PRISM_RT_CHECK(p, "prism_tag");
     return ((long *)p)[PRISM_TAG_W];
 }
 
 long prism_field(void *p, long i) {
+    PRISM_RT_CHECK(p, "prism_field");
+#ifdef PRISM_RT_DEBUG
+    {
+        long tag = ((long *)p)[PRISM_TAG_W];
+        long arity = ((long *)p)[PRISM_ARITY_W];
+        /* String/bignum cells carry an inline byte/limb payload, not child
+         * fields, so their arity slot is a length, not a field count: skip the
+         * bounds check for them (prism_field is not a valid accessor there). */
+        if (tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && (i < 0 || i >= arity)) {
+            fprintf(stderr, "prism_rt: prism_field index %ld out of bounds (arity %ld)\n", i, arity);
+            abort();
+        }
+    }
+#endif
     return ((long *)p)[PRISM_HDR_WORDS + i];
 }
 
@@ -509,7 +562,7 @@ long prism_kont_splice(long top, long base) {
     return prev;
 }
 
-long prism_read_int(void) {
+long prism_prim_read_int(void) {
     long n = 0;
     if (scanf("%ld", &n) != 1) {
         fprintf(stderr, "fatal: read_int: no integer on stdin\n");
@@ -518,7 +571,7 @@ long prism_read_int(void) {
     return n;
 }
 
-long prism_read_line(void) {
+long prism_prim_read_line(void) {
     char *buf = 0;
     size_t cap = 0;
     long n = getline(&buf, &cap, stdin);
@@ -1256,7 +1309,7 @@ static unsigned long prism_rng = 0x9E3779B97F4A7C15UL;
 
 void prism_srand(long seed) { prism_rng = (unsigned long)seed; }
 
-long prism_rand(void) {
+long prism_prim_rand(void) {
     prism_rng += 0x9E3779B97F4A7C15UL;
     unsigned long z = prism_rng;
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
@@ -1462,23 +1515,23 @@ static void prism_read_fatal(const char *why, const char *path) {
 static int prism_argc = 0;
 static char **prism_argv = 0;
 
-long prism_args_count(void) {
+long prism_prim_args_count(void) {
     return prism_argc;
 }
 
-long prism_arg(long i) {
+long prism_prim_arg(long i) {
     if (i < 0 || i >= prism_argc) return prism_str_lit("", 0);
     const char *a = prism_argv[i];
     return prism_str_lit(a, (long)strlen(a));
 }
 
-long prism_getenv(long name) {
+long prism_prim_getenv(long name) {
     const char *v = getenv(prism_str_data(name));
     if (!v) return prism_str_lit("", 0);
     return prism_str_lit(v, (long)strlen(v));
 }
 
-long prism_read_file(long path) {
+long prism_prim_read_file(long path) {
     const char *name = prism_str_data(path);
     FILE *f = fopen(name, "rb");
     if (!f) prism_read_fatal("cannot open", name);
@@ -1525,7 +1578,7 @@ long prism_append_file(long path, long contents) {
     return prism_file_write(path, contents, "ab");
 }
 
-long prism_file_exists(long path) {
+long prism_prim_file_exists(long path) {
     FILE *f = fopen(prism_str_data(path), "rb");
     if (f) fclose(f);
     return f != 0;

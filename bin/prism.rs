@@ -6,6 +6,10 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use prism::error::Error;
 
+// A CLI argument struct is the canonical exception to `struct_excessive_bools`:
+// the `--no-<pass>` flags and `--mlir` are independent on/off switches, exactly
+// what clap models as bool fields, not a state machine.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(
     name = "prism",
@@ -21,12 +25,57 @@ struct Cli {
     /// Override the output with `-o`; interpret instead with `prism run`.
     file: Option<PathBuf>,
     /// Output path for the compiled binary (default: the source file's stem, or
-    /// the project's package name)
+    /// `target/<package name>` for a project)
     #[arg(short, long)]
     out: Option<PathBuf>,
     /// Lower through the MLIR backend instead of the textual LLVM emitter
     #[arg(long)]
     mlir: bool,
+    /// Optimization level: `-O0` none (representation only), `-O1` (default)
+    /// dictionary specialization, `-O2` all of `-O1` (room for more). Bare `-O`
+    /// is the highest. Applies to building, running, and `dump core`.
+    #[arg(
+        short = 'O',
+        long = "opt",
+        value_name = "LEVEL",
+        global = true,
+        num_args = 0..=1,
+        default_missing_value = "2"
+    )]
+    opt: Option<String>,
+    /// Run an explicit ordered pass list, overriding `-O` (mutually exclusive
+    /// with it). Syntax `[pre:<names>][;late:<names>]`, names comma-separated;
+    /// a bare list is the pre stage. Pre passes: `EraseNewtypes`, `Specialize`;
+    /// late pass: `Simplify`. Example:
+    /// `--passes 'pre:EraseNewtypes,Specialize;late:Simplify'`.
+    #[arg(long = "passes", value_name = "SPEC", global = true)]
+    passes: Option<String>,
+    /// LLVM-backend optimization level handed to the C compiler as `-O<LEVEL>`:
+    /// `0`, `1`, `2` (default), `3`, or `s`/`z` for size. This tunes clang's own
+    /// pipeline over the emitted bitcode and is distinct from `-O`, which tunes
+    /// Prism's Core optimizer. Also settable via `PRISM_BACKEND_OPT`. Pick the
+    /// compiler with `PRISM_CC` (default `clang`) and pass it arbitrary extra
+    /// flags with `PRISM_CC_FLAGS` (e.g. `-march=native`, `-g`).
+    #[arg(long = "backend-opt", value_name = "LEVEL", global = true)]
+    backend_opt: Option<String>,
+    /// Turn off the newtype-erasure pass everywhere in the pipeline (composes
+    /// with both `-O` and `--passes`). Both backends rely on it; disabling it is
+    /// your choice.
+    #[arg(long, global = true)]
+    no_erase_newtypes: bool,
+    /// Turn off the dictionary-specialization pass everywhere in the pipeline
+    /// (the flag form of `PRISM_NO_SPECIALIZE`).
+    #[arg(long, global = true)]
+    no_specialize: bool,
+    /// Turn off the gentle simplifier pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_simplify: bool,
+    /// Turn off the inliner pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_inline: bool,
+    /// Turn off the scalar-CSE pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_cse: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -41,12 +90,20 @@ enum Cmd {
         /// current directory)
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Output path for the compiled binary (default: the project's package name)
+        /// Output path for the compiled binary (default: `target/<package name>`)
         #[arg(short, long)]
         out: Option<PathBuf>,
         /// Lower through the MLIR backend instead of the textual LLVM emitter
         #[arg(long)]
         mlir: bool,
+    },
+    /// Remove the build-artifact directory (`target/`). In a project it is the
+    /// one at the package root; otherwise the one under the given path.
+    Clean {
+        /// Where to start the search for the project's `prism.toml` (default: the
+        /// current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
     },
     /// Type-check and print inferred signatures and effects
     Check { file: PathBuf },
@@ -73,6 +130,46 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if cli.opt.is_some() && cli.passes.is_some() {
+        eprintln!("error: `--passes` and `-O` are mutually exclusive");
+        return ExitCode::FAILURE;
+    }
+    if let Some(s) = &cli.opt {
+        let Some(level) = prism::OptLevel::parse(s) else {
+            eprintln!("invalid optimization level `-O{s}` (expected 0, 1, or 2)");
+            return ExitCode::FAILURE;
+        };
+        prism::set_opt_level(level);
+    }
+    if let Some(s) = &cli.passes {
+        match prism::PassSpec::parse(s) {
+            Ok(spec) => prism::set_pass_spec(spec),
+            Err(e) => {
+                eprintln!("error: invalid pass specification: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if let Some(s) = &cli.backend_opt {
+        if !matches!(s.as_str(), "0" | "1" | "2" | "3" | "s" | "z") {
+            eprintln!("invalid backend optimization level `--backend-opt {s}` (expected 0, 1, 2, 3, s, or z)");
+            return ExitCode::FAILURE;
+        }
+        prism::set_backend_opt(s.clone());
+    }
+    let disabled: Vec<prism::CorePass> = [
+        (cli.no_erase_newtypes, prism::CorePass::EraseNewtypes),
+        (cli.no_specialize, prism::CorePass::Specialize),
+        (cli.no_simplify, prism::CorePass::Simplify),
+        (cli.no_inline, prism::CorePass::Inline),
+        (cli.no_cse, prism::CorePass::Cse),
+    ]
+    .into_iter()
+    .filter_map(|(off, pass)| off.then_some(pass))
+    .collect();
+    if !disabled.is_empty() {
+        prism::set_disabled_passes(&disabled);
+    }
     let result = match (cli.cmd, cli.file) {
         (Some(cmd), _) => dispatch(cmd),
         // Bare `prism <path>` compiles to a native binary (rustc-style: the
@@ -131,7 +228,9 @@ fn resolve_input(arg: &Path) -> Result<Resolved, (Error, String, String)> {
             }
             None => prism::with_prelude(&src),
         };
-        let out = PathBuf::from(&project.name);
+        // A project build lands in `target/` at the package root (rustc-style),
+        // keeping artifacts out of the source tree.
+        let out = project.root.join("target").join(&project.name);
         let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
         Ok((full, roots, file_name(&project.entry), out))
     } else {
@@ -160,8 +259,32 @@ fn build_input(
 ) -> Result<(), (Error, String, String)> {
     let (full, roots, name, default_out) = resolve_input(arg)?;
     let out = out.unwrap_or(default_out);
+    // Codegen writes intermediates (`.bc`, `.ll`) beside the binary, so the
+    // output directory must exist first (the default `target/` may not yet).
+    if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| (Error::Io(e), full.clone(), name.clone()))?;
+    }
     build_dispatch(mlir, &full, &roots, &out).map_err(|e| (e, full, name))?;
     println!("wrote {}", out.display());
+    Ok(())
+}
+
+// `prism clean`: wipe the `target/` build-artifact directory, cargo-clean style.
+// In a project it is the `target/` at the package root (the nearest enclosing
+// `prism.toml`); otherwise the one under `path`. A missing `target/` is success.
+fn clean_cmd(path: &Path) -> Result<(), (Error, String, String)> {
+    let start = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = prism::project::find_manifest(&start)
+        .and_then(|m| m.parent().map(Path::to_path_buf))
+        .unwrap_or(start);
+    let target = root.join("target");
+    match std::fs::remove_dir_all(&target) {
+        Ok(()) => println!("removed {}", target.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!("nothing to clean ({} absent)", target.display());
+        }
+        Err(e) => return Err((Error::Io(e), String::new(), target.display().to_string())),
+    }
     Ok(())
 }
 
@@ -205,6 +328,7 @@ fn dispatch(cmd: Cmd) -> Result<(), (Error, String, String)> {
             })?;
             build_input(&manifest, out, mlir)
         }
+        Cmd::Clean { path } => clean_cmd(&path),
         Cmd::Check { file } => {
             let (full, roots, name, _) = resolve_input(&file)?;
             let checked = prism::check_on(&full, &roots).map_err(|e| (e, full, name))?;

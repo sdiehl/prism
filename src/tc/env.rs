@@ -9,7 +9,7 @@ use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
-use crate::types::ty::{EffRow, Effects, Label, Type};
+use crate::types::ty::{EffRow, Label, Type};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -120,6 +120,17 @@ impl Tc<'_> {
             }
         }
         Ok(())
+    }
+
+    // Convert one annotation against fresh (per-annotation) tyvar/row maps. Use
+    // when an annotation stands alone; sites that share named tyvars across
+    // several annotations build the maps once and reuse `convert_annot`.
+    pub(super) fn convert_annot_fresh(&mut self, t: &ast::Ty) -> Type {
+        let mut ty_ex = BTreeMap::new();
+        let mut row_ex = BTreeMap::new();
+        let no_rigid = BTreeSet::new();
+        let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+        self.convert_annot(t, &mut a)
     }
 
     pub(super) fn convert_annot(&mut self, t: &ast::Ty, a: &mut Annot<'_>) -> Type {
@@ -426,9 +437,11 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
 const BUILTINS: &[(&str, &str)] = &[
     ("print", "forall a. (a) -> Unit ! {IO}"),
     ("println", "forall a. (a) -> Unit ! {IO}"),
-    ("read_int", "() -> Int ! {IO}"),
-    ("read_line", "() -> String ! {IO}"),
-    ("rand", "() -> Int ! {IO}"),
+    ("prim_print", "forall a. (a) -> Unit ! {IO}"),
+    ("prim_println", "forall a. (a) -> Unit ! {IO}"),
+    ("prim_read_int", "() -> Int ! {IO}"),
+    ("prim_read_line", "() -> String ! {IO}"),
+    ("prim_rand", "() -> Int ! {IO}"),
     ("srand", "(Int) -> Unit ! {IO}"),
     ("error", "forall a. (Int) -> a ! {Exn}"),
     ("to_float", "(Int) -> Float"),
@@ -458,17 +471,23 @@ const BUILTINS: &[(&str, &str)] = &[
     ("chr", "(Int) -> Char"),
     ("show_char", "(Char) -> String"),
     ("parse_int", "(String) -> Option(Int)"),
-    ("getenv", "(String) -> String"),
-    ("read_file", "(String) -> String"),
-    ("write_file", "(String, String) -> Result(Unit, String)"),
-    ("file_exists", "(String) -> Bool"),
-    ("append_file", "(String, String) -> Result(Unit, String)"),
-    ("remove_file", "(String) -> Unit"),
+    ("prim_getenv", "(String) -> String ! {IO}"),
+    ("prim_read_file", "(String) -> String ! {IO}"),
+    (
+        "write_file",
+        "(String, String) -> Result(Unit, String) ! {IO}",
+    ),
+    ("prim_file_exists", "(String) -> Bool ! {IO}"),
+    (
+        "append_file",
+        "(String, String) -> Result(Unit, String) ! {IO}",
+    ),
+    ("remove_file", "(String) -> Unit ! {IO}"),
     ("exit", "forall a. (Int) -> a"),
     ("system", "(String) -> Int ! {IO}"),
     ("eprint", "(String) -> Unit ! {IO}"),
-    ("args_count", "() -> Int"),
-    ("arg", "(Int) -> String"),
+    ("prim_args_count", "() -> Int ! {IO}"),
+    ("prim_arg", "(Int) -> String ! {IO}"),
     ("to_i64", "(Int) -> I64"),
     ("to_u64", "(Int) -> U64"),
     ("int_of_i64", "(I64) -> Int"),
@@ -540,22 +559,6 @@ fn base_env() -> Result<Env, TypeError> {
         .collect()
 }
 
-pub(crate) fn builtin_effects() -> &'static BTreeMap<String, Effects> {
-    static MAP: std::sync::OnceLock<BTreeMap<String, Effects>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| {
-        BUILTINS
-            .iter()
-            .filter_map(|(n, s)| {
-                // A malformed signature is reported by `base_env` during
-                // `check`; here we cannot return through the static, so we skip.
-                let effs = parse_sig(n, s).ok()?.1;
-                (!effs.is_empty())
-                    .then(|| ((*n).to_string(), effs.into_iter().map(Sym::from).collect()))
-            })
-            .collect()
-    })
-}
-
 type BuildDataResult = (
     BTreeMap<String, DataInfo>,
     BTreeMap<String, CtorInfo>,
@@ -567,6 +570,25 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     let mut data = BTreeMap::new();
     let mut ctors = BTreeMap::new();
     let mut env = base_env()?;
+    // When the record/replay/durable machinery is imported, `print`/`println`
+    // route through the interceptable `Output` capability instead of the ambient
+    // `IO`, so the replay handlers can drop output during a replayed prefix.
+    // Without it they keep their `{IO}` row, so the rest of the corpus (and any
+    // `!{IO}` annotation) is untouched and a reified-handler body is never wrapped
+    // in a world handler it cannot fuse through.
+    if prog.fns.iter().any(|f| {
+        matches!(
+            f.name.as_str(),
+            "Replay.record" | "Replay.replay" | "Replay.durable"
+        )
+    }) {
+        for n in ["print", "println"] {
+            env.insert(
+                Sym::from(n),
+                parse_sig(n, "forall a. (a) -> Unit ! {Output}")?.0,
+            );
+        }
+    }
     // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface
     // constructors, manipulated only through the `array_*` builtins.
     data.insert(
@@ -693,8 +715,10 @@ mod tests {
         for (name, sig) in super::BUILTINS {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
             let want: &[&str] = match *name {
-                "print" | "println" | "read_int" | "read_line" | "rand" | "srand" | "system"
-                | "eprint" => &["IO"],
+                "print" | "println" | "prim_print" | "prim_println" | "prim_read_int"
+                | "prim_read_line" | "prim_rand" | "srand" | "system" | "eprint"
+                | "prim_getenv" | "prim_read_file" | "write_file" | "prim_file_exists"
+                | "append_file" | "remove_file" | "prim_args_count" | "prim_arg" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

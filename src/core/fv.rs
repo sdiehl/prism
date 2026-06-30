@@ -7,21 +7,22 @@ use std::collections::BTreeSet;
 use crate::sym::Sym;
 
 use super::cbpv::{Comp, CorePat, Value};
+use super::traverse::Visit;
 
 pub type Set = BTreeSet<Sym>;
 
 #[must_use]
 pub fn comp(c: &Comp) -> Set {
-    let mut s = Set::new();
-    free_comp(c, &mut s);
-    s
+    let mut f = Fv::default();
+    f.visit_comp(c);
+    f.free
 }
 
 #[must_use]
 pub fn value(v: &Value) -> Set {
-    let mut s = Set::new();
-    free_val(v, &mut s);
-    s
+    let mut f = Fv::default();
+    f.visit_value(v);
+    f.free
 }
 
 pub fn comp_without<'a, I: IntoIterator<Item = &'a Sym>>(c: &Comp, binders: I) -> Set {
@@ -44,96 +45,80 @@ pub fn pat_vars(p: &CorePat, out: &mut Set) {
     }
 }
 
-fn free_val(v: &Value, out: &mut Set) {
-    match v {
-        Value::Var(x) => {
-            out.insert(*x);
-        }
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().for_each(|f| free_val(f, out)),
-        Value::Thunk(c) => free_comp(c, out),
-        _ => {}
+// A `Var` is free unless an enclosing binder shadows it. The binder stack is a
+// plain `Vec` (not a set) so shadowing nests and unbinds correctly; equality of
+// the resulting set with the subtractive definition is what the tests pin.
+#[derive(Default)]
+struct Fv {
+    free: Set,
+    bound: Vec<Sym>,
+}
+
+impl Fv {
+    fn under(&mut self, names: &[Sym], body: &Comp) {
+        self.bound.extend_from_slice(names);
+        self.visit_comp(body);
+        self.bound.truncate(self.bound.len() - names.len());
     }
 }
 
-fn free_comp(c: &Comp, out: &mut Set) {
-    match c {
-        Comp::Return(v)
-        | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
-        | Comp::Error(v)
-        | Comp::Srand(v)
-        | Comp::FloatBuiltin(_, v)
-        | Comp::Dup(v)
-        | Comp::Drop(v)
-        | Comp::RefNew(v)
-        | Comp::RefGet(v) => free_val(v, out),
-        Comp::RefSet(c, v) => {
-            free_val(c, out);
-            free_val(v, out);
-        }
-        // `token` is bound over `body`; the freed cell is named in the enclosing
-        // scope, so it stays free here.
-        Comp::WithReuse { token, freed, body } => {
-            free_val(freed, out);
-            out.extend(comp_without(body, [token]));
-        }
-        // The token is a free reference resolved to the `WithReuse` binder.
-        Comp::Reuse(tok, v) => {
-            out.insert(*tok);
-            free_val(v, out);
-        }
-        Comp::Bind(m, x, n) => {
-            free_comp(m, out);
-            out.extend(comp_without(n, [x]));
-        }
-        Comp::App(f, args) => {
-            free_comp(f, out);
-            for a in args {
-                free_val(a, out);
+impl Visit for Fv {
+    fn visit_value(&mut self, v: &Value) {
+        if let Value::Var(x) = v {
+            if !self.bound.contains(x) {
+                self.free.insert(*x);
             }
+        } else {
+            self.descend_value(v);
         }
-        Comp::If(v, t, e) => {
-            free_val(v, out);
-            free_comp(t, out);
-            free_comp(e, out);
-        }
-        Comp::Prim(_, a, b) => {
-            free_val(a, out);
-            free_val(b, out);
-        }
-        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
-            for a in args {
-                free_val(a, out);
+    }
+
+    fn visit_comp(&mut self, c: &Comp) {
+        match c {
+            Comp::Bind(m, x, n) => {
+                self.visit_comp(m);
+                self.under(&[*x], n);
             }
-        }
-        Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => {}
-        Comp::Lam(ps, b) => out.extend(comp_without(b, ps)),
-        Comp::Case(v, arms) => {
-            free_val(v, out);
-            for (p, body) in arms {
-                let mut pv = Set::new();
-                pat_vars(p, &mut pv);
-                out.extend(comp(body).difference(&pv).copied());
+            Comp::Lam(ps, b) => self.under(ps, b),
+            Comp::Case(v, arms) => {
+                self.visit_value(v);
+                for (p, body) in arms {
+                    let mut pv = Set::new();
+                    pat_vars(p, &mut pv);
+                    self.under(&pv.into_iter().collect::<Vec<_>>(), body);
+                }
             }
-        }
-        Comp::Mask(_, b) => free_comp(b, out),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => {
-            free_comp(body, out);
-            if let Some(rb) = return_body {
-                out.extend(comp_without(rb, return_var.iter()));
+            // `token` is bound over `body`; the freed cell is named in the
+            // enclosing scope, so it stays free here.
+            Comp::WithReuse { token, freed, body } => {
+                self.visit_value(freed);
+                self.under(&[*token], body);
             }
-            for op in ops {
-                let mut s = comp_without(&op.body, &op.params);
-                s.remove(&op.resume);
-                out.extend(s);
+            // The token is a free reference resolved to the `WithReuse` binder
+            // (unless one is in scope, e.g. nested reuse).
+            Comp::Reuse(tok, v) => {
+                if !self.bound.contains(tok) {
+                    self.free.insert(*tok);
+                }
+                self.visit_value(v);
             }
+            Comp::Handle {
+                body,
+                return_var,
+                return_body,
+                ops,
+            } => {
+                self.visit_comp(body);
+                if let Some(rb) = return_body {
+                    self.under(&return_var.iter().copied().collect::<Vec<_>>(), rb);
+                }
+                for op in ops {
+                    let mut names = op.params.clone();
+                    names.push(op.resume);
+                    self.under(&names, &op.body);
+                }
+            }
+            _ => self.descend_comp(c),
         }
     }
 }

@@ -26,6 +26,7 @@ mod vars;
 mod views;
 
 use defaults::fill_call;
+pub(in crate::syntax::desugar) use escape::referenced_names;
 use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
@@ -159,11 +160,11 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             let handled = sp(Expr::Handle(Box::new(b2), arms2), span);
             return Ok(wrap_vals(vals, handled, span));
         }
-        // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head takes a
-        // reserved-band span so the dictionary it carries never aliases a real
-        // dispatch site (see `synth_span`). Lowering through the class keeps int
-        // exponentiation bignum-correct (its `Int` instance multiplies) and float
-        // exponentiation a `pow_float` call.
+        // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head is a
+        // synthesized node, so its dictionary keys on its own `NodeId` and never
+        // aliases a real dispatch site (see `synth_span`). Lowering through the
+        // class keeps int exponentiation bignum-correct (its `Int` instance
+        // multiplies) and float exponentiation a `pow_float` call.
         Expr::Bin(BinOp::Pow, a, b) => {
             let head = evar(POW_METHOD, synth_span(cx));
             return rw(
@@ -414,14 +415,12 @@ fn rw_sugar(
                         ),
                     });
                 }
-                let harms = vec![
-                    HandlerArm::Sugar(SugarArm::Final(
-                        names::throw_op(&a.name),
-                        a.binders.clone(),
-                        a.body.clone(),
-                    )),
-                    HandlerArm::Return(RET.into(), evar(RET, a.span)),
-                ];
+                let harms = final_handler(
+                    names::throw_op(&a.name),
+                    a.binders.clone(),
+                    a.body.clone(),
+                    a.span,
+                );
                 acc = sp(Expr::Handle(Box::new(acc), harms), a.span);
             }
             rw(&acc, env, cx)
@@ -435,21 +434,15 @@ fn rw_sugar(
         // continuation drops the same way a `??`/`fail` escape does).
         Sugar::For(x, s, quals, body) => {
             let (has_break, has_continue) = loop_ctl_used(body);
-            let mut inner = fold_quals(quals, (**body).clone(), span, cx);
-            if has_continue {
-                inner = loop_ctl_handler(names::CONTINUE_OP, inner, span);
-            }
+            let inner = fold_quals(quals, (**body).clone(), span, cx);
+            let inner = wrap_if(has_continue, names::CONTINUE_OP, inner, span);
             let run = call((**s).clone(), vec![sp(Expr::Unit, s.span)], s.span);
             let arms = vec![
                 HandlerArm::Sugar(SugarArm::Fun("emit".into(), vec![x.clone()], inner)),
                 HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
             ];
             let consumer = sp(Expr::Handle(Box::new(run), arms), span);
-            let full = if has_break {
-                loop_ctl_handler(names::BREAK_OP, consumer, span)
-            } else {
-                consumer
-            };
+            let full = wrap_if(has_break, names::BREAK_OP, consumer, span);
             rw(&full, env, cx)
         }
         Sugar::While(cond, body) => rw_while(cond.as_deref(), body, span, env, cx),
@@ -491,14 +484,7 @@ fn rw_sugar(
         // `a ?? b`: a `Fail`-discarding handler over `a` that returns `b` on
         // failure; a `Fail` raised by `b` itself escapes to the outer context.
         Sugar::Default(a, b) => {
-            let arms = vec![
-                HandlerArm::Sugar(SugarArm::Final(
-                    names::FAIL_OP.into(),
-                    Vec::new(),
-                    (**b).clone(),
-                )),
-                HandlerArm::Return(RET.into(), evar(RET, span)),
-            ];
+            let arms = final_handler(names::FAIL_OP.into(), Vec::new(), (**b).clone(), span);
             rw(&sp(Expr::Handle(a.clone(), arms), span), env, cx)
         }
         // `transact body else fallback`: snapshot every live `var` with its get
@@ -528,10 +514,7 @@ fn rw_sugar(
                     span,
                 );
             }
-            let arms = vec![
-                HandlerArm::Sugar(SugarArm::Final(names::FAIL_OP.into(), Vec::new(), restore)),
-                HandlerArm::Return(RET.into(), evar(RET, span)),
-            ];
+            let arms = final_handler(names::FAIL_OP.into(), Vec::new(), restore, span);
             let mut handled = sp(Expr::Handle(body.clone(), arms), span);
             for ((get, _), snap) in vars.iter().zip(&snaps).rev() {
                 let get_call = call(evar(get, span), vec![sp(Expr::Unit, span)], span);
@@ -585,8 +568,8 @@ fn rw_sugar(
 // constant-`true` condition. `while_loop`'s self-call is in tail position, so the
 // loop runs in constant stack with no per-iteration allocation, and because
 // `while_loop` is unconstrained and effect-polymorphic, a break/continue-free loop
-// adds no effect of its own (pay-as-you-go). The call head takes a reserved-band
-// span so it never aliases a real dispatch site.
+// adds no effect of its own (pay-as-you-go). The call head is a synthesized node,
+// keyed for dispatch by its own `NodeId`, so it never aliases a real dispatch site.
 fn rw_while(
     cond: Option<&S<Expr>>,
     body: &S<Expr>,
@@ -602,11 +585,7 @@ fn rw_while(
     // surfaces. A nested loop captures its own break/continue, so the scan stops
     // at one.
     let (has_break, has_continue) = loop_ctl_used(body);
-    let body = if has_continue {
-        loop_ctl_handler(names::CONTINUE_OP, body.clone(), span)
-    } else {
-        body.clone()
-    };
+    let body = wrap_if(has_continue, names::CONTINUE_OP, body.clone(), span);
     let body_thunk = sp(Expr::Lam(Vec::new(), Box::new(body)), span);
     // An unconditional `loop` that cannot `break` never returns, so it lowers to
     // the bottom-typed `forever` and can stand as the body of a function of any
@@ -622,11 +601,7 @@ fn rw_while(
         let head = evar(WHILE_LOOP, synth_span(cx));
         call(head, vec![cond_thunk, body_thunk], span)
     };
-    let full = if has_break {
-        loop_ctl_handler(names::BREAK_OP, driver, span)
-    } else {
-        driver
-    };
+    let full = wrap_if(has_break, names::BREAK_OP, driver, span);
     rw(&full, env, cx)
 }
 
@@ -643,6 +618,26 @@ fn loop_ctl_handler(op: &str, body: S<Expr>, span: Span) -> S<Expr> {
     sp(Expr::Handle(Box::new(body), arms), span)
 }
 
+// Wrap `body` in `loop_ctl_handler` for `op` only when the loop actually uses
+// that control keyword (pay-as-you-go); otherwise return `body` untouched.
+fn wrap_if(used: bool, op: &str, body: S<Expr>, span: Span) -> S<Expr> {
+    if used {
+        loop_ctl_handler(op, body, span)
+    } else {
+        body
+    }
+}
+
+// A `final ctl` handler that catches one op, binds its carried values and yields
+// the clause body, with an identity return arm (the handled block keeps its
+// normal result). The twin of `loop_ctl_handler`, which instead yields Unit.
+fn final_handler(op: String, binders: Vec<String>, body: S<Expr>, span: Span) -> Vec<HandlerArm> {
+    vec![
+        HandlerArm::Sugar(SugarArm::Final(op, binders, body)),
+        HandlerArm::Return(RET.into(), evar(RET, span)),
+    ]
+}
+
 // Wrap a function body in a `final ctl` handler for the internal `Return` effect
 // when it uses `return`, so `return e` exits the function with `e`. The op arm
 // binds the carried value and yields it; the return arm passes the normal result
@@ -654,14 +649,12 @@ pub(super) fn wrap_return(body: S<Expr>, cx: &mut Cx) -> S<Expr> {
     }
     let span = body.span;
     let v = format!("{}{}", names::VAL, cx.next.bump());
-    let arms = vec![
-        HandlerArm::Sugar(SugarArm::Final(
-            names::RETURN_OP.into(),
-            vec![v.clone()],
-            evar(&v, span),
-        )),
-        HandlerArm::Return(RET.into(), evar(RET, span)),
-    ];
+    let arms = final_handler(
+        names::RETURN_OP.into(),
+        vec![v.clone()],
+        evar(&v, span),
+        span,
+    );
     sp(Expr::Handle(Box::new(body), arms), span)
 }
 
@@ -883,19 +876,16 @@ impl CtlScan {
     }
 }
 
-// Dictionary resolution keys on span (like derive.rs's `SpanAlloc`). The head of
-// a synthesized call to a monomorphic prelude helper must not reuse a real source
-// span: if a comprehension guard `g` is itself an overloaded operator (say
-// `t == A` for a derived `Eq`), the checker records that instance at `g.span`,
-// and reusing it for the synthesized `guard`/`succeeds` head would make
-// elaboration thread the dictionary into that helper, over-applying it and
-// crashing monadification. Minting zero-width spans from a high reserved band no
-// real offset can occupy (and above derive's lower band, so the two never alias)
-// keeps these heads off every dispatch site.
-const SYNTH_SPAN_BASE: usize = usize::MAX / 4 * 3;
-
+// A span for a synthesized node. Dispatch identity is the node's `NodeId`
+// (assigned after desugar), not its span, so a synthesized call head can no
+// longer alias a real dispatch site by reusing a source span -- the source of
+// the old "or it crashes monadification" hazard. The span is now purely a
+// diagnostic, and a synthesized node has no source location, so it collapses to
+// the empty span. The fresh id is still consumed (it is shared with generated
+// variable names) to keep that numbering stable.
 const fn synth_span(cx: &mut Cx) -> Span {
-    Span::empty(SYNTH_SPAN_BASE + cx.next.bump() as usize)
+    let _ = cx.next.bump();
+    Span::empty(0)
 }
 
 // Fold a comprehension's qualifiers inside-out around its body. A `Guard` keeps

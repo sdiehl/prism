@@ -2,9 +2,13 @@
 source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
+examples/calc.pr: evidence
+examples/capabilities.pr: evidence
 examples/comprehension.pr: whole-program-free-monad
 examples/condition.pr: selective-free-monad
 examples/delim.pr: selective-free-monad
+examples/durable.pr: whole-program-free-monad
+examples/echo.pr: evidence
 examples/eff_amb.pr: selective-free-monad
 examples/eff_exn.pr: selective-free-monad
 examples/eff_forward.pr: selective-free-monad
@@ -15,10 +19,13 @@ examples/eff_rows.pr: selective-free-monad
 examples/eff_state.pr: state-fusion
 examples/eff_writer.pr: state-fusion
 examples/eff_yield.pr: selective-free-monad
+examples/effectful_traverse.pr: whole-program-free-monad
 examples/effects.pr: selective-free-monad
 examples/errors.pr: selective-free-monad
 examples/exceptions.pr: selective-free-monad
+examples/game.pr: evidence
 examples/handlers_funval.pr: evidence
+examples/hangman.pr: evidence
 examples/indexing.pr: whole-program-free-monad
 examples/interaction.pr: state-fusion
 examples/lambda.pr: selective-free-monad
@@ -29,8 +36,10 @@ examples/moore.pr: selective-free-monad
 examples/named_handlers.pr: selective-free-monad
 examples/optionals.pr: selective-free-monad
 examples/orders.pr: whole-program-free-monad
+examples/os.pr: evidence
 examples/param_effects.pr: state-fusion
 examples/queens.pr: selective-free-monad
+examples/record_replay.pr: whole-program-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
@@ -56,6 +65,7 @@ tests/cases/run/eff_eta_thunk.pr: whole-program-free-monad
 tests/cases/run/eff_fn_list.pr: whole-program-free-monad
 tests/cases/run/eff_fuse.pr: evidence
 tests/cases/run/eff_pending_arg.pr: evidence
+tests/cases/run/eff_poly_fn_arg.pr: whole-program-free-monad
 tests/cases/run/eff_two_handlers.pr: evidence
 tests/cases/run/effop_tax.pr: evidence
 tests/cases/run/errors.pr: selective-free-monad
@@ -65,6 +75,7 @@ tests/cases/run/fold_chains.pr: state-fusion
 tests/cases/run/for_blocks.pr: evidence
 tests/cases/run/for_break.pr: whole-program-free-monad
 tests/cases/run/forward.pr: selective-free-monad
+tests/cases/run/fs.pr: evidence
 tests/cases/run/handler_funval.pr: evidence
 tests/cases/run/indexing_ops.pr: selective-free-monad
 tests/cases/run/interp_effects.pr: evidence
@@ -78,6 +89,8 @@ tests/cases/run/opt_chain.pr: selective-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad
 tests/cases/run/optics_read.pr: selective-free-monad
 tests/cases/run/param_eff.pr: evidence
+tests/cases/run/reified_under_world.pr: whole-program-free-monad
+tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rollback.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion

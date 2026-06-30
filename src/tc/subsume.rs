@@ -144,8 +144,10 @@ impl Tc<'_> {
                 // therefore a compiler bug, not user-reachable.
                 let oi = self
                     .index_ex(other)
-                    .expect("inst: existential escaped scope");
-                let ei = self.index_ex(ex).expect("inst: existential escaped scope");
+                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{other} escaped scope")))?;
+                let ei = self
+                    .index_ex(ex)
+                    .ok_or_else(|| TcErr::Ice(format!("inst: ^{ex} escaped scope")))?;
                 if oi > ei {
                     self.solve(other, Type::Exist(ex));
                 } else {
@@ -157,7 +159,7 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(ex, &arg_exs, row, ret);
+                self.articulate(ex, &arg_exs, row, ret)?;
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, !left)?;
@@ -170,7 +172,7 @@ impl Tc<'_> {
             Type::Con(name, args) => {
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
                 let con = Type::Con(name, arg_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &arg_exs, con);
+                self.splice_solved(ex, &arg_exs, con)?;
                 for (e, arg) in arg_exs.iter().zip(&args) {
                     let arg = self.apply(arg);
                     self.inst(*e, &arg, left)?;
@@ -184,7 +186,7 @@ impl Tc<'_> {
                 let he = self.fresh_id();
                 let ae = self.fresh_id();
                 let app = Type::App(Box::new(Type::Exist(he)), Box::new(Type::Exist(ae)));
-                self.splice_solved(ex, &[he, ae], app);
+                self.splice_solved(ex, &[he, ae], app)?;
                 let h = self.apply(&h);
                 self.inst(he, &h, left)?;
                 let a = self.apply(&a);
@@ -193,7 +195,7 @@ impl Tc<'_> {
             Type::Tuple(elems) => {
                 let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();
                 let tup = Type::Tuple(elem_exs.iter().map(|e| Type::Exist(*e)).collect());
-                self.splice_solved(ex, &elem_exs, tup);
+                self.splice_solved(ex, &elem_exs, tup)?;
                 for (e, elem) in elem_exs.iter().zip(&elems) {
                     let elem = self.apply(elem);
                     self.inst(*e, &elem, left)?;
@@ -342,9 +344,15 @@ impl Tc<'_> {
                 Box::new(self.rewrite_row(rest, label)?),
             )),
             EffRow::Exist(alpha) => {
-                let beta = self.push_ex_row();
-                self.solve_row(
+                // Open the existential tail to `label | beta`, splicing the fresh
+                // `beta` in at `alpha`'s position so the solution references only
+                // entries to its left (mirrors `splice_solved` for type vars);
+                // appending `beta` would make `alpha` point right and strand it on
+                // a later truncation.
+                let beta = self.fresh_id();
+                self.splice_solved_row(
                     *alpha,
+                    &[beta],
                     EffRow::Extend(label.clone(), Box::new(EffRow::Exist(beta))),
                 )?;
                 Ok(EffRow::Exist(beta))
@@ -474,8 +482,8 @@ mod tests {
         ctors: &'a BTreeMap<String, super::super::CtorInfo>,
         data: &'a BTreeMap<String, super::super::DataInfo>,
         eff_ops: &'a BTreeMap<String, super::super::EffOpInfo>,
-        classes: &'a BTreeMap<String, super::super::ClassInfo>,
-        instances: &'a BTreeMap<String, super::super::InstInfo>,
+        classes: &'a BTreeMap<Sym, super::super::ClassInfo>,
+        instances: &'a BTreeMap<Sym, super::super::InstInfo>,
         inst_keys: &'a super::super::InstKeys,
         canonical: &'a super::super::Canon,
     ) -> Tc<'a> {

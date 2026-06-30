@@ -1,0 +1,66 @@
+import Replay (..)
+
+-- Durable record/replay with output suppressed on resume. A workflow reads a
+-- config then draws randoms, PRINTING a line per step. `durable(log, action)`
+-- replays the persisted prefix silently (dropping the output that already fired
+-- in the interrupted run) and, once the log is exhausted, performs each new step
+-- (and its output) for real, persisting after every observation. So a crash plus
+-- resume prints each step exactly once: the concatenation of the two runs' output
+-- equals one uninterrupted run.
+--
+-- Crash plus resume is two invocations of `prism run examples/durable.pr`:
+--   * the first finds no log and runs with `stop = 3`: it prints the config line
+--     and steps 1 and 2, draws the third random (persisting it), then crashes
+--     BEFORE printing step 3, so that step's output never fires in this run;
+--   * the second finds the log, replays the config read and three draws silently
+--     (dropping their output), then prints step 3 (whose output never fired) and
+--     the remaining live steps.
+
+fn log_path() = "target/durable.log"
+
+fn cfg_path() = "target/durable.cfg"
+
+-- A config with ':' and newlines, so the persisted trace exercises the
+-- length-prefixed string encoding on a payload that contains the delimiter.
+fn cfg_text() = "alpha:1\nbeta:22\ngamma:333\n"
+
+fn crash_if(stop, done) =
+  if stop >= 0 && done >= stop then
+    eprintln("simulated crash after step {done} drew; re-run to resume")
+    error(2)
+
+-- Draw a random (a persisted observation), then crash on the `stop` step BEFORE
+-- printing it, so the crashing step's output never fires in this run.
+fn draw(total, stop, done, acc) =
+  if done > total then
+    acc
+  else
+    let r = rng_rand(())
+    let acc2 = acc + r
+    crash_if(stop, done)
+    println("step {done}: running sum mod 97 = {mod(acc2, 97)}")
+    draw(total, stop, done + 1, acc2)
+
+-- Reads the config (observation 1), prints a line about it, then draws `total`
+-- randoms; crashes after the `stop` step's draw when `stop >= 0`.
+fn flow(total, stop, u) =
+  let cfg = read_file(cfg_path())
+  println("config has {str_len(cfg)} bytes")
+  draw(total, stop, 1, 0)
+
+fn cleanup() =
+  remove_file(log_path())
+  remove_file(cfg_path())
+  ()
+
+fn main() =
+  let log = log_path()
+  write_file(cfg_path(), cfg_text())
+  let resuming = prim_file_exists(log) && str_len(prim_read_file(log)) > 0
+  if resuming then
+    let total = durable(log, \(u) -> flow(5, 0 - 1, u))
+    println("resumed and finished: final sum mod 97 = {mod(total, 97)}")
+    cleanup()
+  else
+    durable(log, \(u) -> flow(5, 3, u))
+    ()

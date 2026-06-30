@@ -13,13 +13,21 @@ use std::path::Path;
 use crate::lex::Token;
 use crate::{check, format as fmt_src, interpret, off_platform_builtins, with_prelude};
 
-// The web host owns the effects. It serves only what a browser can: `print`
-// (buffered) and `read_line` (host-fed). The OS builtins compile on wasm but
-// have no implementation here, so the snippet declares its platform by which
-// of these it reaches in the elaborated core, and a use of one is reported up
-// front rather than failing silently at runtime. The check runs after
-// type-checking and elaboration so indirection like `let f = read_file; f()`
-// is caught as soundly as a direct `read_file(..)` call.
+// The web host owns the effects. A browser can serve more of them than it might
+// seem: `print` is buffered and `read_line` host-fed, the `Random` capability is
+// a deterministic SplitMix64 stream (pure arithmetic, identical to the native
+// oracle), and the `Env` capability reads an empty environment (`getenv` returns
+// "", no args). What it genuinely cannot provide is host file IO and process
+// control. A snippet declares its platform by which builtins it reaches in the
+// elaborated core, and a use of an unservable one is reported up front rather
+// than failing silently at runtime. The check runs after type-checking and
+// elaboration so indirection like `let f = read_file; f()` is caught as soundly
+// as a direct `read_file(..)` call.
+
+// Off-platform builtins the browser can still serve with a sensible default: the
+// `Env` capability inputs answer from an empty environment. (`Random` never
+// reaches this list; it lowers to a pure `Rand` node the interpreter evaluates.)
+const BROWSER_SERVABLE: &[&str] = &["getenv", "args_count", "arg"];
 
 /// Run a snippet and return its captured `print` transcript verbatim (the exact
 /// bytes emitted, the same the differential oracle compares). On any front-end
@@ -29,13 +37,18 @@ use crate::{check, format as fmt_src, interpret, off_platform_builtins, with_pre
 pub fn run(src: &str) -> String {
     let full = with_prelude(src);
     match off_platform_builtins(&full, Path::new(".")) {
-        Ok(off) if !off.is_empty() => {
-            return format!(
-                "error: the web platform provides only `print` and `read_line`; not available here: {}",
-                off.join(", ")
-            );
+        Ok(off) => {
+            let blocked: Vec<_> = off
+                .into_iter()
+                .filter(|b| !BROWSER_SERVABLE.contains(b))
+                .collect();
+            if !blocked.is_empty() {
+                return format!(
+                    "error: the web platform cannot provide host file or process IO here: {}",
+                    blocked.join(", ")
+                );
+            }
         }
-        Ok(_) => {}
         Err(e) => return format!("error: {e}"),
     }
     match interpret(&full) {

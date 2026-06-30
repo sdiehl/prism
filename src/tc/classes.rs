@@ -10,7 +10,7 @@ use super::{
 use crate::error::TypeError;
 use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
-use crate::syntax::ast::{self, Core, Program};
+use crate::syntax::ast::{self, Core, NodeId, Program};
 use crate::types::ty::{EffRow, Type};
 
 // Cap on recursive instance resolution: a cyclic or diverging instance set
@@ -23,7 +23,8 @@ impl Tc<'_> {
     pub(super) fn instantiate_constrained(
         &mut self,
         scheme: &Type,
-        cs: &[(String, Type)],
+        cs: &[(Sym, Type)],
+        id: NodeId,
         span: Span,
         explicit: Option<&[String]>,
     ) -> Type {
@@ -62,11 +63,11 @@ impl Tc<'_> {
                 for (n, t) in &subs {
                     ct = ct.subst_var(*n, t);
                 }
-                (class.clone(), ct, explicit.map(|ns| ns[i].clone()))
+                (class.to_string(), ct, explicit.map(|ns| ns[i].clone()))
             })
             .collect();
         if !items.is_empty() {
-            self.wanted.push(Wanted { span, items });
+            self.wanted.push(Wanted { id, span, items });
         }
         body
     }
@@ -105,12 +106,12 @@ impl Tc<'_> {
         // sees their final types. An operand a later use already pinned to a
         // fixed-width lane is recorded; one still ambiguous defaults to `Int`; a
         // `Float` or non-numeric one (an int operator on a float) is rejected.
-        for (span, t) in std::mem::take(&mut self.num_default) {
+        for (id, span, t) in std::mem::take(&mut self.num_default) {
             let t = self.apply(&t);
             match &t {
                 Type::Int => {}
                 Type::I64 | Type::U64 => {
-                    self.fixed.insert(span, t);
+                    self.fixed.insert(id, t);
                 }
                 other => {
                     self.default_numeric(other, span)?;
@@ -124,7 +125,7 @@ impl Tc<'_> {
                 let t = self.apply(ty);
                 ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), &[])?);
             }
-            match self.dicts.get(&w.span) {
+            match self.dicts.get(&w.id) {
                 Some(prev) if *prev != ds => {
                     return Err(TypeError::Ice {
                         msg: format!("conflicting dict records at {:?}", w.span),
@@ -132,7 +133,7 @@ impl Tc<'_> {
                 }
                 Some(_) => {}
                 None => {
-                    self.dicts.insert(w.span, ds);
+                    self.dicts.insert(w.id, ds);
                 }
             }
         }
@@ -170,10 +171,13 @@ impl Tc<'_> {
             });
         }
         let inst_name = if let Some(name) = explicit {
-            let info = self.instances.get(name).ok_or_else(|| TypeError::Other {
-                span,
-                msg: format!("unknown instance `{name}`"),
-            })?;
+            let info = self
+                .instances
+                .get(&Sym::from(name))
+                .ok_or_else(|| TypeError::Other {
+                    span,
+                    msg: format!("unknown instance `{name}`"),
+                })?;
             if info.class != class {
                 return Err(TypeError::Other {
                     span,
@@ -212,25 +216,17 @@ impl Tc<'_> {
             let key = Self::head_key(class, t, span)?;
             match self
                 .inst_keys
-                .get(&(class.to_string(), key.clone()))
+                .get(&(Sym::from(class), key.clone()))
                 .map(Vec::as_slice)
             {
-                Some([one]) => one.clone(),
+                Some([one]) => one.to_string(),
                 Some(many @ [_, _, ..]) => {
                     // Several instances share this head, so implicit resolution
                     // uses the canonical designation. Coherence checking rejects
                     // 2+ undesignated instances at definition, so a missing entry
                     // here is a backstop, not a reachable user error.
-                    let Some(name) = self.canonical.get(&(class.to_string(), key)) else {
-                        let cross_module = many
-                            .iter()
-                            .filter_map(|n| self.instances.get(n))
-                            .any(|i| !i.module.is_empty());
-                        let listed = if cross_module {
-                            provenance_list(self.instances, many)
-                        } else {
-                            many.join(", ")
-                        };
+                    let Some(name) = self.canonical.get(&(Sym::from(class), key)) else {
+                        let listed = provenance_list(self.instances, many);
                         return Err(TypeError::Other {
                             span,
                             msg: format!(
@@ -240,7 +236,7 @@ impl Tc<'_> {
                             ),
                         });
                     };
-                    name.clone()
+                    name.to_string()
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -250,7 +246,7 @@ impl Tc<'_> {
                 }
             }
         };
-        let info = self.instances[&inst_name].clone();
+        let info = self.instances[&Sym::from(&inst_name)].clone();
         let mut vars = BTreeSet::new();
         collect_type_vars(&info.head, &mut vars);
         let subs: Vec<(Sym, Type)> = vars
@@ -282,7 +278,7 @@ impl Tc<'_> {
                 ct = ct.subst_var(*n, x);
             }
             let ct = self.apply(&ct);
-            ctx_dicts.push(self.resolve(cclass, &ct, span, None, &child)?);
+            ctx_dicts.push(self.resolve(cclass.as_str(), &ct, span, None, &child)?);
         }
         // Superclass dictionaries follow the declared context, in the same order
         // the instance constructor lays them out as leading dict-cell fields.
@@ -292,7 +288,7 @@ impl Tc<'_> {
                 st = st.subst_var(*n, x);
             }
             let st = self.apply(&st);
-            ctx_dicts.push(self.resolve(sclass, &st, span, None, &child)?);
+            ctx_dicts.push(self.resolve(sclass.as_str(), &st, span, None, &child)?);
         }
         Ok(Dict::Global(inst_name, ctx_dicts))
     }
@@ -312,12 +308,12 @@ impl Tc<'_> {
         if depth > MAX_INSTANCE_DEPTH {
             return None;
         }
-        let info = self.classes.get(from)?;
+        let info = self.classes.get(&Sym::from(from))?;
         for (idx, s) in info.supers.iter().enumerate() {
-            if s == want {
+            if s.as_str() == want {
                 return Some(vec![(from.to_string(), idx)]);
             }
-            if let Some(mut rest) = self.super_path_d(s, want, depth + 1) {
+            if let Some(mut rest) = self.super_path_d(s.as_str(), want, depth + 1) {
                 rest.insert(0, (from.to_string(), idx));
                 return Some(rest);
             }
@@ -342,12 +338,12 @@ impl Tc<'_> {
 }
 
 type BuildClassResult = (
-    BTreeMap<String, ClassInfo>,
-    BTreeMap<String, InstInfo>,
+    BTreeMap<Sym, ClassInfo>,
+    BTreeMap<Sym, InstInfo>,
     InstKeys,
     Canon,
-    BTreeMap<String, (String, usize)>,
-    BTreeMap<String, (Type, Vec<(String, Type)>)>,
+    BTreeMap<Sym, (Sym, usize)>,
+    BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     Vec<Warning>,
 );
 
@@ -370,28 +366,29 @@ const fn head_name(t: &Type) -> Option<HeadKey> {
 // with a readable path instead of letting `super_path` overflow the stack at the
 // first use site. Three-color DFS; a gray (on-stack) target is a back edge.
 fn check_superclass_cycles(
-    classes: &BTreeMap<String, ClassInfo>,
+    classes: &BTreeMap<Sym, ClassInfo>,
     decls: &[ast::ClassDecl],
 ) -> Result<(), TypeError> {
     fn dfs<'a>(
         node: &'a str,
-        classes: &'a BTreeMap<String, ClassInfo>,
+        classes: &'a BTreeMap<Sym, ClassInfo>,
         color: &mut BTreeMap<&'a str, u8>,
         path: &mut Vec<&'a str>,
     ) -> Option<Vec<String>> {
         color.insert(node, 1);
         path.push(node);
-        if let Some(info) = classes.get(node) {
+        if let Some(info) = classes.get(&Sym::from(node)) {
             for s in &info.supers {
-                let Some((skey, _)) = classes.get_key_value(s.as_str()) else {
+                if !classes.contains_key(s) {
                     continue;
-                };
-                match color.get(skey.as_str()).copied().unwrap_or(0) {
+                }
+                let skey: &str = s.as_str();
+                match color.get(skey).copied().unwrap_or(0) {
                     1 => {
-                        let from = path.iter().position(|p| *p == skey.as_str()).unwrap_or(0);
+                        let from = path.iter().position(|p| *p == skey).unwrap_or(0);
                         let mut cyc: Vec<String> =
                             path[from..].iter().map(|p| (*p).to_string()).collect();
-                        cyc.push(skey.clone());
+                        cyc.push(skey.to_string());
                         return Some(cyc);
                     }
                     0 => {
@@ -408,8 +405,12 @@ fn check_superclass_cycles(
         None
     }
     let mut color: BTreeMap<&str, u8> = BTreeMap::new();
-    for start in classes.keys() {
-        if color.get(start.as_str()).copied().unwrap_or(0) != 0 {
+    // `Sym` keys order by intern id; sort on the name so the reported cycle is
+    // deterministic when several independent cycles exist.
+    let mut starts: Vec<&str> = classes.keys().map(|s| s.as_str()).collect();
+    starts.sort_unstable();
+    for start in starts {
+        if color.get(start).copied().unwrap_or(0) != 0 {
             continue;
         }
         let mut path = Vec::new();
@@ -434,14 +435,14 @@ pub(super) fn build_classes(
     env: &mut Env,
 ) -> Result<BuildClassResult, TypeError> {
     let fn_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
-    let mut classes: BTreeMap<String, ClassInfo> = BTreeMap::new();
-    let mut instances: BTreeMap<String, InstInfo> = BTreeMap::new();
+    let mut classes: BTreeMap<Sym, ClassInfo> = BTreeMap::new();
+    let mut instances: BTreeMap<Sym, InstInfo> = BTreeMap::new();
     let mut inst_keys = InstKeys::new();
     let mut warnings: Vec<Warning> = Vec::new();
-    let mut methods: BTreeMap<String, (String, usize)> = BTreeMap::new();
-    let mut constrained: BTreeMap<String, (Type, Vec<(String, Type)>)> = BTreeMap::new();
+    let mut methods: BTreeMap<Sym, (Sym, usize)> = BTreeMap::new();
+    let mut constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)> = BTreeMap::new();
     for c in &prog.classes {
-        if classes.contains_key(&c.name) {
+        if classes.contains_key(&Sym::from(&c.name)) {
             return Err(TypeError::Other {
                 span: c.span,
                 msg: format!("duplicate class {}", c.name),
@@ -468,7 +469,7 @@ pub(super) fn build_classes(
                 });
             }
             if env.contains_key(&Sym::from(mname))
-                || methods.contains_key(mname)
+                || methods.contains_key(&Sym::from(mname))
                 || fn_names.contains(mname.as_str())
             {
                 return Err(TypeError::Other {
@@ -477,25 +478,17 @@ pub(super) fn build_classes(
                 });
             }
             let sorted: Vec<Sym> = vars.into_iter().collect();
-            let mut scheme = wrap_forall(&sorted, t.clone());
-            // Generalize over the method's effect-row variables too, so an
-            // effect-polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`)
-            // is row-polymorphic rather than carrying a free row var.
-            let mut rvars = BTreeSet::new();
-            collect_row_vars(&t, &mut rvars);
-            for rv in rvars {
-                scheme = Type::RowForall(rv, Box::new(scheme));
-            }
+            let scheme = quantify(&t, &sorted);
             env.insert(Sym::from(mname), scheme.clone());
-            methods.insert(mname.clone(), (c.name.clone(), idx));
+            methods.insert(Sym::from(mname), (Sym::from(&c.name), idx));
             constrained.insert(
-                mname.clone(),
+                Sym::from(mname),
                 (
                     scheme,
-                    vec![(c.name.clone(), Type::Var(Sym::from(&c.param)))],
+                    vec![(Sym::from(&c.name), Type::Var(Sym::from(&c.param)))],
                 ),
             );
-            infos.push((mname.clone(), t));
+            infos.push((Sym::from(mname), t));
         }
         let dname = dict_ctor(&c.name);
         // The dictionary cell is structurally typed, not a row of placeholders:
@@ -513,12 +506,7 @@ pub(super) fn build_classes(
             let mut tvars = BTreeSet::new();
             collect_type_vars(mt, &mut tvars);
             tvars.remove(&param);
-            let mut scheme = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), mt.clone());
-            let mut rvars = BTreeSet::new();
-            collect_row_vars(mt, &mut rvars);
-            for rv in rvars {
-                scheme = Type::RowForall(rv, Box::new(scheme));
-            }
+            let scheme = quantify(mt, &tvars.into_iter().collect::<Vec<_>>());
             dict_args.push(scheme);
         }
         data.insert(
@@ -539,10 +527,10 @@ pub(super) fn build_classes(
             },
         );
         classes.insert(
-            c.name.clone(),
+            Sym::from(&c.name),
             ClassInfo {
-                param: c.param.clone(),
-                supers: c.supers.clone(),
+                param: Sym::from(&c.param),
+                supers: c.supers.iter().map(Sym::from).collect(),
                 methods: infos,
             },
         );
@@ -552,11 +540,13 @@ pub(super) fn build_classes(
     // into unbounded recursion at the first use site.
     check_superclass_cycles(&classes, &prog.classes)?;
     for i in &prog.instances {
-        let class = classes.get(&i.class).ok_or_else(|| TypeError::Other {
-            span: i.span,
-            msg: format!("unknown class {}", i.class),
-        })?;
-        if instances.contains_key(&i.name)
+        let class = classes
+            .get(&Sym::from(&i.class))
+            .ok_or_else(|| TypeError::Other {
+                span: i.span,
+                msg: format!("unknown class {}", i.class),
+            })?;
+        if instances.contains_key(&Sym::from(&i.name))
             || env.contains_key(&Sym::from(&i.name))
             || fn_names.contains(i.name.as_str())
         {
@@ -598,7 +588,7 @@ pub(super) fn build_classes(
         }
         let mut context = Vec::new();
         for ct in &i.context {
-            if !classes.contains_key(&ct.class) {
+            if !classes.contains_key(&Sym::from(&ct.class)) {
                 return Err(TypeError::Other {
                     span: ct.span,
                     msg: format!("unknown class {}", ct.class),
@@ -606,7 +596,7 @@ pub(super) fn build_classes(
             }
             match &ct.ty {
                 ast::Ty::Var(v) if head_vars.contains(&Sym::from(v)) => {
-                    context.push((ct.class.clone(), Type::Var(Sym::from(v))));
+                    context.push((Sym::from(&ct.class), Type::Var(Sym::from(v))));
                 }
                 _ => {
                     return Err(TypeError::Other {
@@ -619,13 +609,17 @@ pub(super) fn build_classes(
         }
         let mut seen = BTreeSet::new();
         for m in &i.methods {
-            if !seen.insert(m.name.clone()) {
+            if !seen.insert(Sym::from(&m.name)) {
                 return Err(TypeError::Other {
                     span: m.span,
                     msg: format!("duplicate method `{}` in instance `{}`", m.name, i.name),
                 });
             }
-            let Some((_, sig)) = class.methods.iter().find(|(n, _)| n == &m.name) else {
+            let Some((_, sig)) = class
+                .methods
+                .iter()
+                .find(|(n, _)| n.as_str() == m.name.as_str())
+            else {
                 return Err(TypeError::Other {
                     span: m.span,
                     msg: format!("class {} has no method `{}`", i.class, m.name),
@@ -660,11 +654,11 @@ pub(super) fn build_classes(
                 });
             }
         }
-        let missing: Vec<String> = class
+        let missing: Vec<&str> = class
             .methods
             .iter()
-            .map(|(n, _)| n.clone())
-            .filter(|n| !seen.contains(n))
+            .filter(|(n, _)| !seen.contains(n))
+            .map(|(n, _)| n.as_str())
             .collect();
         if !missing.is_empty() {
             return Err(TypeError::Other {
@@ -686,7 +680,7 @@ pub(super) fn build_classes(
                     msg: format!("class {} names unknown superclass {s}", i.class),
                 });
             }
-            supers.push((s.clone(), head.clone()));
+            supers.push((*s, head.clone()));
         }
         // Orphan rule: an instance must be anchored to the module that defines
         // its class or its head type. Anywhere else it is an orphan, warned now
@@ -724,13 +718,13 @@ pub(super) fn build_classes(
             });
         }
         inst_keys
-            .entry((i.class.clone(), key))
+            .entry((Sym::from(&i.class), key))
             .or_default()
-            .push(i.name.clone());
+            .push(Sym::from(&i.name));
         instances.insert(
-            i.name.clone(),
+            Sym::from(&i.name),
             InstInfo {
-                class: i.class.clone(),
+                class: Sym::from(&i.class),
                 head,
                 module: i.module.clone(),
                 context,
@@ -758,7 +752,7 @@ pub(super) fn build_classes(
 fn build_canonical(
     prog: &Program<Core>,
     inst_keys: &InstKeys,
-    instances: &BTreeMap<String, InstInfo>,
+    instances: &BTreeMap<Sym, InstInfo>,
 ) -> Result<Canon, TypeError> {
     let mut canonical: Canon = BTreeMap::new();
     for c in &prog.canonicals {
@@ -768,8 +762,8 @@ fn build_canonical(
             msg: "canonical head must be a primitive type or a data type constructor".to_string(),
         })?;
         let registered = inst_keys
-            .get(&(c.class.clone(), key.clone()))
-            .is_some_and(|ns| ns.contains(&c.name));
+            .get(&(Sym::from(&c.class), key.clone()))
+            .is_some_and(|ns| ns.contains(&Sym::from(&c.name)));
         if !registered {
             return Err(TypeError::Other {
                 span: c.span,
@@ -782,7 +776,7 @@ fn build_canonical(
             });
         }
         if canonical
-            .insert((c.class.clone(), key), c.name.clone())
+            .insert((Sym::from(&c.class), key), Sym::from(&c.name))
             .is_some()
         {
             return Err(TypeError::Other {
@@ -795,8 +789,12 @@ fn build_canonical(
             });
         }
     }
-    for ((class, key), names) in inst_keys {
-        if names.len() < 2 || canonical.contains_key(&(class.clone(), key.clone())) {
+    // Iterate in name order: `Sym` keys order by intern id, so sort on the class
+    // name to keep the chosen diagnostic deterministic across runs.
+    let mut entries: Vec<_> = inst_keys.iter().collect();
+    entries.sort_by_key(|((class, key), _)| (class.as_str(), key.clone()));
+    for ((class, key), names) in entries {
+        if names.len() < 2 || canonical.contains_key(&(*class, key.clone())) {
             continue;
         }
         let head = instances
@@ -808,7 +806,7 @@ fn build_canonical(
         let span = prog
             .instances
             .iter()
-            .find(|i| names.contains(&i.name) && i.module.is_empty())
+            .find(|i| names.contains(&Sym::from(&i.name)) && i.module.is_empty())
             .map_or_else(Span::default, |i| i.span);
         return Err(TypeError::Other {
             span,
@@ -826,7 +824,21 @@ fn build_canonical(
 /// Render a list of instance names with their defining module, for overlap and
 /// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
 /// program) ``.
-fn provenance_list(instances: &BTreeMap<String, InstInfo>, names: &[String]) -> String {
+// Generalize a method/dictionary-field type over the given type variables and,
+// additionally, over every effect-row variable it mentions, so an effect-
+// polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`) is row-polymorphic
+// rather than carrying a free row var.
+fn quantify(ty: &Type, tvars: &[Sym]) -> Type {
+    let mut scheme = wrap_forall(tvars, ty.clone());
+    let mut rvars = BTreeSet::new();
+    collect_row_vars(ty, &mut rvars);
+    for rv in rvars {
+        scheme = Type::RowForall(rv, Box::new(scheme));
+    }
+    scheme
+}
+
+fn provenance_list(instances: &BTreeMap<Sym, InstInfo>, names: &[Sym]) -> String {
     names
         .iter()
         .map(|n| match instances.get(n).map(|i| i.module.as_str()) {

@@ -8,8 +8,8 @@ use super::{
 };
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, PathOp, PathStep, S};
-use crate::types::ty::{EffRow, Label, Type, EQ_CLASS, LIST};
+use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, NodeId, PathOp, PathStep, S};
+use crate::types::ty::{EffRow, Effects, Label, Type, EQ_CLASS, LIST};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
@@ -22,7 +22,6 @@ struct DeclSeed {
     cur: Vec<(String, Type)>,
     scope: Vec<(Sym, Vec<Type>)>,
     mu: u32,
-    prefix: std::collections::BTreeSet<Sym>,
     self_ty: Type,
 }
 
@@ -96,6 +95,7 @@ impl Tc<'_> {
 
     fn check(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
         let span = e.span;
+        let id = e.id;
         match (&e.node, ty) {
             (_, Type::Forall(n, b)) => {
                 self.ctx.push(Entry::Uni(*n));
@@ -131,9 +131,8 @@ impl Tc<'_> {
                     EffRow::Exist(r) => (*r, None),
                     other => (self.push_ex_row(), Some(other.clone())),
                 };
-                let saved = self.cur_row.replace(RowScope { tail, prefix });
-                let checked = self.check(&env2, body, ret);
-                self.cur_row = saved;
+                let checked =
+                    self.with_row_scope(RowScope { tail, prefix }, |tc| tc.check(&env2, body, ret));
                 checked?;
                 if let Some(closed) = closed {
                     self.unify_row(&EffRow::Exist(tail), &closed)
@@ -148,6 +147,7 @@ impl Tc<'_> {
             }
             (Expr::Let(x, v, b), _) => {
                 let tv = self.synth(env, v)?;
+                // Unconditional generalization; no value restriction (see `generalize`).
                 let g = self.generalize(env, &tv);
                 let mut env2 = env.clone();
                 env2.insert(Sym::from(x), g);
@@ -174,7 +174,7 @@ impl Tc<'_> {
             }
             (Expr::Int(lit), Type::I64 | Type::U64) if lit.suffix == ast::Suffix::None => {
                 Self::lit_range(lit, ty, span)?;
-                self.fixed.insert(span, ty.clone());
+                self.fixed.insert(id, ty.clone());
                 Ok(())
             }
             _ => {
@@ -194,7 +194,7 @@ impl Tc<'_> {
 
     pub(super) fn synth(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
         let t = self.synth_node(env, e)?;
-        self.pending.push((e.span, t.clone()));
+        self.pending.push((e.id, t.clone()));
         Ok(t)
     }
 
@@ -217,11 +217,21 @@ impl Tc<'_> {
         r
     }
 
+    // Run `f` under a delimited ambient effect row, restoring the previous row
+    // afterwards (mirrors `with_self`). Any reading of the scoped row (e.g. to
+    // collect inferred effects) must happen inside `f`, before the restore.
+    fn with_row_scope<R>(&mut self, scope: RowScope, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = self.cur_row.replace(scope);
+        let r = f(self);
+        self.cur_row = saved;
+        r
+    }
+
     // Zonk after resolve_all, while this declaration's solutions are still in ctx.
     fn flush_spans(&mut self) {
-        for (span, t) in std::mem::take(&mut self.pending) {
+        for (id, t) in std::mem::take(&mut self.pending) {
             let t = self.apply(&t);
-            self.span_types.insert(span, t);
+            self.span_types.insert(id, t);
         }
     }
 
@@ -287,6 +297,7 @@ impl Tc<'_> {
 
     fn synth_node(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
         let span = e.span;
+        let id = e.id;
         match &e.node {
             Expr::Int(lit) => {
                 let ty = match lit.suffix {
@@ -295,7 +306,7 @@ impl Tc<'_> {
                     ast::Suffix::U64 => Type::U64,
                 };
                 Self::lit_range(lit, &ty, span)?;
-                self.fixed.insert(span, ty.clone());
+                self.fixed.insert(id, ty.clone());
                 Ok(ty)
             }
             Expr::Float(_) => Ok(Type::Float),
@@ -311,9 +322,9 @@ impl Tc<'_> {
                         span,
                         name: x.clone(),
                     })?;
-                if let Some((scheme, cs)) = self.constrained.get(x).cloned() {
+                if let Some((scheme, cs)) = self.constrained.get(&Sym::from(x)).cloned() {
                     if t == scheme && !cs.is_empty() {
-                        return Ok(self.instantiate_constrained(&scheme, &cs, span, None));
+                        return Ok(self.instantiate_constrained(&scheme, &cs, id, span, None));
                     }
                 }
                 if let Some(s) = &self.cur_self {
@@ -324,7 +335,7 @@ impl Tc<'_> {
                             .into_iter()
                             .map(|(class, cty)| (class, cty, None))
                             .collect();
-                        self.wanted.push(Wanted { span, items });
+                        self.wanted.push(Wanted { id, span, items });
                     }
                 }
                 Ok(t)
@@ -344,7 +355,7 @@ impl Tc<'_> {
                         span: f.span,
                         name: x.clone(),
                     })?;
-                match self.constrained.get(x).cloned() {
+                match self.constrained.get(&Sym::from(x)).cloned() {
                     Some((scheme, cs)) if t == scheme && !cs.is_empty() => {
                         if names.len() != cs.len() {
                             return Err(TypeError::Other {
@@ -356,7 +367,7 @@ impl Tc<'_> {
                                 ),
                             });
                         }
-                        Ok(self.instantiate_constrained(&scheme, &cs, span, Some(names)))
+                        Ok(self.instantiate_constrained(&scheme, &cs, id, span, Some(names)))
                     }
                     _ => Err(TypeError::Other {
                         span,
@@ -366,7 +377,7 @@ impl Tc<'_> {
             }
             Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
             Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
-            Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, span),
+            Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, id, span),
             Expr::If(c, t, e2) => {
                 self.check(env, c, &Type::Bool)?;
                 let tt = self.synth(env, t)?;
@@ -376,6 +387,7 @@ impl Tc<'_> {
             }
             Expr::Let(x, v, b) => {
                 let tv = self.synth(env, v)?;
+                // Unconditional generalization; no value restriction (see `generalize`).
                 let g = self.generalize(env, &tv);
                 let mut env2 = env.clone();
                 env2.insert(Sym::from(x), g);
@@ -394,12 +406,13 @@ impl Tc<'_> {
                 // captured on the arrow type, not bled into the enclosing
                 // function, and re-emerge only when the closure is applied.
                 let row = self.push_ex_row();
-                let saved = self.cur_row.replace(RowScope {
-                    tail: row,
-                    prefix: BTreeSet::new(),
-                });
-                let checked = self.check(&env2, body, &Type::Exist(ret));
-                self.cur_row = saved;
+                let checked = self.with_row_scope(
+                    RowScope {
+                        tail: row,
+                        prefix: BTreeSet::new(),
+                    },
+                    |tc| tc.check(&env2, body, &Type::Exist(ret)),
+                );
                 checked?;
                 Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
             }
@@ -416,14 +429,8 @@ impl Tc<'_> {
                         // obligation (rule 1) is a bare label; emit it, then type
                         // the call through the ordinary env-scheme path below.
                         let eff = info.effect_name;
-                        self.absorb_row(&EffRow::Extend(
-                            Label {
-                                name: eff,
-                                args: Vec::new(),
-                            },
-                            Box::new(EffRow::Empty),
-                        ))
-                        .map_err(|e| e.at(span))?;
+                        self.absorb_row(&EffRow::singleton(eff))
+                            .map_err(|e| e.at(span))?;
                     }
                 }
                 let tf = self.synth(env, f)?;
@@ -481,7 +488,7 @@ impl Tc<'_> {
                     .find(|(_, c)| c.type_name == ctor_name && c.fields.iter().any(|f| *f == field))
                 {
                     self.field_res
-                        .insert(span, (cname.clone(), fi, info.args.len()));
+                        .insert(id, (cname.clone(), fi, info.args.len()));
                 }
                 Ok(field_ty)
             }
@@ -519,7 +526,7 @@ impl Tc<'_> {
                 }
                 Ok(self.apply(&result_ty))
             }
-            Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, span),
+            Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, id, span),
             Expr::Handle(body, arms) => {
                 // The handler picks one instantiation per parametric effect it
                 // handles. The body checks under that scope, so every perform
@@ -551,18 +558,12 @@ impl Tc<'_> {
                         }
                         HandlerArm::Op(op_name, params, k_var, arm_body) => {
                             if let Some(info) = self.eff_ops.get(op_name).cloned() {
-                                let mut op_params = info.params.clone();
-                                let mut op_ret = info.ret.clone();
                                 let eff_sym = info.effect_name;
-                                if let Some((_, args)) = scope.iter().find(|(n, _)| *n == eff_sym) {
-                                    for (p, t) in info.eff_params.iter().zip(args) {
-                                        let p = *p;
-                                        for q in &mut op_params {
-                                            *q = q.subst_var(p, t);
-                                        }
-                                        op_ret = op_ret.subst_var(p, t);
-                                    }
-                                }
+                                let (op_params, op_ret) =
+                                    match scope.iter().find(|(n, _)| *n == eff_sym) {
+                                        Some((_, args)) => info.instantiate(args),
+                                        None => (info.params.clone(), info.ret.clone()),
+                                    };
                                 let mut env2 = env.clone();
                                 for (pname, pty) in params.iter().zip(op_params.iter()) {
                                     env2.insert(Sym::from(pname), pty.clone());
@@ -589,11 +590,7 @@ impl Tc<'_> {
             Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
-                let mut ty_ex = BTreeMap::new();
-                let mut row_ex = BTreeMap::new();
-                let no_rigid = BTreeSet::new();
-                let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
-                let t = self.convert_annot(ann, &mut a);
+                let t = self.convert_annot_fresh(ann);
                 self.check(env, inner, &t)?;
                 Ok(self.apply(&t))
             }
@@ -615,6 +612,7 @@ impl Tc<'_> {
         env: &Env,
         base: &S<Expr<Core>>,
         ups: &[(Vec<PathStep<Core>>, PathOp<Core>)],
+        id: NodeId,
         span: Span,
     ) -> Result<Type, TypeError> {
         let tb = self.synth(env, base)?;
@@ -687,7 +685,7 @@ impl Tc<'_> {
             }
             chains.push(chain);
         }
-        self.path_res.insert(span, chains);
+        self.path_res.insert(id, chains);
         Ok(self.apply(&tb))
     }
 
@@ -709,11 +707,7 @@ impl Tc<'_> {
     ) -> Result<Type, TypeError> {
         let recv_ty = self.synth(env, recv)?;
         let recv_ty = self.apply(&recv_ty);
-        let fail = Label {
-            name: Sym::from(crate::names::FAIL_EFFECT),
-            args: vec![],
-        };
-        self.absorb_row(&EffRow::Extend(fail, Box::new(EffRow::Empty)))
+        self.absorb_row(&EffRow::singleton(Sym::from(crate::names::FAIL_EFFECT)))
             .map_err(|e| e.at(span))?;
         if let Some((kty, elem, _)) = index_container(&recv_ty) {
             self.check(env, key, &kty)?;
@@ -798,6 +792,7 @@ impl Tc<'_> {
         op: BinOp,
         a: &S<Expr<Core>>,
         b: &S<Expr<Core>>,
+        id: NodeId,
         span: Span,
     ) -> Result<Type, TypeError> {
         match op {
@@ -819,18 +814,19 @@ impl Tc<'_> {
             BinOp::Eq | BinOp::Ne => {
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                let ta = self.instantiate_constrained(&ta, &[], span, None);
+                let ta = self.instantiate_constrained(&ta, &[], id, span, None);
                 self.check(env, b, &ta)?;
                 let ta = self.apply(&ta);
                 match &ta {
                     Type::Int => {}
                     Type::I64 | Type::U64 | Type::Float | Type::Bool | Type::Str => {
-                        self.fixed.insert(span, ta);
+                        self.fixed.insert(id, ta);
                     }
                     // Defer like the arithmetic arm: a later use may still pin
                     // this to a fixed-width lane before the `Int` default applies.
-                    Type::Exist(_) => self.num_default.push((span, ta)),
+                    Type::Exist(_) => self.num_default.push((id, span, ta)),
                     _ => self.wanted.push(Wanted {
+                        id,
                         span,
                         items: vec![(EQ_CLASS.into(), ta, None)],
                     }),
@@ -851,7 +847,7 @@ impl Tc<'_> {
                 let t = match &ta {
                     Type::I64 | Type::U64 => {
                         self.check(env, b, &ta)?;
-                        self.fixed.insert(span, ta.clone());
+                        self.fixed.insert(id, ta.clone());
                         ta
                     }
                     Type::Int => {
@@ -863,10 +859,10 @@ impl Tc<'_> {
                         let t = self.apply(&ta);
                         match &t {
                             Type::I64 | Type::U64 => {
-                                self.fixed.insert(span, t.clone());
+                                self.fixed.insert(id, t.clone());
                             }
                             Type::Int => {}
-                            Type::Exist(_) => self.num_default.push((span, t.clone())),
+                            Type::Exist(_) => self.num_default.push((id, span, t.clone())),
                             other => {
                                 self.default_numeric(other, b.span)?;
                             }
@@ -904,7 +900,8 @@ impl Tc<'_> {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
                 let arg_exs: Vec<u32> = args.iter().map(|_| self.fresh_id()).collect();
-                self.articulate(*a, &arg_exs, row, ret);
+                self.articulate(*a, &arg_exs, row, ret)
+                    .map_err(|e| e.at(span))?;
                 for (ex, arg) in arg_exs.iter().zip(args) {
                     self.check(env, arg, &Type::Exist(*ex))?;
                 }
@@ -1016,15 +1013,7 @@ impl Tc<'_> {
         };
         self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
             .map_err(|e| e.at(span))?;
-        let mut params = info.params.clone();
-        let mut ret = info.ret.clone();
-        for (p, t) in info.eff_params.iter().zip(&args) {
-            let p = *p;
-            for q in &mut params {
-                *q = q.subst_var(p, t);
-            }
-            ret = ret.subst_var(p, t);
-        }
+        let (params, mut ret) = info.instantiate(&args);
         let mut pv = BTreeSet::new();
         for p in &params {
             collect_type_vars(p, &mut pv);
@@ -1205,6 +1194,12 @@ impl Tc<'_> {
             // cannot be typed without a signature; name the remedy.
             self.infer_body(env, d, seed)
                 .map_err(|e| poly_recursion_hint(e, d).in_fn(&d.name))?;
+            // A `konst` member must be pure: its body's effects accumulated into
+            // the seeded ambient row, so hold it to an empty inferred row.
+            if d.konst {
+                let effs = self.apply_row(&EffRow::Exist(seed.mu)).label_names();
+                super::require_pure_konst(d, &effs)?;
+            }
         }
         // Stage 3: generalize every member once, against the pre-group env, so the
         // group's shared existentials all generalize.
@@ -1292,7 +1287,6 @@ impl Tc<'_> {
                 scope.push((Sym::from(&al.name), args));
             }
         }
-        let prefix: BTreeSet<Sym> = BTreeSet::new();
         let mu = self.push_ex_row();
         let self_ty = Type::fun_eff(doms.clone(), EffRow::Exist(mu), ret.clone());
         Ok(DeclSeed {
@@ -1301,7 +1295,6 @@ impl Tc<'_> {
             cur,
             scope,
             mu,
-            prefix,
             self_ty,
         })
     }
@@ -1315,11 +1308,7 @@ impl Tc<'_> {
         let val = match &d.ret {
             Some(ann) => {
                 self.check_annot_rows(ann, d.span)?;
-                let mut ty_ex = BTreeMap::new();
-                let mut row_ex = BTreeMap::new();
-                let no_rigid = BTreeSet::new();
-                let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
-                self.convert_annot(ann, &mut a)
+                self.convert_annot_fresh(ann)
             }
             None => Type::Exist(self.push_ex()),
         };
@@ -1330,7 +1319,6 @@ impl Tc<'_> {
             cur: Vec::new(),
             scope: Vec::new(),
             mu,
-            prefix: std::collections::BTreeSet::new(),
             self_ty: val,
         })
     }
@@ -1370,7 +1358,7 @@ impl Tc<'_> {
         env2.insert(Sym::from(&d.name), self_entry);
         let saved_row = self.cur_row.replace(RowScope {
             tail: seed.mu,
-            prefix: seed.prefix.clone(),
+            prefix: BTreeSet::new(),
         });
         let checked = self.in_row_scope(&seed.scope, |tc| {
             tc.with_self(
@@ -1424,37 +1412,70 @@ impl Tc<'_> {
                         ),
                     });
                 }
-                final_cs.push((class.clone(), t2));
+                final_cs.push((Sym::from(class), t2));
             }
             self.constrained
-                .insert(d.name.clone(), (g.clone(), final_cs));
+                .insert(Sym::from(&d.name), (g.clone(), final_cs));
         }
         Ok(g)
+    }
+
+    // Run `f` (a body inference ending in `resolve_all`) under a fresh ambient
+    // effect row, and return the concrete labels the body accumulated alongside
+    // its result. A value or expression has no function arrow to read its row
+    // off, so the purity checks (konst, pure instance methods) and the REPL get
+    // the principal inferred effects this way instead of a syntactic set pass.
+    pub(super) fn scoped_effects<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<R, TypeError>,
+    ) -> Result<(R, Effects), TypeError> {
+        let mu = self.push_ex_row();
+        let (r, effs) = self.with_row_scope(
+            RowScope {
+                tail: mu,
+                prefix: BTreeSet::new(),
+            },
+            |tc| {
+                let r = f(tc);
+                let effs = if r.is_ok() {
+                    tc.apply_row(&EffRow::Exist(mu)).label_names()
+                } else {
+                    Effects::new()
+                };
+                (r, effs)
+            },
+        );
+        Ok((r?, effs))
     }
 
     // A top-level constant: its type is the body's value type (no arrow). With
     // an annotation the body is checked against it, else it is synthesized. The
     // result is generalized so polymorphic constants (`map_empty = Tip`)
-    // instantiate fresh at each reference.
-    pub(super) fn infer_const(&mut self, env: &Env, d: &Decl<Core>) -> Result<Type, TypeError> {
+    // instantiate fresh at each reference. The inferred effects are returned so
+    // the caller can hold a `konst` to purity.
+    pub(super) fn infer_const(
+        &mut self,
+        env: &Env,
+        d: &Decl<Core>,
+    ) -> Result<(Type, Effects), TypeError> {
         self.reset_ctx();
         self.clear_obligations();
-        let ty = if let Some(ann) = &d.ret {
-            self.check_annot_rows(ann, d.span)?;
-            let mut ty_ex = BTreeMap::new();
-            let mut row_ex = BTreeMap::new();
-            let no_rigid = BTreeSet::new();
-            let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
-            let t = self.convert_annot(ann, &mut a);
-            self.check(env, &d.body, &t)?;
-            t
-        } else {
-            self.synth(env, &d.body)?
-        };
-        self.resolve_all()?;
+        let (ty, effs) = self.scoped_effects(|tc| {
+            let ty = if let Some(ann) = &d.ret {
+                tc.check_annot_rows(ann, d.span)?;
+                let t = tc.convert_annot_fresh(ann);
+                tc.check(env, &d.body, &t)?;
+                Ok(t)
+            } else {
+                tc.synth(env, &d.body)
+            };
+            let ty = ty?;
+            tc.resolve_all()?;
+            Ok(ty)
+        })?;
         self.flush_spans();
         let t = self.apply(&ty);
-        Ok(self.generalize(env, &t))
+        Ok((self.generalize(env, &t), effs))
     }
 
     pub(super) fn check_instance(
@@ -1470,11 +1491,21 @@ impl Tc<'_> {
             let (_, sig) = class
                 .methods
                 .iter()
-                .find(|(n, _)| n == &m.name)
+                .find(|(n, _)| n.as_str() == m.name.as_str())
                 .ok_or_else(|| TypeError::Ice {
                     msg: format!("instance method `{}` missing from class", m.name),
                 })?;
-            let expected = sig.subst_var(Sym::from(&class.param), &info.head);
+            // An effect-polymorphic method (its class signature carries a row
+            // variable, like `fmap`) may perform the effects flowing through that
+            // row. A method with a pure signature must be pure: its body is
+            // checked under a fresh ambient row whose inferred labels are held to
+            // empty, replacing the old syntactic set pass.
+            let poly = {
+                let mut rv = BTreeSet::new();
+                super::env::collect_row_vars(sig, &mut rv);
+                !rv.is_empty()
+            };
+            let expected = sig.subst_var(class.param, &info.head);
             let Type::Fun(doms, _, ret) = &expected else {
                 return Err(TypeError::Ice {
                     msg: format!("class method `{}` signature is not a function type", m.name),
@@ -1485,12 +1516,31 @@ impl Tc<'_> {
                 env2.insert(Sym::from(&p.name), t.clone());
             }
             let qual = format!("{}.{}", inst.name, m.name);
-            self.with_self(qual.clone(), expected.clone(), info.context.clone(), |tc| {
-                tc.check(&env2, &m.body, ret)
-                    .and_then(|()| tc.resolve_all())
-            })
-            .map_err(|e| e.in_fn(&qual))?;
+            let ((), effs) = self.scoped_effects(|tc| {
+                let ctx = info
+                    .context
+                    .iter()
+                    .map(|(c, t)| (c.to_string(), t.clone()))
+                    .collect();
+                tc.with_self(qual.clone(), expected.clone(), ctx, |tc| {
+                    tc.check(&env2, &m.body, ret)
+                        .and_then(|()| tc.resolve_all())
+                })
+                .map_err(|e| e.in_fn(&qual))
+            })?;
             self.flush_spans();
+            if !poly && !effs.is_empty() {
+                let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
+                return Err(TypeError::Other {
+                    span: m.body.span,
+                    msg: format!(
+                        "instance method `{}.{}` must be pure; it performs {}",
+                        inst.name,
+                        m.name,
+                        list.join(", ")
+                    ),
+                });
+            }
         }
         Ok(())
     }

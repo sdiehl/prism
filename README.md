@@ -6,7 +6,7 @@
 
 <p align="center">A small functional language with algebraic effects, multishot continuations, and native codegen.</p>
 
-Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred and extensible, combining structurally as functions call one another via row polymorphism instead of monads. They track observability rather than implementation: so an effect handled inside a function vanishes from its type, thus code that mutates locals or throws internally is analyzed, optimized, and reused as pure code. The type system also has rank-N polymorphism, typeclasses, and first-class lenses and streams integrated into the language. The core is strict and elaborates to an A-normal-form call-by-push-value calculus where evaluation order is explicit, then compiles to native code through LLVM. Memory is managed by deterministic reference counting instead of a garbage collector. The compiler itself (written in Rust until bootstrapped) also compiles to WebAssembly, so the whole language runs in the browser. The interpreter is a CEK machine modeled in Lean and proved correct against a substitution semantics, and it serves in turn as the differential oracle every native backend must match byte-for-byte.
+Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred and extensible, combining structurally as functions call one another via row polymorphism instead of monads. They track observability rather than implementation: so an effect handled inside a function vanishes from its type, thus code that mutates locals or throws internally is analyzed, optimized, and reused as pure code. The type system also has rank-N polymorphism, typeclasses, and first-class lenses and streams integrated into the language. The core is strict and elaborates to an A-normal-form call-by-push-value calculus where evaluation order is explicit, then compiles to native code through LLVM. Memory is managed by deterministic reference counting instead of a garbage collector. The compiler itself (written in Rust until bootstrapped) also compiles to WebAssembly, so the whole language runs in the browser as a 2.5 MB bundle that compresses to under a megabyte, small enough to fit on a floppy disk. The interpreter is a CEK machine modeled in Lean and proved correct against its big-step semantics, and it serves in turn as the differential oracle every native backend must match byte-for-byte.
 
 Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/play/).
 
@@ -41,8 +41,10 @@ This builds the `prism` binary. Native compilation also needs `clang` on `$PATH`
 prism                                # interactive shell
 prism program.pr                     # compile to a native binary named `program`
 prism program.pr -o out              # ...with a custom output path
+prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
-prism build                          # compile the enclosing project (needs a prism.toml)
+prism build                          # compile the enclosing project (needs a prism.toml), into target/
+prism clean                          # remove the project's target/ directory
 prism check program.pr               # type check only
 prism fmt program.pr                 # format source
 prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|fbip|llvm

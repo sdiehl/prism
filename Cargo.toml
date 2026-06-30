@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -27,7 +27,7 @@ offsides = "0.2"
 rustyline = { version = "18.0", optional = true }
 serde_json = "1"
 thiserror = "2.0"
-toml = { version = "0.8", optional = true }
+toml = { version = "1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [build-dependencies]

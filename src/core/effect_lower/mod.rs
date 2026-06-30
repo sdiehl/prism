@@ -28,7 +28,7 @@ use walk::collect_ops;
 
 pub use analysis::latent_ops;
 pub use checks::residual_effects;
-use walk::{contains_mask, each_subcomp, each_value, latent, thunks_in_value};
+use walk::{contains_mask, each_subcomp, each_value, latent, thunks_in_comp, thunks_in_value};
 
 // Compile algebraic effects to plain closures and data by a free-monad
 // translation. A computation that may perform effects is reified into a value
@@ -194,7 +194,7 @@ pub fn lower(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered,
 
 /// The lowering strategy a program takes.
 ///
-/// The single source of truth is [`lower_impl`] itself, so the classification can
+/// The single source of truth is `lower_impl` itself, so the classification can
 /// never drift from the decision the compiler actually makes. One of: `pure` (no
 /// effects survive), `evidence`, `state-fusion`, `local-partial` (free monad
 /// confined to a component, rest fused), `whole-program-free-monad`, or
@@ -346,8 +346,19 @@ fn lower_impl(
     // Neither fusion path applied and the escape is not confinable, so the
     // continuation is reified into the free monad (EOp cells), the slow path.
     // Hand the driver a warning naming the functions that lost fusion and why,
-    // so the fallback is surfaced rather than taken silently.
-    *warning = free_monad_warning(core, &genuine_eff(&lo.latent), &lo.latent);
+    // so the fallback is surfaced rather than taken silently. The latent fixpoint
+    // does not enter thunk bodies, so a function whose only effect is a raw `do` in
+    // an escaping closure has an empty latent set; add those capturing functions so
+    // a program forced whole-program purely by such an escape still names a culprit.
+    let mut lost = genuine_eff(&lo.latent);
+    for f in &core.fns {
+        let mut thunks = Vec::new();
+        thunks_in_comp(&f.body, &mut thunks);
+        if thunks.iter().any(|t| raw_effects(t)) {
+            lost.insert(f.name);
+        }
+    }
+    *warning = free_monad_warning(core, &lost, &lo.latent);
 
     let entries: BTreeSet<Sym> = if lo.eff.contains(&Sym::new(ENTRY_POINT)) {
         std::iter::once(Sym::from(ENTRY_POINT)).collect()

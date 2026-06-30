@@ -1,4 +1,4 @@
-import { createElement, Play } from "lucide";
+import { createElement, Github, Play } from "lucide";
 import init, { core_ir, diagnostics, dump, fmt, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import "./styles.css";
@@ -35,6 +35,9 @@ const dumpBtn = el<HTMLButtonElement>("dump");
 const irBtn = el<HTMLButtonElement>("ir");
 
 runBtn.prepend(createElement(Play));
+// Icons come from lucide (sized 18px in CSS) rather than inline SVG markup, so
+// they never flash at the unsized default size before stylesheet load.
+el<HTMLAnchorElement>("gh").append(createElement(Github));
 
 // ariadne diagnostics carry ANSI color; a browser <pre> renders the raw escapes
 // as noise, so drop them before display.

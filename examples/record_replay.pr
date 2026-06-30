@@ -1,0 +1,19 @@
+import Replay (..)
+
+-- Record an action that draws from Random and reads the argument count, then
+-- replay the captured trace, both directly and after a serialize/deserialize
+-- round trip. The replays perform no real IO yet reproduce the recorded result
+-- exactly, so record-then-replay and the durable trace serialization both
+-- round-trip (deserialize(serialize(t)) preserves every entry).
+fn main() =
+  let pair = record(\(_u) -> rng_rand(()) + rng_rand(()) + env_argc(()))
+  match pair of
+    (r, t) =>
+      let r2 = replay(t, \(_u) -> rng_rand(()) + rng_rand(()) + env_argc(()))
+      let r3 =
+        replay(deserialize(serialize(t))) fn(_u)
+          rng_rand(()) + rng_rand(()) + env_argc(())
+      if r == r2 && r == r3 then
+        println("replay matches")
+      else
+        println("replay diverged")

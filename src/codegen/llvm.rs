@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
+use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
@@ -26,11 +27,6 @@ struct Inkwell<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     vals: RefCell<HashMap<String, BasicValueEnum<'ctx>>>,
-    // Integer constants are uniqued by their value, kept apart from the
-    // name-keyed `vals` map so a value-named constant cannot pollute the SSA
-    // name space. LLVM constants are module-global, so this outlives the
-    // per-function `vals` clear.
-    consts: RefCell<HashMap<i64, BasicValueEnum<'ctx>>>,
     blocks: RefCell<HashMap<String, BasicBlock<'ctx>>>,
     func: Cell<Option<FunctionValue<'ctx>>>,
     // First codegen-internal failure (a builder error or an unbound SSA name).
@@ -89,7 +85,6 @@ impl<'ctx> Inkwell<'ctx> {
             module,
             builder: ctx.create_builder(),
             vals: RefCell::default(),
-            consts: RefCell::default(),
             blocks: RefCell::default(),
             func: Cell::new(None),
             err: RefCell::default(),
@@ -162,11 +157,6 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn get(&self, n: &str) -> BasicValueEnum<'ctx> {
-        if let Some(v) = n.strip_prefix("$c").and_then(|d| d.parse::<i64>().ok()) {
-            if let Some(c) = self.consts.borrow().get(&v).copied() {
-                return c;
-            }
-        }
         self.vals.borrow().get(n).copied().unwrap_or_else(|| {
             self.ice(&format!("unbound ssa {n}"));
             self.i64t().const_zero().into()
@@ -199,10 +189,27 @@ impl<'ctx> Inkwell<'ctx> {
         bb
     }
 
+    // Mark a function non-unwinding. Every function in a Prism module is: the
+    // language has no exceptions, and this backend emits no invokes or
+    // landingpads, so neither the generated bodies nor the C runtime nor the
+    // libc/intrinsic declarations can unwind. Telling LLVM lets it drop unwind
+    // tables and treat every call as non-throwing, which the `-O2` pipeline
+    // turns into freer code motion and smaller objects.
+    fn set_nounwind(&self, f: FunctionValue<'ctx>) {
+        let kind = Attribute::get_named_enum_kind_id("nounwind");
+        f.add_attribute(
+            AttributeLoc::Function,
+            self.ctx.create_enum_attribute(kind, 0),
+        );
+    }
+
     fn decl(&self, name: &str, ty: FunctionType<'ctx>) -> FunctionValue<'ctx> {
-        self.module
-            .get_function(name)
-            .unwrap_or_else(|| self.module.add_function(name, ty, None))
+        if let Some(f) = self.module.get_function(name) {
+            return f;
+        }
+        let f = self.module.add_function(name, ty, None);
+        self.set_nounwind(f);
+        f
     }
 
     fn call_direct(
@@ -275,12 +282,10 @@ impl<'ctx> Inkwell<'ctx> {
 }
 
 impl Isa for Inkwell<'_> {
-    fn const_int(&self, _b: &mut Buf, n: i64) -> String {
-        self.consts
-            .borrow_mut()
-            .entry(n)
-            .or_insert_with(|| self.i64t().const_int(n.cast_unsigned(), false).into());
-        format!("$c{n}")
+    fn const_int(&self, b: &mut Buf, n: i64) -> String {
+        let t = b.tmp();
+        self.set(&t, self.i64t().const_int(n.cast_unsigned(), false).into());
+        t
     }
 
     fn const_float(&self, b: &mut Buf, f: f64) -> String {

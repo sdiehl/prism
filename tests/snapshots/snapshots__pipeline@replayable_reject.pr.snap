@@ -1,0 +1,83 @@
+---
+source: tests/snapshots.rs
+assertion_line: 14
+expression: "prism::report(&src)"
+input_file: tests/cases/replayable_reject.pr
+---
+== tokens ==
+VOpen Effect UIdent("World") LBrace Ctl Ident("spew") LParen KwInt RParen Colon KwInt RBrace VSemi Replayable Fn Ident("leak") LParen RParen Eq Ident("spew") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "World",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "spew",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                },
+            ],
+            span: 0..38,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "leak",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "spew",
+                        ),
+                        span: 63..67,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 1,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 68..69,
+                        },
+                    ],
+                ),
+                span: 63..70,
+            },
+            wheres: [],
+            replayable: true,
+            span: 40..70,
+        },
+    ],
+}
+
+== types ==
+leak : () -> Int ! {World}
+
+== core (cbpv) ==
+fn leak() =
+  return 1 to t@0; do spew(t@0)
+
+== replayable ==
+Type Error: function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ replayable fn leak() = spew(1)
+   │ ───────────────┬──────────────  
+   │                ╰──────────────── function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail
+───╯

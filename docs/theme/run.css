@@ -68,3 +68,10 @@
   border-left-color: #c0392b;
   color: #e88;
 }
+
+/* Always show the code-block copy button, not only on row hover, so it is
+   discoverable. mdbook hides `pre > .buttons` until `pre:hover`. */
+pre > .buttons {
+  visibility: visible;
+  opacity: 1;
+}

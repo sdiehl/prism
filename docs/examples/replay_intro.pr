@@ -1,0 +1,17 @@
+import Replay (..)
+
+-- `roll` reads only the Random capability, so it is `replayable`: its result is
+-- reproducible from a recorded trace.
+replayable fn roll() = rand() % 6 + rand() % 6 + 2
+
+fn main() =
+  -- Record one real run, logging every draw into the trace.
+  let pair = record(\(_u) -> roll())
+  match pair of
+    (recorded, trace) =>
+      -- Replay the trace: no real randomness is drawn, yet the result matches.
+      let again = replay(trace, \(_u) -> roll())
+      if recorded == again then
+        println("reproduced")
+      else
+        println("diverged")
