@@ -6,6 +6,10 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use prism::error::Error;
 
+// A CLI argument struct is the canonical exception to `struct_excessive_bools`:
+// the `--no-<pass>` flags and `--mlir` are independent on/off switches, exactly
+// what clap models as bool fields, not a state machine.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(
     name = "prism",
@@ -54,6 +58,24 @@ struct Cli {
     /// flags with `PRISM_CC_FLAGS` (e.g. `-march=native`, `-g`).
     #[arg(long = "backend-opt", value_name = "LEVEL", global = true)]
     backend_opt: Option<String>,
+    /// Turn off the newtype-erasure pass everywhere in the pipeline (composes
+    /// with both `-O` and `--passes`). Both backends rely on it; disabling it is
+    /// your choice.
+    #[arg(long, global = true)]
+    no_erase_newtypes: bool,
+    /// Turn off the dictionary-specialization pass everywhere in the pipeline
+    /// (the flag form of `PRISM_NO_SPECIALIZE`).
+    #[arg(long, global = true)]
+    no_specialize: bool,
+    /// Turn off the gentle simplifier pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_simplify: bool,
+    /// Turn off the inliner pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_inline: bool,
+    /// Turn off the scalar-CSE pass everywhere in the pipeline.
+    #[arg(long, global = true)]
+    no_cse: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -134,6 +156,19 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         prism::set_backend_opt(s.clone());
+    }
+    let disabled: Vec<prism::CorePass> = [
+        (cli.no_erase_newtypes, prism::CorePass::EraseNewtypes),
+        (cli.no_specialize, prism::CorePass::Specialize),
+        (cli.no_simplify, prism::CorePass::Simplify),
+        (cli.no_inline, prism::CorePass::Inline),
+        (cli.no_cse, prism::CorePass::Cse),
+    ]
+    .into_iter()
+    .filter_map(|(off, pass)| off.then_some(pass))
+    .collect();
+    if !disabled.is_empty() {
+        prism::set_disabled_passes(&disabled);
     }
     let result = match (cli.cmd, cli.file) {
         (Some(cmd), _) => dispatch(cmd),

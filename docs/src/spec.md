@@ -571,33 +571,81 @@ A file is a module and a directory is a namespace prefix: `import Data.Map` load
 
 `import M` brings `M`'s exports into scope under qualified names; `import M (a, b)` also brings `a` and `b` into bare scope; `import M as N` adds the alias `N`. The `pub` modifier on a declaration makes it visible to importers; `pub import M (x)` re-exports `x` through the importing module. An `opaque type` exports its name but not its constructors.
 
+{{#tabs }}
+
+{{#tab name="src/Geometry.pr" }}
+
+```prism
+pub fn area(w, h) = w * h   -- exported
+
+fn clamp(x) = if x < 0 then 0 else x   -- private to the module
+```
+
+{{#endtab }}
+
+{{#tab name="src/main.pr" }}
+
+```prism
+import Geometry (area)
+
+fn main() = println(area(4, 5))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
 Name resolution rewrites every top-level definition to a canonical, module-qualified symbol (an export as `Data.Map.insert`, a private as the unforgeable, source-unwritable `Data.Map@helper`) and merges all modules into one program keyed by those symbols. Because identity is the canonical symbol, two modules may export the same short name and coexist. This is namespacing, not separate compilation: there are no per-module artifacts, and changing one module recompiles the whole program. Identifying each definition by a content hash of its core rather than by its name is a direction the compiler is prototyping ([content-addressed core](./compiler.md#content-addressed-core)); it would make a definition's identity independent of its name and recompilation incremental over only what actually changed.
 
 Instances are global, but each records its defining module. An _orphan_ instance (defined apart from both its class and its head type) and instances that overlap across modules are reported as warnings; an ambiguity names each candidate's module.
 
+### 11.1 Projects {#projects}
+
+A single `.pr` file compiles on its own (`prism file.pr`), resolving imports relative to its own directory. A multi-file program is a _project_: a `prism.toml` manifest at the root plus a `src/` tree, where dotted module paths resolve from the source root rather than from the entry file's location. The smallest manifest names the package and its entry point:
+
+```toml
+[package]
+name = "myapp"
+
+[bin]
+entry = "src/main.pr"
+```
+
+`prism build` compiles the nearest enclosing project to a native binary under a `target/` directory at the project root (rustc-style), named after the package; `prism run <path>` interprets it instead, and `prism clean` removes `target/`. A single file is still built with a bare `prism file.pr`. The manifest keys are:
+
+| Key              | Section     | Required           | Meaning                                                                             |
+| ---------------- | ----------- | ------------------ | ----------------------------------------------------------------------------------- |
+| `name`           | `[package]` | yes                | package name; also the default binary name                                          |
+| `entry`          | `[bin]`     | yes                | the entry `.pr` file, relative to the project root                                  |
+| `src`            | `[package]` | no (default `src`) | the module root that dotted `import` paths resolve from                             |
+| `prelude`        | `[package]` | no                 | a `.pr` file whose contents replace the built-in prelude for this project           |
+| `[dependencies]` | table       | no                 | path dependencies, each `name = { path = "..." }` (or the shorthand `name = "..."`) |
+
+A path dependency's modules import under their own dotted paths, so a `geometry = { path = "../geometry" }` entry makes that project's `Geometry` module reachable as `import Geometry`:
+
+```toml
+[package]
+name = "myapp"
+
+[bin]
+entry = "src/main.pr"
+
+[dependencies]
+geometry = { path = "../geometry" }
+```
+
 ## 12. The Standard Prelude {#the-standard-prelude}
 
-The prelude in [`lib/prelude.pr`](https://github.com/sdiehl/prism/blob/main/lib/prelude.pr) is in scope in every module. It is ordinary Prism, not built-in. Its contents, by category:
+The prelude is in scope in every module. It is ordinary Prism, not built-in, and is itself assembled from modules under `lib/std`: the prelude opens the `Data.*` ones with `import M (..)`, so their names are in unqualified scope everywhere, while `Replay` is the exception, brought in only by an explicit `import Replay` ([record and replay](#record-and-replay)). Each module name below links to its source.
 
-- **Data types.** `Option(a)`, `Result(a, e)`, `List(a)`, the balanced-tree `Map(k, v)`, and the hash table `HashMap(v)`. A set is a `Map(k, Unit)`, with a `set_*` API rather than a distinct type.
-- **List combinators.** `map`, `filter`, `foldl`, `foldr`, `length`, `append`, `reverse`, `zip`/`unzip`, `take`/`drop`, `sort`, `range`, and the rest of the usual vocabulary.
-- **Option and Result combinators.** `map_option`, `and_then`, `unwrap_or`, `map_result`, `and_then_result`, `result_or`, and conversions between the two.
-- **The class tower.** `Eq`, `Ord` (with `Eq` as superclass), `Show`, `Pow` (exponentiation `^`, with `Int` and `Float` instances), and the higher-kinded `Functor`, `Applicative`, `Monad`, `Foldable`, `Traversable`, with instances for `List` and `Option`.
-- **Strings and characters.** Classifiers (`is_digit`, `is_alpha`, ...), case mapping, `starts_with`/`ends_with`/`contains`/`index_of`, `split`, `trim`, `chars`, and single-allocation joining.
-- **Arrays and maps.** The growable `Array(a)` API (`array_new`, `array_get`, `array_set`, `array_push`, with in-place update on unique ownership), the AVL `Map` and `set_*` API, and the `HashMap` API over string keys.
-- **Streams.** The `Emit(a)` effect and the producer/transformer/consumer combinators `srange`, `sof`, `smap`, `skeep`, `stake`, `sfold`, `ssum`, `scollect`, which fuse without intermediate collections.
-- **Numerics and failure.** Fixed-width `i64_*`/`u64_*` operations, common math, and the failure helpers `guard`, `optional`, `succeeds`, `default`.
-- **World and IO.** The capability effects `Console`, `FileSystem`, `Random`, and `Env` ([capability effects and IO](#capability-effects-and-io)), their input wrappers (`read_int`, `read_line`, `read_file`, `file_exists`, `rand`, `getenv`, `args_count`, `arg`), the default `run_io` world handler, and the output builtins (`print`, `write_file`, `append_file`, `remove_file`). The separate `Replay` module (`import Replay`, [record and replay](#record-and-replay)) adds `record`, `replay`, and the durable-execution handler `durable` over those capabilities.
-
-That surface is itself assembled from modules under `lib/std`. The prelude opens the `Data.*` ones with `import M (..)`, so their names are in unqualified scope everywhere; `Replay` is the exception, brought in only by an explicit `import Replay`:
-
-| Module        | Contents                                                                                        | Source                                                                                       |
-| ------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `Data.Char`   | ASCII classifiers and case mapping (`is_digit`, `is_alpha`, `to_upper_c`)                       | [`lib/std/Data/Char.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Char.pr)     |
-| `Data.List`   | list combinators over `List(a)` (`map`, `filter`, `foldl`/`foldr`, `zip`, `take`/`drop`)        | [`lib/std/Data/List.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/List.pr)     |
-| `Data.Map`    | the persistent AVL `Map(k, v)` API (`map_insert`, `map_lookup`, `map_keys`)                     | [`lib/std/Data/Map.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Map.pr)       |
-| `Data.Maybe`  | `Option(a)` combinators (`unwrap_or`, `map_option`, `and_then`)                                 | [`lib/std/Data/Maybe.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Maybe.pr)   |
-| `Data.Result` | `Result(a, e)` combinators (`map_result`, `and_then_result`, `Option` conversions)              | [`lib/std/Data/Result.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Result.pr) |
-| `Data.Set`    | ordered sets as `Map(k, Unit)` (`set_insert`, `set_union`, `set_intersection`)                  | [`lib/std/Data/Set.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Set.pr)       |
-| `Data.String` | string utilities (`str_join`, `split`, `trim`, `starts_with`, `to_upper`)                       | [`lib/std/Data/String.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/String.pr) |
-| `Replay`      | record/replay and durable execution over the capability effects (`record`, `replay`, `durable`) | [`lib/std/Replay.pr`](https://github.com/sdiehl/prism/blob/main/lib/std/Replay.pr)           |
+| Module                                                                            | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`prelude`](https://github.com/sdiehl/prism/blob/main/lib/prelude.pr)             | the wired-in `Option`/`Result`/`List`/`Map`/`HashMap` types (a set is `Map(k, Unit)`); the `Eq`/`Ord`/`Show`/`Pow` and higher-kinded `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` class tower; the growable `Array(a)` API; fusing `Emit` stream combinators (`srange`/`smap`/`skeep`/`stake`/`sfold`/`scollect`); fixed-width `i64_*`/`u64_*` numerics; failure helpers (`guard`, `optional`, `default`); and the `Console`/`FileSystem`/`Random`/`Env` capability effects ([capability effects and IO](#capability-effects-and-io)) with their input wrappers and the `run_io` handler |
+| [`Data.List`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/List.pr)     | list combinators over `List(a)`: `map`, `filter`, `foldl`/`foldr`, `zip`/`unzip`, `take`/`drop`, `reverse`, `sort`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| [`Data.Maybe`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Maybe.pr)   | `Option(a)` combinators: `unwrap_or`, `map_option`, `and_then`, `option_or`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| [`Data.Result`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Result.pr) | `Result(a, e)` combinators: `map_result`, `and_then_result`, and `Option` conversions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| [`Data.Map`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Map.pr)       | the persistent AVL `Map(k, v)`: `map_insert`, `map_lookup`, `map_keys`, `map_to_list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| [`Data.Set`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Set.pr)       | ordered sets as `Map(k, Unit)`: `set_insert`, `set_union`, `set_intersection`, `set_difference`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| [`Data.Char`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/Char.pr)     | ASCII classifiers and case mapping: `is_digit`, `is_alpha`, `to_upper_c`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| [`Data.String`](https://github.com/sdiehl/prism/blob/main/lib/std/Data/String.pr) | string utilities: `str_join`, `split`, `trim`, `starts_with`/`ends_with`/`contains`, `to_upper`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| [`Replay`](https://github.com/sdiehl/prism/blob/main/lib/std/Replay.pr)           | record/replay and durable execution over the capability effects: `record`, `replay`, `durable` (via `import Replay`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

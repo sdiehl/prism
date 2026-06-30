@@ -17,7 +17,7 @@ use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Core, OptLevel, PassSpec,
+    run_opt_spec, Core, CorePass, OptLevel, PassSpec,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
@@ -112,6 +112,31 @@ fn backend_opt() -> String {
         .clone()
         .or_else(|| env::var("PRISM_BACKEND_OPT").ok())
         .unwrap_or_else(|| "2".into())
+}
+
+// The Core passes the user turned off with a `--no-<pass>` flag (e.g.
+// `--no-inline`). The optimizer filters these out of the effective pipeline,
+// whether it came from a `-O` level or an explicit `--passes` list, so the flags
+// compose with both. A process-global like the other opt knobs above;
+// `PRISM_NO_SPECIALIZE` is the env equivalent of `--no-specialize`, unioned in by
+// the optimizer.
+static DISABLED_PASSES: std::sync::Mutex<Vec<CorePass>> = std::sync::Mutex::new(Vec::new());
+
+/// Turn off the named Core passes for subsequent compiles (the CLI
+/// `--no-<pass>` flags). Each is removed from every occurrence in the effective
+/// pipeline, whether it came from `-O` or `--passes`.
+///
+/// # Panics
+/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
+/// for this infallible store.
+pub fn set_disabled_passes(passes: &[CorePass]) {
+    *DISABLED_PASSES.lock().unwrap() = passes.to_vec();
+}
+
+// The passes disabled via `set_disabled_passes`, read by the optimizer when it
+// finalizes the pass vector. Empty when no `--no-<pass>` flag was given.
+pub(crate) fn disabled_passes() -> Vec<CorePass> {
+    DISABLED_PASSES.lock().unwrap().clone()
 }
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");

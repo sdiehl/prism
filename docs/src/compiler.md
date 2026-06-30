@@ -31,6 +31,17 @@ Every phase returns its result into one `thiserror` enum (`src/error.rs`) whose 
 
 The lexer produces a token stream and trivia (comments and spacing) that the formatter uses to reproduce source faithfully. An interpolated string is lexed by re-lexing each `{ ... }` hole at its absolute source offset, so spans inside holes remain accurate. A layout pass then rewrites the stream, inserting virtual block-open, block-close, and separator tokens according to the offside rule of the [layout](./spec.md#layout) specification, which the grammar consumes as ordinary terminals.
 
+Comments are one form only: `--` to the end of the line. There are no block comments. This is, on purpose, the least interesting decision in the language, because the lexical syntax of comments is by long observation the most bikeshed-prone corner of language design:
+
+> In any language design, the total time spent discussing a feature in this list is proportional to two raised to the power of its position:
+>
+> 0. Semantics
+> 1. Syntax
+> 2. Lexical syntax
+> 3. Lexical syntax of comments
+
+It is a [notoriously fraught](https://wiki.haskell.org/Wadler's_Law) topic, in functional languages especially. Prism ends the argument before it starts by taking Haskell-style `--` line comments and moving on. Deal with it.
+
 ## 3. Parsing {#parsing}
 
 The grammar is an LALR(1) grammar in LALRPOP (`src/syntax/grammar.lalrpop`), with two entry points: a whole program, and a single expression for the REPL. Parsing produces the surface AST of `src/syntax/ast.rs`. Type and parse errors are rendered with a source caret.
@@ -533,7 +544,7 @@ The C runtime (`runtime/prism_rt.c`) is linked with the code each backend emits.
 
 ### 12.1 Value Representation {#value-representation}
 
-Every value occupies one 64-bit word, tagged by its low bit so that a single representation serves both scalars and pointers under polymorphism.
+A Prism value is one 64-bit word, tagged by its low bit, so that a single representation serves both scalars and pointers under polymorphism:
 
 ```text
 {{#include ../examples/value-repr.txt}}
@@ -545,11 +556,21 @@ A float does not fit the immediate scheme, so it is _boxed_: wrapped in a one-fi
 
 A heap cell is a three-word header followed by its fields.
 
-```text
-{{#include ../examples/cell-layout.txt}}
-```
+| Offset | Field      | Meaning                                                           |
+| ------ | ---------- | ----------------------------------------------------------------- |
+| 0      | `refcount` | number of live references to this cell                            |
+| 8      | `tag`      | constructor tag; reserved values mark String and bignum cells     |
+| 16     | `arity`    | number of fields (or byte length for a String)                    |
+| 24     | `fields`   | `arity` words, each a value or pointer (UTF-8 bytes for a String) |
 
-Constructor tags follow declaration order (for `Option(a) = None | Some(a)`, `None` is 0 and `Some` is 1). Two tag values are reserved, `0x53545200` for a string and `0x42494700` for a bignum (see [integers](#integers)), marking cells whose payload is raw bytes or limbs rather than child values; the collector and the reuse pass (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)) read the tag to avoid recursing into them.
+Constructor tags follow declaration order (for `Option(a) = None | Some(a)`, `None` is 0 and `Some` is 1). Two tag values are reserved, marking cells whose payload is raw bytes or limbs rather than child values:
+
+| Tag          | Cell                                      |
+| ------------ | ----------------------------------------- |
+| `0x53545200` | String (UTF-8 bytes)                      |
+| `0x42494700` | bignum (limbs; see [integers](#integers)) |
+
+The collector and the reuse pass (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)) read the tag to avoid recursing into them.
 
 Every cell allocation routes its size through one overflow-checked chokepoint, `prism_cell_bytes`, which rejects a negative field count and aborts (via `__builtin_add_overflow`/`__builtin_mul_overflow`) if the header-plus-payload word count, or its conversion to bytes, would overflow `size_t`, so a corrupt or oversized arity can never produce an undersized allocation.
 
@@ -613,35 +634,237 @@ The mid-level Core-to-Core tier is a composable pass framework in the spirit of 
 
 The pipeline spans two stages around effect lowering, so passes are not freely reorderable across it. _Pre-lowering_ passes run in the front end on the elaborated core (see [the core calculus](#the-core-calculus)); _late_ passes run on the lowered core, after [effect lowering](#effect-lowering) has fixed the fusion strategy. The split is load-bearing for performance. The simplifier runs in the late stage on purpose: run before effect lowering it rewrote the Core shapes the var/State fusion analysis depends on and degraded that fusion (a regression bisected to copy-propagation), so it runs after lowering, where it cannot defeat the fusion.
 
-The passes currently implemented, in the order the default pipeline runs them. The "name" is the identifier `--passes` uses ([explicit pass lists](#explicit-pass-lists)):
+The pipeline currently implements five passes, given below in the order the default `-O1` pipeline runs them; each subsection heading is the name `--passes` uses. Three controls switch a pass on and off ([controlling the pipeline](#explicit-pass-lists)): the `-O` level enables passes in groups ([optimization levels](#optimization-levels)), a `--no-<pass>` flag subtracts a single pass from that pipeline, and `--passes` replaces the level with an exact ordered list. Each example shows the same fragment before and after the pass, with the others held off so the rewrite is the only change.
 
-| Pass (`--passes` name) | Stage        | What it does                                                                                                                                                    | Enabled at   | Turned off by                                                        |
-| ---------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------- |
-| `EraseNewtypes`        | pre-lowering | strips `newtype` wrappers down to their representation; both backends depend on it                                                                              | every level  | only by omitting it from a `--passes` list (the backends require it) |
-| `Specialize`           | pre-lowering | dictionary specialization: rewrites a class-constrained call to the resolved instance's code                                                                    | `-O1`, `-O2` | `PRISM_NO_SPECIALIZE=1`, or a `--passes` list that omits it          |
-| `Simplify`             | late         | gentle simplifier run to a fixed point: case-of-known-constructor, copy-propagation, dead-`let` elimination, integer constant folding, used-once-thunk inlining | `-O1`, `-O2` | a `--passes` list that omits it                                      |
-| `Inline`               | late         | bounded inliner: pastes in non-recursive, single-call-site callees, every binder alpha-renamed                                                                  | `-O1`, `-O2` | a `--passes` list that omits it                                      |
-| `Cse`                  | late         | conservative common-subexpression elimination over pure, non-trapping `Prim`s                                                                                   | `-O1`, `-O2` | a `--passes` list that omits it                                      |
+### 14.1 EraseNewtypes {#pass-erase-newtypes}
 
-Two controls switch passes on and off: the `-O` level enables them in groups (the "enabled at" column above, detailed in [optimization levels](#optimization-levels)), and `--passes` names the exact passes to run, ignoring the levels entirely. The only single-pass environment switch is `PRISM_NO_SPECIALIZE`; every other pass is selected by level or by an explicit list. At `-O1` (the default) the late stage runs `Simplify` three times, sandwiching `Inline` and `Cse` (the GHC simplify/inline/simplify shape); `-O2` currently runs the same passes as `-O1`.
+- **Stage:** pre-lowering
+- **Levels:** every level (including `-O0`)
+- **Disable:** `--no-erase-newtypes` (honored, but both backends rely on it)
 
-### 14.1 Optimization Levels {#optimization-levels}
+A `newtype` is a distinct type at compile time but identical to its single field at runtime, so this pass deletes the wrapper: each constructor application becomes its argument and each projection becomes the identity. Both backends assume it has happened, which is why it is the one pass `-O0` still runs and the one a `--passes` list should never omit.
 
-The `-O`/`--opt` flag selects a level; the default is `-O1`.
+{{#tabs }}
 
-| Level          | Passes                                                                                                                                                                                                                                                                                                                                                |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-O0`          | Representation only: `EraseNewtypes`, which both backends depend on.                                                                                                                                                                                                                                                                                  |
-| `-O1`(default) | Adds `Specialize` (pre-lowering) and the late pipeline `Simplify` -> `Inline` -> `Simplify` -> `Cse` -> `Simplify`: dictionary specialization, a gentle simplifier run to a fixed point (case-of-known-constructor, copy-propagation, dead-`let` elimination, integer constant folding, used-once-thunk inlining), a bounded inliner, and scalar CSE. |
-| `-O2`          | Currently identical to `-O1`; reserved for heavier passes.                                                                                                                                                                                                                                                                                            |
+{{#tab name="Before" }}
 
-### 14.2 Explicit Pass Lists {#explicit-pass-lists}
+```prism
+newtype Age = Age(Int)
 
-`--passes` drives the tier with an explicit ordered pass list, the LLVM `opt -passes=` / GHC `[CoreToDo]` analogue. It overrides the `-O` level rather than augmenting it, and the two are mutually exclusive. The syntax is `[pre:<names>][;late:<names>]`, where `<names>` is a comma-separated list of pass names; a bare comma-list with no marker is the pre stage. The pass names are `EraseNewtypes` and `Specialize` in the pre stage and `Simplify`, `Inline`, and `Cse` in the late stage. Each section is exactly the passes named, in run order, with no level defaults filled in, so explicit means explicit: `--passes 'pre:EraseNewtypes,Specialize;late:Simplify,Inline,Simplify,Cse,Simplify'` reproduces the `-O1` pipeline.
+fn birthday(a) =
+  match a of
+    Age(n) => Age(n + 1)
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism
+-- an `Age` is represented exactly as its `Int`, so the wrapper compiles away
+fn birthday(n) = n + 1
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 14.2 Specialize {#pass-specialize}
+
+- **Stage:** pre-lowering
+- **Levels:** `-O1`, `-O2`
+- **Disable:** `--no-specialize` (or `PRISM_NO_SPECIALIZE`)
+
+Type-class methods are compiled by passing a dictionary. When the instance is known at a call site, this pass replaces the dictionary-dispatched call with a direct call to that instance's method, so both the dictionary argument and the indirect call disappear.
+
+{{#tabs }}
+
+{{#tab name="Before" }}
+
+```prism
+-- `show` is dispatched through the `Show` dictionary `d`
+fn render(d, x) = show(d, x)
+
+render(show_int, 7)
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism
+-- the instance is known, so the call resolves straight to `show_int`
+fn render(x) = show_int(x)
+
+render(7)
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 14.3 Simplify (Gentle Simplifier) {#pass-simplify}
+
+- **Stage:** late
+- **Levels:** `-O1`, `-O2`
+- **Disable:** `--no-simplify`
+
+A gentle simplifier run to a fixed point: case-of-known-constructor (a `match` on a known constructor picks its arm), copy-propagation, dead-`let` elimination, integer constant folding, and used-once-thunk inlining. It is the workhorse, run three times in the `-O1` pipeline: once to expose call sites for `Inline`, once to clean up after it, and once more after `Cse`.
+
+{{#tabs }}
+
+{{#tab name="Before" }}
+
+```prism
+let p = Some(2 + 3)
+
+match p of
+  Some(n) => n * 10
+  None => 0
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism
+-- 2 + 3 folds, the `Some` arm is chosen, then n * 10 folds
+50
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 14.4 Inline {#pass-inline}
+
+- **Stage:** late
+- **Levels:** `-O1`, `-O2`
+- **Disable:** `--no-inline`
+
+A bounded inliner: a non-recursive function called from exactly one site is pasted into that site, with every binder alpha-renamed so no name collides. Single-call-site only, so inlining never duplicates code; the `Simplify` that follows then optimizes across the merged boundary.
+
+{{#tabs }}
+
+{{#tab name="Before" }}
+
+```prism
+fn scale(x) = x * 2
+
+fn main() = println(scale(21))
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism
+-- `scale` has one caller, so its body is pasted in (then Simplify folds 21 * 2)
+fn main() = println(21 * 2)
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 14.5 Cse {#pass-cse}
+
+- **Stage:** late
+- **Levels:** `-O1`, `-O2`
+- **Disable:** `--no-cse`
+
+Conservative common-subexpression elimination: a pure, non-trapping `Prim` computed twice is computed once and shared through a `let`. It is restricted to operations with no effect and no trap, so it never reorders a division or an effectful call, making it the most cautious pass in the pipeline.
+
+{{#tabs }}
+
+{{#tab name="Before" }}
+
+```prism
+fn f(x, y) = (x * y) + (x * y)
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism
+-- `x * y` is pure, so it is computed once and reused
+fn f(x, y) = let t = x * y in t + t
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 14.6 Optimization Levels {#optimization-levels}
+
+The `-O`/`--opt` flag selects a level; the default is `-O1` and a bare `-O` is the highest. A level is a named pipeline, from which `--no-<pass>` can then subtract individual passes ([controlling the pipeline](#explicit-pass-lists)).
+
+`-O0` is representation only. It runs just [`EraseNewtypes`](#pass-erase-newtypes), the one pass both backends require, and nothing more, so the compiled core stays a direct image of the elaborated program. This is the level to reach for when reading `dump core` or bisecting whether an optimization caused a change.
+
+`-O1`, the default, is the real optimization level. On top of `EraseNewtypes` it runs [`Specialize`](#pass-specialize) before effect lowering and, after it, the late pipeline [`Simplify`](#pass-simplify) -> [`Inline`](#pass-inline) -> [`Simplify`](#pass-simplify) -> [`Cse`](#pass-cse) -> [`Simplify`](#pass-simplify): dictionary specialization, then a gentle simplifier brought to a fixed point around a bounded inliner and scalar CSE. This is the GHC simplify/inline/simplify shape, and it is what the compiler runs unless told otherwise.
+
+`-O2` currently runs exactly the `-O1` pipeline. It is the reserved slot for the heavier passes that have not landed yet (stronger inlining, a worker/wrapper split, loop-invariant code motion); until they do, `-O2` and `-O1` produce identical core.
+
+### 14.7 Controlling the Pipeline {#explicit-pass-lists}
+
+Below the `-O` level, two mechanisms drive the passes directly. The `-O`/`--opt`, `--passes`, and `--no-<pass>` flags are global, so they apply to building, running, and `dump core` alike.
+
+A `--no-<pass>` flag subtracts a single pass from whatever pipeline is otherwise in effect, an `-O` level or a `--passes` list. There is one per pass, and they stack:
+
+```console
+prism app.pr -O1 --no-inline             # the -O1 pipeline, minus Inline
+prism app.pr -O1 --no-inline --no-cse    # ...minus Inline and Cse
+prism app.pr --no-specialize             # default -O1, minus Specialize
+prism dump core app.pr -O0 --no-erase-newtypes   # the raw elaborated core, nothing run
+```
+
+`--no-specialize` is the flag form of the `PRISM_NO_SPECIALIZE` environment variable; the two are equivalent and combine. `--no-erase-newtypes` is honored but rarely wise, since both backends assume newtype erasure has run.
+
+`--passes` instead replaces the level outright with an explicit, ordered list, the LLVM `opt -passes=` / GHC `[CoreToDo]` analogue; it is mutually exclusive with `-O`. The spec names the two stages around effect lowering:
+
+```text
+--passes '[pre:<names>][;late:<names>]'
+```
+
+`<names>` is a comma-separated list in run order; a bare list with no marker is the pre stage. The pre passes are `EraseNewtypes` and `Specialize`; the late passes are `Simplify`, `Inline`, and `Cse`. Each section is exactly the passes named, with no level defaults filled in, so explicit means explicit. The `-O1` pipeline written out in full, and a pre-only run that stops after specialization:
+
+```console
+prism app.pr --passes 'pre:EraseNewtypes,Specialize;late:Simplify,Inline,Simplify,Cse,Simplify'
+prism dump core app.pr --passes 'pre:EraseNewtypes,Specialize'
+```
+
+A `--no-<pass>` flag still applies on top of an explicit list, filtering it:
+
+```console
+prism app.pr --passes 'late:Simplify,Inline,Simplify' --no-inline   # Inline dropped from the list
+```
 
 The parser rejects an unknown name (suggesting the closest known one), a pass placed in the wrong stage, a pre section that orders `Specialize` before `EraseNewtypes`, and an empty spec.
 
-### 14.3 Lint, Telemetry, and Parity {#lint-telemetry-and-parity}
+### 14.8 Controlling LLVM Codegen {#controlling-llvm-codegen}
+
+The `-O` level and the controls above tune the Core-to-Core optimizer, which runs identically on both backends. A separate set of knobs tunes the native backend's own codegen, the last step where the emitted bitcode and the C runtime are compiled and linked. They are independent of the Core `-O`: a program can pair an aggressive Core pipeline with a light backend, or the reverse, for granular control of the generated code.
+
+Prism runs no LLVM optimization passes in process. It verifies the module, writes bitcode, and hands the rest to `clang`, which compiles the bitcode and the C runtime in one `-flto=thin` invocation so ThinLTO inlines the runtime into the generated code. ThinLTO stays on at every level, since it is what folds the runtime in, and every emitted function carries `nounwind` (Prism has no exceptions and this backend emits no invokes or landingpads), which lets the pipeline drop unwind tables. Three controls override this step:
+
+| Control          | Default | Effect                                                                                                           |
+| ---------------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--backend-opt`  | `2`     | the `clang -O` level over the emitted bitcode: `0`, `1`, `2`, `3`, or `s`/`z` for size; also `PRISM_BACKEND_OPT` |
+| `PRISM_CC`       | `clang` | the compiler driver invoked for the compile-and-link step (e.g. a pinned `clang-18`)                             |
+| `PRISM_CC_FLAGS` | (none)  | arbitrary flags appended after the defaults, so a trailing token wins                                            |
+
+Because `PRISM_CC_FLAGS` is appended last and `clang` honors the final `-O` it sees, a trailing `-O0` there overrides `--backend-opt`; the same hook adds `-march=native`, `-g`, or a sanitizer such as `-fsanitize=undefined`:
+
+```console
+prism app.pr --backend-opt 3                       # heaviest backend pipeline
+PRISM_CC_FLAGS='-march=native -g' prism app.pr     # native tuning plus debug info
+PRISM_CC=clang-18 prism app.pr --backend-opt z     # a pinned compiler, optimized for size
+```
+
+These controls drive the `clang` step shared by the LLVM and MLIR backends; `prism run` invokes no compiler, so they do not affect the interpreter.
+
+### 14.9 Lint, Telemetry, and Parity {#lint-telemetry-and-parity}
 
 A Core Lint well-formedness check, pipeline idempotence, and per-pass tick telemetry gate every pass, alongside the triple-backend parity oracle (see [verification](#verification)). Parity is the invariant: compiled behavior at every level, and under any `--passes` spec, is byte-identical under the oracle, so optimization can only change cost, never meaning.
 
@@ -696,9 +919,9 @@ Prism is an unusually good host for the Unison-style managed codebase this point
 
 ## 19. Metaprogramming {#metaprogramming}
 
-Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [email me](mailto:stephen.m.diehl@gmail.com). Until then it stays an open problem.
+Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having been burned by Template Haskell and OCaml's metaprogramming fire and watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [email me](mailto:stephen.m.diehl@gmail.com). Until then it stays an open problem.
 
-## 20. Bootstrapping and Self-Hosting {#bootstrapping-and-self-hosting}
+## 20. Bootstrapping Plan {#bootstrapping-and-self-hosting}
 
 The compiler is written in Rust, but only until it can be written in Prism. The end state is the ordinary one for a serious language: a self-hosting compiler that compiles its own source, reached by a standard multi-stage bootstrap. The current Rust compiler is _stage 0_. Compiling the Prism-in-Prism source with stage 0 yields _stage 1_; compiling that same source again with stage 1 yields _stage 2_; and the bootstrap is sound exactly when stage 1 and stage 2 are byte-identical, the fixed point that proves the compiler reproduces itself. Prism is already unusually well-equipped to check that last step, because the [differential oracle](#the-model-as-a-differential-oracle) and the triple-backend [parity gate](#lint-telemetry-and-parity) make "two builds agree byte-for-byte" the property the whole test suite is already built around.
 
@@ -732,17 +955,18 @@ The `prism` binary is one executable with a handful of subcommands. With no subc
 
 The four optimizer/backend flags are global (`-O`, `--passes`, `--backend-opt` apply to any subcommand, since they affect building, running, and `dump core`); the rest are positional to the command shown. `-h`/`--help` works on the binary and every subcommand, and `-V`/`--version` on the binary.
 
-| Flag                    | Applies to           | Default                        | Meaning                                                                                                                                                          |
-| ----------------------- | -------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--out <PATH>`    | bare build, `build`  | source stem, or `target/<pkg>` | Output path for the compiled binary.                                                                                                                             |
-| `--mlir`                | bare build, `build`  | off (LLVM)                     | Lower through the MLIR backend instead of the textual LLVM emitter (requires the `mlir` build feature).                                                          |
-| `-O`, `--opt [LEVEL]`   | global               | `1` (bare `-O` is `2`)         | Core optimizer level (`0`/`1`/`2`); see [optimization levels](#optimization-levels).                                                                             |
-| `--passes <SPEC>`       | global               | unset                          | Run an explicit ordered pass list, overriding `-O` (mutually exclusive); see [explicit pass lists](#explicit-pass-lists).                                        |
-| `--backend-opt <LEVEL>` | global               | `2`                            | LLVM-backend opt level handed to the C compiler as `-O<LEVEL>`: `0`, `1`, `2`, `3`, or `s`/`z` for size. Distinct from `-O`, which tunes Prism's Core optimizer. |
-| `--no-banner`           | `repl`               | off                            | Skip the REPL startup banner.                                                                                                                                    |
-| `--check`               | `fmt`                | off                            | Check only: exit 1 if any file is not canonical, write nothing.                                                                                                  |
-| `-h`, `--help`          | binary, all commands |                                | Print help.                                                                                                                                                      |
-| `-V`, `--version`       | binary               |                                | Print the version.                                                                                                                                               |
+| Flag                    | Applies to           | Default                        | Meaning                                                                                                                                                                        |
+| ----------------------- | -------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `-o`, `--out <PATH>`    | bare build, `build`  | source stem, or `target/<pkg>` | Output path for the compiled binary.                                                                                                                                           |
+| `--mlir`                | bare build, `build`  | off (LLVM)                     | Lower through the MLIR backend instead of the textual LLVM emitter (requires the `mlir` build feature).                                                                        |
+| `-O`, `--opt [LEVEL]`   | global               | `1` (bare `-O` is `2`)         | Core optimizer level (`0`/`1`/`2`); see [optimization levels](#optimization-levels).                                                                                           |
+| `--passes <SPEC>`       | global               | unset                          | Run an explicit ordered pass list, overriding `-O` (mutually exclusive); see [controlling the pipeline](#explicit-pass-lists).                                                 |
+| `--no-<pass>`           | global               | off                            | Remove one pass from the pipeline: `--no-erase-newtypes`, `--no-specialize`, `--no-simplify`, `--no-inline`, `--no-cse`; see [controlling the pipeline](#explicit-pass-lists). |
+| `--backend-opt <LEVEL>` | global               | `2`                            | LLVM-backend opt level handed to the C compiler as `-O<LEVEL>`: `0`, `1`, `2`, `3`, or `s`/`z` for size. Distinct from `-O`, which tunes Prism's Core optimizer.               |
+| `--no-banner`           | `repl`               | off                            | Skip the REPL startup banner.                                                                                                                                                  |
+| `--check`               | `fmt`                | off                            | Check only: exit 1 if any file is not canonical, write nothing.                                                                                                                |
+| `-h`, `--help`          | binary, all commands |                                | Print help.                                                                                                                                                                    |
+| `-V`, `--version`       | binary               |                                | Print the version.                                                                                                                                                             |
 
 ### 21.3 Dump Phases {#dump-phases}
 

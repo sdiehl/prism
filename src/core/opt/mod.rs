@@ -412,10 +412,27 @@ pub fn run_spec_stage(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (
 
 // The shared pass-running loop behind [`run`] and [`run_spec_stage`]: Core Lint
 // between passes under `PRISM_CORE_LINT`, dumps under `PRISM_DUMP_CORE`, the
-// `PRISM_NO_SPECIALIZE` skip, and per-pass ticks dumped under `PRISM_OPT_STATS`.
+// disabled-pass filter (the `--no-<pass>` flags plus `PRISM_NO_SPECIALIZE`), and
+// per-pass ticks dumped under `PRISM_OPT_STATS`.
 fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, PassStats) {
     let lint_on = std::env::var_os("PRISM_CORE_LINT").is_some();
-    let no_spec = std::env::var_os("PRISM_NO_SPECIALIZE").is_some();
+    // The effective pass vector: the requested passes minus every one the user
+    // disabled. The disabled set is the union of the `--no-<pass>` flags (the
+    // process-level `set_disabled_passes`) and `PRISM_NO_SPECIALIZE`, the env
+    // equivalent of `--no-specialize`. Filtering here unifies the two sources and
+    // applies whether the passes came from a `-O` level or an explicit `--passes`
+    // list, and keeps disabled passes out of the dump and per-pass stats below.
+    let mut disabled = crate::driver::disabled_passes();
+    if std::env::var_os("PRISM_NO_SPECIALIZE").is_some()
+        && !disabled.contains(&CorePass::Specialize)
+    {
+        disabled.push(CorePass::Specialize);
+    }
+    let passes: Vec<CorePass> = passes
+        .iter()
+        .copied()
+        .filter(|p| !disabled.contains(p))
+        .collect();
     let mut cx = OptCx {
         newtype_ctors: nt.clone(),
         stats: PassStats::default(),
@@ -443,10 +460,7 @@ fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, Pa
     }
     check(core, "<input>");
     let mut cur = core.clone();
-    for &pass in passes {
-        if pass == CorePass::Specialize && no_spec {
-            continue;
-        }
+    for &pass in &passes {
         cur = run_pass(pass, &cur, &mut cx);
         check(&cur, pass.name());
         if let Some(sink) = &dump_sink {

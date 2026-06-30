@@ -42,8 +42,11 @@ fmt-examples: build-release
 
 ci: fmt-check clippy test fmt-examples
 
+# Build the wasm playground bundle and sync it into the docs (docs/src/pkg), so
+# the mdbook playground always runs the current compiler (no stale-bundle drift).
 wasm:
     wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+    cp web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 
 examples:
     cd web && pnpm gen-examples
@@ -54,7 +57,9 @@ web: wasm
 web-build:
     cd web && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
-docs:
+# `docs` rebuilds the wasm bundle first (via `wasm`, which syncs it into
+# docs/src/pkg), so the served playground is never a stale compiler.
+docs: wasm
     mdbook build docs
     mdbook serve docs --open
 
