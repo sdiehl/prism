@@ -10,6 +10,5 @@
 *.mlir
 /a.out
 /models/.lake
-/models/lake-manifest.json
 /docs/src/pkg
 /public

@@ -10,7 +10,9 @@ fn main() =
   match pair of
     (r, t) =>
       let r2 = replay(t, \(_u) -> rng_rand(()) + rng_rand(()) + env_argc(()))
-      let r3 = replay(deserialize(serialize(t)), \(_u) -> rng_rand(()) + rng_rand(()) + env_argc(()))
+      let r3 =
+        replay(deserialize(serialize(t))) fn(_u)
+          rng_rand(()) + rng_rand(()) + env_argc(())
       if r == r2 && r == r3 then
         println("replay matches")
       else

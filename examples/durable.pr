@@ -26,10 +26,8 @@ fn cfg_text() = "alpha:1\nbeta:22\ngamma:333\n"
 
 fn crash_if(stop, done) =
   if stop >= 0 && done >= stop then
-    let _ = eprintln("simulated crash after step {done} drew; re-run to resume")
+    eprintln("simulated crash after step {done} drew; re-run to resume")
     error(2)
-  else
-    ()
 
 -- Draw a random (a persisted observation), then crash on the `stop` step BEFORE
 -- printing it, so the crashing step's output never fires in this run.
@@ -40,29 +38,29 @@ fn draw(total, stop, done, acc) =
     let r = rng_rand(())
     let acc2 = acc + r
     crash_if(stop, done)
-    let _ = println("step {done}: running sum mod 97 = {mod(acc2, 97)}")
+    println("step {done}: running sum mod 97 = {mod(acc2, 97)}")
     draw(total, stop, done + 1, acc2)
 
 -- Reads the config (observation 1), prints a line about it, then draws `total`
 -- randoms; crashes after the `stop` step's draw when `stop >= 0`.
 fn flow(total, stop, u) =
   let cfg = read_file(cfg_path())
-  let _ = println("config has {str_len(cfg)} bytes")
+  println("config has {str_len(cfg)} bytes")
   draw(total, stop, 1, 0)
 
 fn cleanup() =
-  let _ = remove_file(log_path())
-  let _ = remove_file(cfg_path())
+  remove_file(log_path())
+  remove_file(cfg_path())
   ()
 
 fn main() =
   let log = log_path()
-  let _ = write_file(cfg_path(), cfg_text())
+  write_file(cfg_path(), cfg_text())
   let resuming = prim_file_exists(log) && str_len(prim_read_file(log)) > 0
   if resuming then
     let total = durable(log, \(u) -> flow(5, 0 - 1, u))
-    let _ = println("resumed and finished: final sum mod 97 = {mod(total, 97)}")
+    println("resumed and finished: final sum mod 97 = {mod(total, 97)}")
     cleanup()
   else
-    let _ = durable(log, \(u) -> flow(5, 3, u))
+    durable(log, \(u) -> flow(5, 3, u))
     ()

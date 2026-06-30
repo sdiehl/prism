@@ -1,4 +1,5 @@
 import Data.List (..)
+
 import Data.String (..)
 
 -- Record/replay handlers for the four capability effects (Console, FileSystem,
@@ -11,7 +12,6 @@ import Data.String (..)
 type TraceEntry = TInt(Int) | TStr(String) | TBool(Bool)
 
 alias Trace = List(TraceEntry)
-
 
 -- A single multi-effect handle discharges all eight ops, parameter-passing the
 -- trace through every resume (the `sfold` shape). Each arm performs the real op
@@ -26,17 +26,16 @@ fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
 
 pub fn record(action) =
   let g =
-    handle action(()) with {
-      con_read_int(u, k) => \(t) -> rec_int(k, t, prim_read_int()),
-      con_read_line(u, k) => \(t) -> rec_str(k, t, prim_read_line()),
-      fs_read_file(p, k) => \(t) -> rec_str(k, t, prim_read_file(p)),
-      fs_file_exists(p, k) => \(t) -> rec_bool(k, t, prim_file_exists(p)),
-      rng_rand(u, k) => \(t) -> rec_int(k, t, prim_rand()),
-      env_get(s, k) => \(t) -> rec_str(k, t, prim_getenv(s)),
-      env_argc(u, k) => \(t) -> rec_int(k, t, prim_args_count()),
-      env_arg(i, k) => \(t) -> rec_str(k, t, prim_arg(i)),
+    handle action(()) with
+      con_read_int(u, k) => \(t) -> rec_int(k, t, prim_read_int())
+      con_read_line(u, k) => \(t) -> rec_str(k, t, prim_read_line())
+      fs_read_file(p, k) => \(t) -> rec_str(k, t, prim_read_file(p))
+      fs_file_exists(p, k) => \(t) -> rec_bool(k, t, prim_file_exists(p))
+      rng_rand(u, k) => \(t) -> rec_int(k, t, prim_rand())
+      env_get(s, k) => \(t) -> rec_str(k, t, prim_getenv(s))
+      env_argc(u, k) => \(t) -> rec_int(k, t, prim_args_count())
+      env_arg(i, k) => \(t) -> rec_str(k, t, prim_arg(i))
       return r => \(t) -> (r, reverse(t))
-    }
   g(Nil)
 
 -- Pop the next entry, unwrap it to the op's result type, and resume with the
@@ -61,19 +60,18 @@ fn rep_bool(k, t) =
 -- dropped: resume with Unit, leaving the trace untouched.
 pub fn replay(trace, action) =
   let g =
-    handle action(()) with {
-      con_read_int(u, k) => \(t) -> rep_int(k, t),
-      con_read_line(u, k) => \(t) -> rep_str(k, t),
-      fs_read_file(p, k) => \(t) -> rep_str(k, t),
-      fs_file_exists(p, k) => \(t) -> rep_bool(k, t),
-      rng_rand(u, k) => \(t) -> rep_int(k, t),
-      env_get(s, k) => \(t) -> rep_str(k, t),
-      env_argc(u, k) => \(t) -> rep_int(k, t),
-      env_arg(i, k) => \(t) -> rep_str(k, t),
-      out_print(x, k) => \(t) -> k(())(t),
-      out_println(x, k) => \(t) -> k(())(t),
+    handle action(()) with
+      con_read_int(u, k) => \(t) -> rep_int(k, t)
+      con_read_line(u, k) => \(t) -> rep_str(k, t)
+      fs_read_file(p, k) => \(t) -> rep_str(k, t)
+      fs_file_exists(p, k) => \(t) -> rep_bool(k, t)
+      rng_rand(u, k) => \(t) -> rep_int(k, t)
+      env_get(s, k) => \(t) -> rep_str(k, t)
+      env_argc(u, k) => \(t) -> rep_int(k, t)
+      env_arg(i, k) => \(t) -> rep_str(k, t)
+      out_print(x, k) => \(t) -> k(())(t)
+      out_println(x, k) => \(t) -> k(())(t)
       return r => \(t) -> r
-    }
   g(trace)
 
 -- Durable trace serialization over ground types. Each TraceEntry encodes as a
@@ -165,24 +163,32 @@ fn step_bool(path, k, st, real) =
 fn out_step(k, st, real) =
   match st of
     (Nil, acc) =>
-      let _ = real(())
+      real(())
       k(())((Nil, acc))
     (rem, acc) => k(())((rem, acc))
 
 pub fn durable(path, action) =
-  let loaded = if prim_file_exists(path) then deserialize(prim_read_file(path)) else Nil
+  let loaded =
+    if prim_file_exists(path) then
+      deserialize(prim_read_file(path))
+    else
+      Nil
   let g =
-    handle action(()) with {
-      con_read_int(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_read_int()),
-      con_read_line(u, k) => \(st) -> step_str(path, k, st, \(z) -> prim_read_line()),
-      fs_read_file(p, k) => \(st) -> step_str(path, k, st, \(z) -> prim_read_file(p)),
-      fs_file_exists(p, k) => \(st) -> step_bool(path, k, st, \(z) -> prim_file_exists(p)),
-      rng_rand(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_rand()),
-      env_get(s, k) => \(st) -> step_str(path, k, st, \(z) -> prim_getenv(s)),
-      env_argc(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_args_count()),
-      env_arg(i, k) => \(st) -> step_str(path, k, st, \(z) -> prim_arg(i)),
-      out_print(x, k) => \(st) -> out_step(k, st, \(z) -> prim_print(x)),
-      out_println(x, k) => \(st) -> out_step(k, st, \(z) -> prim_println(x)),
+    handle action(()) with
+      con_read_int(u, k) =>
+        \(st) -> step_int(path, k, st, \(z) -> prim_read_int())
+      con_read_line(u, k) =>
+        \(st) -> step_str(path, k, st, \(z) -> prim_read_line())
+      fs_read_file(p, k) =>
+        \(st) -> step_str(path, k, st, \(z) -> prim_read_file(p))
+      fs_file_exists(p, k) =>
+        \(st) -> step_bool(path, k, st, \(z) -> prim_file_exists(p))
+      rng_rand(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_rand())
+      env_get(s, k) => \(st) -> step_str(path, k, st, \(z) -> prim_getenv(s))
+      env_argc(u, k) =>
+        \(st) -> step_int(path, k, st, \(z) -> prim_args_count())
+      env_arg(i, k) => \(st) -> step_str(path, k, st, \(z) -> prim_arg(i))
+      out_print(x, k) => \(st) -> out_step(k, st, \(z) -> prim_print(x))
+      out_println(x, k) => \(st) -> out_step(k, st, \(z) -> prim_println(x))
       return r => \(st) -> r
-    }
   g((loaded, reverse(loaded)))
