@@ -375,4 +375,41 @@ theorem load_runs {Γ : Core} {c : Comp} {w : Rv}
     (h : BEval Γ [] c w) : Runs Γ (load c) (.ret w, []) :=
   bigstep_runs h []
 
+/-- A run to a halted (non-stepping) configuration is unique: the machine being a
+    deterministic function, two maximal runs from the same start coincide. This is
+    `MStep.deterministic` lifted to whole runs. -/
+theorem runs_to_halt_unique {Γ : Core} {a n1 : Conf} (h1 : Runs Γ a n1) :
+    step Γ n1 = none → ∀ {n2}, Runs Γ a n2 → step Γ n2 = none → n1 = n2 := by
+  induction h1 with
+  | refl =>
+      intro hn1 n2 h2 hn2
+      cases h2 with
+      | refl => rfl
+      | step hs _ => simp [hs] at hn1
+  | step hs _ ih =>
+      intro hn1 n2 h2 hn2
+      cases h2 with
+      | refl => simp [hs] at hn2
+      | step hs2 hrest2 =>
+          have hb := Option.some.inj (hs.symm.trans hs2)
+          subst hb
+          exact ih hn1 hrest2 hn2
+
+/--
+Oracle soundness: the machine is a faithful realization of the big-step natural
+semantics. Whenever the specification evaluates a closed program `c` to `w`, the
+machine halts on exactly `w` (`load_runs`), and it halts on no other value
+(`runs_to_halt_unique`). Together with `MStep.deterministic` this is what
+licenses the CEK machine as the differential oracle: its observable result is
+the natural semantics' value, uniquely determined.
+-/
+theorem oracle_sound {Γ : Core} {c : Comp} {w : Rv} (h : BEval Γ [] c w) :
+    Runs Γ (load c) (.ret w, []) ∧ ∀ {w'}, Runs Γ (load c) (.ret w', []) → w' = w := by
+  refine ⟨load_runs h, ?_⟩
+  intro w' h'
+  have heq : ((.ret w : MState), ([] : Stack)) = ((.ret w' : MState), ([] : Stack)) :=
+    runs_to_halt_unique (load_runs h) rfl h' rfl
+  simp only [Prod.mk.injEq, MState.ret.injEq] at heq
+  exact heq.1.symm
+
 end Prism
