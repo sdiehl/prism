@@ -2,9 +2,9 @@
 //!
 //! A general tool: it renders one Markdown page per module of a project (or
 //! single file) into `target/docs`, with signatures taken from the typechecker's
-//! inferred types and prose from `-- |` doc comments (see [`extract`]). Runnable
+//! inferred types and prose from `-- |` doc comments (see `extract`). Runnable
 //! ```` ```prism ```` blocks in those comments are doctests, compiled and
-//! optionally run by `prism docs --test` (see [`doctest`]), keeping the
+//! optionally run by `prism docs --test` (see `doctest`), keeping the
 //! documentation in sync with the code.
 //!
 //! The standard library is the first consumer: [`stdlib_pages`] documents the
