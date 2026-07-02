@@ -3,13 +3,13 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/optics_each.pr
 ---
-[Player(a, Vec2(1, 2), 15, [Item(sword, 1)]), Player(b, Vec2(1, 2), 18, [Item(sword, 1)])]
-[Player(a, Vec2(1, 2), 0, [Item(sword, 1)]), Player(b, Vec2(1, 2), 0, [Item(sword, 1)])]
-[Player(a, Vec2(1, 2), 99, [Item(sword, 1)]), Player(b, Vec2(1, 2), 99, [Item(sword, 1)])]
-World([Player(a, Vec2(0, 2), 5, [Item(sword, 1)]), Player(b, Vec2(0, 2), 8, [Item(sword, 1)])], 1)
-World([Player(z, Vec2(1, 2), 15, [Item(sword, 1)]), Player(z, Vec2(1, 2), 18, [Item(sword, 1)])], 1)
-World([Player(a, Vec2(1, 2), 5, [Item(sword, 6)]), Player(b, Vec2(1, 2), 8, [Item(sword, 6)])], 1)
-World([Player(a, Vec2(1, 2), 1, [Item(sword, 1)]), Player(b, Vec2(1, 2), 1, [Item(sword, 1)])], 2)
-Some(Item(gem, 6))
+[Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 15, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 18, bag = [Item { name = "sword", count = 1 }] }]
+[Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 0, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 0, bag = [Item { name = "sword", count = 1 }] }]
+[Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 99, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 99, bag = [Item { name = "sword", count = 1 }] }]
+World { party = [Player { name = "a", pos = Vec2 { x = 0, y = 2 }, hp = 5, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", pos = Vec2 { x = 0, y = 2 }, hp = 8, bag = [Item { name = "sword", count = 1 }] }], turn = 1 }
+World { party = [Player { name = "z", pos = Vec2 { x = 1, y = 2 }, hp = 15, bag = [Item { name = "sword", count = 1 }] }, Player { name = "z", pos = Vec2 { x = 1, y = 2 }, hp = 18, bag = [Item { name = "sword", count = 1 }] }], turn = 1 }
+World { party = [Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 5, bag = [Item { name = "sword", count = 6 }] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 8, bag = [Item { name = "sword", count = 6 }] }], turn = 1 }
+World { party = [Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 1, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 1, bag = [Item { name = "sword", count = 1 }] }], turn = 2 }
+Some(Item { name = "gem", count = 6 })
 None
 => ()

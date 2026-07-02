@@ -53,8 +53,6 @@ fn paint(s: Style, t: &str) -> String {
     format!("{}{t}{}", s.render(), s.render_reset())
 }
 
-// Banner art: a small prism dispersing white light into a spectrum, a wink at
-// the name and at what rows do (split one beam into observable components).
 // Target and allocator are resolved at compile time: PRISM_TARGET is the cargo
 // target triple (set in build.rs); the allocator follows the mimalloc feature.
 const fn allocator() -> &'static str {
@@ -971,9 +969,10 @@ fn set(session: &mut Session, arg: &str) {
         return;
     }
     for tok in arg.split_whitespace() {
-        let (on, flag) = match tok.split_at(1) {
-            ("+", f) => (true, f),
-            ("-", f) => (false, f),
+        let mut chars = tok.chars();
+        let (on, flag) = match chars.next() {
+            Some('+') => (true, chars.as_str()),
+            Some('-') => (false, chars.as_str()),
             _ => {
                 eprintln!("usage: :set +t -s  (bare :set lists options)");
                 continue;

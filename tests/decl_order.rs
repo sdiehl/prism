@@ -121,10 +121,10 @@ fn f(n : Int) : Int =
     assert_eq!(sig(src, "f"), "(Int) -> Int");
 }
 
-// The call graph over-approximates: a local `dup` that shadows the top-level
-// `dup` adds a spurious `caller -> dup` edge. That edge must never change
-// inference, so `caller` stays fully polymorphic rather than being pinned to the
-// top-level `dup : (Int) -> Int`.
+// The call graph respects lexical scope: a local `dup` that shadows the
+// top-level `dup` is not a reference to it, so no `caller -> dup` edge is added
+// and `caller` stays fully polymorphic rather than being pinned to the top-level
+// `dup : (Int) -> Int`.
 #[test]
 fn shadowing_local_sharing_a_top_level_name_is_sound() {
     let src = "\
@@ -136,4 +136,78 @@ fn caller(z) =
 ";
     assert_eq!(sig(src, "dup"), "(Int) -> Int");
     assert_eq!(sig(src, "caller"), "forall a. (a) -> a");
+}
+
+// A parameter name that collides with a top-level function must not add a
+// call-graph edge either. Here the edge would be a back-edge (`visit`'s body
+// mentions its parameter `fs`, and a top-level `fs` calls `visit`), forming a
+// cycle that merges the two into one recursion group. `visit` would then be
+// inferred monomorphically against `fs`'s single use, stripping its polymorphism
+// (`forall e. (List(() -> Unit ! {E, e})) -> ...`). Scope-aware collection keeps
+// `visit` general, identical to a control that only renames the caller.
+const SHADOW_COLLIDE: &str = "\
+effect E { ctl op(Unit) : Unit }
+
+fn visit(fs) =
+  match fs of
+    Nil => ()
+    Cons(f, rest) =>
+      f()
+      visit(rest)
+
+fn fs() : !{E} Unit =
+  visit([\\() -> op(())])
+";
+
+const SHADOW_CONTROL: &str = "\
+effect E { ctl op(Unit) : Unit }
+
+fn visit(fs) =
+  match fs of
+    Nil => ()
+    Cons(f, rest) =>
+      f()
+      visit(rest)
+
+fn runner() : !{E} Unit =
+  visit([\\() -> op(())])
+";
+
+#[test]
+fn parameter_shadowing_a_top_level_name_keeps_the_callee_general() {
+    assert_eq!(sig(SHADOW_COLLIDE, "visit"), sig(SHADOW_CONTROL, "visit"));
+    assert_eq!(
+        sig(SHADOW_COLLIDE, "visit"),
+        "forall a e0. (List(() -> a ! {e0})) -> Unit ! {e0}"
+    );
+    assert_eq!(sig(SHADOW_COLLIDE, "fs"), "() -> Unit ! {E}");
+}
+
+// The concrete regression: the stdlib `Concurrent` nursery binds a parameter
+// `tasks` in `scope`/`fork_all`. A user function named `tasks` that calls `scope`
+// used to be merged into a recursion group with them by the spurious edge, which
+// dropped its residual `Async`/user effect row to empty and tripped the
+// effect-reconciliation ICE (`can still perform [...] but its inferred row is
+// []`). With scope-aware collection the call's full row flows out unchanged.
+#[test]
+fn scope_caller_named_after_a_concurrent_parameter_infers_its_row() {
+    let src = "\
+import Concurrent (..)
+
+effect Trace { ctl note(Int) : Unit }
+
+fn task(n : Int, r : Int) : !{Async(Int), Trace} Int =
+  note(n)
+  yield(())
+  r
+
+fn tasks() : !{Async(Int), Trace} Int =
+  match scope([\\() -> task(1, 10), \\() -> task(2, 20)]) of
+    Cons(a, Cons(b, Nil)) => a + b
+    _ => 0
+";
+    assert_eq!(
+        sig(src, "tasks"),
+        "() -> Int ! {Concurrent.Async(Int), Trace}"
+    );
 }

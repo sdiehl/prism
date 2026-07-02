@@ -1,9 +1,9 @@
--- Type-directed show. The compiler infers each argument's static type and
--- derives a printer for it. Primitives go to show_int/show_bool/show_float.
--- ADTs and tuples get a structural printer built from their real constructor
--- names, recursing into fields. No typeclasses, just the type.
+-- `show` is a typeclass method, dispatched by dictionary. Primitives have
+-- built-in instances (Int/Bool/Float/...), containers and tuples compose from
+-- their elements, and an ADT gets a structural instance from `deriving (Show)`,
+-- printing its real constructor names and recursing into fields.
 
-type Tree = Leaf | Node(Tree, Int, Tree)
+type Tree = Leaf | Node(Tree, Int, Tree) deriving (Show)
 
 fn build(n) : ! Tree =
   if n == 0 then

@@ -54,13 +54,10 @@ Program {
 }
 
 == types ==
-shw : forall a. (a) -> String
-
-== core (cbpv) ==
-Type Error: cannot infer the type to show; annotate the argument, e.g. (e : List(Int))
-   ╭─[ <source>:1:18 ]
+Scope Error: in `shw`: unbound variable 'show'
+   ╭─[ <source>:1:13 ]
    │
  1 │ fn shw(x) = show(x)
-   │                  ┬  
-   │                  ╰── cannot infer the type to show; annotate the argument, e.g. (e : List(Int))
+   │             ──┬─  
+   │               ╰─── in `shw`: unbound variable 'show'
 ───╯

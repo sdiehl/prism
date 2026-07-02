@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Lst",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Nil",

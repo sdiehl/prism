@@ -1,0 +1,39 @@
+-- Braiding Replay and Concurrent: a concurrent run that draws randomness is
+-- recorded, then replayed to reproduce it exactly.
+--
+-- The fibers perform `Random` in addition to `Async`. Since the scheduler does
+-- not handle `Random`, it flows out through `run_async` (e = {Random}) and is
+-- caught by `record`, which logs each draw into a trace. Because the cooperative
+-- schedule is deterministic, `replay` re-runs the same interleaving against the
+-- trace -- performing no real randomness -- and returns the identical result.
+--
+-- Expected output (the drawn value depends on the RNG, but replay always
+-- reproduces the recorded run):
+--   recorded run reproduced: true
+
+import Concurrent (..)
+
+import Replay (record, replay)
+
+fn worker(name : String) : !{Async(Int), Random} Int =
+  let r = rand_below(100)
+  yield(())
+  r
+
+fn scene() : !{Async(Int), Random} Int =
+  match scope([\() -> worker("A"), \() -> worker("B")]) of
+    Cons(a, Cons(b, Nil)) => a + b
+    _ => 0
+
+-- `replayable` verifies the whole concurrent run stays within the recordable
+-- capabilities (here `Random`, plus the scheduler's `Exn`): the annotation is
+-- accepted only because the row is a subset of the replayable set, so the type
+-- proves this run can be recorded and replayed. A `Preempt`-carrying row would be
+-- rejected here with no extra rule.
+replayable fn draw() : Int = run_async(scene)
+
+fn main() =
+  match record(\(_u) -> draw()) of
+    (recorded, trace) =>
+      let replayed = replay(trace, \(_u) -> draw())
+      println("recorded run reproduced: {recorded == replayed}")

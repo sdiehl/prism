@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use ariadne::{Color, Config, Label, Report, ReportKind, Source};
 
-use crate::driver::PRELUDE;
+use crate::driver::{PRELUDE, PRELUDE_END_MARK};
 use marginalia::Span;
 use thiserror::Error;
 
@@ -43,7 +43,7 @@ impl<'a> SourceMap<'a> {
             if full.len() >= n && full.as_bytes()[n - 1] == b'\n' && full.starts_with(PRELUDE) {
                 n
             } else {
-                0
+                custom_prelude_end(full)
             };
         Self { full, prelude }
     }
@@ -70,6 +70,19 @@ impl<'a> SourceMap<'a> {
             format!("line {l}:{c}")
         }
     }
+}
+
+// Locate the boundary a custom prelude stamped (`with_custom_prelude`): the
+// byte offset just past the first `PRELUDE_END_MARK` line, or 0 when the source
+// carries no custom prelude. The first occurrence is authoritative; the mark's
+// spelling is not one ordinary source or the formatter produces.
+fn custom_prelude_end(full: &str) -> usize {
+    let line = format!("{PRELUDE_END_MARK}\n");
+    if full.starts_with(&line) {
+        return line.len();
+    }
+    let sep = format!("\n{line}");
+    full.find(&sep).map_or(0, |pos| pos + sep.len())
 }
 
 pub(crate) fn line_col(src: &str, byte: usize) -> (u32, u32) {
@@ -388,4 +401,35 @@ fn write_report(
         )
         .finish()
         .write((name, Source::from(src)), out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SourceMap;
+    use crate::driver::{with_custom_prelude, with_prelude};
+
+    // Diagnostics under a custom prelude must be user-relative, exactly like
+    // the built-in path: the composed source carries the boundary mark, and
+    // SourceMap reads it back. This was silently wrong (offset by the whole
+    // custom prelude) before the mark existed.
+    #[test]
+    fn custom_prelude_positions_are_user_relative() {
+        let user_src = "fn main() =\n  oops()\n";
+        let full = with_custom_prelude("fn helper() = 1\nfn helper2() = 2", user_src);
+        let map = SourceMap::new(&full);
+        assert_eq!(map.user(), user_src);
+        let off = map.prelude_len() + map.user().find("oops").unwrap();
+        assert_eq!(map.at(off), "line 2:3");
+    }
+
+    // The built-in prelude path is unchanged: located by its known text, no
+    // boundary mark involved.
+    #[test]
+    fn builtin_prelude_positions_are_user_relative() {
+        let user_src = "fn main() = 1\n";
+        let full = with_prelude(user_src);
+        let map = SourceMap::new(&full);
+        assert_eq!(map.user(), user_src);
+        assert_eq!(map.at(map.prelude_len()), "line 1:1");
+    }
 }

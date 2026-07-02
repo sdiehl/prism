@@ -1,0 +1,43 @@
+-- A logical clock as an ordinary effect: deterministic virtual time, no OS clock.
+--
+-- `Clock` is an algebraic effect with two operations, `now` and `sleep`. Nothing
+-- here reads the operating system. `run_clock` interprets the effect by threading a
+-- single integer -- the current logical tick -- through the computation: it is a
+-- parameter-passing handler that reifies the program into a function `Int -> a`,
+-- where `sleep(d)` resumes with the tick advanced by `d`, `now()` resumes with the
+-- tick unchanged, and the whole thing is seeded at 0.
+--
+-- The clock is installed *outside* `run_async`. The scheduler handles `Async`
+-- (fork/await/...) but not `Clock`, so every `sleep`/`now` a fiber performs tunnels
+-- out through the scheduler to `run_clock`. That pass-through is the row-kinded
+-- effect polymorphism at work: `run_async` is generic in the residual row `e`, so
+-- `Clock` flows through it untouched rather than being trapped or forcing the
+-- scheduler to know anything about time.
+--
+-- One tick is threaded across the entire cooperative run, so logical time is the
+-- running sum of the sleeps in schedule order: A sleeps 3 (0 -> 3), then B sleeps 4
+-- (3 -> 7), so B reads t=7, not t=4. `sleep` advances the shared clock but does not
+-- itself reschedule, so the result is a pure function of the sleeps -- identical on
+-- every run, with no real time elapsing. Swap `run_clock` for a handler that reads
+-- the OS clock and the same program runs in real time, unchanged: time is a
+-- capability chosen at the edge, not a primitive baked into the language.
+--
+-- Expected output:
+--   A woke at t=3
+--   B woke at t=7
+--   total 10
+
+import Concurrent (..)
+
+fn worker(name : String, d : Int) : !{Async(Int), Clock, IO} Int =
+  sleep(d)
+  let t = now(())
+  println("{name} woke at t={t}")
+  t
+
+fn scene() : !{Async(Int), Clock, IO} Int =
+  let a = fork(\() -> worker("A", 3))
+  let b = fork(\() -> worker("B", 4))
+  await(a) + await(b)
+
+fn main() = println("total {run_clock(\() -> run_async(scene))}")

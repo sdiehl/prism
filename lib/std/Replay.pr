@@ -1,13 +1,15 @@
+-- | Record/replay handlers for the capability effects (Console, FileSystem,
+-- Random, Env).
+--
+-- `record` runs an action against the real world, logging each observation
+-- into a trace; `replay` re-runs the same action against a trace, performing
+-- no real IO. The trace and its entry type stay private to this module: a
+-- caller only ever threads the opaque trace `record` returns back into
+-- `replay`.
+
 import Data.List (..)
 
 import Data.String (..)
-
--- Record/replay handlers for the four capability effects (Console, FileSystem,
--- Random, Env). `record` runs an action against the real world, logging each
--- observation into a trace; `replay` re-runs the same action against a trace,
--- performing no real IO. Replaying a recorded trace reproduces the original
--- result. The trace and its entry type stay private to this module: a caller
--- only ever threads the opaque trace `record` returns back into `replay`.
 
 type TraceEntry = TInt(Int) | TStr(String) | TBool(Bool)
 
@@ -24,6 +26,9 @@ fn rec_str(k, t, x) = k(x)(Cons(TStr(x), t))
 
 fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
 
+-- | Run `action` against the real world, logging every capability observation
+-- (console, file, random, and environment reads) into a trace. Returns
+-- `(result, trace)`; feed the trace to `replay` to reproduce the run without IO.
 pub fn record(action) =
   let g =
     handle action(()) with
@@ -56,8 +61,9 @@ fn rep_bool(k, t) =
     Cons(TBool(x), rest) => k(x)(rest)
     _ => fail()
 
--- A pure replay reproduces the action's VALUE, not its side effects, so Output is
--- dropped: resume with Unit, leaving the trace untouched.
+-- | Re-run `action` against a recorded `trace`, performing no real IO: each
+-- capability read is served from the trace and output is dropped, reproducing the
+-- original result. Fails if the trace does not match the action.
 pub fn replay(trace, action) =
   let g =
     handle action(()) with
@@ -87,6 +93,8 @@ fn enc_entry(e) =
     TStr(s) => enc_field("S", s)
     TBool(b) => enc_field("B", if b then "1" else "0")
 
+-- | Encode a trace to a self-delimiting string for durable storage, read back
+-- with `deserialize`.
 pub fn serialize(trace) = str_join("", map(enc_entry, trace))
 
 fn un_int(o) =
@@ -114,6 +122,7 @@ fn de_go(s, i, colon) =
     let payload = substring(s, c + 1, len)
     Cons(de_entry(tag, payload), de_go(s, c + 1 + len, colon))
 
+-- | Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 pub fn deserialize(s) = de_go(s, 0, char_at(":", 0))
 
 -- Durable record/replay driver. A persisted log freezes the observations of an
@@ -167,6 +176,10 @@ fn out_step(k, st, real) =
       k(())((Nil, acc))
     (rem, acc) => k(())((rem, acc))
 
+-- | Durable record/replay against a persisted log at `path`: replay the recorded
+-- prefix with no real IO, then perform each new observation for real, appending
+-- and persisting the trace after each so an interrupted run resumes where it left
+-- off.
 pub fn durable(path, action) =
   let loaded =
     if prim_file_exists(path) then

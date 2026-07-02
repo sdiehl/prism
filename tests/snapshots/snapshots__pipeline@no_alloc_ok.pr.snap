@@ -1,0 +1,223 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_ok.pr
+---
+== tokens ==
+VOpen Fn Ident("inc") LParen Ident("x") Colon KwInt RParen Colon KwInt Without Alloc Eq Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("twice") LParen Ident("x") Colon KwInt RParen Colon KwInt Without Alloc Eq Ident("inc") LParen Ident("inc") LParen Ident("x") RParen RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("twice") LParen Int(IntLit { value: 40, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "inc",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 270..271,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 274..275,
+                    },
+                ),
+                span: 270..275,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 232..275,
+        },
+        Decl {
+            name: "twice",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "inc",
+                        ),
+                        span: 317..320,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "inc",
+                                    ),
+                                    span: 321..324,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 325..326,
+                                    },
+                                ],
+                            ),
+                            span: 321..327,
+                        },
+                    ],
+                ),
+                span: 317..328,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 277..328,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "twice",
+                        ),
+                        span: 348..353,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 40,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 354..356,
+                        },
+                    ],
+                ),
+                span: 348..357,
+            },
+            wheres: [],
+            span: 330..357,
+        },
+    ],
+}
+
+== types ==
+inc : (Int) -> Int
+twice : (Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn inc(x) =
+  return x to t@0; return 1 to t@1; t@0 + t@1
+fn twice(x) =
+  return x to t@2; inc(t@2) to t@3; inc(t@3)
+fn main() =
+  return 40 to t@4; twice(t@4)
+
+== fbip (rc) ==
+fn inc(x) =
+  return x to t@0; return 1 to t@1; t@0 + t@1
+fn twice(x) =
+  return x to t@2; inc(t@2) to t@3; inc(t@3)
+fn main() =
+  return 40 to t@4; twice(t@4)
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+; Function Attrs: nounwind
+define i64 @prism_inc(i64 %a0) #0 {
+entry:
+  %t1 = and i64 %a0, 3
+  %t3 = and i64 %t1, 1
+  %t4 = icmp eq i64 %t3, 1
+  br i1 %t4, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t6 = ashr i64 %a0, 1
+  %t9 = add i64 %t6, 1
+  %t11 = shl i64 %t9, 1
+  %t12 = ashr i64 %t11, 1
+  %t13 = icmp eq i64 %t12, %t9
+  br i1 %t13, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t15 = call i64 @prism_rt_int_add(i64 %a0, i64 3)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t14 = or i64 %t11, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 3)
+  ret i64 %t16
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t1 = call i64 @prism_inc(i64 81)
+  %t2 = call i64 @prism_inc(i64 %t1)
+  ret i64 %t2
+}
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 42

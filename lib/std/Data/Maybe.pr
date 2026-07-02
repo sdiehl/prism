@@ -1,26 +1,44 @@
--- Operations over the wired-in `Option(a)` type (`None` / `Some(a)`). The
--- prelude opens this module, so these are in unqualified scope everywhere.
+-- | Operations over `Option(a)` (`None` / `Some(a)`).
+--
+-- The type is wired in; the prelude opens this module, so these are in
+-- unqualified scope everywhere.
 
+-- | True when the option holds a value.
 pub fn is_some(o) =
   match o of
     None => false
     Some(x) => true
 
+-- | True when the option is empty.
 pub fn is_none(o) =
   match o of
     None => true
     Some(x) => false
 
+-- | The contained value, or the default `d` when the option is empty.
+--
+-- ```prism
+-- unwrap_or(0, Some(5))
+-- ```
 pub fn unwrap_or(d, o) =
   match o of
     None => d
     Some(x) => x
 
+-- | Apply `f` to the contained value, leaving `None` untouched.
+--
+-- The default `d` here is not an option, so this example is rejected:
+--
+-- ```prism,compile_fail
+-- unwrap_or(0, 5)
+-- ```
 pub fn map_option(f, o) =
   match o of
     None => None
     Some(x) => Some(f(x))
 
+-- | Chain an option-returning function, short-circuiting on `None` (monadic
+-- bind for `Option`).
 pub fn and_then(f, o) =
   match o of
     None => None

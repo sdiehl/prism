@@ -1,15 +1,17 @@
 name: Release
 
 # Cut a release by pushing a version tag (`git tag v0.4.0 && git push --tags`,
-# or `just release 0.4.0`). This builds the Apple Silicon binary, attaches the
-# tarball, checksum, and build provenance to a GitHub Release, and bumps the
-# Homebrew tap. CI (ci.yml) only triggers on branch pushes, not tags, so this
-# job runs its own full test gate.
+# or `just release 0.4.0`). The build matrix produces the macOS arm64 and Linux
+# x64 binaries; a single publish job then attaches both tarballs, their
+# checksums, and build provenance to one GitHub Release and bumps the Homebrew
+# tap. CI (ci.yml) only triggers on pull requests and pushes to main, not tags,
+# so each build runs its own full test gate.
 #
-# The binary is not self-contained: it links the z3 and zstd dylibs Homebrew's
-# LLVM drags in, and shells out to clang to compile a program. Both come from
-# `brew install llvm@22`, which the Homebrew formula declares as a dependency,
-# so distribution is the bare binary plus that one documented dependency.
+# Neither binary is self-contained. The macOS binary links the z3 and zstd
+# dylibs Homebrew's LLVM drags in and shells out to clang, both from
+# `brew install llvm@22` (the Homebrew formula's declared dependency). The Linux
+# binary links the libs from the apt llvm-22 packages and likewise shells out to
+# clang, so it needs llvm-22 installed (`apt-get install llvm-22 clang-22`).
 on:
   push:
     tags: ['v*']
@@ -29,9 +31,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  macos-arm64:
-    name: macOS arm64 binary
-    runs-on: macos-14  # Apple Silicon runner; host target is aarch64-apple-darwin
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14  # Apple Silicon runner; host target is aarch64-apple-darwin
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v7
 
@@ -63,35 +73,49 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      # llvm@22 pins the major inkwell links against (llvm22-1); the bare `llvm`
-      # formula would drift to 23+ and break the build. It also provides the z3
-      # and zstd dylibs the built binary links and the clang it compiles with.
-      - name: Install LLVM 22
+      # macOS: llvm@22 pins the major inkwell links against (llvm22-1); the bare
+      # `llvm` formula would drift to 23+ and break the build. It also provides
+      # the z3 and zstd dylibs the built binary links and the clang it compiles
+      # with.
+      - name: Install LLVM 22 (macOS)
+        if: runner.os == 'macOS'
         run: |
           brew install llvm@22
           prefix="$(brew --prefix llvm@22)"
           echo "LLVM_SYS_221_PREFIX=$prefix" >> "$GITHUB_ENV"
           echo "PRISM_CC=$prefix/bin/clang" >> "$GITHUB_ENV"
 
+      # Linux: the same LLVM 22 from the apt.llvm.org snapshot CI builds against.
+      - name: Install LLVM 22 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+          echo "PRISM_CC=/usr/lib/llvm-22/bin/clang" >> "$GITHUB_ENV"
+
       # The release gate. ci.yml does not run on tags, so the parity/leak oracle
-      # and the perf ratchet run here, on macOS, which is also the platform
-      # coverage the Linux-only CI lacks.
+      # and the perf ratchet run here, on each release platform.
       - name: Test
         run: cargo test --all
 
       - name: Build release
         run: cargo build --release
 
-      # LLVM drags in z3 and zstd, and the linker bakes in their exact versioned
-      # dylib name (e.g. libz3.4.15.dylib). z3 bumps that name every minor
-      # release and Homebrew keeps only the current one, so the binary fails to
-      # launch on any machine whose z3 differs from the build runner's. Repoint
-      # both at the unversioned symlink Homebrew always keeps current, then
-      # re-sign (install_name_tool invalidates the ad-hoc signature arm64
-      # requires). The smoke test below cannot catch this since the runner has
-      # the exact z3 it built against; this step is what makes the binary
-      # portable across z3 versions.
-      - name: Make dylib references version-independent
+      # macOS only: LLVM drags in z3 and zstd, and the linker bakes in their
+      # exact versioned dylib name (e.g. libz3.4.15.dylib). z3 bumps that name
+      # every minor release and Homebrew keeps only the current one, so the
+      # binary fails to launch on any machine whose z3 differs from the build
+      # runner's. Repoint both at the unversioned symlink Homebrew always keeps
+      # current, then re-sign (install_name_tool invalidates the ad-hoc signature
+      # arm64 requires). Linux's soname/ldconfig handling makes this unnecessary
+      # there.
+      - name: Make dylib references version-independent (macOS)
+        if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           bin=target/release/prism
@@ -109,12 +133,16 @@ jobs:
       - name: Package tarball
         run: |
           set -euo pipefail
-          pkg="prism-${VERSION}-aarch64-apple-darwin"
+          pkg="prism-${VERSION}-${{ matrix.target }}"
           mkdir "$pkg"
           cp target/release/prism "$pkg/prism"
           cp LICENSE README.md "$pkg/" 2>/dev/null || true
           tar -czf "$pkg.tar.gz" "$pkg"
-          shasum -a 256 "$pkg.tar.gz" | tee "$pkg.tar.gz.sha256"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$pkg.tar.gz" | tee "$pkg.tar.gz.sha256"
+          else
+            shasum -a 256 "$pkg.tar.gz" | tee "$pkg.tar.gz.sha256"
+          fi
           echo "PKG=$pkg" >> "$GITHUB_ENV"
 
       # Smoke-test the packaged binary (not target/release/prism): compile and
@@ -129,16 +157,43 @@ jobs:
           echo "output: $out"
           [ "$out" = "42" ] || { echo "unexpected output: $out"; exit 1; }
 
+      # Hand the tarball + checksum to the single publish job, which uploads both
+      # platforms to one release so the two builds never race to create it.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ env.PKG }}.tar.gz
+            ${{ env.PKG }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # Collect both platforms' tarballs/checksums into dist/.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Attest build provenance
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: ${{ env.PKG }}.tar.gz
+          subject-path: dist/*.tar.gz
 
       # The release body is the matching CHANGELOG.md section, so notes are
       # whatever was written for this version rather than auto-generated noise.
       - name: Extract changelog section
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           awk -v v="$VERSION" '
             $0 ~ "^## +" v "([^0-9]|$)" { f=1; next }
@@ -150,22 +205,20 @@ jobs:
           fi
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: |
-            ${{ env.PKG }}.tar.gz
-            ${{ env.PKG }}.tar.gz.sha256
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
 
       # Bump Formula/prism.rb in the tap so `brew upgrade prism` sees the new
-      # version. No-op until the tap repo and the HOMEBREW_TAP_TOKEN secret (a
-      # PAT with contents:write on sdiehl/homebrew-prism) exist. See
-      # packaging/homebrew/README.md for the one-time setup.
+      # version. The tap ships the macOS arm64 tarball. No-op until the tap repo
+      # and the HOMEBREW_TAP_TOKEN secret (a PAT with contents:write on
+      # sdiehl/homebrew-prism) exist. See packaging/homebrew/README.md.
       - name: Check tap token
         id: tap
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

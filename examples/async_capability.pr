@@ -1,0 +1,39 @@
+-- A capability handled through the concurrent scheduler.
+--
+-- Fibers perform a `Log` capability in addition to `Async`. The scheduler does
+-- not handle `Log`, so by the ambient-row discipline it flows out of `run_async`
+-- (`run_async : (() -> a ! {Async(a) | e}) -> a ! {e}` with `e = {Log}`), and the
+-- program must supply a `Log` handler at the edge. Nothing is smuggled past the
+-- scheduler: the capability is granted exactly where the run is interpreted.
+--
+-- Expected output:
+--   A: begin
+--   B: begin
+--   A: end
+--   B: end
+--   done: 2
+
+import Concurrent (..)
+
+effect Log {
+  ctl log(String) : Unit
+}
+
+fn worker(name : String) : !{Async(Int), Log} Int =
+  log("{name}: begin")
+  yield(())
+  log("{name}: end")
+  1
+
+fn scene() : !{Async(Int), Log} Int =
+  match scope([\() -> worker("A"), \() -> worker("B")]) of
+    Cons(a, Cons(b, Nil)) => a + b
+    _ => 0
+
+-- `run_async` discharges `Async` but leaves `Log`; grant the capability here.
+fn main() =
+  handle run_async(scene) with
+    log(msg, k) =>
+      println(msg)
+      k(())
+    return total => println("done: {total}")

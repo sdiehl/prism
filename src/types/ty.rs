@@ -5,6 +5,21 @@ use crate::sym::Sym;
 
 pub type Effects = BTreeSet<Sym>;
 
+// The kind (sort) of a type-level parameter. Most parameters have kind `Type`
+// (`*`); a parameter annotated `: Row` ranges over effect rows, so a data-type
+// field may reference it in a `! {..}` position (`type Cmd(a, e : Row)`). `Fun`
+// is reserved for a future higher-kinded checker: today HKT (`f(a)`) is handled
+// structurally by `App`/`Con` unification and needs no kind annotation, so an
+// unannotated parameter defaults to `Type` and the whole existing corpus is
+// unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Kind {
+    #[default]
+    Type,
+    Row,
+    Fun(Box<Self>, Box<Self>),
+}
+
 // Wired-in nominal names. The prelude defines them and the compiler special-
 // cases them (list literals, `deriving`, built-in equality), so they go through
 // these constants rather than scattered string literals.
@@ -211,6 +226,12 @@ pub enum Type {
     // `App` always has a flexible head.
     App(Box<Self>, Box<Self>),
     Tuple(Vec<Self>),
+    // An effect row carried in type-argument position: the argument supplied
+    // for a `Row`-kinded parameter (`Cmd(Int, {IO})`), and what a rigid row
+    // parameter `Var(e)` becomes once embedded in a `Con` spine. It only ever
+    // appears at a `Row`-kinded position; unification of `Row(a) ~ Row(b)`
+    // defers to `unify_row`, and row-variable substitution recurses through it.
+    Row(EffRow),
 }
 
 impl Type {
@@ -292,6 +313,7 @@ impl Type {
                 h.free_exist(acc);
                 a.free_exist(acc);
             }
+            Self::Row(r) => r.for_each_arg(&mut |a| a.free_exist(acc)),
             _ => {}
         }
     }
@@ -315,6 +337,7 @@ impl Type {
                 h.free_exist_row(acc);
                 a.free_exist_row(acc);
             }
+            Self::Row(r) => r.free_exist_row(acc),
             _ => {}
         }
     }
@@ -334,6 +357,7 @@ impl Type {
             // Re-reduce after substitution: the head may have become concrete.
             Self::App(h, a) => Self::app(h.subst_exist(v, with), a.subst_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_exist(v, with)).collect()),
+            Self::Row(r) => Self::Row(r.map_args(&|a| a.subst_exist(v, with))),
             other => other.clone(),
         }
     }
@@ -353,6 +377,7 @@ impl Type {
             }
             Self::App(h, a) => Self::app(h.subst_row_exist(v, with), a.subst_row_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_row_exist(v, with)).collect()),
+            Self::Row(r) => Self::Row(r.subst_row_exist(v, with)),
             other => other.clone(),
         }
     }
@@ -371,6 +396,7 @@ impl Type {
             Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_var(name, with)).collect()),
             Self::App(h, a) => Self::app(h.subst_var(name, with), a.subst_var(name, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_var(name, with)).collect()),
+            Self::Row(r) => Self::Row(r.map_args(&|a| a.subst_var(name, with))),
             other => other.clone(),
         }
     }
@@ -394,6 +420,7 @@ impl Type {
             Self::Tuple(ts) => {
                 Self::Tuple(ts.iter().map(|t| t.subst_row_var(name, with)).collect())
             }
+            Self::Row(r) => Self::Row(r.subst_row_var(name, with)),
             other => other.clone(),
         }
     }
@@ -406,6 +433,7 @@ impl Type {
             }
             Self::Con(_, ps) | Self::Tuple(ps) => ps.iter().all(Self::is_mono),
             Self::App(h, a) => h.is_mono() && a.is_mono(),
+            Self::Row(r) => r.is_mono_row(),
             _ => true,
         }
     }
@@ -455,6 +483,7 @@ impl Type {
                 let ts: Vec<_> = ts.iter().map(Self::show).collect();
                 format!("({})", ts.join(", "))
             }
+            Self::Row(r) => r.show(),
         }
     }
 }

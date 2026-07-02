@@ -11,7 +11,7 @@
 
 use serde_json::{json, Map, Value as J};
 
-use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
+use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
 use crate::sym::Sym;
 
 fn syms(ss: &[Sym]) -> J {
@@ -131,14 +131,16 @@ fn comp(c: &Comp) -> J {
         }
         Comp::Mask(ops, b) => json!({"c": "mask", "ops": syms(ops), "body": comp(b)}),
         // IO / builtins / ref: tagged faithfully; the Lean model erases or rejects these.
-        Comp::Print(v) => json!({"c": "print", "v": value(v)}),
-        Comp::PrintF(v) => json!({"c": "printf", "v": value(v)}),
-        Comp::PrintS(v) => json!({"c": "prints", "v": value(v)}),
-        Comp::PrintNl => json!({"c": "printNl"}),
-        Comp::ReadInt => json!({"c": "readInt"}),
-        Comp::ReadLine => json!({"c": "readLine"}),
-        Comp::Rand => json!({"c": "rand"}),
-        Comp::Srand(v) => json!({"c": "srand", "v": value(v)}),
+        Comp::Io(op, args) => match op {
+            IoOp::Print => json!({"c": "print", "v": value(&args[0])}),
+            IoOp::PrintF => json!({"c": "printf", "v": value(&args[0])}),
+            IoOp::PrintS => json!({"c": "prints", "v": value(&args[0])}),
+            IoOp::PrintNl => json!({"c": "printNl"}),
+            IoOp::ReadInt => json!({"c": "readInt"}),
+            IoOp::ReadLine => json!({"c": "readLine"}),
+            IoOp::Rand => json!({"c": "rand"}),
+            IoOp::Srand => json!({"c": "srand", "v": value(&args[0])}),
+        },
         Comp::Error(v) => json!({"c": "err", "v": value(v)}),
         Comp::FloatBuiltin(op, v) => {
             json!({"c": "floatBuiltin", "name": format!("{op:?}"), "v": value(v)})

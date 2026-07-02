@@ -1,36 +1,46 @@
--- Operations over the wired-in `Result(a, e)` type (`Ok(a)` / `Err(e)`). The
--- prelude opens this module, so these are in unqualified scope everywhere.
+-- | Operations over `Result(a, e)` (`Ok(a)` / `Err(e)`).
+--
+-- The type is wired in; the prelude opens this module, so these are in
+-- unqualified scope everywhere.
 
+-- | True when the result is `Ok`.
 pub fn is_ok(r) =
   match r of
     Ok(x) => true
     Err(e) => false
 
+-- | True when the result is `Err`.
 pub fn is_err(r) =
   match r of
     Ok(x) => false
     Err(e) => true
 
+-- | Apply `f` to the `Ok` value, leaving an `Err` untouched.
 pub fn map_result(f, r) =
   match r of
     Ok(x) => Ok(f(x))
     Err(e) => Err(e)
 
+-- | Chain a result-returning function, short-circuiting on `Err` (monadic bind
+-- for `Result`).
 pub fn and_then_result(f, r) =
   match r of
     Ok(x) => f(x)
     Err(e) => Err(e)
 
+-- | The `Ok` value, or the default `d` when the result is `Err`.
 pub fn result_or(d, r) =
   match r of
     Ok(x) => x
     Err(e) => d
 
+-- | Convert an `Option` to a `Result`, using `err` in place of `None`.
 pub fn ok_of_option(err, o) =
   match o of
     None => Err(err)
     Some(x) => Ok(x)
 
+-- | Convert a `Result` to an `Option`, discarding the error.
 pub fn option_of_result(r) =
   match r of
     Ok(x) => Some(x)

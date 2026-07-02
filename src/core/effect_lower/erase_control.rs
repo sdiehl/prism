@@ -38,13 +38,13 @@ use crate::core::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, Value};
 use crate::core::fv;
 use crate::fresh::Fresh;
 use crate::names;
+// The prelude loop-driver names live in their one canonical home; a drift-guard
+// test there pins each to the prelude, so a rename cannot silently drop loop
+// erasure onto the free-monad tier.
+use crate::names::{FOREVER, REPEAT_WHILE};
 use crate::sym::Sym;
 
-use super::{DONE_TAG, MORE_TAG, SDONE, SMORE};
-
-// The prelude tail-recursive loop drivers a `while`/`loop` desugars to.
-const REPEAT_WHILE: &str = "repeat_while";
-const FOREVER: &str = "forever";
+use super::{sdone, smore, SDONE, SMORE};
 
 // Control dispositions threaded through a loop body.
 const CTL_NORMAL: i64 = 0;
@@ -81,6 +81,7 @@ pub(super) fn erase_control(core: &Core) -> (Core, bool) {
         .map(|f| CoreFn {
             name: f.name,
             params: f.params.clone(),
+            dict_arity: f.dict_arity,
             body: er.erase(&f.body),
         })
         .collect();
@@ -540,6 +541,7 @@ impl Eraser {
         self.generated.push(CoreFn {
             name: drv,
             params: fvs,
+            dict_arity: 0,
             body: drv_body,
         });
         Some(Comp::Call(drv, args))
@@ -637,14 +639,6 @@ impl Eraser {
             )),
         )
     }
-}
-
-fn smore(v: Value) -> Value {
-    Value::Ctor(SMORE.into(), MORE_TAG, vec![v])
-}
-
-fn sdone(v: Value) -> Value {
-    Value::Ctor(SDONE.into(), DONE_TAG, vec![v])
 }
 
 fn ctor_pat1(name: &str, var: Sym) -> CorePat {

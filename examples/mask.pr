@@ -1,4 +1,4 @@
--- Koka-style effect masking. `mask<Eff>(e)` makes every Eff operation in e
+-- Effect masking. `mask<Eff>(e)` makes every Eff operation in e
 -- bypass the innermost enclosing Eff handler and reach the next one out.
 -- Masks nest, so a double mask skips two handlers. The row type still injects
 -- Eff, so a masked expression demands an enclosing handler. Dispatch skips

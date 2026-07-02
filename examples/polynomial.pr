@@ -35,7 +35,9 @@ fn psum(p : Poly, q : Poly) : Poly =
 -- Dirichlet product: positions pair up, their direction sets multiply, so the
 -- exponents add. (p (x) q)(X) = p(X) * q(X).
 fn pmul(p : Poly, q : Poly) : Poly =
-  Poly { arities = concat_map(\(a) -> map(\(b) -> a + b, q.arities), p.arities) }
+  Poly {
+    arities = concat_map(\(a) -> map(\(b) -> a + b, q.arities), p.arities)
+  }
 
 -- Substitution p <| q = p(q(y)). At a position of p each of its directions
 -- independently picks a position of q, and the resulting arity is the sum of the

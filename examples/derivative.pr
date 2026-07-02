@@ -10,7 +10,14 @@
 -- nullable(r) decides emptiness; deriv(c, r) is the calculus rule for each
 -- constructor; matches(re, s) folds deriv over the codepoints of s.
 
-type Re = Eps | Nul | Chr(Int) | Seq(Re, Re) | Alt(Re, Re) | Star(Re) deriving (Eq, Show)
+type Re
+  = Eps
+  | Nul
+  | Chr(Int)
+  | Seq(Re, Re)
+  | Alt(Re, Re)
+  | Star(Re)
+  deriving (Eq, Show)
 
 -- Does r match the empty string?
 fn nullable(r) : Bool =

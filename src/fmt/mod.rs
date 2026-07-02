@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use marginalia::{BuiltinKind, Trivia, TriviaTable};
 
 use crate::error::Error;
@@ -8,7 +10,7 @@ use crate::syntax::ast::{
     Sugar, SugarArm, Surface, S,
 };
 
-mod decl;
+pub(crate) mod decl;
 mod ops;
 mod pat;
 use decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
@@ -93,7 +95,7 @@ const fn callee_parens(e: &Expr) -> bool {
 }
 
 // Wrap an already-rendered operand in parens when the surrounding precedence
-// demands it; the no-paren case returns the string untouched.
+// demands it.
 fn paren_if(parens: bool, s: String) -> String {
     if parens {
         format!("({s})")
@@ -105,12 +107,51 @@ fn paren_if(parens: bool, s: String) -> String {
 // In statement position, `match` and `if` always lay out across lines, even
 // when they would fit on one: their arms and branches read better stacked, the
 // way other languages write them. Synth matches (pattern-let / `?` desugar) are
-// excluded. The block printer restores those surfaces inline.
-const fn forces_break(e: &S<Expr>) -> bool {
+// excluded. The block printer restores those surfaces inline. Record and optic
+// literals whose shape reads better stacked (`wants_break`) force layout too,
+// so a dense or nested constructor never stays cramped on one line.
+fn forces_break(e: &S<Expr>) -> bool {
+    wants_break(&e.node)
+        || matches!(
+            e.node,
+            Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..) | Sugar::While(..))
+        ) && !e.synth
+}
+
+// The most fields a record constructor keeps on one line; beyond this it stacks
+// one field per line even when it would fit, for scannability.
+const MAX_INLINE_RECORD_FIELDS: usize = 4;
+
+// A record or optic literal reads better stacked across lines regardless of
+// width. A record does when it carries more than `MAX_INLINE_RECORD_FIELDS`
+// fields or nests another record constructor as a field value; a nested optic
+// update does when it has several clauses and any path actually traverses
+// (`each`/`?Ctor`/`where`/`[i]`), so the foci line up one per row.
+fn wants_break(e: &Expr) -> bool {
+    match e {
+        Expr::RecordCreate(_, fields) | Expr::RecordUpdate(_, _, fields) => {
+            fields.len() > MAX_INLINE_RECORD_FIELDS
+                || fields.iter().any(|(_, v)| is_record_lit(&v.node))
+        }
+        Expr::RecordUpdatePath(_, ups) => {
+            ups.len() > 1 && ups.iter().any(|(p, _)| p.iter().any(path_step_traverses))
+        }
+        _ => false,
+    }
+}
+
+const fn is_record_lit(e: &Expr) -> bool {
     matches!(
-        e.node,
-        Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..) | Sugar::While(..))
-    ) && !e.synth
+        e,
+        Expr::RecordCreate(..) | Expr::RecordUpdate(..) | Expr::RecordUpdatePath(..)
+    )
+}
+
+const fn path_step_traverses(s: &PathStep) -> bool {
+    matches!(
+        s,
+        PathStep::Each | PathStep::Case(_) | PathStep::Index(_) | PathStep::Where(_)
+    )
 }
 
 // A call whose last argument is a lambda with a statement-shaped body: a
@@ -182,14 +223,11 @@ fn escape_str(s: &str) -> String {
     out
 }
 
-// Recognize the compound-assignment shape `compound_assign` produces: a `var`
-// assignment whose RHS is a synth `Bin(op, Var(x), rhs)` with a matching target
-// and a compound-eligible op. Returns the op and right operand so the formatter
-// restores `x <op>= rhs`. A hand-written `x := x + e` (non-synth `Bin`) returns
-// `None` and keeps its explicit `:=` form.
 // The shared shape of `as_compound_assign`/`as_index_compound`: a synth
 // `Bin(op, lhs, rhs)` with a compound-eligible op whose `lhs` matches the
-// caller's target predicate. Returns the op and right operand.
+// caller's target predicate. Returns the op and right operand, so the formatter
+// restores `x <op>= rhs`; a hand-written `x := x + e` (non-synth `Bin`) returns
+// `None` and keeps its explicit `:=` form.
 fn as_compound(v: &S<Expr>, lhs_ok: impl Fn(&Expr) -> bool) -> Option<(BinOp, &S<Expr>)> {
     if !v.synth {
         return None;
@@ -739,9 +777,11 @@ impl Fmt<'_> {
     }
 
     fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
-        if let Some(s) = self.fmt_expr_inline(e, mode) {
-            if indent * INDENT.len() + s.len() <= LINE_WIDTH {
-                return s;
+        if !wants_break(&e.node) {
+            if let Some(s) = self.fmt_expr_inline(e, mode) {
+                if indent * INDENT.len() + s.len() <= LINE_WIDTH {
+                    return s;
+                }
             }
         }
         self.fmt_expr_break(e, indent, mode)
@@ -1176,6 +1216,10 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{} {e_s}", kw::RETURN))
             }
+            Sugar::WithoutAlloc(body) => {
+                let b = self.fmt_expr_inline(body, Mode::Flat)?;
+                Some(format!("{} {} {b}", kw::WITHOUT, kw::ALLOC))
+            }
             Sugar::VarDecl(..) | Sugar::NamedHandle(..) => None,
         }
     }
@@ -1199,7 +1243,6 @@ impl Fmt<'_> {
     }
 
     fn fmt_quals(&self, quals: &[Qualifier]) -> Option<String> {
-        use std::fmt::Write;
         let mut out = String::new();
         for q in quals {
             match q {
@@ -1223,9 +1266,11 @@ impl Fmt<'_> {
     // Heads (if conditions, match scrutinees, handle bodies) sit before a layout
     // opener, so a multi-line head must be parenthesized to suppress layout.
     fn fmt_head(&self, e: &S<Expr>, indent: usize) -> String {
-        if let Some(s) = self.fmt_expr_inline(e, Mode::Flat) {
-            if indent * INDENT.len() + s.len() + 16 <= LINE_WIDTH {
-                return s;
+        if !wants_break(&e.node) {
+            if let Some(s) = self.fmt_expr_inline(e, Mode::Flat) {
+                if indent * INDENT.len() + s.len() + 16 <= LINE_WIDTH {
+                    return s;
+                }
             }
         }
         format!("({})", self.fmt_expr_break(e, indent + 1, Mode::Flat))
@@ -1306,6 +1351,12 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::While(cond, body)), Mode::Layout) => {
                 self.fmt_while_layout(cond.as_deref(), body, indent)
             }
+            (Expr::Sugar(Sugar::WithoutAlloc(body)), Mode::Layout) => format!(
+                "{} {}\n{}",
+                kw::WITHOUT,
+                kw::ALLOC,
+                self.fmt_block(body, indent + 1, body.span.start)
+            ),
             (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => self
                 .fmt_block(e, indent, e.span.start)
                 .trim_start()
@@ -1326,10 +1377,89 @@ impl Fmt<'_> {
                 }
             }
             (Expr::Handle(body, arms), _) => self.fmt_handle_flat(body, arms, indent, mode),
+            // A record literal too long for one line stacks one field per line,
+            // brace-delimited (so layout is suppressed and it reparses), the
+            // closing brace back at the record's own column.
+            (Expr::RecordCreate(name, fields), _) => {
+                self.fmt_record_break(name, None, fields, indent)
+            }
+            (Expr::RecordUpdate(base, name, fields), _) => {
+                self.fmt_record_break(name, Some(base), fields, indent)
+            }
+            (Expr::RecordUpdatePath(base, ups), _) => {
+                self.fmt_path_update_break(e, base, ups, indent)
+            }
             _ => self
                 .fmt_expr_inline(e, Mode::Flat)
                 .unwrap_or_else(|| self.verbatim(e.span.start, e.span.end)),
         }
+    }
+
+    // Stack a record literal's fields one per line at `indent + 1`, an optional
+    // `..base` spread first (a `RecordUpdate`), the closing `}` at `indent`. Only
+    // reached from `fmt_expr` when the inline form overflows the width budget, so
+    // a short record stays on one line and this is idempotent.
+    fn fmt_record_break(
+        &self,
+        name: &str,
+        base: Option<&S<Expr>>,
+        fields: &[(String, S<Expr>)],
+        indent: usize,
+    ) -> String {
+        let inner = INDENT.repeat(indent + 1);
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(b) = base {
+            lines.push(format!(
+                "{inner}..{}",
+                self.fmt_expr(b, indent + 1, Mode::Flat)
+            ));
+        }
+        for (f, e) in fields {
+            lines.push(format!(
+                "{inner}{f} = {}",
+                self.fmt_expr(e, indent + 1, Mode::Flat)
+            ));
+        }
+        format!(
+            "{name} {{\n{}\n{}}}",
+            lines.join(",\n"),
+            INDENT.repeat(indent)
+        )
+    }
+
+    // A nested optic update stacked one clause per line, leading-delimiter style:
+    //   { base
+    //   | path op val
+    //   , path op val
+    //   }
+    // The base sits alone on the opening line; the first clause is led by `|`, the
+    // rest by `,`; the closing brace returns to the update's own column. The whole
+    // form is brace-delimited, so it reparses to the same tree (idempotent). Falls
+    // back to verbatim source if a path carries a sub-expression that cannot inline.
+    fn fmt_path_update_break(
+        &self,
+        e: &S<Expr>,
+        base: &S<Expr>,
+        ups: &[(Vec<PathStep>, PathOp)],
+        indent: usize,
+    ) -> String {
+        let ind = INDENT.repeat(indent);
+        let base_s = self.fmt_expr(base, indent + 1, Mode::Flat);
+        let mut lines = vec![format!("{{ {base_s}")];
+        for (k, (p, op)) in ups.iter().enumerate() {
+            let Some(ps) = self.fmt_path(p) else {
+                return self.verbatim(e.span.start, e.span.end);
+            };
+            let (sigil, val) = match op {
+                PathOp::Set(v) => (kw::EQ, v),
+                PathOp::Modify(v) => (kw::TILDE, v),
+            };
+            let lead = if k == 0 { "|" } else { "," };
+            let val_s = self.fmt_expr(val, indent + 1, Mode::Flat);
+            lines.push(format!("{ind}{lead} {ps} {sigil} {val_s}"));
+        }
+        lines.push(format!("{ind}}}"));
+        lines.join("\n")
     }
 
     fn fmt_match_layout(&self, scrut: &S<Expr>, arms: &[Arm], indent: usize) -> String {

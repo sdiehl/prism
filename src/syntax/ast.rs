@@ -1,6 +1,8 @@
 pub use marginalia::Span;
 pub use num_bigint::BigInt;
 
+pub use crate::types::ty::Kind;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Suffix {
     None,
@@ -320,6 +322,11 @@ pub struct Constraint {
 pub struct DataDecl {
     pub name: String,
     pub params: Vec<String>,
+    // Kind of each type parameter, positional. Either empty (every parameter has
+    // kind `Type`, the common case) or the same length as `params`. A parameter
+    // of kind `Row` ranges over effect rows, so a field may reference it in a
+    // `! {..}` position (`type Cmd(a, e : Row)`).
+    pub param_kinds: Vec<Kind>,
     pub ctors: Vec<Ctor>,
     pub deriving: Vec<(String, Span)>,
     pub newtype: bool,
@@ -348,6 +355,9 @@ pub struct EffOp {
     pub ret: Ty,
 }
 
+// Several independent surface flags (`konst`, `replayable`, `no_alloc`, and which
+// spelling of it); a flat set of one-shot booleans, not a state machine.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone)]
 pub struct Decl<P: Phase = Surface> {
     pub name: String,
@@ -370,11 +380,26 @@ pub struct Decl<P: Phase = Surface> {
     // must stay within the recordable capabilities plus the deterministic builtin
     // effects, so a record/replay handler can reproduce every observation.
     pub replayable: bool,
+    // The `without alloc` signature suffix: the function and its whole call tree
+    // must allocate no fresh heap cell. Checked over the reuse-lowered core with
+    // `fbip` semantics (no linearity or bounded-stack requirement), so this is
+    // `fbip` spelled as a revoked capability.
+    pub no_alloc: bool,
+    // Which surface spelling of that suffix the source used: `true` for the terser
+    // `\ alloc`, `false` for `without alloc`. Purely a formatter fidelity hint so a
+    // round-trip preserves the author's choice; the two spellings are semantically
+    // identical, so this is deliberately kept out of the `Debug` dump (an AST dump
+    // of `\ alloc` and `without alloc` is byte-identical, as it should be).
+    pub no_alloc_bs: bool,
     pub span: Span,
 }
 
 // `konst` is shown only when set, so a plain `fn` dumps identically to the
 // pre-constant form and a constant stands out.
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "`no_alloc_bs` is a formatter display hint, deliberately omitted so a `\\ alloc` and a `without alloc` decl dump identically (they are the same declaration)"
+)]
 impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Decl<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Decl");
@@ -393,6 +418,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Decl<P> {
         }
         if self.replayable {
             d.field("replayable", &self.replayable);
+        }
+        if self.no_alloc {
+            d.field("no_alloc", &self.no_alloc);
         }
         d.field("span", &self.span).finish()
     }
@@ -431,6 +459,124 @@ pub enum Ty {
     Fun(Vec<Self>, Row, Box<Self>),
     Con(String, Vec<Self>),
     Tuple(Vec<Self>),
+    // A `{ E, .. | r }` effect-row literal written in type-argument position, the
+    // argument for a `Row`-kinded parameter (`Cmd(Int, {IO})`). Only valid at a
+    // `Row`-kinded position; the kind check rejects it anywhere a type is wanted.
+    RowLit(Row),
+}
+
+impl Ty {
+    /// Visit each directly-nested `Ty` (including those inside effect-row label
+    /// arguments). This is the single exhaustive statement of `Ty`'s structural
+    /// children: a walker that recurses through it cannot silently drop a variant,
+    /// and adding a variant forces an update here rather than a quiet miss at every
+    /// hand-written `match`.
+    pub fn each_child(&self, f: &mut impl FnMut(&Self)) {
+        match self {
+            Self::App(_, args) | Self::Con(_, args) | Self::Tuple(args) => {
+                for a in args {
+                    f(a);
+                }
+            }
+            Self::Forall(_, b) => f(b),
+            Self::Fun(ps, row, ret) => {
+                for p in ps {
+                    f(p);
+                }
+                for a in row_label_args(row) {
+                    f(a);
+                }
+                f(ret);
+            }
+            Self::RowLit(row) => {
+                for a in row_label_args(row) {
+                    f(a);
+                }
+            }
+            Self::Int
+            | Self::I64
+            | Self::U64
+            | Self::Bool
+            | Self::Unit
+            | Self::Float
+            | Self::Char
+            | Self::Str
+            | Self::Var(_)
+            | Self::State(_) => {}
+        }
+    }
+
+    /// Mutable counterpart of [`Ty::each_child`].
+    pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut Self)) {
+        match self {
+            Self::App(_, args) | Self::Con(_, args) | Self::Tuple(args) => {
+                for a in args {
+                    f(a);
+                }
+            }
+            Self::Forall(_, b) => f(b),
+            Self::Fun(ps, row, ret) => {
+                for p in ps {
+                    f(p);
+                }
+                for a in row_label_args_mut(row) {
+                    f(a);
+                }
+                f(ret);
+            }
+            Self::RowLit(row) => {
+                for a in row_label_args_mut(row) {
+                    f(a);
+                }
+            }
+            Self::Int
+            | Self::I64
+            | Self::U64
+            | Self::Bool
+            | Self::Unit
+            | Self::Float
+            | Self::Char
+            | Self::Str
+            | Self::Var(_)
+            | Self::State(_) => {}
+        }
+    }
+
+    /// Fallible mutable child walk: stops and returns the first error `f` yields.
+    ///
+    /// # Errors
+    /// Propagates the first `Err` returned by `f` for any child, leaving the
+    /// remaining children unvisited.
+    pub fn try_each_child_mut<E>(
+        &mut self,
+        f: &mut impl FnMut(&mut Self) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut out = Ok(());
+        self.each_child_mut(&mut |c| {
+            if out.is_ok() {
+                out = f(c);
+            }
+        });
+        out
+    }
+}
+
+fn row_label_args(row: &Row) -> impl Iterator<Item = &Ty> {
+    let labels = if let Row::Cons(ls, _) = row {
+        ls.as_slice()
+    } else {
+        &[]
+    };
+    labels.iter().flat_map(|l| l.args.iter())
+}
+
+fn row_label_args_mut(row: &mut Row) -> impl Iterator<Item = &mut Ty> {
+    let labels = if let Row::Cons(ls, _) = row {
+        ls.as_mut_slice()
+    } else {
+        &mut []
+    };
+    labels.iter_mut().flat_map(|l| l.args.iter_mut())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -617,6 +763,11 @@ pub enum Sugar<P: Phase> {
     // `s.[ path ]`: read every focus the path selects into a `List`, the read
     // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
     ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),
+    // `without alloc { block }`: a scoped zero-allocation assertion. Desugar lifts
+    // the block to a synthetic top-level `without alloc` function taking the
+    // block's captured locals as parameters, replacing the block with a call, so
+    // the existing whole-call-tree allocation check covers the region.
+    WithoutAlloc(Box<S<Expr<P>>>),
 }
 
 // One step of an update path, read left to right. `Field(f)` descends into a
@@ -701,8 +852,8 @@ pub enum Expr<P: Phase = Surface> {
     // `{ base | a.b.c = v, xs.each ~ f }`: nested functional update along paths
     // of steps (`Field`/`Each`/`Case`/`Index`). Each path ends in a `PathOp`:
     // `= v` sets the focus, `~ f` modifies it. `Field`-only paths rebuild
-    // single-constructor records (reusable under Perceus); the optic steps
-    // desugar to `fmap`/`match`/`index_set`.
+    // single-constructor records (reused in place by the reuse pass); the optic
+    // steps desugar to `fmap`/`match`/`index_set`.
     RecordUpdatePath(Box<S<Self>>, Vec<(Vec<PathStep<P>>, PathOp<P>)>),
     Handle(Box<S<Self>>, Vec<HandlerArm<P>>),
     Mask(String, Box<S<Self>>),
@@ -737,7 +888,7 @@ pub enum Marker {
 }
 
 // A comprehension/loop qualifier following the generator: a Bool `if` filter or
-// a `let` binder. A failing guard or binder (Wave 2) prunes the element.
+// a `let` binder. A failing guard or binder prunes the element.
 #[derive(Clone, Debug)]
 pub enum Qualifier<P: Phase = Surface> {
     Guard(S<Expr<P>>),

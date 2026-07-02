@@ -11,66 +11,25 @@
 // byte-for-byte) and deterministic reference counting (zero leaked cells),
 // into `cargo test`, which CI and pre-commit run.
 //
-// Skips cleanly when no C compiler is available; CI sets PRISM_CC. Cases build
-// across cores because cargo already runs test functions (and their LLVM
-// builds) concurrently, so per-case temp paths and a fresh inkwell context per
-// build are the only isolation needed.
+// A missing C compiler is a hard failure, not a silent skip: a local `cargo
+// test` must not pass while exercising zero native, reference-counting, or
+// fusion coverage. CI sets PRISM_CC. Cases build across cores because cargo
+// already runs test functions (and their LLVM builds) concurrently, so per-case
+// temp paths and a fresh inkwell context per build are the only isolation needed.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::{env, fs, thread};
 
 use prism::error::Error;
 
-fn cc() -> String {
-    env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
-}
-
-fn have(tool: &str) -> bool {
-    Command::new(tool)
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-fn source(path: &Path) -> String {
-    prism::with_prelude(&fs::read_to_string(path).unwrap())
-}
-
-// The interpreter's real terminal output, byte-for-byte what a native binary's
-// stdout must equal. `term` (not a join over `out`) preserves the print/println
-// distinction: a bare `print` adds no newline.
-fn interpreted(full: &str) -> String {
-    prism::interpret(full).unwrap().term
-}
-
-// The runnable corpus: every example/run-case the interpreter executes cleanly
-// on empty stdin, restricted to on-platform programs. The interpret-Ok filter
-// excludes error cases, no-`main` library files, and the interactive examples
-// that block on input; the off-platform filter excludes file/env IO whose
-// native and interpreted runs are not a pure function of the source.
-fn corpus() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut out = Vec::new();
-    for dir in ["examples", "tests/cases/run"] {
-        for entry in fs::read_dir(root.join(dir)).unwrap().flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("pr") {
-                continue;
-            }
-            let full = source(&path);
-            let on_platform =
-                prism::off_platform_builtins(&full, root).is_ok_and(|ops| ops.is_empty());
-            if on_platform && prism::interpret(&full).is_ok() {
-                out.push(path);
-            }
-        }
-    }
-    out.sort();
-    out
-}
+mod common;
+#[cfg(feature = "mlir")]
+use common::have;
+use common::{candidate_count, corpus, interpreted, require_cc, source};
 
 fn check_parity(
     case: &Path,
@@ -126,10 +85,17 @@ fn check_parity(
 // run reports all divergences rather than aborting at the first.
 fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync) {
     let cases = corpus();
+    // The corpus is defined by a runtime filter (interprets cleanly, stays
+    // on-platform), so a regression that stops many examples interpreting would
+    // silently shrink every oracle drawing on it. Tie the floor to the
+    // committed file count rather than an absolute constant.
+    let total = candidate_count();
     assert!(
-        cases.len() >= 30,
-        "runnable corpus shrank to {} cases; discovery likely broke",
-        cases.len()
+        cases.len() * 100 >= total * 95,
+        "runnable corpus shrank to {} of {} committed programs; discovery or \
+         the interpreter likely broke",
+        cases.len(),
+        total
     );
     let next = AtomicUsize::new(0);
     let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -159,22 +125,133 @@ fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync
 
 #[test]
 fn native_matches_interpreter() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping parity: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     run_corpus("llvm", prism::build);
 }
 
 #[cfg(feature = "mlir")]
 #[test]
 fn mlir_matches_interpreter() {
-    if !have(&cc()) || !have("mlir-translate") {
-        eprintln!("skipping mlir parity: clang or mlir-translate not found");
-        return;
-    }
+    require_cc();
+    assert!(
+        have("mlir-translate"),
+        "`mlir-translate` not found. The --features mlir parity oracle requires \
+         it; install LLVM/MLIR so the MLIR backend is exercised."
+    );
     run_corpus("mlir", prism::build_mlir);
+}
+
+// Build `full` natively, run it on `input` over stdin with leak checking, and
+// return the process output. Shared by the stdin-driven oracles below, which
+// cover the seam the empty-stdin corpus cannot: `read_int`/`read_line` codegen.
+fn native_on_input(tag: &str, full: &str, input: &str) -> std::process::Output {
+    let bin = env::temp_dir().join(format!("prism_parity_{tag}_{}", std::process::id()));
+    prism::build(full, &bin).expect("native build failed");
+    let mut child = Command::new(&bin)
+        .env("PRISM_CHECK_LEAKS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn failed");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    for ext in ["bc", "ll"] {
+        let _ = fs::remove_file(bin.with_extension(ext));
+    }
+    let _ = fs::remove_file(&bin);
+    out
+}
+
+// read_int must keep the full i64 range: a value in (2^62, 2^63) fits an i64
+// but not the 63-bit tagged immediate, so the runtime returns it encoded (a
+// bignum cell) rather than letting codegen's retag shift out bit 62. Feed both
+// signs of the boundary explicitly and diff against the interpreter on the
+// same input.
+#[test]
+fn read_int_keeps_full_i64_range() {
+    require_cc();
+    let src = "fn echo2() : !{IO, Console} Unit =\n  \
+               println(show_int(read_int()))\n  \
+               println(show_int(read_int()))\n\n\
+               fn main() : !{IO} Unit = echo2()\n";
+    let full = prism::with_prelude(src);
+    let input = "4611686018427387905\n-4611686018427387905\n";
+    let mut sink = Vec::new();
+    let want = prism::interpret_io_at(&full, Path::new("."), &mut sink, &mut input.as_bytes())
+        .expect("interpreter run failed")
+        .term;
+    let out = native_on_input("readint", &full, input);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        want,
+        "native read_int diverges from the interpreter on 63/64-bit boundary values"
+    );
+}
+
+// The interactive examples are excluded from the empty-stdin corpus, which
+// leaves read_int/read_line codegen with no parity coverage there. Each has a
+// committed input fixture (`examples/<name>.in`); run native and interpreter on
+// the same fixture bytes and require byte-equal stdout plus zero leaked cells.
+#[test]
+fn io_fixtures_match_interpreter() {
+    require_cc();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut ran = 0usize;
+    let mut fails = Vec::new();
+    for entry in fs::read_dir(root.join("examples")).unwrap().flatten() {
+        let fixture = entry.path();
+        if fixture.extension().and_then(|e| e.to_str()) != Some("in") {
+            continue;
+        }
+        let case = fixture.with_extension("pr");
+        let stem = case.file_stem().unwrap().to_string_lossy().into_owned();
+        let input = fs::read_to_string(&fixture).unwrap();
+        let full = source(&case);
+        let mut sink = Vec::new();
+        let want = match prism::interpret_io_at(&full, root, &mut sink, &mut input.as_bytes()) {
+            Ok(run) => run.term,
+            Err(e) => {
+                fails.push(format!(
+                    "{}: interpreter failed on fixture: {e}",
+                    case.display()
+                ));
+                continue;
+            }
+        };
+        let out = native_on_input(&format!("io_{stem}"), &full, &input);
+        let got = String::from_utf8_lossy(&out.stdout);
+        if got != want {
+            fails.push(format!(
+                "io fixture output diverges for {}:\n  native: {got:?}\n  interp: {want:?}",
+                case.display()
+            ));
+            continue;
+        }
+        let leak = String::from_utf8_lossy(&out.stderr);
+        if leak.trim_end() != "prism: 0 cells leaked" {
+            fails.push(format!(
+                "{} did not free all cells: {}",
+                case.display(),
+                leak.trim()
+            ));
+            continue;
+        }
+        ran += 1;
+    }
+    assert!(
+        fails.is_empty(),
+        "{} io fixture case(s) failed:\n{}",
+        fails.len(),
+        fails.join("\n")
+    );
+    assert!(
+        ran >= 4,
+        "only {ran} io fixtures ran; the committed .in fixtures likely moved"
+    );
 }

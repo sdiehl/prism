@@ -69,6 +69,7 @@ pub(super) fn ebind_fn() -> CoreFn {
     CoreFn {
         name: EBIND.into(),
         params: vec![names::RET.into(), names::EBIND_FN.into()],
+        dict_arity: 0,
         body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
     }
 }
@@ -137,6 +138,7 @@ pub(super) fn qapply_fn() -> CoreFn {
     CoreFn {
         name: QAPPLY.into(),
         params: vec![qparam, v],
+        dict_arity: 0,
         body: Comp::Bind(
             Box::new(Comp::StrBuiltin(
                 Builtin::TaqUncons,
@@ -156,6 +158,7 @@ pub(super) fn synth_ctor(type_name: &str, tag: usize, n: usize) -> CtorInfo {
     CtorInfo {
         type_name: type_name.into(),
         params: vec![],
+        param_kinds: vec![],
         args: vec![Type::Int; n],
         tag,
         fields: vec![],

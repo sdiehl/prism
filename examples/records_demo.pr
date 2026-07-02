@@ -23,7 +23,11 @@ fn run(p : Particle, n : Int) : Particle =
 
 fn main() : !{IO} Unit =
   let origin = Vec2 { x = 0, y = 0 }
-  let p0 = Particle { pos = origin, vel = Vec2 { x = 3, y = 4 } }
+  let p0 =
+    Particle {
+      pos = origin,
+      vel = Vec2 { x = 3, y = 4 }
+    }
   let p = run(p0, 5)
   let bounced = Particle { ..p, vel = scale(0 - 1, p.vel) }
   println(p.pos.x)

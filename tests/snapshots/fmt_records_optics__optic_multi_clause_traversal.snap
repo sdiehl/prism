@@ -1,0 +1,10 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn tick(world : World) : World =\\n\\\n     \\x20 { world | players.each.hp ~ heal, players.each.mana = full, log = [] }\\n\")"
+---
+fn tick(world : World) : World =
+  { world
+  | players.each.hp ~ heal
+  , players.each.mana = full
+  , log = []
+  }

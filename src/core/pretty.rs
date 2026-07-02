@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use super::cbpv::{Comp, Core, CoreOp, CorePat, Value};
+use super::cbpv::{Comp, Core, CoreOp, CorePat, IoOp, Value};
 use crate::kw;
 use crate::sym::Sym;
 
@@ -216,14 +216,16 @@ pub fn pp_comp(c: &Comp) -> String {
             let args: Vec<_> = args.iter().map(pp_value).collect();
             format!("{}({})", b.name(), args.join(", "))
         }
-        Comp::Print(v) => format!("print {}", pp_value(v)),
-        Comp::PrintF(v) => format!("printf {}", pp_value(v)),
-        Comp::PrintS(v) => format!("prints {}", pp_value(v)),
-        Comp::PrintNl => "print_nl".into(),
-        Comp::ReadInt => "read_int()".into(),
-        Comp::ReadLine => "read_line()".into(),
-        Comp::Rand => "rand()".into(),
-        Comp::Srand(v) => format!("srand {}", pp_value(v)),
+        Comp::Io(op, args) => match op {
+            IoOp::Print => format!("print {}", pp_value(&args[0])),
+            IoOp::PrintF => format!("printf {}", pp_value(&args[0])),
+            IoOp::PrintS => format!("prints {}", pp_value(&args[0])),
+            IoOp::PrintNl => "print_nl".into(),
+            IoOp::ReadInt => "read_int()".into(),
+            IoOp::ReadLine => "read_line()".into(),
+            IoOp::Rand => "rand()".into(),
+            IoOp::Srand => format!("srand {}", pp_value(&args[0])),
+        },
         Comp::Error(v) => format!("error {}", pp_value(v)),
         Comp::Case(v, arms) => {
             let arms: Vec<_> = arms

@@ -1,0 +1,126 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_backslash.pr
+---
+== tokens ==
+VOpen Fn Ident("inc") LParen Ident("x") Colon KwInt RParen Colon KwInt Lambda Alloc Eq Ident("x") Plus Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("inc") LParen Int(IntLit { value: 41, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "inc",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 269..270,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 1,
+                                suffix: None,
+                            },
+                        ),
+                        span: 273..274,
+                    },
+                ),
+                span: 269..274,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 237..274,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "inc",
+                        ),
+                        span: 294..297,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 41,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 298..300,
+                        },
+                    ],
+                ),
+                span: 294..301,
+            },
+            wheres: [],
+            span: 276..301,
+        },
+    ],
+}
+
+== types ==
+inc : (Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn inc(x) =
+  return x to t@0; return 1 to t@1; t@0 + t@1
+fn main() =
+  return 41 to t@2; inc(t@2)
+
+== fbip (rc) ==
+fn inc(x) =
+  return x to t@0; return 1 to t@1; t@0 + t@1
+fn main() =
+  return 41 to t@2; inc(t@2)
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  ret i64 85
+}
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 42

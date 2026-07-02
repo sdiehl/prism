@@ -11,7 +11,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::lex::Token;
-use crate::{check, format as fmt_src, interpret, off_platform_builtins, with_prelude};
+use crate::{
+    check, example_program, format as fmt_src, interpret, off_platform_builtins, with_prelude,
+};
 
 // The web host owns the effects. A browser can serve more of them than it might
 // seem: `print` is buffered and `read_line` host-fed, the `Random` capability is
@@ -35,7 +37,12 @@ const BROWSER_SERVABLE: &[&str] = &["getenv", "args_count", "arg"];
 #[wasm_bindgen]
 #[must_use]
 pub fn run(src: &str) -> String {
-    let full = with_prelude(src);
+    // A doc snippet without `main` (a bare expression or `let`-block) is wrapped
+    // as an implicit `main`; when wrapped, its result value is shown (`=> v`)
+    // since it prints nothing. A full program is run and its transcript shown.
+    let program = example_program(src);
+    let wrapped = program != src;
+    let full = with_prelude(&program);
     match off_platform_builtins(&full, Path::new(".")) {
         Ok(off) => {
             let blocked: Vec<_> = off
@@ -52,9 +59,21 @@ pub fn run(src: &str) -> String {
         Err(e) => return format!("error: {e}"),
     }
     match interpret(&full) {
-        // The exact transcript (real emitted newlines, byte-for-byte what the
-        // oracle compares), not a per-value newline join.
-        Ok(r) => r.term,
+        // A full program: the exact transcript (real emitted newlines,
+        // byte-for-byte what the oracle compares). A wrapped expression: the
+        // value, after any transcript it produced.
+        Ok(r) => {
+            if wrapped {
+                let v = r.value.show();
+                if r.term.is_empty() {
+                    format!("=> {v}")
+                } else {
+                    format!("{}\n=> {v}", r.term.trim_end_matches('\n'))
+                }
+            } else {
+                r.term
+            }
+        }
         Err(e) => format!("error: {e}"),
     }
 }
@@ -122,7 +141,9 @@ fn json_escape(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).unwrap(),
+            c if (c as u32) < u32::from(crate::ASCII_PRINTABLE_LO) => {
+                write!(out, "\\u{:04x}", c as u32).unwrap()
+            }
             c => out.push(c),
         }
     }

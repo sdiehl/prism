@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Point",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Point",
@@ -429,22 +430,16 @@ source_filename = "prism"
 define i64 @prism_sum_coords(i64 %a0) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
   %t2 = load i64, ptr %t1, align 8
   switch i64 %t2, label %b1 [
     i64 0, label %b2
   ]
 
 b2:                                               ; preds = %entry
-  %2 = ptrtoint ptr %t0 to i64
-  %3 = add i64 %2, 24
-  %t3 = inttoptr i64 %3 to ptr
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
   %t4 = load i64, ptr %t3, align 8
-  %4 = ptrtoint ptr %t0 to i64
-  %5 = add i64 %4, 32
-  %t5 = inttoptr i64 %5 to ptr
+  %t5 = getelementptr inbounds i8, ptr %t0, i64 32
   %t6 = load i64, ptr %t5, align 8
   call void @prism_rc_inc(i64 %t4)
   call void @prism_rc_inc(i64 %t6)
@@ -494,32 +489,20 @@ declare i64 @prism_rt_int_add(i64, i64) #0
 define i64 @prism_main() #0 {
 entry:
   %t3 = call ptr @prism_alloc(i64 2)
-  %0 = ptrtoint ptr %t3 to i64
-  %1 = add i64 %0, 8
-  %t4 = inttoptr i64 %1 to ptr
+  %t4 = getelementptr inbounds i8, ptr %t3, i64 8
   store i64 0, ptr %t4, align 8
-  %2 = ptrtoint ptr %t3 to i64
-  %3 = add i64 %2, 24
-  %t6 = inttoptr i64 %3 to ptr
+  %t6 = getelementptr inbounds i8, ptr %t3, i64 24
   store i64 7, ptr %t6, align 8
-  %4 = ptrtoint ptr %t3 to i64
-  %5 = add i64 %4, 32
-  %t7 = inttoptr i64 %5 to ptr
+  %t7 = getelementptr inbounds i8, ptr %t3, i64 32
   store i64 9, ptr %t7, align 8
   %t8 = ptrtoint ptr %t3 to i64
   %t9 = call i64 @prism_sum_coords(i64 %t8)
   %t13 = call ptr @prism_alloc(i64 2)
-  %6 = ptrtoint ptr %t13 to i64
-  %7 = add i64 %6, 8
-  %t14 = inttoptr i64 %7 to ptr
+  %t14 = getelementptr inbounds i8, ptr %t13, i64 8
   store i64 0, ptr %t14, align 8
-  %8 = ptrtoint ptr %t13 to i64
-  %9 = add i64 %8, 24
-  %t16 = inttoptr i64 %9 to ptr
+  %t16 = getelementptr inbounds i8, ptr %t13, i64 24
   store i64 21, ptr %t16, align 8
-  %10 = ptrtoint ptr %t13 to i64
-  %11 = add i64 %10, 32
-  %t17 = inttoptr i64 %11 to ptr
+  %t17 = getelementptr inbounds i8, ptr %t13, i64 32
   store i64 9, ptr %t17, align 8
   %t18 = ptrtoint ptr %t13 to i64
   %t19 = call i64 @prism_sum_coords(i64 %t18)

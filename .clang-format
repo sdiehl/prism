@@ -1,0 +1,13 @@
+# Canonical C style for the native runtime (runtime/*.c). Expanded functions,
+# short control-flow statements kept inline, 4-space indent, attached braces,
+# right-aligned pointers. Idempotent: `clang-format -i` is a fixpoint.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Right
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: None
+KeepEmptyLinesAtTheStartOfBlocks: false

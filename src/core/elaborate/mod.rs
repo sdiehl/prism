@@ -5,16 +5,18 @@ use marginalia::Span;
 use num_bigint::Sign;
 
 use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
-use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, Value};
+use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
-use crate::names::{self, dict_ctor, instance_method};
+use crate::names::{self, dict_ctor, instance_method, EQ_METHOD, ORD_METHOD};
 use crate::sym::Sym;
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
     Pattern, Program, Spanned, Suffix, S,
 };
-use crate::types::{infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL};
+use crate::types::{
+    infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL, ORD_CLASS,
+};
 
 mod dict;
 mod match_compile;
@@ -114,8 +116,8 @@ impl Elab<'_> {
     }
 
     // Nested rebuild along each path: one single-arm Case per level, each arm
-    // ending in Return(Ctor), the exact shape Perceus turns into in-place
-    // reuse when the spine is uniquely owned.
+    // ending in Return(Ctor), the exact shape the reuse analysis rewrites to
+    // in-place mutation when the spine is uniquely owned.
     fn elab_update_path(
         &mut self,
         id: NodeId,
@@ -331,7 +333,7 @@ impl Elab<'_> {
                 .checked
                 .classes
                 .get(&Sym::from(EQ_CLASS))
-                .and_then(|c| c.methods.iter().position(|(n, _)| n == "eq"))
+                .and_then(|c| c.methods.iter().position(|(n, _)| n == EQ_METHOD))
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
             let d0 = ds
                 .first()
@@ -391,6 +393,54 @@ impl Elab<'_> {
             Box::new(ca),
             va.into(),
             Box::new(Comp::Bind(Box::new(cb), vb.into(), Box::new(body))),
+        ))
+    }
+
+    // `a < b` on an Ord-class type elaborates to `cmp(a, b) < 0`: the class
+    // method yields the canonical -1/0/1 ordering Int, so the surface operator
+    // itself becomes the primitive comparison of that Int against zero. Only
+    // reached when the typechecker recorded a dictionary for this node; the
+    // primitive numeric lanes stay on the generic `Expr::Bin` arm.
+    fn elab_ord(
+        &mut self,
+        op: BinOp,
+        a: &S<Expr<CorePhase>>,
+        b: &S<Expr<CorePhase>>,
+        id: NodeId,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let ca = self.elab(a, locals)?;
+        let cb = self.elab(b, locals)?;
+        let va = self.fresh();
+        let vb = self.fresh();
+        let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
+        let ds = self
+            .dicts
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::Ice("no dictionary for comparison operator".into()))?;
+        let d0 = ds
+            .first()
+            .ok_or_else(|| Error::Ice("empty dictionary set for comparison operator".into()))?;
+        let idx = self
+            .checked
+            .classes
+            .get(&Sym::from(ORD_CLASS))
+            .and_then(|c| c.methods.iter().position(|(n, _)| n == ORD_METHOD))
+            .ok_or_else(|| Error::Ice("no `cmp` method on class Ord".into()))?;
+        let cmp = self.method_invoke(Sym::from(ORD_CLASS), idx, d0, args)?;
+        let r = self.fresh();
+        let core_op = CoreOp::from_binop(op)
+            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+        let test = Comp::Bind(
+            Box::new(cmp),
+            r.clone().into(),
+            Box::new(Comp::Prim(core_op, Value::Var(r.into()), Value::Int(0))),
+        );
+        Ok(Comp::Bind(
+            Box::new(ca),
+            va.into(),
+            Box::new(Comp::Bind(Box::new(cb), vb.into(), Box::new(test))),
         ))
     }
 
@@ -457,6 +507,11 @@ impl Elab<'_> {
             }
             Expr::Bin(op @ (BinOp::Eq | BinOp::Ne), a, b) => {
                 self.elab_eq(*op, a, b, e.id, e.span, locals)?
+            }
+            Expr::Bin(op @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), a, b)
+                if self.dicts.contains_key(&e.id) =>
+            {
+                self.elab_ord(*op, a, b, e.id, locals)?
             }
             Expr::Bin(op, a, b) => {
                 let ca = self.elab(a, locals)?;
@@ -697,13 +752,11 @@ impl Elab<'_> {
         })
     }
 
-    // A user function applied to fewer arguments than its arity is a partial
-    // application. Elaborate it to an explicit closure that captures the given
-    // arguments, takes the rest, and calls the function at full arity inside.
-    // Effect lowering then sees a real lambda whose body is a full call rather
-    // than a partial `Call` it would wrongly lower as a full effectful call
-    // (which silently miscompiled partial applications of effectful functions).
-    // Returns None for builtins and for saturated or over-saturated calls.
+    // Eta-expand a partial application (fewer args than arity) into an explicit
+    // closure that calls the function at full arity. Without this, effect
+    // lowering sees a partial `Call` and wrongly lowers it as a full effectful
+    // call, miscompiling partial applications of effectful functions.
+    // Returns None for builtins and saturated/over-saturated calls.
     fn eta_partial(&self, name: &str, given: &[Value]) -> Result<Option<Comp>, Error> {
         if builtin(name).is_some() {
             return Ok(None);
@@ -780,17 +833,24 @@ impl Elab<'_> {
                     } else {
                         let p = self.print_dispatch(v, &args[0], locals);
                         if name == "println" {
-                            Comp::Bind(Box::new(p), self.fresh().into(), Box::new(Comp::PrintNl))
+                            Comp::Bind(
+                                Box::new(p),
+                                self.fresh().into(),
+                                Box::new(Comp::Io(IoOp::PrintNl, vec![])),
+                            )
                         } else {
                             p
                         }
                     }
-                } else if name == "show" && !vals.is_empty() && !args.is_empty() {
+                } else if name == names::DISPLAY_FN && !vals.is_empty() && !args.is_empty() {
+                    // A string-interpolation hole: rendered by the type-directed
+                    // display printer (raw for a top-level string), not the
+                    // quoting `Show` method.
                     let v = vals
                         .into_iter()
                         .next()
-                        .ok_or_else(|| Error::Ice("empty show args".into()))?;
-                    self.show_dispatch(v, &args[0], locals)?
+                        .ok_or_else(|| Error::Ice("empty display args".into()))?;
+                    self.display_comp(v, &args[0], locals)
                 } else if self.needs_dict(name) {
                     return Err(Error::Ice(format!(
                         "no dict record for `{name}` at {:?}",
@@ -829,9 +889,8 @@ impl Elab<'_> {
     }
 
     // `recv[key]`: dispatch on the receiver's checked head type to the failable
-    // accessor for that container, the type-directed pattern of `show_dispatch`.
-    // tc already proved the receiver indexable, so an unresolved or unexpected
-    // type here is a compiler bug.
+    // accessor for that container. tc already proved the receiver indexable, so
+    // an unresolved or unexpected type here is a compiler bug.
     fn elab_index(
         &mut self,
         recv: &S<Expr<CorePhase>>,
@@ -1033,7 +1092,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     // with its own reified handlers is never wrapped in a world handler it cannot
     // fuse through. `Output` interception only changes behaviour where it matters.
     let route_output = effect_ops.contains("out_print")
-        && ["Replay.record", "Replay.replay", "Replay.durable"]
+        && crate::names::REPLAY_DRIVERS
             .iter()
             .any(|f| arity.contains_key(*f));
     let consts: BTreeMap<String, &S<Expr<CorePhase>>> = prog
@@ -1082,6 +1141,9 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             name: d.name.clone().into(),
             body,
             params: params.into_iter().map(Sym::from).collect(),
+            // The leading `_c{i}` dictionary params prepended just above, one per
+            // class constraint (zero when the context is empty).
+            dict_arity: d.constraints.len(),
         });
     }
 
@@ -1097,9 +1159,10 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         // Dict params: the declared context first (so method bodies' `_c{i}`
         // indices are unchanged), then one per superclass obligation.
         let nctx = info.context.len();
-        let dps: Vec<String> = (0..(nctx + info.supers.len()))
-            .map(|i| format!("_c{i}"))
-            .collect();
+        // The dictionary arity every function in this instance carries: one param
+        // per declared context obligation plus one per superclass.
+        let ndict = nctx + info.supers.len();
+        let dps: Vec<String> = (0..ndict).map(|i| format!("_c{i}")).collect();
         for m in &inst.methods {
             let sig = &class
                 .methods
@@ -1127,6 +1190,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
                 name: instance_method(&inst.name, &m.name).into(),
                 body: elab.elab(&m.body, &locals)?,
                 params: params.into_iter().map(Sym::from).collect(),
+                dict_arity: ndict,
             });
         }
         let mut fields = Vec::new();
@@ -1153,6 +1217,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         fns.push(CoreFn {
             name: inst.name.clone().into(),
             params: dps.into_iter().map(Sym::from).collect(),
+            dict_arity: ndict,
             body: Comp::Return(Value::Ctor(
                 dict_ctor(info.class.as_str()).into(),
                 0,
@@ -1167,6 +1232,50 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
 
 /// # Errors
 /// Fails when the expression cannot be elaborated to core.
+/// Elaborate every `konst` (top-level `let`) as a zero-parameter [`CoreFn`], for
+/// content hashing only. The real compile inlines konsts at their use sites, so
+/// they are absent from the compiled Core and would otherwise get no behavior
+/// hash. A konst is a genuine value definition (unlike a transparent alias), so
+/// giving it its own hash makes it addressable and displayable. konst-to-konst
+/// references inline, so two constants with the same value share a hash.
+///
+/// # Errors
+/// Fails when a konst body cannot be elaborated (a compiler bug).
+pub fn konst_fns(prog: &Program<CorePhase>, checked: &Checked) -> Result<Vec<CoreFn>, Error> {
+    let mut arity: BTreeMap<String, usize> = prog
+        .fns
+        .iter()
+        .filter(|d| !d.konst)
+        .map(|d| (d.name.clone(), d.params.len()))
+        .collect();
+    builtin_arities(&mut arity);
+    let consts: BTreeMap<String, S<Expr<CorePhase>>> = prog
+        .fns
+        .iter()
+        .filter(|d| d.konst)
+        .map(|d| (d.name.clone(), d.body.clone()))
+        .collect();
+    prog.fns
+        .iter()
+        .filter(|d| d.konst)
+        .map(|d| {
+            let body = elaborate_expr(checked, &d.body, &arity, &checked.dicts, &consts)?;
+            Ok(CoreFn {
+                name: d.name.clone().into(),
+                params: Vec::new(),
+                dict_arity: 0,
+                body,
+            })
+        })
+        .collect()
+}
+
+/// Elaborate a single surface expression to Core against an already-checked
+/// program (used to hash konst bodies as zero-parameter definitions).
+///
+/// # Errors
+/// Fails if the expression references a name or dictionary the elaborator cannot
+/// resolve against `checked`.
 pub fn elaborate_expr(
     checked: &Checked,
     e: &S<Expr<CorePhase>>,
@@ -1183,7 +1292,7 @@ pub fn elaborate_expr(
         checked,
         dicts,
         route_output: effect_ops.contains("out_print")
-            && ["Replay.record", "Replay.replay", "Replay.durable"]
+            && crate::names::REPLAY_DRIVERS
                 .iter()
                 .any(|f| arity.contains_key(*f)),
         effect_ops,

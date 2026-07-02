@@ -16,24 +16,14 @@ use crate::syntax::desugar::{call, evar, sp, Cx};
 pub(super) type Vals = Vec<(String, S<Expr<Core>>)>;
 
 fn ty_vars(t: &Ty, out: &mut BTreeSet<String>) {
-    match t {
-        Ty::Var(n) => {
-            out.insert(n.clone());
-        }
-        Ty::Forall(_, b) => ty_vars(b, out),
-        Ty::Fun(ps, _, r) => {
-            for p in ps {
-                ty_vars(p, out);
-            }
-            ty_vars(r, out);
-        }
-        Ty::Con(_, ps) | Ty::Tuple(ps) => {
-            for p in ps {
-                ty_vars(p, out);
-            }
-        }
-        _ => {}
+    if let Ty::Var(n) = t {
+        out.insert(n.clone());
+        return;
     }
+    // Every other variant just recurses; the spine reaches App args, row-literal
+    // labels, and a function's effect-row label arguments that the old hand-match
+    // skipped.
+    t.each_child(&mut |c| ty_vars(c, out));
 }
 
 // A var in the return type but no parameter and no effect parameter: fresh
@@ -187,10 +177,25 @@ pub(super) fn rw_named(
                 msg: format!("unknown effect operation `{op}` in handler `{f}`"),
             });
         };
-        if eff.is_none() {
-            eff_params.clone_from(src_params);
+        // All handled ops must come from one effect: the private EffectDecl below
+        // records a single `eff_params`, so mixing effects would leave later ops'
+        // signatures referencing type params that are not in scope.
+        match &eff {
+            None => {
+                eff = Some(src_eff.clone());
+                eff_params.clone_from(src_params);
+            }
+            Some(prev) if prev != src_eff => {
+                return Err(TypeError::Other {
+                    span,
+                    msg: format!(
+                        "handler `{f}` mixes operations from effects `{prev}` and `{src_eff}`; \
+                         a named handler must handle a single effect"
+                    ),
+                });
+            }
+            Some(_) => {}
         }
-        eff.get_or_insert_with(|| src_eff.clone());
         let mangled = names::named_op(op, f, n);
         decl_ops.push(EffOp {
             name: mangled.clone(),

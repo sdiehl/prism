@@ -212,6 +212,7 @@ impl Tc<'_> {
             Type::App(h, a) => Type::app(self.apply(h), self.apply(a)),
             Type::Con(n, ps) => Type::Con(*n, ps.iter().map(|p| self.apply(p)).collect()),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.apply(t)).collect()),
+            Type::Row(r) => Type::Row(self.apply_row(r)),
             other => other.clone(),
         }
     }
@@ -313,10 +314,7 @@ impl Tc<'_> {
         }
         let mut row_exs = BTreeSet::new();
         out.free_exist_row(&mut row_exs);
-        let mut env_row_exs = BTreeSet::new();
-        for v in env.values() {
-            self.apply(v).free_exist_row(&mut env_row_exs);
-        }
+        // `env_row_exs` was already accumulated in the single env walk above.
         let gen_rows: Vec<u32> = row_exs
             .into_iter()
             .filter(|e| !env_row_exs.contains(e))
@@ -376,6 +374,11 @@ fn collect_row_names(t: &Type, out: &mut BTreeSet<String>) {
         Type::Con(_, ps) | Type::Tuple(ps) => {
             for p in ps {
                 collect_row_names(p, out);
+            }
+        }
+        Type::Row(r) => {
+            if let EffRow::Var(n) = r.tail() {
+                out.insert(n.to_string());
             }
         }
         _ => {}

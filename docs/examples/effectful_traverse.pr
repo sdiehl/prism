@@ -7,7 +7,7 @@
 -- row `e` straight through, so each leaf's effects sequence in tree order and a
 -- handler discharges them at the boundary. No Applicative, no do-notation.
 
-type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a)) deriving (Show)
 
 -- The higher-kinded tower for Tree. Traversable names Functor and Foldable as
 -- superclasses, so this instance trio is what lets the prelude's generic

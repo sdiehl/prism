@@ -12,10 +12,11 @@
         name: "Prism",
         keywords: {
           keyword:
-            "fn fip fbip pub import as type newtype opaque effect error throw " +
-            "try catch transact alias class instance pattern deriving where " +
+            "fn fip fbip replayable pub import as type newtype opaque effect error throw " +
+            "try catch transact alias class instance canonical pattern deriving where " +
             "given handle with handler mask ctl final fun val return let var " +
-            "borrow in for do if then else elif match of forall",
+            "borrow in for while loop break continue do if then else elif match of " +
+            "each forall using",
           literal: "true false",
           type: "Int Bool Unit Float Char String I64 U64",
         },
@@ -24,7 +25,11 @@
           { className: "string", begin: '"', end: '"', contains: [{ begin: "\\\\." }] },
           { className: "string", begin: "'", end: "'", contains: [{ begin: "\\\\." }] },
           hl.C_NUMBER_MODE,
-          { className: "title.class", begin: "\\b[A-Z][A-Za-z0-9_]*" },
+          // Any capitalized identifier: builtin/user types, data constructors,
+          // effect and class names. `hljs-title.class` (a v11 nested-scope
+          // spelling) isn't a real class the shipped ayu theme styles, so this
+          // colors them the same as the builtin `type:` keywords above.
+          { className: "type", begin: "\\b[A-Z][A-Za-z0-9_]*" },
         ],
       };
     });

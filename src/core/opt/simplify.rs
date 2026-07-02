@@ -51,6 +51,7 @@ pub(crate) fn simplify_counted(core: &Core) -> (Core, u64) {
             .map(|f| CoreFn {
                 name: f.name,
                 params: f.params.clone(),
+                dict_arity: f.dict_arity,
                 body: s.comp(&f.body, &env),
             })
             .collect();
@@ -487,6 +488,7 @@ mod tests {
             fns: vec![CoreFn {
                 name: s("f"),
                 params,
+                dict_arity: 0,
                 body,
             }],
         }

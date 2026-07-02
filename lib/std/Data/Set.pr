@@ -1,32 +1,50 @@
--- Ordered sets as `Map(k, Unit)`, reusing the balanced-tree map. Set algebra
--- stays O(n log n) and preserves iteration order. The prelude opens this module.
+-- | Ordered sets as `Map(k, Unit)`, reusing the balanced-tree map.
+--
+-- Set algebra stays O(n log n) and preserves iteration order. The prelude
+-- opens this module.
 
 import Data.Map (map_empty, map_insert, map_member, map_delete, map_size, map_keys)
 
 import Data.List (foldl, filter)
 
+-- | The empty set.
 pub let set_empty : Map(k, Unit) = map_empty
 
+-- | Add `x` to the set (a no-op if already present).
 pub fn set_insert(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
   map_insert(x, (), s)
 
+-- | True when `x` is a member of the set.
 pub fn set_member(x : k, s : Map(k, Unit)) : Bool given Ord(k) = map_member(x, s)
 
+-- | Remove `x` from the set (a no-op if absent).
 pub fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
   map_delete(x, s)
 
+-- | The number of elements.
 pub fn set_size(s) = map_size(s)
 
+-- | The elements in ascending order.
 pub fn set_to_list(s) = map_keys(s)
 
+-- | Build a set from a list, dropping duplicates.
 pub fn set_from_list(xs : List(k)) : Map(k, Unit) given Ord(k) =
   foldl(\(acc, x) -> set_insert(x, acc), set_empty, xs)
 
+-- | Every element in either set.
 pub fn set_union(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
   foldl(\(acc, x) -> set_insert(x, acc), s1, set_to_list(s2))
 
-pub fn set_intersection(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+-- | The elements in both sets.
+pub fn set_intersection(
+  s1 : Map(k, Unit),
+  s2 : Map(k, Unit)
+) : Map(k, Unit) given Ord(k) =
   set_from_list(filter(\(x) -> set_member(x, s2), set_to_list(s1)))
 
-pub fn set_difference(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
+-- | The elements of `s1` that are not in `s2`.
+pub fn set_difference(
+  s1 : Map(k, Unit),
+  s2 : Map(k, Unit)
+) : Map(k, Unit) given Ord(k) =
   set_from_list(filter(\(x) -> not(set_member(x, s2)), set_to_list(s1)))

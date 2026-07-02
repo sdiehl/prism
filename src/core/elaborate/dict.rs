@@ -1,7 +1,8 @@
 use super::{
     builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
-    Elab, Error, FloatOp, NodeId, Sym, Type, Value,
+    Elab, Error, FloatOp, IoOp, NodeId, Sym, Type, Value,
 };
+use crate::types::SHOW_CLASS;
 
 impl Elab<'_> {
     pub(super) fn needs_dict(&self, name: &str) -> bool {
@@ -95,6 +96,37 @@ impl Elab<'_> {
                     out.clone(),
                 ));
                 Value::Var(out.into())
+            }
+            // Build a `Show` dict cell for a tuple: one method thunk that matches
+            // the tuple and prints `(e0, e1, ...)`, each element shown through its
+            // component dictionary. Matches the print-site tuple generator.
+            Dict::Tuple(comps) => {
+                let ps: Vec<Sym> = (0..comps.len())
+                    .map(|i| Sym::from(format!("_t{i}")))
+                    .collect();
+                let mut elems = vec![Comp::Return(Value::Str("(".into()))];
+                for (i, (comp, p)) in comps.iter().zip(&ps).enumerate() {
+                    if i > 0 {
+                        elems.push(Comp::Return(Value::Str(", ".into())));
+                    }
+                    elems.push(self.method_invoke(
+                        Sym::from(SHOW_CLASS),
+                        0,
+                        comp,
+                        vec![Value::Var(*p)],
+                    )?);
+                }
+                elems.push(Comp::Return(Value::Str(")".into())));
+                let inner = self.concat_comps(elems);
+                let param = self.fresh();
+                let pat = CorePat::Tuple(ps.into_iter().map(Some).collect());
+                let body = Comp::Case(Value::Var(param.clone().into()), vec![(pat, inner)]);
+                let show_thunk =
+                    Value::Thunk(Box::new(Comp::Lam(vec![param.into()], Box::new(body))));
+                let cell = Value::Ctor(dict_ctor(SHOW_CLASS).into(), 0, vec![show_thunk]);
+                let v = self.fresh();
+                binds.push((Comp::Return(cell), v.clone()));
+                Value::Var(v.into())
             }
         })
     }
@@ -245,16 +277,16 @@ impl Elab<'_> {
                 .ok_or_else(|| Error::Ice(format!("str builtin `{name}` not in Builtin")))
         };
         Ok(match builtin(name).map(|(_, kind)| kind) {
-            Some(BuiltinKind::Print) => Comp::Print(first(args)),
+            Some(BuiltinKind::Print) => Comp::Io(IoOp::Print, vec![first(args)]),
             Some(BuiltinKind::Println) => Comp::Bind(
-                Box::new(Comp::Print(first(args))),
+                Box::new(Comp::Io(IoOp::Print, vec![first(args)])),
                 "_".into(),
-                Box::new(Comp::PrintNl),
+                Box::new(Comp::Io(IoOp::PrintNl, vec![])),
             ),
-            Some(BuiltinKind::ReadInt) => Comp::ReadInt,
-            Some(BuiltinKind::ReadLine) => Comp::ReadLine,
-            Some(BuiltinKind::Rand) => Comp::Rand,
-            Some(BuiltinKind::Srand) => Comp::Srand(first(args)),
+            Some(BuiltinKind::ReadInt) => Comp::Io(IoOp::ReadInt, vec![]),
+            Some(BuiltinKind::ReadLine) => Comp::Io(IoOp::ReadLine, vec![]),
+            Some(BuiltinKind::Rand) => Comp::Io(IoOp::Rand, vec![]),
+            Some(BuiltinKind::Srand) => Comp::Io(IoOp::Srand, vec![first(args)]),
             Some(BuiltinKind::Error) => Comp::Error(first(args)),
             Some(BuiltinKind::Float) => Comp::FloatBuiltin(resolve_float()?, first(args)),
             Some(BuiltinKind::Str | BuiltinKind::Int) => Comp::StrBuiltin(resolve_str()?, args),

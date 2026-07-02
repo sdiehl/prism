@@ -67,11 +67,14 @@ import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
 modpath   ->  conid { "." conid }
 name      ->  varid | conid
 
-datatype  ->  "type" conid [ tyvars ] "=" ctor { "|" ctor } [ deriving ]
+datatype  ->  "type" conid [ kindedvars ] "=" ctor { "|" ctor } [ deriving ]
 newtype   ->  "newtype" conid [ tyvars ] "=" ctor [ deriving ]
 synonym   ->  "alias" conid [ tyvars ] "=" type
 rowalias  ->  "alias" conid "=" "{" [ label , ... ] "}"
 tyvars    ->  "(" varid , ... ")"
+kindedvars -> "(" tyvar , ... ")"               -- a data-type parameter may carry a kind
+tyvar     ->  varid [ ":" kind ]
+kind      ->  "Type" | "Row"                    -- "Row" ranges over an effect row
 ctor      ->  conid [ "(" type , ... ")" ]
            |  conid "{" field , ... "}"
 field     ->  varid ":" type
@@ -112,10 +115,13 @@ arrow   ->  "(" [ type , ... ] ")" "->" arrow   -- n-ary domain
          |  atype
 atype   ->  scalar
          |  "[" type "]"                          -- List(type)
-         |  conid [ "(" type , ... ")" ]          -- type constructor
-         |  varid [ "(" type , ... ")" ]          -- variable, possibly applied
+         |  conid [ "(" typearg , ... ")" ]       -- type constructor
+         |  varid [ "(" typearg , ... ")" ]       -- variable, possibly applied
          |  "(" type ")"
          |  "(" type "," type , ... ")"           -- tuple
+typearg ->  type
+         |  rowlit                                -- argument for a Row-kinded parameter
+rowlit  ->  "{" [ label , ... ] [ "|" varid ] "}" -- effect-row literal, e.g. Cmd(Int, {IO})
 scalar  ->  "Int" | "I64" | "U64" | "Bool" | "Unit" | "Float" | "Char" | "String"
 
 row     ->  "!" "{" [ label , ... ] [ "|" varid ] "}"

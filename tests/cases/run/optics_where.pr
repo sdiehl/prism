@@ -14,7 +14,11 @@ fn alive(p : Player) : Bool = p.hp > 0
 fn heal(h : Int) : Int = h + 10
 
 fn mk(n : String, h : Int) : Player =
-  Player { name = n, hp = h, bag = Cons(Item { name = "sword", count = 1 }, Nil) }
+  Player {
+    name = n,
+    hp = h,
+    bag = Cons(Item { name = "sword", count = 1 }, Nil)
+  }
 
 fn main() =
   let ps = Cons(mk("a", 5), Cons(mk("b", 0), Cons(mk("c", 3), Nil)))

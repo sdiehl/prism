@@ -1,0 +1,96 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_fresh.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("fresh") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Without Alloc Eq UIdent("Box") LParen Ident("x") RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 185..204,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "fresh",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Box",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Box",
+                        ),
+                        span: 246..249,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 250..251,
+                        },
+                    ],
+                ),
+                span: 246..252,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 206..252,
+        },
+    ],
+}
+
+== types ==
+fresh : (Int) -> Box
+
+== core (cbpv) ==
+fn fresh(x) =
+  return x to t@0; return Box(t@0)
+
+== fip ==
+Type Error: function `fresh` is marked `without alloc` but allocates a fresh `Box` (no reuse token available)
+   ╭─[ <source>:6:1 ]
+   │
+ 6 │ fn fresh(x : Int) : Box without alloc = Box(x)
+   │ ───────────────────────┬──────────────────────  
+   │                        ╰──────────────────────── function `fresh` is marked `without alloc` but allocates a fresh `Box` (no reuse token available)
+───╯

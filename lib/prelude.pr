@@ -1,9 +1,10 @@
--- The always-on prelude: wired-in types, the type-class hierarchy, core
--- combinators and arithmetic, the effect/stream and loop machinery, and the
--- containers the compiler synthesizes calls into. The broad data-structure
--- surface (lists, maybe/result, maps, sets, strings, chars) lives in importable
--- stdlib modules under `Data.*`; the glob imports below re-open them into
--- unqualified scope so every name stays available without an explicit import.
+-- | The always-on prelude: wired-in types, the type-class tower, core
+-- combinators, and the effect/loop machinery.
+--
+-- The broad data-structure surface (lists, maybe/result, maps, sets, strings,
+-- chars) lives in importable stdlib modules under `Data.*`; the glob imports
+-- below re-open them into unqualified scope so every name stays available
+-- without an explicit import.
 
 import Data.List (..)
 
@@ -19,58 +20,75 @@ import Data.Char (..)
 
 import Data.String (..)
 
-type Option(a) = None | Some(a) deriving (Eq)
+-- | The optional type: `None`, or `Some(a)` holding a value.
+type Option(a) = None | Some(a) deriving (Eq, Show)
 
-type Result(a, e) = Ok(a) | Err(e) deriving (Eq)
+-- | A computation outcome: `Ok(a)` on success or `Err(e)` on failure.
+type Result(a, e) = Ok(a) | Err(e) deriving (Eq, Show)
 
+-- | A singly-linked list: `Nil`, or `Cons(head, tail)`. Backs `[..]` literals.
 type List(a) = Nil | Cons(a, List(a)) deriving (Eq)
 
+-- | A persistent ordered map, an AVL tree (`Tip`/`Bin`); see `Data.Map`.
 type Map(k, v) = Tip | Bin(Int, k, v, Map(k, v), Map(k, v))
 
+-- | The identity function.
 fn id(x) = x
 
+-- | The constant function: returns `x`, ignoring `y`.
 fn const(x, y) = x
 
+-- | Function composition: `compose(f, g, x)` is `f(g(x))`.
 fn compose(f, g, x) = f(g(x))
 
+-- | `f` with its first two arguments swapped.
 fn flip(f, x, y) = f(y, x)
 
+-- | Boolean negation.
 fn not(b) =
   if b then
     false
   else
     true
 
+-- | Boolean conjunction (the function form of `&&`).
 fn and(a, b) = a && b
 
+-- | Boolean disjunction (the function form of `||`).
 fn or(a, b) = a || b
 
+-- | Exclusive or.
 fn xor(a, b) =
   if a then
     not(b)
   else
     b
 
+-- | Absolute value.
 fn abs(n) =
   if n < 0 then
     0 - n
   else
     n
 
+-- | The greater of two values.
 fn max(a, b) =
   if a > b then
     a
   else
     b
 
+-- | The lesser of two values.
 fn min(a, b) =
   if a < b then
     a
   else
     b
 
+-- | Constrain `x` to the range `[lo, hi]`.
 fn clamp(lo, hi, x) = max(lo, min(hi, x))
 
+-- | The sign of `n`, as `-1`, `0`, or `1`.
 fn signum(n) =
   if n > 0 then
     1
@@ -79,21 +97,26 @@ fn signum(n) =
   else
     0
 
+-- | The remainder `a % b`.
 fn mod(a, b) = a % b
 
+-- | True when `n` is even.
 fn even(n) = mod(n, 2) == 0
 
+-- | True when `n` is odd.
 fn odd(n) = not(even(n))
 
+-- | The greatest common divisor (Euclid's algorithm).
 fn gcd(a, b) =
   if b == 0 then
     a
   else
     gcd(b, mod(a, b))
 
+-- | The least common multiple.
 fn lcm(a, b) = a / gcd(a, b) * b
 
--- Integer exponentiation (the `Pow(Int)` instance): bignum-correct because `*`
+-- | Integer exponentiation, the `Pow(Int)` instance: bignum-correct because `*`
 -- promotes past 63 bits. `a ^ b` over ints lowers here through the `Pow` class.
 fn int_pow(base, n) =
   if n == 0 then
@@ -101,117 +124,138 @@ fn int_pow(base, n) =
   else
     base * int_pow(base, n - 1)
 
+-- | `n!`, the factorial of `n`.
 fn factorial(n) =
   if n == 0 then
     1
   else
     n * factorial(n - 1)
 
+-- | The nth Fibonacci number (naive, exponential).
 fn fib(n) =
   if n <= 1 then
     n
   else
     fib(n - 1) + fib(n - 2)
 
--- Floating-point constants and the transcendentals not exposed as builtins.
--- sin, cos, exp, ln, sqrt and pow_float are builtins lowered to FP intrinsics.
+-- | Pi. The transcendental builtins (`sin`, `cos`, `exp`, `ln`, `sqrt`,
+-- `pow_float`) lower to FP intrinsics; the constants and `tan`/`log10`/`log2`
+-- below are defined here.
 let pi = 3.141592653589793
 
+-- | Euler's number.
 let e = 2.718281828459045
 
+-- | Tau, `2 * pi`.
 let tau = 6.283185307179586
 
+-- | Tangent.
 fn tan(x) = sin(x) /. cos(x)
 
+-- | Base-10 logarithm.
 fn log10(x) = ln(x) /. ln(10.0)
 
+-- | Base-2 logarithm.
 fn log2(x) = ln(x) /. ln(2.0)
 
--- Pseudo-random helpers over the seeded SplitMix64 stream. rand_below n yields
--- 0..n-1; rand_range lo hi yields lo..hi-1.
+-- | A random integer in `[0, n)`, over the seeded SplitMix64 stream.
 fn rand_below(n) = mod(rand(), n)
 
+-- | A random integer in `[lo, hi)`.
 fn rand_range(lo, hi) = lo + mod(rand(), hi - lo)
 
+-- | A random boolean.
 fn rand_bool() = mod(rand(), 2) == 0
 
+-- | True when `lo <= x <= hi`.
 fn between(lo, hi, x) = lo <= x && x <= hi
 
+-- | The first component of a pair.
 fn fst(p) =
   match p of
     (x, _) => x
 
+-- | The second component of a pair.
 fn snd(p) =
   match p of
     (_, y) => y
 
+-- | A pair with its two components swapped.
 fn swap(p) =
   match p of
     (x, y) => (y, x)
 
+-- | Apply `f` to the first component and `g` to the second.
 fn pair_map(f, g, p) =
   match p of
     (x, y) => (f(x), g(y))
 
+-- | `()` when `b` holds, otherwise `fail()` (short-circuits a failable block).
 fn guard(b) =
   if b then
     ()
   else
     fail()
 
+-- | Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 fn optional(thunk) =
   handle thunk() with
     final ctl fail() => None
     return r => Some(r)
 
+-- | True when `thunk` runs to completion without calling `fail()`.
 fn succeeds(thunk) =
   handle thunk() with
     final ctl fail() => false
     return r => true
 
+-- | Run `thunk`, returning its result or the default `d` if it calls `fail()`.
 fn default(thunk, d) =
   handle thunk() with
     final ctl fail() => d
     return r => r
 
--- Failable accessors: a missing element is a `fail()`, so `xs.at_list(0) ?? d`,
--- `m.at_map(k) ?? d`, and `o.force() ?? d` all default cleanly through `??`.
+-- | The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so
+-- `xs.at_list(i) ?? d` defaults cleanly through `??`.
 fn at_list(xs : List(a), i : Int) : a =
   match nth(i, xs) of
     Some(x) => x
     None => fail()
 
+-- | The value bound to `key`, or `fail()` if absent. Backs `m[k]`.
 fn at_map(m : Map(k, v), key : k) : v given Ord(k) =
   match map_lookup(key, m) of
     Some(x) => x
     None => fail()
 
+-- | The value inside `Some`, or `fail()` for `None`; `o.force() ?? d` defaults.
 fn force(o) =
   match o of
     Some(x) => x
     None => fail()
 
--- Indexing accessors backing `a[i]` / `m[k]` / `s[i]`: a bounds- or
--- membership-failure is a `fail()`, so `a[i] ?? d` defaults through `??`.
+-- | The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
 fn at_array(a : Array(e), i : Int) : e =
   if i >= 0 && i < array_len(a) then
     array_get(a, i)
   else
     fail()
 
+-- | The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`.
 fn at_hashmap(m : HashMap(v), k : String) : v =
   match hm_lookup(m, k) of
     Some(x) => x
     None => fail()
 
+-- | The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`.
 fn at_byte(s : String, i : Int) : Int =
   if i >= 0 && i < byte_len(s) then
     byte_at(s, i)
   else
     fail()
 
--- Functional index update: a new list with element `i` replaced by `v`, out of
--- range left unchanged. Backs `xs[i] := v` and the `[i]` optic path on lists.
+-- | A new list with element `i` replaced by `v` (out of range: unchanged). Backs
+-- `xs[i] := v` and the `[i]` optic path on lists.
 fn list_set(xs, i, v) =
   match xs of
     Nil => Nil
@@ -221,106 +265,113 @@ fn list_set(xs, i, v) =
       else
         Cons(x, list_set(rest, i - 1, v))
 
--- Stable, O(n log n) merge sort. Primitive element types (Integer, Float, the
--- fixed-width ints, Char, Bool) are specialized to a native kernel at the call
--- site; any other Ord type uses this generic path. `sort` and `sort_by_ord` are
--- recognized by name during elaboration, so they stay in the always-on prelude.
+-- | Sort a list in ascending order, a stable O(n log n) merge sort. Primitive
+-- element types are specialized to a native kernel at the call site; any other
+-- `Ord` type uses the generic path.
 fn sort(xs : List(a)) : List(a) given Ord(a) = sort_by_ord(xs)
 
+-- | Iterate `body` from state `s` while `cond(s)` holds, returning the final
+-- state. Tail-recursive (constant stack).
 fn while_loop(cond, body, s) =
   if cond(s) then
     while_loop(cond, body, body(s))
   else
     s
 
+-- | Fold `f(i, s)` over `i` in `[lo, hi)`, threading the state `s`.
 fn for_range(lo, hi, f, s) =
   if lo >= hi then
     s
   else
     for_range(lo + 1, hi, f, f(lo, s))
 
--- The driver `while c do body`, and `loop body` when the body can exit via
--- `break`, desugar to. The condition and body are thunks re-run each iteration;
--- both close over the ambient `var` State effect, so loop-body mutations thread
--- through the enclosing var handlers. The recursive call is in tail position, so
--- the loop runs in constant stack.
+-- | The driver `while c do body` (and `loop body` with `break`) desugars to.
+-- Condition and body are thunks re-run each iteration, closing over the ambient
+-- `var` state; tail-recursive, so it runs in constant stack.
 fn repeat_while(cond, body) =
   if cond() then
     body()
     repeat_while(cond, body)
 
--- The driver an unconditional `loop body` with no `break` desugars to: it never
--- returns, so its result type is fully polymorphic (a bottom), letting such a
--- loop stand as the body of a function of any return type whose only exits are
--- early `return`s. Tail-recursive, so it too runs in constant stack.
+-- | The driver an unconditional `loop body` (no `break`) desugars to: it never
+-- returns, so its result type is fully polymorphic. Tail-recursive.
 fn forever(body) =
   body()
   forever(body)
 
+-- | Run `body` `n` times for its effects.
 fn repeat(n, body) =
   if n > 0 then
     body()
     repeat(n - 1, body)
 
+-- | The stream effect: `emit(x)` yields one element to the enclosing consumer.
 effect Emit(a) {
   ctl emit(a) : Unit
 }
 
--- Console output as an interceptable capability. `print`/`println` perform these
--- ops; the default world handler run_io discharges them to the real prim_print/
--- prim_println, while replay/durable drop them during a replayed prefix so a
--- durable resume never re-prints work it already did.
+-- | Console output as an interceptable capability. `print`/`println` perform
+-- these ops; the default `run_io` handler discharges them to the real terminal,
+-- while replay/durable drop them during a replayed prefix.
 effect Output {
   ctl out_print(String) : Unit,
   ctl out_println(String) : Unit
 }
 
--- Capability effects routing the nondeterministic input primitives. User code
--- calls the surface wrappers (read_int, read_file, ...), which perform an op;
--- the default world handler run_io discharges each by resuming with the matching
--- prim_* builtin. The tail-resumptive handlers fuse, so a wrapped read costs no
--- effect-op allocation.
+-- | Console input capability. The surface wrappers `read_int`/`read_line`
+-- perform these ops; `run_io` discharges each by resuming with the matching
+-- `prim_*` builtin, and the tail-resumptive handlers fuse to direct calls.
 effect Console {
   ctl con_read_int(Unit) : Int,
   ctl con_read_line(Unit) : String
 }
 
+-- | File-system read capability (`read_file`, `file_exists`).
 effect FileSystem {
   ctl fs_read_file(String) : String,
   ctl fs_file_exists(String) : Bool
 }
 
+-- | Random-number capability (`rand`).
 effect Random {
   ctl rng_rand(Unit) : Int
 }
 
+-- | Process-environment capability (`getenv`, `args_count`, `arg`).
 effect Env {
   ctl env_get(String) : String,
   ctl env_argc(Unit) : Int,
   ctl env_arg(Int) : String
 }
 
+-- | Read an integer from standard input.
 fn read_int() = con_read_int(())
 
+-- | Read a line from standard input.
 fn read_line() = con_read_line(())
 
+-- | Read the contents of the file at path `p`.
 fn read_file(p) = fs_read_file(p)
 
+-- | True when a file exists at path `p`.
 fn file_exists(p) = fs_file_exists(p)
 
+-- | A random integer.
 fn rand() = rng_rand(())
 
+-- | The value of environment variable `s` (empty when unset).
 fn getenv(s) = env_get(s)
 
+-- | The number of command-line arguments.
 fn args_count() = env_argc(())
 
+-- | The `i`th command-line argument.
 fn arg(i) = env_arg(i)
 
--- The default world handler the entry point is wrapped in. Each effect is
--- discharged by a tail-resumptive handler that resumes with the matching prim_*
--- builtin, so the chain fuses to direct calls (no effect-op allocation). The
--- action's row is annotated with the four capability effects (open in e), so the
--- handlers subtract them concretely and run_io leaves only {IO | e}.
+-- | The default world handler the entry point is wrapped in. Each capability
+-- effect is discharged by a tail-resumptive handler that resumes with the
+-- matching `prim_*` builtin, so the chain fuses to direct calls (no effect-op
+-- allocation), leaving only `{IO | e}`.
 fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e}) =
   handle (handle handle handle handle action(()) with {
       con_read_int(u, k) => k(prim_read_int()),
@@ -347,13 +398,16 @@ fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e})
       k(())
     return r => r
 
+-- | Helper for `srange`: emit `lo, lo+1, ..., hi-1`.
 fn srange_go(lo, hi) =
   if lo < hi then
     emit(lo)
     srange_go(lo + 1, hi)
 
+-- | A stream of the integers in `[lo, hi)`, for the `Emit` combinators.
 fn srange(lo, hi) = \(u) -> srange_go(lo, hi)
 
+-- | Helper for `sof`: emit each element of `xs`.
 fn sof_go(xs) =
   match xs of
     Nil => ()
@@ -361,15 +415,18 @@ fn sof_go(xs) =
       emit(x)
       sof_go(rest)
 
+-- | A stream of the elements of the list `xs`.
 fn sof(xs) = \(u) -> sof_go(xs)
 
--- Arithmetic sequences backing the [a..z] / [a,b..z] list syntax.
+-- | The ascending list `[lo, lo+1, ..., hi]` (empty when `lo > hi`). Backs the
+-- `[a..z]` list syntax.
 fn enum_from_to(lo, hi) =
   if lo > hi then
     Nil
   else
     Cons(lo, enum_from_to(lo + 1, hi))
 
+-- | Helper for `enum_from_then_to`: the list from `x` by `step` up to `hi`.
 fn enum_seq(x, step, hi) =
   if step > 0 && x > hi then
     Nil
@@ -378,6 +435,8 @@ fn enum_seq(x, step, hi) =
   else
     Cons(x, enum_seq(x + step, step, hi))
 
+-- | The list from `a`, stepping by `b - a`, up to `hi`. Backs the `[a,b..z]`
+-- list syntax.
 fn enum_from_then_to(a, b, hi) =
   let step = b - a
   if step == 0 then
@@ -385,13 +444,16 @@ fn enum_from_then_to(a, b, hi) =
   else
     enum_seq(a, step, hi)
 
+-- | Helper for `smap`.
 fn smap_go(s, f) =
   handle s(()) with
     fun emit(x) => emit(f(x))
     return r => r
 
+-- | Map `f` over every element of a stream, fusing (no intermediate list).
 fn smap(s, f) = \(u) -> smap_go(s, f)
 
+-- | Helper for `skeep`.
 fn skeep_go(s, p) =
   handle s(()) with
     fun emit(x) =>
@@ -399,8 +461,10 @@ fn skeep_go(s, p) =
         emit(x)
     return r => r
 
+-- | Keep only the stream elements satisfying `p`, fusing.
 fn skeep(s, p) = \(u) -> skeep_go(s, p)
 
+-- | Helper for `stake`.
 fn stake_go(s, n) =
   let g =
     handle s(()) with
@@ -409,8 +473,10 @@ fn stake_go(s, n) =
       return r => \(left) -> ()
   g(n)
 
+-- | The first `n` elements of a stream, stopping the producer early.
 fn stake(s, n) = \(u) -> stake_go(s, n)
 
+-- | Left-fold a stream with `f` from the initial accumulator `z`, fusing.
 fn sfold(s, z, f) =
   let g =
     handle s(()) with
@@ -418,54 +484,58 @@ fn sfold(s, z, f) =
       return r => \(acc) -> acc
   g(z)
 
+-- | Sum a stream of numbers.
 fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 
+-- | Collect a stream into a list, in emission order.
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 
--- Kept in the always-on prelude (as well as `Data.List`) because optic-path
--- desugaring synthesizes calls to it by bare name after resolution, so it must
--- be a bare global symbol.
+-- | Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude
+-- (as well as `Data.List`) because optic-path desugaring synthesizes calls to it
+-- by bare name.
 fn concat_map(f, xs) = flatten(map(f, xs))
 
+-- | Print `s` to standard error, followed by a newline.
 fn eprintln(s) = eprint(concat(s, "\n"))
 
+-- | Helper for `array_of_list`: push each element of `xs` onto `arr`.
 fn push_all(arr, xs) =
   match xs of
     Nil => arr
     Cons(h, t) => push_all(array_push(arr, h), t)
 
+-- | Build a growable `Array` from a list.
 fn array_of_list(xs : List(a)) : Array(a) = push_all(array_empty(), xs)
 
--- Join a list of strings into one with a single allocation: the O(n) builder
--- that replaces a right-nested chain of `concat`.
+-- | Join a list of strings into one with a single allocation (an O(n) builder
+-- that replaces a right-nested chain of `concat`).
 fn concat_all(xs : List(String)) : String = string_of_array(array_of_list(xs))
 
--- A separate-chaining hash table with String keys, built on the growable Array:
--- each bucket is an association list, and the table doubles its bucket count when
--- the load factor passes 1. Keys hash by a modular DJB2 over their codepoints, so
--- the hash (and thus iteration order) is a pure function of the inserts, identical
--- across the interpreter and native backends.
-
+-- | A separate-chaining hash table with `String` keys, built on the growable
+-- `Array`: each bucket is an association list, and the table doubles its bucket
+-- count when the load factor passes 1. Iteration order is a pure function of the
+-- inserts, identical across the interpreter and native backends.
 type HashMap(v) = HM { buckets: Array(List((String, v))), size: Int }
 
--- FNV-1a, a real fixed-width hash written in the language: fold each byte in with
--- xor, then a wrapping 64-bit multiply by the FNV prime. `byte_at` is O(1), so
--- this is O(length); the U64 lane wraps instead of promoting to a bignum.
+-- | Helper for `str_hash`: fold one byte into the running FNV-1a hash.
 fn fnv_from(s, i, h) =
   if i >= byte_len(s) then
     h
   else
     fnv_from(s, i + 1, u64_mul(u64_xor(h, to_u64(byte_at(s, i))), 1099511628211u64))
 
+-- | The FNV-1a 64-bit hash of a string (the U64 lane wraps, O(length)).
 fn str_hash(s : String) : U64 = fnv_from(s, 0, 14695981039346656037u64)
 
+-- | Helper: the bucket index of key `k` in a table of `n` buckets.
 fn bucket_of(k : String, n : Int) : Int =
   int_of_u64(u64_rem(str_hash(k), to_u64(n)))
 
+-- | An empty hash map.
 fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
 
--- These pattern-match each (key, value) pair rather than calling `fst`/`snd`, so
--- the table keeps working in a program that defines its own `fst`/`snd`.
+-- | Helper: look up `k` in an association-list bucket (matches pairs directly so
+-- it keeps working in a program that defines its own `fst`/`snd`).
 fn assoc_get(pairs, k) =
   match pairs of
     Nil => None
@@ -477,22 +547,25 @@ fn assoc_get(pairs, k) =
           else
             assoc_get(rest, k)
 
+-- | The value bound to `k` as `Some`, or `None`.
 fn hm_lookup(hm : HashMap(v), k : String) : Option(v) =
   let bs = hm.buckets
   assoc_get(array_get(bs, bucket_of(k, array_len(bs))), k)
 
+-- | True when `k` is present.
 fn hm_member(hm : HashMap(v), k : String) : Bool =
   match hm_lookup(hm, k) of
     Some(_) => true
     None => false
 
+-- | The value bound to `k`, or the default `d`.
 fn hm_get_or(d, hm : HashMap(v), k : String) : v =
   match hm_lookup(hm, k) of
     Some(x) => x
     None => d
 
--- Replace the value for `k` in an association list, or add it. Returns the new
--- chain and 1 if the key was new, 0 if it replaced an existing binding.
+-- | Helper for `hm_put_raw`: replace or add `k` in a bucket, returning the chain
+-- and 1 if the key was new (0 if it replaced a binding).
 fn assoc_put(pairs, k, x) =
   match pairs of
     Nil => (Cons((k, x), Nil), 1)
@@ -505,6 +578,7 @@ fn assoc_put(pairs, k, x) =
             match assoc_put(rest, k, x) of
               (chain, added) => (Cons(p, chain), added)
 
+-- | Helper for `hm_insert`: insert without resizing.
 fn hm_put_raw(hm : HashMap(v), k : String, x : v) : HashMap(v) =
   let bs = hm.buckets
   let i = bucket_of(k, array_len(bs))
@@ -512,15 +586,18 @@ fn hm_put_raw(hm : HashMap(v), k : String, x : v) : HashMap(v) =
     (chain, added) =>
       HM { buckets = array_set(bs, i, chain), size = hm.size + added }
 
+-- | Helper for `hm_to_list`: concatenate buckets `i..n`.
 fn buckets_to_list(bs, i, n) =
   if i >= n then
     Nil
   else
     append(array_get(bs, i), buckets_to_list(bs, i + 1, n))
 
+-- | The `(key, value)` pairs, in bucket order.
 fn hm_to_list(hm : HashMap(v)) : List((String, v)) =
   buckets_to_list(hm.buckets, 0, array_len(hm.buckets))
 
+-- | Helper: the keys of a list of pairs.
 fn pair_keys(ps) =
   match ps of
     Nil => Nil
@@ -528,10 +605,13 @@ fn pair_keys(ps) =
       match p of
         (k, _) => Cons(k, pair_keys(rest))
 
+-- | The keys of the map.
 fn hm_keys(hm : HashMap(v)) : List(String) = pair_keys(hm_to_list(hm))
 
+-- | The number of entries.
 fn hm_size(hm : HashMap(v)) : Int = hm.size
 
+-- | Helper for `hm_insert`: re-insert every pair into a fresh table.
 fn hm_reinsert(hm, pairs) =
   match pairs of
     Nil => hm
@@ -539,7 +619,8 @@ fn hm_reinsert(hm, pairs) =
       match p of
         (k, x) => hm_reinsert(hm_put_raw(hm, k, x), rest)
 
--- Insert, doubling the bucket count and rehashing once the load factor exceeds 1.
+-- | Insert or overwrite `k`, doubling the bucket count and rehashing once the
+-- load factor exceeds 1.
 fn hm_insert(hm : HashMap(v), k : String, x : v) : HashMap(v) =
   let next = hm_put_raw(hm, k, x)
   if next.size > array_len(next.buckets) then
@@ -547,6 +628,7 @@ fn hm_insert(hm : HashMap(v), k : String, x : v) : HashMap(v) =
   else
     next
 
+-- | Remove `k` (a no-op if absent).
 fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
   let bs = hm.buckets
   let i = bucket_of(k, array_len(bs))
@@ -554,6 +636,8 @@ fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
     (chain, removed) =>
       HM { buckets = array_set(bs, i, chain), size = hm.size - removed }
 
+-- | Helper for `hm_delete`: remove `k` from a bucket, returning the chain and 1
+-- if a binding was removed.
 fn assoc_del(pairs, k) =
   match pairs of
     Nil => (Nil, 0)
@@ -566,6 +650,7 @@ fn assoc_del(pairs, k) =
             match assoc_del(rest, k) of
               (r, removed) => (Cons(p, r), removed)
 
+-- | Helper: the values of a list of pairs.
 fn pair_values(ps) =
   match ps of
     Nil => Nil
@@ -573,8 +658,10 @@ fn pair_values(ps) =
       match p of
         (_, value) => Cons(value, pair_values(rest))
 
+-- | The values of the map.
 fn hm_values(hm : HashMap(v)) : List(v) = pair_values(hm_to_list(hm))
 
+-- | Helper for `hm_from_list`.
 fn hm_from_list_go(hm, ps) =
   match ps of
     Nil => hm
@@ -582,41 +669,48 @@ fn hm_from_list_go(hm, ps) =
       match p of
         (k, x) => hm_from_list_go(hm_insert(hm, k, x), rest)
 
+-- | Build a hash map from `(key, value)` pairs (later pairs win).
 fn hm_from_list(ps : List((String, v))) : HashMap(v) =
   hm_from_list_go(hm_new(), ps)
 
+-- | Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
 fn hm_adjust(f, hm : HashMap(v), k : String) : HashMap(v) =
   match hm_lookup(hm, k) of
     None => hm
     Some(x) => hm_insert(hm, k, f(x))
 
--- Array folds and conversion to a list.
+-- | Helper for `array_foldl`.
 fn array_foldl_go(f, acc, arr, i) =
   if i >= array_len(arr) then
     acc
   else
     array_foldl_go(f, f(acc, array_get(arr, i)), arr, i + 1)
 
+-- | Left-fold `f` over the elements of an array from `acc`.
 fn array_foldl(f, acc, arr) = array_foldl_go(f, acc, arr, 0)
 
+-- | Helper for `array_to_list`.
 fn array_to_list_go(arr, i, acc) =
   if i < 0 then
     acc
   else
     array_to_list_go(arr, i - 1, Cons(array_get(arr, i), acc))
 
+-- | The elements of an array as a list, in order.
 fn array_to_list(arr : Array(a)) : List(a) =
   array_to_list_go(arr, array_len(arr) - 1, Nil)
 
--- Command-line arguments as a list.
+-- | Helper for `args`.
 fn args_go(i, n) =
   if i >= n then
     Nil
   else
     Cons(arg(i), args_go(i + 1, n))
 
+-- | The command-line arguments as a list.
 fn args() : List(String) = args_go(0, args_count())
 
+-- | Three-way comparison of two ints: `-1`, `0`, or `1` (the `Ord(Int)` kernel).
 fn int_cmp(a, b) =
   if a < b then
     0 - 1
@@ -625,21 +719,27 @@ fn int_cmp(a, b) =
   else
     0
 
+-- | Equality. `eq` backs `==`/`/=`.
 class Eq(a) {
   eq : (a, a) -> Bool
 }
 
+-- | Total order. `cmp(x, y)` returns `-1`, `0`, or `1`; backs `<`/`<=`/`>`/`>=`.
 class Ord(a) given Eq(a) {
   cmp : (a, a) -> Int
 }
 
+-- | Canonical rendering to a `String`, dispatched by dictionary. `show(x)`
+-- reads `x`'s `Show` instance, so a value prints canonically even in a
+-- polymorphic context (where the runtime representation alone cannot tell, say,
+-- a `Bool` from an `Int`). Derive it with `deriving (Show)`; strings render
+-- quoted and escaped, records with their field names.
 class Show(a) {
-  show_c : (a) -> String
+  show : (a) -> String
 }
 
--- Exponentiation, the class `a ^ b` desugars to via its method `pow`. Int and
--- Float instances cover homogeneous powers; a mixed `Int ^ Float` is a type error,
--- resolved by an explicit `to_float`, exactly like the rest of Prism's arithmetic.
+-- | Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances
+-- cover homogeneous powers; a mixed `Int ^ Float` is a type error.
 class Pow(a) {
   pow : (a, a) -> a
 }
@@ -701,32 +801,76 @@ instance ordFloat : Ord(Float) {
 }
 
 instance showInt : Show(Int) {
-  fn show_c(x) = show_int(x)
+  fn show(x) = show_int(x)
 }
 
 instance showI64 : Show(I64) {
-  fn show_c(x) = show(x)
+  fn show(x) = show_i64(x)
 }
 
 instance showU64 : Show(U64) {
-  fn show_c(x) = show(x)
+  fn show(x) = show_u64(x)
 }
 
 instance showFloat : Show(Float) {
-  fn show_c(x) = show(x)
+  fn show(x) = show_float(x)
 }
 
 instance showBool : Show(Bool) {
-  fn show_c(x) = show_bool(x)
+  fn show(x) = show_bool(x)
 }
 
 instance showStr : Show(String) {
-  fn show_c(x) = x
+  fn show(x) = str_escape(x)
 }
 
 instance showChar : Show(Char) {
-  fn show_c(x) = show_char(x)
+  fn show(x) = show_char(x)
 }
+
+instance showUnit : Show(Unit) {
+  fn show(x) = "()"
+}
+
+-- | Render `s` as a canonical double-quoted string literal, escaping the
+-- characters that would otherwise break the quoting. This is what `show`
+-- produces for a `String`; raw output (`print`/`println` of a message) is
+-- unquoted.
+fn str_escape(s : String) : String =
+  concat("\"", concat(escape_body(s, 0, str_len(s)), "\""))
+
+fn escape_body(s : String, i : Int, n : Int) : String =
+  if i >= n then
+    ""
+  else
+    concat(escape_at(char_at(s, i), s, i), escape_body(s, i + 1, n))
+
+-- Codepoints: 34 = `"`, 92 = `\`, 10 = newline, 9 = tab, 13 = carriage return.
+fn escape_at(c : Int, s : String, i : Int) : String =
+  if c == 34 then
+    "\\\""
+  elif c == 92 then
+    "\\\\"
+  elif c == 10 then
+    "\\n"
+  elif c == 9 then
+    "\\t"
+  elif c == 13 then
+    "\\r"
+  else
+    substring(s, i, 1)
+
+-- | Lists render in bracket form, `[a, b, c]`, matching the print-site
+-- generator; the elements recurse through their own `Show`.
+instance showList : Show(List(a)) given Show(a) {
+  fn show(xs) = concat("[", concat(show_list_body(xs, true), "]"))
+}
+
+fn show_list_body(xs : List(a), first : Bool) : String given Show(a) =
+  match xs of
+    Nil => ""
+    Cons(h, t) =>
+      concat(concat(if first then "" else ", ", show(h)), show_list_body(t, false))
 
 instance powInt : Pow(Int) {
   fn pow(b, e) = int_pow(b, e)
@@ -736,9 +880,8 @@ instance powFloat : Pow(Float) {
   fn pow(b, e) = pow_float(b, e)
 }
 
--- Higher-kinded classes: the parameter ranges over a type constructor (kind
--- * -> *), applied in the method signatures as `f(a)`. `fmap` is effect-
--- polymorphic, so mapping an effectful function threads its row `e` through.
+-- | A container that can be mapped over. `fmap` is effect-polymorphic, so
+-- mapping an effectful function threads its row `e` through.
 class Functor(f) {
   fmap : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
 }
@@ -751,7 +894,7 @@ instance functorOption : Functor(Option) {
   fn fmap(g, o) = map_option(g, o)
 }
 
--- Foldable: collapse a container with an effect-polymorphic right fold.
+-- | A container collapsible with an effect-polymorphic right fold.
 class Foldable(t) {
   fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
 }
@@ -764,7 +907,7 @@ instance foldableOption : Foldable(Option) {
   fn fold_r(g, z, o) = option_fold_r(g, z, o)
 }
 
--- Applicative: a Functor with `pure` and application `ap` inside the structure.
+-- | A `Functor` with `pure` (inject a value) and `ap` (apply a wrapped function).
 class Applicative(f) given Functor(f) {
   pure : (a) -> f(a),
   ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
@@ -780,8 +923,8 @@ instance applicativeOption : Applicative(Option) {
   fn ap(fo, xo) = option_ap(fo, xo)
 }
 
--- Monad: structural sequencing via `bind`. Effects ride the effect system, so
--- there is no do-notation; this is for List/Option-style structure.
+-- | Structural sequencing via `bind`. Side effects ride the effect system, so
+-- this is for `List`/`Option`-style structure rather than do-notation.
 class Monad(m) given Applicative(m) {
   bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
 }
@@ -794,8 +937,8 @@ instance monadOption : Monad(Option) {
   fn bind(o, g) = option_bind(o, g)
 }
 
--- Traversable: an effect-polymorphic traversal. The per-element effect row `e`
--- replaces the classic `Applicative` parameter; `traverse` is effectful map.
+-- | An effect-polymorphic traversal: `traverse` is an effectful `map`, the
+-- per-element effect row `e` replacing the classic `Applicative` parameter.
 class Traversable(t) given Functor(t), Foldable(t) {
   traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}
 }
@@ -808,6 +951,7 @@ instance traversableOption : Traversable(Option) {
   fn traverse(g, o) = map_option(g, o)
 }
 
+-- | Insert `x` into an already-sorted list, keeping it sorted (`Ord`).
 fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => Cons(x, Nil)
@@ -817,7 +961,7 @@ fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
       else
         Cons(y, insert_by_ord(x, rest))
 
--- Stable merge of two already-sorted lists. The recursive Cons is turned into a
+-- | Stable merge of two already-sorted lists. The recursive `Cons` becomes a
 -- loop by tail-recursion-modulo-cons, and Perceus reuses the consumed cells.
 fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
   match xs of
@@ -831,6 +975,7 @@ fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
           else
             Cons(y, merge_by_ord(xs, yr))
 
+-- | The generic stable merge sort behind `sort`, for any `Ord` element type.
 fn sort_by_ord(xs : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => Nil

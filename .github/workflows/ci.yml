@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  # Every commit on any branch is gated, not just pushes to main, so the parity
-  # and perf ratchets run before work lands rather than only at PR time.
-  push:
-    branches: ['**']
+  # Gated once per change: pull requests run the full parity/perf ratchet before
+  # work lands, and pushes to main re-run it post-merge. Feature-branch pushes no
+  # longer trigger their own run, so an open PR is no longer built twice.
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # A newer commit on the same ref supersedes an in-flight run, so rapid pushes do
@@ -121,6 +122,13 @@ jobs:
         run: |
           cargo build --release 2>/dev/null
           ./target/release/prism fmt --check
+
+      # The committed Standard Library Reference is generated from the stdlib
+      # sources; fail if it drifts, and run the doctests in its `-- |` comments.
+      - name: Check stdlib docs
+        run: |
+          ./target/release/prism docs --stdlib --check --out docs/src/stdlib
+          ./target/release/prism docs --stdlib --test
 
       - name: Build release
         run: cargo build --all --release

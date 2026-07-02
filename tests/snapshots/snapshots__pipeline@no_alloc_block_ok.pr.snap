@@ -1,0 +1,161 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_block_ok.pr
+---
+== tokens ==
+VOpen Fn Ident("tick") LParen Ident("n") Colon KwInt RParen Colon KwInt Eq VOpen Let Ident("base") Eq Ident("n") Plus Int(IntLit { value: 1, suffix: None }) VSemi Without Alloc Ident("base") Plus Ident("base") VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("tick") LParen Int(IntLit { value: 20, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "tick",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "base",
+                    Spanned {
+                        node: Bin(
+                            Add,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 284..285,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 288..289,
+                            },
+                        ),
+                        span: 284..289,
+                    },
+                    Spanned {
+                        node: Sugar(
+                            WithoutAlloc(
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Var(
+                                                "base",
+                                            ),
+                                            span: 306..310,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "base",
+                                            ),
+                                            span: 313..317,
+                                        },
+                                    ),
+                                    span: 306..317,
+                                },
+                            ),
+                        ),
+                        span: 292..317,
+                    },
+                ),
+                span: 273..317,
+            },
+            wheres: [],
+            span: 246..317,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "tick",
+                        ),
+                        span: 337..341,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 20,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 342..344,
+                        },
+                    ],
+                ),
+                span: 337..345,
+            },
+            wheres: [],
+            span: 319..345,
+        },
+    ],
+}
+
+== types ==
+tick : (Int) -> Int
+main : () -> Int
+noalloc@0 : (Int) -> Int
+
+== core (cbpv) ==
+fn tick(n) =
+  return n to t@0; return 1 to t@1; t@0 + t@1 to base; return base to t@2; noalloc@0(t@2)
+fn main() =
+  return 20 to t@3; tick(t@3)
+fn noalloc@0(base) =
+  return base to t@4; return base to t@5; t@4 + t@5
+
+== fbip (rc) ==
+fn tick(n) =
+  return n to t@0; return 1 to t@1; t@0 + t@1 to base; return base to t@2; noalloc@0(t@2)
+fn main() =
+  return 20 to t@3; tick(t@3)
+fn noalloc@0(base) =
+  dup base to _; return base to t@4; return base to t@5; t@4 + t@5
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  ret i64 85
+}
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 42

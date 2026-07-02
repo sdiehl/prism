@@ -9,7 +9,7 @@ use super::{
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, NodeId, PathOp, PathStep, S};
-use crate::types::ty::{EffRow, Effects, Label, Type, EQ_CLASS, LIST};
+use crate::types::ty::{EffRow, Effects, Label, Type, EQ_CLASS, LIST, ORD_CLASS};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
@@ -31,7 +31,7 @@ struct DeclSeed {
 // annotated function already checks against its signature (and so supports
 // polymorphic recursion), so its errors pass through unchanged.
 fn poly_recursion_hint(e: TypeError, d: &Decl<Core>) -> TypeError {
-    if super::env::annotation_scheme(d).is_some() {
+    if super::env::fully_annotated(d) {
         return e;
     }
     match e {
@@ -256,11 +256,7 @@ impl Tc<'_> {
                 msg: format!("{ctor_name} is not a record constructor"),
             });
         }
-        let map: Vec<(Sym, Type)> = info
-            .params
-            .iter()
-            .map(|pn| (*pn, Type::Exist(self.push_ex())))
-            .collect();
+        let (result, tsubs, rsubs) = self.open_ctor(&info);
         for (field_name, field_expr) in field_exprs {
             let fi = info
                 .fields
@@ -271,8 +267,11 @@ impl Tc<'_> {
                     msg: format!("unknown field {field_name} on {ctor_name}"),
                 })?;
             let mut ft = info.args[fi].clone();
-            for (pn, t) in &map {
+            for (pn, t) in &tsubs {
                 ft = ft.subst_var(*pn, t);
+            }
+            for (pn, r) in &rsubs {
+                ft = ft.subst_row_var(*pn, r);
             }
             let ft = self.apply(&ft);
             self.check(env, field_expr, &ft)?;
@@ -289,10 +288,7 @@ impl Tc<'_> {
                 msg: format!("missing field(s) {} in {ctor_name}", missing.join(", ")),
             });
         }
-        Ok(Type::Con(
-            info.type_name,
-            map.iter().map(|(_, t)| self.apply(t)).collect(),
-        ))
+        Ok(self.apply(&result))
     }
 
     fn synth_node(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
@@ -340,41 +336,7 @@ impl Tc<'_> {
                 }
                 Ok(t)
             }
-            Expr::Inst(f, names) => {
-                let Expr::Var(x) = &f.node else {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: "explicit instance selection `f(using ..)` requires a named function"
-                            .into(),
-                    });
-                };
-                let t = env
-                    .get(&Sym::from(x))
-                    .cloned()
-                    .ok_or_else(|| TypeError::Unbound {
-                        span: f.span,
-                        name: x.clone(),
-                    })?;
-                match self.constrained.get(&Sym::from(x)).cloned() {
-                    Some((scheme, cs)) if t == scheme && !cs.is_empty() => {
-                        if names.len() != cs.len() {
-                            return Err(TypeError::Other {
-                                span,
-                                msg: format!(
-                                    "`{x}` has {} constraint(s), got {} instance argument(s)",
-                                    cs.len(),
-                                    names.len()
-                                ),
-                            });
-                        }
-                        Ok(self.instantiate_constrained(&scheme, &cs, id, span, Some(names)))
-                    }
-                    _ => Err(TypeError::Other {
-                        span,
-                        msg: format!("`{x}` has no class constraints to instantiate"),
-                    }),
-                }
-            }
+            Expr::Inst(f, names) => self.synth_inst(env, f, names, id, span),
             Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
             Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
             Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, id, span),
@@ -496,97 +458,10 @@ impl Tc<'_> {
                 self.synth_record_create(env, ctor_name, field_exprs, span)
             }
             Expr::RecordUpdate(base_expr, ctor_name, field_exprs) => {
-                let info = self
-                    .ctors
-                    .get(ctor_name)
-                    .cloned()
-                    .ok_or_else(|| TypeError::Other {
-                        span,
-                        msg: format!("unknown record constructor {ctor_name}"),
-                    })?;
-                let result_ty = Type::Con(
-                    info.type_name,
-                    info.params
-                        .iter()
-                        .map(|_| Type::Exist(self.push_ex()))
-                        .collect(),
-                );
-                self.check(env, base_expr, &result_ty)?;
-                for (field_name, field_expr) in field_exprs {
-                    let fi = info
-                        .fields
-                        .iter()
-                        .position(|f| *f == field_name)
-                        .ok_or_else(|| TypeError::Other {
-                            span,
-                            msg: format!("unknown field {field_name} on {ctor_name}"),
-                        })?;
-                    let ft = self.apply(&info.args[fi]);
-                    self.check(env, field_expr, &ft)?;
-                }
-                Ok(self.apply(&result_ty))
+                self.synth_record_update(env, base_expr, ctor_name, field_exprs, span)
             }
             Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, id, span),
-            Expr::Handle(body, arms) => {
-                // The handler picks one instantiation per parametric effect it
-                // handles. The body checks under that scope, so every perform
-                // and callee row inside unifies with the handler's choice.
-                let mut scope = Vec::new();
-                let mut seen = BTreeSet::new();
-                for arm in arms {
-                    if let HandlerArm::Op(op_name, ..) = arm {
-                        if let Some(info) = self.eff_ops.get(op_name).cloned() {
-                            if !info.eff_params.is_empty() && seen.insert(info.effect_name) {
-                                let args: Vec<Type> = info
-                                    .eff_params
-                                    .iter()
-                                    .map(|_| Type::Exist(self.push_ex()))
-                                    .collect();
-                                scope.push((info.effect_name, args));
-                            }
-                        }
-                    }
-                }
-                let body_ty = self.synth_handle_body(env, body, &scope, arms, span)?;
-                let ret_ex = self.push_ex();
-                for arm in arms {
-                    match arm {
-                        HandlerArm::Return(x, arm_body) => {
-                            let mut env2 = env.clone();
-                            env2.insert(Sym::from(x), body_ty.clone());
-                            self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
-                        }
-                        HandlerArm::Op(op_name, params, k_var, arm_body) => {
-                            if let Some(info) = self.eff_ops.get(op_name).cloned() {
-                                let eff_sym = info.effect_name;
-                                let (op_params, op_ret) =
-                                    match scope.iter().find(|(n, _)| *n == eff_sym) {
-                                        Some((_, args)) => info.instantiate(args),
-                                        None => (info.params.clone(), info.ret.clone()),
-                                    };
-                                let mut env2 = env.clone();
-                                for (pname, pty) in params.iter().zip(op_params.iter()) {
-                                    env2.insert(Sym::from(pname), pty.clone());
-                                }
-                                let k_ty = Type::fun(vec![op_ret], Type::Exist(ret_ex));
-                                env2.insert(Sym::from(k_var), k_ty);
-                                self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
-                            } else {
-                                return Err(TypeError::Other {
-                                    span,
-                                    msg: format!("unknown effect operation `{op_name}`"),
-                                });
-                            }
-                        }
-                        #[expect(
-                            clippy::uninhabited_references,
-                            reason = "Never is uninhabited in Core; arm is unreachable"
-                        )]
-                        HandlerArm::Sugar(never) => match *never {},
-                    }
-                }
-                Ok(self.apply(&Type::Exist(ret_ex)))
-            }
+            Expr::Handle(body, arms) => self.synth_handle(env, body, arms, span),
             Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
@@ -602,6 +477,163 @@ impl Tc<'_> {
             )]
             Expr::Sugar(never) | Expr::Marker(never) => match *never {},
         }
+    }
+
+    // Explicit instance selection `f(using d)`: `f` must be a constrained name and
+    // the instance arguments must match its constraint count one-to-one.
+    fn synth_inst(
+        &mut self,
+        env: &Env,
+        f: &S<Expr<Core>>,
+        names: &[String],
+        id: NodeId,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let Expr::Var(x) = &f.node else {
+            return Err(TypeError::Other {
+                span,
+                msg: "explicit instance selection `f(using ..)` requires a named function".into(),
+            });
+        };
+        let t = env
+            .get(&Sym::from(x))
+            .cloned()
+            .ok_or_else(|| TypeError::Unbound {
+                span: f.span,
+                name: x.clone(),
+            })?;
+        match self.constrained.get(&Sym::from(x)).cloned() {
+            Some((scheme, cs)) if t == scheme && !cs.is_empty() => {
+                if names.len() != cs.len() {
+                    return Err(TypeError::Other {
+                        span,
+                        msg: format!(
+                            "`{x}` has {} constraint(s), got {} instance argument(s)",
+                            cs.len(),
+                            names.len()
+                        ),
+                    });
+                }
+                Ok(self.instantiate_constrained(&scheme, &cs, id, span, Some(names)))
+            }
+            _ => Err(TypeError::Other {
+                span,
+                msg: format!("`{x}` has no class constraints to instantiate"),
+            }),
+        }
+    }
+
+    // `{ base | field = v, .. }` over a known record constructor: the base checks
+    // at the record type and each named field at its declared type.
+    fn synth_record_update(
+        &mut self,
+        env: &Env,
+        base_expr: &S<Expr<Core>>,
+        ctor_name: &str,
+        field_exprs: &[(String, S<Expr<Core>>)],
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let info = self
+            .ctors
+            .get(ctor_name)
+            .cloned()
+            .ok_or_else(|| TypeError::Other {
+                span,
+                msg: format!("unknown record constructor {ctor_name}"),
+            })?;
+        let (result_ty, tsubs, rsubs) = self.open_ctor(&info);
+        self.check(env, base_expr, &result_ty)?;
+        for (field_name, field_expr) in field_exprs {
+            let fi = info
+                .fields
+                .iter()
+                .position(|f| *f == field_name)
+                .ok_or_else(|| TypeError::Other {
+                    span,
+                    msg: format!("unknown field {field_name} on {ctor_name}"),
+                })?;
+            let mut ft = info.args[fi].clone();
+            for (pn, t) in &tsubs {
+                ft = ft.subst_var(*pn, t);
+            }
+            for (pn, r) in &rsubs {
+                ft = ft.subst_row_var(*pn, r);
+            }
+            let ft = self.apply(&ft);
+            self.check(env, field_expr, &ft)?;
+        }
+        Ok(self.apply(&result_ty))
+    }
+
+    // A `handle e { .. }`: pick one instantiation per parametric effect handled,
+    // check the body under that scope, then check each return/op clause against a
+    // shared result existential.
+    fn synth_handle(
+        &mut self,
+        env: &Env,
+        body: &S<Expr<Core>>,
+        arms: &[HandlerArm<Core>],
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let mut scope = Vec::new();
+        let mut seen = BTreeSet::new();
+        for arm in arms {
+            if let HandlerArm::Op(op_name, ..) = arm {
+                if let Some(info) = self.eff_ops.get(op_name).cloned() {
+                    if !info.eff_params.is_empty() && seen.insert(info.effect_name) {
+                        let args: Vec<Type> = info
+                            .eff_params
+                            .iter()
+                            .map(|_| Type::Exist(self.push_ex()))
+                            .collect();
+                        scope.push((info.effect_name, args));
+                    }
+                }
+            }
+        }
+        let body_ty = self.synth_handle_body(env, body, &scope, arms, span)?;
+        let ret_ex = self.push_ex();
+        for arm in arms {
+            match arm {
+                HandlerArm::Return(x, arm_body) => {
+                    let mut env2 = env.clone();
+                    env2.insert(Sym::from(x), body_ty.clone());
+                    self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
+                }
+                HandlerArm::Op(op_name, params, k_var, arm_body) => {
+                    if let Some(info) = self.eff_ops.get(op_name).cloned() {
+                        let eff_sym = info.effect_name;
+                        let (mut op_params, mut op_ret) =
+                            match scope.iter().find(|(n, _)| *n == eff_sym) {
+                                Some((_, args)) => info.instantiate(args),
+                                None => (info.params.clone(), info.ret.clone()),
+                            };
+                        // Open the op's free row variables per handler clause, so a
+                        // row-polymorphic argument (`fork`'s fiber thunk) does not
+                        // pin the handler's answer row to a rigid variable.
+                        self.open_op_rows(&mut op_params, &mut op_ret);
+                        let mut env2 = env.clone();
+                        for (pname, pty) in params.iter().zip(op_params.iter()) {
+                            env2.insert(Sym::from(pname), pty.clone());
+                        }
+                        let k_ty = Type::fun(vec![op_ret], Type::Exist(ret_ex));
+                        env2.insert(Sym::from(k_var), k_ty);
+                        self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
+                    } else {
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!("unknown effect operation `{op_name}`"),
+                        });
+                    }
+                }
+                #[expect(
+                    clippy::uninhabited_references,
+                    reason = "Never is uninhabited in Core; arm is unreachable"
+                )]
+                HandlerArm::Sugar(never) => match *never {},
+            }
+        }
+        Ok(self.apply(&Type::Exist(ret_ex)))
     }
 
     // `{ base | a.b.c = v, .. }`: each segment must land on a single-constructor
@@ -689,11 +721,6 @@ impl Tc<'_> {
         Ok(self.apply(&tb))
     }
 
-    // The numeric defaulting rule, in one place: an ambiguous operand defaults
-    // to `Int`. `==`/`!=` invoke it for an unconstrained (existential) operand;
-    // the ordered and arithmetic operators invoke it for any operand that is not
-    // already a fixed-width integer. This is the only site the `Int` literal and
-    // its `subtype` decision live, so Eq and Ord share one rule.
     // `recv[key]`: a failable read dispatched on `recv`'s head. Dispatch eagerly
     // when the receiver type is already a concrete container; defer it (to
     // `resolve_all`) when the receiver is still an unsolved existential, since a
@@ -775,6 +802,11 @@ impl Tc<'_> {
         }
     }
 
+    // The numeric defaulting rule, in one place: an ambiguous operand defaults
+    // to `Int`. `==`/`!=` invoke it for an unconstrained (existential) operand;
+    // the ordered and arithmetic operators invoke it for any operand that is not
+    // already a fixed-width integer. This is the only site the `Int` literal and
+    // its `subtype` decision live, so Eq and Ord share one rule.
     pub(super) fn default_numeric(&mut self, ty: &Type, span: Span) -> Result<Type, TypeError> {
         self.subtype(ty, &Type::Int).map_err(|e| {
             e.or(TypeError::Mismatch {
@@ -833,17 +865,46 @@ impl Tc<'_> {
                 }
                 Ok(Type::Bool)
             }
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                let ta = self.synth(env, a)?;
+                let ta = self.apply(&ta);
+                let ta = self.instantiate_constrained(&ta, &[], id, span, None);
+                self.check(env, b, &ta)?;
+                let ta = self.apply(&ta);
+                match &ta {
+                    Type::Int => {}
+                    Type::I64 | Type::U64 => {
+                        self.fixed.insert(id, ta);
+                    }
+                    // Float comparison belongs to the dotted operators (`<.`),
+                    // same as the arithmetic arm below.
+                    Type::Float => {
+                        self.default_numeric(&ta, a.span)?;
+                    }
+                    // Defer like the arithmetic arm: a later use may still pin
+                    // this to a fixed-width lane before the `Int` default applies.
+                    Type::Exist(_) => self.num_default.push((id, span, ta)),
+                    // Everything else dispatches through its Ord instance: the
+                    // operator elaborates to `cmp(a, b) <op> 0`.
+                    _ => self.wanted.push(Wanted {
+                        id,
+                        span,
+                        items: vec![(ORD_CLASS.into(), ta, None)],
+                    }),
+                }
+                Ok(Type::Bool)
+            }
             _ => {
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                // A concrete or rigid left operand drives the operator, exactly as
-                // before: a fixed-width lane fixes both sides, and a non-numeric
-                // one is rejected at its own span (good blame). The new case is an
-                // unsolved existential left operand: rather than defaulting it to
-                // `Int` here, check the right operand against it (so the right can
-                // pin the lane) and, if both stay ambiguous, defer to one pass at
-                // `resolve_all` where a later use can still fix the width. This is
-                // what lets `y + x` with `x : I64` type when `y` was left open.
+                // A concrete or rigid left operand drives the operator: a
+                // fixed-width lane fixes both sides, and a non-numeric one is
+                // rejected at its own span (good blame). An unsolved existential
+                // left operand is not defaulted to `Int` here; check the right
+                // operand against it (so the right can pin the lane), and if both
+                // stay ambiguous defer to one pass at `resolve_all` where a later
+                // use can still fix the width. This lets `y + x` with `x : I64`
+                // type when `y` was left open.
                 let t = match &ta {
                     Type::I64 | Type::U64 => {
                         self.check(env, b, &ta)?;
@@ -986,13 +1047,59 @@ impl Tc<'_> {
         Ok(())
     }
 
+    // Open every free effect-row variable in an operation signature to a fresh
+    // row existential, once per use. A row-polymorphic op such as
+    // `fork(() -> a ! {Async(a) | e})` carries `e` as a free row variable in its
+    // stored signature; a handler clause opens it fresh so it unifies downstream
+    // with the reified answer row instead of leaking a rigid variable. Ops with
+    // no free row variable are untouched.
+    fn open_op_rows(&mut self, params: &mut [Type], ret: &mut Type) {
+        let mut rows = BTreeSet::new();
+        for p in params.iter() {
+            super::env::collect_row_vars(p, &mut rows);
+        }
+        super::env::collect_row_vars(ret, &mut rows);
+        for v in rows {
+            let e = EffRow::Exist(self.push_ex_row());
+            for p in params.iter_mut() {
+                *p = p.subst_row_var(v, &e);
+            }
+            *ret = ret.subst_row_var(v, &e);
+        }
+    }
+
+    // Tie an operation's free effect-row variables to the ambient effect row at a
+    // perform site. `fork(() -> a ! {Async | e})` shares the caller's open row
+    // tail for `e`, so a forked computation's effects are absorbed into the
+    // caller's obligation and flow out to whoever handles the effect: a fiber
+    // performing `Log` makes the caller (and `run_async`) demand a `Log` handler
+    // rather than smuggling it past the scheduler. Outside any function body (no
+    // ambient scope) it falls back to a fresh row. Ops with no free row variable
+    // are untouched, so the rest of the corpus is unaffected.
+    fn bind_op_rows_to_ambient(&mut self, params: &mut [Type], ret: &mut Type) {
+        let existing_tail = self.cur_row.as_ref().map(|s| s.tail);
+        let tail = existing_tail.unwrap_or_else(|| self.push_ex_row());
+        let target = EffRow::Exist(tail);
+        let mut rows = BTreeSet::new();
+        for p in params.iter() {
+            super::env::collect_row_vars(p, &mut rows);
+        }
+        super::env::collect_row_vars(ret, &mut rows);
+        for v in rows {
+            for p in params.iter_mut() {
+                *p = p.subst_row_var(v, &target);
+            }
+            *ret = ret.subst_row_var(v, &target);
+        }
+    }
+
     // The type of a perform site for a parametric op: the op signature with
     // effect parameters replaced by the instantiation in force, and any
     // leftover return-only variables opened fresh per site. The op's own effect
     // label is absorbed into the ambient row here, so a direct `do op` demands
     // its effect by inference (rule 1); the label's args are the same
     // existentials that instantiate the op type, so the value- and row-level
-    // views of the effect stay tied. Additive over the set-pass seed.
+    // views of the effect stay tied.
     fn perform_ty(&mut self, info: &super::EffOpInfo, span: Span) -> Result<Type, TypeError> {
         let eff_sym = info.effect_name;
         let found = self
@@ -1013,7 +1120,7 @@ impl Tc<'_> {
         };
         self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
             .map_err(|e| e.at(span))?;
-        let (params, mut ret) = info.instantiate(&args);
+        let (mut params, mut ret) = info.instantiate(&args);
         let mut pv = BTreeSet::new();
         for p in &params {
             collect_type_vars(p, &mut pv);
@@ -1026,6 +1133,7 @@ impl Tc<'_> {
                 ret = ret.subst_var(v, &Type::Exist(e));
             }
         }
+        self.bind_op_rows_to_ambient(&mut params, &mut ret);
         Ok(Type::fun(params, ret))
     }
 
@@ -1042,10 +1150,9 @@ impl Tc<'_> {
 
     // `mask<E>(body)`: the masked ops bypass the innermost `E` handler, so the
     // expression still demands an enclosing one. Inject one `E` label into the
-    // ambient row (mirroring the set pass, effects.rs `Expr::Mask`) so the
-    // unifier does not under-report it, and mark the nearest enclosing `E`
-    // handler so it leaves the label in its residual row instead of discharging
-    // it.
+    // ambient row so the unifier does not under-report it, and mark the nearest
+    // enclosing `E` handler so it leaves the label in its residual row instead of
+    // discharging it.
     fn synth_mask(
         &mut self,
         env: &Env,
@@ -1097,7 +1204,7 @@ impl Tc<'_> {
     ) -> Result<Type, TypeError> {
         let body_row = self.push_ex_row();
         // A handler scopes a fresh ambient tail for its body but keeps the
-        // enclosing fixed prefix, matching the old standalone `cur_labels`.
+        // enclosing fixed prefix.
         let prefix = self
             .cur_row
             .as_ref()
@@ -1161,8 +1268,8 @@ impl Tc<'_> {
     // structure-free stub. An annotated member is seeded with its generalized
     // annotation scheme, so calls to it check against the annotation (decidable
     // polymorphic recursion). Every member is then generalized against the
-    // environment that held before the group, exactly as textbook Hindley-Milner
-    // generalizes a recursion group once, after the whole group is inferred.
+    // environment that held before the group, so a recursion group is generalized
+    // once, after the whole group is inferred.
     pub(super) fn infer_scc(
         &mut self,
         env: &mut Env,
@@ -1184,7 +1291,8 @@ impl Tc<'_> {
             // self-type (shared existentials let a sibling unify structure); a
             // fully annotated function exposes its generalized annotation scheme
             // (a sibling call checks against it, supporting polymorphic recursion).
-            let visible = super::env::annotation_scheme(d).unwrap_or_else(|| seed.self_ty.clone());
+            let visible =
+                super::env::annotation_scheme(d, self.data).unwrap_or_else(|| seed.self_ty.clone());
             env.insert(Sym::from(&d.name), visible);
             seeds.push(seed);
         }
@@ -1351,7 +1459,7 @@ impl Tc<'_> {
             env2.insert(Sym::from(&p.name), t.clone());
         }
         let self_entry = if d.constraints.is_empty() {
-            super::env::annotation_scheme(d).unwrap_or_else(|| seed.self_ty.clone())
+            super::env::annotation_scheme(d, self.data).unwrap_or_else(|| seed.self_ty.clone())
         } else {
             seed.self_ty.clone()
         };

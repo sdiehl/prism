@@ -5,17 +5,17 @@
 -- resolution picks it, and the other is selected explicitly with
 -- f(args, using instName). Coherence: resolution is never silently ambiguous.
 
--- Take the head as the running best, then fold the order's max over the tail.
 fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
   match xs of
     Nil => None
-    Cons(x, rest) => Some(max_acc(x, rest))
-
--- Tail-recursive running maximum under the supplied Ord.
-fn max_acc(best : a, xs : List(a)) : a given Ord(a) =
-  match xs of
-    Nil => best
-    Cons(x, rest) => max_acc(if cmp(x, best) > 0 then x else best, rest)
+    Cons(x, rest) =>
+      match maximum_by_ord(rest) of
+        None => Some(x)
+        Some(y) =>
+          if cmp(x, y) >= 0 then
+            Some(x)
+          else
+            Some(y)
 
 instance ordDesc : Ord(Int) {
   fn cmp(x, y) = int_cmp(y, x)
@@ -31,8 +31,8 @@ fn join_shown(xs : List(a)) : String given Show(a) =
     Nil => ""
     Cons(x, rest) =>
       match rest of
-        Nil => show_c(x)
-        Cons(_, _) => concat(show_c(x), concat(", ", join_shown(rest)))
+        Nil => show(x)
+        Cons(_, _) => concat(show(x), concat(", ", join_shown(rest)))
 
 fn main() : !{IO} Unit =
   let xs = [3, 1, 4, 1, 5, 9, 2, 6]

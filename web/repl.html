@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism REPL</title>
+    <meta name="description" content="An in-browser REPL for Prism, a functional language with algebraic effect types. Evaluate expressions compiled to WebAssembly." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="repl-body">
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag">REPL</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Docs</a>
+        <div class="settings-wrap">
+          <button id="gear" class="ctl-icon" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings" title="Settings">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <line x1="4" y1="8" x2="20" y2="8" />
+              <circle cx="9.5" cy="8" r="2.4" fill="var(--bg)" />
+              <line x1="4" y1="16" x2="20" y2="16" />
+              <circle cx="14.5" cy="16" r="2.4" fill="var(--bg)" />
+            </svg>
+          </button>
+          <div id="settings" class="settings" hidden>
+            <div class="set-title">Session options</div>
+            <button id="opt-t" class="set-row" type="button" role="switch" aria-checked="false">
+              <span class="set-label">Type after each result <code>:set +t</code></span>
+              <span class="toggle" aria-hidden="true"></span>
+            </button>
+            <button id="opt-s" class="set-row" type="button" role="switch" aria-checked="false">
+              <span class="set-label">Timing after each result <code>:set +s</code></span>
+              <span class="toggle" aria-hidden="true"></span>
+            </button>
+            <div class="set-hint">Type <code>:help</code> in the prompt for all commands.</div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main class="repl-main">
+      <div class="repl-col">
+        <div class="repl-inner">
+          <div id="log" class="repl-log"></div>
+          <div id="inputrow" class="repl-inputrow">
+            <span id="status" class="repl-status idle" aria-hidden="true"></span>
+            <span class="repl-prompt">&gt;</span>
+            <span id="caret" class="repl-caret" aria-hidden="true"></span>
+            <input id="in" class="repl-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" autofocus />
+            <button id="clear" class="repl-clear" type="button" title="Clear the session" aria-label="Clear the session">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+                <path d="M20 5v5h-5" />
+              </svg>
+              <span>clear</span>
+            </button>
+          </div>
+          <div id="diag" class="repl-diag" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+      <aside class="repl-side">
+        <div class="repl-side-label">Examples</div>
+        <div id="examples" class="repl-examples"></div>
+      </aside>
+    </main>
+    <script type="module" src="/src/repl.ts"></script>
+  </body>
+</html>

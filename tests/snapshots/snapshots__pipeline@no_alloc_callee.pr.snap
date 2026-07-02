@@ -1,0 +1,141 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_callee.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("mk") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Eq UIdent("Box") LParen Ident("x") RParen VSemi Fn Ident("top") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Without Alloc Eq Ident("mk") LParen Ident("x") RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 228..247,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "mk",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Box",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Box",
+                        ),
+                        span: 272..275,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 276..277,
+                        },
+                    ],
+                ),
+                span: 272..278,
+            },
+            wheres: [],
+            span: 249..278,
+        },
+        Decl {
+            name: "top",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Box",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "mk",
+                        ),
+                        span: 318..320,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 321..322,
+                        },
+                    ],
+                ),
+                span: 318..323,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 280..323,
+        },
+    ],
+}
+
+== types ==
+mk : (Int) -> Box
+top : (Int) -> Box
+
+== core (cbpv) ==
+fn mk(x) =
+  return x to t@0; return Box(t@0)
+fn top(x) =
+  return x to t@1; mk(t@1)
+
+== fip ==
+Type Error: a `without alloc` function may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+   ╭─[ <source>:8:1 ]
+   │
+ 8 │ fn top(x : Int) : Box without alloc = mk(x)
+   │ ─────────────────────┬─────────────────────  
+   │                      ╰─────────────────────── a `without alloc` function may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+───╯

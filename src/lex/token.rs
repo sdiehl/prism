@@ -120,6 +120,23 @@ impl Scanner {
         false
     }
 
+    // Find the `}` that closes a hole whose text starts at `inner[from]`, driving
+    // this automaton so a nested string literal's own quotes and braces never end
+    // the hole early. `inner` is the string body as (absolute byte offset, char)
+    // pairs. Returns the closing brace's byte offset and the index one past it in
+    // `inner`, or None when the hole is never closed.
+    pub(super) fn scan_hole(inner: &[(usize, char)], from: usize) -> Option<(usize, usize)> {
+        let mut sc = Self::hole();
+        let mut j = from;
+        while let Some(&(at, c)) = inner.get(j) {
+            j += 1;
+            if sc.step(at, c) {
+                return Some((at, j));
+            }
+        }
+        None
+    }
+
     // Runs on the malformed-input path (string or hole never closed), so it
     // must yield a diagnostic, never panic: an empty marker stack falls back
     // to the other region's opener, then to offset 0.
@@ -227,6 +244,10 @@ pub enum Token {
     Fbip,
     #[token("replayable")]
     Replayable,
+    #[token("without")]
+    Without,
+    #[token("alloc")]
+    Alloc,
     #[token("pub")]
     Pub,
     #[token("import")]
@@ -503,6 +524,8 @@ impl Token {
             Self::Fip => kw::FIP,
             Self::Fbip => kw::FBIP,
             Self::Replayable => kw::REPLAYABLE,
+            Self::Without => kw::WITHOUT,
+            Self::Alloc => kw::ALLOC,
             Self::Pub => kw::PUB,
             Self::Import => kw::IMPORT,
             Self::As => kw::AS,
@@ -676,6 +699,31 @@ mod tests {
     use super::Token;
     use crate::kw;
 
+    // The reason the hole scanner is a stack automaton and not a brace count: a
+    // string literal nested inside a hole carries its own `{`/`}`/`"`, none of
+    // which may close the outer hole or string. Lex a hole containing a nested
+    // interpolated string and confirm the outer literal splits into exactly one
+    // start/end pair around re-lexed hole tokens (one of them itself a nested
+    // start/end pair), with no stray brace ending the region early.
+    #[test]
+    fn hole_with_nested_interp_string() {
+        use Token::{Ident, InterpEnd, InterpStart};
+        let (toks, _) =
+            crate::lex::lex_raw(r#""a {f("b {x} c")} d""#).expect("nested interp lexes");
+        let kinds: Vec<&Token> = toks.iter().map(|(_, t, _)| t).collect();
+        let starts = kinds.iter().filter(|t| matches!(t, InterpStart(_))).count();
+        let ends = kinds.iter().filter(|t| matches!(t, InterpEnd(_))).count();
+        // Two interpolated literals (the outer one and the one inside the hole),
+        // each a balanced start..end pair: the nested `"`/`{`/`}` never ended the
+        // outer region early, and the hole's `f(...)` re-lexed into real tokens.
+        assert_eq!(starts, 2, "one InterpStart per interpolated literal");
+        assert_eq!(ends, 2, "one InterpEnd per interpolated literal");
+        assert!(
+            kinds.iter().any(|t| matches!(t, Ident(s) if s == "f")),
+            "the hole expression `f(..)` re-lexes to its own tokens"
+        );
+    }
+
     // Every fixed token paired with its canonical spelling. This is the bridge
     // the logos `#[token("...")]` attributes cannot express directly (the macro
     // needs a literal), so the test below makes each attribute verified against
@@ -686,6 +734,8 @@ mod tests {
             (Token::Fip, kw::FIP),
             (Token::Fbip, kw::FBIP),
             (Token::Replayable, kw::REPLAYABLE),
+            (Token::Without, kw::WITHOUT),
+            (Token::Alloc, kw::ALLOC),
             (Token::Pub, kw::PUB),
             (Token::Import, kw::IMPORT),
             (Token::As, kw::AS),

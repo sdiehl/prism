@@ -1,0 +1,14 @@
+-- `<`/`<=`/`>`/`>=` dispatch through the Ord class when the operands are not a
+-- primitive numeric lane: the operator elaborates to `cmp(a, b) <op> 0`.
+-- Exercises a derived Ord instance, the prelude Str/Bool instances, and the
+-- primitive Int fast path side by side.
+
+type Money = Money(Int) deriving (Eq, Ord)
+
+fn main() =
+  println(show(Money(3) < Money(5)))
+  println(show(Money(7) <= Money(5)))
+  println(show(Money(5) >= Money(5)))
+  println(show("apple" < "banana"))
+  println(show(false < true))
+  println(show(2 < 3))

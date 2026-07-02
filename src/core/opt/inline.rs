@@ -17,10 +17,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::cbpv::{calls_in, Comp, Core, CoreFn, CorePat, HandleOp, Value};
+use super::super::cbpv::{calls_in, Comp, Core, CoreFn, Value};
 use super::super::fv;
 use super::super::traverse::Rewrite;
-use crate::names::ENTRY_POINT;
+use super::rename;
+use crate::names::{self, ENTRY_POINT};
 use crate::sym::Sym;
 
 /// Inline single-call-site non-recursive functions, returning the result and the
@@ -73,6 +74,7 @@ pub(crate) fn inline_counted(core: &Core) -> (Core, u64) {
         .map(|f| CoreFn {
             name: f.name,
             params: f.params.clone(),
+            dict_arity: f.dict_arity,
             body: inl.comp(&f.body, &()),
         })
         .collect();
@@ -146,171 +148,16 @@ impl Rewrite for Inliner {
 // freshening counter, threaded so every binder across every site gets a distinct
 // deterministic name.
 fn inline_call(callee: &CoreFn, args: &[Value], counter: &mut u32) -> Comp {
-    let mut fresh = Freshen { counter };
     let mut ren: BTreeMap<Sym, Sym> = BTreeMap::new();
     for p in &callee.params {
-        let n = fresh.next();
-        ren.insert(*p, n);
+        ren.insert(*p, rename::next(counter, names::FRESH_INLINE));
     }
-    let mut out = fresh.comp(&callee.body, &ren);
+    let mut out = rename::freshen_with(&callee.body, &ren, counter, names::FRESH_INLINE);
     for i in (0..callee.params.len()).rev() {
         let p = ren[&callee.params[i]];
         out = Comp::Bind(Box::new(Comp::Return(args[i].clone())), p, Box::new(out));
     }
     out
-}
-
-// Alpha-renames every bound name in a term to a fresh symbol, threading the
-// old->new map and substituting variable uses. Free variables (top-level function
-// names) are left untouched. The fresh-name supply is a deterministic
-// per-compilation counter (`%i{n}`), borrowed from the inliner so a whole sweep
-// shares one numbering.
-struct Freshen<'a> {
-    counter: &'a mut u32,
-}
-
-impl Freshen<'_> {
-    // The next deterministic fresh name, `%i{n}`. The `%` prefix is unforgeable:
-    // no source identifier contains it.
-    fn next(&mut self) -> Sym {
-        let n = *self.counter;
-        *self.counter += 1;
-        Sym::new(&format!("%i{n}"))
-    }
-
-    // Record a fresh rename for `s` and return the fresh name.
-    fn fresh_for(&mut self, s: Sym, ren: &mut BTreeMap<Sym, Sym>) -> Sym {
-        let n = self.next();
-        ren.insert(s, n);
-        n
-    }
-}
-
-impl Rewrite for Freshen<'_> {
-    type Ctx = BTreeMap<Sym, Sym>;
-
-    fn value(&mut self, v: &Value, ren: &Self::Ctx) -> Value {
-        if let Value::Var(x) = v {
-            if let Some(n) = ren.get(x) {
-                return Value::Var(*n);
-            }
-        }
-        self.descend_value(v, ren)
-    }
-
-    fn comp(&mut self, c: &Comp, ren: &Self::Ctx) -> Comp {
-        match c {
-            Comp::Bind(rhs, x, body) => {
-                let rhs2 = self.comp(rhs, ren);
-                let nx = self.next();
-                let mut r2 = ren.clone();
-                r2.insert(*x, nx);
-                Comp::Bind(Box::new(rhs2), nx, Box::new(self.comp(body, &r2)))
-            }
-            Comp::Lam(ps, b) => {
-                let mut r2 = ren.clone();
-                let mut nps: Vec<Sym> = Vec::with_capacity(ps.len());
-                for p in ps {
-                    let n = self.next();
-                    r2.insert(*p, n);
-                    nps.push(n);
-                }
-                Comp::Lam(nps, Box::new(self.comp(b, &r2)))
-            }
-            Comp::Case(scrut, arms) => {
-                let scrut2 = self.value(scrut, ren);
-                let mut arms2 = Vec::with_capacity(arms.len());
-                for (p, b) in arms {
-                    let mut r2 = ren.clone();
-                    let np = match p {
-                        CorePat::Wild => CorePat::Wild,
-                        CorePat::Var(s) => CorePat::Var(self.fresh_for(*s, &mut r2)),
-                        CorePat::Ctor(c, bs) => {
-                            let mut nbs = Vec::with_capacity(bs.len());
-                            for b in bs {
-                                nbs.push(b.map(|s| self.fresh_for(s, &mut r2)));
-                            }
-                            CorePat::Ctor(*c, nbs)
-                        }
-                        CorePat::Tuple(bs) => {
-                            let mut nbs = Vec::with_capacity(bs.len());
-                            for b in bs {
-                                nbs.push(b.map(|s| self.fresh_for(s, &mut r2)));
-                            }
-                            CorePat::Tuple(nbs)
-                        }
-                    };
-                    let nb = self.comp(b, &r2);
-                    arms2.push((np, nb));
-                }
-                Comp::Case(scrut2, arms2)
-            }
-            Comp::Handle {
-                body,
-                return_var,
-                return_body,
-                ops,
-            } => {
-                let body2 = Box::new(self.comp(body, ren));
-                let (rv, rb) = match return_var {
-                    Some(v) => {
-                        let n = self.next();
-                        let mut r2 = ren.clone();
-                        r2.insert(*v, n);
-                        (
-                            Some(n),
-                            return_body.as_ref().map(|b| Box::new(self.comp(b, &r2))),
-                        )
-                    }
-                    None => (
-                        None,
-                        return_body.as_ref().map(|b| Box::new(self.comp(b, ren))),
-                    ),
-                };
-                let mut ops2 = Vec::with_capacity(ops.len());
-                for o in ops {
-                    let mut r2 = ren.clone();
-                    let mut nps: Vec<Sym> = Vec::with_capacity(o.params.len());
-                    for p in &o.params {
-                        let n = self.next();
-                        r2.insert(*p, n);
-                        nps.push(n);
-                    }
-                    let nres = self.next();
-                    r2.insert(o.resume, nres);
-                    let nbody = self.comp(&o.body, &r2);
-                    ops2.push(HandleOp {
-                        name: o.name,
-                        params: nps,
-                        resume: nres,
-                        body: nbody,
-                    });
-                }
-                Comp::Handle {
-                    body: body2,
-                    return_var: rv,
-                    return_body: rb,
-                    ops: ops2,
-                }
-            }
-            Comp::WithReuse { token, freed, body } => {
-                let freed2 = self.value(freed, ren);
-                let nt = self.next();
-                let mut r2 = ren.clone();
-                r2.insert(*token, nt);
-                Comp::WithReuse {
-                    token: nt,
-                    freed: freed2,
-                    body: Box::new(self.comp(body, &r2)),
-                }
-            }
-            Comp::Reuse(tok, v) => {
-                let nt = ren.get(tok).copied().unwrap_or(*tok);
-                Comp::Reuse(nt, self.value(v, ren))
-            }
-            _ => self.descend_comp(c, ren),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -333,11 +180,13 @@ mod tests {
                 CoreFn {
                     name: s("main"),
                     params: vec![s("x")],
+                    dict_arity: 0,
                     body: Comp::Call(s("wrap"), vec![Value::Var(s("x"))]),
                 },
                 CoreFn {
                     name: s("wrap"),
                     params: vec![s("a")],
+                    dict_arity: 0,
                     body: Comp::Call(s("g"), vec![Value::Var(s("a"))]),
                 },
             ],
@@ -362,6 +211,7 @@ mod tests {
             fns: vec![CoreFn {
                 name: s("loop"),
                 params: vec![],
+                dict_arity: 0,
                 body: Comp::Call(s("loop"), vec![]),
             }],
         };

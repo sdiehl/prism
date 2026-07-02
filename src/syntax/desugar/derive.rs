@@ -5,7 +5,9 @@ use std::collections::BTreeSet;
 use marginalia::Span;
 
 use super::{call, eint, evar, sp, spat};
+use crate::core::builtins::Builtin;
 use crate::error::TypeError;
+use crate::names::{EQ_METHOD, INT_CMP, ORD_METHOD, SHOW_METHOD};
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Constraint, DataDecl, Decl, Expr, Fip, InstanceDecl, IntLit, Param, PathOp,
     PathStep, Pattern, Program, Suffix, Ty, S,
@@ -160,6 +162,8 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         konst: false,
         fip: Fip::No,
         replayable: false,
+        no_alloc: false,
+        no_alloc_bs: false,
         span: z,
     }
 }
@@ -193,7 +197,7 @@ fn derive_eq(d: &DataDecl) -> InstanceDecl {
         let mut body = sp(Expr::Bool(true), z);
         for i in (0..n).rev() {
             let f = call(
-                evar("eq", Z),
+                evar(EQ_METHOD, Z),
                 vec![evar(&format!("_l{i}"), z), evar(&format!("_r{i}"), z)],
                 z,
             );
@@ -214,7 +218,13 @@ fn derive_eq(d: &DataDecl) -> InstanceDecl {
     }
     let scrut = sp(Expr::Tuple(vec![evar("_x", z), evar("_y", z)]), z);
     let body = sp(Expr::Match(Box::new(scrut), arms), z);
-    inst_skel(d, EQ_CLASS, "eq", mdecl("eq", &["_x", "_y"], body, z), z)
+    inst_skel(
+        d,
+        EQ_CLASS,
+        "eq",
+        mdecl(EQ_METHOD, &["_x", "_y"], body, z),
+        z,
+    )
 }
 
 // Lexicographic compare: within a constructor, `cmp` the fields left to right
@@ -227,7 +237,7 @@ fn derive_ord(d: &DataDecl) -> InstanceDecl {
         let mut body = eint(0, z);
         for i in (0..n).rev() {
             let f = call(
-                evar("cmp", Z),
+                evar(ORD_METHOD, Z),
                 vec![evar(&format!("_l{i}"), z), evar(&format!("_r{i}"), z)],
                 z,
             );
@@ -285,17 +295,30 @@ fn derive_ord(d: &DataDecl) -> InstanceDecl {
         arms.push(Arm {
             pat: spat(Pattern::Wild, z),
             guard: None,
-            body: call(evar("int_cmp", z), vec![tag("_x"), tag("_y")], z),
+            body: call(evar(INT_CMP, z), vec![tag("_x"), tag("_y")], z),
         });
     }
     let scrut = sp(Expr::Tuple(vec![evar("_x", z), evar("_y", z)]), z);
     let body = sp(Expr::Match(Box::new(scrut), arms), z);
-    inst_skel(d, ORD_CLASS, "ord", mdecl("cmp", &["_x", "_y"], body, z), z)
+    inst_skel(
+        d,
+        ORD_CLASS,
+        "ord",
+        mdecl(ORD_METHOD, &["_x", "_y"], body, z),
+        z,
+    )
 }
 
+// Structural `show`, matching the canonical format the print-site generator in
+// `core/elaborate/show.rs` also produces (the two are kept in lockstep by the
+// `print_show_consistency` snapshot gate): a nullary constructor prints its
+// bare name, a positional one prints `Name(f0, f1)`, and a record one prints
+// `Name { field0 = v0, field1 = v1 }`. Each field recurses through `show`, so
+// nested strings are quoted and nested records carry their own field names.
 fn derive_show(d: &DataDecl) -> InstanceDecl {
     let z = Z;
-    let concat = |a: S<Expr>, b: S<Expr>| call(evar("concat", z), vec![a, b], z);
+    let concat = |a: S<Expr>, b: S<Expr>| call(evar(Builtin::Concat.name(), z), vec![a, b], z);
+    let shown = |i: usize| call(evar(SHOW_METHOD, Z), vec![evar(&format!("_f{i}"), z)], z);
     let arms = d
         .ctors
         .iter()
@@ -303,11 +326,21 @@ fn derive_show(d: &DataDecl) -> InstanceDecl {
             let n = c.args.len();
             let body = if n == 0 {
                 sp(Expr::Str(c.name.clone()), z)
+            } else if let Some(fields) = &c.fields {
+                // Record constructor: `Name { f0 = v0, f1 = v1 }`.
+                let mut acc = sp(Expr::Str(" }".into()), z);
+                for (i, (fname, _)) in fields.iter().enumerate().rev() {
+                    let sep = if i > 0 { ", " } else { " { " };
+                    acc = concat(
+                        concat(sp(Expr::Str(format!("{sep}{fname} = ")), z), shown(i)),
+                        acc,
+                    );
+                }
+                concat(sp(Expr::Str(c.name.clone()), z), acc)
             } else {
                 let mut acc = sp(Expr::Str(")".into()), z);
                 for i in (0..n).rev() {
-                    let s = call(evar("show_c", Z), vec![evar(&format!("_f{i}"), z)], z);
-                    acc = concat(s, acc);
+                    acc = concat(shown(i), acc);
                     if i > 0 {
                         acc = concat(sp(Expr::Str(", ".into()), z), acc);
                     }
@@ -322,5 +355,11 @@ fn derive_show(d: &DataDecl) -> InstanceDecl {
         })
         .collect();
     let body = sp(Expr::Match(Box::new(evar("_x", z)), arms), z);
-    inst_skel(d, SHOW_CLASS, "show", mdecl("show_c", &["_x"], body, z), z)
+    inst_skel(
+        d,
+        SHOW_CLASS,
+        "show",
+        mdecl(SHOW_METHOD, &["_x"], body, z),
+        z,
+    )
 }

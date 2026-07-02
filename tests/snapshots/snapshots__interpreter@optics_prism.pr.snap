@@ -3,10 +3,10 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/optics_prism.pr
 ---
-Circle(10)
-Square(3)
-Circle(100)
-Square(6)
-Square(1)
-[Circle(2), Square(2), Circle(6)]
+Circle { radius = 10 }
+Square { side = 3 }
+Circle { radius = 100 }
+Square { side = 6 }
+Square { side = 1 }
+[Circle { radius = 2 }, Square { side = 2 }, Circle { radius = 6 }]
 => ()

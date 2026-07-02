@@ -59,14 +59,7 @@ pub trait Rewrite {
             ),
             Comp::Prim(op, a, b) => Comp::Prim(*op, self.value(a, cx), self.value(b, cx)),
             Comp::Call(n, args) => Comp::Call(*n, args.iter().map(|a| self.value(a, cx)).collect()),
-            Comp::Print(v) => Comp::Print(self.value(v, cx)),
-            Comp::PrintF(v) => Comp::PrintF(self.value(v, cx)),
-            Comp::PrintS(v) => Comp::PrintS(self.value(v, cx)),
-            Comp::PrintNl => Comp::PrintNl,
-            Comp::ReadInt => Comp::ReadInt,
-            Comp::ReadLine => Comp::ReadLine,
-            Comp::Rand => Comp::Rand,
-            Comp::Srand(v) => Comp::Srand(self.value(v, cx)),
+            Comp::Io(op, args) => Comp::Io(*op, args.iter().map(|v| self.value(v, cx)).collect()),
             Comp::Error(v) => Comp::Error(self.value(v, cx)),
             Comp::Case(v, arms) => Comp::Case(
                 self.value(v, cx),
@@ -140,11 +133,7 @@ pub trait Visit {
         match c {
             Comp::Return(v)
             | Comp::Force(v)
-            | Comp::Print(v)
-            | Comp::PrintF(v)
-            | Comp::PrintS(v)
             | Comp::Error(v)
-            | Comp::Srand(v)
             | Comp::FloatBuiltin(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
@@ -170,7 +159,10 @@ pub trait Visit {
                 self.visit_comp(t);
                 self.visit_comp(e);
             }
-            Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+            Comp::Call(_, args)
+            | Comp::Do(_, args)
+            | Comp::StrBuiltin(_, args)
+            | Comp::Io(_, args) => {
                 for a in args {
                     self.visit_value(a);
                 }
@@ -200,7 +192,6 @@ pub trait Visit {
                     self.visit_comp(&op.body);
                 }
             }
-            Comp::PrintNl | Comp::ReadInt | Comp::ReadLine | Comp::Rand => {}
         }
     }
 

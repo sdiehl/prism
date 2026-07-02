@@ -109,15 +109,11 @@ fn spends(token: Sym, c: &Comp) -> usize {
             spends(token, f) + args.iter().map(|a| spends_val(token, a)).sum::<usize>()
         }
         Comp::Prim(_, a, b) | Comp::RefSet(a, b) => spends_val(token, a) + spends_val(token, b),
-        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             args.iter().map(|a| spends_val(token, a)).sum()
         }
         Comp::Return(v)
         | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
-        | Comp::Srand(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
@@ -140,7 +136,6 @@ fn spends(token: Sym, c: &Comp) -> usize {
                 + return_body.as_ref().map_or(0, |b| spends(token, b))
                 + ops.iter().map(|op| spends(token, &op.body)).sum::<usize>()
         }
-        Comp::PrintNl | Comp::ReadInt | Comp::ReadLine | Comp::Rand => 0,
     }
 }
 

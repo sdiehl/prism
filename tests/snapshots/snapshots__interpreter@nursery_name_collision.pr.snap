@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/nursery_name_collision.pr
+---
+note 1
+note 2
+note 3
+sum 6
+=> ()

@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Tree",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Leaf",

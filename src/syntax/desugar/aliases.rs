@@ -129,24 +129,15 @@ fn expand_labels(ls: &mut Vec<EffLabel>, map: &AliasMap) {
 }
 
 fn expand_ty(t: &mut Ty, map: &AliasMap) {
+    // The node-specific work is expanding a row's label aliases, wherever a row
+    // appears (a function's effect row, or a `{ MyAlias, .. }` `Row`-kinded
+    // argument). Everything structural then recurses through the spine, so no
+    // type position (including a label's own type arguments) is missed.
     match t {
-        Ty::Fun(args, row, ret) => {
-            for a in args {
-                expand_ty(a, map);
-            }
-            if let Row::Cons(ls, _) = row {
-                expand_labels(ls, map);
-            }
-            expand_ty(ret, map);
-        }
-        Ty::Forall(_, b) => expand_ty(b, map),
-        Ty::Con(_, args) | Ty::Tuple(args) => {
-            for a in args {
-                expand_ty(a, map);
-            }
-        }
+        Ty::Fun(_, Row::Cons(ls, _), _) | Ty::RowLit(Row::Cons(ls, _)) => expand_labels(ls, map),
         _ => {}
     }
+    t.each_child_mut(&mut |c| expand_ty(c, map));
 }
 
 fn expand_decl(d: &mut Decl, map: &AliasMap) {

@@ -2,8 +2,12 @@
 source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
+examples/async.pr: whole-program-free-monad
+examples/async_capability.pr: whole-program-free-monad
 examples/calc.pr: evidence
 examples/capabilities.pr: evidence
+examples/channels.pr: whole-program-free-monad
+examples/clock.pr: whole-program-free-monad
 examples/comprehension.pr: whole-program-free-monad
 examples/condition.pr: selective-free-monad
 examples/delim.pr: selective-free-monad
@@ -38,8 +42,15 @@ examples/optionals.pr: selective-free-monad
 examples/orders.pr: whole-program-free-monad
 examples/os.pr: evidence
 examples/param_effects.pr: state-fusion
+examples/parse_dont_validate.pr: whole-program-free-monad
+examples/pipeline.pr: whole-program-free-monad
 examples/queens.pr: selective-free-monad
 examples/record_replay.pr: whole-program-free-monad
+examples/replay_concurrent.pr: whole-program-free-monad
+examples/same_fringe.pr: whole-program-free-monad
+examples/sandbox.pr: evidence
+examples/scheduler.pr: whole-program-free-monad
+examples/scheduler_policy.pr: whole-program-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
@@ -84,6 +95,7 @@ tests/cases/run/local_mono_combined.pr: local-partial
 tests/cases/run/local_mono_escape.pr: whole-program-free-monad
 tests/cases/run/mask.pr: whole-program-free-monad
 tests/cases/run/named_handlers.pr: selective-free-monad
+tests/cases/run/nursery_name_collision.pr: whole-program-free-monad
 tests/cases/run/open_nontail.pr: selective-free-monad
 tests/cases/run/opt_chain.pr: selective-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad

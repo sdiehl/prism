@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Wrap",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Wrap",
@@ -215,34 +216,24 @@ source_filename = "prism"
 define i64 @prism_main() #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t1 to i64
-  %1 = add i64 %0, 8
-  %t2 = inttoptr i64 %1 to ptr
+  %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 0, ptr %t2, align 8
   %t4 = ptrtoint ptr %t1 to i64
   %t6 = call ptr @prism_alloc(i64 1)
-  %2 = ptrtoint ptr %t6 to i64
-  %3 = add i64 %2, 8
-  %t7 = inttoptr i64 %3 to ptr
+  %t7 = getelementptr inbounds i8, ptr %t6, i64 8
   store i64 0, ptr %t7, align 8
-  %4 = ptrtoint ptr %t6 to i64
-  %5 = add i64 %4, 24
-  %t9 = inttoptr i64 %5 to ptr
+  %t9 = getelementptr inbounds i8, ptr %t6, i64 24
   store i64 %t4, ptr %t9, align 8
   %t10 = ptrtoint ptr %t6 to i64
   %t11 = inttoptr i64 %t10 to ptr
-  %6 = ptrtoint ptr %t11 to i64
-  %7 = add i64 %6, 8
-  %t12 = inttoptr i64 %7 to ptr
+  %t12 = getelementptr inbounds i8, ptr %t11, i64 8
   %t13 = load i64, ptr %t12, align 8
   switch i64 %t13, label %b1 [
     i64 0, label %b2
   ]
 
 b2:                                               ; preds = %entry
-  %8 = ptrtoint ptr %t11 to i64
-  %9 = add i64 %8, 24
-  %t14 = inttoptr i64 %9 to ptr
+  %t14 = getelementptr inbounds i8, ptr %t11, i64 24
   %t15 = load i64, ptr %t14, align 8
   call void @prism_rc_inc(i64 %t15)
   call void @prism_rc_dec(i64 %t10)
@@ -275,9 +266,7 @@ declare void @prism_rc_dec(i64) #0
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
-  %0 = ptrtoint ptr %_cp to i64
-  %1 = add i64 %0, 8
-  %_tp = inttoptr i64 %1 to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
   switch i64 %_tag, label %_dead [
     i64 0, label %_lam0

@@ -1,0 +1,37 @@
+-- Maximum segment sum. The naive spec is cubic: sum every contiguous segment
+-- and take the largest (the empty segment sums to 0, so the answer is never
+-- negative). Bird's derivation fuses that into one left fold carrying two
+-- running maxima, so `mss` is linear and allocation-free over the scan. The
+-- fused form and the spec agree on every input.
+--
+-- Expected output:
+--   6
+--   6
+--   0
+--   0
+
+-- One step of the linear scan: `best` is the answer so far, `here` the best
+-- segment ending at the current element.
+fn kadane(acc, x) =
+  let (best, here) = acc
+  let here2 = max(0, here + x)
+  (max(best, here2), here2)
+
+fn mss(xs) =
+  let (best, _here) = foldl(kadane, (0, 0), xs)
+  best
+
+-- The cubic spec: the largest sum over every segment xs[i..j).
+fn seg_sum(xs, i, j) = sum(take(j - i, drop(i, xs)))
+
+fn mss_spec(xs) =
+  let n = length(xs)
+  foldl(\(best, i) -> foldl(\(b, j) -> max(b, seg_sum(xs, i, j)), best, range(i, n + 1)), 0, range(0, n + 1))
+
+fn main() =
+  let xs = [0 - 2, 1, 0 - 3, 4, 0 - 1, 2, 1, 0 - 5, 4]
+  println(mss(xs))
+  println(mss_spec(xs))
+  let ys = [0 - 1, 0 - 2, 0 - 3]
+  println(mss(ys))
+  println(mss_spec(ys))

@@ -3,6 +3,10 @@ type Vec2 = Vec2 { x: Int, y: Int }
 type Line = Line { from: Vec2, to: Vec2 }
 
 fn main() =
-  let l = Line { from = Vec2 { x = 0, y = 0 }, to = Vec2 { x = 1, y = 1 } }
+  let l =
+    Line {
+      from = Vec2 { x = 0, y = 0 },
+      to = Vec2 { x = 1, y = 1 }
+    }
   let l2 = { l | from.x = 9 }
   println(l2.from.x)

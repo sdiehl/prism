@@ -1,0 +1,9 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn f(g : Game) : Game =\\n\\\n     \\x20 { g | items[0].?Weapon.dmg ~ boost, players.each.slot[1] = empty }\\n\")"
+---
+fn f(g : Game) : Game =
+  { g
+  | items[0].?Weapon.dmg ~ boost
+  , players.each.slot[1] = empty
+  }

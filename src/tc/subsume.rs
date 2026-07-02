@@ -105,6 +105,12 @@ impl Tc<'_> {
                 self.drop_row_uni(*n);
                 Ok(())
             }
+            // A `Row`-kinded argument position: unify the carried effect rows.
+            (Type::Row(x), Type::Row(y)) => {
+                let x = self.apply_row(x);
+                let y = self.apply_row(y);
+                self.unify_row(&x, &y)
+            }
             (Type::Exist(x), _) if !occurs_ex(*x, b) => self.inst_l(*x, b),
             (_, Type::Exist(x)) if !occurs_ex(*x, a) => self.inst_r(a, *x),
             (a, b) => Err(TcErr::Fail(format!(
@@ -136,12 +142,10 @@ impl Tc<'_> {
             Type::Exist(other) => {
                 // Solve the younger existential (further right in the context)
                 // to the older one, so a solution only references entries to its
-                // left and survives later truncation at a marker. Every live
-                // existential is in the context, so absence means it escaped scope.
-                // A live existential is always in the context: `solve` only ever
-                // records a solution referencing entries to its left (asserted
-                // there), so truncation never strands a referenced var. Absence is
-                // therefore a compiler bug, not user-reachable.
+                // left and survives later truncation at a marker. A live
+                // existential is always in the context (`solve` only records
+                // left-referencing solutions), so absence is a compiler bug, not
+                // user-reachable.
                 let oi = self
                     .index_ex(other)
                     .ok_or_else(|| TcErr::Ice(format!("inst: ^{other} escaped scope")))?;
@@ -241,7 +245,7 @@ impl Tc<'_> {
         }
     }
 
-    // Scoped-label row unification (Leijen / Koka). To unify `l | rest1` with
+    // Scoped-label row unification. To unify `l | rest1` with
     // another row, rewrite that row to expose `l` at its head, then unify the
     // tails. A bare existential tail absorbs any missing label by extending.
     pub(super) fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {

@@ -234,56 +234,48 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.fmtf = private constant [3 x i8] c"%g\00"
-
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
   %t2 = call i64 @prism_box(i64 4599075939470750516)
   %t3 = call i64 @prism_unbox(i64 %t2)
-  %t4 = bitcast i64 %t3 to double
-  %0 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t4)
+  call void @prism_print_float(i64 %t3)
   call void @prism_rc_dec(i64 %t2)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t11 = call i64 @prism_box(i64 4614688418178968235)
-  %t12 = call i64 @prism_unbox(i64 %t11)
-  %t13 = bitcast i64 %t12 to double
-  %1 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t13)
-  call void @prism_rc_dec(i64 %t11)
+  %t10 = call i64 @prism_box(i64 4614688418178968235)
+  %t11 = call i64 @prism_unbox(i64 %t10)
+  call void @prism_print_float(i64 %t11)
+  call void @prism_rc_dec(i64 %t10)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t20 = call i64 @prism_box(i64 4636737291354636288)
-  %t21 = call i64 @prism_unbox(i64 %t20)
-  %t22 = bitcast i64 %t21 to double
-  %2 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t22)
-  call void @prism_rc_dec(i64 %t20)
+  %t18 = call i64 @prism_box(i64 4636737291354636288)
+  %t19 = call i64 @prism_unbox(i64 %t18)
+  call void @prism_print_float(i64 %t19)
+  call void @prism_rc_dec(i64 %t18)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t29 = call i64 @prism_box(i64 4846369599423283200)
-  %t30 = call i64 @prism_unbox(i64 %t29)
-  %t31 = bitcast i64 %t30 to double
-  %3 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t31)
-  call void @prism_rc_dec(i64 %t29)
+  %t26 = call i64 @prism_box(i64 4846369599423283200)
+  %t27 = call i64 @prism_unbox(i64 %t26)
+  call void @prism_print_float(i64 %t27)
+  call void @prism_rc_dec(i64 %t26)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t38 = call i64 @prism_box(i64 4532020583610935537)
-  %t39 = call i64 @prism_unbox(i64 %t38)
-  %t40 = bitcast i64 %t39 to double
-  %4 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t40)
-  call void @prism_rc_dec(i64 %t38)
+  %t34 = call i64 @prism_box(i64 4532020583610935537)
+  %t35 = call i64 @prism_unbox(i64 %t34)
+  call void @prism_print_float(i64 %t35)
+  call void @prism_rc_dec(i64 %t34)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t47 = call i64 @prism_box(i64 -4610560118520545280)
-  %t48 = call i64 @prism_unbox(i64 %t47)
-  %t49 = bitcast i64 %t48 to double
-  %5 = call i32 (ptr, ...) @printf(ptr @.fmtf, double %t49)
-  call void @prism_rc_dec(i64 %t47)
+  %t42 = call i64 @prism_box(i64 -4610560118520545280)
+  %t43 = call i64 @prism_unbox(i64 %t42)
+  call void @prism_print_float(i64 %t43)
+  call void @prism_rc_dec(i64 %t42)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
@@ -296,7 +288,7 @@ declare i64 @prism_box(i64) #0
 declare i64 @prism_unbox(i64) #0
 
 ; Function Attrs: nounwind
-declare i32 @printf(ptr, ...) #0
+declare void @prism_print_float(i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_dec(i64) #0

@@ -3,7 +3,10 @@
 use std::collections::BTreeSet;
 
 use super::runtime::{ctor_pat, epure};
-use super::{Lowerer, EOP, EPURE, ERESUME, OP_TAG, QAPPLY};
+use super::{
+    Lowerer, ResumeMode, EBIND, EOP, EPURE, ERESUME, MKCONS, MKCONS_TAG, MKNIL, MKNIL_TAG, OP_TAG,
+    QAPPLY, RESUME_OP_ID,
+};
 use crate::core::builtins::Builtin;
 use crate::core::cbpv::{Comp, CoreFn, CoreOp, CorePat, HandleOp, Value};
 use crate::core::fv;
@@ -42,7 +45,7 @@ impl Lowerer {
         };
 
         let fvs = handler_fvs(*return_var, return_body.as_deref(), ops);
-        let open = self.is_open(body, ops);
+        let open = self.is_open(c);
 
         let driver = self.fresh("handle");
         let res = self.fresh("res");
@@ -169,6 +172,7 @@ impl Lowerer {
         self.generated.push(CoreFn {
             name: driver,
             params,
+            dict_arity: 0,
             body: body_case,
         });
 
@@ -183,10 +187,10 @@ impl Lowerer {
         if !self.native {
             return false;
         }
-        let Comp::Handle { body, ops, .. } = c else {
+        let Comp::Handle { ops, .. } = c else {
             return false;
         };
-        !self.is_open(body, ops) && resume_tail_only(ops)
+        !self.is_open(c) && resume_tail_only(ops)
     }
 
     pub(super) fn handle_closed(&mut self, c: &Comp) -> Result<Comp, TypeError> {
@@ -195,6 +199,280 @@ impl Lowerer {
         } else {
             self.lower_handle(c)
         }
+    }
+
+    // An open handler is driven by the meta-kont CEK trampoline (constant stack)
+    // only in whole-program (full) mode and only when every clause resumes its `k`
+    // IN SCOPE: applied directly in the clause's own control flow, never captured
+    // by a lambda or stored in a value that outlives the clause. An in-scope resume
+    // is reified and driven while the loop is still running, so it stays constant
+    // stack. A `k` that escapes into a returned answer-function (a parameter-passing
+    // scheduler) is resumed after the loop has exited, which the trampoline cannot
+    // catch, so that handler keeps the proven re-enterable thunk driver.
+    pub(super) fn lower_handle_open(&mut self, c: &Comp) -> Result<Comp, TypeError> {
+        if self.full && self.cek_spike && !self.has_mask {
+            if let Comp::Handle { ops, .. } = c {
+                if resume_in_scope(ops) {
+                    return self.lower_handle_cek(c);
+                }
+            }
+        }
+        self.lower_handle(c)
+    }
+
+    // Behind `PRISM_CEK_SPIKE` (full mode): one self-recursive loop drives a
+    // whole-program (open) handler in constant native stack. `resume` reifies to an
+    // internal `RESUME_OP_ID` op carrying its captured continuation queue and value;
+    // the clause's post-resume work is snoc'd onto that op's queue by `ebind`. A
+    // resume drives `qApply(captured, value)` and `musttail`s the loop, pushing the
+    // post-resume work onto an explicit LIFO meta-stack (`mk`), so a non-tail,
+    // multishot, or escaping resume runs in constant stack. The return clause is
+    // appended to the body's continuation (so it is part of every captured `k`),
+    // leaving the pure arm to only feed the meta-stack. An unhandled op is forwarded
+    // outward with a re-entry that restores `mk`.
+    pub(super) fn lower_handle_cek(&mut self, c: &Comp) -> Result<Comp, TypeError> {
+        let Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        } = c
+        else {
+            return Ok(c.clone());
+        };
+
+        let fvs = handler_fvs(*return_var, return_body.as_deref(), ops);
+        let driver = self.fresh("region");
+
+        // One clause function per op: clause(arg, resume, fvs...). `resume` is the
+        // op's continuation queue, reified by `resume_as_op` monadification.
+        let mut clause_names = Vec::new();
+        for op in ops {
+            let cname = self.fresh("clause");
+            let arg_p = self.fresh("arg");
+            let resume_p = self.fresh("res");
+            let saved = std::mem::take(&mut self.resume_aliases);
+            self.resume_aliases.insert(op.resume);
+            let saved_resume = std::mem::replace(&mut self.resume, ResumeMode::CekOp);
+            let mbody = self.mon(&op.body);
+            self.resume = saved_resume;
+            self.resume_aliases = saved;
+            let with_resume = Comp::Bind(
+                Box::new(Comp::Return(Value::Var(resume_p))),
+                op.resume,
+                Box::new(mbody?),
+            );
+            let cbody = bind_params(&op.params, arg_p, with_resume);
+            let mut params = vec![arg_p, resume_p];
+            params.extend(fvs.iter().copied());
+            self.generated.push(CoreFn {
+                name: cname,
+                params,
+                dict_arity: 0,
+                body: cbody,
+            });
+            clause_names.push(cname);
+        }
+
+        let cur = self.fresh("cur");
+        let mk = self.fresh("mk");
+        let fvs_ref = &fvs;
+        let region_args = |head: Value, stack: Value| {
+            let mut a = vec![head, stack];
+            a.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
+            a
+        };
+        // Pop the next pending answer-continuation from `mk` and apply it to `v`,
+        // else (empty stack) the whole handler is finished with `v`.
+        let feed_mk = |me: &mut Self, v: Sym| {
+            let g = me.fresh("g");
+            let rest = me.fresh("rest");
+            let qg = me.fresh("qg");
+            Comp::Case(
+                Value::Var(mk),
+                vec![
+                    (ctor_pat(MKNIL, &[]), epure(Value::Var(v))),
+                    (
+                        ctor_pat(MKCONS, &[g, rest]),
+                        Comp::Bind(
+                            Box::new(Comp::Call(
+                                QAPPLY.into(),
+                                vec![Value::Var(g), Value::Var(v)],
+                            )),
+                            qg,
+                            Box::new(Comp::Call(
+                                driver,
+                                region_args(Value::Var(qg), Value::Var(rest)),
+                            )),
+                        ),
+                    ),
+                ],
+            )
+        };
+
+        // EPure(x): the body (whose continuation ends in the return clause) is done,
+        // so `x` is the final answer; feed the meta-stack.
+        let x = self.fresh("x");
+        let pure_arm = (ctor_pat(EPURE, &[x]), feed_mk(self, x));
+
+        let id = self.fresh("id");
+        let skip = self.fresh("sk");
+        let arg = self.fresh("arg");
+        let k = self.fresh("k");
+        let ids: Vec<i64> = ops
+            .iter()
+            .map(|op| self.op_id(op.name))
+            .collect::<Result<_, _>>()?;
+
+        // Forward re-entry: drive this handler's pending continuation `k` (which ends
+        // in the return clause) on a resumed value, restoring the meta-stack `mk`.
+        let reentry = Value::Thunk(Box::new(Comp::Lam(
+            vec![names::RESUME_VAL.into()],
+            Box::new(Comp::Bind(
+                Box::new(Comp::Call(
+                    QAPPLY.into(),
+                    vec![Value::Var(k), Value::Var(names::RESUME_VAL.into())],
+                )),
+                names::RESUME_KONT.into(),
+                Box::new(Comp::Call(
+                    driver,
+                    region_args(Value::Var(names::RESUME_KONT.into()), Value::Var(mk)),
+                )),
+            )),
+        )));
+
+        // Unhandled op: forward outward, capturing `mk` in the re-entry.
+        let mut dispatch = self.forward_eop(
+            Value::Var(id),
+            Value::Var(skip),
+            Value::Var(arg),
+            reentry.clone(),
+        );
+        let rt = &reentry;
+        dispatch = self.build_op_chain(
+            &Value::Var(id),
+            &ids,
+            |me, i| {
+                let cname = clause_names[i];
+                let mut call_args = vec![Value::Var(arg), Value::Var(k)];
+                call_args.extend(fvs_ref.iter().map(|v| Value::Var(*v)));
+                // Drive the clause result: a bare `EPure(ans)` is an abort (the clause
+                // did not resume) whose value feeds the meta-stack without the return
+                // clause; anything else (a reified resume or a forwarded op) re-drives.
+                let cr = me.fresh("cr");
+                let ans = me.fresh("ans");
+                let abort = feed_mk(me, ans);
+                let oi = me.fresh("id");
+                let os = me.fresh("sk");
+                let oa = me.fresh("arg");
+                let ok = me.fresh("k");
+                let redrive_arm = (
+                    ctor_pat(EOP, &[oi, os, oa, ok]),
+                    Comp::Call(driver, region_args(Value::Var(cr), Value::Var(mk))),
+                );
+                let cased = Comp::Case(
+                    Value::Var(cr),
+                    vec![(ctor_pat(EPURE, &[ans]), abort), redrive_arm],
+                );
+                let handle =
+                    Comp::Bind(Box::new(Comp::Call(cname, call_args)), cr, Box::new(cased));
+                // skip 0 handles; skip > 0 forwards one level out (mask crossing).
+                let sk1 = me.fresh("sk");
+                let reemit =
+                    me.forward_eop(Value::Var(id), Value::Var(sk1), Value::Var(arg), rt.clone());
+                let forward = Comp::Bind(
+                    Box::new(Comp::Prim(CoreOp::Sub, Value::Var(skip), Value::Int(1))),
+                    sk1,
+                    Box::new(reemit),
+                );
+                let z = me.fresh("z");
+                Ok(Comp::Bind(
+                    Box::new(Comp::Prim(CoreOp::Eq, Value::Var(skip), Value::Int(0))),
+                    z,
+                    Box::new(Comp::If(Value::Var(z), Box::new(handle), Box::new(forward))),
+                ))
+            },
+            dispatch,
+        )?;
+
+        // Resume: arg = (rk, rv). Push this op's queue `k` (the post-resume work) onto
+        // the meta-stack and drive the captured continuation `rk` on `rv`. Keeping the
+        // post-resume work on the stack rather than concatenated into `rk` is what
+        // makes nested parallel multishot compose.
+        let rk = self.fresh("rk");
+        let rv = self.fresh("rv");
+        let qa = self.fresh("qa");
+        let pushed = Value::Ctor(
+            MKCONS.into(),
+            MKCONS_TAG,
+            vec![Value::Var(k), Value::Var(mk)],
+        );
+        let resume_drive = Comp::Case(
+            Value::Var(arg),
+            vec![(
+                CorePat::Tuple(vec![Some(rk), Some(rv)]),
+                Comp::Bind(
+                    Box::new(Comp::Call(
+                        QAPPLY.into(),
+                        vec![Value::Var(rk), Value::Var(rv)],
+                    )),
+                    qa,
+                    Box::new(Comp::Call(driver, region_args(Value::Var(qa), pushed))),
+                ),
+            )],
+        );
+
+        let t = self.fresh("t");
+        let op_body = Comp::Bind(
+            Box::new(Comp::Prim(
+                CoreOp::Eq,
+                Value::Var(id),
+                Value::Int(RESUME_OP_ID),
+            )),
+            t,
+            Box::new(Comp::If(
+                Value::Var(t),
+                Box::new(resume_drive),
+                Box::new(dispatch),
+            )),
+        );
+        let op_arm = (ctor_pat(EOP, &[id, skip, arg, k]), op_body);
+
+        let loop_body = Comp::Case(Value::Var(cur), vec![pure_arm, op_arm]);
+        let mut params = vec![cur, mk];
+        params.extend(fvs.iter().copied());
+        self.generated.push(CoreFn {
+            name: driver,
+            params,
+            dict_arity: 0,
+            body: loop_body,
+        });
+
+        // The return clause becomes the base of the body's continuation (so it rides
+        // inside every captured `k`); a missing one is the identity. Append it with
+        // one `ebind`, then drive with an empty meta-stack.
+        let rcv = self.fresh("rcv");
+        let ret_arrow = match (return_var, return_body) {
+            (Some(rv2), Some(rb)) => {
+                Value::Thunk(Box::new(Comp::Lam(vec![*rv2], Box::new(self.mon(rb)?))))
+            }
+            _ => Value::Thunk(Box::new(Comp::Lam(
+                vec![rcv],
+                Box::new(epure(Value::Var(rcv))),
+            ))),
+        };
+        let bv = self.fresh("bv");
+        let r0 = self.fresh("r0");
+        let nil = Value::Ctor(MKNIL.into(), MKNIL_TAG, vec![]);
+        Ok(Comp::Bind(
+            Box::new(self.mon(body)?),
+            bv,
+            Box::new(Comp::Bind(
+                Box::new(Comp::Call(EBIND.into(), vec![Value::Var(bv), ret_arrow])),
+                r0,
+                Box::new(Comp::Call(driver, region_args(Value::Var(r0), nil))),
+            )),
+        ))
     }
 
     // The self-recursive driver for an eligible closed handle. Mirrors
@@ -231,10 +509,9 @@ impl Lowerer {
             let resume_p = self.fresh("res");
             let saved = std::mem::take(&mut self.resume_aliases);
             self.resume_aliases.insert(op.resume);
-            let saved_native = self.native_resume;
-            self.native_resume = true;
+            let saved_resume = std::mem::replace(&mut self.resume, ResumeMode::Native);
             let mbody = self.mon(&op.body);
-            self.native_resume = saved_native;
+            self.resume = saved_resume;
             self.resume_aliases = saved;
             let with_resume = Comp::Bind(
                 Box::new(Comp::Return(Value::Var(resume_p))),
@@ -247,6 +524,7 @@ impl Lowerer {
             self.generated.push(CoreFn {
                 name: cname,
                 params,
+                dict_arity: 0,
                 body: cbody,
             });
             clause_names.push(cname);
@@ -290,7 +568,7 @@ impl Lowerer {
                 let cr = me.fresh("cr");
                 // case cr of
                 //   EResume(q, v) => region(qApply(q, v), fvs)   -- drive the resume
-                //   EOp(..)       => region(cr, fvs)             -- a re-performed op
+                //   EOp(..)       => ICE                         -- see below
                 //   EPure(ans)    => ans                         -- finished, bare answer
                 let q = me.fresh("q");
                 let v = me.fresh("v");
@@ -308,19 +586,26 @@ impl Lowerer {
                         Box::new(Comp::Call(lname, resume_args)),
                     ),
                 );
+                // A closed handler's clause has an empty escape set (`is_open`
+                // counts a clause's re-performs, own op included), so a clause
+                // result is only ever EResume or EPure. An EOp here means the
+                // handler was misclassified closed: fail loudly rather than
+                // re-dispatch the op into this same handler, which would
+                // self-handle an op whose semantics is to escape (and loop
+                // forever when the clause re-performed its own op).
                 let oi = me.fresh("id");
                 let os = me.fresh("sk");
                 let oa = me.fresh("arg");
                 let ok = me.fresh("k");
-                let mut redrive_args = vec![Value::Var(cr)];
-                redrive_args.extend(fvs_ref.iter().map(|w| Value::Var(*w)));
-                let op_redrive = (
+                let op_escape = (
                     ctor_pat(EOP, &[oi, os, oa, ok]),
-                    Comp::Call(lname, redrive_args),
+                    Comp::Error(Value::Str(
+                        "ICE: effect op escaped a closed native handler clause".into(),
+                    )),
                 );
                 let ans = me.fresh("ans");
                 let final_arm = (ctor_pat(EPURE, &[ans]), Comp::Return(Value::Var(ans)));
-                let cased = Comp::Case(Value::Var(cr), vec![resume_arm, op_redrive, final_arm]);
+                let cased = Comp::Case(Value::Var(cr), vec![resume_arm, op_escape, final_arm]);
                 Ok(Comp::Bind(
                     Box::new(Comp::Call(cname, call_args)),
                     cr,
@@ -338,6 +623,7 @@ impl Lowerer {
         self.generated.push(CoreFn {
             name: loop_name,
             params,
+            dict_arity: 0,
             body: loop_body,
         });
 
@@ -376,7 +662,7 @@ impl Lowerer {
         else {
             return Ok(None);
         };
-        if ops.is_empty() || self.is_open(body, ops) || return_var.is_none() {
+        if ops.is_empty() || self.is_open(m) || return_var.is_none() {
             return Ok(None);
         }
         // Pure shape check first, before any fresh-name or generated-function
@@ -466,6 +752,7 @@ impl Lowerer {
         self.generated.push(CoreFn {
             name: region,
             params,
+            dict_arity: 0,
             body: loop_body,
         });
 
@@ -620,6 +907,7 @@ impl Lowerer {
         self.generated.push(CoreFn {
             name: driver,
             params: vec![names::RET.into()],
+            dict_arity: 0,
             body: Comp::Case(Value::Var(names::RET.into()), vec![pure_arm, op_arm]),
         });
         Ok(driver)
@@ -711,6 +999,53 @@ fn clause_resume_tail(c: &Comp, aliases: &BTreeSet<Sym>, tail: bool) -> bool {
                     .iter()
                     .all(|(_, b)| clause_resume_tail(b, aliases, tail))
         }
+        other => !mentions(&fv::comp(other), aliases),
+    }
+}
+
+// Whether every clause resumes its `k` IN SCOPE: `k` appears only as the head of
+// an application within the clause's own control flow (any position, tail or not),
+// never captured by a lambda or stored in a value. The CEK trampoline reifies and
+// drives such a resume while the loop is live, so it stays constant stack. A `k`
+// that escapes into a returned closure or a stored cell is resumed after the loop
+// exits, beyond the trampoline's reach. Looser than `resume_tail_only` (it allows
+// non-tail resume, the generator/yielder shape) but still rejects escape.
+fn resume_in_scope(ops: &[HandleOp]) -> bool {
+    ops.iter().all(|op| {
+        let mut aliases = BTreeSet::new();
+        aliases.insert(op.resume);
+        clause_in_scope(&op.body, &aliases)
+    })
+}
+
+fn clause_in_scope(c: &Comp, aliases: &BTreeSet<Sym>) -> bool {
+    match c {
+        // A resume application in any position; its arguments must not pass `k` on.
+        Comp::App(f, args) if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) => {
+            args.iter().all(|a| !mentions(&fv::value(a), aliases))
+        }
+        Comp::Bind(m, x, n) => {
+            let routing = matches!(m.as_ref(), Comp::Return(Value::Var(v)) if aliases.contains(v));
+            let mut a2 = aliases.clone();
+            if let Comp::Return(Value::Var(v)) = m.as_ref() {
+                if aliases.contains(v) {
+                    a2.insert(*x);
+                }
+            }
+            (routing || clause_in_scope(m, aliases)) && clause_in_scope(n, &a2)
+        }
+        Comp::If(v, t, e) => {
+            !mentions(&fv::value(v), aliases)
+                && clause_in_scope(t, aliases)
+                && clause_in_scope(e, aliases)
+        }
+        Comp::Case(v, arms) => {
+            !mentions(&fv::value(v), aliases)
+                && arms.iter().all(|(_, b)| clause_in_scope(b, aliases))
+        }
+        // A lambda capturing `k` defers the resume past the loop: out of scope.
+        Comp::Lam(_, b) => !mentions(&fv::comp(b), aliases),
+        // Any other occurrence (stored in a ctor/tuple, returned as a value) escapes.
         other => !mentions(&fv::comp(other), aliases),
     }
 }

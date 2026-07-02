@@ -6,7 +6,10 @@
  * macro requests it. macOS exposes it regardless, so this only bites on Linux.
  * Must precede every system header (including mimalloc's <stddef.h> below). */
 #ifndef _POSIX_C_SOURCE
+// clang-format off: a feature-test macro must be one line, and the NOLINT must
+// stay on it to suppress the reserved-identifier lint.
 #define _POSIX_C_SOURCE 200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard feature-test macro */
+// clang-format on
 #endif
 
 /* Opt-in mimalloc (cargo --features mimalloc): route every libc allocation
@@ -26,6 +29,7 @@ extern void *mi_calloc(size_t, size_t);
 #endif
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,8 +186,9 @@ long prism_box(long payload) {
 /* Optional in-binary structural backstop. A compiled program's memory safety
  * otherwise rests entirely on codegen emitting correct tags, refcounts, and
  * field indices: a tagging or rc bug is plain UB with no trap in a shipped
- * binary. Building the runtime with -DPRISM_RT_DEBUG (e.g.
- * PRISM_CC_FLAGS=-DPRISM_RT_DEBUG) inserts a cheap validity check at every cell
+ * binary. Building the runtime with -DPRISM_RT_DEBUG (the canonical PRISM_RT_CHECKS
+ * knob adds it to the cc invocation; PRISM_CC_FLAGS=-DPRISM_RT_DEBUG also works)
+ * inserts a cheap validity check at every cell
  * dereference: the value must be a non-null, 8-byte-aligned heap pointer (low
  * tag bit clear) carrying a positive refcount, and a constructor field read must
  * be in bounds. A violation aborts with a diagnostic instead of corrupting
@@ -315,7 +320,9 @@ __attribute__((destructor)) static void prism_effop_report(void) {
     }
 }
 
-void prism_effop_alloc(void) { prism_effop_allocs++; }
+void prism_effop_alloc(void) {
+    prism_effop_allocs++;
+}
 
 /* Driver work-step counter: every structural reduction turn of the residual
  * free-monad driver (an `ebind`/handler/mask driver entry) bumps this. With
@@ -332,7 +339,9 @@ __attribute__((destructor)) static void prism_drive_report(void) {
     }
 }
 
-void prism_drive_step(void) { prism_drive_steps++; }
+void prism_drive_step(void) {
+    prism_drive_steps++;
+}
 
 long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
@@ -351,6 +360,17 @@ long prism_reuse_token(long v) {
 void *prism_reuse_alloc(long token, long n_words) {
     if (token) {
         long *p = (long *)token;
+#ifdef PRISM_RT_DEBUG
+        /* FBIP reuse is compiler-trusted: the shell was allocated for its old
+         * arity, so recycling it for a larger payload would write past the
+         * allocation. A codegen bug here is a silent heap overflow; under the
+         * debug runtime, make it a trap instead. */
+        if (n_words > p[PRISM_ARITY_W]) {
+            fprintf(stderr, "fatal: reuse_alloc grows a cell (%ld > %ld words)\n", n_words,
+                    p[PRISM_ARITY_W]);
+            abort();
+        }
+#endif
         p[PRISM_RC_W] = 1;
         p[PRISM_TAG_W] = 0;
         p[PRISM_ARITY_W] = n_words;
@@ -374,7 +394,8 @@ long prism_field(void *p, long i) {
          * fields, so their arity slot is a length, not a field count: skip the
          * bounds check for them (prism_field is not a valid accessor there). */
         if (tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && (i < 0 || i >= arity)) {
-            fprintf(stderr, "prism_rt: prism_field index %ld out of bounds (arity %ld)\n", i, arity);
+            fprintf(stderr, "prism_rt: prism_field index %ld out of bounds (arity %ld)\n", i,
+                    arity);
             abort();
         }
     }
@@ -562,13 +583,35 @@ long prism_kont_splice(long top, long base) {
     return prev;
 }
 
+long prism_int_of_long(long v); /* defined with the Int encoding below */
+
 long prism_prim_read_int(void) {
-    long n = 0;
-    if (scanf("%ld", &n) != 1) {
+    /* Line-oriented to match the interpreter oracle: consume a whole line and
+     * parse its trimmed contents, so a following read_line sees the next line
+     * rather than the leftover newline a bare scanf("%ld") would strand. */
+    char *buf = 0;
+    size_t cap = 0;
+    long len = getline(&buf, &cap, stdin);
+    if (len < 0) {
+        free(buf);
         fprintf(stderr, "fatal: read_int: no integer on stdin\n");
         exit(1);
     }
-    return n;
+    errno = 0;
+    char *end = 0;
+    long n = strtol(buf, &end, 10);
+    int ok = errno == 0 && end != buf;
+    free(buf);
+    if (!ok) {
+        fprintf(stderr, "fatal: read_int: no integer on stdin\n");
+        exit(1);
+    }
+    /* Return an encoded Int, not the raw machine word: a value in
+     * (2^62, 2^63) fits an i64 but not the 63-bit tagged immediate, so
+     * codegen retagging it would silently shift out bit 62 while the
+     * interpreter keeps the full value. Encoding here keeps the two in
+     * lockstep for the whole i64 range. */
+    return prism_int_of_long(n);
 }
 
 long prism_prim_read_line(void) {
@@ -585,24 +628,11 @@ long prism_prim_read_line(void) {
     return cell;
 }
 
-/* Printing helpers used by the MLIR backend. The LLVM backend inlines printf
- * directly; these give both backends one shared runtime to link against. */
-void print_int(long n) {
-    printf("%ld\n", n);
-}
-
-void print_float(long f) {
-    double d;
-    memcpy(&d, &f, 8);
-    printf("%g\n", d);
-}
-
+/* Shared with the interpreter's C differential oracle, which links this file and
+ * calls print_str to echo shown values. Backends print via the prism_print_*
+ * entry points below, not this one. */
 void print_str(long s) {
     printf("%s\n", prism_str_data(s));
-}
-
-void exit_code(long n) {
-    exit((int)n);
 }
 
 /* String builders operate on string cells and return fresh counted cells, so
@@ -678,18 +708,41 @@ long prism_show_char(long cp) {
  * are differentially tested against this runtime. Because `p` is the FEWEST
  * significant digits that round-trip, the last digit is never 0, so no trailing
  * zeros ever need stripping. */
-long prism_show_float(long f) {
-    double d;
-    memcpy(&d, &f, 8);
-    if (isnan(d)) return prism_str_lit("nan", 3);
-    if (isinf(d)) return d < 0 ? prism_str_lit("-inf", 4) : prism_str_lit("inf", 3);
-    if (d == 0.0) return signbit(d) ? prism_str_lit("-0", 2) : prism_str_lit("0", 1);
+/* Buffer size every caller of prism_fmt_float must provide; 17 significant
+ * digits plus sign, point, and `e+XXX` never exceed this. */
+#define PRISM_FLOAT_BUF 64
+
+static int prism_fmt_float(double d, char *out) {
+    int o = 0;
+    if (isnan(d)) {
+        memcpy(out, "nan", sizeof "nan");
+        return 3;
+    }
+    if (isinf(d)) {
+        if (d < 0) {
+            memcpy(out, "-inf", sizeof "-inf");
+            return 4;
+        }
+        memcpy(out, "inf", sizeof "inf");
+        return 3;
+    }
+    if (d == 0.0) {
+        if (signbit(d)) {
+            memcpy(out, "-0", sizeof "-0");
+            return 2;
+        }
+        out[0] = '0';
+        return 1;
+    }
 
     char sci[40];
     int p = 17;
     for (int cand = 1; cand < 17; cand++) {
         snprintf(sci, sizeof sci, "%.*e", cand - 1, d);
-        if (strtod(sci, NULL) == d) { p = cand; break; }
+        if (strtod(sci, NULL) == d) {
+            p = cand;
+            break;
+        }
     }
     snprintf(sci, sizeof sci, "%.*e", p - 1, d); /* "[-]D[.DDD]e+XX" */
 
@@ -698,11 +751,12 @@ long prism_show_float(long f) {
     if (neg) s++;
     char digits[20] = {0};
     int nd = 0;
-    while (*s && *s != 'e') { if (*s != '.') digits[nd++] = *s; s++; }
+    while (*s && *s != 'e') {
+        if (*s != '.') digits[nd++] = *s;
+        s++;
+    }
     int e10 = atoi(s + 1); /* s now points at 'e' */
 
-    char out[64];
-    int o = 0;
     if (neg) out[o++] = '-';
     if (e10 >= -4 && e10 < 16) {
         if (e10 >= 0) {
@@ -724,10 +778,29 @@ long prism_show_float(long f) {
             out[o++] = '.';
             for (int i = 1; i < nd; i++) out[o++] = digits[i];
         }
-        o += snprintf(out + o, sizeof out - (size_t)o, "e%c%02d",
-                      e10 < 0 ? '-' : '+', e10 < 0 ? -e10 : e10);
+        o += snprintf(out + o, PRISM_FLOAT_BUF - (size_t)o, "e%c%02d", e10 < 0 ? '-' : '+',
+                      e10 < 0 ? -e10 : e10);
     }
+    return o;
+}
+
+long prism_show_float(long f) {
+    double d;
+    memcpy(&d, &f, 8);
+    char out[PRISM_FLOAT_BUF];
+    int o = prism_fmt_float(d, out);
     return prism_str_lit(out, o);
+}
+
+/* `print` of a float goes through the same shortest-round-trip formatter as
+ * `show_float`, so native `print(x)` agrees with the interpreter and with
+ * native `print(show_float(x))` instead of C `printf("%g")`'s 6-digit form. */
+void prism_print_float(long f) {
+    double d;
+    memcpy(&d, &f, 8);
+    char out[PRISM_FLOAT_BUF];
+    int o = prism_fmt_float(d, out);
+    fwrite(out, 1, (size_t)o, stdout);
 }
 
 long prism_substring(long s, long start, long len) {
@@ -736,9 +809,15 @@ long prism_substring(long s, long start, long len) {
     if (start < 0) start = 0;
     if (len < 0) len = 0;
     long b = 0, skipped = 0;
-    while (b < nb && skipped < start) { b += utf8_step(d, b, nb); skipped++; }
+    while (b < nb && skipped < start) {
+        b += utf8_step(d, b, nb);
+        skipped++;
+    }
     long bstart = b, taken = 0;
-    while (b < nb && taken < len) { b += utf8_step(d, b, nb); taken++; }
+    while (b < nb && taken < len) {
+        b += utf8_step(d, b, nb);
+        taken++;
+    }
     long out_len = b - bstart;
     long *p = prism_str_alloc(out_len);
     char *o = (char *)(p + PRISM_HDR_WORDS);
@@ -756,8 +835,7 @@ long prism_char_at(long s, long i) {
         unsigned char c = (unsigned char)d[b];
         long adv = utf8_step(d, b, nb);
         long val = c < 0x80 ? c : c < 0xE0 ? c & 0x1F : c < 0xF0 ? c & 0x0F : c & 0x07;
-        for (long k = 1; k < adv; k++)
-            val = (val << 6) | ((unsigned char)d[b + k] & 0x3F);
+        for (long k = 1; k < adv; k++) val = (val << 6) | ((unsigned char)d[b + k] & 0x3F);
         if (cp == i) return val;
         cp++;
         b += adv;
@@ -827,7 +905,8 @@ static int mag_cmp(const unsigned long *a, long na, const unsigned long *b, long
     return 0;
 }
 
-static long mag_add(const unsigned long *a, long na, const unsigned long *b, long nb, unsigned long *o) {
+static long mag_add(const unsigned long *a, long na, const unsigned long *b, long nb,
+                    unsigned long *o) {
     __uint128_t c = 0;
     long n = na > nb ? na : nb;
     for (long i = 0; i < n; i++) {
@@ -840,7 +919,8 @@ static long mag_add(const unsigned long *a, long na, const unsigned long *b, lon
 }
 
 /* Requires a >= b; in place (o == a) is safe. */
-static long mag_sub(const unsigned long *a, long na, const unsigned long *b, long nb, unsigned long *o) {
+static long mag_sub(const unsigned long *a, long na, const unsigned long *b, long nb,
+                    unsigned long *o) {
     long borrow = 0;
     for (long i = 0; i < na; i++) {
         __int128 t = (__int128)a[i] - (i < nb ? b[i] : 0) - borrow;
@@ -850,7 +930,8 @@ static long mag_sub(const unsigned long *a, long na, const unsigned long *b, lon
     return na;
 }
 
-static void mag_mul(const unsigned long *a, long na, const unsigned long *b, long nb, unsigned long *o) {
+static void mag_mul(const unsigned long *a, long na, const unsigned long *b, long nb,
+                    unsigned long *o) {
     memset(o, 0, (size_t)(na + nb) * 8);
     for (long i = 0; i < na; i++) {
         unsigned long carry = 0;
@@ -915,9 +996,15 @@ long prism_big_of_str(long s, int *ok) {
     while (q > p && prism_ws(q[-1])) q--;
     int neg = 0;
     if (p < q && (*p == '-' || *p == '+')) neg = *p++ == '-';
-    if (p == q) { *ok = 0; return 0; }
+    if (p == q) {
+        *ok = 0;
+        return 0;
+    }
     for (const char *t = p; t < q; t++)
-        if (*t < '0' || *t > '9') { *ok = 0; return 0; }
+        if (*t < '0' || *t > '9') {
+            *ok = 0;
+            return 0;
+        }
     unsigned long *m = malloc((size_t)((q - p) / 19 + 2) * 8);
     if (!m) abort();
     long n = 0;
@@ -1020,8 +1107,7 @@ long prism_big_show(long a) {
     char *o = buf;
     if (big_count(a) < 0) *o++ = '-';
     o += snprintf(o, (size_t)(buf + cap - o), "%lu", chunk[k - 1]);
-    for (long i = k - 2; i >= 0; i--)
-        o += snprintf(o, (size_t)(buf + cap - o), "%019lu", chunk[i]);
+    for (long i = k - 2; i >= 0; i--) o += snprintf(o, (size_t)(buf + cap - o), "%019lu", chunk[i]);
     long cell = prism_str_lit(buf, o - buf);
     free(t);
     free(chunk);
@@ -1070,24 +1156,24 @@ static long int_slow(long a, long b, long (*f)(long, long)) {
 
 long prism_rt_int_add(long a, long b) {
     long r;
-    if ((a & b & 1) && !__builtin_add_overflow(a >> 1, b >> 1, &r) &&
-        r >= PRISM_IMM_MIN && r <= PRISM_IMM_MAX)
+    if ((a & b & 1) && !__builtin_add_overflow(a >> 1, b >> 1, &r) && r >= PRISM_IMM_MIN &&
+        r <= PRISM_IMM_MAX)
         return int_imm(r);
     return int_slow(a, b, prism_big_add);
 }
 
 long prism_rt_int_sub(long a, long b) {
     long r;
-    if ((a & b & 1) && !__builtin_sub_overflow(a >> 1, b >> 1, &r) &&
-        r >= PRISM_IMM_MIN && r <= PRISM_IMM_MAX)
+    if ((a & b & 1) && !__builtin_sub_overflow(a >> 1, b >> 1, &r) && r >= PRISM_IMM_MIN &&
+        r <= PRISM_IMM_MAX)
         return int_imm(r);
     return int_slow(a, b, prism_big_sub);
 }
 
 long prism_rt_int_mul(long a, long b) {
     long r;
-    if ((a & b & 1) && !__builtin_mul_overflow(a >> 1, b >> 1, &r) &&
-        r >= PRISM_IMM_MIN && r <= PRISM_IMM_MAX)
+    if ((a & b & 1) && !__builtin_mul_overflow(a >> 1, b >> 1, &r) && r >= PRISM_IMM_MIN &&
+        r <= PRISM_IMM_MAX)
         return int_imm(r);
     return int_slow(a, b, prism_big_mul);
 }
@@ -1142,22 +1228,22 @@ static unsigned long prism_flt_key(long boxed) {
 
 static int prism_sort_cmp(long kind, long a, long b) {
     switch (kind) {
-        case 1: {
-            long x = prism_unbox(a), y = prism_unbox(b);
-            return (x > y) - (x < y);
-        }
-        case 2: {
-            unsigned long x = (unsigned long)prism_unbox(a), y = (unsigned long)prism_unbox(b);
-            return (x > y) - (x < y);
-        }
-        case 3: {
-            unsigned long x = prism_flt_key(a), y = prism_flt_key(b);
-            return (x > y) - (x < y);
-        }
-        default: {
-            long c = prism_rt_int_cmp(a, b);
-            return (c > 0) - (c < 0);
-        }
+    case 1: {
+        long x = prism_unbox(a), y = prism_unbox(b);
+        return (x > y) - (x < y);
+    }
+    case 2: {
+        unsigned long x = (unsigned long)prism_unbox(a), y = (unsigned long)prism_unbox(b);
+        return (x > y) - (x < y);
+    }
+    case 3: {
+        unsigned long x = prism_flt_key(a), y = prism_flt_key(b);
+        return (x > y) - (x < y);
+    }
+    default: {
+        long c = prism_rt_int_cmp(a, b);
+        return (c > 0) - (c < 0);
+    }
     }
 }
 
@@ -1174,7 +1260,9 @@ static long *prism_msort(long *src, long *buf, long n, long kind) {
             while (a < mid) buf[k++] = src[a++];
             while (b < hi) buf[k++] = src[b++];
         }
-        long *t = src; src = buf; buf = t;
+        long *t = src;
+        src = buf;
+        buf = t;
     }
     return src;
 }
@@ -1184,10 +1272,10 @@ static long *prism_msort(long *src, long *buf, long n, long kind) {
  * through, and use the IEEE total-order transform for floats. */
 static unsigned long prism_sort_key(long kind, long h) {
     switch (kind) {
-        case 1: return (unsigned long)prism_unbox(h) ^ 0x8000000000000000UL;
-        case 2: return (unsigned long)prism_unbox(h);
-        case 3: return prism_flt_key(h);
-        default: return 0;
+    case 1: return (unsigned long)prism_unbox(h) ^ 0x8000000000000000UL;
+    case 2: return (unsigned long)prism_unbox(h);
+    case 3: return prism_flt_key(h);
+    default: return 0;
     }
 }
 
@@ -1196,20 +1284,29 @@ static unsigned long prism_sort_key(long kind, long h) {
 static void prism_radix(long *heads, unsigned long *keys, long n) {
     long *th = malloc((size_t)n * sizeof(long));
     unsigned long *tk = malloc((size_t)n * sizeof(unsigned long));
+    if (!th || !tk) abort();
     long *sh = heads, *dh = th;
     unsigned long *sk = keys, *dk = tk;
     for (int shift = 0; shift < 64; shift += 8) {
         long count[256] = {0};
         for (long i = 0; i < n; i++) count[(sk[i] >> shift) & 0xff]++;
         long sum = 0;
-        for (int b = 0; b < 256; b++) { long c = count[b]; count[b] = sum; sum += c; }
+        for (int b = 0; b < 256; b++) {
+            long c = count[b];
+            count[b] = sum;
+            sum += c;
+        }
         for (long i = 0; i < n; i++) {
             long pos = count[(sk[i] >> shift) & 0xff]++;
             dh[pos] = sh[i];
             dk[pos] = sk[i];
         }
-        long *t = sh; sh = dh; dh = t;
-        unsigned long *u = sk; sk = dk; dk = u;
+        long *t = sh;
+        sh = dh;
+        dh = t;
+        unsigned long *u = sk;
+        sk = dk;
+        dk = u;
     }
     free(th);
     free(tk);
@@ -1233,6 +1330,7 @@ long prism_sort_prim(long kind, long list) {
 
     long *cells = n ? malloc((size_t)n * sizeof(long)) : NULL;
     long *heads = n ? malloc((size_t)n * sizeof(long)) : NULL;
+    if (n && (!cells || !heads)) abort();
     long cons_tag = 0, i = 0, p = list, unique = 1;
     while (!(p & 1) && p && ((long *)p)[PRISM_ARITY_W] == 2) {
         long *cell = (long *)p;
@@ -1248,11 +1346,13 @@ long prism_sort_prim(long kind, long list) {
     if (n > 1) {
         if (kind == 0) {
             long *buf = malloc((size_t)n * sizeof(long));
+            if (!buf) abort();
             long *res = prism_msort(heads, buf, n, kind);
             if (res != heads) memcpy(heads, res, (size_t)n * sizeof(long));
             free(buf);
         } else {
             unsigned long *keys = malloc((size_t)n * sizeof(unsigned long));
+            if (!keys) abort();
             for (long j = 0; j < n; j++) keys[j] = prism_sort_key(kind, heads[j]);
             prism_radix(heads, keys, n);
             free(keys);
@@ -1301,13 +1401,17 @@ void prism_print_int(long w) {
     }
 }
 
-void prism_print_nl(void) { putchar('\n'); }
+void prism_print_nl(void) {
+    putchar('\n');
+}
 
 /* SplitMix64. A single global stream, seeded to the same default constant the
  * interpreter uses so unseeded `rand` is reproducible across backends. */
 static unsigned long prism_rng = 0x9E3779B97F4A7C15UL;
 
-void prism_srand(long seed) { prism_rng = (unsigned long)seed; }
+void prism_srand(long seed) {
+    prism_rng = (unsigned long)seed;
+}
 
 long prism_prim_rand(void) {
     prism_rng += 0x9E3779B97F4A7C15UL;
@@ -1394,10 +1498,17 @@ long prism_to_u64(long w) {
     return prism_box((long)int_low64(w));
 }
 
-long prism_int_of_i64(long p) {
-    long v = prism_unbox(p);
+/* Encode a raw machine integer as a Prism Int: a tagged immediate when it fits
+ * the 63-bit immediate range, a bignum cell otherwise. The single encoding
+ * chokepoint for values entering from the machine-word world (boxed i64/u64
+ * conversions, read_int). */
+long prism_int_of_long(long v) {
     if (v >= PRISM_IMM_MIN && v <= PRISM_IMM_MAX) return int_imm(v);
     return prism_big_from_int(v);
+}
+
+long prism_int_of_i64(long p) {
+    return prism_int_of_long(prism_unbox(p));
 }
 
 long prism_int_of_u64(long p) {
@@ -1469,12 +1580,24 @@ long prism_u64_mul(long a, long b) {
 /* Fixed-width bitwise/shift. and/or/xor are bit-pattern identical across lanes;
    shifts mask the count to 0..64. i64_shr is arithmetic (signed >>), u64_shr
    logical (unsigned >>). */
-long prism_i64_and(long a, long b) { return prism_box(prism_unbox(a) & prism_unbox(b)); }
-long prism_i64_or(long a, long b) { return prism_box(prism_unbox(a) | prism_unbox(b)); }
-long prism_i64_xor(long a, long b) { return prism_box(prism_unbox(a) ^ prism_unbox(b)); }
-long prism_u64_and(long a, long b) { return prism_box(prism_unbox(a) & prism_unbox(b)); }
-long prism_u64_or(long a, long b) { return prism_box(prism_unbox(a) | prism_unbox(b)); }
-long prism_u64_xor(long a, long b) { return prism_box(prism_unbox(a) ^ prism_unbox(b)); }
+long prism_i64_and(long a, long b) {
+    return prism_box(prism_unbox(a) & prism_unbox(b));
+}
+long prism_i64_or(long a, long b) {
+    return prism_box(prism_unbox(a) | prism_unbox(b));
+}
+long prism_i64_xor(long a, long b) {
+    return prism_box(prism_unbox(a) ^ prism_unbox(b));
+}
+long prism_u64_and(long a, long b) {
+    return prism_box(prism_unbox(a) & prism_unbox(b));
+}
+long prism_u64_or(long a, long b) {
+    return prism_box(prism_unbox(a) | prism_unbox(b));
+}
+long prism_u64_xor(long a, long b) {
+    return prism_box(prism_unbox(a) ^ prism_unbox(b));
+}
 
 long prism_i64_shl(long a, long b) {
     return prism_box((long)((unsigned long)prism_unbox(a) << (prism_unbox(b) & 63)));
@@ -1601,9 +1724,15 @@ void prism_array_oob(void) {
    ops BORROW their cell args (the call site drops them afterward), so each
    retains a ref by inc-ing what it stores or returns. Indices arrive raw. */
 #define PRISM_ARR_ELEM0 (PRISM_HDR_WORDS + 1)
-static long arr_len(long *p) { return p[PRISM_HDR_WORDS] >> 1; }
-static void arr_setlen(long *p, long l) { p[PRISM_HDR_WORDS] = (l << 1) | 1; }
-static long arr_cap(long *p) { return p[PRISM_ARITY_W] - 1; }
+static long arr_len(long *p) {
+    return p[PRISM_HDR_WORDS] >> 1;
+}
+static void arr_setlen(long *p, long l) {
+    p[PRISM_HDR_WORDS] = (l << 1) | 1;
+}
+static long arr_cap(long *p) {
+    return p[PRISM_ARITY_W] - 1;
+}
 
 long prism_array_empty(void) {
     long *p = prism_alloc(1); /* cap 0: just the length word */

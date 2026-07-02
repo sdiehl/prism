@@ -1,0 +1,53 @@
+-- Policy is a handler: the SAME fiber program, run under two schedulers.
+--
+-- `run_async` (FIFO, round-robin) and `run_lifo` (LIFO, depth-first) are two
+-- handlers for the one `Async` effect. The fibers below are byte-for-byte
+-- identical under both; only the run function is swapped.
+--
+-- Each worker notes its id, yields once, then returns it. FIFO enqueues a
+-- newly-runnable fiber at the back, so the workers are visited in fork order and
+-- note 1 then 2. LIFO pushes to the front, so the most-recently-forked worker
+-- runs first and they note 2 then 1. The sum is 3 either way, because the result
+-- is a determinate function of the workers; only the interleaving (the order of
+-- the observable notes) depends on the policy.
+--
+-- Expected output:
+--   fifo: 1
+--   fifo: 2
+--   fifo sum 3
+--   lifo: 2
+--   lifo: 1
+--   lifo sum 3
+
+import Concurrent (..)
+
+effect Trace {
+  ctl note(Int) : Unit
+}
+
+fn worker(n : Int) : !{Async(Int), Trace} Int =
+  note(n)
+  yield(())
+  n
+
+fn scene() : !{Async(Int), Trace} Int =
+  match scope([\() -> worker(1), \() -> worker(2)]) of
+    Cons(a, Cons(b, Nil)) => a + b
+    _ => 0
+
+-- Discharge `Async` with each policy; the residual `Trace` flows out to `main`.
+fn fifo() : !{Trace} Int = run_async(scene)
+
+fn lifo() : !{Trace} Int = run_lifo(scene)
+
+fn main() =
+  handle fifo() with
+    note(n, k) =>
+      println("fifo: {n}")
+      k(())
+    return s => println("fifo sum {s}")
+  handle lifo() with
+    note(n, k) =>
+      println("lifo: {n}")
+      k(())
+    return s => println("lifo sum {s}")

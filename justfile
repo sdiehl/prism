@@ -37,6 +37,43 @@ fmt-check:
 clippy:
     cargo clippy --all-targets -- -D warnings
 
+# --- fast inner loop: filtered output, exit codes preserved ---
+
+# Full test suite; print only summaries, failures, and compile errors.
+t:
+    #!/usr/bin/env bash
+    set -o pipefail
+    cargo test --all 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked|warning:"
+
+# Run one test target or filter, filtered the same way. e.g. `just t1 fmt_records`
+t1 FILTER:
+    #!/usr/bin/env bash
+    set -o pipefail
+    cargo test {{FILTER}} 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked"
+
+# Regenerate snapshots (optionally one FILTER), then show which changed.
+snap FILTER="":
+    #!/usr/bin/env bash
+    INSTA_UPDATE=always cargo test {{FILTER}} 2>&1 | grep -E "test result:|error\[|error:" || true
+    git status --short tests/snapshots || true
+
+# Format .pr files in place with the debug binary (whole tree if no args).
+fmtw *FILES:
+    cargo run --quiet -- fmt {{FILES}}
+
+# Build, surfacing only errors and warnings (exit code preserved).
+b:
+    #!/usr/bin/env bash
+    out=$(cargo build 2>&1); code=$?
+    echo "$out" | grep -E "error|warning" || echo "build clean"
+    exit $code
+
+# Correctness gates to run before declaring done.
+gate:
+    #!/usr/bin/env bash
+    set -o pipefail
+    cargo test --test parity --test tier_parity --test perf_gate --test snapshots 2>&1 | grep -E "test result:|FAILED|error\["
+
 fmt-examples: build-release
     ./target/release/prism fmt --check
 
@@ -54,12 +91,32 @@ examples:
 web: wasm
     cd web && pnpm install && pnpm dev
 
+# Serve the web app and open the REPL page in the browser.
+web-repl: wasm
+    cd web && pnpm install && pnpm gen-examples && pnpm exec vite --open /repl.html
+
 web-build:
     cd web && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
-# `docs` rebuilds the wasm bundle first (via `wasm`, which syncs it into
-# docs/src/pkg), so the served playground is never a stale compiler.
-docs: wasm
+# Regenerate the committed Standard Library Reference from the stdlib sources.
+# CI checks this is current (`prism docs --stdlib --check`); run it after editing
+# any `-- |` doc comment under lib/.
+docs-gen:
+    cargo build --release --features native
+    ./target/release/prism docs --stdlib --out docs/src/stdlib
+    ./target/release/prism docs --stdlib --test
+
+# Regenerate every committed content-addressed stdlib artifact after a change
+# that shifts a definition/type/effect hash: the Merkle-root fingerprint and
+# per-def `#hash` badges live in the stdlib docs (computed from the built stdlib,
+# hence `docs-gen`'s build dependency), the shape/type digests in snapshots.
+hash: docs-gen
+    INSTA_UPDATE=always cargo test --test snapshots shape_digests
+
+# `docs` regenerates the stdlib reference and rebuilds the wasm bundle first (via
+# `wasm`, which syncs it into docs/src/pkg), so the book and the served
+# playground are never stale.
+docs: docs-gen wasm
     mdbook build docs
     mdbook serve docs --open
 

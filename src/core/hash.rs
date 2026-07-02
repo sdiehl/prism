@@ -37,7 +37,29 @@ pub type Hashes = BTreeMap<Sym, String>;
 
 /// Scheme tag: every hash commits to it, so a change to this encoding cannot
 /// silently reuse an old hash computed under a different scheme.
-const SCHEME: &str = "prism-core-hash-v1";
+pub const SCHEME: &str = "prism-core-hash-v1";
+
+/// Width, in hex characters, of the abbreviated hash prefix shown in the
+/// human-facing `core-hash`/`shape`/`stdlib-hash` dumps. Full hashes are longer;
+/// display truncates to this many leading nibbles.
+pub const HASH_PREFIX_HEX: usize = 16;
+
+/// Fold a `name -> content-hash` map into a single namespace root, a
+/// branch-hash-style fold over the sorted entries.
+///
+/// The root commits to the SCHEME and to each length-prefixed name, so it moves
+/// under a rename or any content change but not under reordering (the map is
+/// sorted). Part A feeds it the per-definition behavior hashes; Part B merges in
+/// the datatype/effect shape digests, so the stdlib root covers the whole
+/// documented surface through one fold.
+#[must_use]
+pub fn root(entries: &BTreeMap<String, String>) -> String {
+    let mut blob = String::from(SCHEME);
+    for (name, hash) in entries {
+        let _ = write!(blob, "|{}:{name}={hash}", name.len());
+    }
+    hex(&blob)
+}
 
 /// Hash every definition in `core`. `meta[sym]` is a canonical rendering of the
 /// out-of-Core elaboration inputs for `sym` (type, principal row); an absent
@@ -83,7 +105,11 @@ fn hash_component(
     // and hash the concatenation as the component identity.
     let mut blob = String::from(SCHEME);
     for (_, m) in &order {
-        let _ = write!(blob, "|meta:{}|", meta.get(m).map_or("", String::as_str));
+        // Length-prefix the free-form meta (same `{len}:{payload}` discipline as
+        // every other field) so its bytes cannot forge a `|meta:` member boundary
+        // and collide two distinct components.
+        let m_str = meta.get(m).map_or("", String::as_str);
+        let _ = write!(blob, "|meta{}:{m_str}", m_str.len());
         blob.push_str(&encode(fnmap[m], member_set, Some(&idx), hashes));
     }
     let component = hex(&blob);
@@ -93,7 +119,7 @@ fn hash_component(
     }
 }
 
-fn hex(s: &str) -> String {
+pub(crate) fn hex(s: &str) -> String {
     blake3::hash(s.as_bytes()).to_hex().to_string()
 }
 
@@ -257,15 +283,19 @@ impl Enc<'_> {
         match c {
             Comp::Return(v)
             | Comp::Force(v)
-            | Comp::Print(v)
-            | Comp::PrintF(v)
-            | Comp::PrintS(v)
             | Comp::Error(v)
-            | Comp::Srand(v)
             | Comp::Dup(v)
             | Comp::Drop(v)
             | Comp::RefNew(v)
             | Comp::RefGet(v) => self.val(v),
+            // The `<{kind}>` prefix above already distinguishes the op, so hashing
+            // the operands in order reproduces the old per-variant byte sequence
+            // exactly (one value for the output/seed ops, none for the inputs).
+            Comp::Io(_, args) => {
+                for v in args {
+                    self.val(v);
+                }
+            }
             Comp::FloatBuiltin(op, v) => {
                 self.tok(&format!("{op:?}"));
                 self.val(v);
@@ -362,7 +392,6 @@ impl Enc<'_> {
                 self.val(a);
                 self.val(b);
             }
-            Comp::PrintNl | Comp::ReadInt | Comp::ReadLine | Comp::Rand => {}
         }
     }
 }
@@ -426,6 +455,7 @@ mod tests {
             fns: vec![CoreFn {
                 name: sym("f"),
                 params: vec![sym("x")],
+                dict_arity: 0,
                 body,
             }],
         }
@@ -457,5 +487,29 @@ mod tests {
     fn hashing_is_deterministic() {
         let (core, m) = (let_id("y"), BTreeMap::new());
         assert_eq!(hash_program(&core, &m), hash_program(&core, &m));
+    }
+
+    #[test]
+    fn root_is_deterministic_and_order_independent() {
+        let mut a = BTreeMap::new();
+        a.insert("map".to_string(), "aaa".to_string());
+        a.insert("filter".to_string(), "bbb".to_string());
+        // A different insertion order yields the same sorted map, so the same root.
+        let mut b = BTreeMap::new();
+        b.insert("filter".to_string(), "bbb".to_string());
+        b.insert("map".to_string(), "aaa".to_string());
+        assert_eq!(super::root(&a), super::root(&b));
+    }
+
+    #[test]
+    fn root_moves_under_rename_or_content_change() {
+        let base = BTreeMap::from([("map".to_string(), "aaa".to_string())]);
+        // Renaming the binding (same content hash, new name) changes the root:
+        // the namespace commits to the public name.
+        let renamed = BTreeMap::from([("fmap".to_string(), "aaa".to_string())]);
+        // Changing the behavior hash under the same name changes it too.
+        let rebodied = BTreeMap::from([("map".to_string(), "zzz".to_string())]);
+        assert_ne!(super::root(&base), super::root(&renamed));
+        assert_ne!(super::root(&base), super::root(&rebodied));
     }
 }

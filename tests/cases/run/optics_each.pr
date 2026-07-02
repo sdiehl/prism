@@ -16,7 +16,12 @@ type World = World { party: List(Player), turn: Int }
 fn heal(h : Int) : Int = h + 10
 
 fn mk(n : String, h : Int) : Player =
-  Player { name = n, pos = Vec2 { x = 1, y = 2 }, hp = h, bag = Cons(Item { name = "sword", count = 1 }, Nil) }
+  Player {
+    name = n,
+    pos = Vec2 { x = 1, y = 2 },
+    hp = h,
+    bag = Cons(Item { name = "sword", count = 1 }, Nil)
+  }
 
 fn main() =
   let players = Cons(mk("a", 5), Cons(mk("b", 8), Nil))

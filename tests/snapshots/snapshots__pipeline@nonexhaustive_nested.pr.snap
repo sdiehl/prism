@@ -14,6 +14,9 @@ Program {
             params: [
                 "a",
             ],
+            param_kinds: [
+                Type,
+            ],
             ctors: [
                 Ctor {
                     name: "Nil",

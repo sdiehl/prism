@@ -1,0 +1,5 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn f(r : R) : R = { r | x = 1 }\\n\")"
+---
+fn f(r : R) : R = { r | x = 1 }

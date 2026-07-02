@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "UserId",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "UserId",
@@ -39,6 +40,7 @@ Program {
             params: [
                 "a",
             ],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Wrap",

@@ -1,0 +1,6 @@
+-- `\ alloc` is the terser row-subtraction spelling of the `without alloc` suffix:
+-- the result type with the `alloc` coeffect subtracted. It is a pure synonym,
+-- checked identically; the formatter canonicalizes it to `without alloc`.
+fn inc(x : Int) : Int \ alloc = x + 1
+
+fn main() : Int = inc(41)

@@ -28,15 +28,26 @@ type Closed(s, o) = Closed { cstate: s, observe: (s) -> o, tick: (s) -> s }
 
 -- One tick of the closed loop: each system steps on the output it can see this
 -- instant. Both are Moore, so the two reads happen before either update.
-fn loop_step(ctrl : Sys(cs, po, pi), plant : Sys(ps, pi, po), s : (cs, ps)) : (cs, ps) =
+fn loop_step(
+  ctrl : Sys(cs, po, pi),
+  plant : Sys(ps, pi, po),
+  s : (cs, ps)
+) : (cs, ps) =
   let u = (ctrl.read)(fst(s))
   let y = (plant.read)(snd(s))
   ((ctrl.step)(fst(s), y), (plant.step)(snd(s), u))
 
 -- Feedback wiring: route the plant's output into the controller and the
 -- controller's command into the plant, closing the diagram into one system.
-fn feedback(ctrl : Sys(cs, po, pi), plant : Sys(ps, pi, po)) : Closed((cs, ps), po) =
-  Closed { cstate = (ctrl.state, plant.state), observe = \(s) -> (plant.read)(snd(s)), tick = \(s) -> loop_step(ctrl, plant, s) }
+fn feedback(
+  ctrl : Sys(cs, po, pi),
+  plant : Sys(ps, pi, po)
+) : Closed((cs, ps), po) =
+  Closed {
+    cstate = (ctrl.state, plant.state),
+    observe = \(s) -> (plant.read)(snd(s)),
+    tick = \(s) -> loop_step(ctrl, plant, s)
+  }
 
 -- The orbit: iterate the closed system, observing at each step.
 fn orbit(c : Closed(s, o), s : s, n : Int) : List(o) =
