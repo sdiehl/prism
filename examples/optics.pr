@@ -38,7 +38,10 @@ fn over(l : Lens(s, a), f : (a) -> a, s : s) : s = (l.set)(s, f((l.get)(s)))
 -- Lens composition: focus through `l1 : s -> b` then `l2 : b -> a`, giving a
 -- lens `s -> a`. The heart of optics. Deep access stays a one-liner.
 fn compose_l(l1 : Lens(s, b), l2 : Lens(b, a)) : Lens(s, a) =
-  Lens { get = \(s) -> view(l2, view(l1, s)), set = \(s, a) -> set(l1, s, set(l2, view(l1, s), a)) }
+  Lens {
+    get = \(s) -> view(l2, view(l1, s)),
+    set = \(s, a) -> set(l1, s, set(l2, view(l1, s), a))
+  }
 
 -- Primitive lenses lifted from the derived field functions.
 fn lx() : Lens(Vec2, Int) = Lens { get = x_of, set = with_x }
@@ -69,7 +72,10 @@ fn main() : !{IO} Unit =
   println(Vec2 { ..v, x = 1, y = 2 })
   -- Compose lenses to reach a deeply nested field in one step.
   let w =
-    World { player = Player { name = "hero", pos = v, hp = 30 }, turn = 1 }
+    World {
+      player = Player { name = "hero", pos = v, hp = 30 },
+      turn = 1
+    }
   let player_x = compose_l(lplayer(), compose_l(lpos(), lx()))
   println(view(player_x, w))
   println(set(player_x, w, 7))

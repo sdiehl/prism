@@ -584,6 +584,19 @@ impl<'a> Rw<'a> {
                     self.ty(i);
                 }
             }
+            Ty::RowLit(Row::Cons(labels, _)) => {
+                for l in labels {
+                    self.efflabel(l);
+                }
+            }
+            // Higher-kinded application `f(a, ..)`: the head is a bound type
+            // variable (never a top-level name), but the arguments carry
+            // references that still need canonicalizing.
+            Ty::App(_, args) => {
+                for a in args {
+                    self.ty(a);
+                }
+            }
             _ => {}
         }
     }
@@ -649,8 +662,9 @@ impl<'a> Rw<'a> {
                     self.expr(v);
                 }
             }
-            Expr::RecordUpdate(x, _, fields) => {
+            Expr::RecordUpdate(x, name, fields) => {
                 self.expr(x);
+                *name = self.value(name, span);
                 for (_, v) in fields {
                     self.expr(v);
                 }
@@ -792,6 +806,7 @@ impl<'a> Rw<'a> {
             }
             Sugar::Break | Sugar::Continue => {}
             Sugar::Return(e) => self.expr(e),
+            Sugar::WithoutAlloc(body) => self.expr(body),
         }
     }
 

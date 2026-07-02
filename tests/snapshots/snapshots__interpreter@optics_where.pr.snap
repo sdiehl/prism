@@ -3,7 +3,7 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/optics_where.pr
 ---
-[Player(a, 15, [Item(sword, 1)]), Player(b, 0, [Item(sword, 1)]), Player(c, 13, [Item(sword, 1)])]
-[Player(X, 5, [Item(sword, 1)]), Player(b, 0, [Item(sword, 1)]), Player(X, 3, [Item(sword, 1)])]
-World([Player(a, 5, [Item(sword, 6)]), Player(b, 0, [Item(sword, 1)]), Player(c, 3, [Item(sword, 6)])], 1)
+[Player { name = "a", hp = 15, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", hp = 0, bag = [Item { name = "sword", count = 1 }] }, Player { name = "c", hp = 13, bag = [Item { name = "sword", count = 1 }] }]
+[Player { name = "X", hp = 5, bag = [Item { name = "sword", count = 1 }] }, Player { name = "b", hp = 0, bag = [Item { name = "sword", count = 1 }] }, Player { name = "X", hp = 3, bag = [Item { name = "sword", count = 1 }] }]
+World { party = [Player { name = "a", hp = 5, bag = [Item { name = "sword", count = 6 }] }, Player { name = "b", hp = 0, bag = [Item { name = "sword", count = 1 }] }, Player { name = "c", hp = 3, bag = [Item { name = "sword", count = 6 }] }], turn = 1 }
 => ()

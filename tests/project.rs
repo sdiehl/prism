@@ -35,20 +35,24 @@ fn withdep() -> &'static Path {
 }
 
 // Build a project's entry to a native binary and assert its stdout matches the
-// interpreter, the same oracle as the parity corpus. Returns early when no C
-// compiler is available so CI without clang still passes.
+// interpreter, the same oracle as the parity corpus. A missing C compiler is a
+// hard failure, not a silent skip, so the native path is never vacuously green.
 fn assert_native_matches_interp(project_dir: &Path) {
-    if !have_cc() {
-        return;
-    }
+    assert!(
+        have_cc(),
+        "C compiler `{}` not found (set PRISM_CC). Native project tests require \
+         it; install clang or LLVM so the project backend is exercised.",
+        cc()
+    );
     let project = load_project(project_dir).expect("manifest loads");
     let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
     let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
-    let want = prism::interpret_io_on(&full, &roots, &mut Vec::new(), &mut std::io::empty())
+    let cfg = prism::Config::default();
+    let want = prism::interpret_io_on(&full, &roots, &mut Vec::new(), &mut std::io::empty(), &cfg)
         .expect("interprets")
         .term;
     let bin = env::temp_dir().join(format!("prism_{}_{}", project.name, process::id()));
-    prism::build_on(&full, &roots, &bin).expect("native build");
+    prism::build_on(&full, &roots, &bin, &cfg).expect("native build");
     let out = Command::new(&bin).output().expect("runs binary");
     for ext in ["bc", "ll"] {
         let _ = fs::remove_file(bin.with_extension(ext));
@@ -118,6 +122,7 @@ fn path_dependency_modules_resolve_and_run() {
         &roots,
         &mut Vec::new(),
         &mut std::io::empty(),
+        &prism::Config::default(),
     )
     .expect("resolves and runs");
     let out: Vec<String> = run.out.iter().map(Rv::show).collect();

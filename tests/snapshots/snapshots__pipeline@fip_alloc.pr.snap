@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Box",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Box",

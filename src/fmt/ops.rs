@@ -77,12 +77,20 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
         Expr::Bin(op, ..) if is_cmp(*op) && is_cmp(parent_op) => true,
         Expr::Bin(op, ..) => {
             let cp = binop_prec(*op);
-            cp < parent_prec
-                || (cp == parent_prec
-                    && matches!(
-                        parent_op,
-                        BinOp::Sub | BinOp::Div | BinOp::Rem | BinOp::Subf | BinOp::Divf
-                    ))
+            if cp != parent_prec {
+                return cp < parent_prec;
+            }
+            // Equal precedence, left-associative: `parent(a, child(b, c))` reprints as
+            // `a P b C c` and reparses as `child(parent(a, b), c)`. That regrouping is
+            // meaning-preserving only when the ops reassociate. Additive parents always
+            // do (`a + (b - c) == (a + b) - c`); a multiplicative parent only does over
+            // a pure `*` child, since `a * (b / c) != (a * b) / c` under integer division
+            // (likewise `%`).
+            match parent_op {
+                BinOp::Sub | BinOp::Div | BinOp::Rem | BinOp::Subf | BinOp::Divf => true,
+                BinOp::Mul | BinOp::Mulf => matches!(*op, BinOp::Div | BinOp::Divf | BinOp::Rem),
+                _ => false,
+            }
         }
         _ => low_prec_operand(child),
     }

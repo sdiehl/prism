@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use marginalia::Span;
 
 use crate::error::TypeError;
-use crate::syntax::ast::{Decl, EffLabel, Program, Row, Ty};
+use crate::syntax::ast::{Decl, Program, Ty};
 
 // Type synonyms are purely syntactic: each names a parameterized type and is
 // expanded (with its arguments substituted for its parameters) here, before
@@ -104,86 +104,49 @@ fn expand_syn_ty(
     map: &mut SynMap,
     path: &mut Vec<String>,
 ) -> Result<(), TypeError> {
-    match t {
-        Ty::Fun(args, row, ret) => {
-            for a in args {
-                expand_syn_ty(a, prog, map, path)?;
-            }
-            if let Row::Cons(ls, _) = row {
-                for l in ls {
-                    for a in &mut l.args {
-                        expand_syn_ty(a, prog, map, path)?;
-                    }
-                }
-            }
-            expand_syn_ty(ret, prog, map, path)?;
+    // Only `Con` is node-specific (its head may name a synonym to expand); every
+    // other variant just recurses into its children, so route the whole rest
+    // through the structural spine and stay total as `Ty` grows.
+    if let Ty::Con(name, args) = t {
+        for a in args.iter_mut() {
+            expand_syn_ty(a, prog, map, path)?;
         }
-        Ty::Forall(_, b) => expand_syn_ty(b, prog, map, path)?,
-        Ty::Tuple(items) => {
-            for i in items {
-                expand_syn_ty(i, prog, map, path)?;
-            }
+        if prog.synonyms.iter().any(|s| &s.name == name) {
+            let (params, body) = resolve_synonym(name, prog, map, path)?;
+            check_arity(name, params.len(), args.len(), prog)?;
+            let sub = params.into_iter().zip(args.iter().cloned()).collect();
+            *t = subst_ty(&body, &sub);
         }
-        Ty::Con(name, args) => {
-            for a in args.iter_mut() {
-                expand_syn_ty(a, prog, map, path)?;
-            }
-            if prog.synonyms.iter().any(|s| &s.name == name) {
-                let (params, body) = resolve_synonym(name, prog, map, path)?;
-                check_arity(name, params.len(), args.len(), prog)?;
-                let sub = params.into_iter().zip(args.iter().cloned()).collect();
-                *t = subst_ty(&body, &sub);
-            }
-        }
-        _ => {}
+        return Ok(());
     }
-    Ok(())
+    t.try_each_child_mut(&mut |c| expand_syn_ty(c, prog, map, path))
 }
 
 // Rewrite `t` against the completed synonym table.
 fn apply_syn(t: &mut Ty, map: &SynMap) -> Result<(), TypeError> {
-    match t {
-        Ty::Fun(args, row, ret) => {
-            for a in args {
-                apply_syn(a, map)?;
-            }
-            if let Row::Cons(ls, _) = row {
-                for l in ls {
-                    for a in &mut l.args {
-                        apply_syn(a, map)?;
-                    }
-                }
-            }
-            apply_syn(ret, map)?;
+    // As in `expand_syn_ty`, only `Con` is node-specific; the rest recurse through
+    // the structural spine so a new `Ty` variant cannot be silently skipped.
+    if let Ty::Con(name, args) = t {
+        for a in args.iter_mut() {
+            apply_syn(a, map)?;
         }
-        Ty::Forall(_, b) => apply_syn(b, map)?,
-        Ty::Tuple(items) => {
-            for i in items {
-                apply_syn(i, map)?;
+        if let Some((params, body, span)) = map.get(name) {
+            if params.len() != args.len() {
+                return Err(TypeError::Other {
+                    span: *span,
+                    msg: format!(
+                        "type synonym `{name}` expects {} argument(s), got {}",
+                        params.len(),
+                        args.len()
+                    ),
+                });
             }
+            let sub = params.iter().cloned().zip(args.iter().cloned()).collect();
+            *t = subst_ty(body, &sub);
         }
-        Ty::Con(name, args) => {
-            for a in args.iter_mut() {
-                apply_syn(a, map)?;
-            }
-            if let Some((params, body, span)) = map.get(name) {
-                if params.len() != args.len() {
-                    return Err(TypeError::Other {
-                        span: *span,
-                        msg: format!(
-                            "type synonym `{name}` expects {} argument(s), got {}",
-                            params.len(),
-                            args.len()
-                        ),
-                    });
-                }
-                let sub = params.iter().cloned().zip(args.iter().cloned()).collect();
-                *t = subst_ty(body, &sub);
-            }
-        }
-        _ => {}
+        return Ok(());
     }
-    Ok(())
+    t.try_each_child_mut(&mut |c| apply_syn(c, map))
 }
 
 fn apply_syn_decl(d: &mut Decl, map: &SynMap) -> Result<(), TypeError> {
@@ -220,13 +183,22 @@ fn check_arity(name: &str, want: usize, got: usize, prog: &Program) -> Result<()
 fn subst_ty(t: &Ty, sub: &BTreeMap<String, Ty>) -> Ty {
     match t {
         Ty::Var(n) => sub.get(n).cloned().unwrap_or_else(|| t.clone()),
-        Ty::Con(n, args) => Ty::Con(n.clone(), args.iter().map(|a| subst_ty(a, sub)).collect()),
-        Ty::Tuple(xs) => Ty::Tuple(xs.iter().map(|x| subst_ty(x, sub)).collect()),
-        Ty::Fun(args, row, ret) => Ty::Fun(
-            args.iter().map(|a| subst_ty(a, sub)).collect(),
-            subst_row(row, sub),
-            Box::new(subst_ty(ret, sub)),
-        ),
+        // A higher-kinded application `f(a)`: the head may itself be a synonym
+        // parameter, so substitute it, distributing over the head's arg list when
+        // the argument is another application/constructor.
+        Ty::App(n, args) => {
+            let args: Vec<Ty> = args.iter().map(|a| subst_ty(a, sub)).collect();
+            match sub.get(n) {
+                Some(Ty::Var(h)) => Ty::App(h.clone(), args),
+                Some(Ty::Con(h, hargs)) => {
+                    Ty::Con(h.clone(), hargs.iter().cloned().chain(args).collect())
+                }
+                Some(Ty::App(h, hargs)) => {
+                    Ty::App(h.clone(), hargs.iter().cloned().chain(args).collect())
+                }
+                _ => Ty::App(n.clone(), args),
+            }
+        }
         Ty::Forall(vs, b) => {
             let mut s2 = sub.clone();
             for v in vs {
@@ -234,21 +206,12 @@ fn subst_ty(t: &Ty, sub: &BTreeMap<String, Ty>) -> Ty {
             }
             Ty::Forall(vs.clone(), Box::new(subst_ty(b, &s2)))
         }
-        _ => t.clone(),
-    }
-}
-
-fn subst_row(row: &Row, sub: &BTreeMap<String, Ty>) -> Row {
-    match row {
-        Row::Empty => Row::Empty,
-        Row::Cons(ls, tail) => Row::Cons(
-            ls.iter()
-                .map(|l| EffLabel {
-                    name: l.name.clone(),
-                    args: l.args.iter().map(|a| subst_ty(a, sub)).collect(),
-                })
-                .collect(),
-            tail.clone(),
-        ),
+        // Con / Tuple / Fun / RowLit / leaves: no node-specific rewrite, so recurse
+        // into every child (including row-label argument types) through the spine.
+        other => {
+            let mut out = other.clone();
+            out.each_child_mut(&mut |c| *c = subst_ty(c, sub));
+            out
+        }
     }
 }

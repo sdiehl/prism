@@ -12,16 +12,19 @@
 //! untouched, so only the representation changes, never the meaning.
 
 use std::collections::BTreeSet;
+use std::fmt::Write;
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
 use super::pretty::pp_core_pretty;
 use super::traverse::Rewrite;
+use crate::flags::DynFlags;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
 mod cse;
 mod inline;
 mod lint;
+mod rename;
 mod simplify;
 mod specialize;
 use cse::cse_counted;
@@ -37,8 +40,11 @@ use specialize::specialize_counted;
 /// both backends depend on). `O1`, the default, adds dictionary specialization
 /// (pre-lowering), the gentle simplifier, the bounded inliner, and scalar CSE
 /// (all late, after effect lowering, so they compose with the var/State fusion
-/// rather than defeating it). `O2` currently matches `O1`; it is reserved for
-/// future aggressive passes.
+/// rather than defeating it). `O2` runs a second inline/simplify iteration on top
+/// of `O1`, so a body exposed as a call site only after the first inlining round
+/// (a wrapper that inlined into another wrapper) still gets pasted in and cleaned
+/// up. The extra round is idempotent once the program reaches a fixed point, so it
+/// costs nothing on code the first round already settled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptLevel {
     O0,
@@ -62,7 +68,7 @@ impl OptLevel {
     }
 }
 
-/// A pass in the pipeline (the GHC `CoreToDo` analogue).
+/// A pass in the pipeline.
 ///
 /// The ordered list a level expands to is data, built by [`pipeline`]; new
 /// passes slot in here.
@@ -148,9 +154,8 @@ impl PassStage {
 
 /// An explicit ordered pass list per stage, the parsed `--passes` flag.
 ///
-/// The LLVM `opt -passes=` / GHC `[CoreToDo]` analogue. It overrides the `-O`
-/// level entirely: each section is exactly the passes named, in order, with no
-/// level defaults filled in.
+/// Overrides the `-O` level entirely: each section is exactly the passes named,
+/// in order, with no level defaults filled in.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PassSpec {
     /// Pre-lowering passes, in run order.
@@ -251,7 +256,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 /// Per-pass tick counts (rewrites fired), in run order. Dumped under
-/// `PRISM_OPT_STATS`; the `-ddump-simpl-stats` analogue.
+/// `PRISM_OPT_STATS`.
 #[derive(Clone, Debug, Default)]
 pub struct PassStats {
     entries: Vec<(&'static str, u64)>,
@@ -275,7 +280,6 @@ impl PassStats {
     }
 
     fn report(&self) -> String {
-        use std::fmt::Write;
         let mut s = String::from("core-opt ticks:\n");
         for (pass, ticks) in &self.entries {
             let _ = writeln!(s, "  {pass:<16} {ticks}");
@@ -285,16 +289,16 @@ impl PassStats {
     }
 }
 
-/// The optimization context (the GHC `CoreM` analogue): the program-derived
-/// newtype constructor set a pass needs, and the tick counter. The inliner owns
+/// The optimization context: the program-derived newtype constructor set a pass
+/// needs, and the tick counter. The inliner owns
 /// its own deterministic per-compilation fresh-name counter.
 struct OptCx {
     newtype_ctors: BTreeSet<Sym>,
     stats: PassStats,
 }
 
-/// The ordered pass list for an opt level (the GHC `getCoreToDo`). Order matters:
-/// erase first (it exposes inner values), then specialize.
+/// The ordered pass list for an opt level. Order matters: erase first (it
+/// exposes inner values), then specialize.
 #[must_use]
 pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     // The list spans both stages; `run` executes the passes of one stage at a
@@ -302,16 +306,32 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     // the var/State fusion instead of defeating it.
     match level {
         OptLevel::O0 => vec![CorePass::EraseNewtypes],
-        // O1 runs the inliner and CSE, sandwiched in simplifier runs (the GHC
-        // simplify/inline/simplify shape): the first cleans and exposes call
-        // sites, the inliner pastes single-call-site bodies in, the second cleans
+        // O1 runs the inliner and CSE, sandwiched in simplifier runs: the first
+        // cleans and exposes call sites, the inliner pastes single-call-site
+        // bodies in, the second cleans
         // up the inlined code (wrappers vanish, case-of-known-constructor fires
         // across the inlined boundary), CSE shares the prims it exposed, the last
         // cleans up after CSE. The inliner's freshened binders are deterministic
         // (`%i{n}`), so this is safe at the default level's snapshots.
-        OptLevel::O1 | OptLevel::O2 => vec![
+        OptLevel::O1 => vec![
             CorePass::EraseNewtypes,
             CorePass::Specialize,
+            CorePass::Simplify,
+            CorePass::Inline,
+            CorePass::Simplify,
+            CorePass::Cse,
+            CorePass::Simplify,
+        ],
+        // O2 = O1 with a second inline/simplify round before CSE. The first
+        // inlining can turn a two-hop call chain into a single site that only the
+        // second round can paste, so a wrapper that inlined into another wrapper is
+        // flattened here. Both passes are fixed-point/idempotent, so the extra
+        // round is a no-op once the program settles and never loops.
+        OptLevel::O2 => vec![
+            CorePass::EraseNewtypes,
+            CorePass::Specialize,
+            CorePass::Simplify,
+            CorePass::Inline,
             CorePass::Simplify,
             CorePass::Inline,
             CorePass::Simplify,
@@ -326,8 +346,8 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
 // places instead of clobbering one another.
 static DUMP_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-// Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows
-// (the `-ddump-simpl`-per-phase analogue). `stdout`/`stderr` stream a banner plus
+// Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows.
+// `stdout`/`stderr` stream a banner plus
 // the block; any other value (or a bare flag) is a base directory under which a
 // `run-N/` subdir holds one ordinal-prefixed file per stage, so directory order
 // matches run order. Dump-only: the rendered form is for reading and diffing, not
@@ -373,9 +393,10 @@ fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
 /// runs only the passes of the requested stage, so the driver calls it twice (the
 /// pre-lowering passes in the front end, the late passes on the lowered core).
 /// `nt` is the program's newtype constructor set, needed by `EraseNewtypes` (pass
-/// an empty set for a late run, which has no use for it). Honors
-/// `PRISM_NO_SPECIALIZE`, runs Core Lint between passes under `PRISM_CORE_LINT`,
-/// returns per-pass ticks, and dumps them to stderr under `PRISM_OPT_STATS`.
+/// an empty set for a late run, which has no use for it). `disabled` is the set of
+/// passes the caller turned off (the `--no-<pass>` flags plus `PRISM_NO_SPECIALIZE`,
+/// resolved by the driver's `Config`). Runs Core Lint between passes under
+/// `PRISM_CORE_LINT`, returns per-pass ticks, and dumps them under `PRISM_OPT_STATS`.
 ///
 /// # Panics
 /// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
@@ -386,12 +407,14 @@ pub fn run(
     nt: &BTreeSet<Sym>,
     level: OptLevel,
     stage: PassStage,
+    disabled: &[CorePass],
+    flags: &DynFlags,
 ) -> (Core, PassStats) {
     let passes: Vec<CorePass> = pipeline(level)
         .into_iter()
         .filter(|p| p.stage() == stage)
         .collect();
-    run_passes(core, nt, &passes)
+    run_passes(core, nt, &passes, disabled, flags)
 }
 
 /// Run an explicit ordered list of `passes` over `core`, the `--passes` analogue
@@ -399,35 +422,41 @@ pub fn run(
 ///
 /// `passes` is one stage's worth (the driver calls this twice, once per stage);
 /// `nt` is the newtype constructor set `EraseNewtypes` needs (empty for a late
-/// run). Uses the same lint/dump/stats machinery and `PRISM_*` switches as
-/// [`run`].
+/// run); `disabled` is the caller's turned-off pass set. Uses the same lint/dump/
+/// stats machinery and `PRISM_*` switches as [`run`].
 ///
 /// # Panics
 /// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
 /// compiler bug), naming the pass responsible.
 #[must_use]
-pub fn run_spec_stage(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, PassStats) {
-    run_passes(core, nt, passes)
+pub fn run_spec_stage(
+    core: &Core,
+    nt: &BTreeSet<Sym>,
+    passes: &[CorePass],
+    disabled: &[CorePass],
+    flags: &DynFlags,
+) -> (Core, PassStats) {
+    run_passes(core, nt, passes, disabled, flags)
 }
 
 // The shared pass-running loop behind [`run`] and [`run_spec_stage`]: Core Lint
-// between passes under `PRISM_CORE_LINT`, dumps under `PRISM_DUMP_CORE`, the
+// between passes when `flags.core_lint`, dumps when `flags.dump_core` is set, the
 // disabled-pass filter (the `--no-<pass>` flags plus `PRISM_NO_SPECIALIZE`), and
-// per-pass ticks dumped under `PRISM_OPT_STATS`.
-fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, PassStats) {
-    let lint_on = std::env::var_os("PRISM_CORE_LINT").is_some();
-    // The effective pass vector: the requested passes minus every one the user
-    // disabled. The disabled set is the union of the `--no-<pass>` flags (the
-    // process-level `set_disabled_passes`) and `PRISM_NO_SPECIALIZE`, the env
-    // equivalent of `--no-specialize`. Filtering here unifies the two sources and
-    // applies whether the passes came from a `-O` level or an explicit `--passes`
-    // list, and keeps disabled passes out of the dump and per-pass stats below.
-    let mut disabled = crate::driver::disabled_passes();
-    if std::env::var_os("PRISM_NO_SPECIALIZE").is_some()
-        && !disabled.contains(&CorePass::Specialize)
-    {
-        disabled.push(CorePass::Specialize);
-    }
+// per-pass ticks dumped when `flags.opt_stats`. Those three switches come from the
+// threaded [`DynFlags`], not from the environment (see `crate::flags`).
+fn run_passes(
+    core: &Core,
+    nt: &BTreeSet<Sym>,
+    passes: &[CorePass],
+    disabled: &[CorePass],
+    flags: &DynFlags,
+) -> (Core, PassStats) {
+    let lint_on = flags.core_lint;
+    // The effective pass vector: the requested passes minus every one the caller
+    // disabled (the `--no-<pass>` flags and `PRISM_NO_SPECIALIZE`, resolved into
+    // one list by the driver's `Config`). Filtering here applies whether the
+    // passes came from a `-O` level or an explicit `--passes` list, and keeps
+    // disabled passes out of the dump and per-pass stats below.
     let passes: Vec<CorePass> = passes
         .iter()
         .copied()
@@ -447,7 +476,7 @@ fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, Pa
             }
         }
     };
-    let dump_sink = std::env::var_os("PRISM_DUMP_CORE");
+    let dump_sink = flags.dump_core.clone();
     let dump_run = std::sync::atomic::AtomicUsize::fetch_add(
         &DUMP_RUN,
         1,
@@ -468,7 +497,7 @@ fn run_passes(core: &Core, nt: &BTreeSet<Sym>, passes: &[CorePass]) -> (Core, Pa
             ord += 1;
         }
     }
-    if std::env::var_os("PRISM_OPT_STATS").is_some() {
+    if flags.opt_stats {
         eprint!("{}", cx.stats.report());
     }
     (cur, cx.stats)
@@ -506,6 +535,7 @@ fn erase_newtypes_counted(core: &Core, nt: &BTreeSet<Sym>) -> (Core, u64) {
         .map(|f| CoreFn {
             name: f.name,
             params: f.params.clone(),
+            dict_arity: f.dict_arity,
             body: e.comp(&f.body, &()),
         })
         .collect();

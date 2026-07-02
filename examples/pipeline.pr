@@ -1,0 +1,69 @@
+-- Flagship: a concurrent map-reduce pipeline that exercises the whole v0.5
+-- concurrency machinery at once.
+--
+--   * the effect-polymorphic scheduler (`run_async`) built on row-kinded types;
+--   * `channel`/`send`/`recv` for fiber-to-fiber data flow;
+--   * `fork` and the structured `scope` nursery (workers are joined before we
+--     collect, so no fiber escapes);
+--   * a `Log` capability the fibers perform, which -- because the scheduler does
+--     not handle it -- flows out through `run_async` and is granted at the edge.
+--
+-- A feeder streams 1..4 into an `input` channel; two workers each square two
+-- items (logging as they go) and push to an `output` channel; the main fiber
+-- collects the four results and sums them: 1 + 4 + 9 + 16 = 30.
+--
+-- Expected output (one interleaving; the schedule is deterministic):
+--   w1 squared 1
+--   w2 squared 2
+--   w1 squared 3
+--   w2 squared 4
+--   sum of squares: 30
+
+import Concurrent (..)
+
+effect Log {
+  ctl log(String) : Unit
+}
+
+fn feed(c : Chan, items : List(Int)) : !{Async(Int)} Int =
+  match items of
+    Nil => 0
+    Cons(x, rest) =>
+      send(c, x)
+      yield(())
+      feed(c, rest)
+
+fn worker(
+  name : String,
+  input : Chan,
+  output : Chan,
+  n : Int
+) : !{Async(Int), Log} Int =
+  if n == 0 then
+    0
+  else
+    let x = recv(input)
+    log("{name} squared {x}")
+    send(output, x * x)
+    yield(())
+    worker(name, input, output, n - 1)
+
+fn collect(c : Chan, n : Int, acc : Int) : !{Async(Int)} Int =
+  if n == 0 then
+    acc
+  else
+    collect(c, n - 1, acc + recv(c))
+
+fn pipeline() : !{Async(Int), Log} Int =
+  let input = channel(())
+  let output = channel(())
+  let f = fork(\() -> feed(input, [1, 2, 3, 4]))
+  match (scope([\() -> worker("w1", input, output, 2), \() -> worker("w2", input, output, 2)])) of
+    _ => collect(output, 4, 0)
+
+fn main() =
+  handle run_async(pipeline) with
+    log(msg, k) =>
+      println(msg)
+      k(())
+    return total => println("sum of squares: {total}")

@@ -31,6 +31,9 @@ const fn opens_block(t: &Token) -> bool {
             | Token::Where
             // `loop <block>` opens directly; `while cond do <block>` opens at `do`.
             | Token::Loop
+            // `without alloc <block>` opens after `alloc`; the conditional opener
+            // rule keeps the postfix suffix (`: T without alloc = ..`) block-free.
+            | Token::Alloc
     )
 }
 
@@ -91,20 +94,9 @@ fn split_interp(
                 i += 2;
             }
             '{' => {
-                // Same automaton as the string callback: nested string
-                // literals keep their quotes and braces out of the count.
-                let mut sc = token::Scanner::hole();
-                let mut j = i + 1;
-                let mut end = None;
-                while j < inner.len() {
-                    let (q, hc) = inner[j];
-                    j += 1;
-                    if sc.step(q, hc) {
-                        end = Some(q);
-                        break;
-                    }
-                }
-                let Some(close) = end else {
+                // The hole runs to its matching `}`, found by the shared automaton
+                // so a nested string literal's quotes and braces are not miscounted.
+                let Some((close, next)) = token::Scanner::scan_hole(&inner, i + 1) else {
                     return Err(LexError::UnterminatedHole { offset: p });
                 };
                 if src[p + 1..close].trim().is_empty() {
@@ -125,7 +117,7 @@ fn split_interp(
                     }
                 }
                 seg_from = close;
-                i = j;
+                i = next;
             }
             c => {
                 seg.push(c);

@@ -18,8 +18,13 @@
 //! Soundness: a mutable cell shares state across resumptions, but pure State gives
 //! each resumption an independent copy. They agree iff the var's continuation is
 //! never resumed more than once. So erasure is skipped entirely when the program
-//! contains any multishot handler (a clause that uses its `resume` more than
-//! once). The var's own single-resume parameter-passing clauses are not multishot.
+//! contains any handler that may be multishot: a clause whose `resume` is applied
+//! more than once, or escapes into a nested closure, constructor, tuple, or alias
+//! (whose application count no syntactic gate can see). The var's own
+//! parameter-passing clauses apply `resume` exactly once under the answer lambda,
+//! so they are not flagged.
+
+use std::collections::BTreeSet;
 
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
 use crate::fresh::Fresh;
@@ -43,6 +48,7 @@ pub(super) fn erase_local_vars(core: &Core) -> Core {
             .map(|f| CoreFn {
                 name: f.name,
                 params: f.params.clone(),
+                dict_arity: f.dict_arity,
                 body: er.erase(&f.body),
             })
             .collect(),
@@ -177,21 +183,96 @@ fn erase_ops(c: &Comp, get: Sym, set: Sym, cell: Sym) -> Comp {
     }
 }
 
-// Whether a handler clause anywhere resumes more than once (a multishot handler):
-// its `resume` variable occurs more than once in the clause body. The var/State
-// clauses use `resume` exactly once (`k(s)(s)` is a single `force k`), so they are
-// not flagged.
+// Whether a handler clause anywhere may resume more than once (a multishot
+// handler). The gate is structural, not a textual occurrence count: a `resume`
+// captured once into a closure that is later applied twice, stored in a
+// constructor and re-applied, or rebound to an alias is invoked more than once
+// while occurring exactly once, so counting occurrences alone fails open (the
+// erasure would install a shared cell where pure State demands per-resumption
+// copies). A clause is single-shot only when every occurrence of its `resume`
+// is the head of a direct `force` outside any nested thunk, and there is at
+// most one such head; any other occurrence is treated as an escape and flags
+// the handler multishot, falling back to the always-sound general lowering.
 fn has_multishot(c: &Comp) -> bool {
     let mut found = false;
     if let Comp::Handle { ops, .. } = c {
         for op in ops {
-            if var_uses(&op.body, op.resume) > 1 {
+            if multishot_clause(&op.body, op.resume) {
                 found = true;
             }
         }
     }
     each_subterm(c, &mut |sc| found |= has_multishot(sc));
     found
+}
+
+// The structural single-shot check for one clause. The parameter-passing answer
+// lambda a clause returns (`get(u,k) => \s -> k(s)(s)` reaches Core as
+// `Return(Thunk(Lam(..)))`) is peeled before scanning: the handler protocol
+// applies each answer function it threads exactly once, so a `resume` under
+// that wrapper alone is not a capture. Occurrences under any other thunk are:
+// nothing pins how many times such a closure is forced.
+fn multishot_clause(body: &Comp, k: Sym) -> bool {
+    let mut b = body;
+    loop {
+        match b {
+            Comp::Lam(_, inner) => b = inner,
+            Comp::Return(Value::Thunk(t)) => match t.as_ref() {
+                Comp::Lam(_, inner) => b = inner,
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+    let mut calls = 0usize;
+    let mut escapes = false;
+    let ks: BTreeSet<Sym> = std::iter::once(k).collect();
+    scan_resume(b, &ks, &mut calls, &mut escapes);
+    escapes || calls > 1
+}
+
+// Classify every occurrence of a resume alias in `c`: a `Force` head is a
+// direct call (counted); a pure rename `Bind(Return(alias), x, n)` extends the
+// alias set over `n` (elaboration ANF-normalizes `k(s)(s)` into exactly this
+// shape, one rename per application); any other value occurrence, including
+// inside a nested thunk, a constructor, or a tuple, is an escape. `each_value`
+// visits the values `c` holds directly and `val_uses` descends into them
+// (thunks included); sub-computations recurse. The two are disjoint, so no
+// occurrence is missed or double-counted.
+fn scan_resume(c: &Comp, ks: &BTreeSet<Sym>, calls: &mut usize, escapes: &mut bool) {
+    match c {
+        Comp::Force(Value::Var(y)) if ks.contains(y) => {
+            *calls += 1;
+            return;
+        }
+        Comp::Bind(m, x, n) => {
+            if let Comp::Return(Value::Var(y)) = m.as_ref() {
+                if ks.contains(y) {
+                    let mut inner = ks.clone();
+                    inner.insert(*x);
+                    scan_resume(n, &inner, calls, escapes);
+                    return;
+                }
+            }
+            scan_resume(m, ks, calls, escapes);
+            // `x` rebound to a non-alias shadows any alias of the same name.
+            if ks.contains(x) {
+                let mut inner = ks.clone();
+                inner.remove(x);
+                scan_resume(n, &inner, calls, escapes);
+            } else {
+                scan_resume(n, ks, calls, escapes);
+            }
+            return;
+        }
+        _ => {}
+    }
+    each_value(c, &mut |v| {
+        if ks.iter().any(|k| val_uses(v, *k) > 0) {
+            *escapes = true;
+        }
+    });
+    super::each_subcomp(c, &mut |sc| scan_resume(sc, ks, calls, escapes));
 }
 
 // Count occurrences of `Value::Var(x)` in a computation (including in thunks).

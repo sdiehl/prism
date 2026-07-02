@@ -9,11 +9,20 @@ pub const FN: &str = "fn";
 pub const FIP: &str = "fip";
 pub const FBIP: &str = "fbip";
 pub const REPLAYABLE: &str = "replayable";
+// `without alloc`: a postfix signature suffix certifying that a function and its
+// whole call tree allocate no fresh heap cell (the `alloc` capability revoked
+// for the function). Same check as `fbip`, spelled as a capability.
+pub const WITHOUT: &str = "without";
+pub const ALLOC: &str = "alloc";
 pub const PUB: &str = "pub";
 pub const IMPORT: &str = "import";
 pub const AS: &str = "as";
 pub const TYPE: &str = "type";
 pub const NEWTYPE: &str = "newtype";
+// Kind annotations on a type parameter (`type Cmd(a, e : Row)`). `Type` is the
+// default and prints bare; only `Row` is emitted.
+pub const KIND_ROW: &str = "Row";
+pub const KIND_TYPE: &str = "Type";
 pub const OPAQUE: &str = "opaque";
 pub const EFFECT: &str = "effect";
 pub const ERROR: &str = "error";

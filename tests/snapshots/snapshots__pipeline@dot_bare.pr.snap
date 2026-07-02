@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Point",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Point",

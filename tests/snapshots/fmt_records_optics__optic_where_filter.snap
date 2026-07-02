@@ -1,0 +1,9 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn hurt(army : Army) : Army =\\n\\\n     \\x20 { army | units.each.(hp where alive) ~ dec, turn = next }\\n\")"
+---
+fn hurt(army : Army) : Army =
+  { army
+  | units.each.(hp where alive) ~ dec
+  , turn = next
+  }

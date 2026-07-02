@@ -84,14 +84,10 @@ Program {
 }
 
 == types ==
-inc : (Int) -> Int
-main : () -> String
-
-== core (cbpv) ==
-Type Error: cannot show a function of type (Int) -> Int
-   ╭─[ <source>:3:18 ]
+Scope Error: in `main`: unbound variable 'show'
+   ╭─[ <source>:3:13 ]
    │
  3 │ fn main() = show(inc)
-   │                  ─┬─  
-   │                   ╰─── cannot show a function of type (Int) -> Int
+   │             ──┬─  
+   │               ╰─── in `main`: unbound variable 'show'
 ───╯

@@ -11,10 +11,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::slice;
 
+use super::rt;
 use crate::core::builtins::{builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
-use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, Value};
+use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, Value};
 use crate::names::{closure_cap, closure_rem};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
@@ -185,7 +186,6 @@ pub(super) trait Isa {
     fn call_ptr(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
     fn call_void(&self, b: &mut Buf, f: &str, args: &[String]);
     fn musttail_call(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
-    fn printf_float(&self, b: &mut Buf, v: &str);
     fn printf_str(&self, b: &mut Buf, p: &str);
     fn exit_with(&self, b: &mut Buf, v: &str);
     fn jump(&self, b: &mut Buf, l: &str);
@@ -288,14 +288,14 @@ impl<'a, I: Isa> Cg<'a, I> {
 
     fn alloc_obj(&mut self, tag: i64, fields: &[String]) -> String {
         let n = self.isa.const_int(&mut self.b, idx64(fields.len()));
-        let ptr = self.dst(|i, b, d| i.call_ptr(b, d, "prism_alloc", slice::from_ref(&n)));
+        let ptr = self.dst(|i, b, d| i.call_ptr(b, d, rt::ALLOC, slice::from_ref(&n)));
         self.fill_obj(&ptr, tag, fields)
     }
 
     fn reuse_obj(&mut self, token: &str, tag: i64, fields: &[String]) -> String {
         let n = self.isa.const_int(&mut self.b, idx64(fields.len()));
         let args = [token.to_string(), n];
-        let ptr = self.dst(|i, b, d| i.call_ptr(b, d, "prism_reuse_alloc", &args));
+        let ptr = self.dst(|i, b, d| i.call_ptr(b, d, rt::REUSE_ALLOC, &args));
         self.fill_obj(&ptr, tag, fields)
     }
 
@@ -342,15 +342,15 @@ impl<'a, I: Isa> Cg<'a, I> {
 
     fn rc_dec(&mut self, v: &str) {
         self.isa
-            .call_void(&mut self.b, "prism_rc_dec", &[v.to_string()]);
+            .call_void(&mut self.b, rt::RC_DEC, &[v.to_string()]);
     }
 
     fn unbox(&mut self, p: &str) -> String {
-        self.dst(|i, b, d| i.call(b, d, "prism_unbox", &[p.to_string()]))
+        self.dst(|i, b, d| i.call(b, d, rt::UNBOX, &[p.to_string()]))
     }
 
     fn box_i64(&mut self, payload: &str) -> String {
-        self.dst(|i, b, d| i.call(b, d, "prism_box", &[payload.to_string()]))
+        self.dst(|i, b, d| i.call(b, d, rt::BOX, &[payload.to_string()]))
     }
 
     fn f_in(&mut self, v: &str) -> String {
@@ -412,7 +412,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 // Count the EOp cell each `do op` builds (stderr-only under
                 // PRISM_EFFOP_STATS, so stdout is untouched).
                 if *name == EOP {
-                    self.isa.call_void(&mut self.b, "prism_effop_alloc", &[]);
+                    self.isa.call_void(&mut self.b, rt::EFFOP_ALLOC, &[]);
                 }
                 Ok(obj)
             }
@@ -455,32 +455,60 @@ impl<'a, I: Isa> Cg<'a, I> {
                     self.alloc_closure(&temp_regs, &rem_names, &body)
                 }
             }
-            Comp::Print(v) => {
-                let r = self.value(regs, v)?;
-                self.isa
-                    .call_void(&mut self.b, "prism_print_int", slice::from_ref(&r));
-                self.rc_dec(&r);
-                Ok(self.isa.const_int(&mut self.b, 0))
-            }
-            Comp::PrintF(v) => {
-                let r = self.value(regs, v)?;
-                let fd = self.f_in(&r);
-                self.isa.printf_float(&mut self.b, &fd);
-                self.rc_dec(&r);
-                Ok(self.isa.const_int(&mut self.b, 0))
-            }
-            Comp::PrintS(v) => {
-                let r = self.value(regs, v)?;
-                let cp = self.dst(|i, b, d| i.inttoptr(b, d, &r));
-                let bp = self.dst(|i, b, d| i.gep(b, d, &cp, HDR_BYTES));
-                self.isa.printf_str(&mut self.b, &bp);
-                self.rc_dec(&r);
-                Ok(self.isa.const_int(&mut self.b, 0))
-            }
+            Comp::Io(op, args) => match op {
+                IoOp::Print => {
+                    let r = self.value(regs, &args[0])?;
+                    self.isa
+                        .call_void(&mut self.b, rt::PRINT_INT, slice::from_ref(&r));
+                    self.rc_dec(&r);
+                    Ok(self.isa.const_int(&mut self.b, 0))
+                }
+                IoOp::PrintF => {
+                    let r = self.value(regs, &args[0])?;
+                    // Pass the raw double bits; the runtime formats them with the same
+                    // shortest-round-trip layout as `show_float` (not C `%g`).
+                    let bits = self.unbox(&r);
+                    self.isa
+                        .call_void(&mut self.b, rt::PRINT_FLOAT, slice::from_ref(&bits));
+                    self.rc_dec(&r);
+                    Ok(self.isa.const_int(&mut self.b, 0))
+                }
+                IoOp::PrintS => {
+                    let r = self.value(regs, &args[0])?;
+                    let cp = self.dst(|i, b, d| i.inttoptr(b, d, &r));
+                    let bp = self.dst(|i, b, d| i.gep(b, d, &cp, HDR_BYTES));
+                    self.isa.printf_str(&mut self.b, &bp);
+                    self.rc_dec(&r);
+                    Ok(self.isa.const_int(&mut self.b, 0))
+                }
+                IoOp::PrintNl => {
+                    self.isa.call_void(&mut self.b, rt::PRINT_NL, &[]);
+                    Ok(self.isa.const_int(&mut self.b, 0))
+                }
+                IoOp::ReadInt => {
+                    // The runtime returns an already-encoded Int (a tagged
+                    // immediate, or a bignum cell when the value exceeds the
+                    // 63-bit immediate range), so no retag here: shifting a
+                    // full-width i64 would silently drop bit 62.
+                    Ok(self.dst(|i, b, d| i.call(b, d, rt::READ_INT, &[])))
+                }
+                IoOp::ReadLine => Ok(self.dst(|i, b, d| i.call(b, d, rt::READ_LINE, &[]))),
+                IoOp::Rand => {
+                    let t = self.dst(|i, b, d| i.call(b, d, rt::RAND, &[]));
+                    Ok(self.retag(&t))
+                }
+                IoOp::Srand => {
+                    let r = self.value(regs, &args[0])?;
+                    let ut = self.untag(&r);
+                    self.isa
+                        .call_void(&mut self.b, rt::SRAND, slice::from_ref(&ut));
+                    Ok(self.isa.const_int(&mut self.b, 0))
+                }
+            },
             Comp::Error(v) => {
                 let r = self.value(regs, v)?;
                 if matches!(v, Value::Str(_)) {
-                    self.isa.call_void(&mut self.b, "prism_fatal", &[r]);
+                    self.isa.call_void(&mut self.b, rt::FATAL, &[r]);
                 } else {
                     let code = self.untag(&r);
                     self.isa.exit_with(&mut self.b, &code);
@@ -488,26 +516,6 @@ impl<'a, I: Isa> Cg<'a, I> {
                 Ok(self.isa.const_int(&mut self.b, 0))
             }
             Comp::If(v, t, e) => self.lower_if(regs, v, t, e, false),
-            Comp::PrintNl => {
-                self.isa.call_void(&mut self.b, "prism_print_nl", &[]);
-                Ok(self.isa.const_int(&mut self.b, 0))
-            }
-            Comp::ReadInt => {
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_prim_read_int", &[]));
-                Ok(self.retag(&t))
-            }
-            Comp::ReadLine => Ok(self.dst(|i, b, d| i.call(b, d, "prism_prim_read_line", &[]))),
-            Comp::Rand => {
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_prim_rand", &[]));
-                Ok(self.retag(&t))
-            }
-            Comp::Srand(v) => {
-                let r = self.value(regs, v)?;
-                let ut = self.untag(&r);
-                self.isa
-                    .call_void(&mut self.b, "prism_srand", slice::from_ref(&ut));
-                Ok(self.isa.const_int(&mut self.b, 0))
-            }
             Comp::Lam(..) => Err("bare Lam in lower; should be inside Thunk".into()),
             Comp::App(f_comp, args) => {
                 let clos = self.lower(regs, f_comp)?;
@@ -611,17 +619,17 @@ impl<'a, I: Isa> Cg<'a, I> {
             }
             Comp::Dup(v) => {
                 let r = self.value(regs, v)?;
-                self.isa.call_void(&mut self.b, "prism_rc_inc", &[r]);
+                self.isa.call_void(&mut self.b, rt::RC_INC, &[r]);
                 Ok(self.isa.fresh_zero(&mut self.b))
             }
             Comp::Drop(v) => {
                 let r = self.value(regs, v)?;
-                self.isa.call_void(&mut self.b, "prism_rc_dec", &[r]);
+                self.isa.call_void(&mut self.b, rt::RC_DEC, &[r]);
                 Ok(self.isa.fresh_zero(&mut self.b))
             }
             Comp::WithReuse { token, freed, body } => {
                 let r = self.value(regs, freed)?;
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let t = self.dst(|i, b, d| i.call(b, d, rt::REUSE_TOKEN, slice::from_ref(&r)));
                 let mut r2 = regs.clone();
                 r2.insert(*token, t);
                 self.lower(&r2, body)
@@ -642,11 +650,11 @@ impl<'a, I: Isa> Cg<'a, I> {
             // stored/initial value moves into the cell, so it is not dropped here.
             Comp::RefNew(v) => {
                 let r = self.value(regs, v)?;
-                Ok(self.dst(|i, b, d| i.call(b, d, "prism_ref_new", slice::from_ref(&r))))
+                Ok(self.dst(|i, b, d| i.call(b, d, rt::REF_NEW, slice::from_ref(&r))))
             }
             Comp::RefGet(c) => {
                 let cv = self.value(regs, c)?;
-                let r = self.dst(|i, b, d| i.call(b, d, "prism_ref_get", slice::from_ref(&cv)));
+                let r = self.dst(|i, b, d| i.call(b, d, rt::REF_GET, slice::from_ref(&cv)));
                 self.rc_dec(&cv);
                 Ok(r)
             }
@@ -654,7 +662,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 let cv = self.value(regs, c)?;
                 let rv = self.value(regs, v)?;
                 self.isa
-                    .call_void(&mut self.b, "prism_ref_set", &[cv.clone(), rv]);
+                    .call_void(&mut self.b, rt::REF_SET, &[cv.clone(), rv]);
                 self.rc_dec(&cv);
                 Ok(self.isa.fresh_zero(&mut self.b))
             }
@@ -686,7 +694,7 @@ impl<'a, I: Isa> Cg<'a, I> {
             // instruction sequence the threaded `bind (reuse_token ..)` emitted.
             Comp::WithReuse { token, freed, body } => {
                 let r = self.value(regs, freed)?;
-                let t = self.dst(|i, b, d| i.call(b, d, "prism_reuse_token", slice::from_ref(&r)));
+                let t = self.dst(|i, b, d| i.call(b, d, rt::REUSE_TOKEN, slice::from_ref(&r)));
                 let mut r2 = regs.clone();
                 r2.insert(*token, t);
                 self.lower_tail(&r2, body)
@@ -784,11 +792,9 @@ impl<'a, I: Isa> Cg<'a, I> {
                             .cloned()
                             .ok_or_else(|| format!("codegen: unbound {tok}"))?;
                         let cargs = [tr, n];
-                        self.dst(|i, b, d| i.call_ptr(b, d, "prism_reuse_alloc", &cargs))
+                        self.dst(|i, b, d| i.call_ptr(b, d, rt::REUSE_ALLOC, &cargs))
                     }
-                    None => {
-                        self.dst(|i, b, d| i.call_ptr(b, d, "prism_alloc", slice::from_ref(&n)))
-                    }
+                    None => self.dst(|i, b, d| i.call_ptr(b, d, rt::ALLOC, slice::from_ref(&n))),
                 };
                 let cell = self.fill_obj(&ptr, *tag, &fvs);
                 let off = HDR_BYTES + idx64(*hole) * WORD_BYTES;
@@ -959,9 +965,9 @@ impl<'a, I: Isa> Cg<'a, I> {
             }
             CoreOp::Mul | CoreOp::Div | CoreOp::Rem => {
                 let sym = match op {
-                    CoreOp::Mul => "prism_rt_int_mul",
-                    CoreOp::Div => "prism_rt_int_div",
-                    _ => "prism_rt_int_rem",
+                    CoreOp::Mul => rt::INT_MUL,
+                    CoreOp::Div => rt::INT_DIV,
+                    _ => rt::INT_REM,
                 };
                 self.used_rt.insert(sym.into(), 2);
                 let args = [a.to_string(), b.to_string()];
@@ -975,9 +981,9 @@ impl<'a, I: Isa> Cg<'a, I> {
         let merge = self.b.label();
         if matches!(op, CoreOp::Add | CoreOp::Sub) {
             let (instr, sym) = if op == CoreOp::Add {
-                (IntOp::Add, "prism_rt_int_add")
+                (IntOp::Add, rt::INT_ADD)
             } else {
-                (IntOp::Sub, "prism_rt_int_sub")
+                (IntOp::Sub, rt::INT_SUB)
             };
             self.used_rt.insert(sym.into(), 2);
             let fastok = self.b.label();
@@ -1014,7 +1020,7 @@ impl<'a, I: Isa> Cg<'a, I> {
             _ => "sge",
         };
         // Tagging is order-preserving, so immediates compare as tagged words.
-        self.used_rt.insert("prism_rt_int_cmp".into(), 2);
+        self.used_rt.insert(rt::INT_CMP.into(), 2);
         self.isa.cond_br(&mut self.b, &cond, &fast, &slow);
         self.isa.open_block(&mut self.b, &fast);
         let c1 = self.dst(|i, bf, d| i.icmp(bf, d, pred, a, b));
@@ -1024,7 +1030,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.isa.jump_merge(&mut self.b, &merge, &rf);
         self.isa.open_block(&mut self.b, &slow);
         let args = [a.to_string(), b.to_string()];
-        let c = self.dst(|i, bf, d| i.call(bf, d, "prism_rt_int_cmp", &args));
+        let c = self.dst(|i, bf, d| i.call(bf, d, rt::INT_CMP, &args));
         let zero = self.isa.const_int(&mut self.b, 0);
         let c2 = self.dst(|i, bf, d| i.icmp(bf, d, pred, &c, &zero));
         let z2 = self.dst(|i, bf, d| i.zext(bf, d, &c2));
@@ -1073,7 +1079,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         // under PRISM_DRIVE_STATS, so stdout is untouched). This is the counter
         // whose asymptotics track the trampoline's actual work.
         if crate::core::effect_lower::is_free_monad_driver(f.name.as_str()) {
-            self.isa.call_void(&mut self.b, "prism_drive_step", &[]);
+            self.isa.call_void(&mut self.b, rt::DRIVE_STEP, &[]);
         }
         self.lower_tail(&regs, &body)?;
         Ok(format!("{header}{}{}", self.b.body, self.isa.fn_close()))
@@ -1163,7 +1169,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 let captured = free_vars.len();
                 for r in all_params.iter().take(captured) {
                     self.isa
-                        .call_void(&mut self.b, "prism_rc_inc", slice::from_ref(r));
+                        .call_void(&mut self.b, rt::RC_INC, slice::from_ref(r));
                 }
                 let r =
                     self.dst(|i, b, d| i.call(b, d, &format!("prism_lam_{target}"), &all_params));
@@ -1262,7 +1268,7 @@ impl<I: Isa> Cg<'_, I> {
         self.isa.load(&mut b, "%_tag", "%_tp");
 
         if lams.is_empty() {
-            self.isa.call_void(&mut b, "prism_apply_error", &[]);
+            self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
             self.isa.unreachable(&mut b);
             return format!("{header}{}{}", b.body, self.isa.fn_close());
         }
@@ -1273,7 +1279,7 @@ impl<I: Isa> Cg<'_, I> {
             .collect();
         self.isa.switch(&mut b, "%_tag", "_dead", &cases);
         self.isa.open_block(&mut b, "_dead");
-        self.isa.call_void(&mut b, "prism_apply_error", &[]);
+        self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
         self.isa.unreachable(&mut b);
 
         let mut preds: Vec<(String, String)> = Vec::new();
@@ -1310,14 +1316,13 @@ impl<I: Isa> Cg<'_, I> {
                     let adapter = self.curry_adapter(tag, fvs, n);
                     let mut fields = captured;
                     for fv in &fields {
-                        self.isa
-                            .call_void(&mut b, "prism_rc_inc", slice::from_ref(fv));
+                        self.isa.call_void(&mut b, rt::RC_INC, slice::from_ref(fv));
                     }
                     fields.extend(args);
                     let nf = self.isa.const_int(&mut b, idx64(fields.len()));
                     let cp = format!("%_ac{tag}");
                     self.isa
-                        .call_ptr(&mut b, &cp, "prism_alloc", slice::from_ref(&nf));
+                        .call_ptr(&mut b, &cp, rt::ALLOC, slice::from_ref(&nf));
                     let tp = format!("%_atp{tag}");
                     self.isa.gep(&mut b, &tp, &cp, TAG_OFF);
                     let tv = self.isa.const_int(&mut b, idx64(adapter));
@@ -1331,22 +1336,24 @@ impl<I: Isa> Cg<'_, I> {
                     self.isa.ptrtoint(&mut b, &r, &cp);
                 }
                 Ordering::Less => {
-                    // Over-application: call with the first m args for the next
-                    // closure, then apply the remaining n-m to it.
-                    let mut call_args = captured;
-                    call_args.extend(args.iter().take(m).cloned());
-                    let inter = format!("%_i{tag}");
-                    self.isa
-                        .call(&mut b, &inter, &format!("prism_lam_{tag}"), &call_args);
-                    let mut more = vec![inter.clone()];
-                    more.extend(args.iter().skip(m).cloned());
-                    self.isa
-                        .call(&mut b, &r, &format!("prism_apply_{}", n - m), &more);
-                    self.isa.call_void(&mut b, "prism_rc_dec", &[inter]);
+                    // Over-application: ANF saturates every call, so a closure
+                    // receiving more args than its arity is a lowering bug. The
+                    // interpreter traps this shape (`eval`, the differential
+                    // oracle); trap identically here rather than implement the
+                    // extra application, which would silently fork native
+                    // semantics from the oracle on a shape neither should see.
+                    self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
+                    self.isa.unreachable(&mut b);
+                    continue;
                 }
             }
             self.isa.jump_merge(&mut b, "_merge", &r);
             preds.push((r, format!("_lam{tag}")));
+        }
+        // Every arm may have trapped (each lambda's arity below n): the merge
+        // block then has no predecessors and must not be emitted.
+        if preds.is_empty() {
+            return format!("{header}{}{}", b.body, self.isa.fn_close());
         }
         self.isa.open_merge(&mut b, "_merge", "%_result", &preds);
         self.isa.ret(&mut b, "%_result");
@@ -1445,7 +1452,7 @@ pub(super) fn escape_str(s: &str) -> String {
         match b {
             b'\\' => escaped.push_str("\\5C"),
             b'"' => escaped.push_str("\\22"),
-            0x20..=0x7E => escaped.push(b as char),
+            crate::ASCII_PRINTABLE_LO..=crate::ASCII_PRINTABLE_HI => escaped.push(b as char),
             _ => write!(escaped, "\\{b:02X}").unwrap(),
         }
     }

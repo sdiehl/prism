@@ -69,9 +69,199 @@
   color: #e88;
 }
 
-/* Always show the code-block copy button, not only on row hover, so it is
-   discoverable. mdbook hides `pre > .buttons` until `pre:hover`. */
-pre > .buttons {
-  visibility: visible;
+/* A ghosted Run button: the example compiles but is not run inline. */
+.prism-run-btn.prism-run-ghost {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #3a3f45;
+  border-color: #4a5058;
+}
+
+/* Status pills: a small icon-only badge, one soft pastel per category, with the
+   description on hover (title tooltip). Same size and shape for every state so
+   the row of blocks reads consistently. */
+.prism-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: help;
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 600;
+}
+
+/* Instant styled tooltip above the pill on hover (the native `title` delay is
+   too long and easy to miss). */
+.prism-chip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #12161c;
+  color: #d6d8e0;
+  border: 1px solid #333a44;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 30;
+}
+/* A small arrow joining the bubble to the pill. */
+.prism-chip::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #333a44;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 30;
+}
+.prism-chip:hover::after,
+.prism-chip:hover::before {
   opacity: 1;
+}
+.prism-chip .prism-run-ico {
+  flex: 0 0 auto;
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+.prism-chip-check {
+  color: #9edcbf;
+  background: rgba(122, 197, 164, 0.16);
+  border-color: rgba(122, 197, 164, 0.34);
+}
+.prism-chip-cfail {
+  color: #e8cf99;
+  background: rgba(219, 189, 122, 0.16);
+  border-color: rgba(219, 189, 122, 0.34);
+}
+.prism-chip-ignore {
+  color: #b6bcc4;
+  background: rgba(160, 168, 178, 0.14);
+  border-color: rgba(160, 168, 178, 0.3);
+}
+.prism-chip-err {
+  color: #eaa6a0;
+  background: rgba(216, 138, 130, 0.16);
+  border-color: rgba(216, 138, 130, 0.34);
+}
+.prism-chip-sig {
+  color: #c7bcef;
+  background: rgba(174, 160, 224, 0.16);
+  border-color: rgba(174, 160, 224, 0.34);
+}
+
+/* The content-hash pill: a subdued, monospace sibling of the Σ badge. Auto width
+   for the short digest, quiet grey so it reads as metadata, not a status. */
+.prism-hash {
+  width: auto;
+  padding: 0 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #9aa0ab;
+  background: rgba(160, 168, 178, 0.1);
+  border-color: rgba(160, 168, 178, 0.22);
+}
+
+/* Copyable elements (hash pills, the Merkle root) invite a click and confirm
+   with a brief "Copied" bubble, reusing the chip tooltip machinery. */
+.prism-copyable {
+  cursor: pointer;
+}
+.prism-hash:hover {
+  color: #c2c7d0;
+  border-color: rgba(160, 168, 178, 0.4);
+}
+.prism-chip.prism-copied::after,
+.prism-chip.prism-copied::before {
+  opacity: 1;
+}
+
+/* The Merkle-root fingerprint card on the stdlib index: a quiet framed block with
+   the root as the headline, scheme and compiler version around it. Theme-neutral
+   (currentColor + translucent fills), so it reads on light and dark. */
+.stdlib-fingerprint {
+  margin: 1.3rem 0 1.7rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid rgba(160, 168, 178, 0.28);
+  border-radius: 10px;
+  background: rgba(160, 168, 178, 0.06);
+}
+.stdlib-fp-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.stdlib-fp-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  color: #9aa0ab;
+  background: rgba(160, 168, 178, 0.12);
+  border: 1px solid rgba(160, 168, 178, 0.24);
+}
+.stdlib-fp-root {
+  position: relative;
+  display: inline-block;
+  margin: 0.55rem 0 0.5rem;
+  padding: 0.2rem 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  word-break: break-all;
+  cursor: pointer;
+  color: inherit;
+  background: rgba(174, 160, 224, 0.16);
+  border: 1px solid rgba(174, 160, 224, 0.32);
+  border-radius: 6px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.stdlib-fp-root:hover {
+  background: rgba(174, 160, 224, 0.24);
+  border-color: rgba(174, 160, 224, 0.5);
+}
+.stdlib-fp-root.prism-copied::after {
+  content: "Copied";
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 1.2rem;
+  background: #12161c;
+  color: #d6d8e0;
+  border: 1px solid #333a44;
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.8rem;
+  font-family: system-ui, sans-serif;
+  white-space: nowrap;
+}
+.stdlib-fp-foot {
+  font-size: 0.85rem;
+  opacity: 0.68;
 }

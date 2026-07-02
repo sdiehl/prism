@@ -1,37 +1,45 @@
--- Singly-linked list operations. The `List(a)` type and its `Nil`/`Cons`
--- constructors are wired into the language (list literals, deriving); this module
--- is the function surface over them. The prelude opens it, so these names are in
--- scope unqualified everywhere; a project module reaches them with `import
--- Data.List`.
+-- | Singly-linked list operations.
+--
+-- The `List(a)` type and its `Nil`/`Cons` constructors are wired into the
+-- language (list literals, deriving); this module is the function surface over
+-- them. The prelude opens it, so these names are in scope unqualified
+-- everywhere; a project module reaches them with `import Data.List`.
 
+-- | The one-element list `Cons(x, Nil)`.
 pub fn singleton(x) = Cons(x, Nil)
 
+-- | True for the empty list.
 pub fn is_nil(xs) =
   match xs of
     Nil => true
     Cons(x, rest) => false
 
+-- | The first element as `Some`, or `None` when the list is empty.
 pub fn head(xs) =
   match xs of
     Nil => None
     Cons(x, _) => Some(x)
 
+-- | Everything after the first element (`Nil` for the empty list).
 pub fn tail(xs) =
   match xs of
     Nil => Nil
     Cons(_, rest) => rest
 
+-- | The final element as `Some`, or `None` when the list is empty.
 pub fn last(xs) =
   match xs of
     Nil => None
     Cons(x, Nil) => Some(x)
     Cons(_, rest) => last(rest)
 
+-- | The number of elements.
 pub fn length(xs) =
   match xs of
     Nil => 0
     Cons(x, rest) => 1 + length(rest)
 
+-- | The element at index `n` (zero-based) as `Some`, or `None` if out of range.
 pub fn nth(n, xs) =
   if n == 0 then
     head(xs)
@@ -40,6 +48,7 @@ pub fn nth(n, xs) =
       Nil => None
       Cons(_, rest) => nth(n - 1, rest)
 
+-- | The first `n` elements (fewer if the list is shorter).
 pub fn take(n, xs) =
   if n == 0 then
     Nil
@@ -48,6 +57,7 @@ pub fn take(n, xs) =
       Nil => Nil
       Cons(x, rest) => Cons(x, take(n - 1, rest))
 
+-- | The list with its first `n` elements removed.
 pub fn drop(n, xs) =
   if n == 0 then
     xs
@@ -56,6 +66,7 @@ pub fn drop(n, xs) =
       Nil => Nil
       Cons(_, rest) => drop(n - 1, rest)
 
+-- | The longest prefix of elements satisfying `p`.
 pub fn take_while(p, xs) =
   match xs of
     Nil => Nil
@@ -65,6 +76,7 @@ pub fn take_while(p, xs) =
       else
         Nil
 
+-- | The suffix remaining after `take_while(p, xs)`.
 pub fn drop_while(p, xs) =
   match xs of
     Nil => Nil
@@ -74,13 +86,24 @@ pub fn drop_while(p, xs) =
       else
         xs
 
+-- | `(take(n, xs), drop(n, xs))` in one pass of intent.
 pub fn split_at(n, xs) = (take(n, xs), drop(n, xs))
 
+-- | Apply `f` to every element, preserving order and length.
+--
+-- ```prism
+-- map(\(x) -> x + 1, [1, 2, 3])
+-- ```
 pub fn map(f, xs) =
   match xs of
     Nil => Nil
     Cons(x, rest) => Cons(f(x), map(f, rest))
 
+-- | Keep the elements satisfying `p`.
+--
+-- ```prism
+-- filter(\(x) -> x > 1, [1, 2, 3])
+-- ```
 pub fn filter(p, xs) =
   match xs of
     Nil => Nil
@@ -90,27 +113,38 @@ pub fn filter(p, xs) =
       else
         filter(p, rest)
 
+-- | Right fold: `f(x0, f(x1, ... f(xn, z)))`.
 pub fn foldr(f, z, xs) =
   match xs of
     Nil => z
     Cons(x, rest) => f(x, foldr(f, z, rest))
 
+-- | Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
+--
+-- ```prism
+-- foldl(\(a, b) -> a + b, 0, [1, 2, 3])
+-- ```
 pub fn foldl(f, z, xs) =
   match xs of
     Nil => z
     Cons(x, rest) => foldl(f, f(z, x), rest)
 
+-- | Concatenate two lists.
 pub fn append(xs, ys) =
   match xs of
     Nil => ys
     Cons(x, rest) => Cons(x, append(rest, ys))
 
+-- | The list in reverse order.
 pub fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
 
+-- | Concatenate a list of lists.
 pub fn flatten(xss) = foldr(append, Nil, xss)
 
+-- | Map `f` over the list and concatenate the resulting lists.
 pub fn concat_map(f, xs) = flatten(map(f, xs))
 
+-- | Combine two lists elementwise with `f`, stopping at the shorter length.
 pub fn zip_with(f, xs, ys) =
   match xs of
     Nil => Nil
@@ -119,11 +153,14 @@ pub fn zip_with(f, xs, ys) =
         Nil => Nil
         Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
 
+-- | Pair up two lists elementwise, stopping at the shorter length.
 pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
 
+-- | Split a list of pairs into a pair of lists.
 pub fn unzip(ps) =
   (map(\(p) -> match p of { (x, _) => x }, ps), map(\(p) -> match p of { (_, y) => y }, ps))
 
+-- | True when every element satisfies `p` (vacuously true for `Nil`).
 pub fn all(p, xs) =
   match xs of
     Nil => true
@@ -133,6 +170,7 @@ pub fn all(p, xs) =
       else
         false
 
+-- | True when some element satisfies `p`.
 pub fn any(p, xs) =
   match xs of
     Nil => false
@@ -142,8 +180,10 @@ pub fn any(p, xs) =
       else
         any(p, rest)
 
+-- | The number of elements satisfying `p`.
 pub fn count(p, xs) = length(filter(p, xs))
 
+-- | The first element satisfying `p` as `Some`, or `None`.
 pub fn find(p, xs) =
   match xs of
     Nil => None
@@ -153,6 +193,7 @@ pub fn find(p, xs) =
       else
         find(p, rest)
 
+-- | Helper for `position`: search from index `n`.
 pub fn position_go(p, n, xs) =
   match xs of
     Nil => None
@@ -162,36 +203,49 @@ pub fn position_go(p, n, xs) =
       else
         position_go(p, n + 1, rest)
 
+-- | The index of the first element satisfying `p` as `Some`, or `None`.
 pub fn position(p, xs) = position_go(p, 0, xs)
 
+-- | The sum of a list of numbers (`0` for `Nil`).
 pub fn sum(xs) = foldl(\(a, b) -> a + b, 0, xs)
 
+-- | The product of a list of numbers (`1` for `Nil`).
 pub fn product(xs) = foldl(\(a, b) -> a * b, 1, xs)
 
+-- | The greatest element as `Some`, or `None` for the empty list.
 pub fn maximum(xs) =
   match xs of
     Nil => None
     Cons(x, rest) => Some(foldl(max, x, rest))
 
+-- | The least element as `Some`, or `None` for the empty list.
 pub fn minimum(xs) =
   match xs of
     Nil => None
     Cons(x, rest) => Some(foldl(min, x, rest))
 
+-- | A list of `n` copies of `x`.
 pub fn replicate(n, x) =
   if n == 0 then
     Nil
   else
     Cons(x, replicate(n - 1, x))
 
+-- | The ascending list `[lo, lo+1, ..., hi-1]` (empty when `lo >= hi`).
+--
+-- ```prism
+-- range(0, 5)
+-- ```
 pub fn range(lo, hi) =
   if lo >= hi then
     Nil
   else
     Cons(lo, range(lo + 1, hi))
 
+-- | The list `[f(0), f(1), ..., f(n-1)]`.
 pub fn tabulate(n, f) = map(f, range(0, n))
 
+-- | Insert `x` into an already-ascending list, keeping it sorted.
 pub fn insert_sorted(x, xs) =
   match xs of
     Nil => Cons(x, Nil)
@@ -201,20 +255,25 @@ pub fn insert_sorted(x, xs) =
       else
         Cons(y, insert_sorted(x, rest))
 
+-- | The first element as `Some`, or `None` (an `Option` view of the head).
 pub fn list_to_option(xs) =
   match xs of
     Nil => None
     Cons(x, _) => Some(x)
 
+-- | Split into `(matching, non-matching)` by predicate `p`.
 pub fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
 
+-- | Break the list into consecutive chunks of up to `n` elements.
 pub fn chunks_of(n, xs) =
   if is_nil(xs) then
     Nil
   else
     Cons(take(n, xs), chunks_of(n, drop(n, xs)))
 
+-- | Left scan: the running accumulators of `foldl`, starting from `z`.
 pub fn scan_left(f, z, xs) =
   Cons(z, match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) })
 
+-- | Applicative apply for lists: every function in `fs` applied to every `x`.
 pub fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)

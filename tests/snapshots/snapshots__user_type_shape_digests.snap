@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: "lines.join(\"\\n\")"
+---
+Color  03439be58b783f6e
+Log  7a1fcf934d023539
+Point  b7c4351fef1a0897
+Range  e7948a2362d394e8
+Shape  536f8856e2045ee1
+Tree  c304902309be4a4e

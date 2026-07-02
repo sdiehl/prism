@@ -112,6 +112,7 @@ impl Lowerer {
                 CoreFn {
                     name: f.name,
                     params,
+                    dict_arity: f.dict_arity,
                     body: self.thread_st(&f.body, &evs, &loc, st)?,
                 }
             } else {
@@ -119,6 +120,7 @@ impl Lowerer {
                 CoreFn {
                     name: f.name,
                     params: f.params.clone(),
+                    dict_arity: f.dict_arity,
                     body: self.rewrite(&f.body, &loc, &evs)?,
                 }
             };

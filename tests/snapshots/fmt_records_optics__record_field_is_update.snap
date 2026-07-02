@@ -1,0 +1,9 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn f(v : Vec2) : Player = Player { name = q, pos = Vec2 { ..v, x = 9 } }\\n\")"
+---
+fn f(v : Vec2) : Player =
+  Player {
+    name = q,
+    pos = Vec2 { ..v, x = 9 }
+  }

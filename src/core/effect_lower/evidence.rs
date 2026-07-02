@@ -59,6 +59,7 @@ impl Lowerer {
             fns.push(CoreFn {
                 name: f.name,
                 params,
+                dict_arity: f.dict_arity,
                 body: self.thread_ev(&f.body, &env, &loc)?,
             });
         }

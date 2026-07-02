@@ -3,9 +3,9 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/optics_index.pr
 ---
-[Vec2(99, 2), Vec2(3, 4)]
-[Vec2(1, 2), Vec2(3, 104)]
-[Vec2(7, 2), Vec2(8, 4)]
-World([Vec2(0, 2), Vec2(3, 4)], 5)
-[Vec2(1, 2), Vec2(3, 4)]
+[Vec2 { x = 99, y = 2 }, Vec2 { x = 3, y = 4 }]
+[Vec2 { x = 1, y = 2 }, Vec2 { x = 3, y = 104 }]
+[Vec2 { x = 7, y = 2 }, Vec2 { x = 8, y = 4 }]
+World { party = [Vec2 { x = 0, y = 2 }, Vec2 { x = 3, y = 4 }], turn = 5 }
+[Vec2 { x = 1, y = 2 }, Vec2 { x = 3, y = 4 }]
 => ()

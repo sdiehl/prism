@@ -1,0 +1,56 @@
+effect Gen {
+  ctl yield(Int) : Unit
+}
+
+-- Same-fringe, the classic coroutine problem: do two differently shaped trees
+-- have the same left-to-right sequence of leaves? Flattening both throws away
+-- the point; the elegant answer pulls one leaf at a time and stops at the first
+-- mismatch. `to_stream` reifies a `yield`-producer into a lazy step: resuming
+-- the captured continuation advances to the next leaf, so the two trees walk in
+-- lockstep with no intermediate lists.
+--
+-- Expected output:
+--   true
+--   false
+--   false
+
+type Tree = Leaf(Int) | Branch(Tree, Tree)
+
+type Step = Done | More(Int, () -> Step)
+
+fn leaves(t) : !{Gen} Unit =
+  match t of
+    Leaf(n) => yield(n)
+    Branch(l, r) =>
+      leaves(l)
+      leaves(r)
+
+-- Resume-on-demand: the continuation `k` becomes the rest of the stream.
+fn to_stream(thunk) =
+  handle thunk() with
+    yield(v, k) => More(v, \() -> k(()))
+    return r => Done
+
+fn same(s1, s2) =
+  match (s1, s2) of
+    (Done, Done) => true
+    (More(x, k1), More(y, k2)) =>
+      if x == y then
+        same(k1(), k2())
+      else
+        false
+    _ => false
+
+fn same_fringe(t1, t2) =
+  same(to_stream(\() -> leaves(t1)), to_stream(\() -> leaves(t2)))
+
+fn main() =
+  -- ((1 2) 3) and (1 (2 3)): same fringe, different shape.
+  let a = Branch(Branch(Leaf(1), Leaf(2)), Leaf(3))
+  let b = Branch(Leaf(1), Branch(Leaf(2), Leaf(3)))
+  println(same_fringe(a, b))
+  -- Differs at the second leaf, so the walk stops there.
+  let c = Branch(Leaf(1), Branch(Leaf(9), Leaf(3)))
+  println(same_fringe(a, c))
+  -- A shorter fringe.
+  println(same_fringe(a, Branch(Leaf(1), Leaf(2))))

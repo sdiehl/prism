@@ -18,11 +18,11 @@ end
 local cmd = vim.cmd
 
 -- Declarations and binding forms.
-cmd([[syntax keyword prismKeyword let var in fun val return do borrow with handler given where as forall deriving of handle]])
+cmd([[syntax keyword prismKeyword let var in fun val return do borrow with handler given where as forall deriving of handle using]])
 cmd([[syntax keyword prismInclude import pub]])
-cmd([[syntax keyword prismStructure fn fip fbip type newtype opaque alias effect class instance pattern]])
+cmd([[syntax keyword prismStructure fn fip fbip replayable type newtype opaque alias effect class instance canonical pattern]])
 cmd([[syntax keyword prismConditional if then else elif match]])
-cmd([[syntax keyword prismRepeat for]])
+cmd([[syntax keyword prismRepeat for while loop break continue]])
 -- Effect control and failure forms.
 cmd([[syntax keyword prismException throw try catch transact mask final ctl error]])
 cmd([[syntax keyword prismBoolean true false]])
@@ -30,7 +30,7 @@ cmd([[syntax keyword prismBoolean true false]])
 -- Builtin scalar types and effect/handler verbs that are ordinary identifiers
 -- in the lexer but read as language vocabulary.
 cmd([[syntax keyword prismType Int Bool Unit Float Char String I64 U64]])
-cmd([[syntax keyword prismBuiltin resume emit perform fail guard succeeds optional default print println eprint eprintln]])
+cmd([[syntax keyword prismBuiltin resume emit perform fail guard succeeds optional default print println eprint eprintln each]])
 
 -- Uppercase identifiers are constructors / type names; a dotted uppercase head
 -- is a qualified module path.
@@ -46,7 +46,7 @@ cmd([[syntax match prismStringEscape "\\." contained]])
 
 -- Operators: arrows, the effect bang, pipes, dot-chaining, var assign, failure
 -- fallback / optional chaining, and arithmetic/comparison.
-cmd([[syntax match prismOperator "\%(->\|<-\|=>\|:=\|??\|?\.\|>>\|<<\|||\||>\|&&\|==\.\?\|/=\.\?\|<=\.\?\|>=\.\?\|[-+*/%<>=!|?.]\)"]])
+cmd([[syntax match prismOperator "\%(->\|<-\|=>\|:=\|??\|?\.\|>>\|<<\|||\||>\|&&\|==\.\?\|/=\.\?\|<=\.\?\|>=\.\?\|[-+*/%<>=!|?.^~]\)"]])
 
 -- Line comments, with the usual TODO/FIXME callouts.
 cmd([[syntax keyword prismTodo TODO FIXME XXX NOTE contained]])

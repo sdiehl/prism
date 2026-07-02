@@ -192,22 +192,44 @@ impl Elab<'_> {
             })?;
 
         let col_scrut = Value::Var(field_vars[col].clone().into());
-        let mut part = self.partition_arms(arms, col)?;
+        let mut part = self.partition_arms(arms.clone(), col)?;
 
+        // Wildcard/variable rows (column retained, so a `Var` still binds the
+        // scrutinee) form the Case's `Wild` arm and the scalar chain's final
+        // `else`: the rows that apply once no listed constructor/literal matched.
         let wild = std::mem::take(&mut part.wild);
         let col_default = if wild.is_empty() {
-            default
+            default.clone()
         } else {
-            Some(self.compile_sub_arms(field_vars, wild, default)?)
+            Some(self.compile_sub_arms(field_vars, wild, default.clone())?)
         };
 
-        // Scalar (bool/int/float/char) columns test the value directly. Ctor and
-        // tuple columns destructure through a Case. The two never mix in one
-        // column because coverage groups same-typed patterns together.
+        // A wildcard also matches every listed head, so `specialize` (in the emit
+        // helpers) folds these rows into each branch IN SOURCE ORDER; that is what
+        // keeps first-match semantics when a wildcard arm precedes a constructor or
+        // literal arm. Scalar (bool/int/float/char) columns test the value
+        // directly; ctor/tuple columns destructure through a Case. The two never
+        // mix in one column because coverage groups same-typed patterns together.
         if part.has_bool || !part.lits.is_empty() {
-            self.emit_scalar_column(&part, field_vars, col, &col_scrut, col_default.as_ref())
+            self.emit_scalar_column(
+                &part,
+                &arms,
+                field_vars,
+                col,
+                &col_scrut,
+                default.as_ref(),
+                col_default,
+            )
         } else {
-            self.emit_case_column(&part, field_vars, col, col_scrut, col_default)
+            self.emit_case_column(
+                &part,
+                &arms,
+                field_vars,
+                col,
+                col_scrut,
+                default,
+                col_default,
+            )
         }
     }
 
@@ -266,35 +288,88 @@ impl Elab<'_> {
         Ok(part)
     }
 
+    // Build one branch's sub-matrix in source order. A row whose column head is a
+    // wildcard or variable matches every value, so it belongs in EVERY branch: it
+    // is always included, its column expanded with `wild_fill` fresh wildcards
+    // (0 drops the column, as a scalar branch tests the value directly), and if it
+    // named a variable that variable is bound to the scrutinee. A row with a
+    // concrete head is included only when `head_match` accepts it, using the
+    // sub-patterns it returns for the expansion.
+    fn specialize(
+        &self,
+        arms: &[ArmRow],
+        col: usize,
+        col_scrut: &Value,
+        wild_fill: usize,
+        mut head_match: impl FnMut(&Pattern) -> Option<Vec<S<Pattern>>>,
+    ) -> Vec<ArmRow> {
+        let mut out = Vec::new();
+        for (subs, body) in arms {
+            match self.flat_pat(&subs[col]) {
+                Pattern::Wild => {
+                    out.push((
+                        expand_col(subs, col, &vec![wild_pat(); wild_fill]),
+                        body.clone(),
+                    ));
+                }
+                Pattern::Var(x) => out.push((
+                    expand_col(subs, col, &vec![wild_pat(); wild_fill]),
+                    bind_col_var(body.clone(), &x, col_scrut),
+                )),
+                other => {
+                    if let Some(ss) = head_match(&other) {
+                        out.push((expand_col(subs, col, &ss), body.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     // A bool column becomes one If. An int/float/char column becomes a chain of
-    // equality tests, built innermost-first so the source order is preserved.
+    // equality tests, built innermost-first so the source order is preserved. Each
+    // value's sub-matrix is `specialize`d from the full ordered rows so preceding
+    // wildcard arms are tried in their real position.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_scalar_column(
         &mut self,
         part: &ArmPartition,
+        arms: &[ArmRow],
         field_vars: &[String],
         col: usize,
         col_scrut: &Value,
-        col_default: Option<&Comp>,
+        default: Option<&Comp>,
+        col_default: Option<Comp>,
     ) -> Result<Comp, Error> {
         let mut rest_vars = field_vars.to_vec();
         rest_vars.remove(col);
         let ice = || Error::Ice("scalar column without default survived exhaustiveness".into());
         if part.has_bool {
-            let [f_arms, t_arms] = &part.bools;
-            let mut side = |group: &[ArmRow]| -> Result<Comp, Error> {
+            let side = |me: &mut Self, want: bool| -> Result<Comp, Error> {
+                let group = me.specialize(arms, col, col_scrut, 0, |p| match p {
+                    Pattern::Bool(b) if *b == want => Some(Vec::new()),
+                    _ => None,
+                });
                 if group.is_empty() {
-                    col_default.cloned().ok_or_else(ice)
+                    col_default.clone().ok_or_else(ice)
                 } else {
-                    self.compile_sub_arms(&rest_vars, group.to_vec(), col_default.cloned())
+                    me.compile_sub_arms(&rest_vars, group, default.cloned())
                 }
             };
-            let t = side(t_arms)?;
-            let f = side(f_arms)?;
+            let t = side(self, true)?;
+            let f = side(self, false)?;
             return Ok(Comp::If(col_scrut.clone(), Box::new(t), Box::new(f)));
         }
-        let mut acc = col_default.cloned().ok_or_else(ice)?;
-        for (lit, group) in part.lits.iter().rev() {
-            let body = self.compile_sub_arms(&rest_vars, group.clone(), col_default.cloned())?;
+        let mut acc = col_default.ok_or_else(ice)?;
+        for (lit, _) in part.lits.iter().rev() {
+            let group = self.specialize(arms, col, col_scrut, 0, |p| {
+                if lit_matches(p, lit) {
+                    Some(Vec::new())
+                } else {
+                    None
+                }
+            });
+            let body = self.compile_sub_arms(&rest_vars, group, default.cloned())?;
             let t = self.fresh();
             let (eq, pre) = match lit {
                 Lit::Float(f) => (
@@ -339,22 +414,31 @@ impl Elab<'_> {
         Ok(acc)
     }
 
-    // Emit a Case: one arm per ctor, then a tuple arm or wildcard default.
+    // Emit a Case: one arm per ctor, then a tuple arm or wildcard default. Each
+    // ctor/tuple arm's sub-matrix is `specialize`d from the full ordered rows, so
+    // a wildcard arm preceding a constructor arm still wins first-match; the Wild
+    // arm carries the wildcard-only default for any unlisted constructor.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_case_column(
         &mut self,
         part: &ArmPartition,
+        arms: &[ArmRow],
         field_vars: &[String],
         col: usize,
         col_scrut: Value,
+        default: Option<Comp>,
         col_default: Option<Comp>,
     ) -> Result<Comp, Error> {
         let mut sub_case_arms: Vec<(CorePat, Comp)> = Vec::new();
-        for (sub_ctor, sub_group) in &part.ctors {
+        for sub_ctor in part.ctors.keys() {
             let n_sub = self.ctors.get(sub_ctor).map_or(0, |info| info.args.len());
             let sub_fvs = self.fresh_fields(n_sub);
             let new_field_vars = splice_vars(field_vars, col, &sub_fvs);
-            let sub_body =
-                self.compile_sub_arms(&new_field_vars, sub_group.clone(), col_default.clone())?;
+            let group = self.specialize(arms, col, &col_scrut, n_sub, |p| match p {
+                Pattern::Ctor(name, ss) if name == sub_ctor => Some(ss.clone()),
+                _ => None,
+            });
+            let sub_body = self.compile_sub_arms(&new_field_vars, group, default.clone())?;
             sub_case_arms.push((
                 CorePat::Ctor(Sym::from(sub_ctor), binders(&sub_fvs)),
                 sub_body,
@@ -366,10 +450,14 @@ impl Elab<'_> {
                 sub_case_arms.push((CorePat::Wild, def));
             }
         } else {
-            let sub_fvs = self.fresh_fields(part.tuple_arity);
+            let arity = part.tuple_arity;
+            let sub_fvs = self.fresh_fields(arity);
             let new_field_vars = splice_vars(field_vars, col, &sub_fvs);
-            let sub_body =
-                self.compile_sub_arms(&new_field_vars, part.tuple.clone(), col_default)?;
+            let group = self.specialize(arms, col, &col_scrut, arity, |p| match p {
+                Pattern::Tuple(ss) => Some(ss.clone()),
+                _ => None,
+            });
+            let sub_body = self.compile_sub_arms(&new_field_vars, group, default)?;
             sub_case_arms.push((CorePat::Tuple(binders(&sub_fvs)), sub_body));
         }
 
@@ -410,6 +498,34 @@ pub(super) fn pattern_needs_compile(p: &Pattern) -> bool {
             .iter()
             .any(|s| !matches!(s.node, Pattern::Wild | Pattern::Var(_))),
         Pattern::Int(_) | Pattern::Float(_) | Pattern::Char(_) | Pattern::Bool(_) => true,
+        _ => false,
+    }
+}
+
+// A fresh wildcard sub-pattern, used to fill a destructured column for a
+// wildcard/variable row specialized into a constructor/tuple branch.
+const fn wild_pat() -> S<Pattern> {
+    spanned(Pattern::Wild)
+}
+
+// When a `Var(x)` row is specialized into a column that is destructured (ctor,
+// tuple) or dropped (scalar), `x` no longer binds through the column, so bind it
+// to the whole matched value here.
+fn bind_col_var(body: Comp, x: &str, col_scrut: &Value) -> Comp {
+    Comp::Bind(
+        Box::new(Comp::Return(col_scrut.clone())),
+        Sym::from(x),
+        Box::new(body),
+    )
+}
+
+// Whether a concrete scalar pattern is the literal `key` (grouped exactly as
+// `partition_arms` groups them: char folds into its codepoint as an Int).
+fn lit_matches(p: &Pattern, key: &Lit) -> bool {
+    match (p, key) {
+        (Pattern::Int(l), Lit::Int(n)) => &l.value == n,
+        (Pattern::Char(c), Lit::Int(n)) => &BigInt::from(u32::from(*c)) == n,
+        (Pattern::Float(f), Lit::Float(g)) => f.to_bits() == g.to_bits(),
         _ => false,
     }
 }

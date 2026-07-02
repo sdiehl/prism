@@ -1,12 +1,16 @@
 type Color = Red | Green | Blue deriving (Eq, Ord, Show)
 
-type Shape(a) = Dot | Circle(a, Color) | Rect(a, a, Color) deriving (Eq, Ord, Show)
+type Shape(a)
+  = Dot
+  | Circle(a, Color)
+  | Rect(a, a, Color)
+  deriving (Eq, Ord, Show)
 
 fn print_all(xs : List(Color)) =
   match xs of
     Nil => ()
     Cons(x, rest) =>
-      println(show_c(x))
+      println(show(x))
       print_all(rest)
 
 fn main() =
@@ -22,7 +26,7 @@ fn main() =
   println(cmp(Dot, Rect(0, 0, Red)))
   println(cmp(Circle(3, Red), Circle(3, Blue)))
   println(cmp(Rect(1, 2, Red), Rect(1, 3, Red)))
-  println(show_c(Rect(4, 5, Blue)))
+  println(show(Rect(4, 5, Blue)))
   println(show(Rect(4, 5, Blue)))
   println("c = {Circle(7, Blue)}")
   print_all(sort_by_ord([Blue, Red, Green]))

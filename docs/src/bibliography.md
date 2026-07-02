@@ -80,6 +80,8 @@
 
 <a id="reinking-2021"></a> Reinking, A., Xie, N., de Moura, L., & Leijen, D. (2021). Perceus: Garbage free reference counting with reuse. _Programming Language Design and Implementation (PLDI)_.
 
+<a id="sulzmann-2007"></a> Sulzmann, M., Chakravarty, M. M. T., Peyton Jones, S., & Donnelly, K. (2007). System F with type equality coercions. _Types in Language Design and Implementation (TLDI)_.
+
 <a id="swierstra-2008"></a> Swierstra, W. (2008). Data types à la carte. _Journal of Functional Programming, 18_(4), 423-436.
 
 <a id="wand-1987"></a> Wand, M. (1987). Complete type inference for simple objects. _Logic in Computer Science (LICS)_.

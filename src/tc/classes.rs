@@ -11,7 +11,8 @@ use crate::error::TypeError;
 use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, NodeId, Program};
-use crate::types::ty::{EffRow, Type};
+use crate::types::ty::{EffRow, Kind, Type};
+use crate::types::SHOW_CLASS;
 
 // Cap on recursive instance resolution: a cyclic or diverging instance set
 // reports an error instead of overflowing the stack.
@@ -153,7 +154,7 @@ impl Tc<'_> {
         // `Eq(Foo)`); that is a genuine program error and reported precisely. A
         // goal that keeps *growing* without repeating (`C(a)` :- `C([a])` :-
         // `C([[a]])`) never recurs exactly, so no cycle check can catch it; the
-        // depth bound is the standard fuel backstop (cf. GHC's reduction depth).
+        // depth bound is the standard fuel backstop.
         let goal = (class.to_string(), t.clone());
         if chain.contains(&goal) {
             return Err(TypeError::Other {
@@ -211,6 +212,22 @@ impl Tc<'_> {
                         }
                         return Ok(d);
                     }
+                }
+            }
+            // A tuple has no nominal head to key an instance on, so its `Show`
+            // dictionary is synthesized from the component `Show` dictionaries.
+            if class == SHOW_CLASS {
+                if let Type::Tuple(elems) = t {
+                    let mut child = chain.to_vec();
+                    child.push(goal);
+                    let comps = elems
+                        .iter()
+                        .map(|e| {
+                            let e = self.apply(e);
+                            self.resolve(class, &e, span, None, &child)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return Ok(Dict::Tuple(comps));
                 }
             }
             let key = Self::head_key(class, t, span)?;
@@ -513,6 +530,7 @@ pub(super) fn build_classes(
             dname.clone(),
             DataInfo {
                 params: vec![c.param.clone()],
+                param_kinds: vec![Kind::Type],
                 ctors: vec![dname.clone()],
             },
         );
@@ -521,6 +539,7 @@ pub(super) fn build_classes(
             CtorInfo {
                 type_name: Sym::from(&dname),
                 params: vec![param],
+                param_kinds: vec![Kind::Type],
                 args: dict_args,
                 tag: 0,
                 fields: vec![],
@@ -558,118 +577,9 @@ pub(super) fn build_classes(
                 ),
             });
         }
-        let head = convert_data(&i.head);
-        let key = head_name(&head).ok_or_else(|| TypeError::Other {
-            span: i.span,
-            msg: "instance head must be a primitive type or a data type constructor".to_string(),
-        })?;
-        let mut head_vars = BTreeSet::new();
-        if let Type::Con(n, args) = &head {
-            if !data.contains_key(n.as_str()) {
-                return Err(TypeError::Other {
-                    span: i.span,
-                    msg: format!("unknown type {n}"),
-                });
-            }
-            for a in args {
-                match a {
-                    Type::Var(v) if !head_vars.contains(v) => {
-                        head_vars.insert(*v);
-                    }
-                    _ => {
-                        return Err(TypeError::Other {
-                            span: i.span,
-                            msg: "instance head arguments must be distinct type variables"
-                                .to_string(),
-                        })
-                    }
-                }
-            }
-        }
-        let mut context = Vec::new();
-        for ct in &i.context {
-            if !classes.contains_key(&Sym::from(&ct.class)) {
-                return Err(TypeError::Other {
-                    span: ct.span,
-                    msg: format!("unknown class {}", ct.class),
-                });
-            }
-            match &ct.ty {
-                ast::Ty::Var(v) if head_vars.contains(&Sym::from(v)) => {
-                    context.push((Sym::from(&ct.class), Type::Var(Sym::from(v))));
-                }
-                _ => {
-                    return Err(TypeError::Other {
-                        span: ct.span,
-                        msg: "instance context constraints must be over the head's type variables"
-                            .to_string(),
-                    })
-                }
-            }
-        }
-        let mut seen = BTreeSet::new();
-        for m in &i.methods {
-            if !seen.insert(Sym::from(&m.name)) {
-                return Err(TypeError::Other {
-                    span: m.span,
-                    msg: format!("duplicate method `{}` in instance `{}`", m.name, i.name),
-                });
-            }
-            let Some((_, sig)) = class
-                .methods
-                .iter()
-                .find(|(n, _)| n.as_str() == m.name.as_str())
-            else {
-                return Err(TypeError::Other {
-                    span: m.span,
-                    msg: format!("class {} has no method `{}`", i.class, m.name),
-                });
-            };
-            if m.params.iter().any(|p| p.ty.is_some())
-                || m.ret.is_some()
-                || m.eff.is_some()
-                || !m.constraints.is_empty()
-            {
-                return Err(TypeError::Other {
-                    span: m.span,
-                    msg: format!(
-                        "instance method `{}` takes its signature from class {}; drop the annotations",
-                        m.name, i.class
-                    ),
-                });
-            }
-            let arity = match sig {
-                Type::Fun(doms, _, _) => doms.len(),
-                _ => 0,
-            };
-            if m.params.len() != arity {
-                return Err(TypeError::Other {
-                    span: m.span,
-                    msg: format!(
-                        "method `{}` of class {} takes {arity} parameter(s), got {}",
-                        m.name,
-                        i.class,
-                        m.params.len()
-                    ),
-                });
-            }
-        }
-        let missing: Vec<&str> = class
-            .methods
-            .iter()
-            .filter(|(n, _)| !seen.contains(n))
-            .map(|(n, _)| n.as_str())
-            .collect();
-        if !missing.is_empty() {
-            return Err(TypeError::Other {
-                span: i.span,
-                msg: format!(
-                    "instance `{}` is missing method(s): {}",
-                    i.name,
-                    missing.join(", ")
-                ),
-            });
-        }
+        let (head, key, head_vars) = convert_instance_head(i, data)?;
+        let context = instance_context(i, &classes, &head_vars)?;
+        check_instance_methods(class, i)?;
         // Each declared superclass of the class becomes an obligation `S(head)`
         // discharged at every use site and embedded as a leading dict field.
         let mut supers = Vec::new();
@@ -682,40 +592,8 @@ pub(super) fn build_classes(
             }
             supers.push((*s, head.clone()));
         }
-        // Orphan rule: an instance must be anchored to the module that defines
-        // its class or its head type. Anywhere else it is an orphan, warned now
-        // and (once packages and separate compilation land) an error across a
-        // package boundary. Primitive heads count as prelude-defined.
-        let inst_mod = i.module.as_str();
-        let class_mod = module_of(&i.class);
-        let head_mod = match &head {
-            Type::Con(n, _) => module_of(n.as_str()),
-            _ => "",
-        };
-        if class_mod != inst_mod && head_mod != inst_mod {
-            let where_ = if inst_mod.is_empty() {
-                "this program".to_string()
-            } else {
-                format!("module `{inst_mod}`")
-            };
-            // A root-program instance's span indexes the entry source, so it can
-            // carry a caret; an imported module's span belongs to another file,
-            // so leave it empty and the warning renders as a plain line.
-            let span = if inst_mod.is_empty() {
-                i.span
-            } else {
-                Span::default()
-            };
-            warnings.push(Warning {
-                span,
-                msg: format!(
-                    "orphan instance `{}` for {}({}): neither the class nor the type is \
-                     defined in {where_}; define it alongside the class or the type",
-                    i.name,
-                    i.class,
-                    head.show()
-                ),
-            });
+        if let Some(w) = orphan_warning(i, &head) {
+            warnings.push(w);
         }
         inst_keys
             .entry((Sym::from(&i.class), key))
@@ -742,6 +620,183 @@ pub(super) fn build_classes(
         constrained,
         warnings,
     ))
+}
+
+// An instance head must be a primitive or a data-type constructor applied to
+// distinct type variables. Returns the converted head, its store key, and the
+// head's variable set (the only variables an instance context may constrain).
+fn convert_instance_head(
+    i: &ast::InstanceDecl<Core>,
+    data: &BTreeMap<String, DataInfo>,
+) -> Result<(Type, HeadKey, BTreeSet<Sym>), TypeError> {
+    let head = convert_data(&i.head);
+    let key = head_name(&head).ok_or_else(|| TypeError::Other {
+        span: i.span,
+        msg: "instance head must be a primitive type or a data type constructor".to_string(),
+    })?;
+    let mut head_vars = BTreeSet::new();
+    if let Type::Con(n, args) = &head {
+        if !data.contains_key(n.as_str()) {
+            return Err(TypeError::Other {
+                span: i.span,
+                msg: format!("unknown type {n}"),
+            });
+        }
+        for a in args {
+            match a {
+                Type::Var(v) if !head_vars.contains(v) => {
+                    head_vars.insert(*v);
+                }
+                _ => {
+                    return Err(TypeError::Other {
+                        span: i.span,
+                        msg: "instance head arguments must be distinct type variables".to_string(),
+                    })
+                }
+            }
+        }
+    }
+    Ok((head, key, head_vars))
+}
+
+// An instance context may constrain only the head's type variables. Returns the
+// resolved `(class, type)` obligations.
+fn instance_context(
+    i: &ast::InstanceDecl<Core>,
+    classes: &BTreeMap<Sym, ClassInfo>,
+    head_vars: &BTreeSet<Sym>,
+) -> Result<Vec<(Sym, Type)>, TypeError> {
+    let mut context = Vec::new();
+    for ct in &i.context {
+        if !classes.contains_key(&Sym::from(&ct.class)) {
+            return Err(TypeError::Other {
+                span: ct.span,
+                msg: format!("unknown class {}", ct.class),
+            });
+        }
+        match &ct.ty {
+            ast::Ty::Var(v) if head_vars.contains(&Sym::from(v)) => {
+                context.push((Sym::from(&ct.class), Type::Var(Sym::from(v))));
+            }
+            _ => {
+                return Err(TypeError::Other {
+                    span: ct.span,
+                    msg: "instance context constraints must be over the head's type variables"
+                        .to_string(),
+                })
+            }
+        }
+    }
+    Ok(context)
+}
+
+// Validate an instance's method block against its class: no duplicates, every
+// method belongs to the class, signatures are inherited (no annotations), arity
+// matches, and no class method is left unimplemented.
+fn check_instance_methods(class: &ClassInfo, i: &ast::InstanceDecl<Core>) -> Result<(), TypeError> {
+    let mut seen = BTreeSet::new();
+    for m in &i.methods {
+        if !seen.insert(Sym::from(&m.name)) {
+            return Err(TypeError::Other {
+                span: m.span,
+                msg: format!("duplicate method `{}` in instance `{}`", m.name, i.name),
+            });
+        }
+        let Some((_, sig)) = class
+            .methods
+            .iter()
+            .find(|(n, _)| n.as_str() == m.name.as_str())
+        else {
+            return Err(TypeError::Other {
+                span: m.span,
+                msg: format!("class {} has no method `{}`", i.class, m.name),
+            });
+        };
+        if m.params.iter().any(|p| p.ty.is_some())
+            || m.ret.is_some()
+            || m.eff.is_some()
+            || !m.constraints.is_empty()
+        {
+            return Err(TypeError::Other {
+                span: m.span,
+                msg: format!(
+                    "instance method `{}` takes its signature from class {}; drop the annotations",
+                    m.name, i.class
+                ),
+            });
+        }
+        let arity = match sig {
+            Type::Fun(doms, _, _) => doms.len(),
+            _ => 0,
+        };
+        if m.params.len() != arity {
+            return Err(TypeError::Other {
+                span: m.span,
+                msg: format!(
+                    "method `{}` of class {} takes {arity} parameter(s), got {}",
+                    m.name,
+                    i.class,
+                    m.params.len()
+                ),
+            });
+        }
+    }
+    let missing: Vec<&str> = class
+        .methods
+        .iter()
+        .filter(|(n, _)| !seen.contains(n))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(TypeError::Other {
+            span: i.span,
+            msg: format!(
+                "instance `{}` is missing method(s): {}",
+                i.name,
+                missing.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
+// The orphan rule: an instance must be anchored to the module that defines its
+// class or its head type. Returns a warning when it is anchored to neither
+// (primitive heads count as prelude-defined). Once packages and separate
+// compilation land, a cross-package orphan becomes an error.
+fn orphan_warning(i: &ast::InstanceDecl<Core>, head: &Type) -> Option<Warning> {
+    let inst_mod = i.module.as_str();
+    let class_mod = module_of(&i.class);
+    let head_mod = match head {
+        Type::Con(n, _) => module_of(n.as_str()),
+        _ => "",
+    };
+    if class_mod == inst_mod || head_mod == inst_mod {
+        return None;
+    }
+    let where_ = if inst_mod.is_empty() {
+        "this program".to_string()
+    } else {
+        format!("module `{inst_mod}`")
+    };
+    // A root-program instance's span indexes the entry source, so it can carry a
+    // caret; an imported module's span belongs to another file, so leave it empty
+    // and the warning renders as a plain line.
+    let span = if inst_mod.is_empty() {
+        i.span
+    } else {
+        Span::default()
+    };
+    Some(Warning {
+        span,
+        msg: format!(
+            "orphan instance `{}` for {}({}): neither the class nor the type is \
+             defined in {where_}; define it alongside the class or the type",
+            i.name,
+            i.class,
+            head.show()
+        ),
+    })
 }
 
 // Build the canonical-instance store from `canonical Class(Head) = name` decls
@@ -821,9 +876,6 @@ fn build_canonical(
     Ok(canonical)
 }
 
-/// Render a list of instance names with their defining module, for overlap and
-/// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
-/// program) ``.
 // Generalize a method/dictionary-field type over the given type variables and,
 // additionally, over every effect-row variable it mentions, so an effect-
 // polymorphic method (`fmap : (.. ! {e}, ..) -> .. ! {e}`) is row-polymorphic
@@ -838,6 +890,9 @@ fn quantify(ty: &Type, tvars: &[Sym]) -> Type {
     scheme
 }
 
+/// Render a list of instance names with their defining module, for overlap and
+/// ambiguity diagnostics: `` `eqStack` (module `Data.Stack`), `eqRev` (this
+/// program) ``.
 fn provenance_list(instances: &BTreeMap<Sym, InstInfo>, names: &[Sym]) -> String {
     names
         .iter()

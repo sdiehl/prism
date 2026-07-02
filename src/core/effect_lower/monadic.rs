@@ -7,13 +7,14 @@ use super::analysis::{monadic_region, open_resume_escapes};
 use super::checks::check_convention_boundaries;
 use super::diagnostics::{free_monad_warning, genuine_eff};
 use super::runtime::{ctor_pat, ebind_fn, epure, qapply_fn, synth_ctor};
-use super::walk::latent;
+use super::walk::handle_escapes;
 use super::{
-    flow, Lowered, Lowerer, MaskOp, DONE_TAG, EBIND, EFF, EOP, EPURE, ERESUME, MORE_TAG, OP_TAG,
-    PURE_TAG, QAPPLY, RESUME_TAG, SDONE, SMORE, STEP, TQ, TQCONS, TQCONS_TAG, TQNIL, TQNIL_TAG,
+    flow, Lowered, Lowerer, ResumeMode, DONE_TAG, EBIND, EFF, EOP, EPURE, ERESUME, MORE_TAG,
+    OP_TAG, PURE_TAG, QAPPLY, RESUME_OP_ID, RESUME_TAG, SDONE, SMORE, STEP, TQ, TQCONS, TQCONS_TAG,
+    TQNIL, TQNIL_TAG,
 };
 use crate::core::builtins::Builtin;
-use crate::core::cbpv::{Comp, Core, CoreFn, CoreOp, HandleOp, Value};
+use crate::core::cbpv::{Comp, Core, CoreFn, CoreOp, Value};
 use crate::error::TypeError;
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
@@ -45,20 +46,32 @@ impl Lowerer {
         Ok(acc)
     }
 
-    // A handler is open when its body performs an effect it does not catch.
-    // Whole-program mode drives every handler open-style for uniformity.
-    pub(super) fn is_open(&self, body: &Comp, ops: &[HandleOp]) -> bool {
+    // A handler is open when evaluating it can perform an effect it does not
+    // catch. That is exactly the handle's escape set (`handle_escapes`): body
+    // ops with no matching clause, plus everything the return clause and the
+    // op clauses perform. Clauses run in the enclosing context (a deep handler
+    // reinstalls itself only around `resume`), so even a clause re-performing
+    // this handler's own op escapes and keeps the handler open; stripping own
+    // ops from clause latents here once misclassified such a handler closed,
+    // which the closed drivers turn into a self-handling loop or a residual
+    // `do`. `latent` flows the same set interprocedurally, so classification
+    // and flow cannot drift. Whole-program mode drives every handler
+    // open-style for uniformity.
+    pub(super) fn is_open(&self, c: &Comp) -> bool {
         if self.full {
             return true;
         }
+        let Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } = c
+        else {
+            return false;
+        };
         let mut s = BTreeSet::new();
-        latent(body, &self.latent, &mut s);
-        for op in ops {
-            s.remove(&MaskOp {
-                id: op.name,
-                depth: 0,
-            });
-        }
+        handle_escapes(body, return_body.as_deref(), ops, &self.latent, &mut s);
         !s.is_empty()
     }
 
@@ -70,11 +83,11 @@ impl Lowerer {
     // call to a generated driver, leaving non-effectful code untouched.
     pub(super) fn lower_comp(&mut self, c: &Comp) -> Result<Comp, TypeError> {
         Ok(match c {
-            Comp::Handle { body, ops, .. } if self.is_open(body, ops) => {
+            Comp::Handle { .. } if self.is_open(c) => {
                 let e = self.fresh("e");
                 let x = self.fresh("ex");
                 Comp::Bind(
-                    Box::new(self.lower_handle(c)?),
+                    Box::new(self.lower_handle_open(c)?),
                     e,
                     Box::new(Comp::Case(
                         Value::Var(e),
@@ -179,12 +192,17 @@ impl Lowerer {
                     .map(|(p, b)| Ok((p.clone(), self.mon(b)?)))
                     .collect::<Result<_, TypeError>>()?,
             ),
-            // Driving the resume natively: `resume` is bound to the op's
-            // continuation queue, so applying it yields `EResume(queue, value)`,
-            // which the `{n}@region` loop drives by tail-calling itself on
-            // `qApply(queue, value)`. Eligibility guarantees this is in tail
-            // position, so the `EResume` is the clause's result.
-            Comp::App(f, args) if self.native_resume && self.is_resume_app(f) => {
+            // A resume inside a native (`{n}@region`) or CEK clause body: `resume`
+            // is bound to the op's captured continuation queue `q`, so applying it
+            // reifies to an Eff value the driver loop can inspect. The two backends
+            // build the argument identically and differ only in the ctor emitted:
+            //   Native -> `EResume(queue, value)`, which the `{n}@region` loop drives
+            //     by tail-calling itself on `qApply(queue, value)`. Eligibility puts
+            //     this in tail position, so the `EResume` is the clause's result.
+            //   CekOp  -> `EOp(RESUME_OP_ID, 0, (queue, value), unit)`, whose
+            //     post-resume work the surrounding `ebind` snocs onto the op's queue,
+            //     so a non-tail or multishot resume runs on the same musttail loop.
+            Comp::App(f, args) if self.resume != ResumeMode::Off && self.is_resume_app(f) => {
                 let Comp::Force(Value::Var(q)) = f.as_ref() else {
                     unreachable!("is_resume_app matched a non-Force(Var)")
                 };
@@ -197,11 +215,23 @@ impl Lowerer {
                     >>(
                     )?),
                 };
-                Comp::Return(Value::Ctor(
-                    ERESUME.into(),
-                    RESUME_TAG,
-                    vec![Value::Var(*q), arg],
-                ))
+                let reified = match self.resume {
+                    ResumeMode::Native => {
+                        Value::Ctor(ERESUME.into(), RESUME_TAG, vec![Value::Var(*q), arg])
+                    }
+                    ResumeMode::CekOp => Value::Ctor(
+                        EOP.into(),
+                        OP_TAG,
+                        vec![
+                            Value::Int(RESUME_OP_ID),
+                            Value::Int(0),
+                            Value::Tuple(vec![Value::Var(*q), arg]),
+                            Value::Unit,
+                        ],
+                    ),
+                    ResumeMode::Off => unreachable!("guarded by resume != Off"),
+                };
+                Comp::Return(reified)
             }
             // Applying the current resume already yields an Eff value (the
             // re-driven continuation), so thread it instead of EPure-wrapping.
@@ -223,7 +253,7 @@ impl Lowerer {
                     Box::new(Comp::Call(driver, vec![Value::Var(v)])),
                 )
             }
-            Comp::Handle { body, ops, .. } if self.is_open(body, ops) => self.lower_handle(c)?,
+            Comp::Handle { .. } if self.is_open(c) => self.lower_handle_open(c)?,
             Comp::Handle { .. } => {
                 let v = self.fresh("h");
                 Comp::Bind(
@@ -377,6 +407,7 @@ impl Lowerer {
                 Ok(CoreFn {
                     name: f.name,
                     params: f.params.clone(),
+                    dict_arity: f.dict_arity,
                     body,
                 })
             })

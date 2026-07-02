@@ -21,4 +21,5 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Char", include_str!("../lib/std/Data/Char.pr")),
     ("Data.String", include_str!("../lib/std/Data/String.pr")),
     ("Replay", include_str!("../lib/std/Replay.pr")),
+    ("Concurrent", include_str!("../lib/std/Concurrent.pr")),
 ];

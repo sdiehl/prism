@@ -1,0 +1,8 @@
+-- `without alloc` is `fbip` spelled as a revoked capability: the function and
+-- its whole call tree must allocate no fresh heap cell. `inc` only does
+-- arithmetic and `twice` calls only `inc`, so both certify; `main` stays pure.
+fn inc(x : Int) : Int without alloc = x + 1
+
+fn twice(x : Int) : Int without alloc = inc(inc(x))
+
+fn main() : Int = twice(40)

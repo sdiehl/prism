@@ -1,37 +1,45 @@
--- Persistent ordered map: an AVL-balanced binary search tree over keys with an
--- `Ord` instance. The `Map(k, v)` type and its `Tip`/`Bin` constructors are
--- wired in; this module is the operation surface. The prelude opens it.
+-- | Persistent ordered map: an AVL-balanced binary search tree over keys.
+--
+-- The `Map(k, v)` type and its `Tip`/`Bin` constructors are wired in; this
+-- module is the operation surface. The prelude opens it.
 
 import Data.List (append, map, foldl)
 
 import Data.Maybe (is_some)
 
+-- | The empty map.
 pub let map_empty : Map(k, v) = Tip
 
+-- | Helper: the cached height of the tree (0 for the empty map).
 pub fn map_height(m) =
   match m of
     Tip => 0
     Bin(h, _, _, _, _) => h
 
+-- | Helper: build a `Bin` node, computing its height from its children.
 pub fn map_node(k, v, l, r) = Bin(1 + max(map_height(l), map_height(r)), k, v, l, r)
 
+-- | Helper: the balance factor of a node (left height minus right height).
 pub fn map_bf(m) =
   match m of
     Tip => 0
     Bin(_, _, _, l, r) => map_height(l) - map_height(r)
 
+-- | Helper: a single right AVL rotation.
 pub fn map_rot_right(m) =
   match m of
     Bin(_, k, v, Bin(_, lk, lv, ll, lr), r) =>
       map_node(lk, lv, ll, map_node(k, v, lr, r))
     other => other
 
+-- | Helper: a single left AVL rotation.
 pub fn map_rot_left(m) =
   match m of
     Bin(_, k, v, l, Bin(_, rk, rv, rl, rr)) =>
       map_node(rk, rv, map_node(k, v, l, rl), rr)
     other => other
 
+-- | Helper: rebalance a node after an insert or delete unbalanced it.
 pub fn map_balance(m) =
   let bf = map_bf(m)
   if bf > 1 then
@@ -53,6 +61,7 @@ pub fn map_balance(m) =
   else
     m
 
+-- | Insert `key` with `value`, overwriting any existing binding, and rebalance.
 pub fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
   match m of
     Tip => map_node(key, value, Tip, Tip)
@@ -65,6 +74,7 @@ pub fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
       else
         map_node(k2, value, l, r)
 
+-- | The value bound to `key` as `Some`, or `None` when absent.
 pub fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
   match m of
     Tip => None
@@ -77,20 +87,24 @@ pub fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
       else
         Some(v)
 
+-- | True when `key` is present in the map.
 pub fn map_member(key : k, m : Map(k, v)) : Bool given Ord(k) =
   is_some(map_lookup(key, m))
 
+-- | The number of entries.
 pub fn map_size(m) =
   match m of
     Tip => 0
     Bin(_, _, _, l, r) => 1 + map_size(l) + map_size(r)
 
+-- | The smallest key and its value as `Some`, or `None` when empty.
 pub fn map_min(m) =
   match m of
     Tip => None
     Bin(_, k, v, Tip, _) => Some((k, v))
     Bin(_, _, _, l, _) => map_min(l)
 
+-- | Remove `key` (a no-op if absent), rebalancing the tree.
 pub fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
   match m of
     Tip => Tip
@@ -112,18 +126,24 @@ pub fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
                   Some((mk, mv)) =>
                     map_balance(map_node(mk, mv, l, map_delete(mk, r)))
 
+-- | The `(key, value)` pairs in ascending key order.
 pub fn map_to_list(m) =
   match m of
     Tip => Nil
     Bin(_, k, v, l, r) => append(map_to_list(l), Cons((k, v), map_to_list(r)))
 
+-- | The keys in ascending order.
 pub fn map_keys(m) = map(fst, map_to_list(m))
 
+-- | The values in ascending key order.
 pub fn map_values(m) = map(snd, map_to_list(m))
 
+-- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier
+-- one with the same key.
 pub fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
   foldl(\(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) }, Tip, xs)
 
+-- | Apply `f` to every value, keeping keys and tree structure.
 pub fn map_map_values(f, m) =
   match m of
     Tip => Tip

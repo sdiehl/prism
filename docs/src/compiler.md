@@ -13,7 +13,7 @@ Compilation is a pipeline from source text to a native binary. Each phase is a t
 | [Resolve](#name-resolution-and-modules)               | load imports, canonicalize names, merge                                                                                       | `src/resolve/`                             |
 | [Desugar](#desugaring)                                | surface sugar to core surface                                                                                                 | `src/syntax/desugar/`                      |
 | [Check](#type-and-effect-inference)                   | type and effect inference                                                                                                     | `src/tc/`                                  |
-| Elaborate                                             | surface to [CBPV / ANF core](#the-core-calculus) (match compilation, [pattern-match compilation](#pattern-match-compilation)) | `src/core/elaborate/`                      |
+| [Elaborate](#elaboration)                             | surface to [CBPV / ANF core](#the-core-calculus) (match compilation, [pattern-match compilation](#pattern-match-compilation)) | `src/core/elaborate/`                      |
 | [Optimize](#optimization)                             | Core-to-Core passes, in two stages around effect lowering                                                                     | `src/core/opt/`                            |
 | [Effect lower](#effect-lowering)                      | remove handlers and operations                                                                                                | `src/core/effect_lower/`                   |
 | [Reference count](#reference-counting-and-fbip-reuse) | insert `dup`/`drop`, then reuse                                                                                               | `src/core/fbip.rs`                         |
@@ -74,6 +74,28 @@ Function composition lowers to a lambda, kept as sugar only so the operator surv
 
 ```text
 {{#include ../examples/compose_desugared.txt}}
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+A `without alloc` block lifts to a synthetic top-level function carrying the zero-allocation certificate. The block's free locals become its parameters and the block becomes a call to it, so the whole-call-tree check that backs the `without alloc` function suffix covers exactly the region. A local lambda would be a heap closure, which allocates, so the region must lift to a named top-level function rather than an applied lambda; a `var` read or a handler-instance operation inside the block is already an effect that tunnels out to its enclosing handler, so neither is captured.
+
+{{#tabs }}
+
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/without_alloc_sugar.pr}}
+```
+
+{{#endtab }}
+
+{{#tab name="Desugared" }}
+
+```text
+{{#include ../examples/without_alloc_desugared.txt}}
 ```
 
 {{#endtab }}
@@ -212,7 +234,7 @@ A method call `e.m(args)` is uniform-function-call sugar: the receiver becomes t
 
 {{#endtabs }}
 
-A string with interpolation holes becomes a concatenation of its literal pieces and the `show` of each hole.
+A string with interpolation holes becomes a concatenation of its literal pieces and the type-directed display of each hole; a top-level string is spliced in raw, not quoted the way the `Show` method renders it.
 
 {{#tabs }}
 
@@ -440,15 +462,33 @@ Type inference is the bidirectional, higher-rank algorithm of [Dunfield & Krishn
 
 Instances are global, but each records its defining module, so coherence is checked by provenance (`src/tc/classes.rs`). Resolution is coherent: for each `(class, type-head)` there is exactly one canonical instance, and implicit resolution always selects it. A single instance for a head is canonical automatically. When two or more instances share a head, one must be designated with a top-level `canonical Class(Head) = name` declaration (see [coherence and resolution](./spec.md#coherence-and-resolution)). An undesignated overlap is a hard error reported at definition, naming the candidates and their modules, with a source caret when they point into the program being compiled. An orphan instance (defined apart from both its class and its head type) is reported as a warning. An explicit override is written at the use site as a trailing `using` argument, `f(args, using name)`, which changes nothing else's resolution.
 
-Indexing (`a[i]`, `a[i] := v`) is resolved the same way the `Show` and `^` lowerings are, by type-directed dispatch at elaboration: the checker records each sub-expression's type in a span-keyed table, and the elaborator reads the receiver's head type back and emits the matching builtin or accessor (`Array` to `at_array`/`array_set`, `HashMap` to `at_hashmap`/`hm_insert`, `String` to `at_byte`, `List` to `at_list`). A receiver whose type is still an unsolved existential when first synthesized (a `var` indexed before its initializer fixes its state type) defers to one pass at the end of the declaration, after the initializer has constrained it. No class or type-system extension is involved, so concrete indexing ships today; the desugar target is `index`/`index_set`, leaving room for a user-extensible `Index` class later.
+Indexing (`a[i]`, `a[i] := v`) is resolved the same way the `print`/interpolation display and `^` lowerings are, by type-directed dispatch at elaboration: the checker records each sub-expression's type in a span-keyed table, and the elaborator reads the receiver's head type back and emits the matching builtin or accessor (`Array` to `at_array`/`array_set`, `HashMap` to `at_hashmap`/`hm_insert`, `String` to `at_byte`, `List` to `at_list`). A receiver whose type is still an unsolved existential when first synthesized (a `var` indexed before its initializer fixes its state type) defers to one pass at the end of the declaration, after the initializer has constrained it. No class or type-system extension is involved, so concrete indexing ships today; the desugar target is `index`/`index_set`, leaving room for a user-extensible `Index` class later.
 
 Effect-row inference is _principal_: each declaration infers its most general row from its body alone. The row unifier in `src/tc/subsume.rs` discovers every label on its own (a _row_ is a function's effect set; see [types and kinds](./spec.md#types-and-kinds)) from direct performs, applied effect-carrying callees, builtin rows, and `mask`. At a call it adds the callee's row to the caller's _ambient row_ (the effect set accumulated for the body so far), and a handler removes the operations it discharges. The row is the single source of truth: there is no separate set-pass seed and no subset reconciliation against one.
 
 A syntactic _set-pass_ (a pass that computes a _set_ of operation labels by a call-graph fixpoint, `src/types/effects.rs`) still runs, but only to feed the syntactic purity checks: it confirms a `konst` declaration and a declared-pure instance method perform nothing. It no longer seeds the row. After lowering, `reconcile_effects` checks the operations the lowered code actually performs against the inferred row, and the interpreter parity oracle (see [verification](#verification)) is the final backstop. Effect lowering computes its own per-function _latent_ operation set by an independent call-graph fixpoint (see [effect lowering](#effect-lowering)), so the two phases no longer share the set-pass result.
 
+### 6.1 Kinds and Row-Kinded Type Parameters {#kinds-and-rows}
+
+Type parameters carry a _kind_ (`src/types/ty.rs`, `Kind`). Almost every parameter has kind `Type` (`*`), and an unannotated parameter defaults to it, so the kind system is invisible to ordinary code and higher-kinded types stay structural (an applied variable `f(a)` is resolved by `App`/`Con` unification, not by a kind assignment). The one kind that is load-bearing is `Row`: a parameter annotated `: Row` ranges over effect rows rather than types.
+
+A `Row`-kinded parameter lets a data type _store_ an effectful computation. In
+
+```prism
+type Box(a, e : Row) = Box(() -> a ! {e})
+```
+
+the field `() -> a ! {e}` mentions the row parameter `e` (a data field may name it either bare, `! {e}`, or in tail position, `! {IO | e}`). The constructor scheme quantifies `e` with a `RowForall` binder instead of a `Forall`, and the applied head `Box(a, e)` carries the row in its spine as a dedicated `Type::Row(EffRow)` argument. Row unification then threads through the same places type unification does (instantiation, substitution, zonking, pattern matching, and record construction), so opening `Box(f)` in a match instantiates `e` to a fresh row existential exactly as `a` is instantiated to a fresh type existential.
+
+At a use site a `Row`-kinded argument is an effect row: a row variable (`Box(a, e)`) or a `{ .. }` row literal (`Box(Int, {IO})`, `Box(Int, {IO | e})`). Supplying a type where a row is wanted, or a row where a type is wanted, is a _kind mismatch_ reported at the annotation (`check_annot_rows`) rather than surfacing later as a row-versus-type unification failure.
+
+This is the type-system half of effect-polymorphic concurrency: it is what makes an effect-polymorphic scheduler storable and, together with the ambient-row discipline for operations, sound. See [concurrency](#concurrency) for the whole story.
+
 ## 7. The Core Calculus {#the-core-calculus}
 
 Elaboration lowers the surface language to a call-by-push-value core ([Levy, 2004](bibliography.md#levy-2004); `src/core/cbpv.rs`) in A-normal form. CBPV separates _values_, which are inert, from _computations_, which can be run; `Thunk` freezes a computation into a value and `Force` runs it. A-normal form names every intermediate result with a `Bind`, making evaluation order explicit and each operation and allocation syntactically distinguished, enabling the later effect and reference-counting passes. The grammar below is the elaborated core; the reference-count pass (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)) later adds `dup`, `drop`, and reuse nodes to it.
+
+This follows GHC's discipline for Haskell: desugar and elaborate the entire surface language into one small, explicitly typed core, and make that core the single place every later pass operates. The surface may grow new sugar freely, but effect lowering, reference counting, optimization, and the Lean model all see only the handful of forms in the grammar below, so their complexity does not scale with surface syntax. Prism's core is smaller still than GHC's [System FC](bibliography.md#sulzmann-2007): call-by-push-value already makes evaluation order syntactic and A-normal form already names every intermediate result, leaving a pass little to re-derive.
 
 ```text
 {{#include ../examples/cbpv-grammar.txt}}
@@ -460,9 +500,145 @@ For example, a constructor applied to a call elaborates so the call is named bef
 {{#include ../examples/anf-example.txt}}
 ```
 
+### Core Nodes {#core-nodes}
+
+The core has two syntactic categories. A **value** (`Value` in `src/core/cbpv.rs`) is inert: it can be named, copied, and stored, but not run. A **computation** (`Comp`) can be run to produce a value or perform an effect. `Thunk` freezes a computation into a value and `Force`/`Return` cross back, so the two categories are bridged by exactly those nodes. The tables below name every node the backend passes see.
+
+#### Values
+
+| Node    | Description                                                                                |
+| ------- | ------------------------------------------------------------------------------------------ |
+| `Var`   | Reference to a bound variable, by its resolved symbol.                                     |
+| `Int`   | A machine-word integer literal (the default `Int`).                                        |
+| `I64`   | A fixed-width 64-bit signed integer literal.                                               |
+| `U64`   | A fixed-width 64-bit unsigned integer literal.                                             |
+| `Float` | A double-precision floating-point literal.                                                 |
+| `Bool`  | A boolean literal.                                                                         |
+| `Unit`  | The unit value `()`.                                                                       |
+| `Str`   | A string literal.                                                                          |
+| `Thunk` | A computation frozen as a value; `Force` runs it later. The value-from-computation bridge. |
+| `Ctor`  | A fully applied data constructor: its symbol, its integer tag, and its field values.       |
+| `Tuple` | An anonymous product of values.                                                            |
+
+#### Computations
+
+| Node           | Description                                                                                                                                        |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Return`       | Lift a value into a (trivial) computation. The computation-from-value bridge.                                                                      |
+| `Bind`         | Run a computation, name its result, and continue. A-normal-form sequencing, the only sequencer.                                                    |
+| `Force`        | Run a thunk value.                                                                                                                                 |
+| `Lam`          | A function abstraction over parameters with a computation body.                                                                                    |
+| `App`          | Apply a computation (typically a forced closure) to value arguments.                                                                               |
+| `Call`         | A direct call to a top-level function by name, kept distinct from `App` for direct-call codegen.                                                   |
+| `If`           | Branch on a boolean value.                                                                                                                         |
+| `Prim`         | A primitive arithmetic or comparison operator on two values (see Operators).                                                                       |
+| `Case`         | Scrutinize a value against constructor and tuple patterns (see Patterns). The compiled form of `match`.                                            |
+| `FloatBuiltin` | A unary floating-point or numeric-conversion builtin on one value (see Float builtins).                                                            |
+| `StrBuiltin`   | A string, array, or map builtin applied to value operands.                                                                                         |
+| `Io`           | A builtin IO operation and its operands: the output family, the input family, and RNG seeding (see IO operations).                                 |
+| `Error`        | Raise a runtime error carrying a value. The panic and unrecoverable-failure surface.                                                               |
+| `Do`           | Perform an effect operation: the operation symbol and its argument values. Algebraic-effect `perform`.                                             |
+| `Handle`       | Install an effect handler: a body, per-operation clauses (each binding its parameters and a `resume` continuation), and an optional return clause. |
+| `Mask`         | Bypass the innermost matching handlers for the named operations while running the body (effect tunnelling).                                        |
+
+#### Reference-counting and reuse nodes
+
+Elaboration does not produce these; the reference-counting pass inserts them (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)).
+
+| Node        | Description                                                                                                                |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `Dup`       | Increment a value's reference count to share an owned reference.                                                           |
+| `Drop`      | Decrement a value's reference count, freeing the cell at zero.                                                             |
+| `WithReuse` | Free a now-dead owned cell and bind its shell as a reuse token scoped over a body; the cell is freed at exactly one point. |
+| `Reuse`     | Build a constructor in place over a reuse token's cell, without calling the allocator (in-place FBIP update).              |
+
+#### Local-mutation nodes
+
+Produced by effect lowering when it rewrites a closed, escape-checked `var` into a real mutable cell (see [effect lowering](#effect-lowering)), so a `var` loop runs in constant stack rather than through the free monad.
+
+| Node     | Description                                                                  |
+| -------- | ---------------------------------------------------------------------------- |
+| `RefNew` | Allocate a one-field mutable cell holding a value; the result owns the cell. |
+| `RefGet` | Read a mutable cell's field as an owned snapshot; the cell is borrowed.      |
+| `RefSet` | Overwrite a mutable cell's field in place; yields `Unit`.                    |
+
+#### Operators (`Prim`)
+
+| Operation             | Integer | Float  |
+| --------------------- | ------- | ------ |
+| Addition              | `Add`   | `Addf` |
+| Subtraction           | `Sub`   | `Subf` |
+| Multiplication        | `Mul`   | `Mulf` |
+| Division              | `Div`   | `Divf` |
+| Remainder             | `Rem`   |        |
+| Equality              | `Eq`    | `Eqf`  |
+| Inequality            | `Ne`    | `Nef`  |
+| Less than             | `Lt`    | `Ltf`  |
+| Less than or equal    | `Le`    | `Lef`  |
+| Greater than          | `Gt`    | `Gtf`  |
+| Greater than or equal | `Ge`    | `Gef`  |
+
+Short-circuiting `&&` and `||` lower to `If`, and `^` lowers to a class-method call, so none of the three reaches a `Prim`.
+
+#### Patterns (`Case` arms)
+
+| Pattern | Description                                                                    |
+| ------- | ------------------------------------------------------------------------------ |
+| `Var`   | Bind the whole scrutinee to a name (or ignore it).                             |
+| `Ctor`  | Test the scrutinee's constructor tag, binding or ignoring each field position. |
+| `Tuple` | Destructure a product, binding or ignoring each component.                     |
+
+Literal, boolean, and record patterns are compiled away upstream into `If` and `Prim` tests, so only these three shapes survive into a `Case`.
+
+#### IO operations (`Io`)
+
+| Node       | Description                                                                      |
+| ---------- | -------------------------------------------------------------------------------- |
+| `Print`    | Print an integer value (the output family, performing the `Output`/`IO` effect). |
+| `PrintF`   | Print a floating-point value (output family).                                    |
+| `PrintS`   | Print a string value (output family).                                            |
+| `PrintNl`  | Print a newline (output family).                                                 |
+| `ReadInt`  | Read an integer from input (the input family, reading the world).                |
+| `ReadLine` | Read a line of input as a string (input family).                                 |
+| `Rand`     | Draw a pseudo-random integer (input family).                                     |
+| `Srand`    | Seed the random-number generator.                                                |
+
+Folding the family under one node keeps each structural pass to a single arm; the interpreter, codegen, and serializer switch on the operation where behavior differs.
+
+#### Float builtins (`FloatBuiltin`)
+
+| Node         | Description                                             |
+| ------------ | ------------------------------------------------------- |
+| `ToFloat`    | Convert an integer to a float.                          |
+| `Truncate`   | Convert a float to an integer, discarding the fraction. |
+| `FloorToInt` | Round a float down to the nearest integer.              |
+| `CeilToInt`  | Round a float up to the nearest integer.                |
+| `AbsFloat`   | Absolute value.                                         |
+| `Sqrt`       | Square root.                                            |
+| `Sin`        | Sine.                                                   |
+| `Cos`        | Cosine.                                                 |
+| `Exp`        | The exponential function `e^x`.                         |
+| `Ln`         | Natural logarithm.                                      |
+
+#### Program structure
+
+| Node       | Description                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| `Core`     | A whole program: the list of its top-level functions.                                                   |
+| `CoreFn`   | One top-level function: its name, parameters, and computation body.                                     |
+| `HandleOp` | One clause of a `Handle`: the operation name, its parameters, the `resume` binder, and the clause body. |
+
 This calculus is modeled in Lean 4 ([de Moura & Ullrich, 2021](bibliography.md#demoura-ullrich-2021)): `models/Prism.lean` mirrors the core one variant at a time with a substitution small-step relation, on top of which the model adds an executable abstract machine that mirrors the interpreter and is proved to agree with it. The chapter on [verification](#verification) describes the model and how it anchors the compiler's verification chain.
 
-## 8. Pattern-Match Compilation {#pattern-match-compilation}
+## 8. Elaborator {#elaboration}
+
+Elaboration is the surface-to-core translation (`src/core/elaborate/`): it turns the type- and effect-checked surface tree into the [call-by-push-value core](#the-core-calculus) above, making explicit everything the surface left implicit. The checker already did the deciding and recorded each result in a side table keyed by a stable `NodeId` (assigned after desugar), so elaboration is a second traversal that reads those tables and emits, rather than re-deriving anything: the checker decides, the elaborator builds.
+
+Three things are made explicit here. Type-class constraints become dictionary-passing: each constraint the checker discharged is emitted as a global instance dictionary, a hidden dictionary parameter, or a projection of a superclass dictionary, and every method call becomes a field access on the resolved dictionary (see [type and effect inference](#type-and-effect-inference)). The `show` method itself is dictionary-dispatched like any other class method; separately, a few type-directed lowerings are resolved against the checker's span-keyed type table: the `print`/`println` and interpolation display, exponentiation (`^`), and indexing (`a[i]`) each read their operand's head type back and emit the matching builtin. And a `match` is lowered to a decision tree, the one part of elaboration large enough to be its own pass, below.
+
+The output is `Expr<Core>`, the sugar-free phase in which the surface's sugar constructors are uninhabited (see [desugaring](#desugaring)), so a construct elaboration fails to translate is a compile-time type error in the compiler rather than a runtime fallthrough.
+
+### Pattern-Match Compilation {#pattern-match-compilation}
 
 A `match` is compiled to a decision tree (`src/core/elaborate/match_compile.rs`). The arms form a matrix whose rows are arms and columns are argument positions. The compiler selects a column, partitions the arms by the head of that column's patterns, and emits a test: a `Case` on the constructor tag of the scrutinee (the value being matched) for a constructor column, or a chain of equality tests for a scalar column. Wildcard rows form a default sub-matrix shared by the branches that fall through. A guarded arm compiles to a conditional that re-enters the remaining arms when the guard fails. Exhaustiveness, proven by the checker (see [patterns](./spec.md#patterns)), guarantees every scrutinee reaches an arm.
 
@@ -496,6 +672,16 @@ The example below exercises this path: an inner handler catches `Log` and forwar
 
 The fallback reifies one cell per pending operation, so its cost is proportional to the operations in flight; the fast paths avoid it where they apply.
 
+### 9.1 Concurrency {#concurrency}
+
+Prism has no built-in threads, event loop, or async runtime. Concurrency is this free-monad fallback applied to one handler: the `Concurrent` standard library (`lib/std/Concurrent.pr`) defines an `Async` effect and a handler, `run_async`, that schedules fibers cooperatively. The schedule is deterministic (fixed by the program's structure, not a clock), the scheduler keeps no mutable state, and it runs in constant native stack. The full API is the [`Concurrent`](./stdlib/concurrent.md) reference; this section is how the pieces above realize it.
+
+The `Async(a)` effect is parametric in the fibers' shared result type `a`, with operations `fork(() -> a ! {Async(a) | e}) : Fiber`, `yield`, `await(Fiber) : a`, `cancel(Fiber)`, and a buffered FIFO `channel`/`send`/`recv`; sharing one result type is what lets a single run queue hold every fiber without existentials. With no shared mutable cell the handler cannot poke a run queue in place, so it reifies each step instead: a `step` function runs a fiber body to its next `Async` operation and returns a `Cmd` (`Forked`, `Yielded`, `Awaited`, `Cancelled`, `Opened`, `Sent`, `Recving`, or `Finished`) with the fiber's continuation captured inside, and a pure `drive` loop interprets one `Cmd` at a time, threading an immutable `Sched` record that holds the run queue, the finished results, the parked awaiters, the cancelled set, and the channel buffers. A fiber blocks by having its continuation parked in `Sched` and wakes by being moved back onto the queue; because every continuation escapes into `Sched` the program takes the free-monad path above, and under constant-stack driving the loop runs an unbounded number of steps without growing the native stack.
+
+A fiber performs more than `Async`, so the reified `Cmd` must store continuations that perform arbitrary effects, and its effect row is therefore a [row-kinded parameter](#kinds-and-rows), `type Cmd(a, e : Row)`, threaded through `Cmd`, `Sched`, and the scheduler functions to make the whole library polymorphic in the fibers' effects. The handler's type is `run_async : forall a e. (() -> a ! {Async(a) | e}) -> a ! {e}`, discharging `Async` and leaving `e`, so fibers that perform `IO` yield a run that performs `IO` and fibers that perform a capability `E` yield a run that performs `E`, written once for every row. This stays sound through the ambient-row discipline of the type checker: at a `fork` the fiber's row variable is tied to the caller's ambient row rather than opened fresh, so forking a fiber that performs `E` forces `E` into the caller's row and out through `run_async`, and a fiber cannot perform an effect no handler was demanded for. It is the same forwarding the `eff_forward.pr` example shows for nested handlers, now through the scheduler, a fiber's capability tunnelling past the non-handling scheduler to an outer handler exactly as an `EOp` the driver does not name is re-emitted outward; that is the capabilities-as-handlers pattern, where a capability is granted with an ordinary `handle` around `run_async`.
+
+The structured wrappers are ordinary functions over these operations: `scope(tasks)` forks a list of fibers and joins them all so none outlives the call, `cancel(f)` records the fiber id in `Sched` so `run_next` skips it when it would next be dequeued, and a `channel` carries the shared type `a` with `send` handing its value to a waiting receiver or buffering it and `recv` taking the buffer head or parking the fiber, the same reify-and-thread machinery as `await` keyed by a channel id rather than a fiber id. Because the schedule is a pure function of the program a run is reproducible, and composed with the [`Replay`](./stdlib/replay.md) handlers a concurrent run that draws randomness or reads input records into a trace and replays to the identical result, its capability effects tunnelling out of `run_async` and into `record`/`replay` like any other. The worked programs are [`examples/async.pr`](https://github.com/sdiehl/prism/blob/main/examples/async.pr), [`examples/channels.pr`](https://github.com/sdiehl/prism/blob/main/examples/channels.pr), [`examples/async_capability.pr`](https://github.com/sdiehl/prism/blob/main/examples/async_capability.pr), the map-reduce pipeline in [`examples/pipeline.pr`](https://github.com/sdiehl/prism/blob/main/examples/pipeline.pr), and [`examples/replay_concurrent.pr`](https://github.com/sdiehl/prism/blob/main/examples/replay_concurrent.pr).
+
 ## 10. Reference Counting and FBIP Reuse {#reference-counting-and-fbip-reuse}
 
 Reference counting runs after effect lowering, over the handler-free core, so it counts evidence parameters and any reified cells as ordinary values. Memory is managed by Perceus-style reference counting ([Reinking et al., 2021](bibliography.md#reinking-2021); `src/core/fbip.rs`): every parameter and binding is owned and consumed exactly once on every control-flow path from its binding to the end of its scope; a second use inserts a `dup` and an unused value inserts a `drop`. Perceus places these operations precisely rather than conservatively at scope exit, which frees a cell at the earliest point the reuse pass below can claim it. Closure captures are borrowed (read without being consumed) and duplicated before a consuming use, as is a `borrow` parameter (see [declarations and programs](./spec.md#declarations-and-programs)). The parameters a function borrows are recorded as a per-function bit vector, its interprocedural _borrow signature_, which every caller consults to place its `dup`/`drop` correctly. Because that signature crosses call sites, it is one of the analyses that complicates the move to separate compilation (see [name resolution and modules](#name-resolution-and-modules)).
@@ -509,6 +695,8 @@ The `fip`/`fbip` annotations (see [declarations and programs](./spec.md#declarat
 ```prism
 {{#include ../examples/fip_list.pr}}
 ```
+
+This turns a familiar library idiom into a checked one. A mutable structure presented behind a pure interface, a buffer or array updated in place under an API that appears to return a fresh value, is written by hand throughout functional libraries (OCaml's Base and Core are full of such in-place blits), and its correctness rests on the author having reasoned that no other reference can observe the mutation. Prism derives the idiom from ownership rather than trusting it: the reuse pass updates in place exactly when the scrutinee is uniquely owned, and the independent `fbip::balanced` verifier re-establishes that on every control path before anything runs. The hand-written version hopes the aliasing is safe; here the safety is a property of the term the compiler has already proved.
 
 ## 11. Backends {#backends}
 
@@ -620,13 +808,23 @@ A static bar is enforced across the tree. It carries no `todo!`, `unimplemented!
 
 Beyond the differential gates, the core calculus is mechanized in Lean 4 (the `models/` directory, built with `lake`). `Prism.lean` defines the syntax and a substitution-based small-step relation `Step` with its determinism theorem (`Step.deterministic`). `CEK.lean` then defines the abstract machine the compiler actually runs (see [the interpreter](#the-interpreter)): an environment machine with a continuation stack, `Rv` runtime values carrying closures and thunks, curried application, and the deep, mask-aware handler capture that makes `resume` multishot. The machine is a total, executable `step` function, so it is deterministic by construction and runnable.
 
-The model's central theorem connects the two. A big-step natural semantics specifies what a program evaluates to, and `bigstep_runs` proves the machine implements it (a forward simulation under any continuation stack), so the abstract machine is a faithful realization of the specification rather than an independent artifact. `Meta.lean` adds the supporting metatheory: a unique-normal-form corollary, substitution lemmas, and a progress trichotomy (every computation is a value, takes a step, or is an explicit `Stuck` error, with `stuckNoStep` confirming the classification is a genuine partition). `Dynamics.lean` covers the effect machinery, proving the machine reaches a handler exactly when one is in scope (`effect_progress`) and is stuck on an unhandled operation otherwise (`effect_unhandled`). Every theorem is `sorry`-free; the proofs depend only on `propext`/`Quot.sound`, with `Classical.choice` added only where the model evaluates IEEE floats (whose arithmetic Lean defines non-constructively).
+The model's central theorem connects the two. A big-step natural semantics specifies what a program evaluates to, and `bigstep_runs` proves the machine implements it (a forward simulation under any continuation stack), so the abstract machine is a faithful realization of the specification rather than an independent artifact. `Meta.lean` adds the supporting metatheory: a unique-normal-form corollary, substitution lemmas, and a progress trichotomy (every computation is a value, takes a step, or is an explicit `Stuck` error, with `stuckNoStep` confirming the classification is a genuine partition). `Dynamics.lean` covers the effect machinery, proving the machine reaches a handler exactly when one is in scope (`effect_progress`) and is stuck on an unhandled operation otherwise (`effect_unhandled`). These compose into the effect-safety property behind [concurrency](#concurrency): a computation performing an operation the frames a handler crosses do not name (`Tunnels`, the `args`/`bind`/non-matching-`handle`/`mask` frames a scheduler contributes) still reaches an outer handler (`effect_tunnels`), so a covered `doOp` steps while an uncovered one is provably stuck (`effect_tunnels_progress`). That is the machine-level image of the ambient-row discipline: a forked fiber's capability tunnels through the non-handling scheduler to the handler the caller's row demanded and cannot escape it. The surface typing side, that ambient-row inference forces every operation a fiber performs into the caller's row so a covering handler must exist, is not itself mechanized; the two meet at the handler-in-scope predicate, inference guaranteeing the stack covers the row and these theorems guaranteeing a covered stack is effect-safe. Every theorem is `sorry`-free; the proofs declare no axioms of their own and reduce to Lean 4's three standard ones, the entire trusted base sitting above the kernel at the top of the verification chain.
+
+| Axiom              | What it is                                                                                                                  | What the model uses it for                                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `propext`          | Propositional extensionality: `(a ↔ b) → a = b`.                                                                            | Rewriting a proposition for a provably equivalent one, so `Prop`-level equalities behave like any other equation in the metatheory.                                                                                                            |
+| `Quot.sound`       | Quotient soundness: `r a b → Quot.mk r a = Quot.mk r b`.                                                                    | The computational core of quotient types, and in Lean 4 of the kernel's `funext` and the `Acc`/well-founded recursion the executable `step` and its termination proofs rely on.                                                                |
+| `Classical.choice` | The axiom of choice: extracts an element from a nonempty type, underwriting excluded middle and non-constructive existence. | Only where the model evaluates IEEE floats, whose arithmetic and the shortest-round-trip `fmt_g` port ([the differential oracle](#the-model-as-a-differential-oracle)) Lean defines non-constructively; the rest of the model is constructive. |
+
+Determinism, progress, and effect-safety therefore rest on `propext` and `Quot.sound` alone, with `Classical.choice` confined to the float-formatting path.
+
+The full stack of trust, top to bottom: the pseudocode traditionally known as mathematics, then the code that actually _is_ mathematics (the Lean 4 kernel), then a hand-written Core-JSON-Lean mangler, and finally the most non-trivial subset of my pile of shit code that I could be bothered to verify. Maybe more someday, but I'm tired, so probably not. So Prism depends on the axiom of choice and some JSON mangling and a prayer, but I guess that's better than nothing.
 
 ### 13.2 The Model as a Differential Oracle {#the-model-as-a-differential-oracle}
 
 The Lean model is the top of a verification chain rather than a co-equal third oracle beside the interpreter and native backends. The machine carries [its proven guarantees](#the-lean-model), determinism and soundness against the big-step semantics, and is checked to agree with the interpreter on the compiler's own core; the interpreter is in turn the differential oracle the native LLVM and MLIR backends are held byte-identical to (the [parity harness](#verification) above). A property proved once at the top, that the machine computes the specified value and no other, therefore propagates down the chain to every native binary the gate accepts. Concretely, `prism dump core-json <file>` serializes the elaborated core to a JSON tree (`src/core/json.rs`), which `models/Json.lean` decodes back into the Lean syntax, and the `oracle` executable (`models/Oracle.lean`) runs the verified machine on it and prints the result, rendering floats through a port of the runtime's `fmt_g` shortest-round-trip formatter so output is byte-identical. Because Lean cannot call the C and Rust `printf` machinery the other two backends use, that formatter is reimplemented from the raw IEEE-754 bits in exact arbitrary-precision integer arithmetic, choosing the fewest significant digits (one to seventeen) that round-trip back to the same double; the round-trip check is the one place the otherwise constructive model uses `Classical.choice`. `models/diff_against_rust.sh` pipes each fixture through `prism dump core-json | oracle` and compares against `prism run`, so the verified model is checked against the interpreter on the compiler's actual core, not a hand-transcription. `models/Certificates.lean` records the same agreements as kernel-checked `rfl` theorems for the curated set. The grammar in [the specification](spec.md) is itself single-sourced from `models/grammar.ebnf`.
 
-This hash-equals-behavior guarantee is what would make [content-addressed core](#content-addressed-core) sound: a content hash names a piece of core whose meaning is pinned by the oracle, so identifying definitions by hash inherits the parity guarantee for free rather than asserting that two equal hashes mean equal behavior.
+This hash-equals-behavior guarantee is what makes [content-addressed core](#content-addressed-core) sound, and the compiler already computes those hashes (`prism dump core-hash`, folded into a stdlib Merkle root): a content hash names a piece of core whose meaning is pinned by the oracle, so identifying definitions by hash inherits the parity guarantee for free rather than asserting that two equal hashes mean equal behavior.
 
 ## 14. Optimization {#optimization}
 
@@ -681,7 +879,7 @@ Type-class methods are compiled by passing a dictionary. When the instance is kn
 
 {{#tab name="Before" }}
 
-```prism
+```prism,ignore
 -- `show` is dispatched through the `Show` dictionary `d`
 fn render(d, x) = show(d, x)
 
@@ -692,7 +890,7 @@ render(show_int, 7)
 
 {{#tab name="After" }}
 
-```prism
+```prism,ignore
 -- the instance is known, so the call resolves straight to `show_int`
 fn render(x) = show_int(x)
 
@@ -715,7 +913,7 @@ A gentle simplifier run to a fixed point: case-of-known-constructor (a `match` o
 
 {{#tab name="Before" }}
 
-```prism
+```prism,ignore
 let p = Some(2 + 3)
 
 match p of
@@ -727,7 +925,7 @@ match p of
 
 {{#tab name="After" }}
 
-```prism
+```prism,ignore
 -- 2 + 3 folds, the `Some` arm is chosen, then n * 10 folds
 50
 ```
@@ -905,23 +1103,35 @@ Two `:set` toggles exist: `t` (`types`) shows the inferred type and effect row o
 
 `prism fmt` is a rustfmt-style canonical formatter: it parses a file to the surface AST and prints that tree back from scratch (layout is reconstructed, not reflowed), so an already-formatted file is a fixed point that `prism fmt --check` verifies byte-for-byte. What lifts it above a plain pretty-printer is that it preserves _trivia_ (comments and deliberate blank lines) and the original _surface syntax_, restoring sugar the parser had already desugared (UFCS, string interpolation, `?`-binding) instead of printing the lowered form, and it never destroys code: a node it cannot otherwise print falls back to its verbatim source bytes, and an unparseable file is an error rather than a mangled rewrite. The trivia and span bookkeeping ride on [`marginalia`](https://crates.io/crates/marginalia), a small crate written for this compiler but published independently. The implementation is `src/fmt/`.
 
-## 17. Editor Integration {#editor-integration}
+## 17. Documentation Generation {#documentation-generation}
+
+`prism docs` generates Markdown API documentation for a project, one page per module, from the two things the compiler already produces: the comment trivia the [formatter](#the-formatter) also relies on, and the types the [checker](#type-and-effect-inference) infers. It is a general tool (`src/docs/`); the [standard library](./stdlib/index.md) reference in this book is its first output, produced by `prism docs --stdlib` with the output redirected into the book source.
+
+Documentation comments are the only convention it layers on top of the language. A `-- |` line comment (an ordinary `--` comment marked with a bar) directly above a declaration is that declaration's docstring, and one at the top of a file is the module description; every other comment is ignored. This adds nothing to the lexer or grammar: the comment never reaches the AST, and the generator recovers it from the [`marginalia`](https://crates.io/crates/marginalia) trivia table by span, exactly as the [formatter](#the-formatter) re-associates leading comments. So `-- |` is a documentation convention, not a syntactic form.
+
+Signatures are not read from the source but taken from the checker, because most standard-library functions carry no written signature: the generator type-checks each module and renders the declaration's inferred type (`Type::show`), the same text `prism check` prints. Types, classes, and effects are printed from the surface AST with the formatter's own declaration printers, so they read exactly as written.
+
+A fenced `prism` code block inside a docstring is a doctest. `prism docs --test` extracts every such block and compiles it, running it when it produces a program to run, so an example that drifts out of sync with the code fails the build. An example need not spell out a `main`: a block without one is wrapped as the body of an implicit `main`, so a bare expression like `unwrap_or(0, Some(5))` or a short `let`-block runs like a REPL line and shows its value, which keeps examples to the point. The in-browser Run button (and the playground) apply the same wrapping. Per-fence attributes gate the treatment: `ignore` skips a block, `no_run` compiles without running, and `compile_fail` expects a type error, for the cases where a snippet is illustrative or is meant to be rejected. The standard-library pages are committed to the book, and `prism docs --stdlib --check` in continuous integration regenerates them in memory and fails if the checked-in Markdown has drifted, the same contract `prism fmt --check` enforces for source.
+
+## 18. Editor Integration {#editor-integration}
 
 Editor support is, to put it generously, nascent. What exists today is a dependency-free Neovim highlighter under `scripts/nvim/` (an `ftdetect/` map for `*.pr` plus a `syntax/` highlighter whose keyword set is mirrored from `src/lex/token.rs`, so it tracks the lexer). That is the whole story: no semantic highlighting, no go-to-definition, no inline diagnostics.
 
 A proper [tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar and a language server (LSP) are planned, which would bring incremental parsing, structural selection, and the usual hover, jump-to-definition, and live-diagnostic surface to any editor that speaks the protocol. They are not built yet. The project is written for one person, by one person, so the editor it integrates with is, for now, the one that person happens to use.
 
-## 18. Content-Addressed Core {#content-addressed-core}
+## 19. Content-Addressed Core {#content-addressed-core}
 
-A research direction the compiler is laid out for, with a working prototype: identify every top-level definition by a hash of its elaborated core rather than by its name. `prism dump core-hash` (`src/core/hash.rs`) already computes that hash over the core after three normalizations. Every free reference to another top-level symbol is replaced by that symbol's own hash, so a definition's hash transitively commits to everything it calls and the program becomes a Merkle DAG. Bound variables are alpha-normalized to positions, and source spans, comments, and formatting are erased. The hash commits to the elaboration inputs an importer reads (the generalized type, the principal effect row, and the borrow mask), not just the term, and a recursive group is hashed as one strongly-connected component (reusing the `dep_sccs` Tarjan machinery from [name resolution](#name-resolution-and-modules)) with members keyed by index. The result is a name-independent, position-independent identifier for behavior: a rename, a reformat, or a local-variable rename leaves it unchanged, while any change to type, effect row, or computed result changes it.
+A research direction the compiler is laid out for, now with a working substrate rather than only a prototype: identify every top-level definition by a hash of its elaborated core rather than by its name. `prism dump core-hash` (`src/core/hash.rs`) computes that hash over the core after three normalizations. Every free reference to another top-level symbol is replaced by that symbol's own hash, so a definition's hash transitively commits to everything it calls and the program becomes a Merkle DAG. Bound variables are alpha-normalized to positions, and source spans, comments, and formatting are erased. The hash commits to the elaboration inputs an importer reads, not just the term: the generalized type, the principal effect row, the `fip`/`fbip` mode, and the borrow mask. A recursive group is hashed as one strongly-connected component (reusing the shared Tarjan machinery from [name resolution](#name-resolution-and-modules)) with members keyed by index. The result is a name-independent, position-independent identifier for behavior: a rename, a reformat, or a local-variable rename leaves it unchanged, while any change to type, effect row, or computed result changes it. Declarations with no term body are committed the same way by structural digest (`src/core/shape.rs`): a datatype or effect by the shape of its constructors and operations, a type class by its interface (superclasses and method signatures), and an instance by its identity (its class, its head type, and the behavior hashes of its methods, which doubles as the primitive a content-addressed coherence check would bind). Top-level constants, which the compiler inlines rather than compiling to a node, are elaborated as zero-parameter definitions for hashing, so nothing a reader sees on a page is left unaddressed except transparent aliases, which have no content of their own.
 
-Prism is an unusually good host for the Unison-style managed codebase this points at, because two of the hardest preconditions are already paid. Name resolution canonicalizes every definition to a globally unique symbol ([modules](spec.md#modules)), and the [differential oracle](#the-model-as-a-differential-oracle) makes "equal hash means equal behavior" a verified property rather than an assertion, since the hash is taken over the very core the parity gate runs byte-identically across three backends. The direction is the codebase as a content-addressed database: names become a mutable index over immutable `hash -> core` entries, so a rename is an O(1) metadata edit, two versions of a dependency coexist as two hashes with no version solver, an unchanged hash is already compiled and parity-verified so a rebuild touches only a definition's Merkle closure, and a computation named by a hash can be shipped across a wire and run with a proof it is the same computation. The open problems are content-addressed instance coherence, hash stability across compiler versions, and the managed-codebase editing model in which the database, not the text file, is the source of truth.
+The first end-to-end consumer has landed. `prism dump stdlib-hash` folds every standard-library definition's hash together with every datatype, effect, class, and instance digest into a single Merkle root, a Unison-style namespace hash stamped with the scheme tag and the compiler version, computed over the pre-optimization core so it is reproducible and independent of optimizer flags. The generated [Standard Library Reference](stdlib/index.md) anchors that root on its index page and gives every documented definition a subtle content-hash badge beside its signature; both are regenerated and byte-diffed in CI (`prism docs --stdlib --check`), so any behavioral change to the library moves the root and fails the gate until the documentation is regenerated. This is the smallest honest slice of the managed codebase: the hashing substrate proven across every declaration kind and surfaced where a reader can see it, with files still the source of truth.
 
-## 19. Metaprogramming {#metaprogramming}
+Prism is an unusually good host for the Unison-style managed codebase this points at, because two of the hardest preconditions are already paid. Name resolution canonicalizes every definition to a globally unique symbol ([modules](spec.md#modules)), and the [differential oracle](#the-model-as-a-differential-oracle) makes "equal hash means equal behavior" a verified property rather than an assertion, since the hash is taken over the very core the parity gate runs byte-identically across three backends. The direction is the codebase as a content-addressed database: names become a mutable index over immutable `hash -> core` entries, so a rename is an O(1) metadata edit, two versions of a dependency coexist as two hashes with no version solver, an unchanged hash is already compiled and parity-verified so a rebuild touches only a definition's Merkle closure, and a computation named by a hash can be shipped across a wire and run with a proof it is the same computation. The open problems that remain are content-addressed instance coherence (for which the instance identity digest above is the primitive, not yet the enforcement), hash stability across compiler versions, and the managed-codebase editing model in which the database, not the text file, is the source of truth.
+
+## 20. Metaprogramming {#metaprogramming}
 
 Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having been burned by Template Haskell and OCaml's metaprogramming fire and watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [get in touch](https://www.stephendiehl.com/hire/). Until then it stays an open problem.
 
-## 20. Bootstrapping Plan {#bootstrapping-and-self-hosting}
+## 21. Bootstrapping Plan {#bootstrapping-and-self-hosting}
 
 The compiler is written in Rust, but only until it can be written in Prism. The end state is the ordinary one for a serious language: a self-hosting compiler that compiles its own source, reached by a standard multi-stage bootstrap. The current Rust compiler is _stage 0_. Compiling the Prism-in-Prism source with stage 0 yields _stage 1_; compiling that same source again with stage 1 yields _stage 2_; and the bootstrap is sound exactly when stage 1 and stage 2 are byte-identical, the fixed point that proves the compiler reproduces itself. Prism is already unusually well-equipped to check that last step, because the [differential oracle](#the-model-as-a-differential-oracle) and the triple-backend [parity gate](#lint-telemetry-and-parity) make "two builds agree byte-for-byte" the property the whole test suite is already built around.
 
@@ -931,7 +1141,7 @@ The second is size. The whole front end already compiles to a [WebAssembly](#web
 
 At which point, modulo an FFI, a package ecosystem, and roughly every other thing a language actually needs to be used in anger, I think Prism is "done", in the sense that it will never be used by anyone. But [that's fine](https://www.stephendiehl.com/posts/prism/)!
 
-## 21. Command-Line Interface {#command-line-interface}
+## 22. Command-Line Interface {#command-line-interface}
 
 The `prism` binary is one executable with a handful of subcommands. With no subcommand, a bare path argument compiles that file or project and no argument at all opens the [interactive shell](#the-interactive-shell). This section tabulates the full surface; every entry is generated from the same `clap` definition in `bin/prism.rs`.
 
@@ -989,21 +1199,22 @@ The four optimizer/backend flags are global (`-O`, `--passes`, `--backend-opt` a
 
 These are read by the compiler at build time. `PRISM_CC`, `PRISM_CC_FLAGS`, and `LLVM_SYS_221_PREFIX` are the ones a normal build cares about; the rest are diagnostic or opt-out knobs.
 
-| Variable               | Effect                                                                                                                            |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `PRISM_CC`             | C compiler used to assemble and link the runtime (default `clang`).                                                               |
-| `PRISM_CC_FLAGS`       | Extra flags passed to the C compiler (e.g. `-march=native`, `-g`, `-DPRISM_RT_DEBUG`).                                            |
-| `PRISM_BACKEND_OPT`    | LLVM-backend opt level (same values as `--backend-opt`); the flag wins when both are set.                                         |
-| `PRISM_OPT_LEVEL`      | Core optimizer level used when `-O` is not passed (same values as `-O`).                                                          |
-| `PRISM_NATIVE_EFFECTS` | `0` opts out of the native delimited-continuation effect runtime, back to the mutually recursive free-monad driver; on otherwise. |
-| `PRISM_NO_SPECIALIZE`  | If set, skip the dictionary-specialization pass.                                                                                  |
-| `PRISM_CORE_LINT`      | If set, run Core Lint (IR well-formedness) between every optimizer pass.                                                          |
-| `PRISM_OPT_STATS`      | If set, print per-pass optimizer telemetry to stderr.                                                                             |
-| `PRISM_DUMP_CORE`      | If set to a directory, dump the core before and after each pass for debugging the optimizer.                                      |
-| `PRISM_QUIET`          | Silence the non-fatal fallback / matcher-drift warnings on stderr.                                                                |
-| `LLVM_SYS_221_PREFIX`  | Where the LLVM 22 dev libraries live, for linking the compiler itself (a build-of-`prism` setting).                               |
-| `VISUAL`, `EDITOR`     | Editor launched by the REPL `:edit` command (`VISUAL` first, then `EDITOR`).                                                      |
-| `HOME`                 | REPL history is persisted at `$HOME/.prism_history`.                                                                              |
+| Variable               | Effect                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `PRISM_CC`             | C compiler used to assemble and link the runtime (default `clang`).                                                                  |
+| `PRISM_CC_FLAGS`       | Extra flags passed to the C compiler (e.g. `-march=native`, `-g`, `-DPRISM_RT_DEBUG`).                                               |
+| `PRISM_BACKEND_OPT`    | LLVM-backend opt level (same values as `--backend-opt`); the flag wins when both are set.                                            |
+| `PRISM_OPT_LEVEL`      | Core optimizer level used when `-O` is not passed (same values as `-O`).                                                             |
+| `PRISM_NATIVE_EFFECTS` | `0` opts out of the native delimited-continuation effect runtime, back to the mutually recursive free-monad driver; on otherwise.    |
+| `PRISM_NO_SPECIALIZE`  | If set, skip the dictionary-specialization pass.                                                                                     |
+| `PRISM_CORE_LINT`      | If set, run Core Lint (IR well-formedness) between every optimizer pass.                                                             |
+| `PRISM_RT_CHECKS`      | If set, compile the C runtime with `-DPRISM_RT_DEBUG` (cell-validity backstop); off by default so release builds stay zero-overhead. |
+| `PRISM_OPT_STATS`      | If set, print per-pass optimizer telemetry to stderr.                                                                                |
+| `PRISM_DUMP_CORE`      | If set to a directory, dump the core before and after each pass for debugging the optimizer.                                         |
+| `PRISM_QUIET`          | Silence the non-fatal fallback / matcher-drift warnings on stderr.                                                                   |
+| `LLVM_SYS_221_PREFIX`  | Where the LLVM 22 dev libraries live, for linking the compiler itself (a build-of-`prism` setting).                                  |
+| `VISUAL`, `EDITOR`     | Editor launched by the REPL `:edit` command (`VISUAL` first, then `EDITOR`).                                                         |
+| `HOME`                 | REPL history is persisted at `$HOME/.prism_history`.                                                                                 |
 
 A second set is read at runtime by the generated program, for the instrumentation the test gates assert. They print to stderr and never change output.
 
@@ -1014,7 +1225,7 @@ A second set is read at runtime by the generated program, for the instrumentatio
 | `PRISM_EFFOP_STATS` | Print how many free-monad effect-operation cells were allocated (zero on the fully fused path).          |
 | `PRISM_DRIVE_STATS` | Print native effect-driver statistics.                                                                   |
 
-The runtime also has two compile-time switches, selected through the C compiler rather than the environment: `-DPRISM_RT_DEBUG` (passed via `PRISM_CC_FLAGS`) inserts a structural validity check at every cell dereference (non-null, aligned, positive refcount, in-bounds field), aborting with a diagnostic instead of corrupting memory; the `mimalloc` cargo feature routes the runtime's allocations through mimalloc.
+The runtime also has two compile-time switches. `-DPRISM_RT_DEBUG` inserts a structural validity check at every cell dereference (non-null, aligned, positive refcount, in-bounds field), aborting with a diagnostic instead of corrupting memory; the canonical way to turn it on is `PRISM_RT_CHECKS` (which adds the define to the `cc` invocation), and `PRISM_CC_FLAGS=-DPRISM_RT_DEBUG` also works. It is off by default so release builds and the parity oracle stay byte-identical and zero-overhead; it is the always-available structural backstop for builds where ASan/UBSan are unavailable. The `mimalloc` cargo feature routes the runtime's allocations through mimalloc.
 
 ### 21.5 REPL Commands {#repl-commands}
 

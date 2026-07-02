@@ -9,7 +9,7 @@ use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
-use crate::types::ty::{EffRow, Label, Type};
+use crate::types::ty::{EffRow, Kind, Label, Type};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -65,11 +65,41 @@ impl Tc<'_> {
                 // independent of whether the head constructor is declared, so it
                 // is reported before the existence check.
                 no_polytype_args(ts, n, span)?;
-                if !self.data.contains_key(n) {
+                let Some(info) = self.data.get(n) else {
                     return Err(TypeError::Other {
                         span,
                         msg: format!("unknown type `{n}`"),
                     });
+                };
+                // Kind-check each argument against the declared parameter kind so a
+                // mismatch is a clear message here rather than a downstream row/type
+                // unification failure. A `Row`-kinded parameter takes an effect row
+                // (a row variable or a `{..}` row literal); every other takes a type.
+                for (i, arg) in ts.iter().enumerate() {
+                    match info.param_kinds.get(i) {
+                        Some(Kind::Row) if !is_row_arg(arg) => {
+                            return Err(TypeError::Other {
+                                span,
+                                msg: format!(
+                                    "kind mismatch: parameter {} of `{n}` has kind `Row`, so its \
+                                     argument must be an effect row (a row variable or `{{..}}`), \
+                                     not a type",
+                                    i + 1
+                                ),
+                            });
+                        }
+                        Some(k) if *k != Kind::Row && is_row_literal(arg) => {
+                            return Err(TypeError::Other {
+                                span,
+                                msg: format!(
+                                    "kind mismatch: parameter {} of `{n}` has kind `Type`, but an \
+                                     effect row was given",
+                                    i + 1
+                                ),
+                            });
+                        }
+                        _ => {}
+                    }
                 }
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
@@ -78,6 +108,9 @@ impl Tc<'_> {
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
             ast::Ty::Tuple(ts) => ts.iter().try_for_each(|x| self.check_annot_rows(x, span)),
+            // A `{..}` row literal in argument position: its labels are validated
+            // like any other effect row.
+            ast::Ty::RowLit(ast::Row::Cons(ls, _)) => self.check_labels(ls, span),
             _ => Ok(()),
         }
     }
@@ -185,10 +218,27 @@ impl Tc<'_> {
                 self.convert_row(row, a),
                 self.convert_annot(r, a),
             ),
-            ast::Ty::Con(n, args) => Type::Con(
-                Sym::from(n),
-                args.iter().map(|x| self.convert_annot(x, a)).collect(),
-            ),
+            ast::Ty::Con(n, args) => {
+                // A `Row`-kinded parameter position takes an effect row, not a
+                // type, so its argument is lowered as a row (`Cmd(a, e)`).
+                let kinds = self.data.get(n).map(|d| d.param_kinds.clone());
+                let conv = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| {
+                        let is_row = kinds
+                            .as_ref()
+                            .and_then(|ks| ks.get(i))
+                            .is_some_and(|k| *k == Kind::Row);
+                        if is_row {
+                            Type::Row(self.row_annot_arg(x, a))
+                        } else {
+                            self.convert_annot(x, a)
+                        }
+                    })
+                    .collect();
+                Type::Con(Sym::from(n), conv)
+            }
             ast::Ty::App(v, args) => {
                 // The head is a type variable (rigid or to-be-unified), applied.
                 let head = self.convert_annot(&ast::Ty::Var(v.clone()), a);
@@ -200,6 +250,28 @@ impl Tc<'_> {
             ast::Ty::Tuple(ts) => {
                 Type::Tuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
             }
+            ast::Ty::RowLit(row) => Type::Row(self.convert_row(row, a)),
+        }
+    }
+
+    // Lower a type argument sitting at a `Row`-kinded position of a constructor
+    // (`Cmd(a, e)`): only a row variable can be written there, rigid under an
+    // enclosing `forall`, otherwise a fresh row existential shared by name with
+    // any other mention (so `Cmd(a, e)` and a `! {e}` tail unify).
+    fn row_annot_arg(&mut self, x: &ast::Ty, a: &mut Annot<'_>) -> EffRow {
+        match x {
+            ast::Ty::RowLit(row) => self.convert_row(row, a),
+            ast::Ty::Var(m) if a.rigid_row.contains(m) => EffRow::Var(Sym::from(m)),
+            ast::Ty::Var(m) => {
+                if let Some(e) = a.row_ex.get(m) {
+                    EffRow::Exist(*e)
+                } else {
+                    let e = self.push_ex_row();
+                    a.row_ex.insert(m.clone(), e);
+                    EffRow::Exist(e)
+                }
+            }
+            _ => EffRow::Empty,
         }
     }
 
@@ -256,43 +328,75 @@ fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), Type
     Ok(())
 }
 
-fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
-    match t {
-        ast::Ty::Forall(_, b) => ty_row_vars(b, out),
-        ast::Ty::Fun(ps, row, r) => {
-            for p in ps {
-                ty_row_vars(p, out);
-            }
-            if let ast::Row::Cons(_, Some(v)) = row {
-                out.insert(v.clone());
-            }
-            ty_row_vars(r, out);
-        }
-        ast::Ty::Con(_, args) => args.iter().for_each(|a| ty_row_vars(a, out)),
-        ast::Ty::Tuple(ts) => ts.iter().for_each(|t| ty_row_vars(t, out)),
-        _ => {}
-    }
+// A type argument acceptable at a `Row`-kinded parameter position: an effect-row
+// variable (a bare name) or a `{..}` row literal.
+const fn is_row_arg(t: &ast::Ty) -> bool {
+    matches!(t, ast::Ty::Var(_)) || is_row_literal(t)
 }
 
-fn data_row(row: &ast::Row) -> EffRow {
-    match row {
-        ast::Row::Empty => EffRow::Empty,
-        ast::Row::Cons(ls, tl) => {
-            let base = tl
-                .as_ref()
-                .map_or(EffRow::Empty, |v| EffRow::Var(Sym::from(v)));
-            ls.iter().rev().fold(base, |acc, l| {
-                let lab = Label {
-                    name: Sym::from(&l.name),
-                    args: l.args.iter().map(convert_data).collect(),
-                };
-                EffRow::Extend(lab, Box::new(acc))
-            })
+// Whether a written type argument is a `{..}` effect-row literal.
+const fn is_row_literal(t: &ast::Ty) -> bool {
+    matches!(t, ast::Ty::RowLit(_))
+}
+
+fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
+    // A row's tail variable, wherever a row occurs (a function arrow or a
+    // `Row`-kinded `{.. | r}` literal). The tail var is row-position data the
+    // child spine does not yield, so match it explicitly; the spine then recurses
+    // every nested type (App args and label-argument types the old match skipped).
+    match t {
+        ast::Ty::Fun(_, ast::Row::Cons(_, Some(v)), _)
+        | ast::Ty::RowLit(ast::Row::Cons(_, Some(v))) => {
+            out.insert(v.clone());
+        }
+        _ => {}
+    }
+    t.each_child(&mut |c| ty_row_vars(c, out));
+}
+
+// Lower a data-field row, given the current declaration's `Row`-kinded
+// parameters. A label whose name is one of those parameters is not a concrete
+// effect but the row variable itself, so it moves to the tail: both `! {e}` and
+// `! {IO | e}` yield a row ending in `Var(e)`. Concrete labels stay in the
+// prefix, their args lowered with the same row-parameter awareness.
+fn data_row_rp(row: &ast::Row, rp: &BTreeSet<Sym>) -> EffRow {
+    let ast::Row::Cons(ls, tl) = row else {
+        return EffRow::Empty;
+    };
+    let mut base = tl
+        .as_ref()
+        .map_or(EffRow::Empty, |v| EffRow::Var(Sym::from(v)));
+    let mut concrete = Vec::new();
+    for l in ls {
+        let name = Sym::from(&l.name);
+        if rp.contains(&name) {
+            // A row parameter mentioned bare acts as the row tail.
+            if base == EffRow::Empty {
+                base = EffRow::Var(name);
+            }
+        } else {
+            concrete.push(Label {
+                name,
+                args: l.args.iter().map(|t| convert_data_rp(t, rp)).collect(),
+            });
         }
     }
+    concrete
+        .into_iter()
+        .rev()
+        .fold(base, |acc, l| EffRow::Extend(l, Box::new(acc)))
 }
 
 pub(super) fn convert_data(t: &ast::Ty) -> Type {
+    convert_data_rp(t, &BTreeSet::new())
+}
+
+// The core of `convert_data`, aware of the current declaration's `Row`-kinded
+// parameters `rp`. A variable named in `rp` is an effect row, so it lowers to
+// `Type::Row(Var(..))` wherever it appears (notably as the argument at a
+// `Row`-kinded position of a `Con`, `Cmd(a, e)`); every other name is a type
+// variable, exactly as before. `rp` is empty for all non-data-field callers.
+pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
     match t {
         ast::Ty::Int => Type::Int,
         ast::Ty::I64 => Type::I64,
@@ -302,23 +406,44 @@ pub(super) fn convert_data(t: &ast::Ty) -> Type {
         ast::Ty::Float => Type::Float,
         ast::Ty::Char => Type::Char,
         ast::Ty::Str => Type::Str,
-        ast::Ty::Var(n) => Type::Var(Sym::from(n)),
+        ast::Ty::Var(n) => {
+            let s = Sym::from(n);
+            if rp.contains(&s) {
+                Type::Row(EffRow::Var(s))
+            } else {
+                Type::Var(s)
+            }
+        }
         ast::Ty::State(n) => Type::Exist(*n),
         ast::Ty::Forall(names, body) => wrap_forall(
             &names.iter().map(Sym::from).collect::<Vec<_>>(),
-            convert_data(body),
+            convert_data_rp(body, rp),
         ),
         ast::Ty::Fun(ps, row, r) => Type::fun_eff(
-            ps.iter().map(convert_data).collect(),
-            data_row(row),
-            convert_data(r),
+            ps.iter().map(|p| convert_data_rp(p, rp)).collect(),
+            data_row_rp(row, rp),
+            convert_data_rp(r, rp),
         ),
-        ast::Ty::Con(n, args) => Type::Con(Sym::from(n), args.iter().map(convert_data).collect()),
+        ast::Ty::Con(n, args) => Type::Con(
+            Sym::from(n),
+            args.iter().map(|x| convert_data_rp(x, rp)).collect(),
+        ),
         ast::Ty::App(v, args) => Type::apps(
             Type::Var(Sym::from(v)),
-            args.iter().map(convert_data).collect(),
+            args.iter().map(|x| convert_data_rp(x, rp)).collect(),
         ),
-        ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(convert_data).collect()),
+        ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect()),
+        ast::Ty::RowLit(row) => Type::Row(data_row_rp(row, rp)),
+    }
+}
+
+// Normalize a declaration's parallel `param_kinds` to a full-length vector: an
+// empty annotation means every parameter has kind `Type` (the common case).
+fn normalize_kinds(params: &[String], kinds: &[Kind]) -> Vec<Kind> {
+    if kinds.len() == params.len() {
+        kinds.to_vec()
+    } else {
+        vec![Kind::Type; params.len()]
     }
 }
 
@@ -326,6 +451,21 @@ pub(super) fn wrap_forall(params: &[Sym], body: Type) -> Type {
     let mut out = body;
     for p in params.iter().rev() {
         out = Type::Forall(*p, Box::new(out));
+    }
+    out
+}
+
+// Quantify a constructor scheme over its parameters, each with the right binder
+// for its kind: a `Row`-kinded parameter becomes a `RowForall` (opened to a
+// fresh row existential at each use), every other a `Forall`.
+fn wrap_scheme(params: &[String], kinds: &[Kind], body: Type) -> Type {
+    let mut out = body;
+    for (p, k) in params.iter().zip(kinds).rev() {
+        let s = Sym::from(p);
+        out = match k {
+            Kind::Row => Type::RowForall(s, Box::new(out)),
+            _ => Type::Forall(s, Box::new(out)),
+        };
     }
     out
 }
@@ -350,6 +490,7 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
             collect_type_vars(h, out);
             collect_type_vars(a, out);
         }
+        Type::Row(r) => r.for_each_arg(&mut |a| collect_type_vars(a, out)),
         _ => {}
     }
 }
@@ -378,16 +519,62 @@ pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
             collect_row_vars(a, out);
         }
         Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
+        Type::Row(r) => {
+            if let EffRow::Var(v) = r.tail() {
+                out.insert(*v);
+            }
+            r.for_each_arg(&mut |a| collect_row_vars(a, out));
+        }
         _ => {}
     }
 }
 
-// The generalized scheme of a fully-annotated function: every parameter and the
-// return type carry an annotation, so the scheme is the contract its recursive
-// and mutual calls check against. This is what keeps annotated polymorphic
-// recursion decidable. `None` when any annotation is missing (the member is
-// mono-seeded instead) or for a constant (handled by its own value branch).
-pub(super) fn annotation_scheme(d: &Decl<Core>) -> Option<Type> {
+// True when a declaration carries a full type signature (every parameter and
+// the return type annotated, not a constant): the condition under which
+// `annotation_scheme` yields a scheme, which is what keeps annotated polymorphic
+// recursion decidable.
+pub(super) fn fully_annotated(d: &Decl<Core>) -> bool {
+    !d.konst && d.params.iter().all(|p| p.ty.is_some()) && d.ret.is_some()
+}
+
+// The names an annotation uses at a *row* position: an arrow tail `{.. | e}` or
+// a `Row`-kinded constructor slot (`Cmd(a, e)`). Those are effect-row variables;
+// every other name in the annotation is a type variable. Needs the data map to
+// know which constructor slots are `Row`-kinded.
+fn ann_row_var_names(
+    t: &ast::Ty,
+    data: &BTreeMap<String, super::DataInfo>,
+    out: &mut BTreeSet<Sym>,
+) {
+    // Node-specific: a `Con`'s `Row`-kinded slots naming a bare variable, and a
+    // row tail variable on an arrow or a `{.. | r}` row literal. Everything else
+    // recurses through the spine, which reaches App args, label-argument types,
+    // and the row-literal labels the old match skipped.
+    match t {
+        ast::Ty::Con(n, args) => {
+            if let Some(info) = data.get(n) {
+                for (i, arg) in args.iter().enumerate() {
+                    if matches!(info.param_kinds.get(i), Some(Kind::Row)) {
+                        if let ast::Ty::Var(m) = arg {
+                            out.insert(Sym::from(m));
+                        }
+                    }
+                }
+            }
+        }
+        ast::Ty::Fun(_, ast::Row::Cons(_, Some(v)), _)
+        | ast::Ty::RowLit(ast::Row::Cons(_, Some(v))) => {
+            out.insert(Sym::from(v));
+        }
+        _ => {}
+    }
+    t.each_child(&mut |c| ann_row_var_names(c, data, out));
+}
+
+pub(super) fn annotation_scheme(
+    d: &Decl<Core>,
+    data: &BTreeMap<String, super::DataInfo>,
+) -> Option<Type> {
     if d.konst {
         return None;
     }
@@ -397,18 +584,36 @@ pub(super) fn annotation_scheme(d: &Decl<Core>) -> Option<Type> {
         .map(|p| p.ty.as_ref())
         .collect::<Option<_>>()?;
     let ret = d.ret.as_ref()?;
-    let pt: Vec<Type> = annots.into_iter().map(convert_data).collect();
-    let rt = convert_data(ret);
-    let mut vars = BTreeSet::new();
-    for t in &pt {
-        collect_type_vars(t, &mut vars);
+    // Classify the annotation's free names into row variables and type variables
+    // by where they appear, then convert with that row-variable set so a name at
+    // a row position lowers to a row uniformly (an arrow tail and a `Cmd(a, e)`
+    // slot agree). Quantify each with the binder for its sort.
+    let mut row_names = BTreeSet::new();
+    for t in &annots {
+        ann_row_var_names(t, data, &mut row_names);
     }
-    collect_type_vars(&rt, &mut vars);
-    let sorted: Vec<Sym> = vars.into_iter().collect();
-    Some(wrap_forall(&sorted, Type::fun(pt, rt)))
+    ann_row_var_names(ret, data, &mut row_names);
+    let pt: Vec<Type> = annots
+        .into_iter()
+        .map(|t| convert_data_rp(t, &row_names))
+        .collect();
+    let rt = convert_data_rp(ret, &row_names);
+    let mut tvars = BTreeSet::new();
+    let mut rvars = BTreeSet::new();
+    for t in &pt {
+        collect_type_vars(t, &mut tvars);
+        collect_row_vars(t, &mut rvars);
+    }
+    collect_type_vars(&rt, &mut tvars);
+    collect_row_vars(&rt, &mut rvars);
+    let mut out = wrap_forall(&tvars.into_iter().collect::<Vec<_>>(), Type::fun(pt, rt));
+    for v in rvars.into_iter().rev() {
+        out = Type::RowForall(v, Box::new(out));
+    }
+    Some(out)
 }
 
-pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
+pub(super) fn fn_stub(d: &Decl<Core>, data: &BTreeMap<String, super::DataInfo>) -> Type {
     // A constant's stub is its value type: the annotation if given, else a
     // fresh monovar refined when the body is inferred.
     if d.konst {
@@ -422,7 +627,7 @@ pub(super) fn fn_stub(d: &Decl<Core>) -> Type {
             },
         );
     }
-    if let Some(scheme) = annotation_scheme(d) {
+    if let Some(scheme) = annotation_scheme(d, data) {
         return scheme;
     }
     // Fresh, unforgeable placeholder type vars for the stub scheme, minted from
@@ -461,8 +666,12 @@ const BUILTINS: &[(&str, &str)] = &[
     ("str_len", "(String) -> Int"),
     ("str_eq", "(String, String) -> Bool"),
     ("str_cmp", "(String, String) -> Int"),
-    ("show", "forall a. (a) -> String"),
+    // The interpolation display printer (`names::DISPLAY_FN`); total and
+    // type-directed, elaborated by the display intercept rather than dispatched.
+    ("__display", "forall a. (a) -> String"),
     ("show_int", "(Int) -> String"),
+    ("show_i64", "(I64) -> String"),
+    ("show_u64", "(U64) -> String"),
     ("show_bool", "(Bool) -> String"),
     ("show_float", "(Float) -> String"),
     ("substring", "(String, Int, Int) -> String"),
@@ -530,7 +739,7 @@ const BUILTINS: &[(&str, &str)] = &[
 // A builtin signature carries its latent effects on the arrow, and the env type
 // keeps that row: a builtin is a function whose effects inference must attribute
 // at every call site, exactly like a surface function's inferred row. The
-// returned label list mirrors the row for the set-pass cross-check.
+// returned label list is the parsed row, checked by the signature-parsing tests.
 fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
     let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::Ice {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
@@ -595,19 +804,46 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         "Array".to_string(),
         DataInfo {
             params: vec!["a".to_string()],
+            param_kinds: vec![Kind::Type],
             ctors: vec![],
         },
     );
     for dd in &prog.types {
+        let kinds = normalize_kinds(&dd.params, &dd.param_kinds);
+        // The `Row`-kinded parameters of this declaration; a field row that
+        // names one of them refers to that row variable rather than an effect.
+        let row_params: BTreeSet<Sym> = dd
+            .params
+            .iter()
+            .zip(&kinds)
+            .filter(|(_, k)| **k == Kind::Row)
+            .map(|(p, _)| Sym::from(p))
+            .collect();
         data.insert(
             dd.name.clone(),
             DataInfo {
                 params: dd.params.clone(),
+                param_kinds: kinds.clone(),
                 ctors: dd.ctors.iter().map(|c| c.name.clone()).collect(),
             },
         );
+        // The applied head `Cmd(a, e)`: a `Row`-kinded parameter rides in the
+        // spine as `Type::Row(Var(..))`, matching how fields refer to it.
+        let head_args: Vec<Type> = dd
+            .params
+            .iter()
+            .zip(&kinds)
+            .map(|(p, k)| match k {
+                Kind::Row => Type::Row(EffRow::Var(Sym::from(p))),
+                _ => Type::Var(Sym::from(p)),
+            })
+            .collect();
         for (tag, c) in dd.ctors.iter().enumerate() {
-            let args: Vec<Type> = c.args.iter().map(convert_data).collect();
+            let args: Vec<Type> = c
+                .args
+                .iter()
+                .map(|t| convert_data_rp(t, &row_params))
+                .collect();
             let fields: Vec<Sym> = c
                 .fields
                 .as_ref()
@@ -618,24 +854,19 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 CtorInfo {
                     type_name: Sym::from(&dd.name),
                     params: dd.params.iter().map(Sym::from).collect(),
+                    param_kinds: kinds.clone(),
                     args: args.clone(),
                     tag,
                     fields,
                 },
             );
-            let result = Type::Con(
-                Sym::from(&dd.name),
-                dd.params.iter().map(|p| Type::Var(Sym::from(p))).collect(),
-            );
+            let result = Type::Con(Sym::from(&dd.name), head_args.clone());
             let body = if args.is_empty() {
                 result
             } else {
                 Type::fun(args, result)
             };
-            env.insert(
-                Sym::from(&c.name),
-                wrap_forall(&dd.params.iter().map(Sym::from).collect::<Vec<_>>(), body),
-            );
+            env.insert(Sym::from(&c.name), wrap_scheme(&dd.params, &kinds, body));
         }
     }
     let mut eff_ops = BTreeMap::new();

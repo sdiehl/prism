@@ -18,6 +18,8 @@ extern {
         "fip"    => Token::Fip,
         "fbip"   => Token::Fbip,
         "replayable" => Token::Replayable,
+        "without" => Token::Without,
+        "alloc"  => Token::Alloc,
         "pub"    => Token::Pub,
         "import" => Token::Import,
         "as"     => Token::As,
@@ -276,8 +278,10 @@ ConstraintP: Constraint = {
 };
 
 Data: DataDecl = {
-    <l:@L> "type" <name:"uid"> <params:TyParams?> "=" <body:CtorsRhs> <r:@R> =>
-        DataDecl { name, params: params.unwrap_or_default(), ctors: body.0, deriving: body.1, newtype: false, span: Span::new(l, r) },
+    <l:@L> "type" <name:"uid"> <params:KindedTyParams?> "=" <body:CtorsRhs> <r:@R> => {
+        let (params, param_kinds) = params.unwrap_or_default();
+        DataDecl { name, params, param_kinds, ctors: body.0, deriving: body.1, newtype: false, span: Span::new(l, r) }
+    },
 };
 
 // A newtype is a single-constructor, single-field data type; lowering to a
@@ -290,7 +294,7 @@ Newtype: DataDecl = {
                 error: (Span::new(l, r), format!("newtype `{name}` must have exactly one field")),
             });
         }
-        Ok(DataDecl { name, params: params.unwrap_or_default(), ctors: vec![c], deriving: d.unwrap_or_default(), newtype: true, span: Span::new(l, r) })
+        Ok(DataDecl { name, params: params.unwrap_or_default(), param_kinds: Vec::new(), ctors: vec![c], deriving: d.unwrap_or_default(), newtype: true, span: Span::new(l, r) })
     },
 };
 
@@ -311,6 +315,32 @@ DeriveName: (String, Span) = {
 
 TyParams: Vec<String> = { "(" <ps:Comma<"ident">> ")" => ps };
 
+// Type parameters that may carry a kind annotation, `(a, e : Row)`. An
+// unannotated parameter defaults to kind `Type`, so `(a, b)` parses exactly as
+// before. Returns the names and their kinds as parallel vectors.
+KindedTyParams: (Vec<String>, Vec<crate::types::ty::Kind>) = {
+    "(" <ps:Comma<KindedTyParam>> ")" => {
+        let mut names = Vec::with_capacity(ps.len());
+        let mut kinds = Vec::with_capacity(ps.len());
+        for (n, k) in ps { names.push(n); kinds.push(k); }
+        (names, kinds)
+    },
+};
+
+KindedTyParam: (String, crate::types::ty::Kind) = {
+    <s:"ident"> => (s, crate::types::ty::Kind::Type),
+    <l:@L> <s:"ident"> ":" <k:"uid"> <r:@R> =>? {
+        let kind = match k.as_str() {
+            "Row" => crate::types::ty::Kind::Row,
+            "Type" => crate::types::ty::Kind::Type,
+            other => return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), format!("unknown kind `{other}` (expected `Type` or `Row`)")),
+            }),
+        };
+        Ok((s, kind))
+    },
+};
+
 Ctors: Vec<Ctor> = {
     <c:Ctor> <rest:("|" <Ctor>)*> => { let mut v = vec![c]; v.extend(rest); v },
 };
@@ -323,7 +353,16 @@ Ctor: Ctor = {
     },
 };
 
-CtorArgs: Vec<Ty> = { "(" <ts:Comma<Type>> ")" => ts };
+CtorArgs: Vec<Ty> = { "(" <ts:Comma<TypeArg>> ")" => ts };
+
+// A type-constructor argument: a type, or a `{ E, .. | r }` effect-row literal
+// for a `Row`-kinded parameter (`Cmd(Int, {IO})`). The row literal is confined to
+// argument position, so `{` stays unambiguous elsewhere; the kind check rejects
+// it at a parameter that wants a type.
+TypeArg: Ty = {
+    Type,
+    "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Ty::RowLit(Row::Cons(ls, tl)),
+};
 
 RecordField: (String, Ty) = {
     <n:"ident"> ":" <t:Type> => (n, t),
@@ -379,8 +418,8 @@ EffOpParam: Ty = {
 };
 
 Fn: Decl = {
-    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
-        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), span: Span::new(l, r) },
+    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <na:WithoutAlloc?> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
+        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), no_alloc: na.is_some(), no_alloc_bs: na == Some(true), span: Span::new(l, r) },
 };
 
 // An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
@@ -390,12 +429,24 @@ FipKw: Fip = {
     ()     => Fip::No,
 };
 
+// A postfix `without alloc` on a signature certifies zero fresh allocation
+// across the whole call tree (`fbip` semantics, spelled as a revoked capability).
+// `\ alloc` is the terser row-subtraction spelling of the same certificate, read
+// as the result type with the `alloc` coeffect subtracted (`Int \ alloc`).
+// Returns which surface spelling was used: `true` for the terser `\ alloc`,
+// `false` for `without alloc`. Both certify the same thing; the flag only lets
+// the formatter print back what the author wrote.
+WithoutAlloc: bool = {
+    "without" "alloc" => false,
+    "\\" "alloc" => true,
+};
+
 // A top-level immutable constant: `let NAME = EXPR` or `let NAME : TYPE = EXPR`.
 // Modeled as a zero-param `Decl` flagged `konst`, so references inline the
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, no_alloc: false, no_alloc_bs: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
@@ -545,6 +596,8 @@ pub Expr: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
     <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "without" "alloc" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::WithoutAlloc(Box::new(body))), span: Span::new(l, r) },
     <l:@L> "return" <e:Expr> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
     // The left side is parsed as a general `Call` so an index target `a[i]`

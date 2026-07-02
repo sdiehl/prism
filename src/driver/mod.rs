@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 #[cfg(feature = "native")]
@@ -17,17 +17,18 @@ use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Core, CorePass, OptLevel, PassSpec,
+    run_opt_spec, Comp, Core, CorePass, OptLevel, PassSpec, Value,
 };
 use crate::error::Error;
 use crate::eval::{run, Run, Rv};
+use crate::flags::DynFlags;
 use crate::lex::lex;
 #[cfg(feature = "native")]
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::{default_roots, resolve_modules_in, Root};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Program, Span};
+use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, show_effects, Checked, CtorInfo};
 
@@ -36,107 +37,122 @@ pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
 
-// The Core-to-Core optimization level every compile uses, set once from the CLI
-// `-O` flag and read by `frontend`. A process-level default (like the other opt
-// knobs `opt::run` consults) rather than a parameter threaded through every
-// entrypoint. `255` is the unset sentinel: an explicit CLI flag wins, else the
-// `PRISM_OPT_LEVEL` env var (handy for testing a pass at O2 without the CLI),
-// else `O1`, the tier we ship (newtype erasure plus dictionary specialization).
-static OPT_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255);
+/// Layout version of the `dump namespace` export envelope. The export records it
+/// so a reader can tell which layout it is decoding and dispatch on it; a
+/// layout-breaking change to the envelope bumps this. It is independent of the
+/// hash scheme tag, which versions the hashing itself, not the export around it.
+const NAMESPACE_FORMAT: u32 = 1;
 
-/// Set the optimization level for subsequent compiles (the CLI `-O` flag).
-pub fn set_opt_level(level: OptLevel) {
-    let n = match level {
-        OptLevel::O0 => 0,
-        OptLevel::O1 => 1,
-        OptLevel::O2 => 2,
-    };
-    OPT_LEVEL.store(n, std::sync::atomic::Ordering::Relaxed);
+/// Which cooperative scheduler `run_cooperative` resolves to (the `--scheduler`
+/// flag).
+///
+/// `run_async` and `run_lifo` name a specific policy directly and are never
+/// retargeted, so the flag only picks the default wrap, never the semantics of a
+/// program that pins its own scheduler.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Scheduler {
+    /// FIFO round-robin: `run_cooperative` stays its default alias for `run_async`.
+    #[default]
+    Cooperative,
+    /// LIFO depth-first: retarget `run_cooperative` to `run_lifo`.
+    Lifo,
 }
 
-fn opt_level() -> OptLevel {
-    match OPT_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
-        0 => OptLevel::O0,
-        1 => OptLevel::O1,
-        2 => OptLevel::O2,
-        _ => std::env::var("PRISM_OPT_LEVEL")
-            .ok()
-            .and_then(|s| OptLevel::parse(&s))
-            .unwrap_or_default(),
+impl Scheduler {
+    /// Parse a `--scheduler` value: `cooperative`/`fifo`, or `lifo`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "cooperative" | "fifo" => Some(Self::Cooperative),
+            "lifo" => Some(Self::Lifo),
+            _ => None,
+        }
+    }
+
+    /// The `Concurrent` entry `run_cooperative` retargets to, or `None` when the
+    /// default (`run_async`) already is the choice and no rewrite is needed.
+    #[must_use]
+    const fn retarget(self) -> Option<&'static str> {
+        match self {
+            Self::Cooperative => None,
+            Self::Lifo => Some(crate::names::RUN_LIFO),
+        }
     }
 }
 
-// An explicit `--passes` spec, set once from the CLI before compilation, that
-// overrides the `-O` level. Like `OPT_LEVEL`, a process-level knob rather than a
-// parameter threaded through every entrypoint; when unset, the level path runs
-// exactly as before. The two are mutually exclusive at the CLI, so only one is
-// ever in force.
-static PASS_SPEC: std::sync::Mutex<Option<PassSpec>> = std::sync::Mutex::new(None);
+/// The backend optimization levels clang accepts via `-O`: the single source of
+/// truth shared by the `--backend-opt` flag and the `PRISM_BACKEND_OPT` env knob.
+pub const BACKEND_OPT_LEVELS: [&str; 6] = ["0", "1", "2", "3", "s", "z"];
+/// Backend level used when neither the flag nor the env var picks one.
+pub const DEFAULT_BACKEND_OPT: &str = "2";
 
-/// Use an explicit ordered pass list for subsequent compiles (the CLI
-/// `--passes` flag), overriding the `-O` level.
-///
-/// # Panics
-/// Panics if the spec lock is poisoned (a prior set panicked), which cannot
-/// happen for this infallible store.
-pub fn set_pass_spec(spec: PassSpec) {
-    *PASS_SPEC.lock().unwrap() = Some(spec);
+/// Whether `s` is a backend level clang understands; both entry paths validate
+/// against this so a bad `--backend-opt` or `PRISM_BACKEND_OPT` never reaches `cc`.
+#[must_use]
+pub fn valid_backend_opt(s: &str) -> bool {
+    BACKEND_OPT_LEVELS.contains(&s)
 }
 
-fn pass_spec() -> Option<PassSpec> {
-    PASS_SPEC.lock().unwrap().clone()
+#[derive(Clone, Debug)]
+pub struct Config {
+    /// The Core-to-Core optimization level (the CLI `-O` flag; default `O1`).
+    pub opt: OptLevel,
+    /// An explicit ordered pass list (the CLI `--passes` flag) that overrides
+    /// `opt` when present. The two are mutually exclusive at the CLI.
+    pub passes: Option<PassSpec>,
+    /// The LLVM-backend optimization level handed to `cc` as `-O<level>` (the
+    /// `--backend-opt` flag; default `"2"`). Tunes clang's own pipeline over the
+    /// emitted bitcode, distinct from the Core-to-Core `opt` above.
+    pub backend_opt: String,
+    /// Core passes the caller turned off (the `--no-<pass>` flags), filtered out
+    /// of whatever pipeline `opt`/`passes` selects.
+    pub disabled: Vec<CorePass>,
+    /// Which cooperative scheduler `run_cooperative` binds to (the `--scheduler`
+    /// flag; default cooperative/FIFO).
+    pub scheduler: Scheduler,
+    /// The environment-derived compiler behavior knobs (effect backends, Core
+    /// Lint, dumps). Read once from the process environment and threaded into the
+    /// effect lowerer and optimizer, so no pass reads the environment itself.
+    pub flags: DynFlags,
 }
 
-// The LLVM-backend optimization level handed to `cc` (the `--backend-opt` CLI
-// flag), distinct from the Core-to-Core `-O` above: this one only tunes clang's
-// own `-O{n}` pipeline over the emitted bitcode, leaving Core untouched. A
-// process-global like the other knobs; `None` means the shipped default of
-// `-O2`. `PRISM_BACKEND_OPT` is the env escape hatch, mirroring
-// `PRISM_OPT_LEVEL`.
-static BACKEND_OPT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-
-/// Set the LLVM-backend optimization level (clang `-O`) for subsequent builds.
-///
-/// # Panics
-/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
-/// for this infallible store.
-pub fn set_backend_opt(level: String) {
-    *BACKEND_OPT.lock().unwrap() = Some(level);
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            opt: OptLevel::default(),
+            passes: None,
+            backend_opt: DEFAULT_BACKEND_OPT.into(),
+            disabled: Vec::new(),
+            scheduler: Scheduler::default(),
+            flags: DynFlags::default(),
+        }
+    }
 }
 
-#[cfg(feature = "native")]
-fn backend_opt() -> String {
-    BACKEND_OPT
-        .lock()
-        .unwrap()
-        .clone()
-        .or_else(|| env::var("PRISM_BACKEND_OPT").ok())
-        .unwrap_or_else(|| "2".into())
-}
-
-// The Core passes the user turned off with a `--no-<pass>` flag (e.g.
-// `--no-inline`). The optimizer filters these out of the effective pipeline,
-// whether it came from a `-O` level or an explicit `--passes` list, so the flags
-// compose with both. A process-global like the other opt knobs above;
-// `PRISM_NO_SPECIALIZE` is the env equivalent of `--no-specialize`, unioned in by
-// the optimizer.
-static DISABLED_PASSES: std::sync::Mutex<Vec<CorePass>> = std::sync::Mutex::new(Vec::new());
-
-/// Turn off the named Core passes for subsequent compiles (the CLI
-/// `--no-<pass>` flags). Each is removed from every occurrence in the effective
-/// pipeline, whether it came from `-O` or `--passes`.
-///
-/// # Panics
-/// Panics if the lock is poisoned (a prior set panicked), which cannot happen
-/// for this infallible store.
-pub fn set_disabled_passes(passes: &[CorePass]) {
-    *DISABLED_PASSES.lock().unwrap() = passes.to_vec();
-}
-
-// The passes disabled via `set_disabled_passes`, read by the optimizer when it
-// finalizes the pass vector. Empty when no `--no-<pass>` flag was given.
-pub(crate) fn disabled_passes() -> Vec<CorePass> {
-    DISABLED_PASSES.lock().unwrap().clone()
+impl Config {
+    /// The configuration implied by the process environment: the `PRISM_OPT_LEVEL`,
+    /// `PRISM_BACKEND_OPT`, and `PRISM_NO_SPECIALIZE` escape hatches resolved into a
+    /// value, everything else defaulted. The library entry points use this so a
+    /// bare `prism::build` still honors the env knobs; the CLI starts here and
+    /// overrides with its explicit flags.
+    #[must_use]
+    pub fn from_env() -> Self {
+        // The environment is read once, into `DynFlags`; the Config-level fields
+        // are projected out of it (the CLI later overrides them with its flags).
+        let flags = DynFlags::from_env();
+        let mut disabled = Vec::new();
+        if flags.no_specialize {
+            disabled.push(CorePass::Specialize);
+        }
+        Self {
+            opt: flags.opt_level,
+            passes: None,
+            backend_opt: flags.backend_opt.clone(),
+            disabled,
+            scheduler: flags.scheduler,
+            flags,
+        }
+    }
 }
 #[cfg(feature = "native")]
 const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
@@ -146,14 +162,59 @@ pub fn with_prelude(src: &str) -> String {
     format!("{PRELUDE}\n{src}")
 }
 
+/// The boundary line [`with_custom_prelude`] stamps between a project's own
+/// prelude and the user source.
+///
+/// The built-in prelude is located by its known text, but a custom prelude's
+/// length is unknowable from content alone, so composition records the boundary
+/// in the one artifact that crosses the pipeline (the composed source) and
+/// [`SourceMap`](crate::error::SourceMap) reads it back. A comment to the
+/// lexer; the `@`s keep it a line no formatter or ordinary source spells.
+pub const PRELUDE_END_MARK: &str = "-- prism@prelude@end";
+
 /// Prepend a caller-supplied prelude instead of the built-in one.
 ///
 /// A project that sets `[package] prelude` opts into its own always-on
 /// definitions; the built-in prelude is not added on top, so the project's
-/// prelude is the whole base.
+/// prelude is the whole base. The [`PRELUDE_END_MARK`] line stamped between the
+/// two is how diagnostics locate the user's own file.
 #[must_use]
 pub fn with_custom_prelude(prelude: &str, src: &str) -> String {
-    format!("{prelude}\n{src}")
+    format!("{prelude}\n{PRELUDE_END_MARK}\n{src}")
+}
+
+/// Make a documentation snippet runnable without a `main` boilerplate.
+///
+/// A snippet that already defines `main` is returned unchanged. Otherwise the
+/// whole snippet becomes the body of an implicit `main`, so a bare expression
+/// (`unwrap_or(0, Some(5))`) or a `let`-block runs like a REPL line and yields a
+/// value. A snippet that is neither (top-level declarations with no `main`, which
+/// cannot sit inside a function body) is returned unchanged, so the caller sees
+/// it has no entry point. Idempotent: wrapping a wrapped snippet is a no-op.
+#[must_use]
+pub fn example_program(src: &str) -> String {
+    let defines_main = |s: &str| {
+        parse(s).is_ok_and(|pr| {
+            pr.program
+                .fns
+                .iter()
+                .any(|d| d.name == crate::names::ENTRY_POINT)
+        })
+    };
+    if defines_main(src) {
+        return src.to_string();
+    }
+    let body: String = src
+        .lines()
+        .map(|l| format!("  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let wrapped = format!("fn {}() =\n{body}", crate::names::ENTRY_POINT);
+    if parse(&wrapped).is_ok() {
+        wrapped
+    } else {
+        src.to_string()
+    }
 }
 
 /// # Examples
@@ -213,11 +274,20 @@ fn emit_warnings(src: &str, checked: &Checked) {
     }
 }
 
-fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, Core), Error> {
+fn frontend(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Program<CorePhase>, Checked, Core), Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules_in(program, roots)?;
     let lints = lint_surface(src, &program);
-    let program = desugar(program)?;
+    let mut program = desugar(program)?;
+    // The `--scheduler` choice retargets only the policy-neutral `run_cooperative`
+    // entry; a program that pins `run_async`/`run_lifo` is untouched.
+    if let Some(target) = cfg.scheduler.retarget() {
+        crate::syntax::desugar::retarget_cooperative(&mut program, target);
+    }
     let mut checked = typecheck(&program)?;
     checked.warnings.extend(lints);
     emit_warnings(src, &checked);
@@ -233,11 +303,129 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
     // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1),
     // unless an explicit `--passes` spec overrides it with its pre-stage list.
     let nt = newtype_ctors(&program);
-    let (core, _stats) = match pass_spec() {
-        Some(spec) => run_opt_spec(&core, &nt, &spec.pre),
-        None => run_opt(&core, &nt, opt_level(), PassStage::PreLowering),
-    };
+    let (core, _stats) = cfg.passes.as_ref().map_or_else(
+        || {
+            run_opt(
+                &core,
+                &nt,
+                cfg.opt,
+                PassStage::PreLowering,
+                &cfg.disabled,
+                &cfg.flags,
+            )
+        },
+        |spec| run_opt_spec(&core, &nt, &spec.pre, &cfg.disabled, &cfg.flags),
+    );
     Ok((program, checked, core))
+}
+
+// The composed source that pulls in the entire documented standard library: the
+// always-on prelude (which glob-imports the `Data.*` modules) plus the two
+// modules it does not open, `Replay` and `Concurrent`. Docs and the stdlib hash
+// share this one definition of "the stdlib".
+pub(crate) fn stdlib_driver_src() -> String {
+    with_prelude("import Replay (..)\nimport Concurrent (..)\n")
+}
+
+// Elaborate a source to Core *before* the Core-to-Core optimizer runs, for the
+// content hash. Pre-opt Core is used so a committed root cannot depend on an
+// env-toggled pass (`Specialize`) and does not move when the optimizer is tuned,
+// and so it holds every top-level definition exactly once (the optimizer has no
+// whole-program DCE). Quiet: no warning emission, no surface lints.
+fn elaborated(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, Core), Error> {
+    let ParseResult { program, .. } = parse(src)?;
+    let program = resolve_modules_in(program, roots)?;
+    let program = desugar(program)?;
+    let checked = typecheck(&program)?;
+    let core = elaborate(&program, &checked)?;
+    Ok((program, checked, core))
+}
+
+/// A content-addressed fingerprint of the whole standard library.
+///
+/// One namespace root (a branch-hash-style fold) over every documented
+/// definition's behavior hash and every datatype/effect's shape digest, tagged
+/// with the hashing scheme and the compiler version that produced it.
+#[derive(Debug)]
+pub struct StdlibHash {
+    /// The single fold over every entry below; the value anchored in the docs.
+    pub root: String,
+    /// The hashing scheme tag every constituent hash commits to.
+    pub scheme: &'static str,
+    /// The compiler version that produced this fingerprint.
+    pub version: &'static str,
+    /// Per-definition behavior hashes (term level).
+    pub defs: crate::core::Hashes,
+    /// Per-declaration structural shape digests (datatypes and effects).
+    pub shapes: BTreeMap<String, String>,
+    /// Per-class interface digests (name, superclasses, method signatures).
+    pub classes: BTreeMap<String, String>,
+    /// Per-instance identity digests (class, head, method behavior hashes).
+    pub instances: BTreeMap<String, String>,
+}
+
+/// Compute the standard-library fingerprint. See [`StdlibHash`].
+///
+/// # Errors
+/// Fails only if the embedded stdlib does not parse, type-check, or elaborate,
+/// which would be a compiler bug.
+pub fn stdlib_hash() -> Result<StdlibHash, Error> {
+    let src = stdlib_driver_src();
+    let (program, checked, mut core) = elaborated(&src, &[Root::Embedded(crate::stdlib::STDLIB)])?;
+    // Top-level constants (`let`) are inlined at use sites, so they are not in the
+    // compiled Core. Elaborate them as zero-param CoreFns so each gets its own
+    // behavior hash (addressable and displayable), then hash the whole set.
+    core.fns.extend(crate::core::konst_fns(&program, &checked)?);
+    let defs = hash_program(
+        &core,
+        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+    );
+    let shapes = crate::core::shape_digests(&program.types, &program.effects);
+    let classes = crate::core::class_digests(&program.classes);
+    // An instance's identity folds its already-computed method behavior hashes
+    // (the `i@<inst>@<method>` CoreFns) with its class and head. This is nearly
+    // free and doubles as the coherence seed: the `(class, head) -> hash` value.
+    let defs_str: BTreeMap<String, String> = defs
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+        .collect();
+    let mut instances: BTreeMap<String, String> = BTreeMap::new();
+    for inst in &program.instances {
+        let prefix = format!("i@{}@", inst.name);
+        let methods: BTreeMap<String, String> = defs_str
+            .iter()
+            .filter_map(|(k, v)| k.strip_prefix(&prefix).map(|m| (m.to_string(), v.clone())))
+            .collect();
+        instances.insert(
+            inst.name.clone(),
+            crate::core::instance_digest(&inst.class, &inst.head, &methods),
+        );
+    }
+    // Merge every kind into one name -> hash map, then fold to a single root.
+    // Namespace the keys by kind so declarations that share a name across
+    // namespaces (a value and an instance are both lowercase) cannot collide.
+    let mut entries: BTreeMap<String, String> = BTreeMap::new();
+    for (sym, h) in &defs {
+        entries.insert(format!("def {}", sym.as_str()), h.clone());
+    }
+    for (name, h) in &shapes {
+        entries.insert(format!("shape {name}"), h.clone());
+    }
+    for (name, h) in &classes {
+        entries.insert(format!("class {name}"), h.clone());
+    }
+    for (name, h) in &instances {
+        entries.insert(format!("instance {name}"), h.clone());
+    }
+    Ok(StdlibHash {
+        root: crate::core::hash_root(&entries),
+        scheme: crate::core::HASH_SCHEME,
+        version: env!("CARGO_PKG_VERSION"),
+        defs,
+        shapes,
+        classes,
+        instances,
+    })
 }
 
 // Cross-check the two effect engines as a real assertion (not a debug_assert):
@@ -250,8 +438,6 @@ fn frontend(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, C
 // Synthesized ops that are not type-level effects are skipped rather than
 // flagged.
 fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
-    use std::collections::BTreeSet;
-
     let latent = crate::core::effect_lower::latent_ops(core);
     let empty = BTreeSet::new();
     // Validate against each function's inferred row (the labels of its checked
@@ -310,12 +496,33 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
         // Point the diagnostic at the offending annotated function: its name
         // appears backtick-quoted in the message, so the first annotated decl
         // whose name occurs there owns the span.
-        let span = program
+        let owner = program
             .fns
             .iter()
             .filter(|d| annots.contains_key(&Sym::from(&d.name)))
-            .find(|d| msg.contains(&format!("`{}`", d.name)))
-            .map_or_else(marginalia::Span::default, |d| d.span);
+            .find(|d| msg.contains(&format!("`{}`", d.name)));
+        let span = owner.map_or_else(marginalia::Span::default, |d| d.span);
+        // A `without alloc` function checks with `fbip` semantics, so the shared
+        // checker phrases its message with `fbip`. Restore the surface spelling
+        // for a function that used the `without alloc` suffix, and for a lifted
+        // `without alloc { .. }` block refer to the block rather than leak its
+        // synthetic function name (the span already points at the source block).
+        let msg = match owner {
+            Some(d) if d.no_alloc && d.fip == Fip::No => {
+                let wa = format!("{} {}", crate::kw::WITHOUT, crate::kw::ALLOC);
+                let m = msg.replace("`fbip`", &format!("`{wa}`"));
+                if crate::names::is_without_alloc_block(&d.name) {
+                    m.replace(
+                        &format!("function `{}` is marked `{wa}` but", d.name),
+                        &format!("the `{wa}` block"),
+                    )
+                    .replace(&format!("`{}`", d.name), &format!("the `{wa}` block"))
+                } else {
+                    m
+                }
+            }
+            _ => msg,
+        };
         Error::Type(crate::error::TypeError::Other { span, msg })
     };
     let sigs = borrow_sigs(program);
@@ -337,12 +544,16 @@ fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(
     if annots.is_empty() {
         return Ok(());
     }
-    let allowed: std::collections::BTreeSet<Sym> =
-        ["Console", "FileSystem", "Random", "Env", "Output"]
-            .into_iter()
-            .chain([crate::names::EXN_EFFECT, crate::names::FAIL_EFFECT])
-            .map(Sym::from)
-            .collect();
+    let allowed: std::collections::BTreeSet<Sym> = crate::names::INPUT_CAPABILITY_EFFECTS
+        .iter()
+        .copied()
+        .chain([
+            crate::names::OUTPUT_EFFECT,
+            crate::names::EXN_EFFECT,
+            crate::names::FAIL_EFFECT,
+        ])
+        .map(Sym::from)
+        .collect();
     let inferred: std::collections::BTreeMap<&str, &crate::types::ty::Effects> = checked
         .decls
         .iter()
@@ -402,7 +613,7 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
 /// # Errors
 /// Fails on front-end errors or a runtime fault.
 pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
-    let core = prepared_core(src, &default_roots(base))?;
+    let core = prepared_core(src, &default_roots(base), &Config::from_env())?;
     run(&core).map_err(Error::Runtime)
 }
 
@@ -420,7 +631,13 @@ pub fn interpret_io_at(
     out_sink: &mut dyn std::io::Write,
     input: &mut dyn std::io::BufRead,
 ) -> Result<Run, Error> {
-    interpret_io_on(src, &default_roots(base), out_sink, input)
+    interpret_io_on(
+        src,
+        &default_roots(base),
+        out_sink,
+        input,
+        &Config::from_env(),
+    )
 }
 
 /// Like [`interpret_io_at`], but against an explicit module search path (a
@@ -433,18 +650,19 @@ pub fn interpret_io_on(
     roots: &[Root],
     out_sink: &mut dyn std::io::Write,
     input: &mut dyn std::io::BufRead,
+    cfg: &Config,
 ) -> Result<Run, Error> {
-    let core = prepared_core(src, roots)?;
+    let core = prepared_core(src, roots, cfg)?;
     crate::eval::run_io(&core, out_sink, input).map_err(Error::Runtime)
 }
 
 // Shared front-end and rc-balance ICE check for the interpreter entries. The
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
-fn prepared_core(src: &str, roots: &[Root]) -> Result<Core, Error> {
-    let (program, checked, core) = frontend(src, roots)?;
+fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<Core, Error> {
+    let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, _, warning) = lower_opt(&core, &checked.ctors)?;
+    let (lowered, _, warning) = lower_opt(&core, &checked.ctors, cfg)?;
     emit_lower_warning(src, warning.as_deref());
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
@@ -459,23 +677,37 @@ type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
 // fixed the var/State fusion strategy, so simplifying here cannot defeat it. Every
 // path that produces or shows the lowered native core goes through this, so the
 // compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
-fn lower_opt(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<Lowered, Error> {
-    let (lowered, ctors, warning) = lower_effects(core, ctors)?;
+fn lower_opt(
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    cfg: &Config,
+) -> Result<Lowered, Error> {
+    let (lowered, ctors, warning) = lower_effects(core, ctors, &cfg.flags)?;
     let empty = std::collections::BTreeSet::new();
-    let (lowered, _stats) = match pass_spec() {
-        Some(spec) => run_opt_spec(&lowered, &empty, &spec.late),
-        None => run_opt(&lowered, &empty, opt_level(), PassStage::Late),
-    };
+    let (lowered, _stats) = cfg.passes.as_ref().map_or_else(
+        || {
+            run_opt(
+                &lowered,
+                &empty,
+                cfg.opt,
+                PassStage::Late,
+                &cfg.disabled,
+                &cfg.flags,
+            )
+        },
+        |spec| run_opt_spec(&lowered, &empty, &spec.late, &cfg.disabled, &cfg.flags),
+    );
     Ok((lowered, ctors, warning))
 }
 
 fn lowered_core(
     src: &str,
     roots: &[Root],
+    cfg: &Config,
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
-    let (program, checked, core) = frontend(src, roots)?;
+    let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors)?;
+    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, cfg)?;
     emit_lower_warning(src, warning.as_deref());
     Ok((checked, lowered, ctors, sigs))
 }
@@ -504,8 +736,24 @@ fn emit_lower_warning(src: &str, warning: Option<&str>) {
 /// # Errors
 /// Fails on front-end errors.
 pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Error> {
-    let (_, checked, core) = frontend(full, &default_roots(base))?;
-    Ok(crate::core::effect_strategy(&core, &checked.ctors)?)
+    effect_strategy_on(full, base, &Config::from_env())
+}
+
+/// Like [`effect_strategy_full`] under an explicit [`Config`].
+///
+/// The tier-parity oracle uses this to classify the same program under a
+/// forced `flags.effect_tier` and under `auto`, deciding which programs a
+/// forced build actually exercises.
+///
+/// # Errors
+/// Fails on front-end errors.
+pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<&'static str, Error> {
+    let (_, checked, core) = frontend(full, &default_roots(base), cfg)?;
+    Ok(crate::core::effect_strategy(
+        &core,
+        &checked.ctors,
+        &cfg.flags,
+    )?)
 }
 
 /// The effect-lowering fallback warnings this snippet's program raises.
@@ -517,8 +765,9 @@ pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Err
 /// # Errors
 /// Fails on front-end errors.
 pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Error> {
-    let (_, checked, core) = frontend(full, &default_roots(base))?;
-    let (_, _, warning) = lower_effects(&core, &checked.ctors)?;
+    let cfg = Config::from_env();
+    let (_, checked, core) = frontend(full, &default_roots(base), &cfg)?;
+    let (_, _, warning) = lower_effects(&core, &checked.ctors, &cfg.flags)?;
     Ok(warning.into_iter().collect())
 }
 
@@ -545,7 +794,11 @@ pub fn core_ir(src: &str) -> Result<String, Error> {
 /// # Errors
 /// Fails on front-end errors.
 pub fn core_of(src: &str) -> Result<Core, Error> {
-    let (_, _, core) = frontend(&with_prelude(src), &default_roots(Path::new(".")))?;
+    let (_, _, core) = frontend(
+        &with_prelude(src),
+        &default_roots(Path::new(".")),
+        &Config::from_env(),
+    )?;
     Ok(core)
 }
 
@@ -560,7 +813,7 @@ pub fn core_of(src: &str) -> Result<Core, Error> {
 /// Fails on front-end errors.
 pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
     let prelude = prelude_fn_names()?;
-    let (program, _, core) = frontend(full, &default_roots(base))?;
+    let (program, _, core) = frontend(full, &default_roots(base), &Config::from_env())?;
     let sigs = borrow_sigs(&program);
     let optimized = reuse(&insert_rc(&core, &sigs));
     Ok(pp_core_pretty(&strip_prelude(optimized, &prelude)))
@@ -577,8 +830,6 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
 /// # Errors
 /// Fails on front-end errors (lex, parse, module, type, fip).
 pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str>, Error> {
-    use crate::core::{Comp, Value};
-
     // The input capability wrappers route host file/env IO through effects, so
     // the underlying prim builtin lives only in the always-reachable world
     // handler. Detect that usage from the surface wrapper a program reaches.
@@ -601,11 +852,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
         match c {
             Comp::Return(v)
             | Comp::Force(v)
-            | Comp::Print(v)
-            | Comp::PrintF(v)
-            | Comp::PrintS(v)
             | Comp::Error(v)
-            | Comp::Srand(v)
             | Comp::FloatBuiltin(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
@@ -639,7 +886,10 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
                 scan_comp(t, out);
                 scan_comp(e, out);
             }
-            Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+            Comp::Call(_, args)
+            | Comp::Do(_, args)
+            | Comp::StrBuiltin(_, args)
+            | Comp::Io(_, args) => {
                 for a in args {
                     scan_val(a, out);
                 }
@@ -665,11 +915,10 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
                     scan_comp(&op.body, out);
                 }
             }
-            Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => {}
         }
     }
 
-    let (_, _, core) = frontend(full, &default_roots(base))?;
+    let (_, _, core) = frontend(full, &default_roots(base), &Config::from_env())?;
     let reachable = crate::core::reachable_fns(&core);
     let mut out = Vec::new();
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {
@@ -686,7 +935,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 // Core function names contributed by the prelude alone, used to elide it from a
 // snippet's IR dump.
 fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
-    let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")))?;
+    let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")), &Config::from_env())?;
     Ok(core.fns.into_iter().map(|f| f.name).collect())
 }
 
@@ -707,8 +956,9 @@ fn strip_prelude(core: Core, prelude: &std::collections::HashSet<Sym>) -> Core {
 fn compiled(
     src: &str,
     roots: &[Root],
+    cfg: &Config,
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>), Error> {
-    let (checked, lowered, ctors, sigs) = lowered_core(src, roots)?;
+    let (checked, lowered, ctors, sigs) = lowered_core(src, roots, cfg)?;
     residual_effects(&lowered).map_err(Error::Ice)?;
     Ok((checked, reuse(&insert_rc(&lowered, &sigs)), ctors))
 }
@@ -726,7 +976,7 @@ pub fn build(src: &str, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
 pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    build_on(src, &default_roots(base), out)
+    build_on(src, &default_roots(base), out, &Config::from_env())
 }
 
 #[cfg(feature = "native")]
@@ -744,12 +994,12 @@ fn require_main(checked: &Checked) -> Result<(), Error> {
 /// # Errors
 /// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
-pub fn build_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
-    let (checked, core, ctors) = compiled(src, roots)?;
+pub fn build_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(), Error> {
+    let (checked, core, ctors) = compiled(src, roots, cfg)?;
     require_main(&checked)?;
     let bc = out.with_extension("bc");
     emit_llvm_bc(&core, &ctors, &bc).map_err(Error::Codegen)?;
-    cc_link(&bc, out)
+    cc_link(&bc, out, cfg)
 }
 
 // Save the offending IR at a stable path so a clang parse error points at
@@ -769,7 +1019,7 @@ fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
 }
 
 #[cfg(feature = "native")]
-fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
+fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
     let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
     let rt = out.with_extension("prism_rt.c");
     fs::write(&rt, RUNTIME)?;
@@ -780,9 +1030,18 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
     // generated code. The `-O` level (default `-O2`) is the one user-facing knob;
     // a trailing `PRISM_CC_FLAGS` token still wins, since clang takes the last
     // `-O` it sees.
-    let olevel = format!("-O{}", backend_opt());
+    let olevel = format!("-O{}", cfg.backend_opt);
+    // Opt-in structural backstop: compile the runtime with its cell-validity
+    // checks (`PRISM_RT_CHECKS`). Off by default so release builds and the parity
+    // oracle stay zero-overhead and byte-identical.
+    let rt_checks: &[&str] = if cfg.flags.rt_checks {
+        &["-DPRISM_RT_DEBUG"]
+    } else {
+        &[]
+    };
     let res = Command::new(&cc)
         .args([olevel.as_str(), "-flto=thin", "-Wno-override-module"])
+        .args(rt_checks)
         .args(extra.split_whitespace())
         .arg(ir)
         .arg(&rt)
@@ -807,14 +1066,15 @@ fn cc_link(ir: &Path, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors or codegen failure.
 #[cfg(feature = "native")]
 pub fn emit_ir(src: &str) -> Result<String, Error> {
-    let (_, core, ctors) = compiled(src, &default_roots(Path::new(".")))?;
+    let (_, core, ctors) = compiled(src, &default_roots(Path::new(".")), &Config::from_env())?;
     emit_llvm(&core, &ctors).map_err(Error::Codegen)
 }
 
 /// # Errors
 /// Fails on front-end errors or an unbalanced rc insertion.
 pub fn rc_balanced(src: &str) -> Result<(), Error> {
-    let (_, lowered, _, sigs) = lowered_core(src, &default_roots(Path::new(".")))?;
+    let (_, lowered, _, sigs) =
+        lowered_core(src, &default_roots(Path::new(".")), &Config::from_env())?;
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs).map_err(Error::Codegen)
 }
 
@@ -831,7 +1091,7 @@ pub fn build_mlir(src: &str, out: &Path) -> Result<(), Error> {
 /// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
 #[cfg(feature = "mlir")]
 pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    build_mlir_on(src, &default_roots(base), out)
+    build_mlir_on(src, &default_roots(base), out, &Config::from_env())
 }
 
 /// Like [`build_mlir_at`], but against an explicit module search path.
@@ -839,8 +1099,8 @@ pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 /// # Errors
 /// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
 #[cfg(feature = "mlir")]
-pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error> {
-    let (checked, core, ctors) = compiled(src, roots)?;
+pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(), Error> {
+    let (checked, core, ctors) = compiled(src, roots, cfg)?;
     require_main(&checked)?;
     let mlir_text = emit_mlir(&core, &ctors).map_err(Error::Codegen)?;
     let mlir_file = out.with_extension("mlir");
@@ -865,7 +1125,7 @@ pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path) -> Result<(), Error>
     }
     fs::write(&ll_file, &translate_out.stdout)?;
 
-    let res = cc_link(&ll_file, out);
+    let res = cc_link(&ll_file, out, cfg);
     let _ = fs::remove_file(&mlir_file);
     res
 }
@@ -885,12 +1145,15 @@ pub fn report(src: &str) -> String {
 
 #[must_use]
 pub fn report_at(src: &str, base: &Path) -> String {
-    report_on(src, &default_roots(base))
+    report_on(src, &default_roots(base), &Config::from_env())
 }
 
 /// Like [`report_at`], but against an explicit module search path.
+// `cfg` drives the native-only Core/codegen phases; on wasm those are compiled
+// out, so it is unused there.
+#[cfg_attr(not(feature = "native"), allow(unused_variables))]
 #[must_use]
-pub fn report_on(src: &str, roots: &[Root]) -> String {
+pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     // Render a phase failure with the same span-aware ariadne report the CLI
     // shows for `run`/`build`/`check`, so `report` does not degrade to a bare
     // message.
@@ -963,7 +1226,7 @@ pub fn report_on(src: &str, roots: &[Root]) -> String {
     );
 
     #[cfg(feature = "native")]
-    match lower_opt(&core, &checked.ctors) {
+    match lower_opt(&core, &checked.ctors, cfg) {
         Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
             Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
             Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
@@ -996,7 +1259,23 @@ pub fn dump(phase: &str, src: &str) -> Result<String, Error> {
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
 pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
-    dump_on(phase, src, &default_roots(base))
+    dump_on(phase, src, &default_roots(base), &Config::from_env())
+}
+
+/// The structural shape digest of every datatype and effect a source defines
+/// (prelude included), keyed by name, full-length.
+///
+/// This is the format-identity gate primitive: commit the digests a persisted
+/// type produces and a later edit that changes the wire layout (a new
+/// constructor, a reordered field, a changed component type) moves the digest and
+/// fails the committed golden, while a cosmetic edit leaves it untouched. A caller
+/// snapshots or asserts on the entries for the types it persists.
+///
+/// # Errors
+/// Fails if `src` does not parse, resolve, or type-check.
+pub fn shape_digests_of(src: &str) -> Result<BTreeMap<String, String>, Error> {
+    let (program, _, _) = frontend(src, &default_roots(Path::new(".")), &Config::from_env())?;
+    Ok(crate::core::shape_digests(&program.types, &program.effects))
 }
 
 // Out-of-Core elaboration inputs the content hash must commit to, keyed by
@@ -1011,8 +1290,8 @@ fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, Strin
         .map(|d| {
             let sym = Sym::new(&d.name);
             let fip = match fips.get(&sym) {
-                Some(crate::syntax::ast::Fip::Fip) => "fip",
-                Some(crate::syntax::ast::Fip::Fbip) => "fbip",
+                Some(Fip::Fip) => "fip",
+                Some(Fip::Fbip) => "fbip",
                 _ => "",
             };
             let mask: String = sigs.get(&sym).map_or_else(String::new, |bs| {
@@ -1034,7 +1313,7 @@ fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, Strin
 ///
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
-pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> {
+pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     match phase {
         "tokens" => {
             let (t, _) = lex(src)?;
@@ -1046,15 +1325,15 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> 
         "ast" => Ok(format!("{:#?}", parse(src)?.program)),
         "types" => Ok(types_section(&check_on(src, roots)?)),
         "core" => {
-            let (_, _, core) = frontend(src, roots)?;
+            let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(pp_core_pretty(&strip_prelude(core, &prelude_fn_names()?)))
         }
         "core-json" => {
-            let (_, _, core) = frontend(src, roots)?;
+            let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(crate::core::core_to_json(&core))
         }
         "core-hash" => {
-            let (program, checked, core) = frontend(src, roots)?;
+            let (program, checked, core) = frontend(src, roots, cfg)?;
             let hashes = hash_program(
                 &core,
                 &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
@@ -1063,31 +1342,242 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root]) -> Result<String, Error> 
             names.sort_by_key(|s| s.as_str());
             let mut out = String::new();
             for name in names {
-                writeln!(out, "{}  {}", &hashes[name][..16], name.as_str()).unwrap();
+                writeln!(
+                    out,
+                    "{}  {}",
+                    &hashes[name][..crate::core::HASH_PREFIX_HEX],
+                    name.as_str()
+                )
+                .unwrap();
+            }
+            Ok(out)
+        }
+        // Structural shape digests of the file's datatypes and effects (prelude
+        // included, like `core-hash` shows prelude fns). One line per declaration.
+        "shape" => {
+            let (program, _, _) = frontend(src, roots, cfg)?;
+            let shapes = crate::core::shape_digests(&program.types, &program.effects);
+            let mut out = String::new();
+            for (name, h) in &shapes {
+                writeln!(out, "{}  {name}", &h[..crate::core::HASH_PREFIX_HEX]).unwrap();
+            }
+            Ok(out)
+        }
+        // Structural duplicates: definitions that hash identically are the same
+        // behavior under different names (a user `fact` and the prelude
+        // `factorial`, say). One line per group of clones, `<hash>  a, b, c`.
+        "dupes" => {
+            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let hashes = hash_program(
+                &core,
+                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+            );
+            let mut by_hash: BTreeMap<&str, Vec<&Sym>> = BTreeMap::new();
+            for (sym, h) in &hashes {
+                by_hash.entry(h.as_str()).or_default().push(sym);
+            }
+            let mut groups: Vec<(&&str, &Vec<&Sym>)> =
+                by_hash.iter().filter(|(_, v)| v.len() > 1).collect();
+            groups.sort_by_key(|(_, v)| v.iter().map(|s| s.as_str()).min().unwrap_or(""));
+            let mut out = String::new();
+            for (h, members) in groups {
+                let mut names: Vec<&str> = members.iter().map(|s| s.as_str()).collect();
+                names.sort_unstable();
+                writeln!(
+                    out,
+                    "{}  {}",
+                    &h[..crate::core::HASH_PREFIX_HEX],
+                    names.join(", ")
+                )
+                .unwrap();
+            }
+            if out.is_empty() {
+                out.push_str("no structural duplicates\n");
+            }
+            Ok(out)
+        }
+        // The two-layer store shape as a read-only export, wrapped in a versioned
+        // envelope (the hash scheme tag, the export layout version, and the
+        // producing compiler version) so a persisted export is self-describing
+        // about its format from the first byte. Each definition carries its
+        // content hash, the anonymous layer (the direct dependency hashes, names
+        // erased, which is what the hash actually commits to), and the metadata
+        // layer (the human name and inferred type). Docs and spans belong to the
+        // metadata layer too and join it when the on-disk store lands.
+        "namespace" => {
+            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let hashes = hash_program(
+                &core,
+                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+            );
+            let graph = crate::core::DepGraph::of(&core);
+            let types: BTreeMap<&str, String> = checked
+                .decls
+                .iter()
+                .map(|d| (d.name.as_str(), d.ty.show()))
+                .collect();
+            let mut names: Vec<&Sym> = hashes.keys().collect();
+            names.sort_by_key(|s| s.as_str());
+            let entries: Vec<serde_json::Value> = names
+                .iter()
+                .map(|name| {
+                    let mut deps: Vec<&str> = graph
+                        .direct_deps(**name)
+                        .iter()
+                        .filter_map(|d| hashes.get(d).map(String::as_str))
+                        .collect();
+                    deps.sort_unstable();
+                    serde_json::json!({
+                        "hash": hashes[name],
+                        "meta": { "name": name.as_str(), "type": types.get(name.as_str()) },
+                        "anon": { "deps": deps },
+                    })
+                })
+                .collect();
+            let doc = serde_json::json!({
+                "scheme": crate::core::HASH_SCHEME,
+                "format": NAMESPACE_FORMAT,
+                "compiler": env!("CARGO_PKG_VERSION"),
+                "defs": entries,
+            });
+            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+        }
+        // The whole standard library's fingerprint. Ignores `src`/`roots`: the
+        // stdlib is embedded, so the file argument is only a CLI placeholder.
+        "stdlib-hash" => {
+            let h = stdlib_hash()?;
+            let mut out = String::new();
+            writeln!(out, "scheme    {}", h.scheme).unwrap();
+            writeln!(out, "version   {}", h.version).unwrap();
+            writeln!(out, "root      {}", h.root).unwrap();
+            let mut defs: Vec<&Sym> = h.defs.keys().collect();
+            defs.sort_by_key(|s| s.as_str());
+            for name in defs {
+                writeln!(
+                    out,
+                    "def   {}  {}",
+                    &h.defs[name][..crate::core::HASH_PREFIX_HEX],
+                    name.as_str()
+                )
+                .unwrap();
+            }
+            for (name, dg) in &h.shapes {
+                writeln!(out, "shape {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
+            }
+            for (name, dg) in &h.classes {
+                writeln!(out, "class {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
+            }
+            for (name, dg) in &h.instances {
+                writeln!(out, "inst  {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
             }
             Ok(out)
         }
         "fbip" => {
-            let (program, _, core) = frontend(src, roots)?;
+            let (program, _, core) = frontend(src, roots, cfg)?;
             let sigs = borrow_sigs(&program);
             Ok(pp_core_pretty(&reuse(&insert_rc(&core, &sigs))))
         }
         "lowered" => {
-            let (_, lowered, _, _) = lowered_core(src, roots)?;
+            let (_, lowered, _, _) = lowered_core(src, roots, cfg)?;
             Ok(pp_core_pretty(&lowered))
         }
         #[cfg(feature = "native")]
         "llvm" => {
-            let (_, core, ctors) = compiled(src, roots)?;
+            let (_, core, ctors) = compiled(src, roots, cfg)?;
             emit_llvm(&core, &ctors).map_err(Error::Codegen)
         }
         #[cfg(feature = "mlir")]
         "mlir" => {
-            let (_, core, ctors) = compiled(src, roots)?;
+            let (_, core, ctors) = compiled(src, roots, cfg)?;
             emit_mlir(&core, &ctors).map_err(Error::Codegen)
         }
         other => Err(Error::Codegen(format!("unknown phase {other}"))),
     }
+}
+
+/// Answer a dependency-graph query over a program (prelude included), the
+/// read-only face of the codebase-as-a-database.
+///
+/// `kind` is one of `callers`
+/// (direct), `dependents` (the transitive Merkle closure, the exact set a change
+/// to `target` would force to re-check), `deps` (what `target` transitively
+/// depends on), or `uses-type` (definitions whose inferred type mentions the type
+/// named `target`).
+///
+/// # Errors
+/// Fails on front-end errors, an unknown `kind`, or a `target` that names no
+/// definition (or, for the graph queries, an ambiguous unqualified name).
+pub fn query_on(
+    kind: &str,
+    target: &str,
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<String, Error> {
+    match kind {
+        "callers" | "dependents" | "deps" => {
+            let (_, _, core) = frontend(src, roots, cfg)?;
+            let graph = crate::core::DepGraph::of(&core);
+            let sym = resolve_query_target(&graph, target)?;
+            let set = match kind {
+                "callers" => graph.direct_callers(sym),
+                "dependents" => graph.dependents(sym),
+                _ => graph.dependencies(sym),
+            };
+            let mut names: Vec<&str> = set.iter().map(|s| s.as_str()).collect();
+            names.sort_unstable();
+            let mut out = String::new();
+            writeln!(out, "{kind} of {} ({})", sym.as_str(), names.len()).unwrap();
+            for n in names {
+                writeln!(out, "  {n}").unwrap();
+            }
+            Ok(out)
+        }
+        "uses-type" => {
+            let checked = check_on(src, roots)?;
+            let mut hits: Vec<String> = checked
+                .decls
+                .iter()
+                .filter(|d| type_mentions(&d.ty.show(), target))
+                .map(|d| format!("  {} : {}", d.name, d.ty.show()))
+                .collect();
+            hits.sort_unstable();
+            hits.dedup();
+            let mut out = String::new();
+            writeln!(out, "uses-type {target} ({})", hits.len()).unwrap();
+            out.push_str(&hits.join("\n"));
+            out.push('\n');
+            Ok(out)
+        }
+        other => Err(Error::Codegen(format!(
+            "unknown query {other}; try callers | dependents | deps | uses-type"
+        ))),
+    }
+}
+
+// Resolve a query target name to a single definition, reporting no-match and
+// ambiguity as errors so the caller can qualify.
+fn resolve_query_target(graph: &crate::core::DepGraph, target: &str) -> Result<Sym, Error> {
+    let mut candidates = graph.resolve(target);
+    match candidates.len() {
+        1 => Ok(candidates.remove(0)),
+        0 => Err(Error::Codegen(format!("no definition named `{target}`"))),
+        _ => {
+            candidates.sort_by_key(|s| s.as_str());
+            let list: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+            Err(Error::Codegen(format!(
+                "`{target}` is ambiguous; qualify one of: {}",
+                list.join(", ")
+            )))
+        }
+    }
+}
+
+// Whether a shown type string mentions the type named `name` as a whole token,
+// so `List` matches `List(Int)` but not `Listable`.
+fn type_mentions(ty: &str, name: &str) -> bool {
+    ty.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|tok| tok == name)
 }
 
 // The module's target triple and data layout are host-derived, so they differ

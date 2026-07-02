@@ -5,7 +5,11 @@
 -- no IO: all mutation is explicit. This is the structure that var blocks and a
 -- State effect desugar to, written out by hand.
 
-type Op = Inc | Dec | Reset | Get
+type Op
+  = Inc
+  | Dec
+  | Reset
+  | Get
 
 fn step(op, s) : ! (Int, Int) =
   match op of

@@ -1,0 +1,28 @@
+import Concurrent (..)
+
+fn worker(v : Int) : !{Async(Int)} Int =
+  yield(())
+  v
+
+fn producer(c : Chan, n : Int) : !{Async(Int)} Int =
+  if n == 0 then
+    0
+  else
+    send(c, n)
+    yield(())
+    producer(c, n - 1)
+
+fn consumer(c : Chan, k : Int, acc : Int) : !{Async(Int)} Int =
+  if k == 0 then
+    acc
+  else
+    consumer(c, k - 1, acc + recv(c))
+
+fn scene() : !{Async(Int)} Int =
+  let c = channel(())
+  let a = fork(\() -> worker(20))
+  let b = fork(\() -> worker(22))
+  let p = fork(\() -> producer(c, 3))
+  await(a) + await(b) + consumer(c, 3, 0)
+
+fn main() : Int = run_async(scene)

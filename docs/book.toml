@@ -30,3 +30,12 @@ enable = true
 level = 1
 
 [preprocessor.tabs]
+# Live-check every ```prism block and badge it by what the compiler makes of it
+# (see `prism mdbook`). Runs after `links` so {{#include}} bodies are expanded.
+# mdbook runs preprocessors with the book root (docs/) as the working directory,
+# so the command path is relative to it; build the binary first (`cargo build
+# --release`). Set PRISM_MDBOOK_STRICT=1 to fail the build on a block that should
+# type-check but does not.
+[preprocessor.prism]
+command = "../target/release/prism mdbook"
+after = ["links"]

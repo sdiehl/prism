@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Color",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Red",

@@ -259,6 +259,20 @@ fn walk(
         // The reuse scope's body inherits this site's tail-ness: its result is
         // the scope's result.
         Comp::WithReuse { body, .. } => recur(body, tail, out),
+        // A first-class application `f args`: the callee computation `f` runs in
+        // this frame (its result is then applied), so it is never in tail
+        // position -- descend non-tail to catch any direct in-group `Call` hidden
+        // under it. An in-group function that instead flows into `f` as a value
+        // (a first-class reference `fv` keeps, but drops for direct call heads) is
+        // applied indirectly, which the backend never loops; count it as a NonTail
+        // frame so a stack-growing `fip` cannot slip through by recursing through
+        // an applied value rather than a bare `Call`.
+        Comp::App(f, _) => {
+            recur(f, false, out);
+            for g in fv::comp(f).into_iter().filter(|g| group.contains(g)) {
+                out.push((g, TailClass::NonTail));
+            }
+        }
         _ => {}
     }
 }
@@ -478,6 +492,7 @@ mod tests {
         CoreFn {
             name: name.into(),
             params: vec![],
+            dict_arity: 0,
             body,
         }
     }

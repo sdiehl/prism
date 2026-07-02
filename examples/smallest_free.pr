@@ -1,0 +1,34 @@
+-- The smallest free number (Bird, Pearls of Functional Algorithm Design, ch. 1):
+-- the smallest natural not in `xs`, in linear time. A checklist of size n+1
+-- (n = length xs) is enough, since by pigeonhole at least one of 0..n is absent,
+-- so values past n never matter. The array is threaded linearly, so every mark
+-- is an in-place write (FBIP); the answer is the first index left unmarked.
+--
+-- Expected output:
+--   3
+--   0
+--   6
+
+fn mark_all(seen : Array(Bool), xs : List(Int), n : Int) : Array(Bool) =
+  match xs of
+    Nil => seen
+    Cons(x, rest) =>
+      if x >= 0 && x <= n then
+        mark_all(array_set(seen, x, true), rest, n)
+      else
+        mark_all(seen, rest, n)
+
+fn first_unmarked(seen : Array(Bool), i : Int) : Int =
+  if array_get(seen, i) then
+    first_unmarked(seen, i + 1)
+  else
+    i
+
+fn min_free(xs) =
+  let n = length(xs)
+  first_unmarked(mark_all(array_new(n + 1, false), xs, n), 0)
+
+fn main() =
+  println(min_free([0, 1, 2, 4, 5]))
+  println(min_free([1, 2, 3]))
+  println(min_free([0, 1, 2, 3, 4, 5]))

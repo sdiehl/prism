@@ -15,6 +15,57 @@ fn pipeline() {
     });
 }
 
+// Golden shape digests for the standard library's structural surface: datatype
+// and effect shapes, class interfaces, and instance identities. Committed so that
+// a change to a serialization-relevant type, class, or instance shows up in
+// review rather than silently. Term behavior hashes are excluded (they are
+// covered by tests/stdlib_hash.rs); this pins the shapes, the frozen-format seed.
+// Update with INSTA_UPDATE=always cargo test --test snapshots.
+#[test]
+fn stdlib_shape_digests() {
+    let h = prism::stdlib_hash().unwrap();
+    let mut lines = Vec::new();
+    for (k, v) in &h.shapes {
+        lines.push(format!("shape {}  {k}", &v[..16]));
+    }
+    for (k, v) in &h.classes {
+        lines.push(format!("class {}  {k}", &v[..16]));
+    }
+    for (k, v) in &h.instances {
+        lines.push(format!("inst  {}  {k}", &v[..16]));
+    }
+    lines.sort();
+    insta::assert_snapshot!(lines.join("\n"));
+}
+
+// The per-type format-identity gate, generalized past the standard library to
+// user-defined types. A representative spread (an enum, a positional product, a
+// sum with arguments, a recursive parametric type, a record, and an effect)
+// commits its structural shape digest. A later edit that changes the wire layout
+// of any of these moves its digest and fails this golden; a cosmetic edit leaves
+// it untouched. This is the copy-paste pattern a downstream project uses to guard
+// its own persisted types via `shape_digests_of`. Update with
+// INSTA_UPDATE=always cargo test --test snapshots.
+#[test]
+fn user_type_shape_digests() {
+    const SRC: &str = "\
+type Color = Red | Green | Blue
+type Point = P(Int, Int)
+type Shape = Circle(Int) | Rect(Int, Int)
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
+type Range = Range { lo: Int, hi: Int }
+effect Log { ctl log(String) : Unit }
+";
+    let all = prism::shape_digests_of(&prism::with_prelude(SRC)).expect("shape digests");
+    let names = ["Color", "Point", "Shape", "Tree", "Range", "Log"];
+    let mut lines: Vec<String> = names
+        .iter()
+        .map(|n| format!("{n}  {}", &all[*n][..16]))
+        .collect();
+    lines.sort();
+    insta::assert_snapshot!(lines.join("\n"));
+}
+
 #[test]
 fn prelude_type_checks() {
     let checked = prism::check(prism::with_prelude("").as_str()).unwrap();
@@ -470,12 +521,17 @@ fn print_kind_coverage() {
 }
 
 // Direct-print consistency over a shape matrix. `print(x)` and `print(show(x))`
-// must agree for every printable shape: the print path routes non-primitives
-// through the same type-directed `show`, so any divergence between the two
-// spellings is an elaboration bug. This is the systematic guard for the blind
-// spot (a corpus that only ever writes `print(show(x))`): it exercises bare
-// `print(x)` for each shape rather than growing the corpus one example at a
-// time. Native parity for the same shapes rides `print_structural.pr`.
+// must agree for every printable shape: the print path renders non-primitives
+// in the same canonical format the `Show` instances produce, so any divergence
+// between the two spellings is a drift between the print-site generator and the
+// typeclass. This is the systematic guard for the blind spot (a corpus that
+// only ever writes `print(show(x))`): it exercises bare `print(x)` for each
+// shape rather than growing the corpus one example at a time. Native parity for
+// the same shapes rides `print_structural.pr`.
+//
+// A bare `String` is deliberately excluded: `print` writes it raw (as a
+// message), while `show` renders the canonical quoted-and-escaped literal, so
+// the two legitimately differ for that one shape.
 #[test]
 fn print_show_consistency() {
     let cases = [
@@ -485,15 +541,14 @@ fn print_show_consistency() {
         "7u64",
         "true",
         "()",
-        "\"hi\"",
         "Green",
         "Node(Leaf, 5, Leaf)",
         "[1, 2, 3]",
         "(7, false)",
         "[(1, true), (2, false)]",
     ];
-    let prelude = "type Color = Red | Green | Blue\n\
-                   type Tree = Leaf | Node(Tree, Int, Tree)\n";
+    let prelude = "type Color = Red | Green | Blue deriving (Show)\n\
+                   type Tree = Leaf | Node(Tree, Int, Tree) deriving (Show)\n";
     for c in cases {
         let direct = run_out(&format!("{prelude}fn main() =\n  print({c})\n"));
         let shown = run_out(&format!("{prelude}fn main() =\n  print(show({c}))\n"));

@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "CNat",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "CNat",
@@ -466,39 +467,27 @@ source_filename = "prism"
 define i64 @prism_csucc(i64 %a0) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
-  %0 = ptrtoint ptr %t0 to i64
-  %1 = add i64 %0, 8
-  %t1 = inttoptr i64 %1 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
   %t2 = load i64, ptr %t1, align 8
   switch i64 %t2, label %b1 [
     i64 0, label %b2
   ]
 
 b2:                                               ; preds = %entry
-  %2 = ptrtoint ptr %t0 to i64
-  %3 = add i64 %2, 24
-  %t3 = inttoptr i64 %3 to ptr
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
   %t4 = load i64, ptr %t3, align 8
   call void @prism_rc_inc(i64 %t4)
   %t6 = call i64 @prism_reuse_token(i64 %a0)
   %t8 = call ptr @prism_alloc(i64 1)
-  %4 = ptrtoint ptr %t8 to i64
-  %5 = add i64 %4, 8
-  %t9 = inttoptr i64 %5 to ptr
+  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
   store i64 0, ptr %t9, align 8
-  %6 = ptrtoint ptr %t8 to i64
-  %7 = add i64 %6, 24
-  %t11 = inttoptr i64 %7 to ptr
+  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
   store i64 %t4, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
   %t14 = call ptr @prism_reuse_alloc(i64 %t6, i64 1)
-  %8 = ptrtoint ptr %t14 to i64
-  %9 = add i64 %8, 8
-  %t15 = inttoptr i64 %9 to ptr
+  %t15 = getelementptr inbounds i8, ptr %t14, i64 8
   store i64 0, ptr %t15, align 8
-  %10 = ptrtoint ptr %t14 to i64
-  %11 = add i64 %10, 24
-  %t17 = inttoptr i64 %11 to ptr
+  %t17 = getelementptr inbounds i8, ptr %t14, i64 24
   store i64 %t12, ptr %t17, align 8
   %t18 = ptrtoint ptr %t14 to i64
   ret i64 %t18
@@ -523,44 +512,32 @@ declare ptr @prism_reuse_alloc(i64, i64) #0
 define i64 @prism_main() #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 0)
-  %0 = ptrtoint ptr %t1 to i64
-  %1 = add i64 %0, 8
-  %t2 = inttoptr i64 %1 to ptr
+  %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 1, ptr %t2, align 8
   %t4 = ptrtoint ptr %t1 to i64
   %t6 = call ptr @prism_alloc(i64 1)
-  %2 = ptrtoint ptr %t6 to i64
-  %3 = add i64 %2, 8
-  %t7 = inttoptr i64 %3 to ptr
+  %t7 = getelementptr inbounds i8, ptr %t6, i64 8
   store i64 0, ptr %t7, align 8
-  %4 = ptrtoint ptr %t6 to i64
-  %5 = add i64 %4, 24
-  %t9 = inttoptr i64 %5 to ptr
+  %t9 = getelementptr inbounds i8, ptr %t6, i64 24
   store i64 %t4, ptr %t9, align 8
   %t10 = ptrtoint ptr %t6 to i64
   %t11 = call i64 @prism_csucc(i64 %t10)
   %t12 = call i64 @prism_csucc(i64 %t11)
   %t13 = call i64 @prism_csucc(i64 %t12)
   %t14 = inttoptr i64 %t13 to ptr
-  %6 = ptrtoint ptr %t14 to i64
-  %7 = add i64 %6, 8
-  %t15 = inttoptr i64 %7 to ptr
+  %t15 = getelementptr inbounds i8, ptr %t14, i64 8
   %t16 = load i64, ptr %t15, align 8
   switch i64 %t16, label %b1 [
     i64 0, label %b2
   ]
 
 b2:                                               ; preds = %entry
-  %8 = ptrtoint ptr %t14 to i64
-  %9 = add i64 %8, 24
-  %t17 = inttoptr i64 %9 to ptr
+  %t17 = getelementptr inbounds i8, ptr %t14, i64 24
   %t18 = load i64, ptr %t17, align 8
   call void @prism_rc_inc(i64 %t18)
   call void @prism_rc_dec(i64 %t13)
   %t22 = call ptr @prism_alloc(i64 0)
-  %10 = ptrtoint ptr %t22 to i64
-  %11 = add i64 %10, 8
-  %t23 = inttoptr i64 %11 to ptr
+  %t23 = getelementptr inbounds i8, ptr %t22, i64 8
   store i64 2, ptr %t23, align 8
   %t25 = ptrtoint ptr %t22 to i64
   %t27 = call i64 @prism_apply_2(i64 %t18, i64 %t25, i64 1)
@@ -586,9 +563,7 @@ declare void @prism_rc_dec(i64) #0
 define i64 @prism_apply_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
-  %0 = ptrtoint ptr %_cp to i64
-  %1 = add i64 %0, 8
-  %_tp = inttoptr i64 %1 to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
   switch i64 %_tag, label %_dead [
     i64 0, label %_lam0
@@ -599,9 +574,7 @@ entry:
   ]
 
 _lam0:                                            ; preds = %entry
-  %2 = ptrtoint ptr %_cp to i64
-  %3 = add i64 %2, 24
-  %_fp0_0 = inttoptr i64 %3 to ptr
+  %_fp0_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv0_0 = load i64, ptr %_fp0_0, align 8
   %_r0 = call i64 @prism_lam_0(i64 %_fv0_0, i64 %_a0, i64 %_a1)
   br label %_merge
@@ -611,41 +584,29 @@ _lam1:                                            ; preds = %entry
   br label %_merge
 
 _lam2:                                            ; preds = %entry
-  %_i2 = call i64 @prism_lam_2(i64 %_a0)
-  %_r2 = call i64 @prism_apply_1(i64 %_i2, i64 %_a1)
-  call void @prism_rc_dec(i64 %_i2)
-  br label %_merge
+  call void @prism_apply_error()
+  unreachable
 
 _lam3:                                            ; preds = %entry
-  %4 = ptrtoint ptr %_cp to i64
-  %5 = add i64 %4, 24
-  %_fp3_0 = inttoptr i64 %5 to ptr
+  %_fp3_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv3_0 = load i64, ptr %_fp3_0, align 8
-  %6 = ptrtoint ptr %_cp to i64
-  %7 = add i64 %6, 32
-  %_fp3_1 = inttoptr i64 %7 to ptr
+  %_fp3_1 = getelementptr inbounds i8, ptr %_cp, i64 32
   %_fv3_1 = load i64, ptr %_fp3_1, align 8
-  %_i3 = call i64 @prism_lam_3(i64 %_fv3_0, i64 %_fv3_1, i64 %_a0)
-  %_r3 = call i64 @prism_apply_1(i64 %_i3, i64 %_a1)
-  call void @prism_rc_dec(i64 %_i3)
-  br label %_merge
+  call void @prism_apply_error()
+  unreachable
 
 _lam4:                                            ; preds = %entry
-  %8 = ptrtoint ptr %_cp to i64
-  %9 = add i64 %8, 24
-  %_fp4_0 = inttoptr i64 %9 to ptr
+  %_fp4_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv4_0 = load i64, ptr %_fp4_0, align 8
-  %_i4 = call i64 @prism_lam_4(i64 %_fv4_0, i64 %_a0)
-  %_r4 = call i64 @prism_apply_1(i64 %_i4, i64 %_a1)
-  call void @prism_rc_dec(i64 %_i4)
-  br label %_merge
+  call void @prism_apply_error()
+  unreachable
 
 _dead:                                            ; preds = %entry
   call void @prism_apply_error()
   unreachable
 
-_merge:                                           ; preds = %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
-  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ]
+_merge:                                           ; preds = %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ]
   ret i64 %_result
 }
 
@@ -671,9 +632,7 @@ entry:
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
-  %0 = ptrtoint ptr %_cp to i64
-  %1 = add i64 %0, 8
-  %_tp = inttoptr i64 %1 to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
   switch i64 %_tag, label %_dead [
     i64 0, label %_lam0
@@ -684,36 +643,24 @@ entry:
   ]
 
 _lam0:                                            ; preds = %entry
-  %2 = ptrtoint ptr %_cp to i64
-  %3 = add i64 %2, 24
-  %_fp0_0 = inttoptr i64 %3 to ptr
+  %_fp0_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv0_0 = load i64, ptr %_fp0_0, align 8
   call void @prism_rc_inc(i64 %_fv0_0)
   %_ac0 = call ptr @prism_alloc(i64 2)
-  %4 = ptrtoint ptr %_ac0 to i64
-  %5 = add i64 %4, 8
-  %_atp0 = inttoptr i64 %5 to ptr
+  %_atp0 = getelementptr inbounds i8, ptr %_ac0, i64 8
   store i64 3, ptr %_atp0, align 8
-  %6 = ptrtoint ptr %_ac0 to i64
-  %7 = add i64 %6, 24
-  %_afp0_0 = inttoptr i64 %7 to ptr
+  %_afp0_0 = getelementptr inbounds i8, ptr %_ac0, i64 24
   store i64 %_fv0_0, ptr %_afp0_0, align 8
-  %8 = ptrtoint ptr %_ac0 to i64
-  %9 = add i64 %8, 32
-  %_afp0_1 = inttoptr i64 %9 to ptr
+  %_afp0_1 = getelementptr inbounds i8, ptr %_ac0, i64 32
   store i64 %_a0, ptr %_afp0_1, align 8
   %_r0 = ptrtoint ptr %_ac0 to i64
   br label %_merge
 
 _lam1:                                            ; preds = %entry
   %_ac1 = call ptr @prism_alloc(i64 1)
-  %10 = ptrtoint ptr %_ac1 to i64
-  %11 = add i64 %10, 8
-  %_atp1 = inttoptr i64 %11 to ptr
+  %_atp1 = getelementptr inbounds i8, ptr %_ac1, i64 8
   store i64 4, ptr %_atp1, align 8
-  %12 = ptrtoint ptr %_ac1 to i64
-  %13 = add i64 %12, 24
-  %_afp1_0 = inttoptr i64 %13 to ptr
+  %_afp1_0 = getelementptr inbounds i8, ptr %_ac1, i64 24
   store i64 %_a0, ptr %_afp1_0, align 8
   %_r1 = ptrtoint ptr %_ac1 to i64
   br label %_merge
@@ -723,21 +670,15 @@ _lam2:                                            ; preds = %entry
   br label %_merge
 
 _lam3:                                            ; preds = %entry
-  %14 = ptrtoint ptr %_cp to i64
-  %15 = add i64 %14, 24
-  %_fp3_0 = inttoptr i64 %15 to ptr
+  %_fp3_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv3_0 = load i64, ptr %_fp3_0, align 8
-  %16 = ptrtoint ptr %_cp to i64
-  %17 = add i64 %16, 32
-  %_fp3_1 = inttoptr i64 %17 to ptr
+  %_fp3_1 = getelementptr inbounds i8, ptr %_cp, i64 32
   %_fv3_1 = load i64, ptr %_fp3_1, align 8
   %_r3 = call i64 @prism_lam_3(i64 %_fv3_0, i64 %_fv3_1, i64 %_a0)
   br label %_merge
 
 _lam4:                                            ; preds = %entry
-  %18 = ptrtoint ptr %_cp to i64
-  %19 = add i64 %18, 24
-  %_fp4_0 = inttoptr i64 %19 to ptr
+  %_fp4_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv4_0 = load i64, ptr %_fp4_0, align 8
   %_r4 = call i64 @prism_lam_4(i64 %_fv4_0, i64 %_a0)
   br label %_merge

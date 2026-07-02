@@ -1,0 +1,11 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn mk(n : String, h : Int) : Player =\\n\\\n     \\x20 Player { name = n, pos = Vec2 { x = 1, y = 2 }, hp = h, bag = Nil }\\n\")"
+---
+fn mk(n : String, h : Int) : Player =
+  Player {
+    name = n,
+    pos = Vec2 { x = 1, y = 2 },
+    hp = h,
+    bag = Nil
+  }

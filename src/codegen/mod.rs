@@ -2,6 +2,7 @@ mod emit;
 mod llvm;
 #[cfg(feature = "mlir")]
 mod mlir;
+mod rt;
 
 pub use llvm::{emit as emit_llvm, emit_bitcode as emit_llvm_bc};
 

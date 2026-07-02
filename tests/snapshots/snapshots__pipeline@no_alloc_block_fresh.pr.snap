@@ -1,0 +1,128 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/no_alloc_block_fresh.pr
+---
+== tokens ==
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("wrap") LParen Ident("n") Colon KwInt RParen Colon UIdent("Box") Eq Without Alloc UIdent("Box") LParen Ident("n") RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Box",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Box",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 237..256,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "wrap",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Box",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    WithoutAlloc(
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "Box",
+                                    ),
+                                    span: 297..300,
+                                },
+                                [
+                                    Spanned {
+                                        node: Var(
+                                            "n",
+                                        ),
+                                        span: 301..302,
+                                    },
+                                ],
+                            ),
+                            span: 297..303,
+                        },
+                    ),
+                ),
+                span: 283..303,
+            },
+            wheres: [],
+            span: 258..303,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 323..324,
+            },
+            wheres: [],
+            span: 305..324,
+        },
+    ],
+}
+
+== types ==
+wrap : (Int) -> Box
+main : () -> Int
+noalloc@0 : (Int) -> Box
+
+== core (cbpv) ==
+fn wrap(n) =
+  return n to t@0; noalloc@0(t@0)
+fn main() =
+  return 0
+fn noalloc@0(n) =
+  return n to t@1; return Box(t@1)
+
+== fip ==
+Type Error: the `without alloc` block allocates a fresh `Box` (no reuse token available)
+   ╭─[ <source>:6:26 ]
+   │
+ 6 │ fn wrap(n : Int) : Box = without alloc Box(n)
+   │                          ──────────┬─────────  
+   │                                    ╰─────────── the `without alloc` block allocates a fresh `Box` (no reuse token available)
+───╯

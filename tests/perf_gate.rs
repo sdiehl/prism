@@ -10,7 +10,9 @@
 //     `snapshots.rs`.
 //
 // Built once per program through the native backend, so they ride the same
-// toolchain as the parity gate and skip cleanly when no C compiler is present.
+// toolchain as the parity gate. A missing C compiler is a hard failure, not a
+// silent skip: these ratchets are worthless if they pass without ever building
+// natively.
 
 use std::path::Path;
 use std::process::Command;
@@ -25,6 +27,18 @@ fn have(tool: &str) -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
+}
+
+// Assert a C compiler is reachable, panicking with an actionable message if not.
+// A performance ratchet that never builds natively passes vacuously, so its
+// absence fails the test loudly.
+fn require_cc() {
+    assert!(
+        have(&cc()),
+        "C compiler `{}` not found (set PRISM_CC). The native perf gate requires \
+         it; install clang or LLVM so the ratchets actually build.",
+        cc()
+    );
 }
 
 // Build `case` natively, run it with `stat_env=1`, and return the integer the
@@ -84,13 +98,7 @@ const FUSION_PROGRAMS: &[&str] = &[
 
 #[test]
 fn effop_fast_path_allocates_nothing() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let mut fails = Vec::new();
     for &prog in FUSION_PROGRAMS {
         match stat(prog, "PRISM_EFFOP_STATS", "eff ops allocated") {
@@ -120,13 +128,7 @@ fn effop_fast_path_allocates_nothing() {
 // of done for the locality work.
 #[test]
 fn local_monadification_keeps_pipeline_fused() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let count = |case| stat(case, "PRISM_EFFOP_STATS", "eff ops allocated");
     let escape = count("tests/cases/run/local_mono_escape.pr").unwrap_or_else(|e| panic!("{e}"));
     let combined =
@@ -156,13 +158,7 @@ fn local_monadification_keeps_pipeline_fused() {
 // iteration and overflowing the stack.)
 #[test]
 fn allocation_is_flat_for_constant_space_programs() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     // Each program must allocate O(1) eff-op cells regardless of `{N}`.
     let flat: &[(&str, &str)] = &[
         (
@@ -207,13 +203,7 @@ fn allocation_is_flat_for_constant_space_programs() {
 
 #[test]
 fn each_update_reuses_uniquely_owned() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     // A uniquely-owned list updated through an `each` path must reuse cells in
     // place: `fmap` reuses the spine and the per-element rebuild reuses each
     // record, exactly as the hand-written `fmap(\c -> { c | v = .. }, xs)` would.
@@ -238,13 +228,7 @@ fn each_update_reuses_uniquely_owned() {
 
 #[test]
 fn fbip_reuse_fires_at_runtime() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let hits = stat("examples/list.pr", "PRISM_REUSE_STATS", "cells reused")
         .unwrap_or_else(|e| panic!("{e}"));
     assert!(
@@ -300,13 +284,7 @@ fn runs_in_bounded_stack(full: &str, tag: &str, stack_kb: u32) -> Result<(), Str
 // loops via `musttail`); the `var` loops must now too, via mutable-cell erasure.
 #[test]
 fn loops_run_in_constant_stack() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let n = 1_000_000;
     let cases: &[(&str, String)] = &[
         (
@@ -348,13 +326,7 @@ fn loops_run_in_constant_stack() {
 // stack like any `var` loop. A million iterations under a 2048KB stack proves it.
 #[test]
 fn free_monad_loops_run_in_constant_stack() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let n = 1_000_000;
     let cases: &[(&str, String)] = &[
         (
@@ -399,13 +371,7 @@ fn free_monad_loops_run_in_constant_stack() {
 // frame on the native stack and reify a continuation cell.
 #[test]
 fn param_passing_effect_loop_runs_in_constant_stack() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let n = 1_000_000;
     let src = format!(
         "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
@@ -441,13 +407,7 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 // re-association blowup that made `deep_abort` quadratic and had to be reverted).
 #[test]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
-    if !have(&cc()) {
-        eprintln!(
-            "skipping perf gate: C compiler `{}` not found (set PRISM_CC)",
-            cc()
-        );
-        return;
-    }
+    require_cc();
     let prog = |n: i64| {
         prism::with_prelude(&format!(
             "effect Abort {{\n  ctl abort(Int) : Int\n}}\n\
@@ -476,4 +436,34 @@ fn driver_work_is_linear_on_deep_nontail_recursion() {
         "driver work is super-linear: {steps_small} steps at n={small}, {steps_big} at n={big}; \
          a >= 8x growth means the trampoline re-associates quadratically (the EBounce regression)"
     );
+}
+
+// Concurrency constant-stack gate. A fiber that yields a million times drives the
+// cooperative scheduler a million steps: each `yield` reifies a `Cmd`, re-enqueues
+// the fiber, and the pure `drive` loop resumes it off the native stack under the
+// whole-program trampoline, so the scheduler steps in constant native stack rather
+// than growing a frame per yield. Both shipped policies discharge the same `Async`
+// effect (FIFO `run_async` enqueues at the back, LIFO `run_lifo` at the front), so
+// both must complete a million yields under a 2048KB stack; a per-yield stack frame
+// would overflow well before then.
+#[test]
+fn scheduler_yield_loop_runs_in_constant_stack() {
+    require_cc();
+    let n = 1_000_000;
+    let prog = |run: &str| {
+        prism::with_prelude(&format!(
+            "import Concurrent (..)\n\
+             fn spin(k : Int) : !{{Async(Int)}} Int =\n  if k == 0 then 0 else\n    \
+             yield(())\n    spin(k - 1)\n\
+             fn app() : !{{Async(Int)}} Int = spin({n})\n\
+             fn main() = println({run}(app))\n"
+        ))
+    };
+    let mut fails = Vec::new();
+    for run in ["run_async", "run_lifo"] {
+        if let Err(e) = runs_in_bounded_stack(&prog(run), run, 2048) {
+            fails.push(e);
+        }
+    }
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
 }

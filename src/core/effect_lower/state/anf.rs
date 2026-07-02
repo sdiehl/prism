@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::cbpv::{Comp, CorePat, Value};
-use crate::core::effect_lower::{SDONE, SMORE};
+pub(super) use crate::core::effect_lower::{sdone, smore};
 use crate::core::fv;
 use crate::sym::Sym;
 
@@ -55,14 +55,6 @@ fn a_kind(a: &Value, acc: Sym) -> Option<AKind> {
         Value::Var(v) if *v == acc => Some(AKind::Acc),
         _ => None,
     }
-}
-
-pub(super) fn smore(v: Value) -> Value {
-    Value::Ctor(SMORE.into(), 0, vec![v])
-}
-
-pub(super) fn sdone(v: Value) -> Value {
-    Value::Ctor(SDONE.into(), 1, vec![v])
 }
 
 // Whether a branch uses a resume alias (so it resumes) rather than dropping it.

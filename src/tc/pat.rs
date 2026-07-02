@@ -4,9 +4,35 @@ use super::{Env, Tc};
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Pattern, S};
-use crate::types::ty::Type;
+use crate::types::ty::{EffRow, Kind, Type};
+
+// A constructor opened at a use site: its applied head `Con(T, ..)`, the
+// type-variable substitutions, and the row-variable substitutions to apply to
+// its field types.
+type OpenedCtor = (Type, Vec<(Sym, Type)>, Vec<(Sym, EffRow)>);
 
 impl Tc<'_> {
+    // Open a constructor's parameters with a fresh existential of the right sort
+    // per parameter (a row existential for a `Row`-kinded one), returning the
+    // applied head `Con(T, ..)` and the substitutions to apply to field types.
+    pub(super) fn open_ctor(&mut self, info: &super::CtorInfo) -> OpenedCtor {
+        let mut head = Vec::with_capacity(info.params.len());
+        let mut tsubs = Vec::new();
+        let mut rsubs = Vec::new();
+        for (pn, k) in info.params.iter().zip(&info.param_kinds) {
+            if *k == Kind::Row {
+                let r = EffRow::Exist(self.push_ex_row());
+                head.push(Type::Row(r.clone()));
+                rsubs.push((*pn, r));
+            } else {
+                let t = Type::Exist(self.push_ex());
+                head.push(t.clone());
+                tsubs.push((*pn, t));
+            }
+        }
+        (Type::Con(info.type_name, head), tsubs, rsubs)
+    }
+
     pub(super) fn check_pat(
         &mut self,
         env: &Env,
@@ -63,13 +89,7 @@ impl Tc<'_> {
                         span,
                         msg: format!("unknown record constructor {ctor_name}"),
                     })?;
-                let map: Vec<(Sym, Type)> = info
-                    .params
-                    .iter()
-                    .map(|pn| (*pn, Type::Exist(self.push_ex())))
-                    .collect();
-                let result =
-                    Type::Con(info.type_name, map.iter().map(|(_, t)| t.clone()).collect());
+                let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 let mut env2 = env.clone();
                 for (fname, fpat) in field_pats {
@@ -80,8 +100,11 @@ impl Tc<'_> {
                         }
                     })?;
                     let mut ft = info.args[fi].clone();
-                    for (pn, t) in &map {
+                    for (pn, t) in &tsubs {
                         ft = ft.subst_var(*pn, t);
+                    }
+                    for (pn, r) in &rsubs {
+                        ft = ft.subst_row_var(*pn, r);
                     }
                     let ft = self.apply(&ft);
                     env2 = self.check_pat(&env2, fpat, &ft)?;
@@ -97,13 +120,7 @@ impl Tc<'_> {
                         span,
                         msg: format!("unknown constructor {name}"),
                     })?;
-                let map: Vec<(Sym, Type)> = info
-                    .params
-                    .iter()
-                    .map(|pn| (*pn, Type::Exist(self.push_ex())))
-                    .collect();
-                let result =
-                    Type::Con(info.type_name, map.iter().map(|(_, t)| t.clone()).collect());
+                let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 if subs.len() != info.args.len() {
                     return Err(TypeError::Other {
@@ -118,8 +135,11 @@ impl Tc<'_> {
                 let mut env2 = env.clone();
                 for (sub, arg) in subs.iter().zip(&info.args) {
                     let mut at = arg.clone();
-                    for (pn, t) in &map {
+                    for (pn, t) in &tsubs {
                         at = at.subst_var(*pn, t);
+                    }
+                    for (pn, r) in &rsubs {
+                        at = at.subst_row_var(*pn, r);
                     }
                     let at = self.apply(&at);
                     env2 = self.check_pat(&env2, sub, &at)?;
@@ -149,15 +169,14 @@ impl Tc<'_> {
             Type::Con(_, ps) => ps.clone(),
             _ => vec![],
         };
-        let map: Vec<(Sym, Type)> = info
-            .params
-            .iter()
-            .zip(params.iter())
-            .map(|(n, t)| (*n, t.clone()))
-            .collect();
         let mut ft = info.args[fi].clone();
-        for (pn, t) in &map {
-            ft = ft.subst_var(*pn, t);
+        for ((pn, k), t) in info.params.iter().zip(&info.param_kinds).zip(params.iter()) {
+            match (k, t) {
+                // A `Row`-kinded argument carries an effect row; substitute the
+                // row variable, not a type variable.
+                (Kind::Row, Type::Row(r)) => ft = ft.subst_row_var(*pn, r),
+                _ => ft = ft.subst_var(*pn, t),
+            }
         }
         Ok((self.apply(&ft), fi))
     }

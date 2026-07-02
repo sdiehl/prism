@@ -159,11 +159,29 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
 /// # Errors
 /// Fails when the manifest cannot be read or is malformed.
 pub fn load_project(arg: &Path) -> Result<Project, Error> {
+    load_project_rec(arg, &mut Vec::new())
+}
+
+// `visiting` is the stack of manifests currently being resolved (by canonical
+// path), so a dependency edge back into one already on the stack is reported as
+// a cycle instead of recursing until the native stack overflows.
+fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, Error> {
     let manifest_path = if arg.is_dir() {
         arg.join(MANIFEST)
     } else {
         arg.to_path_buf()
     };
+    // Canonicalize so `../geo` and `geo` name the same node; fall back to the raw
+    // path if the file cannot be canonicalized (the read below reports it).
+    let key = manifest_path
+        .canonicalize()
+        .unwrap_or_else(|_| manifest_path.clone());
+    if visiting.contains(&key) {
+        return Err(Error::Resolve(format!(
+            "dependency cycle through `{}`",
+            manifest_path.display()
+        )));
+    }
     let text = std::fs::read_to_string(&manifest_path)?;
     let manifest = Manifest::parse(&text)?;
     let root = manifest_path
@@ -173,9 +191,10 @@ pub fn load_project(arg: &Path) -> Result<Project, Error> {
     // root, plus (transitively) the source roots of its own dependencies, so a
     // diamond of path deps still resolves. Each dep's `src_dir` honours that
     // dependency's own manifest.
+    visiting.push(key);
     let mut dep_src_dirs = Vec::new();
     for dep in &manifest.dependencies {
-        let dep_proj = load_project(&root.join(&dep.path))
+        let dep_proj = load_project_rec(&root.join(&dep.path), visiting)
             .map_err(|e| Error::Resolve(format!("dependency `{}`: {e}", dep.name)))?;
         dep_src_dirs.push(dep_proj.src_dir);
         for d in dep_proj.dep_src_dirs {
@@ -184,6 +203,7 @@ pub fn load_project(arg: &Path) -> Result<Project, Error> {
             }
         }
     }
+    visiting.pop();
     Ok(Project {
         src_dir: root.join(&manifest.src_dir),
         entry: root.join(&manifest.entry),

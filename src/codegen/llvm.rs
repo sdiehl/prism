@@ -16,6 +16,7 @@ use inkwell::values::{
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
 use super::emit::{emit_with, idx64, Buf, IntOp, Isa};
+use super::rt;
 use crate::core::Core;
 use crate::types::CtorInfo;
 
@@ -189,12 +190,11 @@ impl<'ctx> Inkwell<'ctx> {
         bb
     }
 
-    // Mark a function non-unwinding. Every function in a Prism module is: the
-    // language has no exceptions, and this backend emits no invokes or
-    // landingpads, so neither the generated bodies nor the C runtime nor the
-    // libc/intrinsic declarations can unwind. Telling LLVM lets it drop unwind
-    // tables and treat every call as non-throwing, which the `-O2` pipeline
-    // turns into freer code motion and smaller objects.
+    // Every function in a Prism module is non-unwinding: the language has no
+    // exceptions and this backend emits no invokes/landingpads, so nothing
+    // (generated bodies, C runtime, libc/intrinsic decls) can unwind. Marking it
+    // lets `-O2` drop unwind tables and treat every call as non-throwing, which
+    // enables freer code motion and smaller objects.
     fn set_nounwind(&self, f: FunctionValue<'ctx>) {
         let kind = Attribute::get_named_enum_kind_id("nounwind");
         f.add_attribute(
@@ -303,7 +303,7 @@ impl Isa for Inkwell<'_> {
     fn str_lit(&self, _b: &mut Buf, dst: &str, idx: usize, len: usize) {
         let g = self.str_gl(idx, len + 1);
         let f = self.decl(
-            "prism_str_lit",
+            rt::STR_LIT,
             self.i64t()
                 .fn_type(&[self.ptr_t().into(), self.i64t().into()], false),
         );
@@ -428,22 +428,29 @@ impl Isa for Inkwell<'_> {
         self.set(dst, r.into());
     }
 
-    // Byte offsets as ptrtoint/add/inttoptr: the safe builder surface has no
-    // gep, and instcombine folds this back to `gep i8` under -O2.
+    // A real `getelementptr inbounds i8, ptr p, i64 off`, indexing an `i8` element
+    // type so the byte offset is literal. This preserves pointer provenance and the
+    // `inbounds` guarantee, which the prior `ptrtoint`/`add`/`inttoptr` form
+    // discarded (leaving alias analysis to a `-O2` instcombine fold-back).
+    //
+    // This is the crate's single audited `unsafe` (see `[lints.rust]` in
+    // Cargo.toml). inkwell marks every indexed-gep builder `unsafe` because it
+    // cannot check the indices stay in bounds of the pointee, and there is no safe
+    // equivalent for a dynamic byte offset (`build_struct_gep` needs a static field
+    // index, which the variable-arity cell fields and string payload do not have).
+    #[allow(unsafe_code)]
     fn gep(&self, _b: &mut Buf, dst: &str, p: &str, off: i64) {
-        let base = self
-            .builder
-            .build_ptr_to_int(self.pv(p), self.i64t(), "")
-            .unwrap_or_else(|e| self.pint("gep", &e));
         let o = self.i64t().const_int(off.cast_unsigned(), false);
-        let sum = self
-            .builder
-            .build_int_add(base, o, "")
-            .unwrap_or_else(|e| self.pint("gep", &e));
-        let r = self
-            .builder
-            .build_int_to_ptr(sum, self.ptr_t(), nm(dst))
-            .unwrap_or_else(|e| self.pptr("gep", &e));
+        // SAFETY: `off` is always a header/field/payload byte offset produced by
+        // the emitter for a cell it just allocated with enough words (TAG_OFF, or
+        // HDR_BYTES + field*WORD_BYTES, all within the cell's `prism_alloc` size),
+        // so the resulting pointer is in bounds. `i8` element type makes `off` a
+        // literal byte count; `p` is a live cell pointer.
+        let r = unsafe {
+            self.builder
+                .build_in_bounds_gep(self.ctx.i8_type(), self.pv(p), &[o], nm(dst))
+        }
+        .unwrap_or_else(|e| self.pptr("gep", &e));
         self.set(dst, r.into());
     }
 
@@ -493,10 +500,6 @@ impl Isa for Inkwell<'_> {
             cs.set_tail_call_kind(LLVMTailCallKind::LLVMTailCallKindMustTail);
         }
         self.set(dst, self.cs_basic(cs));
-    }
-
-    fn printf_float(&self, _b: &mut Buf, v: &str) {
-        self.printf(".fmtf", b"%g", self.flt(v).into());
     }
 
     fn printf_str(&self, _b: &mut Buf, p: &str) {

@@ -1,0 +1,35 @@
+-- A basic channel: one producer fiber sends a countdown, one consumer fiber
+-- receives and sums it. `channel` opens a buffered FIFO; `send` never blocks,
+-- `recv` blocks until a value is available, parking the fiber off the native
+-- stack. The scheduler is polymorphic in the fibers' effects (here `IO`).
+--
+-- Expected output:
+--   recv 3
+--   recv 2
+--   recv 1
+--   total 6
+
+import Concurrent (..)
+
+fn producer(c : Chan, n : Int) : !{Async(Int), IO} Int =
+  if n == 0 then
+    0
+  else
+    send(c, n)
+    yield(())
+    producer(c, n - 1)
+
+fn consumer(c : Chan, count : Int, acc : Int) : !{Async(Int), IO} Int =
+  if count == 0 then
+    acc
+  else
+    let v = recv(c)
+    println("recv {v}")
+    consumer(c, count - 1, acc + v)
+
+fn scene() : !{Async(Int), IO} Int =
+  let c = channel(())
+  let p = fork(\() -> producer(c, 3))
+  consumer(c, 3, 0)
+
+fn main() = println("total {run_async(scene)}")

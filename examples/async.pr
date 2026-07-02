@@ -1,0 +1,32 @@
+-- Cooperative async/await, using the `Concurrent` standard library.
+-- `fork` spawns a fiber and returns a handle, `yield` hands control to another
+-- fiber, and `await` blocks on a fiber's result. The scheduler lives in the
+-- library and is polymorphic in the effects the fibers perform (here `IO`); those
+-- effects flow out through `run_async`, so nothing escapes untyped. A program
+-- just writes fibers. Runs in constant native stack under PRISM_TRAMPOLINE (the
+-- parked fibers escape into the scheduler, so it is whole-program free-monad; the
+-- trampoline drives it without growing the stack).
+--
+-- Expected output:
+--   A: start
+--   B: start
+--   A: resume, returning 20
+--   B: resume, returning 22
+--   42
+
+import Concurrent (..)
+
+-- A fiber that announces itself, yields so the other fiber can run, then finishes
+-- with a value. Fibers may perform IO.
+fn worker(name : String, v : Int) : !{Async(Int), IO} Int =
+  println("{name}: start")
+  yield(())
+  println("{name}: resume, returning {v}")
+  v
+
+fn scene() : !{Async(Int), IO} Int =
+  let a = fork(\() -> worker("A", 20))
+  let b = fork(\() -> worker("B", 22))
+  await(a) + await(b)
+
+fn main() = println(run_async(scene))

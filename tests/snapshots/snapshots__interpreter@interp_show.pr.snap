@@ -3,7 +3,7 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/interp_show.pr
 ---
-p = Point(1, 2)
+p = Point { x = 1, y = 2 }
 xs = [1, 2, 3]
 answer = 42
 => ()

@@ -9,7 +9,12 @@ type Player = Player { name: String, pos: Vec2, hp: Int } deriving (Show)
 fn heal(h : Int) : Int = h + 10
 
 fn main() =
-  let p = Player { name = "hero", pos = Vec2 { x = 3, y = 4 }, hp = 20 }
+  let p =
+    Player {
+      name = "hero",
+      pos = Vec2 { x = 3, y = 4 },
+      hp = 20
+    }
   -- single-focus modify with a named function
   println({ p | hp ~ heal })
   -- modify with a lambda

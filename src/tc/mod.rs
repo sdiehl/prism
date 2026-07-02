@@ -6,7 +6,7 @@ use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, NodeId, Program, S};
 use crate::types::effects;
-use crate::types::ty::{EffRow, Effects, Type};
+use crate::types::ty::{EffRow, Effects, Kind, Type};
 
 mod classes;
 mod context;
@@ -21,6 +21,10 @@ pub type Env = BTreeMap<Sym, Type>;
 #[derive(Clone, Debug)]
 pub struct DataInfo {
     pub params: Vec<String>,
+    // Kind of each parameter, positional and same length as `params`. Almost
+    // always all `Kind::Type`; a `Kind::Row` entry marks a row-kinded parameter
+    // (`type Cmd(a, e : Row)`), which is carried in `Con` spines as `Type::Row`.
+    pub param_kinds: Vec<Kind>,
     pub ctors: Vec<String>,
 }
 
@@ -28,6 +32,10 @@ pub struct DataInfo {
 pub struct CtorInfo {
     pub type_name: Sym,
     pub params: Vec<Sym>,
+    // Kind of each parameter, parallel to `params`. Lets pattern matching open a
+    // `Row`-kinded parameter with a fresh row existential (substituted into the
+    // field types with `subst_row_var`) rather than a type existential.
+    pub param_kinds: Vec<Kind>,
     pub args: Vec<Type>,
     pub tag: usize,
     pub fields: Vec<Sym>,
@@ -99,6 +107,11 @@ pub enum Dict {
     // leading (superclass) field of the dict cell for class `subclass`. Used to
     // discharge `Eq(a)` from a `given Ord(a)` when `Ord` declares `Eq` a super.
     Super(Box<Self>, String, usize),
+    // A compiler-synthesized `Show` dictionary for a tuple type, carrying one
+    // component `Show` dictionary per element. Tuples have no nominal head to
+    // hang an instance on, so the elaborator materializes their dict cell from
+    // these components (a structural `(a, b, ...)` printer).
+    Tuple(Vec<Self>),
 }
 
 // `NodeId` is the identity of a dispatch site, assigned once by `assign_ids`
@@ -341,23 +354,20 @@ pub(super) fn require_pure_konst(d: &Decl<Core>, effs: &Effects) -> Result<(), T
     Ok(())
 }
 
-// The post-inference checks for a function: reconcile the call-graph set pass
-// against the inferred row, enforce `borrow`-implies-pure, and check the declared
-// effect annotation. Returns the `DeclInfo` to record. Shared by the singleton
-// and mutually recursive driver paths.
+// The post-inference checks for a function: enforce `borrow`-implies-pure and
+// check the declared effect annotation against the inferred (principal) row.
+// Returns the `DeclInfo` to record. Shared by the singleton and mutually
+// recursive driver paths.
 fn finalize_fn(
     d: &Decl<Core>,
     ty: Type,
     warnings: &mut Vec<Warning>,
 ) -> Result<DeclInfo, TypeError> {
-    // The labels of the inferred row. Effect-row inference is now principal: it
+    // The labels of the inferred row. Effect-row inference is principal: it
     // discovers every effect on its own (direct performs, applied effect-carrying
     // callees, builtin rows, `mask`), so the row is the single source of truth.
-    // The old `set-pass ⊆ inferred` reconciliation is gone with the seed it
-    // guarded: the set pass over-approximates effect-polymorphic and
-    // higher-order-laundered effects as concrete labels, so it can only disagree
-    // by over-reporting now. Real under-coverage is caught downstream by
-    // `reconcile_effects` (lowered ops vs the row) and the parity oracle.
+    // Real under-coverage is caught downstream by `reconcile_effects` (lowered
+    // ops vs the row) and the parity oracle.
     let inferred = concrete_effects(&ty);
     if d.params.iter().any(|p| p.borrow) && !inferred.is_empty() {
         let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
@@ -444,7 +454,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             }
             cs.push((Sym::from(&c.class), env::convert_data(&c.ty)));
         }
-        constrained.insert(Sym::from(&d.name), (env::fn_stub(d), cs));
+        constrained.insert(Sym::from(&d.name), (env::fn_stub(d, &data), cs));
     }
     let field_res;
     let path_res;
@@ -502,9 +512,8 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                     continue;
                 }
                 // Effect-row inference is principal: `infer_decl` discovers the
-                // row on its own. There is no separate set pass: the purity
-                // checks (konst here, instance methods in `check_instance`) read
-                // the same principal inferred row.
+                // row on its own; the purity checks (konst here, instance methods
+                // in `check_instance`) read the same principal inferred row.
                 let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                 env.insert(Sym::from(&d.name), ty.clone());
                 infos.push(finalize_fn(d, ty, &mut warnings)?);

@@ -29,7 +29,12 @@ fn alive(p : Player) : Bool = p.hp > 0
 fn heal(h : Int) : Int = h + 10
 
 fn mk(n : String, h : Int) : Player =
-  Player { name = n, pos = Vec2 { x = 1, y = 2 }, hp = h, bag = Nil }
+  Player {
+    name = n,
+    pos = Vec2 { x = 1, y = 2 },
+    hp = h,
+    bag = Nil
+  }
 
 fn main() =
   -- Set and modify a (possibly nested) field.

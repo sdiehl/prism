@@ -1,0 +1,12 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn bump(p : Player) : Player =\\n\\\n     \\x20 Player { ..p, name = q, pos = Vec2 { x = 0, y = 0 }, hp = 100, mp = 50 }\\n\")"
+---
+fn bump(p : Player) : Player =
+  Player {
+    ..p,
+    name = q,
+    pos = Vec2 { x = 0, y = 0 },
+    hp = 100,
+    mp = 50
+  }

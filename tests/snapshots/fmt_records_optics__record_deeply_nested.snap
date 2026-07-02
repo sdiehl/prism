@@ -1,0 +1,12 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn mk() : A =\\n\\\n     \\x20 A { inner = B { inner = C { p = 1, q = 2 }, y = 2 }, z = 3 }\\n\")"
+---
+fn mk() : A =
+  A {
+    inner = B {
+      inner = C { p = 1, q = 2 },
+      y = 2
+    },
+    z = 3
+  }

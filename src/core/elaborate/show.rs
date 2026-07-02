@@ -1,11 +1,14 @@
 use super::{
     subst_ty, wrap_binds, BTreeMap, BTreeSet, Builtin, Comp, CoreFn, CorePhase, Elab, Error, Expr,
-    Locals, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
+    IoOp, Locals, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
 };
 
 // Name prefix for a generated structural `show` function, completed by the
 // type's injective mangling.
 const SHOW_FN_PREFIX: &str = "_show_";
+
+// The prelude function that renders a `String` as a quoted, escaped literal.
+const STR_ESCAPE_FN: &str = "str_escape";
 
 impl Elab<'_> {
     // Like `local_ty`, but for printing: resolve the print-site type to a
@@ -38,22 +41,22 @@ impl Elab<'_> {
         locals: &Locals,
     ) -> Comp {
         match self.printable_ty(arg_expr, locals) {
-            Some(Type::Float) => Comp::PrintF(v),
-            Some(Type::Str) => Comp::PrintS(v),
+            Some(Type::Float) => Comp::Io(IoOp::PrintF, vec![v]),
+            Some(Type::Str) => Comp::Io(IoOp::PrintS, vec![v]),
             // Int (and unknown types) print through the runtime integer printer.
-            Some(Type::Int) | None => Comp::Print(v),
+            Some(Type::Int) | None => Comp::Io(IoOp::Print, vec![v]),
             // Everything else (ADTs, tuples, lists, I64/U64/Bool, Unit) reuses the
             // type-directed structural printer so native matches the interpreter.
             Some(ty) => self
                 .show_for_type(v.clone(), &ty, arg_expr.span)
                 .map_or_else(
-                    |_| Comp::Print(v),
+                    |_| Comp::Io(IoOp::Print, vec![v]),
                     |show| {
                         let s = self.fresh();
                         Comp::Bind(
                             Box::new(show),
                             s.clone().into(),
-                            Box::new(Comp::PrintS(Value::Var(s.into()))),
+                            Box::new(Comp::Io(IoOp::PrintS, vec![Value::Var(s.into())])),
                         )
                     },
                 ),
@@ -74,18 +77,9 @@ impl Elab<'_> {
         locals: &Locals,
         newline: bool,
     ) -> Comp {
-        // The `Output` ops carry a `String`, so every value is rendered here at
-        // the call site where its type is concrete. Str passes through; Int and
-        // unknown render through the integer show (matching the old direct
-        // integer printer); Float and the structural shapes use their show.
-        let val = match self.printable_ty(arg_expr, locals) {
-            Some(Type::Str) => Comp::Return(v),
-            Some(Type::Float) => Comp::StrBuiltin(Builtin::ShowFloat, vec![v]),
-            Some(Type::Int) | None => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),
-            Some(ty) => self
-                .show_for_type(v.clone(), &ty, arg_expr.span)
-                .unwrap_or_else(|_| Comp::StrBuiltin(Builtin::ShowInt, vec![v])),
-        };
+        // The `Output` ops carry a `String`, so the value is rendered here at the
+        // call site where its type is concrete, then handed to the op.
+        let val = self.display_comp(v, arg_expr, locals);
         let op = if newline { "out_println" } else { "out_print" };
         let s = self.fresh();
         Comp::Bind(
@@ -95,17 +89,28 @@ impl Elab<'_> {
         )
     }
 
-    pub(super) fn show_dispatch(
+    // The type-directed "display" rendering of a value to a `String`, shared by
+    // `print`/`println` and by string interpolation. Unlike the `Show` typeclass
+    // it is total (an unresolved type falls back to the integer printer rather
+    // than demanding an instance) and it renders a top-level `String` raw: a
+    // message or an interpolated string is inserted verbatim, not quoted. Only
+    // nested strings inside a structure quote, matching `Show`. This is the
+    // documented "magic" printer; `show` is the canonical, dictionary-dispatched
+    // one.
+    pub(super) fn display_comp(
         &mut self,
         v: Value,
         arg_expr: &S<Expr<CorePhase>>,
         locals: &Locals,
-    ) -> Result<Comp, Error> {
-        let span = arg_expr.span;
-        self.printable_ty(arg_expr, locals).map_or_else(
-            || Err(unshowable(None, span)),
-            |ty| self.show_for_type(v, &ty, span),
-        )
+    ) -> Comp {
+        match self.printable_ty(arg_expr, locals) {
+            Some(Type::Str) => Comp::Return(v),
+            Some(Type::Float) => Comp::StrBuiltin(Builtin::ShowFloat, vec![v]),
+            Some(Type::Int) | None => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),
+            Some(ty) => self
+                .show_for_type(v.clone(), &ty, arg_expr.span)
+                .unwrap_or_else(|_| Comp::StrBuiltin(Builtin::ShowInt, vec![v])),
+        }
     }
 
     pub(super) fn show_for_type(&mut self, v: Value, ty: &Type, span: Span) -> Result<Comp, Error> {
@@ -116,7 +121,10 @@ impl Elab<'_> {
             Type::Bool => Comp::StrBuiltin(Builtin::ShowBool, vec![v]),
             Type::Float => Comp::StrBuiltin(Builtin::ShowFloat, vec![v]),
             Type::Char => Comp::StrBuiltin(Builtin::ShowChar, vec![v]),
-            Type::Str => Comp::Return(v),
+            // A nested string renders quoted and escaped, matching the `Show`
+            // instance. A top-level `print`/`show` of a bare string is handled
+            // by the caller before it reaches here, so it stays raw.
+            Type::Str => Comp::Call(STR_ESCAPE_FN.into(), vec![v]),
             Type::Unit => Comp::Return(Value::Str("()".into())),
             Type::Con(name, args) => Comp::Call(
                 self.ensure_show_con(name.as_str(), args, span)?.into(),
@@ -157,24 +165,42 @@ impl Elab<'_> {
         wrap_binds(binds, acc)
     }
 
+    // The rendering for one constructor, matching the derived `Show` instance
+    // (kept in lockstep by `print_show_consistency`): a nullary constructor is
+    // its bare name, a record constructor prints `Name { f = v, ... }`, and a
+    // positional one prints `Name(v, ...)`. `fields` is empty unless the
+    // constructor has named fields.
     pub(super) fn show_arm_body(
         &mut self,
         label: String,
         field_tys: &[Type],
+        fields: &[Sym],
         span: Span,
     ) -> Result<(Vec<String>, Comp), Error> {
         let fvars: Vec<String> = (0..field_tys.len()).map(|i| format!("_f{i}")).collect();
         if field_tys.is_empty() {
             return Ok((fvars, Comp::Return(Value::Str(label))));
         }
-        let mut comps = vec![Comp::Return(Value::Str(format!("{label}(")))];
+        let record = fields.len() == field_tys.len();
+        let mut comps = vec![Comp::Return(Value::Str(if record {
+            format!("{label} {{ ")
+        } else {
+            format!("{label}(")
+        }))];
         for (i, (fv, fty)) in fvars.iter().zip(field_tys).enumerate() {
             if i > 0 {
                 comps.push(Comp::Return(Value::Str(", ".into())));
             }
+            if record {
+                comps.push(Comp::Return(Value::Str(format!("{} = ", fields[i]))));
+            }
             comps.push(self.show_for_type(Value::Var(fv.clone().into()), fty, span)?);
         }
-        comps.push(Comp::Return(Value::Str(")".into())));
+        comps.push(Comp::Return(Value::Str(if record {
+            " }".into()
+        } else {
+            ")".into()
+        })));
         let body = self.concat_comps(comps);
         Ok((fvars, body))
     }
@@ -215,7 +241,7 @@ impl Elab<'_> {
                 .zip(args.iter().cloned())
                 .collect();
             let field_tys: Vec<Type> = info.args.iter().map(|a| subst_ty(a, &subst)).collect();
-            let (fvars, body) = self.show_arm_body(cn.clone(), &field_tys, span)?;
+            let (fvars, body) = self.show_arm_body(cn.clone(), &field_tys, &info.fields, span)?;
             let subs = fvars
                 .iter()
                 .map(|fv| Spanned {
@@ -231,6 +257,7 @@ impl Elab<'_> {
         self.show_fns.push(CoreFn {
             name: fname.clone().into(),
             params: vec!["_sv".into()],
+            dict_arity: 0,
             body,
         });
         Ok(fname)
@@ -270,6 +297,7 @@ impl Elab<'_> {
             self.show_fns.push(CoreFn {
                 name: fun.clone().into(),
                 params: vec!["_sv".into()],
+                dict_arity: 0,
                 body,
             });
         }
@@ -308,6 +336,7 @@ impl Elab<'_> {
         self.show_fns.push(CoreFn {
             name: fname.clone().into(),
             params: vec!["_sv".into()],
+            dict_arity: 0,
             body: cased,
         });
         Ok(fname)

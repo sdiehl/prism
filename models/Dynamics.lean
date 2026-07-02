@@ -114,4 +114,99 @@ theorem effect_unhandled {op : String} {argvs : List Rv} : ∀ {skip : Nat} {stk
                       rw [hfm]
                       exact nofun) hr)) _
 
+/-
+Ambient-row transparency (tunneling) at the machine level.
+
+v0.5 makes an effect-polymorphic concurrent scheduler expressible and SOUND by
+tying a forked fiber's effect-row variable to the caller's AMBIENT row (Koka /
+Frank / Links discipline): a fiber that performs `E` forces `E` into the caller's
+row, so `E` flows OUT through `run_async` and must be handled at the edge. The
+scheduler is TRANSPARENT to a fiber's non-`Async` effects: they tunnel past the
+scheduler's own handler to an outer handler; nothing a fiber performs escapes
+untyped or unhandled.
+
+`findHandler` already realizes exactly this tunneling operationally: a scheduler
+`handle` frame whose clauses do not cover `op` is crossed by `passH`, and the
+`bind`/`args` frames the trampolining driver pushes are crossed by `bind`/`args`,
+so the stack walk continues to an outer handler. `Tunnels op inner` names such a
+transparent segment: a run of frames the search crosses without trapping `op` and
+without shifting the skip count (no matching handler, no masking of `op`). This is
+the machine image of "the scheduler segment `run_async` contributes does not trap
+a fiber's foreign capability".
+
+Gap to the surface guarantee (honest): the model proves the OPERATIONAL image.
+If the scheduler segment is transparent to `op` and an outer handler covers `op`,
+the machine tunnels to it and never gets stuck. The TYPING side (that the
+ambient-row inference forces every `op` a fiber performs into the caller's row, so
+a covering handler must exist at the edge) lives in the Rust row checker
+(`bind_op_rows_to_ambient`), not here; this machine model does not formalize the
+surface row types. The two meet at `Handles`: row inference guarantees the stack
+covers the row, and these theorems guarantee a covered stack is effect-safe.
+-/
+
+/-- A stack segment the `findHandler` search crosses transparently for `op`:
+    every frame is passed over without trapping `op` and without changing the
+    skip count. Mirrors the non-terminating, skip-preserving arms of `findHandler`:
+    `args`/`bind` (always crossed), a `handle` whose clauses do not cover `op`
+    (crossed by `passH`), and a `mask` that does not name `op` (crossed by
+    `maskNo`). This is the shape of the frames a transparent scheduler adds
+    beneath a fiber: its `handle Async` frame plus the driver's `bind`/`args`. -/
+inductive Tunnels (op : String) : Stack → Prop where
+  | nil : Tunnels op []
+  | args a env rest : Tunnels op rest → Tunnels op (.args a env :: rest)
+  | bind x n env rest : Tunnels op rest → Tunnels op (.bind x n env :: rest)
+  | passH ops rv rb env rest : handlerFor op ops = none → Tunnels op rest → Tunnels op (.handle ops rv rb env :: rest)
+  | maskNo ops rest : ¬ops.contains op → Tunnels op rest → Tunnels op (.mask ops :: rest)
+
+/-- Transparency / tunneling: a transparent scheduler segment `inner` is crossed,
+    so if an outer segment `outer` handles `op` (after skipping `skip`), the whole
+    stack `inner ++ outer` still handles `op` with the same skip count. This is the
+    machine image of a fiber's foreign effect tunneling past `run_async`'s handler
+    to the caller's handler, exactly as `passH`/`bind`/`args` cross frames. -/
+theorem effect_tunnels {op : String} {skip : Nat} {outer : Stack} {inner : Stack}
+    (ht : Tunnels op inner) (hh : Handles op skip outer) : Handles op skip (inner ++ outer) :=
+  by induction ht with
+      | nil => exact hh
+      | args a env rest _ ih => exact Handles.args a env (rest ++ outer) skip ih
+      | bind x n env rest _ ih => exact Handles.bind x n env (rest ++ outer) skip ih
+      | passH ops rv rb env rest hf _ ih => exact Handles.passH ops rv rb env (rest ++ outer) skip hf ih
+      | maskNo ops rest hc _ ih => exact Handles.maskNo ops (rest ++ outer) skip hc ih
+
+/-- Machine-step image of effect coverage: a `doOp` whose operation is handled in
+    the current stack is never stuck: the machine takes a step. This is the
+    per-form progress lemma for the effectful node, the analogue of the `Meta.lean`
+    progress cases at the CEK level: a well-covered `doOp` makes progress. -/
+theorem effect_doOp_progress {Γ : Core} {op : String} {args : List Value} {env : Env}
+    {stk : Stack} {avs : List Rv}
+    (hargs : atomEval.atomEvalL env args = some avs) (hh : Handles op 0 stk) :
+    (step Γ (.eval (.doOp op args) env, stk)).isSome :=
+  by
+    simp only [step, hargs]
+    exact effect_progress hh []
+
+/-- Dual: a `doOp` whose operation is NOT handled anywhere in scope is stuck.
+    `step` returns `none`, the machine's unhandled-effect error. This is the state
+    the ambient-row typing rules out: the row demands a handler, so a well-rowed
+    configuration never reaches this. -/
+theorem effect_doOp_stuck {Γ : Core} {op : String} {args : List Value} {env : Env}
+    {stk : Stack} {avs : List Rv}
+    (hargs : atomEval.atomEvalL env args = some avs) (hns : ¬Handles op 0 stk) :
+    step Γ (.eval (.doOp op args) env, stk) = none :=
+  by
+    simp only [step, hargs]
+    exact effect_unhandled hns []
+
+/-- Headline: ambient-row concurrency soundness, machine image. A fiber performs a
+    foreign operation `op` (`doOp`) under a transparent scheduler segment `inner`
+    that does not handle `op`; if the caller's stack `outer` supplies a handler for
+    `op`, the machine STEPS rather than getting stuck: the effect tunnels through
+    `run_async` to the edge handler. Combines `effect_tunnels` (the segment is
+    crossed) with `effect_doOp_progress` (a covered `doOp` progresses). -/
+theorem effect_tunnels_progress {Γ : Core} {op : String} {args : List Value} {env : Env}
+    {inner outer : Stack} {avs : List Rv}
+    (ht : Tunnels op inner) (hh : Handles op 0 outer)
+    (hargs : atomEval.atomEvalL env args = some avs) :
+    (step Γ (.eval (.doOp op args) env, inner ++ outer)).isSome :=
+  effect_doOp_progress hargs (effect_tunnels ht hh)
+
 end Prism

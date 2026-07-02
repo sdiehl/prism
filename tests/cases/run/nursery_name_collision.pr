@@ -1,0 +1,29 @@
+-- A user function named `tasks` collides with the parameter `tasks` bound
+-- inside the stdlib `Concurrent` nursery (`scope`/`fork_all`). The collision must
+-- not merge the caller into a recursion group with `scope`: doing so dropped the
+-- residual `Async`/`Trace` row to empty and tripped an effect-reconciliation ICE.
+-- Running it exercises the fixed row all the way through the scheduler.
+import Concurrent (..)
+
+effect Trace {
+  ctl note(Int) : Unit
+}
+
+fn worker(n : Int) : !{Async(Int), Trace} Int =
+  note(n)
+  yield(())
+  n
+
+fn tasks() : !{Async(Int), Trace} Int =
+  match scope([\() -> worker(1), \() -> worker(2), \() -> worker(3)]) of
+    Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
+    _ => 0
+
+fn go() : !{Trace} Int = run_async(tasks)
+
+fn main() =
+  handle go() with
+    note(n, k) =>
+      println("note {n}")
+      k(())
+    return s => println("sum {s}")

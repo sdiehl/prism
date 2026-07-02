@@ -353,10 +353,8 @@ entry:
   %t3 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
   %t4 = inttoptr i64 %t3 to ptr
-  %0 = ptrtoint ptr %t4 to i64
-  %1 = add i64 %0, 24
-  %t5 = inttoptr i64 %1 to ptr
-  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t5)
+  %t5 = getelementptr inbounds i8, ptr %t4, i64 24
+  %0 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t5)
   call void @prism_rc_dec(i64 %t3)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
@@ -372,10 +370,8 @@ entry:
   %t18 = call i64 @prism_show_bool(i64 %t17)
   call void @prism_rc_dec(i64 %t15)
   %t19 = inttoptr i64 %t18 to ptr
-  %3 = ptrtoint ptr %t19 to i64
-  %4 = add i64 %3, 24
-  %t20 = inttoptr i64 %4 to ptr
-  %5 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
+  %t20 = getelementptr inbounds i8, ptr %t19, i64 24
+  %1 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
   call void @prism_rc_dec(i64 %t18)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
@@ -383,10 +379,8 @@ entry:
   %t28 = call i64 @prism_show_bool(i64 0)
   call void @prism_rc_dec(i64 1)
   %t29 = inttoptr i64 %t28 to ptr
-  %6 = ptrtoint ptr %t29 to i64
-  %7 = add i64 %6, 24
-  %t30 = inttoptr i64 %7 to ptr
-  %8 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t30)
+  %t30 = getelementptr inbounds i8, ptr %t29, i64 24
+  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t30)
   call void @prism_rc_dec(i64 %t28)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
@@ -394,10 +388,8 @@ entry:
   %t38 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
   %t39 = inttoptr i64 %t38 to ptr
-  %9 = ptrtoint ptr %t39 to i64
-  %10 = add i64 %9, 24
-  %t40 = inttoptr i64 %10 to ptr
-  %11 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t40)
+  %t40 = getelementptr inbounds i8, ptr %t39, i64 24
+  %3 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t40)
   call void @prism_rc_dec(i64 %t38)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
@@ -405,10 +397,8 @@ entry:
   %t48 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
   %t49 = inttoptr i64 %t48 to ptr
-  %12 = ptrtoint ptr %t49 to i64
-  %13 = add i64 %12, 24
-  %t50 = inttoptr i64 %13 to ptr
-  %14 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t50)
+  %t50 = getelementptr inbounds i8, ptr %t49, i64 24
+  %4 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t50)
   call void @prism_rc_dec(i64 %t48)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()

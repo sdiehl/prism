@@ -7,10 +7,14 @@ use std::{env, fs, io, mem};
 use num_bigint::{BigInt, Sign};
 
 use crate::core::builtins::{Builtin, FloatOp};
-use crate::core::{Comp, Core, CoreFn, CoreOp, CorePat, Value};
+// Short aliases for the two builtin-op enums, used to keep their `match` arms
+// readable in `float_builtin`/`str_builtin`.
+use crate::core::{Comp, Core, CoreFn, CoreOp, CorePat, IoOp, Value};
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 use crate::types::{CONS, NIL};
+use Builtin as B;
+use FloatOp as F;
 
 // How values that have no surface syntax render in `show`/`repr`. `print` goes
 // through `show`, so these must stay byte-identical to the native runtime's own
@@ -172,12 +176,14 @@ fn node(c: &Comp) -> Node {
         Comp::If(v, t, e) => Node::If(atom_of(v), lower(t), lower(e)),
         Comp::Prim(op, a, b) => Node::Prim(*op, atom_of(a), atom_of(b)),
         Comp::Call(n, args) => Node::Call(*n, args.iter().map(atom_of).collect()),
-        Comp::Print(v) | Comp::PrintF(v) | Comp::PrintS(v) => Node::Print(atom_of(v)),
-        Comp::PrintNl => Node::PrintNl,
-        Comp::ReadInt => Node::ReadInt,
-        Comp::ReadLine => Node::ReadLine,
-        Comp::Rand => Node::Rand,
-        Comp::Srand(v) => Node::Srand(atom_of(v)),
+        Comp::Io(op, args) => match op {
+            IoOp::Print | IoOp::PrintF | IoOp::PrintS => Node::Print(atom_of(&args[0])),
+            IoOp::PrintNl => Node::PrintNl,
+            IoOp::ReadInt => Node::ReadInt,
+            IoOp::ReadLine => Node::ReadLine,
+            IoOp::Rand => Node::Rand,
+            IoOp::Srand => Node::Srand(atom_of(&args[0])),
+        },
         Comp::Error(v) => Node::Error(atom_of(v)),
         Comp::Case(v, arms) => Node::Case(
             atom_of(v),
@@ -370,8 +376,13 @@ pub struct Run {
 // native backends produce identical streams from an unseeded `rand`.
 const DEFAULT_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
+// SplitMix64's Weyl-sequence increment (the "gamma", 2^64 / golden ratio). This
+// happens to equal the default seed but plays a distinct role: it advances the
+// internal state on every draw.
+const SPLITMIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+
 const fn splitmix64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    *state = state.wrapping_add(SPLITMIX_GAMMA);
     let mut z = *state;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -472,6 +483,17 @@ impl<'a> Machine<'a> {
                         Rc::new(cenv),
                     ))
                 } else {
+                    // ANF saturates every call, so over-application is a lowering
+                    // bug. Trap rather than let `zip` silently drop the extra args:
+                    // as the differential oracle we must diverge from a broken
+                    // backend here, not agree with it.
+                    if avs.len() > params.len() {
+                        return Err(format!(
+                            "over-application of `{name}`: {} args for {} params",
+                            avs.len(),
+                            params.len()
+                        ));
+                    }
                     let mut e2 = BTreeMap::new();
                     for (p, a) in params.iter().zip(avs) {
                         e2.insert(*p, a);
@@ -598,6 +620,17 @@ impl<'a> Machine<'a> {
                             }
                             State::Ret(Rv::Closure(Rc::from(&ps[avs.len()..]), body, cenv))
                         } else {
+                            // The sibling of the `Node::Call` over-application trap:
+                            // saturated application evaluates the body, but ANF never
+                            // over-applies, so surplus args are a lowering bug. Trap
+                            // rather than let `zip` silently drop them.
+                            if avs.len() > ps.len() {
+                                return Err(format!(
+                                    "over-application of closure: {} args for {} params",
+                                    avs.len(),
+                                    ps.len()
+                                ));
+                            }
                             for (p, a) in ps.iter().zip(avs) {
                                 e.insert(*p, a);
                             }
@@ -605,6 +638,13 @@ impl<'a> Machine<'a> {
                         }
                     }
                     Rv::Resume(frames) => {
+                        // resume takes exactly one argument; more is a lowering bug.
+                        if avs.len() > 1 {
+                            return Err(format!(
+                                "resume applied to {} arguments, expected 1",
+                                avs.len()
+                            ));
+                        }
                         let arg = avs
                             .into_iter()
                             .next()
@@ -630,14 +670,25 @@ impl<'a> Machine<'a> {
     fn perform(&mut self, stack: &mut Vec<Frame>, op: Sym, args: Vec<Rv>) -> Result<State, String> {
         let mut captured = Vec::new();
         // Each mask frame for this op's effect crossed on the way out makes
-        // the walk skip one more matching handler (Koka-style mask).
+        // the walk skip one more matching handler.
         let mut skip = 0usize;
         while let Some(frame) = stack.pop() {
             match frame {
-                Frame::Restore(name) => self.fn_name = name,
-                // The recursive evaluator propagated performs past a pending
-                // application without capturing it. Keep that behavior.
-                Frame::Args(..) => {}
+                // A call boundary crossed while unwinding to the handler belongs
+                // to the captured continuation: keep it so a later `resume`
+                // restores the caller's `fn_name` (else post-resume diagnostics
+                // name the wrong function). `Sym` is `Copy`, so this both updates
+                // the live name and records the frame.
+                Frame::Restore(name) => {
+                    self.fn_name = name;
+                    captured.push(Frame::Restore(name));
+                }
+                // An effect performed with a pending application on the stack:
+                // capture the application frame into the continuation so `resume`
+                // re-applies the args to the resumed value. ANF keeps application
+                // heads value-only so this rarely fires, but dropping the frame
+                // would silently resume with the un-applied function.
+                Frame::Args(a, e) => captured.push(Frame::Args(a, e)),
                 Frame::Mask(ops) => {
                     if ops.contains(&op) {
                         skip += 1;
@@ -653,6 +704,16 @@ impl<'a> Machine<'a> {
                         captured.push(Frame::Handle(hi, henv));
                     } else {
                         let (params, resume_var, body) = &hi.ops[&op];
+                        // The op is performed with exactly its declared arity; a
+                        // mismatch is a lowering bug that `zip` would otherwise hide
+                        // by dropping surplus args or leaving params unbound.
+                        if params.len() != args.len() {
+                            return Err(format!(
+                                "effect `{op}` performed with {} argument(s), handler binds {}",
+                                args.len(),
+                                params.len()
+                            ));
+                        }
                         let body = Rc::clone(body);
                         let mut env2 = henv.clone();
                         captured.push(Frame::Handle(Rc::clone(&hi), henv));
@@ -718,7 +779,6 @@ fn atoms(env: &Env, args: &[Atom]) -> Result<Vec<Rv>, String> {
 // Truncating/widening conversions are the language semantics of these builtins.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn float_builtin(op: FloatOp, rv: Rv) -> Result<Rv, String> {
-    use FloatOp as F;
     match (op, rv) {
         (F::ToFloat, Rv::Int(n)) => Ok(Rv::Float(n as f64)),
         (F::Truncate, Rv::Float(f)) => Ok(Rv::Int(f as i64)),
@@ -735,7 +795,6 @@ fn float_builtin(op: FloatOp, rv: Rv) -> Result<Rv, String> {
 }
 
 fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
-    use Builtin as B;
     match (b, vals) {
         (B::Concat, [Rv::Str(a), Rv::Str(b)]) => Ok(Rv::Str(format!("{a}{b}"))),
         (B::StrLen, [Rv::Str(s)]) => Ok(Rv::Int(i64::try_from(s.chars().count()).unwrap_or(0))),
@@ -1237,7 +1296,7 @@ pub fn run_io(
 mod tests {
     use num_bigint::BigInt;
 
-    use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED};
+    use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED, SPLITMIX_GAMMA};
 
     // `fmt_g` renders the shortest decimal that round-trips back to the same
     // double: full precision, no truncation, scientific only outside [-4, 16).
@@ -1419,7 +1478,7 @@ mod tests {
     // only in the end-to-end corpus.
     #[test]
     fn splitmix64_matches_runtime() {
-        assert_eq!(DEFAULT_SEED, 0x9E37_79B9_7F4A_7C15);
+        assert_eq!(DEFAULT_SEED, SPLITMIX_GAMMA);
         let mut state = DEFAULT_SEED;
         let golden: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
         assert_eq!(

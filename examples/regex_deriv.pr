@@ -1,0 +1,62 @@
+-- Brzozowski-derivative regular expressions (Brzozowski 1964; Owens, Reppy &
+-- Turon, JFP 2009). To match a string, differentiate the regex by each symbol
+-- in turn; the string matches iff the final regex is `nullable` (accepts the
+-- empty string). No backtracking and no automaton: matching is one left fold of
+-- `deriv` over the input. The alphabet here is small integers.
+--
+-- Expected output:
+--   true
+--   false
+--   true
+--   true
+--   false
+
+type Re
+  = Nope
+  | Eps
+  | Sym(Int)
+  | Seq(Re, Re)
+  | Alt(Re, Re)
+  | Star(Re)
+
+-- Does r accept the empty string?
+fn nullable(r) =
+  match r of
+    Nope => false
+    Eps => true
+    Sym(_) => false
+    Seq(a, b) => nullable(a) && nullable(b)
+    Alt(a, b) => nullable(a) || nullable(b)
+    Star(_) => true
+
+-- The derivative of r with respect to symbol c: the language of suffixes whose
+-- c-prefixed strings r accepts.
+fn deriv(r, c) =
+  match r of
+    Nope => Nope
+    Eps => Nope
+    Sym(x) =>
+      if x == c then
+        Eps
+      else
+        Nope
+    Seq(a, b) =>
+      if nullable(a) then
+        Alt(Seq(deriv(a, c), b), deriv(b, c))
+      else
+        Seq(deriv(a, c), b)
+    Alt(a, b) => Alt(deriv(a, c), deriv(b, c))
+    Star(a) => Seq(deriv(a, c), Star(a))
+
+fn matches(r, cs) = nullable(foldl(deriv, r, cs))
+
+fn main() =
+  -- (a b)*  with a = 1, b = 2
+  let ab_star = Star(Seq(Sym(1), Sym(2)))
+  println(matches(ab_star, [1, 2, 1, 2]))
+  println(matches(ab_star, [1, 2, 1]))
+  println(matches(ab_star, (Nil : List(Int))))
+  -- a (b | c)* d  with c = 3, d = 4
+  let r = Seq(Sym(1), Seq(Star(Alt(Sym(2), Sym(3))), Sym(4)))
+  println(matches(r, [1, 2, 3, 2, 4]))
+  println(matches(r, [1, 2, 3, 2]))

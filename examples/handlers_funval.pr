@@ -1,4 +1,4 @@
--- Koka-style fun and val handler clauses, pure desugaring sugar.
+-- `fun` and `val` handler clauses, pure desugaring sugar.
 --
 -- `fun op(x) => e` is a tail-resumptive clause, identical to
 -- `op(x, k) => k(e)`, resuming exactly once with e. `val v = e` is an

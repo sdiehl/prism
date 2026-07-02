@@ -7,8 +7,8 @@
 //! never `Div`/`Rem`, whose divide-by-zero trap is observable). Constructors,
 //! tuples, thunks, effects, refs, and calls are never shared: CSE runs before
 //! reference counting, so sharing a heap cell would change ownership and could
-//! defeat FBIP in-place reuse. Widening CSE to allocations is an open question
-//! kept out of this landing; `tests/perf_gate.rs`'s reuse ratchets are the gate.
+//! defeat FBIP in-place reuse. Widening CSE to allocations is an open question;
+//! `tests/perf_gate.rs`'s reuse ratchets are the gate.
 //!
 //! Runs after effect lowering (a late pass) so it cannot disturb the var/State
 //! fusion.
@@ -29,6 +29,7 @@ pub(crate) fn cse_counted(core: &Core) -> (Core, u64) {
         .map(|f| CoreFn {
             name: f.name,
             params: f.params.clone(),
+            dict_arity: f.dict_arity,
             body: c.comp(&f.body, &Avail::new()),
         })
         .collect();
@@ -223,6 +224,7 @@ mod tests {
             fns: vec![CoreFn {
                 name: s("f"),
                 params: vec![s("a"), s("b")],
+                dict_arity: 0,
                 body,
             }],
         };
@@ -257,6 +259,7 @@ mod tests {
             fns: vec![CoreFn {
                 name: s("f"),
                 params: vec![s("a"), s("b")],
+                dict_arity: 0,
                 body,
             }],
         };

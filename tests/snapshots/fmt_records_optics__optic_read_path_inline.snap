@@ -1,0 +1,5 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn f(r : R) : Int = r.[players.each.hp]\\n\")"
+---
+fn f(r : R) : Int = r.[players.each.hp]

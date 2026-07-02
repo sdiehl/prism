@@ -1,0 +1,15 @@
+---
+source: tests/fmt_records_optics.rs
+expression: "fmt(\"fn f(g : Game) : Game =\\n\\\n     \\x20 { g | board.each.cell = Cell { a = 1, b = 2, c = 3, d = 4, e = 5 }, v = 0 }\\n\")"
+---
+fn f(g : Game) : Game =
+  { g
+  | board.each.cell = Cell {
+      a = 1,
+      b = 2,
+      c = 3,
+      d = 4,
+      e = 5
+    }
+  , v = 0
+  }

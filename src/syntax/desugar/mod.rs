@@ -59,6 +59,9 @@ pub(super) struct Cx {
     pub(super) errors: BTreeSet<String>,
     pub(super) patterns: PatMap,
     pub(super) fn_sigs: BTreeMap<String, FnSig>,
+    // Synthetic top-level functions lifted out of `without alloc { .. }` blocks,
+    // drained into the program's `fns` after every body is rewritten.
+    pub(super) lifted: Vec<Decl<Core>>,
 }
 
 // Hygienic return-type var for a throw op: never resumes, so the checker
@@ -300,6 +303,8 @@ fn lift_lam(name: String, lam: S<Expr>, span: Span) -> Decl {
         konst: false,
         fip: Fip::No,
         replayable: false,
+        no_alloc: false,
+        no_alloc_bs: false,
         span,
     }
 }
@@ -325,6 +330,15 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
     let mut effs = BTreeSet::new();
     let mut ops: BTreeMap<&str, &str> = BTreeMap::new();
     for e in &prog.effects {
+        if crate::names::RESERVED_SEAM_EFFECTS.contains(&e.name.as_str()) {
+            return Err(TypeError::Other {
+                span: e.span,
+                msg: format!(
+                    "effect `{}` is a reserved name (reserved for the concurrency preemption seam)",
+                    e.name
+                ),
+            });
+        }
         if !effs.insert(e.name.as_str()) {
             return Err(TypeError::Other {
                 span: e.span,
@@ -353,8 +367,12 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     inject_fail(&mut prog);
     inject_loop_effects(&mut prog);
     inject_return_effect(&mut prog);
-    check_effect_dups(&prog)?;
+    // Lower errors first so their synthesized throw-effects and throw-ops take
+    // part in the duplicate check: a repeated `error Foo`, an `error` colliding
+    // with an `effect` of the same name, or a throw-op clashing with another
+    // effect's op are all rejected here rather than silently overwriting.
     let errors = lower_errors(&mut prog);
+    check_effect_dups(&prog)?;
     expand_synonyms(&mut prog)?;
     expand_aliases(&mut prog)?;
     derive_instances(&mut prog)?;
@@ -416,6 +434,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         errors,
         patterns,
         fn_sigs,
+        lifted: Vec::new(),
     };
     let mut fns = Vec::with_capacity(prog.fns.len());
     for mut d in std::mem::take(&mut prog.fns) {
@@ -441,6 +460,9 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         });
     }
     prog.effects.append(&mut cx.effects);
+    // Splice in the functions lifted from `without alloc { .. }` blocks (from both
+    // top-level bodies and instance methods) as ordinary top-level definitions.
+    fns.append(&mut cx.lifted);
     let mut out = Program {
         types: prog.types,
         effects: prog.effects,
@@ -460,32 +482,19 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     Ok(out)
 }
 
-// Surface wrappers that perform a capability effect (Console/FileSystem/Random/
-// Env). A program needs the world handler iff `main` reaches one of these.
-const CAP_WRAPPERS: &[&str] = &[
-    "read_int",
-    "read_line",
-    "read_file",
-    "file_exists",
-    "rand",
-    "getenv",
-    "args_count",
-    "arg",
-    "args",
-];
-
-// The console-output builtins. Unlike the input wrappers above these are not
-// defined functions (so reachability cannot walk into them); a reachable body
-// that names one performs `Output`, which the world handler must discharge.
-const OUTPUT_BUILTINS: &[&str] = &["print", "println"];
-
-// Wrap `main` in the default world handler `run_io` so top-level input IO works
-// without the user installing a handler. Only applied when the program defines
-// `run_io` (the prelude does) and `main` reaches a capability wrapper, so pure
-// programs and the prelude-free corpus stay untouched and pay nothing. Wrapping
-// only on demand also keeps the fused world handler clear of programs whose body
-// reifies an inner handler, where a wrap-over-reified-handler would otherwise
-// surface a backend divergence.
+// Wrap `main` in the default world handler `run_io` so top-level capability IO
+// works without the user installing a handler. Only applied when the program
+// defines `run_io` (the prelude does) and `main` reaches a capability wrapper, so
+// pure programs and the prelude-free corpus stay untouched and pay nothing.
+// Wrapping only on demand also keeps the fused world handler clear of programs
+// whose body reifies an inner handler, where a wrap-over-reified-handler would
+// otherwise surface a backend divergence.
+//
+// The trigger is the surface wrappers (`names::CAP_WRAPPERS`), not the raw
+// capability operations, so a program that performs a capability directly and
+// installs its own handler (`run_io(\() -> rng_rand(()))`) is left unwrapped. The
+// wrapper names and the Replay/output names are single-sourced in `names`/
+// `builtins`, and a drift guard test pins each to its prelude definition.
 fn wrap_main_world(fns: &mut [Decl<Core>]) {
     let names: BTreeSet<&str> = fns.iter().map(|d| d.name.as_str()).collect();
     if !names.contains("run_io") || !names.contains(names::ENTRY_POINT) {
@@ -505,19 +514,19 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
             queue.extend(refs.iter().filter(|r| names.contains(r.as_str())).cloned());
         }
     }
-    let reaches_cap = CAP_WRAPPERS.iter().any(|w| reachable.contains(*w));
+    let reaches_cap = names::CAP_WRAPPERS.iter().any(|w| reachable.contains(*w));
     // `print`/`println` route through `Output` only when the Replay machinery is
     // imported (see `elaborate`); only then does a printing `main` need the world
     // handler to discharge the output ops. Without it, output lowers directly and
     // wrapping a reified-handler body in `run_io` would diverge on the backend.
-    let uses_replay = ["Replay.record", "Replay.replay", "Replay.durable"]
-        .iter()
-        .any(|f| names.contains(*f));
+    let uses_replay = names::REPLAY_DRIVERS.iter().any(|f| names.contains(*f));
     let reaches_output = uses_replay
         && reachable.iter().any(|n| {
-            edges
-                .get(n)
-                .is_some_and(|refs| OUTPUT_BUILTINS.iter().any(|o| refs.contains(*o)))
+            edges.get(n).is_some_and(|refs| {
+                crate::core::builtins::OUTPUT_BUILTINS
+                    .iter()
+                    .any(|o| refs.contains(*o))
+            })
         });
     if !reaches_cap && !reaches_output {
         return;
@@ -527,6 +536,24 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
         let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
         let action = lam1(names::UNIT_ARG, body, span);
         d.body = call(evar("run_io", span), vec![action], span);
+    }
+}
+
+// Retarget the policy-neutral `run_cooperative` to a concrete scheduler chosen by
+// the `--scheduler` flag. `run_cooperative(main) = run_async(main)` by definition;
+// this rebuilds its body to forward to `target` instead, so a program calling
+// `run_cooperative` follows the deployment's default without any source change.
+// `run_async`/`run_lifo` callers are untouched: only this one entry is neutral. A
+// no-op when the program does not import `Concurrent`.
+pub fn retarget_cooperative(prog: &mut Program<Core>, target: &str) {
+    if let Some(d) = prog
+        .fns
+        .iter_mut()
+        .find(|d| d.name == names::RUN_COOPERATIVE)
+    {
+        let span = d.body.span;
+        let args = d.params.iter().map(|p| evar(&p.name, span)).collect();
+        d.body = call(evar(target, span), args, span);
     }
 }
 
@@ -559,6 +586,8 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         konst: d.konst,
         fip: d.fip,
         replayable: d.replayable,
+        no_alloc: d.no_alloc,
+        no_alloc_bs: d.no_alloc_bs,
         span: d.span,
     })
 }
@@ -576,6 +605,7 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
         errors: BTreeSet::new(),
         patterns: PatMap::new(),
         fn_sigs: BTreeMap::new(),
+        lifted: Vec::new(),
     };
     let mut out = rw(e, &Vars::new(), &mut cx)?;
     ids::assign_expr_ids(&mut out);

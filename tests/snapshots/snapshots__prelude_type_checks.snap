@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 34
 expression: "lines.join(\"\\n\")"
 ---
 Data.Char.is_alnum : (Int) -> Bool ! {}
@@ -157,6 +156,8 @@ enum_from_then_to : (Int, Int, Int) -> List(Int) ! {}
 enum_from_to : (Int, Int) -> List(Int) ! {}
 enum_seq : (Int, Int, Int) -> List(Int) ! {}
 eprintln : (String) -> Unit ! {IO} ! {IO}
+escape_at : (Int, String, Int) -> String ! {}
+escape_body : (String, Int, Int) -> String ! {}
 even : (Int) -> Bool ! {}
 factorial : (Int) -> Int ! {}
 fib : (Int) -> Int ! {}
@@ -218,6 +219,7 @@ repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0} !
 run_io : forall a e0. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
 scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0} ! {}
 sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0} ! {}
+show_list_body : forall a. (List(a), Bool) -> String ! {}
 signum : (Int) -> Int ! {}
 skeep : forall a b c e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> (c) -> a ! {Emit(b), e0} ! {}
 skeep_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0} ! {Emit}
@@ -233,6 +235,7 @@ srange_go : (Int, Int) -> Unit ! {Emit(Int)} ! {Emit}
 ssum : forall a e0. ((Unit) -> a ! {e0}) -> Int ! {e0} ! {}
 stake : forall a b c e0. ((Unit) -> b ! {Emit(a), e0}, Int) -> (c) -> Unit ! {Emit(a), e0} ! {}
 stake_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0} ! {Emit}
+str_escape : (String) -> String ! {}
 str_hash : (String) -> U64 ! {}
 succeeds : forall a e0. (() -> a ! {e0}) -> Bool ! {e0} ! {}
 swap : forall a b. ((a, b)) -> (b, a) ! {}

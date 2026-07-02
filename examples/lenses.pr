@@ -31,7 +31,13 @@ fn norm(v : Vec2) : Int =
 
 fn main() : !{IO} Unit =
   let g =
-    Game { player = Player { pos = Vec2 { x = 3, y = 4 }, hp = 100 }, score = 0 }
+    Game {
+      player = Player {
+        pos = Vec2 { x = 3, y = 4 },
+        hp = 100
+      },
+      score = 0
+    }
   let g2 = { g | player.pos.x = 30, player.hp = 95, score = 110 }
   println(g2.player.pos.x)
   println(g2.player.pos.y)

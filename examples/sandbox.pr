@@ -1,0 +1,30 @@
+-- Capability-based sandboxing: a restricted handler set IS a sandbox.
+--
+-- `untrusted` reads files: it performs the `FileSystem` capability but cannot
+-- discharge it itself, so its row demands a handler. `sandbox` runs it under a
+-- handler that answers `FileSystem` with stubs (`read_file` returns "<denied>",
+-- `file_exists` returns false), so the sub-computation never reaches the real
+-- filesystem no matter which files it names or how it branches: the only
+-- interpreter for those operations in scope is the stub. Authority is exactly the
+-- handlers installed, and `sandbox` grants none for the real world.
+--
+-- `sandbox` is polymorphic in the fiber's other effects `e` (row-kinded), so it
+-- constrains `FileSystem` and lets everything else flow out unchanged. This is
+-- object-capability security read straight off the effect row.
+--
+-- Expected output:
+--   sandboxed read: <denied>
+
+fn untrusted() : !{FileSystem} String =
+  if file_exists("/etc/passwd") then
+    read_file("/etc/passwd")
+  else
+    read_file("/etc/secret")
+
+fn sandbox(action : () -> a ! {FileSystem | e}) : a =
+  handle action() with
+    fs_read_file(path, k) => k("<denied>")
+    fs_file_exists(path, k) => k(false)
+    return r => r
+
+fn main() = println("sandboxed read: {sandbox(untrusted)}")

@@ -1,5 +1,6 @@
 -- A string with holes becomes a concatenation of its literal pieces and the
--- `show` of each hole expression.
+-- type-directed display of each hole. Display renders a top-level string raw
+-- (unquoted), unlike the `show` method, which quotes strings.
 "hello {name}, n = {n}"
   ==>
-concat("hello ", concat(show(name), concat(", n = ", show(n))))
+concat("hello ", concat(display(name), concat(", n = ", display(n))))

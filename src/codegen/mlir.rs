@@ -137,10 +137,6 @@ impl Isa for MlirText {
         ));
     }
 
-    fn printf_float(&self, b: &mut Buf, v: &str) {
-        Self::printf(b, "fmt_g", v, "f64");
-    }
-
     fn printf_str(&self, b: &mut Buf, p: &str) {
         Self::printf(b, "fmt_s", p, "!llvm.ptr");
     }
@@ -231,6 +227,7 @@ impl Isa for MlirText {
             "llvm.func @prism_box(i64) -> i64",
             "llvm.func @prism_unbox(i64) -> i64",
             "llvm.func @prism_print_int(i64)",
+            "llvm.func @prism_print_float(i64)",
             "llvm.func @prism_print_nl()",
             "llvm.func @prism_prim_read_int() -> i64",
             "llvm.func @prism_prim_read_line() -> i64",
@@ -253,7 +250,6 @@ impl Isa for MlirText {
         for (sym, arity) in str_builtin_decls() {
             self.declare(out, seen, &sym, arity);
         }
-        Self::fmt_global(out, "fmt_g", "%g");
         Self::fmt_global(out, "fmt_s", "%s");
     }
 

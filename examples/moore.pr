@@ -52,17 +52,36 @@ fn run_eff(m : Moore(Int, Int, Int), ins : List(Int)) : List(Int) =
   prog(ins, Nil)
 
 -- Parallel wiring (the tensor): both machines run on paired inputs.
-fn parallel(m1 : Moore(s1, i1, o1), m2 : Moore(s2, i2, o2)) : Moore((s1, s2), (i1, i2), (o1, o2)) =
-  Moore { init = (m1.init, m2.init), step = \(s, a) -> ((m1.step)(fst(s), fst(a)), (m2.step)(snd(s), snd(a))), out = \(s) -> ((m1.out)(fst(s)), (m2.out)(snd(s))) }
+fn parallel(
+  m1 : Moore(s1, i1, o1),
+  m2 : Moore(s2, i2, o2)
+) : Moore((s1, s2), (i1, i2), (o1, o2)) =
+  Moore {
+    init = (m1.init, m2.init),
+    step = \(s, a) -> ((m1.step)(fst(s), fst(a)), (m2.step)(snd(s), snd(a))),
+    out = \(s) -> ((m1.out)(fst(s)), (m2.out)(snd(s)))
+  }
 
 -- Series wiring: m1's current readout is the input fed to m2 this tick.
-fn series_step(m1 : Moore(s1, i1, o1), m2 : Moore(s2, o1, o2), s : (s1, s2), a : i1) : (s1, s2) =
+fn series_step(
+  m1 : Moore(s1, i1, o1),
+  m2 : Moore(s2, o1, o2),
+  s : (s1, s2),
+  a : i1
+) : (s1, s2) =
   let ns1 = (m1.step)(fst(s), a)
   let bridge = (m1.out)(fst(s))
   (ns1, (m2.step)(snd(s), bridge))
 
-fn series(m1 : Moore(s1, i1, o1), m2 : Moore(s2, o1, o2)) : Moore((s1, s2), i1, o2) =
-  Moore { init = (m1.init, m2.init), step = \(s, a) -> series_step(m1, m2, s, a), out = \(s) -> (m2.out)(snd(s)) }
+fn series(
+  m1 : Moore(s1, i1, o1),
+  m2 : Moore(s2, o1, o2)
+) : Moore((s1, s2), i1, o2) =
+  Moore {
+    init = (m1.init, m2.init),
+    step = \(s, a) -> series_step(m1, m2, s, a),
+    out = \(s) -> (m2.out)(snd(s))
+  }
 
 fn main() : !{IO} Unit =
   -- Running total and running-total-mod-3, both Moore(Int, Int, Int).

@@ -102,6 +102,52 @@ pub struct HandleOp {
     pub body: Comp,
 }
 
+// A builtin IO operation that survives elaboration as a `Comp::Io`. The output
+// ops (`Print`/`PrintF`/`PrintS`/`PrintNl`) perform the `Output`/`IO` effect, the
+// input ops (`ReadInt`/`ReadLine`/`Rand`) read the world, and `Srand` seeds the
+// RNG. Folding the family under one `Comp` node keeps the structural Core passes
+// (traversal, hashing, reuse, lint) to a single arm; the interpreter, codegen,
+// and JSON serializer still switch on the op where the behavior differs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IoOp {
+    Print,
+    PrintF,
+    PrintS,
+    PrintNl,
+    ReadInt,
+    ReadLine,
+    Rand,
+    Srand,
+}
+
+impl IoOp {
+    // Whether the op takes a single value operand (the output/seed ops) rather
+    // than none (the nullary input ops). The operand count `Comp::Io` carries.
+    #[must_use]
+    pub const fn arity(self) -> usize {
+        match self {
+            Self::Print | Self::PrintF | Self::PrintS | Self::Srand => 1,
+            Self::PrintNl | Self::ReadInt | Self::ReadLine | Self::Rand => 0,
+        }
+    }
+
+    // The node tag, kept identical to the old per-variant `Comp::kind()` strings
+    // because the content hash commits to it.
+    #[must_use]
+    pub const fn kind(self) -> &'static str {
+        match self {
+            Self::Print => "Print",
+            Self::PrintF => "PrintF",
+            Self::PrintS => "PrintS",
+            Self::PrintNl => "PrintNl",
+            Self::ReadInt => "ReadInt",
+            Self::ReadLine => "ReadLine",
+            Self::Rand => "Rand",
+            Self::Srand => "Srand",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Comp {
     Return(Value),
@@ -112,14 +158,10 @@ pub enum Comp {
     If(Value, Box<Self>, Box<Self>),
     Prim(CoreOp, Value, Value),
     Call(Sym, Vec<Value>),
-    Print(Value),
-    PrintF(Value),
-    PrintS(Value),
-    PrintNl,
-    ReadInt,
-    ReadLine,
-    Rand,
-    Srand(Value),
+    // A builtin IO operation and its operands: one value for the output/seed ops,
+    // none for the nullary input ops (`IoOp::arity`). One node for the whole
+    // family so a structural pass needs only one arm.
+    Io(IoOp, Vec<Value>),
     Error(Value),
     Case(Value, Vec<(CorePat, Self)>),
     FloatBuiltin(FloatOp, Value),
@@ -177,14 +219,7 @@ impl Comp {
             Self::If(..) => "If",
             Self::Prim(..) => "Prim",
             Self::Call(..) => "Call",
-            Self::Print(_) => "Print",
-            Self::PrintF(_) => "PrintF",
-            Self::PrintS(_) => "PrintS",
-            Self::PrintNl => "PrintNl",
-            Self::ReadInt => "ReadInt",
-            Self::ReadLine => "ReadLine",
-            Self::Rand => "Rand",
-            Self::Srand(_) => "Srand",
+            Self::Io(op, _) => op.kind(),
             Self::Error(_) => "Error",
             Self::Case(..) => "Case",
             Self::FloatBuiltin(..) => "FloatBuiltin",
@@ -208,6 +243,12 @@ pub struct CoreFn {
     pub name: Sym,
     pub params: Vec<Sym>,
     pub body: Comp,
+    /// How many of the leading `params` are dictionary parameters prepended by
+    /// class-constraint elaboration. Carried as data on the binder rather than
+    /// recovered by sniffing the `_c{i}` param names downstream, so a renaming of
+    /// the convention cannot silently break dictionary specialization. Zero for
+    /// every function without a constraint context.
+    pub dict_arity: usize,
 }
 
 #[derive(Clone, Debug)]

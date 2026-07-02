@@ -12,6 +12,7 @@ Program {
         DataDecl {
             name: "Shape",
             params: [],
+            param_kinds: [],
             ctors: [
                 Ctor {
                     name: "Circle",

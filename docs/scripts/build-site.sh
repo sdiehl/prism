@@ -15,17 +15,28 @@ wasm-pack build --target web --out-dir web/pkg --no-default-features --features 
 mkdir -p docs/src/pkg
 cp -f web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 
-# 2. The book (inline Run loads /pkg/prism.js).
-mdbook build docs
+# 2. The compiler binary drives the docs preprocessor (which live-checks every
+#    ```prism block) and regenerates the Standard Library reference; build it and
+#    refresh the generated pages so the book is in sync with the stdlib.
+cargo build --release --features native
+./target/release/prism docs --stdlib --out docs/src/stdlib
 
-# 3. The playground (bakes examples/*.pr, bundles its own wasm copy).
+# 3. The book (inline Run loads /pkg/prism.js). PRISM_MDBOOK_STRICT fails the
+#    build if a block that should type-check does not.
+PRISM_MDBOOK_STRICT=1 mdbook build docs
+
+# 3. The web app: two self-contained pages, the playground (index.html) and the
+#    REPL (repl.html), both bundling their own wasm copy.
 (cd web && pnpm install --frozen-lockfile && pnpm build)
 
-# 4. Stitch into one tree.
+# 4. Stitch into one tree: book at /, playground at /play/, REPL at /repl/. Both
+#    web pages share the same dist bundle; /repl/ serves repl.html as its index.
 rm -rf "$out"
-mkdir -p "$out/play"
+mkdir -p "$out/play" "$out/repl"
 cp -R docs/book/. "$out/"
 cp -R web/dist/. "$out/play/"
+cp -R web/dist/. "$out/repl/"
+cp -f web/dist/repl.html "$out/repl/index.html"
 cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 
-echo "unified site assembled at $out (docs at /, playground at /play/)"
+echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/)"

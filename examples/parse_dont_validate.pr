@@ -1,0 +1,59 @@
+-- Parse, don't validate (Alexis King, 2019). A validation pass answers a
+-- yes/no question and throws the structure away, so every later use has to
+-- re-check or risk a partial operation. Parsing turns the same check into a
+-- type: a value of `NonEmpty` cannot be built from an empty list, so taking its
+-- head is total. The invariant lives in the type, not in a discipline every
+-- caller has to remember.
+--
+-- Prism makes the difference legible in the effect row: `head_or_fail` keeps
+-- `! {Fail}` forever (it can fail at any call), while `first` over an already
+-- parsed `NonEmpty` has a pure row, the static proof that the emptiness check
+-- ran once, at the boundary.
+--
+-- Expected output:
+--   3
+--   5
+--   empty
+--   7
+--   -1
+
+-- A non-empty list: a head paired with the (possibly empty) rest. There is no
+-- way to build one from an empty list, so `first` below never fails.
+type NonEmpty(a) = NonEmpty(a, List(a))
+
+-- The boundary parser, and the only place the emptiness check lives:
+-- List(a) -> Option(NonEmpty(a)).
+fn non_empty(xs) =
+  match xs of
+    Nil => None
+    Cons(h, t) => Some(NonEmpty(h, t))
+
+-- Total: the type already carries the head, so the inferred row stays pure.
+fn first(ne) =
+  match ne of
+    NonEmpty(h, _) => h
+
+fn count_ne(ne) =
+  match ne of
+    NonEmpty(_, t) => 1 + length(t)
+
+-- The validate anti-pattern: a `Fail`-typed head that has to be re-discharged
+-- on every call, however many `is_nil` checks ran before it.
+fn head_or_fail(xs) =
+  match xs of
+    Nil => fail()
+    Cons(h, _) => h
+
+fn main() =
+  -- Parse once, then operate on a value that cannot be empty.
+  match non_empty([3, 1, 4, 1, 5]) of
+    Some(ne) =>
+      println(first(ne))
+      println(count_ne(ne))
+    None => println("empty")
+  match non_empty((Nil : List(Int))) of
+    Some(ne) => println(first(ne))
+    None => println("empty")
+  -- Validate: the partial head must be reified on every use.
+  println(default(\() -> head_or_fail([7, 8]), 0 - 1))
+  println(default(\() -> head_or_fail((Nil : List(Int))), 0 - 1))

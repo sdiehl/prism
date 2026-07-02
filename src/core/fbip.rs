@@ -8,8 +8,9 @@ use crate::types::{CtorInfo, DeclInfo, Type};
 use super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv::{comp as freev, pat_vars};
 use super::tailrec::{recursive_calls, scc_of, scc_of_calls, TailClass};
+use super::traverse::Visit;
 
-// Perceus-style reference counting (Reinking et al.). Function parameters and
+// Compile-time precise reference counting. Function parameters and
 // every let-bound result are owned; each owned value is consumed exactly once on
 // every control path. A second consuming use inserts dup; a value that dies
 // unused inserts drop. Pattern-extracted fields are dup'd live at the match so
@@ -70,6 +71,7 @@ pub fn insert_rc(core: &Core, sigs: &Sigs) -> Core {
                 CoreFn {
                     name: f.name,
                     params: f.params.clone(),
+                    dict_arity: f.dict_arity,
                     body: rc(&f.body, &owned, &borrowed, sigs),
                 }
             })
@@ -86,6 +88,7 @@ pub fn reuse(core: &Core) -> Core {
             .map(|f| CoreFn {
                 name: f.name,
                 params: f.params.clone(),
+                dict_arity: f.dict_arity,
                 body: reuse_comp(&f.body),
             })
             .collect(),
@@ -414,11 +417,8 @@ fn rc_thunks(c: &Comp, sigs: &Sigs) -> Comp {
     match c {
         Comp::Return(v) => Comp::Return(rv(v)),
         Comp::Force(v) => Comp::Force(rv(v)),
-        Comp::Print(v) => Comp::Print(rv(v)),
-        Comp::PrintF(v) => Comp::PrintF(rv(v)),
-        Comp::PrintS(v) => Comp::PrintS(rv(v)),
         Comp::Error(v) => Comp::Error(rv(v)),
-        Comp::Srand(v) => Comp::Srand(rv(v)),
+        Comp::Io(op, args) => Comp::Io(*op, args.iter().map(rv).collect()),
         Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, rv(v)),
         Comp::Prim(op, a, b) => Comp::Prim(*op, rv(a), rv(b)),
         Comp::Call(n, args) => Comp::Call(*n, args.iter().map(rv).collect()),
@@ -471,11 +471,7 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
     match c {
         Comp::Return(v)
         | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
         | Comp::Error(v)
-        | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         // A `var` cell flows as an ordinary owned value: each read/write consumes
         // a reference (the rc pass dups so each use has one), and `ref_set`
@@ -507,7 +503,7 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
                 }
             }
         }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             for a in args {
                 count_val(a, out);
             }
@@ -537,6 +533,18 @@ fn count_val(v: &Value, out: &mut BTreeMap<Sym, usize>) {
 /// # Errors
 /// Fails when refcount tokens are unbalanced.
 pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
+    // This runs only on effect-lowered Core (the compiled pipeline). `sim` treats
+    // a stray `Handle`/`Do`/`Mask` as a no-op, which would silently mask an RC
+    // imbalance in its clauses, so assert lowering really ran first rather than
+    // leave the precondition to a comment.
+    // `effect_free` is itself `#[cfg(debug_assertions)]`, and `debug_assert!` still
+    // compiles its body in release; gate the whole assertion so the helper is never
+    // referenced outside debug builds.
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        core.fns.iter().all(|f| effect_free(&f.body)),
+        "balanced: effect nodes survived to the reuse linearity check; lower_effects must run first"
+    );
     for f in &core.fns {
         let mask = sigs.get(&f.name).map(Vec::as_slice);
         let mut env: BTreeMap<Sym, i64> = f
@@ -553,6 +561,24 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// Whether `c` is free of the effect nodes that effect lowering removes. Used only
+// by the debug-mode precondition of `balanced`.
+#[cfg(debug_assertions)]
+fn effect_free(c: &Comp) -> bool {
+    struct Scan(bool);
+    impl Visit for Scan {
+        fn visit_comp(&mut self, c: &Comp) {
+            if matches!(c, Comp::Handle { .. } | Comp::Do(..) | Comp::Mask(..)) {
+                self.0 = false;
+            }
+            self.descend_comp(c);
+        }
+    }
+    let mut s = Scan(true);
+    s.visit_comp(c);
+    s.0
 }
 
 fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String> {
@@ -659,11 +685,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         }
         Comp::Return(v)
         | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
         | Comp::Error(v)
-        | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::RefNew(v)
         | Comp::RefGet(v) => use_val(v, env, sigs),
@@ -702,7 +724,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
             }
             Ok(())
         }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             for a in args {
                 use_val(a, env, sigs)?;
             }
@@ -713,18 +735,11 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
             use_val(v, env, sigs)
         }
         Comp::Mask(_, b) => sim(b, env, sigs),
-        Comp::Lam(..)
-        | Comp::ReadInt
-        | Comp::ReadLine
-        | Comp::PrintNl
-        | Comp::Rand
-        | Comp::Handle { .. }
-        | Comp::Dup(_)
-        | Comp::Drop(_) => Ok(()),
+        Comp::Lam(..) | Comp::Handle { .. } | Comp::Dup(_) | Comp::Drop(_) => Ok(()),
     }
 }
 
-// FP^2 static check (Lorenzen/Leijen/Swierstra, ICFP 2023). The three properties
+// Fully-in-place static check. The three properties
 // are PROVEN at the phase each is a property of:
 //
 // - Zero-allocation + call-graph closure (both `fip` and `fbip`), over the
@@ -756,8 +771,16 @@ pub type Fips = BTreeMap<Sym, Fip>;
 pub fn fip_annots(prog: &Program<CorePhase>) -> Fips {
     prog.fns
         .iter()
-        .filter(|d| d.fip != Fip::No)
-        .map(|d| (d.name.clone().into(), d.fip))
+        .filter_map(|d| {
+            // `without alloc` is `fbip` spelled as a revoked capability: same
+            // zero-allocation check, no linearity or bounded-stack requirement.
+            // An explicit `fip`/`fbip` keyword (the stronger discipline) wins.
+            let want = match d.fip {
+                Fip::No if d.no_alloc => Fip::Fbip,
+                other => other,
+            };
+            (want != Fip::No).then(|| (d.name.clone().into(), want))
+        })
         .collect()
 }
 
@@ -928,8 +951,39 @@ pub fn check_fip_linear(
             }
         }
         lin_comp(&f.body, f.name.as_str(), ctors)?;
+        // `lin_comp` checks one frame and does not cross into thunks (a closure
+        // body is a separate frame). Those bodies still need checking, or a binder
+        // duplicated inside a captured closure evades the `fip` linearity gate.
+        let mut tl = ThunkLin {
+            fname: f.name.as_str(),
+            ctors,
+            err: None,
+        };
+        tl.visit_comp(&f.body);
+        if let Some(e) = tl.err {
+            return Err(e);
+        }
     }
     Ok(())
+}
+
+// Drives the exhaustive walk to reach every thunk (which `lin_comp` skips) and
+// lin-checks each body as its own scope; short-circuits on the first failure.
+struct ThunkLin<'a> {
+    fname: &'a str,
+    ctors: &'a BTreeMap<String, CtorInfo>,
+    err: Option<String>,
+}
+
+impl Visit for ThunkLin<'_> {
+    fn visit_value(&mut self, v: &Value) {
+        if let Value::Thunk(c) = v {
+            if self.err.is_none() {
+                self.err = lin_comp(c, self.fname, self.ctors).err();
+            }
+        }
+        self.descend_value(v);
+    }
 }
 
 const fn is_immediate(t: &Type) -> bool {
@@ -1052,11 +1106,7 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
     match c {
         Comp::Return(v)
         | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
         | Comp::Error(v)
-        | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
@@ -1069,7 +1119,7 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
         }
         Comp::Reuse(tok, v) => usize::from(*tok == x) + occ(v),
         Comp::Prim(_, a, b) => occ(a) + occ(b),
-        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) => {
+        Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             args.iter().map(occ).sum()
         }
         Comp::Bind(m, y, n) => max_uses(x, m) + if *y == x { 0 } else { max_uses(x, n) },
@@ -1111,7 +1161,6 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
                 + return_body.as_ref().map_or(0, |rb| max_uses(x, rb))
                 + ops.iter().map(|op| max_uses(x, &op.body)).sum::<usize>()
         }
-        Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => 0,
     }
 }
 
@@ -1179,11 +1228,7 @@ fn fip_comp(
         }
         Comp::Return(v)
         | Comp::Force(v)
-        | Comp::Print(v)
-        | Comp::PrintF(v)
-        | Comp::PrintS(v)
         | Comp::Error(v)
-        | Comp::Srand(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Drop(v)
         // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
@@ -1195,7 +1240,9 @@ fn fip_comp(
             val(c)?;
             val(v)
         }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) => args.iter().try_for_each(val),
+        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
+            args.iter().try_for_each(val)
+        }
         Comp::Handle {
             body,
             return_body,
@@ -1208,7 +1255,7 @@ fn fip_comp(
             }
             ops.iter().try_for_each(|op| recur(&op.body))
         }
-        Comp::Dup(_) | Comp::ReadInt | Comp::ReadLine | Comp::PrintNl | Comp::Rand => Ok(()),
+        Comp::Dup(_) => Ok(()),
     }
 }
 
@@ -1298,6 +1345,7 @@ mod tests {
     fn one(name: &str, arity: usize, body: Comp) -> CoreFn {
         CoreFn {
             name: name.into(),
+            dict_arity: 0,
             params: (0..arity)
                 .map(|i| Sym::from(format!("p{i}").as_str()))
                 .collect(),
@@ -1428,6 +1476,7 @@ mod tests {
         CoreFn {
             name: name.into(),
             params: params.iter().map(|p| Sym::from(*p)).collect(),
+            dict_arity: 0,
             body,
         }
     }
@@ -1469,6 +1518,7 @@ mod tests {
             CtorInfo {
                 type_name: "P".into(),
                 params: vec![],
+                param_kinds: vec![],
                 args: vec![field0, field1],
                 tag: 0,
                 fields: vec!["a".into(), "b".into()],

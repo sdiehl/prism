@@ -475,6 +475,8 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("str_eq", 2, BuiltinKind::Str),
     ("str_cmp", 2, BuiltinKind::Str),
     ("show_int", 1, BuiltinKind::Str),
+    ("show_i64", 1, BuiltinKind::Str),
+    ("show_u64", 1, BuiltinKind::Str),
     ("show_bool", 1, BuiltinKind::Str),
     ("show_float", 1, BuiltinKind::Str),
     ("show_float_prec", 2, BuiltinKind::Str),
@@ -543,3 +545,10 @@ pub fn builtin(name: &str) -> Option<(usize, BuiltinKind)> {
         .find(|(n, ..)| *n == name)
         .map(|&(_, arity, kind)| (arity, kind))
 }
+
+/// The surface output builtins (`print`/`println`).
+///
+/// Their calls route through the interceptable `Output` capability when the
+/// `Replay` machinery is in scope. Lives here, with the rest of the builtin name
+/// knowledge, so the desugarer's world-handler decision does not re-spell them.
+pub const OUTPUT_BUILTINS: &[&str] = &["print", "println"];

@@ -249,7 +249,7 @@ impl Lints {
                 self.expr(a);
                 self.expr(b);
             }
-            Sugar::OptChain(e, _) | Sugar::Return(e) => self.expr(e),
+            Sugar::OptChain(e, _) | Sugar::Return(e) | Sugar::WithoutAlloc(e) => self.expr(e),
             Sugar::Range(pre, hi) => {
                 for x in pre {
                     self.expr(x);

@@ -5,6 +5,11 @@
 
 pub const ENTRY_POINT: &str = "main";
 
+// The internal function a string-interpolation hole lowers to. It renders its
+// value through the total, type-directed display printer (raw for a top-level
+// string) rather than the quoting `Show` method, so `"{s}"` inserts `s` verbatim.
+pub const DISPLAY_FN: &str = "__display";
+
 // The two ambient builtin effects, available without an `effect` declaration:
 // console I/O and the `error`/`throw` exception channel.
 pub const IO_EFFECT: &str = "IO";
@@ -25,6 +30,83 @@ pub const BREAK_EFFECT: &str = "Break";
 pub const CONTINUE_EFFECT: &str = "Continue";
 pub const BREAK_OP: &str = "loop@break";
 pub const CONTINUE_OP: &str = "loop@continue";
+
+// The reserved capability effects (the IO-as-effects surface). `Console`/
+// `FileSystem`/`Random`/`Env` route the nondeterministic input primitives; the
+// separate `Output` effect routes `print`/`println`. The effect declarations
+// themselves live in the prelude; this is the single source of truth for the set
+// of names, so the `replayable` row check reads it rather than re-spelling the
+// literal list.
+pub const OUTPUT_EFFECT: &str = "Output";
+pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random", "Env"];
+
+// The concurrency preemption seam. `Preempt` is the row label a preemptive
+// scheduler will discharge, gating the yield-safepoint pass; it is reserved not
+// shipped, so a user `effect Preempt` is rejected and the name stays free for
+// that release without a later breaking change. It is deliberately absent from
+// the `replayable` allowed set, so a preemptive program is non-replayable by the
+// existing row-subset check with no new rule. (`Clock`, the logical-time
+// capability, shipped in the `Concurrent` stdlib, so it is an ordinary effect and
+// no longer reserved.)
+pub const PREEMPT_EFFECT: &str = "Preempt";
+pub const RESERVED_SEAM_EFFECTS: &[&str] = &[PREEMPT_EFFECT];
+
+// The `Concurrent` scheduler entry points. `run_cooperative` is the policy-neutral
+// wrap that the `--scheduler` flag retargets; `run_async` (FIFO) and `run_lifo`
+// (LIFO) name a concrete policy and are never rewritten. Resolved (module-qualified)
+// form, matched after name resolution.
+pub const RUN_COOPERATIVE: &str = "Concurrent.run_cooperative";
+pub const RUN_LIFO: &str = "Concurrent.run_lifo";
+
+// The prelude surface wrappers that opt a program into the default `run_io` world
+// handler: each performs a capability effect without handling it, so a `main`
+// that reaches one needs the handler installed. This is the opt-in trigger, which
+// is why it keys off the wrapper names rather than the raw capability operations:
+// a program that performs a capability directly (and installs its own handler,
+// e.g. `run_io(\() -> rng_rand(()))`) is deliberately left unwrapped. These are
+// load-bearing prelude names like `main`/`run_io`; a drift guard test asserts each
+// resolves to a prelude function so a rename fails loudly instead of silently
+// changing codegen.
+pub const CAP_WRAPPERS: &[&str] = &[
+    "read_int",
+    "read_line",
+    "read_file",
+    "file_exists",
+    "rand",
+    "getenv",
+    "args_count",
+    "arg",
+    "args",
+];
+
+// The public `Replay` drivers. Their presence is what switches `print`/`println`
+// onto the interceptable `Output` capability (so a durable resume can suppress
+// already-emitted output); everywhere else printing lowers directly. Read by both
+// the desugarer (world-handler decision) and the elaborator (output routing), so
+// the two stay in lockstep from one definition.
+pub const REPLAY_DRIVERS: &[&str] = &["Replay.record", "Replay.replay", "Replay.durable"];
+
+// The prelude tail-recursive loop drivers a `while`/`loop` desugars to.
+// `erase_control` recognizes calls to them by name to lower a recognized loop to
+// direct control flow, so a prelude rename without a matching edit here would
+// silently drop loop erasure onto the free-monad tier (a perf cliff, not a
+// miscompile). Pinned by the drift-guard test below.
+pub const REPEAT_WHILE: &str = "repeat_while";
+pub const FOREVER: &str = "forever";
+
+// The prelude class methods that operator elaboration and `deriving` call by
+// name: `==`/`!=` dispatch through `eq`, `<`/`<=`/`>`/`>=` through `cmp`, and
+// derived Show instances through `show`. One definition here keeps `derive.rs`,
+// `tc`, and `elaborate` in lockstep with the prelude class declarations; the
+// drift-guard test pins each to its class signature.
+pub const EQ_METHOD: &str = "eq";
+pub const ORD_METHOD: &str = "cmp";
+pub const SHOW_METHOD: &str = "show";
+
+// The plain prelude helper derived Ord instances lean on to order constructor
+// tags. Pinned like `CAP_WRAPPERS` by the drift-guard test. (Derived Show's
+// `concat` is a compiler builtin, canonical in `core::builtins`, not here.)
+pub const INT_CMP: &str = "int_cmp";
 
 // Recognizers for the loop-control ops, used by `erase_control` to match the
 // handler templates the desugar emits (op names only; binders are alpha-renamed).
@@ -218,6 +300,21 @@ pub fn snapshot(n: u32) -> String {
     format!("snap@{n}")
 }
 
+// The top-level function a `without alloc { .. }` block lifts to. The `@` keeps
+// it out of the source-identifier namespace; the block's captured locals become
+// its parameters, and it carries the zero-allocation certificate.
+#[must_use]
+pub fn without_alloc_block(n: u32) -> String {
+    format!("noalloc@{n}")
+}
+
+// Whether a name is a lifted `without alloc { .. }` block (so a diagnostic can
+// name it "block" rather than leak the synthetic function name).
+#[must_use]
+pub fn is_without_alloc_block(name: &str) -> bool {
+    name.starts_with("noalloc@")
+}
+
 // Per-element binder for an `each` path step desugared to `map`.
 #[must_use]
 pub fn path_each(n: u32) -> String {
@@ -258,6 +355,23 @@ pub fn lowered(hint: &str, n: u32) -> String {
     format!("{n}@{hint}")
 }
 
+// Fresh-binder prefixes, one per duplicating pass. The `%` lead is unforgeable
+// (no source identifier or other synthesized name contains it), so a freshened
+// binder collides with nothing in its surrounding context; the distinct suffix
+// keeps two passes that freshen the same function from minting the same name, so
+// binders stay globally unique across the pipeline.
+pub const FRESH_INLINE: &str = "%i";
+pub const FRESH_SPECIALIZE: &str = "%sp";
+
+// A binder alpha-renamed to a fresh name by a duplicating pass (the inliner
+// splicing a callee body, the specializer materializing a shared method body).
+// `n` is a caller-threaded counter, so freshening is deterministic across a
+// compilation. `prefix` is one of the `FRESH_*` constants above.
+#[must_use]
+pub fn fresh_binder(prefix: &str, n: u32) -> String {
+    format!("{prefix}{n}")
+}
+
 // Opaque rigid type variable standing in for an untyped local binder when
 // print/show dispatch re-infers an argument's type. Keyed by position so its
 // identity is its own (never derived from the term variable it shadows): the
@@ -266,4 +380,62 @@ pub fn lowered(hint: &str, n: u32) -> String {
 #[must_use]
 pub fn local_shadow(n: u32) -> String {
     format!("shadow@{n}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CAP_WRAPPERS, EQ_METHOD, FOREVER, INT_CMP, ORD_METHOD, REPEAT_WHILE, REPLAY_DRIVERS,
+        SHOW_METHOD,
+    };
+
+    // The capability wrappers and Replay drivers are load-bearing prelude names
+    // the desugarer and elaborator match by string to decide the world-handler
+    // wrapping and output routing. A rename in the prelude without a matching edit
+    // here would silently change codegen, so pin each name to its definition: a
+    // drift fails the build instead of miscompiling.
+    #[test]
+    fn capability_names_resolve_to_prelude_functions() {
+        let prelude = include_str!("../lib/prelude.pr");
+        for w in CAP_WRAPPERS {
+            assert!(
+                prelude.contains(&format!("fn {w}(")),
+                "capability wrapper `{w}` (names::CAP_WRAPPERS) has no `fn {w}(` in the prelude"
+            );
+        }
+        let replay = include_str!("../lib/std/Replay.pr");
+        for d in REPLAY_DRIVERS {
+            let short = d.strip_prefix("Replay.").unwrap_or(d);
+            assert!(
+                replay.contains(&format!("fn {short}(")),
+                "Replay driver `{d}` (names::REPLAY_DRIVERS) has no `fn {short}(` in Replay.pr"
+            );
+        }
+    }
+
+    // The loop drivers, class methods, and derive helpers are the remaining
+    // string contracts between the compiler and the prelude: `erase_control`
+    // matches the loop drivers, operator elaboration and `deriving` call the
+    // methods and helpers. Pin each to its prelude definition so a rename fails
+    // the build instead of silently degrading a tier or breaking deriving.
+    #[test]
+    fn prelude_hook_names_resolve_to_prelude_definitions() {
+        let prelude = include_str!("../lib/prelude.pr");
+        for w in [REPEAT_WHILE, FOREVER] {
+            assert!(
+                prelude.contains(&format!("fn {w}(")),
+                "loop driver `{w}` (names) has no `fn {w}(` in the prelude"
+            );
+        }
+        for m in [EQ_METHOD, ORD_METHOD, SHOW_METHOD] {
+            assert!(
+                prelude.contains(&format!("{m} :")),
+                "class method `{m}` (names) has no `{m} :` signature in the prelude"
+            );
+        }
+        assert!(
+            prelude.contains(&format!("fn {INT_CMP}(")),
+            "derive helper `{INT_CMP}` (names) has no `fn {INT_CMP}(` in the prelude"
+        );
+    }
 }
