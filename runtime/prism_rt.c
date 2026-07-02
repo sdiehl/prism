@@ -715,20 +715,20 @@ long prism_show_char(long cp) {
 static int prism_fmt_float(double d, char *out) {
     int o = 0;
     if (isnan(d)) {
-        memcpy(out, "nan", 3);
+        strcpy(out, "nan");
         return 3;
     }
     if (isinf(d)) {
         if (d < 0) {
-            memcpy(out, "-inf", 4);
+            strcpy(out, "-inf");
             return 4;
         }
-        memcpy(out, "inf", 3);
+        strcpy(out, "inf");
         return 3;
     }
     if (d == 0.0) {
         if (signbit(d)) {
-            memcpy(out, "-0", 2);
+            strcpy(out, "-0");
             return 2;
         }
         out[0] = '0';
