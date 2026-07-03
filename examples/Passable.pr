@@ -1,0 +1,31 @@
+-- | Typeclass for values passed by reference as remotable capabilities.
+pub class Remotable(r) { }
+
+-- | Typeclass for values passed by reference as promises.
+pub class Promise(p) { }
+
+-- | Typeclass for values marshalled as errors.
+pub class PassError(e) { }
+
+-- | A marshallable value parametric in the promise P, remotable R, and error E
+-- types. Atoms and containers are pass-by-copy; Remotable, Promise, and PassError
+-- embed values of the parameterised types.
+pub type Passable(p, r, e)
+  = Atom(AtomValue)
+  | CopyArray(List(Passable(p, r, e)))
+  | CopyRecord(List((String, Passable(p, r, e))))
+  | CopyTagged(String, Passable(p, r, e))
+  | Remotable(r)
+  | Promise(p)
+  | PassError(e)
+
+-- | Atomic pass-by-copy scalar values.
+pub type AtomValue
+  = AUndefined
+  | ANull
+  | ABool(Bool)
+  | ANumber(Float)
+  | ABigInt(Int)
+  | AString(String)
+  | ASymbol(String)
+  | AByteArray(String)

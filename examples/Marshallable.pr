@@ -1,0 +1,283 @@
+import Passable (..)
+
+-- | A slot index in the CapTP import/export table. Capabilities
+-- (remotables and promises) are never serialized as values; they
+-- are referenced by position in the per-session slot table.
+pub newtype SlotIndex = SlotIndex(Int)
+
+-- | Error representation: a message string plus optional data.
+pub type ErrorRepr = ErrorRepr {
+  message : String,
+  data : Option(MyPassable)
+}
+
+-- | A concrete instantiation of Passable using SlotIndex and ErrorRepr.
+pub alias MyPassable = Passable(SlotIndex, SlotIndex, ErrorRepr)
+
+-- | A type whose values can be marshalled to and from MyPassable.
+pub class Marshallable(a) {
+  encode : (a) -> MyPassable,
+  decode : (MyPassable) -> Option(a)
+}
+
+instance marshallableBool : Marshallable(Bool) {
+  fn encode(b) = Atom(ABool(b)),
+  fn decode(p) =
+    match p of {
+      Atom(ABool(b)) => Some(b),
+      _ => None
+    }
+}
+
+instance marshallableInt : Marshallable(Int) {
+  fn encode(n) = Atom(ABigInt(n)),
+  fn decode(p) =
+    match p of {
+      Atom(ABigInt(n)) => Some(n),
+      _ => None
+    }
+}
+
+instance marshallableFloat : Marshallable(Float) {
+  fn encode(f) = Atom(ANumber(f)),
+  fn decode(p) =
+    match p of {
+      Atom(ANumber(f)) => Some(f),
+      _ => None
+    }
+}
+
+instance marshallableString : Marshallable(String) {
+  fn encode(s) = Atom(AString(s)),
+  fn decode(p) =
+    match p of {
+      Atom(AString(s)) => Some(s),
+      _ => None
+    }
+}
+
+instance marshallableSlotIndex : Marshallable(SlotIndex) {
+  fn encode(slot) =
+    match slot of {
+      SlotIndex(n) => Atom(ABigInt(n))
+    },
+  fn decode(p) =
+    match p of {
+      Atom(ABigInt(n)) => Some(SlotIndex(n)),
+      _ => None
+    }
+}
+
+instance marshallableErrorRepr : Marshallable(ErrorRepr) {
+  fn encode(err) =
+    match err of {
+      ErrorRepr { message = msg, data = dat } =>
+        let encoded_data = match dat of {
+          None => Atom(ANull),
+          Some(v) => v
+        } in
+        CopyTagged("error", CopyArray(Cons(Atom(AString(msg)), Cons(encoded_data, Nil))))
+    },
+  fn decode(p) =
+    match p of {
+      CopyTagged(tag, CopyArray(Cons(Atom(AString(msg)), Cons(dat, Nil)))) =>
+        if tag == "error" then
+          let decoded_data = match dat of {
+            Atom(ANull) => None,
+            v => Some(v)
+          } in
+          Some(ErrorRepr { message = msg, data = decoded_data })
+        else
+          None,
+      _ => None
+    }
+}
+
+fn marshal_passable(p : Passable(a, b, c)) : MyPassable given Marshallable(a), Marshallable(b), Marshallable(c) =
+  match p of {
+    Atom(v) => Atom(v),
+    CopyArray(xs) => CopyArray(map(marshal_passable, xs)),
+    CopyRecord(kvs) => CopyRecord(map(\(kv) -> match kv of { (k, v) => (k, marshal_passable(v)) }, kvs)),
+    CopyTagged(tag, body) => CopyTagged(tag, marshal_passable(body)),
+    Remotable(r) => encode(r),
+    Promise(pr) => encode(pr),
+    PassError(e) => encode(e)
+  }
+
+fn unmarshal_passable(p : MyPassable) : Option(Passable(a, b, c)) given Marshallable(a), Marshallable(b), Marshallable(c) =
+  match p of {
+    Atom(v) => Some(Atom(v)),
+    CopyArray(xs) =>
+      match unmarshal_passable_list(xs) of {
+        None => None,
+        Some(ys) => Some(CopyArray(ys))
+      },
+    CopyRecord(kvs) =>
+      match unmarshal_passable_pairs(kvs) of {
+        None => None,
+        Some(ys) => Some(CopyRecord(ys))
+      },
+    CopyTagged(tag, body) =>
+      match unmarshal_passable(body) of {
+        None => None,
+        Some(b) => Some(CopyTagged(tag, b))
+      },
+    Remotable(slot) =>
+      match decode(Remotable(slot)) of {
+        None => None,
+        Some(r) => Some(Remotable(r))
+      },
+    Promise(slot) =>
+      match decode(Promise(slot)) of {
+        None => None,
+        Some(pr) => Some(Promise(pr))
+      },
+    PassError(err) =>
+      match decode(PassError(err)) of {
+        None => None,
+        Some(e) => Some(PassError(e))
+      }
+  }
+
+fn unmarshal_passable_list(xs : List(MyPassable)) : Option(List(Passable(a, b, c))) given Marshallable(a), Marshallable(b), Marshallable(c) =
+  match xs of {
+    Nil => Some(Nil),
+    Cons(p, rest) =>
+      match unmarshal_passable(p) of {
+        None => None,
+        Some(y) =>
+          match unmarshal_passable_list(rest) of {
+            None => None,
+            Some(ys) => Some(Cons(y, ys))
+          }
+      }
+  }
+
+fn unmarshal_passable_pairs(kvs : List((String, MyPassable))) : Option(List((String, Passable(a, b, c)))) given Marshallable(a), Marshallable(b), Marshallable(c) =
+  match kvs of {
+    Nil => Some(Nil),
+    Cons(kv, rest) =>
+      match kv of {
+        (k, p) =>
+          match unmarshal_passable(p) of {
+            None => None,
+            Some(y) =>
+              match unmarshal_passable_pairs(rest) of {
+                None => None,
+                Some(ys) => Some(Cons((k, y), ys))
+              }
+          }
+      }
+  }
+
+instance marshallablePassable : Marshallable(Passable(p, r, e)) given Marshallable(p), Marshallable(r), Marshallable(e) {
+  fn encode(p) = marshal_passable(p),
+  fn decode(p) = unmarshal_passable(p)
+}
+
+fn decode_list(xs : List(MyPassable)) : Option(List(a)) given Marshallable(a) =
+  match xs of {
+    Nil => Some(Nil),
+    Cons(p, rest) =>
+      match decode(p) of {
+        None => None,
+        Some(y) =>
+          match decode_list(rest) of {
+            None => None,
+            Some(ys) => Some(Cons(y, ys))
+          }
+      }
+  }
+
+instance marshallableList : Marshallable(List(a)) given Marshallable(a) {
+  fn encode(xs) =
+    CopyArray(map(encode, xs)),
+  fn decode(p) =
+    match p of {
+      CopyArray(ps) => decode_list(ps),
+      _ => None
+    }
+}
+
+pub newtype RemoteSlot = RemoteSlot(Int)
+pub newtype PromiseSlot = PromiseSlot(Int)
+
+instance marshallableRemoteSlot : Marshallable(RemoteSlot) {
+  fn encode(slot) =
+    match slot of {
+      RemoteSlot(n) => Remotable(SlotIndex(n))
+    },
+  fn decode(p) =
+    match p of {
+      Remotable(SlotIndex(n)) => Some(RemoteSlot(n)),
+      _ => None
+    }
+}
+
+instance marshallablePromiseSlot : Marshallable(PromiseSlot) {
+  fn encode(slot) =
+    match slot of {
+      PromiseSlot(n) => Promise(SlotIndex(n))
+    },
+  fn decode(p) =
+    match p of {
+      Promise(SlotIndex(n)) => Some(PromiseSlot(n)),
+      _ => None
+    }
+}
+
+instance marshallableOption : Marshallable(Option(a)) given Marshallable(a) {
+  fn encode(opt) =
+    match opt of {
+      None => CopyTagged("none", Atom(ANull)),
+      Some(x) => CopyTagged("some", encode(x))
+    },
+  fn decode(p) =
+    match p of {
+      CopyTagged(tag, body) =>
+        if tag == "none" then
+          Some(None)
+        else if tag == "some" then
+          match decode(body) of {
+            None => None,
+            Some(x) => Some(Some(x))
+          }
+        else
+          None,
+      _ => None
+    }
+}
+
+fn main() : !{IO} Unit =
+  let test_bool = encode(true)
+  let test_int = encode(42)
+  let test_str = encode("hello")
+  let test_list = encode(Cons(1, Cons(2, Cons(3, Nil))))
+  let test_opt = encode(Some("value"))
+
+  let decoded_bool = (decode(test_bool) : Option(Bool))
+  let decoded_int = (decode(test_int) : Option(Int))
+  let decoded_str = (decode(test_str) : Option(String))
+  let decoded_list = (decode(test_list) : Option(List(Int)))
+  let decoded_opt = (decode(test_opt) : Option(Option(String)))
+
+  match decoded_bool of
+    Some(b) => println(if b then "bool: true" else "bool: false")
+    None => println("bool: decode failed")
+
+  match decoded_int of
+    Some(n) => println(concat("int: ", show(n)))
+    None => println("int: decode failed")
+
+  match decoded_str of
+    Some(s) => println(concat("str: ", s))
+    None => println("str: decode failed")
+
+  match decoded_list of
+    Some(xs) => println(concat("list length: ", show(length(xs))))
+    None => println("list: decode failed")
+
+  match decoded_opt of
+    Some(Some(s)) => println(concat("opt: Some(", concat(s, ")")))
+    Some(None) => println("opt: Some(None)")
+    None => println("opt: decode failed")
