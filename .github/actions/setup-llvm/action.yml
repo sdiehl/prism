@@ -23,6 +23,11 @@ runs:
           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
         echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
           | sudo tee /etc/apt/sources.list.d/llvm.list
+        # Refresh the index so the newly-added snapshot repo is known. Without
+        # this the cache action's package-list normalization (apt-get --just-print
+        # install) exits 100 "Unable to locate package" on a cache miss and aborts
+        # with "Packages argument is empty".
+        sudo apt-get update
 
     # Caches the resolved .deb set keyed by the package list, so the download
     # (the slow part) is skipped on a hit. Pinned to a version tag; pin to a
