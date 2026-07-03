@@ -371,7 +371,7 @@ jobs:
         run: cargo test --test parity native_matches_interpreter
 
   nix:
-    name: Nix dev shell
+    name: Nix dev shell + package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -382,11 +382,32 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      # Substitutes the LLVM/rust-overlay/package closure from Cachix and pushes
+      # anything newly built. A cache miss or Cachix outage only makes this job
+      # slower (falls back to cache.nixos.org + local build), never wrong.
+      - name: Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: prism-lang
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
       - name: Lock flake inputs
         run: nix flake lock
 
       - name: Build dev shell
         run: nix develop --command bash -c "rustc --version && clang --version && just --version"
+
+      # Phase 2: the reproducible `prism` binary itself. Building it here keeps the
+      # Nix build path from drifting from the cargo/setup-llvm path (loud failure on
+      # any LLVM-version or source-filter skew) and seeds the package closure into
+      # Cachix. The smoke asserts the artifact loads the embedded stdlib and runs.
+      - name: Build package
+        run: nix build .#default --print-build-logs
+
+      - name: Smoke the built binary
+        run: |
+          ./result/bin/prism --version
+          ./result/bin/prism check examples/accum.pr
 
       # Uploaded even if the build step fails, so the resolved lockfile is always
       # retrievable from the run.

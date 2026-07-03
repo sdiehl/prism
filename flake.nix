@@ -1,5 +1,13 @@
 {
-  description = "Prism compiler dev shell";
+  description = "Prism compiler dev shell and package";
+
+  # Substitute the LLVM/toolchain/package closure from the project's binary cache
+  # so a contributor's first `nix develop`/`nix build` fetches instead of building.
+  # Optional: a cache miss or outage only falls back to building, never breaks.
+  nixConfig = {
+    extra-substituters = [ "https://prism-lang.cachix.org" ];
+    extra-trusted-public-keys = [ "prism-lang.cachix.org-1:QGPdkYkeJDrHd7shaXgb5eLsq8LGy0XmQxzKsChlnI0=" ];
+  };
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -7,15 +15,17 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, rust-overlay, crane }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
-    in
-    {
-      devShells = forAllSystems (system:
+
+      # Per-system environment shared by the dev shell and the package, so the two
+      # build paths cannot drift on toolchain, LLVM version, or link inputs.
+      envFor = system:
         let
           pkgs = import nixpkgs {
             inherit system;
@@ -26,6 +36,22 @@
             extensions = (toolchain.toolchain.components or [ ]) ++ [ "rust-src" "rust-analyzer" ];
           };
           llvm = pkgs.llvmPackages_22;
+          libInputs = [
+            pkgs.libffi
+            pkgs.libxml2
+            pkgs.zlib
+            pkgs.ncurses
+            pkgs.zstd
+          ] ++ nixpkgs.lib.optional pkgs.stdenv.isDarwin pkgs.libiconv;
+        in
+        {
+          inherit pkgs toolchain rust llvm libInputs;
+        };
+    in
+    {
+      devShells = forAllSystems (system:
+        let
+          inherit (envFor system) pkgs toolchain rust llvm libInputs;
         in
         {
           default = pkgs.mkShell {
@@ -39,13 +65,7 @@
               pkgs.sccache
             ];
 
-            buildInputs = [
-              pkgs.libffi
-              pkgs.libxml2
-              pkgs.zlib
-              pkgs.ncurses
-              pkgs.zstd
-            ] ++ nixpkgs.lib.optional pkgs.stdenv.isDarwin pkgs.libiconv;
+            buildInputs = libInputs;
 
             LLVM_SYS_221_PREFIX = "${llvm.llvm.dev}";
             PRISM_CC = "${llvm.clang}/bin/clang";
@@ -58,5 +78,55 @@
             '';
           };
         });
+
+      packages = forAllSystems (system:
+        let
+          inherit (envFor system) pkgs rust llvm libInputs;
+          craneLib = (crane.mkLib pkgs).overrideToolchain rust;
+
+          # Crane's default filter keeps only Cargo-relevant files. The compiler
+          # embeds non-.rs inputs at build time: the stdlib via include_str!, the C
+          # runtime compiled by build.rs, the LALRPOP grammar processed by build.rs,
+          # and examples/boids.pr. Those paths must be unioned back in or the build
+          # fails (grammar) or embeds stale/absent sources (stdlib). A stdlib mismatch
+          # would surface as a `dump stdlib-hash` divergence from `cargo build`.
+          fs = pkgs.lib.fileset;
+          src = fs.toSource {
+            root = ./.;
+            fileset = fs.unions [
+              (craneLib.fileset.commonCargoSources ./.)
+              ./lib
+              ./runtime
+              ./rust-toolchain.toml
+              ./examples/boids.pr
+              ./src/syntax/grammar.lalrpop
+            ];
+          };
+
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
+            nativeBuildInputs = [ llvm.clang pkgs.pkg-config ];
+            buildInputs = libInputs;
+            LLVM_SYS_221_PREFIX = "${llvm.llvm.dev}";
+            PRISM_CC = "${llvm.clang}/bin/clang";
+            # Test corpus (parity/snapshots) is CI's job, not the package build's.
+            doCheck = false;
+          };
+
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          prism = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
+        in
+        {
+          default = prism;
+          inherit prism;
+        });
+
+      apps = forAllSystems (system: {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.prism}/bin/prism";
+        };
+      });
     };
 }

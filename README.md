@@ -16,13 +16,25 @@ The [`examples/`](./examples) directory contains a tour of most advanced feature
 
 ## Install
 
-On Apple Silicon, the Homebrew tap installs the prebuilt binary and pulls in LLVM 22:
+### Nix (simplest)
+
+```shell
+nix build github:sdiehl/prism        # binary at ./result/bin/prism
+nix run  github:sdiehl/prism         # or run it directly
+nix develop                          # dev shell: prism, LLVM, cargo, just on PATH
+```
+
+### Homebrew (Apple Silicon)
+
+The Homebrew tap installs the prebuilt binary and pulls in LLVM 22:
 
 ```shell
 brew install sdiehl/prism/prism
 ```
 
-To build from source on any platform, the LLVM 22 dev libraries must be present, since the compiler links against them:
+### Build from source
+
+On any platform, the LLVM 22 dev libraries must be present, since the compiler links against them:
 
 ```shell
 brew install llvm                    # macOS

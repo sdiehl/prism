@@ -15,3 +15,5 @@
 /models/.lake
 /docs/src/pkg
 /public
+/result
+/result-*
