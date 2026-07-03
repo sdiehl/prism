@@ -116,7 +116,7 @@ pub class Serialize(a) {
 
 -- | The structural witness that a type's format is frozen-serializable: a record
 -- is `Stable` when all its fields are, a sum when all its variants' arguments
--- are. It is a marker with no methods precisely so that the *derivability* is the
+-- are. It is a marker with no methods precisely so that the _derivability_ is the
 -- whole content of the proof. Persisting a type with a non-stable component
 -- (a function, an effectful thunk) fails at the `deriving (Stable)` site, at
 -- compile time, naming the offending field.

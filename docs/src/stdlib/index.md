@@ -6,7 +6,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 
 - **Scheme**: `prism-core-hash-v1`
 - **Hash**: `9dc9d52757d07c2af58ec73458fc65b4eaa0eb848747497eb6adb10bf1059b7d`
-- **Compiler version**: Prism v0.5.0
+- **Compiler version**: Prism v0.6.0
 
 ## Modules
 
