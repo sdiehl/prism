@@ -9,8 +9,8 @@
 //! versus incremental pair backstops: equal hash implies an already-verified
 //! artifact.
 //!
-//! This is the logic over the raw record I/O ([`Store::put_verified`] /
-//! [`Store::verified`]): the canonical `check-kind` names in one place, and the
+//! This is the logic over the raw record I/O ([`Store::put_verified`](crate::store::disk::Store::put_verified) /
+//! [`Store::verified`](crate::store::disk::Store::verified)): the canonical `check-kind` names in one place, and the
 //! "does a passing record exist under the hash scheme in force" query the raw
 //! `Vec<VerifiedRecord>` does not answer. Only passes are recorded, mirroring
 //! the record layer's design: a failure is the absence of a pass, so a failing

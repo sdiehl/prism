@@ -176,7 +176,7 @@ pub struct DynFlags {
     pub store: bool,
     /// `PRISM_STORE_PATH` (default none): override the store root. Absent falls
     /// back to a user-wide cache directory, then `target/prism-store`; see
-    /// [`crate::store::resolve_store_path`].
+    /// [`crate::store::disk::resolve_store_path`].
     pub store_path: Option<PathBuf>,
     /// `PRISM_SIGN_MODE` (default `ssh`): which external tool signs and verifies
     /// the `name -> root` index. See [`SignMode`].

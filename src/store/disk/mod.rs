@@ -213,7 +213,7 @@ impl Store {
     }
 
     /// Bind the canonical instance for a `(class, type-head)` (the on-disk key
-    /// shape is fixed, see [`index`]; coherence enforcement owns the semantics).
+    /// shape is fixed, see the `index` submodule; coherence enforcement owns the semantics).
     ///
     /// # Errors
     /// Fails on a filesystem error.
@@ -230,7 +230,7 @@ impl Store {
     }
 
     /// Append a verification record for `hash` (the format is fixed, see
-    /// [`verified`]).
+    /// the `verified` submodule).
     ///
     /// # Errors
     /// Fails on a filesystem error or an ill-formed hash.

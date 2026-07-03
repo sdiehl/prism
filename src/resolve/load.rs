@@ -91,7 +91,7 @@ fn searched(roots: &[Root]) -> String {
 /// # Errors
 /// Fails when an imported module is found in no root, is unreadable, does not
 /// parse, or resolves only to a source file that is itself the importer (a
-/// same-named-file self-import; see [`fetch_module`]).
+/// same-named-file self-import; see `fetch_module`).
 pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
     let mut out = Vec::new();
     let mut visited = BTreeSet::new();

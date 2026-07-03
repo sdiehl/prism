@@ -5,7 +5,7 @@
 //!
 //! The file world already enforces coherence *within* one program: at most one
 //! canonical instance per `(class, type-head)`, with a second undesignated
-//! instance a definition-site error (see [`crate::tc`]). This layer lifts that
+//! instance a definition-site error (see `crate::tc`). This layer lifts that
 //! guarantee *across* programs. Each program that commits records the
 //! content-addressed identity of its canonical instance for a key
 //! ([`crate::core::instance_digest`], the same digest the stdlib fingerprint
