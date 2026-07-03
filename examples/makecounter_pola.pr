@@ -1,0 +1,46 @@
+-- | Counter actor with POLA separation of duties.
+-- Each capability is passed separately: only `incr` to `use_entry`, only `decr` to `use_exit`.
+
+effect Counter {
+  ctl incr(Unit) : Int,
+  ctl decr(Unit) : Int
+}
+
+fn run_counter(start : Int, action : () -> a ! {Counter}) = 
+  let f =
+    handle action() with
+      incr(u, k) => \(s) -> k(s + 1)(s + 1)
+      decr(u, k) => \(s) -> k(s - 1)(s - 1)
+      return r => \(_s) -> r
+  f(start)
+
+-- | A function that only incrementes (entry guard capability).
+fn use_entry(f : () -> Int ! {Counter}, n) : !{Counter} Int =
+  if n == 0 then
+    0
+  else
+    let _ = f()
+    use_entry(f, n - 1)
+
+-- | A function that only decrements (exit guard capability).
+fn use_exit(f : () -> Int ! {Counter}, n) : !{Counter} Int =
+  if n == 0 then
+    0
+  else
+    let _ = f()
+    use_exit(f, n - 1)
+
+fn scene() : !{Counter} (Int, Int) =
+  let entryGuard = \() -> incr(())
+  let exitGuard = \() -> decr(())
+  let a = incr(())
+  let _ = use_entry(entryGuard, 2)
+  let b = incr(())
+  let _ = use_exit(exitGuard, 1)
+  let c = incr(())
+  (b, c)
+
+fn main() =
+  let (x, y) = run_counter(0, scene)
+  println(x)
+  println(y)

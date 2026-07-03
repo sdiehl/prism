@@ -1,0 +1,27 @@
+-- | Counter actor via explicit effect with parameter-passing handler.
+-- The state is threaded through continuations rather than captured in a `var`,
+-- so no escape analysis issue arises.
+
+effect Counter {
+  ctl incr(Unit) : Int,
+  ctl decr(Unit) : Int
+}
+
+-- | Run a counter action with an initial count. Each incr/decr in the action
+-- threads the state via handler-local parameter passing, exactly like the
+-- parameter-passing State handler in eff_state.pr.
+fn run_counter(start : Int, action : () -> a ! {Counter | e}) =
+  let f =
+    handle action() with
+      incr(u, k) => \(s) -> k(s + 1)(s + 1)
+      decr(u, k) => \(s) -> k(s - 1)(s - 1)
+      return r => \(_s) -> r
+  f(start)
+
+fn main() =
+  let (x, y, z) = run_counter(0, \() ->
+    let a = incr(()) in let b = incr(()) in let c = decr(()) in (a, b, c)
+  )
+  println(x)
+  println(y)
+  println(z)

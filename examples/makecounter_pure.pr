@@ -1,0 +1,19 @@
+-- | Pure functional counter: no effects, no mutation.
+-- State is threaded explicitly through function calls.
+
+type Counter = Counter { count : Int }
+
+fn makeCounter() : Counter = Counter { count = 0 }
+
+fn incr(c : Counter) : Counter = Counter { count = c.count + 1 }
+
+fn decr(c : Counter) : Counter = Counter { count = c.count - 1 }
+
+fn main() =
+  let c0 = makeCounter()
+  let c1 = incr(c0)
+  let c2 = incr(c1)
+  let c3 = decr(c2)
+  println(c1.count)
+  println(c2.count)
+  println(c3.count)
