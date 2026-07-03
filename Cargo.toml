@@ -63,6 +63,10 @@ name = "prism"
 path = "bin/prism.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "doctest-run"
+path = "bin/doctest-run.rs"
+
 [[example]]
 name = "demo"
 path = "examples/demo.rs"

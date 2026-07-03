@@ -19,6 +19,9 @@ check FILE:
 test:
     cargo test --all
 
+test-netlayer-fd:
+    cargo test --no-default-features --test netlayer_fd -- --nocapture
+
 parity:
     cargo test --test parity
 
@@ -27,6 +30,12 @@ perf:
 
 snapshots:
     cargo test --test snapshots
+
+research-doctests:
+    #!/usr/bin/env bash
+    for f in docs/research/ocapn-actors/*.md; do \
+        cargo run --quiet --bin doctest-run --no-default-features -- "$f"; \
+    done
 
 fmt:
     cargo fmt --all
