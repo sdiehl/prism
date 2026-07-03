@@ -1,0 +1,27 @@
+import Concurrent (..)
+import Data.String (concat)
+
+pub type Netlayer = Netlayer { fd: Int }
+
+pub fn create_fd_netlayer(fd: Int) : Netlayer = Netlayer { fd = fd }
+
+pub fn netlayer_send(nl : Netlayer, msg : String) : !{IO} Unit =
+  prim_write_fd(nl.fd, concat(msg, "\n"))
+
+pub fn netlayer_recv(nl : Netlayer) : !{IO} String =
+  prim_read_fd(nl.fd)
+
+fn scene() : !{IO} String =
+  let fd = prim_read_int()
+  let nl = create_fd_netlayer(fd)
+  eprintln("[Node B] Waiting for message...")
+  let msg = netlayer_recv(nl)
+  eprintln("[Node B] Received: {msg}")
+  eprintln("[Node B] Sending pong...")
+  netlayer_send(nl, "pong")
+  "done"
+
+fn main() =
+  let res = scene()
+  eprintln("[Node B] Exiting with: {res}")
+

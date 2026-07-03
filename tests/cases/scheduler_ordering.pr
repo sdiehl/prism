@@ -1,0 +1,41 @@
+import Concurrent (..)
+import Data.List (..)
+import Data.String (str_join)
+
+-- Test showing how deterministic scheduling forces a specific ordering.
+-- Fiber A and Fiber B send to the same channel.
+-- In a real distributed system (or an eventual scheduler), the order
+-- of arrival is arbitrary. Here, it is completely deterministic.
+
+fn worker_a(ch : Chan) : !{Async(String)} String =
+  send(ch, "a")
+  recv(ch)
+
+fn worker_b(ch : Chan) : !{Async(String)} String =
+  send(ch, "b")
+  recv(ch)
+
+fn test_ordering() : !{Async(String)} String =
+  var log := Nil
+  let ch = channel(())
+  
+  -- Fiber A: send "a" then receive
+  let _a = fork(\() -> worker_a(ch))
+  
+  -- Fiber B: send "b" then receive
+  let _b = fork(\() -> worker_b(ch))
+  
+  let r_a = await(_a)
+  log := Cons(r_a, log)
+  
+  let r_b = await(_b)
+  log := Cons(r_b, log)
+  
+  str_join(", ", log)
+
+fn main() =
+  let log1 = run_async(test_ordering)
+  println("run_async order: {log1}")
+  
+  let log2 = run_lifo(test_ordering)
+  println("run_lifo order: {log2}")

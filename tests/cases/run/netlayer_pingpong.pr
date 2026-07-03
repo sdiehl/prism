@@ -1,0 +1,28 @@
+-- A minimal channel-pair netlayer: two fibers exchange strings across a
+-- connected pair of netlayer ends, verifying the in/out routing.
+import Concurrent (..)
+import Netlayer (..)
+
+fn side_a(nl : Netlayer) : !{Async(String), IO} String =
+  netlayer_send(nl, "ping")
+  let reply = netlayer_recv(nl)
+  println(reply)
+  reply
+
+fn side_b(nl : Netlayer) : !{Async(String), IO} String =
+  let msg = netlayer_recv(nl)
+  println("got {msg}")
+  netlayer_send(nl, "pong")
+  msg
+
+fn scene() : !{Async(String), IO} String =
+  let (a, b) = create_channel_netlayer()
+  let fa = fork(\() -> side_a(a))
+  let fb = fork(\() -> side_b(b))
+  let ra = await(fa)
+  let rb = await(fb)
+  println("result {ra} {rb}")
+  "done"
+
+fn main() =
+  println(run_async(scene))

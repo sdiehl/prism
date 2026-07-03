@@ -1,0 +1,96 @@
+-- | Pluggable transport abstraction for CapTP.
+-- |
+-- | A netlayer is a bidirectional pair of channels — one outbound, one inbound —
+-- | carrying messages between two vats. The abstraction decouples CapTP session
+-- | logic from transport: the same code works over a channel pair (in-process
+-- | testing), TCP (dev), or Tor (production).
+-- |
+-- | == Effects
+-- |
+-- | Sending is /deterministic/ (the local vat controls the outbound). Receiving
+-- | is /non-deterministic/ — messages arrive from the peer in an order the local
+-- | vat cannot predict. The `Eventual` effect captures this: it is a capability
+-- | the vat's event loop holds, not the vat's own structured-concurrency
+-- | scheduler.
+-- |
+-- | For the /channel-pair/ netlayer, the underlying `Chan` FIFO order happens to
+-- | be deterministic because both "vats" share a scheduler. A TCP or Tor netlayer
+-- | would implement `Eventual` with genuine non-determinism.
+-- |
+-- | ```prism
+-- | import Netlayer (..)
+-- |
+-- | fn ping(nl) : !{Async(String), IO} String =
+-- |   netlayer_send(nl, "ping")
+-- |   let reply = netlayer_recv(nl)
+-- |   println(reply)
+-- |   reply
+-- |
+-- | fn pong(nl) : !{Async(String), IO} String =
+-- |   let msg = netlayer_recv(nl)
+-- |   println("got {msg}")
+-- |   netlayer_send(nl, "pong")
+-- |   msg
+-- |
+-- | fn main() =
+-- |   let (a, b) = create_channel_netlayer()
+-- |   run_async(\() ->
+-- |     let fa = fork(\() -> ping(a))
+-- |     let fb = fork(\() -> pong(b))
+-- |     await(fa)
+-- |     await(fb)
+-- |     ())
+-- | ```
+-- |
+-- | The `Async` part is only the channel-pair plumbing; a production vat would
+-- | install an `Eventual` handler that reads from a real socket instead.
+
+import Concurrent (..)
+
+-- | Eventual delivery from the network.
+-- |
+-- | Messages arrive at a vat in non-deterministic order. The vat's event loop
+-- | discharges this effect by deciding which incoming message to deliver next.
+-- | Unlike `Async` (structured concurrency within a vat), `Eventual` models the
+-- | vat boundary: the peer's sends become our deliveries, and we cannot predict
+-- | their arrival order.
+-- |
+-- | For the /channel-pair/ netlayer, this effect is not used directly — the
+-- | channels provide FIFO order — but it documents the semantic distinction that
+-- | a real transport would respect.
+pub effect Eventual(a) {
+  ctl deliver(a) : Unit
+}
+
+-- | A bidirectional transport: one channel to send, one to receive.
+pub type Netlayer = Netlayer {
+  outbound : Chan,
+  inbound : Chan
+}
+
+-- | Create a connected netlayer pair for two fibers in the same process.
+-- |
+-- | What A sends arrives at B's inbound, and vice versa.
+-- |
+-- | ```prism
+-- | let (side_a, side_b) = create_channel_netlayer()
+-- | ```
+pub fn create_channel_netlayer() : (Netlayer, Netlayer) =
+  let a_to_b = channel(())
+  let b_to_a = channel(())
+  (Netlayer { outbound = a_to_b, inbound = b_to_a },
+   Netlayer { outbound = b_to_a, inbound = a_to_b })
+
+-- | Send a message on the netlayer's outbound channel.
+-- |
+-- | Never blocks: channel buffers are unbounded.
+pub fn netlayer_send(nl : Netlayer, msg : a) : !{Async(a)} Unit =
+  send(nl.outbound, msg)
+
+-- | Receive the next message from the netlayer's inbound channel.
+-- |
+-- | Blocks the fiber until a message is available. For the channel-pair
+-- | netlayer the ordering is FIFO; a real transport may deliver messages
+-- | in any order.
+pub fn netlayer_recv(nl : Netlayer) : !{Async(a)} a =
+  recv(nl.inbound)
