@@ -1,0 +1,44 @@
+import Vat (..)
+
+fn ping_actor(count : Int) : Behavior =
+  Behavior(\msg ->
+    match msg of
+      Ping(reply_to) =>
+        println("Ping received. Count is {count}")
+        send(reply_to, Pong)
+        bcom(ping_actor(count + 1))
+      Print(s) =>
+        println("Ping actor says: {s}")
+      Pong =>
+        println("Ping actor received an unexpected Pong")
+  )
+
+fn pong_actor() : Behavior =
+  Behavior(\msg ->
+    match msg of
+      Ping(reply_to) =>
+        println("Pong actor received an unexpected Ping")
+      Print(s) =>
+        println("Pong actor says: {s}")
+      Pong =>
+        println("Pong received!")
+  )
+
+fn main_prog() : !{VatEff, IO} Unit =
+  let pinger = spawn(ping_actor(0))
+  let ponger = spawn(pong_actor())
+  
+  -- Send a Print message
+  send(pinger, Print("Hello from main"))
+  
+  -- Send a Ping to the pinger, telling it to reply to the ponger
+  send(pinger, Ping(ponger))
+  
+  -- Because ActorRef is opaque, we cannot do this:
+  -- let fake_ref = ActorRef(42)
+  -- send(fake_ref, Pong)
+  
+  println("Actors spawned, messages queued.")
+
+fn main() : !{IO} Unit =
+  run_system(main_prog)

@@ -1,0 +1,81 @@
+pub opaque type ActorRef = ActorRef(Int)
+
+pub type Msg = Ping(ActorRef) | Pong | Print(String)
+
+pub type Behavior = Behavior((Msg) -> Unit ! {VatEff, IO})
+
+pub effect VatEff {
+  ctl spawn(Behavior) : ActorRef,
+  ctl send(ActorRef, Msg) : Unit,
+  ctl bcom(Behavior) : Unit
+}
+
+type VatState = VatState {
+  actormap : List((Int, Behavior)),
+  queue : List((Int, Msg)),
+  next_id : Int,
+  next_behavior : Option(Behavior)
+}
+
+fn lookup_actor(id : Int, map : List((Int, Behavior))) : Option(Behavior) =
+  match map of
+    Nil => None
+    Cons((k, v), rest) => if k == id then Some(v) else lookup_actor(id, rest)
+
+fn update_actor(id : Int, new_b : Behavior, map : List((Int, Behavior))) : List((Int, Behavior)) =
+  match map of
+    Nil => Nil
+    Cons((k, v), rest) => if k == id then Cons((k, new_b), rest) else Cons((k, v), update_actor(id, new_b, rest))
+
+fn append_queue(q : List((Int, Msg)), elem : (Int, Msg)) : List((Int, Msg)) =
+  match q of
+    Nil => Cons(elem, Nil)
+    Cons(x, xs) => Cons(x, append_queue(xs, elem))
+
+fn run_turn(b : Behavior, m : Msg, init_state : VatState) : !{IO} VatState =
+  let Behavior(f) = b
+  let h = handle f(m) with
+    spawn(new_b, k) => \(st) ->
+      let new_id = st.next_id
+      let st1 = VatState { ..st, next_id = new_id + 1, actormap = Cons((new_id, new_b), st.actormap) }
+      k(ActorRef(new_id))(st1)
+    send(target, msg, k) => \(st) ->
+      match target of
+        ActorRef(tid) =>
+          let st1 = VatState { ..st, queue = append_queue(st.queue, (tid, msg)) }
+          k(())(st1)
+    bcom(next_b, k) => \(st) ->
+      let st1 = VatState { ..st, next_behavior = Some(next_b) }
+      k(())(st1)
+    return r => \(st) -> st
+  h(VatState { ..init_state, next_behavior = None })
+
+pub fn run_system(prog : () -> Unit ! {VatEff, IO}) : !{IO} Unit =
+  let h = handle prog() with
+    spawn(new_b, k) => \(st) ->
+      let new_id = st.next_id
+      let st1 = VatState { ..st, next_id = new_id + 1, actormap = Cons((new_id, new_b), st.actormap) }
+      k(ActorRef(new_id))(st1)
+    send(target, msg, k) => \(st) ->
+      match target of
+        ActorRef(tid) =>
+          let st1 = VatState { ..st, queue = append_queue(st.queue, (tid, msg)) }
+          k(())(st1)
+    bcom(next_b, k) => \(st) -> k(())(st)
+    return r => \(st) -> st
+  
+  var state := h(VatState { actormap = Nil, queue = Nil, next_id = 0, next_behavior = None })
+
+  while true do
+    match state.queue of
+      Nil => break
+      Cons((tid, msg), rest) =>
+        state := VatState { ..state, queue = rest }
+        match lookup_actor(tid, state.actormap) of
+          None => ()
+          Some(b) =>
+            state := run_turn(b, msg, state)
+            match state.next_behavior of
+              None => ()
+              Some(new_b) =>
+                state := VatState { ..state, actormap = update_actor(tid, new_b, state.actormap) }
