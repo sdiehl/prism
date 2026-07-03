@@ -12,7 +12,9 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Queue deploys; cancelling one mid-flight leaves a stuck deployment that blocks
+  # all later ones. Matches GitHub's official Pages workflow.
+  cancel-in-progress: false
 
 jobs:
   deploy:
