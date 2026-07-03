@@ -26,28 +26,63 @@ nix develop                          # dev shell: prism, LLVM, cargo, just on PA
 
 ### Homebrew (Apple Silicon)
 
-The Homebrew tap installs the prebuilt binary and pulls in LLVM 22:
-
 ```shell
 brew install sdiehl/prism/prism
 ```
 
-### Build from source
+### Docker
 
-On any platform, the LLVM 22 dev libraries must be present, since the compiler links against them:
+```shell
+docker run ghcr.io/sdiehl/prism --help
+```
+
+### Linux packages
+
+```shell
+# Debian / Ubuntu
+curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.6.0/prism_0.6.0_amd64.deb
+sudo apt install ./prism_0.6.0_amd64.deb
+
+# Fedora / RHEL
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.6.0/prism-0.6.0-1.x86_64.rpm
+
+# Arch
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.6.0/prism-0.6.0-1-x86_64.pkg.tar.zst
+
+# Alpine
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.6.0/prism_0.6.0_x86_64.apk
+sudo apk add --allow-untrusted ./prism_0.6.0_x86_64.apk
+```
+
+Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:
+
+```shell
+# Debian / Ubuntu
+echo 'deb [trusted=yes] https://apt.fury.io/sdiehl/ /' | sudo tee /etc/apt/sources.list.d/prism.list
+sudo apt update && sudo apt install prism
+
+# Fedora / RHEL
+sudo tee /etc/yum.repos.d/prism.repo <<'EOF'
+[prism]
+baseurl=https://yum.fury.io/sdiehl/
+enabled=1
+gpgcheck=0
+EOF
+sudo dnf install prism
+```
+
+### Build from source
 
 ```shell
 brew install llvm                    # macOS
 sudo apt install llvm-22-dev         # Debian/Ubuntu
-```
-
-Then build with:
-
-```shell
 LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/prism
 ```
 
-This builds the `prism` binary. Native compilation also needs `clang` on `$PATH` (override with `PRISM_CC`).
+Native codegen also needs `clang` on `PATH` (override with `PRISM_CC`).
+
+## Usage
 
 ```shell
 prism                                # interactive shell

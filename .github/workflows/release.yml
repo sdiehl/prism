@@ -209,6 +209,7 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.apk
+            dist/*.pkg.tar.zst
           if-no-files-found: error
 
   publish:
@@ -261,6 +262,7 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.apk
+            dist/*.pkg.tar.zst
             dist/stdlib-merkle-root.txt
             dist/SHA256SUMS
             dist/release-merkle-root.txt
@@ -269,6 +271,23 @@ jobs:
       # version. The tap ships the macOS arm64 tarball. No-op until the tap repo
       # and the HOMEBREW_TAP_TOKEN secret (a PAT with contents:write on
       # sdiehl/homebrew-prism) exist. See packaging/homebrew/README.md.
+      # Push deb/rpm to Gemfury for `apt install prism` (no-op without the token).
+      - name: Check fury token
+        id: fury
+        env:
+          TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to Gemfury
+        if: steps.fury.outputs.enabled == 'true'
+        env:
+          FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
+          FURY_ACCOUNT: ${{ vars.FURY_ACCOUNT || 'sdiehl' }}
+        run: ./scripts/publish-fury.sh dist
+
       - name: Check tap token
         id: tap
         env:
@@ -290,14 +309,38 @@ jobs:
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-  # Validate the self-contained image builds and runs. Publishing is manual
-  # (`just docker <tag> && docker push`), so no registry push or secret here.
+  # On a tag: build and push ghcr.io/sdiehl/prism:<version> + :latest using the
+  # built-in GITHUB_TOKEN (no secret needed). On dispatch: build + smoke only.
+  # Make the package Public once in the GitHub UI after the first push. amd64
+  # only for now (multi-arch needs per-arch runners + a manifest).
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
-      - name: Build image
-        run: docker build -t prism:ci .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/sdiehl/prism
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
       - name: Smoke
-        run: docker run --rm prism:ci --version
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: docker run --rm ghcr.io/sdiehl/prism:latest --version

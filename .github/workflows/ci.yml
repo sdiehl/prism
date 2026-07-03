@@ -19,6 +19,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # README install commands hardcode the version; fail if it drifts from Cargo.toml.
+  readme-version:
+    name: README version matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 scripts/check-readme-version.py
+
   test:
     name: Test
     runs-on: ubuntu-latest

@@ -174,6 +174,8 @@ release VERSION:
 pkg VERSION: build-release
     #!/usr/bin/env bash
     set -euo pipefail
+    # Footgun: on macOS this wraps a darwin binary in a Linux package. Run on Linux.
+    if [ "$(uname -s)" = Darwin ]; then echo "WARN: packaging a macOS binary; the deb/rpm/apk won't run on Linux" >&2; fi
     export VERSION="{{VERSION}}"
     case "$(uname -m)" in
       x86_64|amd64)  export PKG_ARCH=amd64 ;;
@@ -181,7 +183,7 @@ pkg VERSION: build-release
       *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
     esac
     mkdir -p dist
-    for fmt in deb rpm apk; do nfpm package -f packaging/nfpm.yaml -p "$fmt" -t dist; done
+    for fmt in deb rpm apk archlinux; do nfpm package -f packaging/nfpm.yaml -p "$fmt" -t dist; done
     ls -1 dist
 
 # Self-contained image bundling LLVM. Push manually when ready.
