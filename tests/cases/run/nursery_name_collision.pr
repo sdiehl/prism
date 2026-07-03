@@ -19,7 +19,7 @@ fn tasks() : !{Async(Int), Trace} Int =
     Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
     _ => 0
 
-fn go() : !{Trace} Int = run_async(tasks)
+fn go() : !{Trace, Fail} Int = run_async(tasks)
 
 fn main() =
   handle go() with

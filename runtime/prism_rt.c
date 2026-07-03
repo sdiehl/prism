@@ -31,6 +31,7 @@ extern void *mi_calloc(size_t, size_t);
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,6 +107,14 @@ static long prism_ctor(long tag, long n, const long *fields) {
  * prism_reuse_token not to recurse into the payload (limbs are not child cells). */
 #define PRISM_BIG_TAG 0x42494700L
 
+/* Unicode scalar-value bounds. The interpreter's show_char is char::from_u32,
+ * which admits U+0000..U+D7FF and U+E000..U+10FFFF, rejecting the UTF-16
+ * surrogate range and anything past the last code point; a rejected value shows
+ * as the empty string. Native must gate on the identical bounds. */
+#define PRISM_CP_MAX 0x10FFFFL
+#define PRISM_SURROGATE_LO 0xD800L
+#define PRISM_SURROGATE_HI 0xDFFFL
+
 _Static_assert(sizeof(void *) == 8 && sizeof(long) == 8, "prism runtime assumes LP64");
 
 static long *prism_str_alloc(long byte_len) {
@@ -167,8 +176,27 @@ void prism_apply_error(void) {
     exit(1);
 }
 
+/* Reached only if a `case` scrutinee carries a tag no arm covers: exhaustiveness
+ * checking proves this dead for well-typed code, so it fires only on a compiler
+ * bug (a coverage hole or a miscompile). A diagnostic abort beats raw
+ * `unreachable` UB, and matches the interpreter's clean "no matching pattern"
+ * error instead of forking native semantics into undefined behavior. */
+void prism_match_error(void) {
+    fprintf(stderr, "fatal: no matching pattern in case\n");
+    exit(1);
+}
+
 void prism_fatal(long s) {
     fprintf(stderr, "fatal: %s\n", prism_str_data(s));
+    exit(1);
+}
+
+/* `error(n)` raises the Exn fault: the interpreter reports it and terminates
+ * with status 1, so native must too, rather than treating the payload as a
+ * process exit code (that is `exit`, a separate builtin). exit() flushes stdout,
+ * so any output printed before the fault is preserved on both backends. */
+void prism_error_int(long n) {
+    fprintf(stderr, "error(%ld)\n", n);
     exit(1);
 }
 
@@ -286,7 +314,18 @@ long prism_ref_get(long c) {
 }
 
 void prism_ref_set(long c, long v) {
+    PRISM_RT_CHECK(c, "prism_ref_set");
     long *p = (long *)c;
+    /* The store lands in field 0, so the cell must have at least one field. A
+     * var cell is always arity 1 by construction (prism_ref_new), so this never
+     * fires for correct codegen and shipped output stays byte-identical; it is a
+     * load+compare on the arity word, already on the header cache line the field
+     * access below touches, so the guard is always on and turns a mis-issued
+     * ref_set into a trap instead of an out-of-bounds write. */
+    if (p[PRISM_ARITY_W] < 1) {
+        fprintf(stderr, "fatal: ref_set on a cell with no field (arity %ld)\n", p[PRISM_ARITY_W]);
+        abort();
+    }
     prism_rc_dec(p[PRISM_HDR_WORDS]); /* free the old value */
     p[PRISM_HDR_WORDS] = v;           /* v moves into the cell */
 }
@@ -360,17 +399,18 @@ long prism_reuse_token(long v) {
 void *prism_reuse_alloc(long token, long n_words) {
     if (token) {
         long *p = (long *)token;
-#ifdef PRISM_RT_DEBUG
         /* FBIP reuse is compiler-trusted: the shell was allocated for its old
          * arity, so recycling it for a larger payload would write past the
-         * allocation. A codegen bug here is a silent heap overflow; under the
-         * debug runtime, make it a trap instead. */
+         * allocation. A codegen bug here is a silent heap overflow, so the guard
+         * is always on: it is one integer compare against the arity word already
+         * loaded on this path, and it never fires for correct codegen, so shipped
+         * binaries stay byte-identical while a growth bug traps instead of
+         * corrupting the heap. */
         if (n_words > p[PRISM_ARITY_W]) {
             fprintf(stderr, "fatal: reuse_alloc grows a cell (%ld > %ld words)\n", n_words,
                     p[PRISM_ARITY_W]);
             abort();
         }
-#endif
         p[PRISM_RC_W] = 1;
         p[PRISM_TAG_W] = 0;
         p[PRISM_ARITY_W] = n_words;
@@ -601,6 +641,14 @@ long prism_prim_read_int(void) {
     char *end = 0;
     long n = strtol(buf, &end, 10);
     int ok = errno == 0 && end != buf;
+    if (ok) {
+        /* The interpreter parses the whole trimmed line (`line.trim().parse`),
+         * so trailing content ("123abc") is an error, not a 123-prefix. Only
+         * trailing ASCII whitespace, which `str::trim` also drops, may follow
+         * the digits; strtol has already skipped the leading whitespace. */
+        while (isspace((unsigned char)*end)) end++;
+        ok = *end == '\0';
+    }
     free(buf);
     if (!ok) {
         fprintf(stderr, "fatal: read_int: no integer on stdin\n");
@@ -676,6 +724,10 @@ long prism_show_bool(long b) {
 }
 
 long prism_show_char(long cp) {
+    /* Non-scalar code points (surrogates, past U+10FFFF, negative) are not
+     * encodable and show as the empty string, matching char::from_u32. */
+    if (cp < 0 || cp > PRISM_CP_MAX || (cp >= PRISM_SURROGATE_LO && cp <= PRISM_SURROGATE_HI))
+        return prism_str_lit("", 0);
     unsigned long c = (unsigned long)cp;
     char buf[4];
     int k;
@@ -701,13 +753,523 @@ long prism_show_char(long cp) {
     return prism_str_lit(buf, k);
 }
 
+/* --- blake3, one-shot ------------------------------------------------------
+ *
+ * A portable, single-threaded blake3 over a byte buffer, returned as lowercase
+ * hex. This is the native half of the `blake3` builtin every derived `Hash`
+ * instance folds through; it must produce output byte-identical to the Rust
+ * `blake3` crate the interpreter uses (gated by tests/hash_value_parity.rs), so
+ * it follows the reference spec exactly: 1024-byte chunks, a binary tree of
+ * parent nodes, the seven-round G-permutation, and the CHUNK/PARENT/ROOT flags. */
+
+#define B3_BLOCK_LEN 64
+#define B3_CHUNK_LEN 1024
+#define B3_CHUNK_START 1u
+#define B3_CHUNK_END 2u
+#define B3_PARENT 4u
+#define B3_ROOT 8u
+
+static const uint32_t B3_IV[8] = {0x6A09E667u, 0xBB67AE85u, 0x3C6EF372u, 0xA54FF53Au,
+                                  0x510E527Fu, 0x9B05688Cu, 0x1F83D9ABu, 0x5BE0CD19u};
+
+static const uint8_t B3_MSG_PERM[16] = {2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8};
+
+static inline uint32_t b3_rotr(uint32_t x, int n) {
+    return (x >> n) | (x << (32 - n));
+}
+
+static inline uint32_t b3_le32(const uint8_t *b) {
+    return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+}
+
+static inline void b3_g(uint32_t s[16], int a, int b, int c, int d, uint32_t x, uint32_t y) {
+    s[a] = s[a] + s[b] + x;
+    s[d] = b3_rotr(s[d] ^ s[a], 16);
+    s[c] = s[c] + s[d];
+    s[b] = b3_rotr(s[b] ^ s[c], 12);
+    s[a] = s[a] + s[b] + y;
+    s[d] = b3_rotr(s[d] ^ s[a], 8);
+    s[c] = s[c] + s[d];
+    s[b] = b3_rotr(s[b] ^ s[c], 7);
+}
+
+static void b3_round(uint32_t s[16], const uint32_t m[16]) {
+    b3_g(s, 0, 4, 8, 12, m[0], m[1]);
+    b3_g(s, 1, 5, 9, 13, m[2], m[3]);
+    b3_g(s, 2, 6, 10, 14, m[4], m[5]);
+    b3_g(s, 3, 7, 11, 15, m[6], m[7]);
+    b3_g(s, 0, 5, 10, 15, m[8], m[9]);
+    b3_g(s, 1, 6, 11, 12, m[10], m[11]);
+    b3_g(s, 2, 7, 8, 13, m[12], m[13]);
+    b3_g(s, 3, 4, 9, 14, m[14], m[15]);
+}
+
+/* Compress one 64-byte block, writing the 16 output words (the first 8 are the
+ * chaining value; the full 16 are the extendable output for a root node). */
+static void b3_compress(const uint32_t cv[8], const uint8_t block[64], uint64_t counter,
+                        uint32_t block_len, uint32_t flags, uint32_t out[16]) {
+    uint32_t m[16];
+    for (size_t i = 0; i < 16; i++) m[i] = b3_le32(block + 4 * i);
+    uint32_t s[16] = {cv[0],
+                      cv[1],
+                      cv[2],
+                      cv[3],
+                      cv[4],
+                      cv[5],
+                      cv[6],
+                      cv[7],
+                      B3_IV[0],
+                      B3_IV[1],
+                      B3_IV[2],
+                      B3_IV[3],
+                      (uint32_t)counter,
+                      (uint32_t)(counter >> 32),
+                      block_len,
+                      flags};
+    for (int r = 0; r < 7; r++) {
+        b3_round(s, m);
+        if (r < 6) {
+            uint32_t t[16];
+            for (int i = 0; i < 16; i++) t[i] = m[B3_MSG_PERM[i]];
+            memcpy(m, t, sizeof t);
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        out[i] = s[i] ^ s[i + 8];
+        out[i + 8] = s[i + 8] ^ cv[i];
+    }
+}
+
+/* Chain the blocks of one chunk into its 8-word chaining value. `root` sets the
+ * ROOT flag on the final block (the whole input is a single chunk). */
+static void b3_chunk_cv(const uint8_t *in, size_t len, uint64_t counter, int root,
+                        uint32_t out_cv[8]) {
+    uint32_t cv[8];
+    memcpy(cv, B3_IV, sizeof cv);
+    size_t nblocks = len == 0 ? 1 : (len + B3_BLOCK_LEN - 1) / B3_BLOCK_LEN;
+    for (size_t b = 0; b < nblocks; b++) {
+        size_t off = b * B3_BLOCK_LEN;
+        size_t blen = len - off < B3_BLOCK_LEN ? len - off : B3_BLOCK_LEN;
+        uint8_t block[64];
+        memset(block, 0, sizeof block);
+        memcpy(block, in + off, blen);
+        uint32_t flags = 0;
+        if (b == 0) flags |= B3_CHUNK_START;
+        if (b == nblocks - 1) {
+            flags |= B3_CHUNK_END;
+            if (root) flags |= B3_ROOT;
+        }
+        uint32_t words[16];
+        b3_compress(cv, block, counter, (uint32_t)blen, flags, words);
+        memcpy(cv, words, sizeof cv);
+    }
+    memcpy(out_cv, cv, sizeof(uint32_t) * 8);
+}
+
+/* Bytes on the left of a subtree split: the largest power-of-two chunk count
+ * strictly less than the total, times the chunk length. */
+static size_t b3_left_len(size_t len) {
+    size_t full = (len - 1) / B3_CHUNK_LEN;
+    size_t p = 1;
+    while (p * 2 <= full) p *= 2;
+    return p * B3_CHUNK_LEN;
+}
+
+/* Chaining value of a non-root subtree covering `in[0..len]`. Recurses on the
+ * binary tree split; depth is bounded by log2(len / B3_CHUNK_LEN) <= 54 for any
+ * size_t len, so the call chain cannot exhaust the stack. */
+/* NOLINTNEXTLINE(misc-no-recursion) */
+static void b3_subtree_cv(const uint8_t *in, size_t len, uint64_t counter, uint32_t out[8]) {
+    if (len <= B3_CHUNK_LEN) {
+        b3_chunk_cv(in, len, counter, 0, out);
+        return;
+    }
+    size_t left = b3_left_len(len);
+    uint32_t l[8], r[8];
+    b3_subtree_cv(in, left, counter, l);
+    b3_subtree_cv(in + left, len - left, counter + left / B3_CHUNK_LEN, r);
+    uint8_t block[64];
+    memcpy(block, l, 32);
+    memcpy(block + 32, r, 32);
+    uint32_t words[16];
+    b3_compress(B3_IV, block, 0, B3_BLOCK_LEN, B3_PARENT, words);
+    memcpy(out, words, sizeof(uint32_t) * 8);
+}
+
+static void b3_hash(const uint8_t *in, size_t len, uint8_t out[32]) {
+    uint32_t words[8];
+    if (len <= B3_CHUNK_LEN) {
+        b3_chunk_cv(in, len, 0, 1, words);
+    } else {
+        size_t left = b3_left_len(len);
+        uint32_t l[8], r[8];
+        b3_subtree_cv(in, left, 0, l);
+        b3_subtree_cv(in + left, len - left, left / B3_CHUNK_LEN, r);
+        uint8_t block[64];
+        memcpy(block, l, 32);
+        memcpy(block + 32, r, 32);
+        uint32_t full[16];
+        b3_compress(B3_IV, block, 0, B3_BLOCK_LEN, B3_PARENT | B3_ROOT, full);
+        memcpy(words, full, sizeof words);
+    }
+    for (size_t i = 0; i < 8; i++)
+        for (size_t j = 0; j < 4; j++) out[i * 4 + j] = (uint8_t)(words[i] >> (8 * j));
+}
+
+long prism_blake3(long s) {
+    const uint8_t *data = (const uint8_t *)prism_str_data(s);
+    size_t len = (size_t)prism_str_len_bytes(s);
+    uint8_t dig[32];
+    b3_hash(data, len, dig);
+    static const char hexd[] = "0123456789abcdef";
+    char hex[64];
+    for (size_t i = 0; i < 32; i++) {
+        hex[2 * i] = hexd[dig[i] >> 4];
+        hex[2 * i + 1] = hexd[dig[i] & 15];
+    }
+    return prism_str_lit(hex, 64);
+}
+
+/* --- Shortest-round-trip decimal digit generation (Dragon4) ---------------
+ *
+ * The significant digits of a shortest-round-trip float print are produced here
+ * with exact integer arithmetic, owning the digit selection in-repo rather than
+ * deferring to libc's snprintf/strtod round-trip. The output is byte-identical
+ * to the interpreter's shortest form by construction: same algorithm class
+ * (correctly-rounded shortest decimal, round-half-to-even at boundaries), so the
+ * digit string and exponent match Rust's float Display digit for digit.
+ *
+ * A fixed-capacity base-2^32 bignum backs the exact scaling. The widest
+ * intermediate is a subnormal scaled toward its leading digit (~2^1130) or
+ * DBL_MAX's denominator (~2^1027), both well under the capacity; every mutator
+ * aborts rather than silently truncate if that bound is ever exceeded. */
+#define PRISM_DTOA_LIMBS 48 /* 1536 bits; margin over the ~2^1130 worst case */
+
+typedef struct {
+    uint32_t w[PRISM_DTOA_LIMBS]; /* little-endian base-2^32 limbs */
+    int n;                        /* used limbs; n == 0 is the value zero */
+} DtoaBig;
+
+static void dtoa_big_norm(DtoaBig *b) {
+    while (b->n > 0 && b->w[b->n - 1] == 0) b->n--;
+}
+
+static void dtoa_big_set_u64(DtoaBig *b, uint64_t x) {
+    b->n = 0;
+    while (x) {
+        b->w[b->n++] = (uint32_t)x;
+        x >>= 32;
+    }
+}
+
+static int dtoa_big_cmp(const DtoaBig *a, const DtoaBig *b) {
+    if (a->n != b->n) return a->n < b->n ? -1 : 1;
+    for (int i = a->n - 1; i >= 0; i--)
+        if (a->w[i] != b->w[i]) return a->w[i] < b->w[i] ? -1 : 1;
+    return 0;
+}
+
+/* a += b */
+static void dtoa_big_add(DtoaBig *a, const DtoaBig *b) {
+    int n = a->n > b->n ? a->n : b->n;
+    uint64_t carry = 0;
+    for (int i = 0; i < n; i++) {
+        uint64_t s = carry + (i < a->n ? a->w[i] : 0) + (i < b->n ? b->w[i] : 0);
+        a->w[i] = (uint32_t)s;
+        carry = s >> 32;
+    }
+    if (carry) {
+        if (n >= PRISM_DTOA_LIMBS) abort();
+        a->w[n++] = (uint32_t)carry;
+    }
+    a->n = n;
+    dtoa_big_norm(a);
+}
+
+/* a -= b, requires a >= b */
+static void dtoa_big_sub(DtoaBig *a, const DtoaBig *b) {
+    int64_t borrow = 0;
+    for (int i = 0; i < a->n; i++) {
+        int64_t s = (int64_t)a->w[i] - (int64_t)(i < b->n ? b->w[i] : 0) - borrow;
+        if (s < 0) {
+            s += (int64_t)1 << 32;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        a->w[i] = (uint32_t)s;
+    }
+    dtoa_big_norm(a);
+}
+
+/* a *= m */
+static void dtoa_big_mul_small(DtoaBig *a, uint32_t m) {
+    uint64_t carry = 0;
+    for (int i = 0; i < a->n; i++) {
+        uint64_t p = (uint64_t)a->w[i] * m + carry;
+        a->w[i] = (uint32_t)p;
+        carry = p >> 32;
+    }
+    while (carry) {
+        if (a->n >= PRISM_DTOA_LIMBS) abort();
+        a->w[a->n++] = (uint32_t)carry;
+        carry >>= 32;
+    }
+    dtoa_big_norm(a);
+}
+
+/* a *= b (schoolbook) */
+static void dtoa_big_mul(DtoaBig *a, const DtoaBig *b) {
+    uint32_t out[PRISM_DTOA_LIMBS] = {0};
+    for (int i = 0; i < a->n; i++) {
+        uint64_t carry = 0;
+        for (int j = 0; j < b->n; j++) {
+            if (i + j >= PRISM_DTOA_LIMBS) abort();
+            uint64_t cur = (uint64_t)out[i + j] + (uint64_t)a->w[i] * b->w[j] + carry;
+            out[i + j] = (uint32_t)cur;
+            carry = cur >> 32;
+        }
+        for (int k = i + b->n; carry; k++) {
+            if (k >= PRISM_DTOA_LIMBS) abort();
+            uint64_t cur = (uint64_t)out[k] + carry;
+            out[k] = (uint32_t)cur;
+            carry = cur >> 32;
+        }
+    }
+    int outn = a->n + b->n;
+    if (outn > PRISM_DTOA_LIMBS) outn = PRISM_DTOA_LIMBS;
+    for (int i = 0; i < outn; i++) a->w[i] = out[i];
+    a->n = outn;
+    dtoa_big_norm(a);
+}
+
+/* a *= 2^bits */
+static void dtoa_big_shl(DtoaBig *a, int bits) {
+    if (a->n == 0 || bits == 0) return;
+    int words = bits / 32, rem = bits % 32;
+    if (words) {
+        if (a->n + words > PRISM_DTOA_LIMBS) abort();
+        for (int i = a->n - 1; i >= 0; i--) a->w[i + words] = a->w[i];
+        for (int i = 0; i < words; i++) a->w[i] = 0;
+        a->n += words;
+    }
+    if (rem) {
+        uint32_t carry = 0;
+        for (int i = 0; i < a->n; i++) {
+            uint64_t s = ((uint64_t)a->w[i] << rem) | carry;
+            a->w[i] = (uint32_t)s;
+            carry = (uint32_t)(s >> 32);
+        }
+        if (carry) {
+            if (a->n >= PRISM_DTOA_LIMBS) abort();
+            a->w[a->n++] = carry;
+        }
+    }
+    dtoa_big_norm(a);
+}
+
+/* Powers of ten that fit a single limb; PRISM_POW10_CHUNK is the largest, used
+ * to multiply by 10^k in one-limb strides. */
+static const uint32_t PRISM_POW10_SMALL[10] = {1,      10,      100,      1000,      10000,
+                                               100000, 1000000, 10000000, 100000000, 1000000000};
+#define PRISM_POW10_CHUNK_EXP 9
+#define PRISM_POW10_CHUNK 1000000000u
+
+/* a *= 10^k */
+static void dtoa_big_mul_pow10(DtoaBig *a, int k) {
+    while (k >= PRISM_POW10_CHUNK_EXP) {
+        dtoa_big_mul_small(a, PRISM_POW10_CHUNK);
+        k -= PRISM_POW10_CHUNK_EXP;
+    }
+    if (k > 0) dtoa_big_mul_small(a, PRISM_POW10_SMALL[k]);
+}
+
+/* Bit layout of an IEEE-754 double. */
+#define PRISM_F64_MANT_BITS 52
+#define PRISM_F64_EXP_BIAS 1075 /* 1023 + 52: unbiased exponent of the integer significand */
+#define PRISM_F64_MIN_EXP (-1074)
+#define PRISM_F64_HIDDEN (1ULL << PRISM_F64_MANT_BITS)
+/* log10(2), for the initial decimal-exponent estimate (corrected exactly below). */
+#define PRISM_LOG10_2 0.30102999566398119521
+
+/* Largest significand a shortest-round-trip double print ever needs; 17 decimal
+ * digits fit a u64, so the p-digit integer is exact in a machine word. */
+#define PRISM_FLOAT_MAX_DIGITS 17
+
+/* Sign of the decimal `F * 10^g` minus the rational `X / S` (S > 0). Both sides
+ * are scaled to integers before comparing: multiply through by S, and by
+ * 10^(-g) when g is negative, so the comparison is exact. */
+static int dtoa_cmp_decimal(uint64_t F, int g, const DtoaBig *X, const DtoaBig *S) {
+    DtoaBig lhs, rhs = *X;
+    dtoa_big_set_u64(&lhs, F);
+    if (g >= 0) {
+        dtoa_big_mul_pow10(&lhs, g);
+        dtoa_big_mul(&lhs, S); /* (F * 10^g) * S  vs  X */
+    } else {
+        dtoa_big_mul(&lhs, S); /* F * S           vs  X * 10^(-g) */
+        dtoa_big_mul_pow10(&rhs, -g);
+    }
+    return dtoa_big_cmp(&lhs, &rhs);
+}
+
+/* Decimal significand of `d` (finite, > 0) matching the interpreter's `fmt_g`:
+ * the FEWEST significant digits p in 1..17 whose correctly-rounded (round half
+ * to even) p-digit decimal rounds back to exactly `d`. This is the trial loop
+ * `fmt_g` runs over Rust's `{:.*e}` and `parse::<f64>()`, reproduced with exact
+ * integer arithmetic so the digit string is owned in-repo rather than resting on
+ * libc agreeing with Rust. The correctly-rounded p-digit value is not always the
+ * shortest that round-trips (a power of two is the classic case), so this must
+ * be the trial loop, not a one-pass shortest formatter, to stay byte-identical.
+ *
+ * Writes the digit chars into `digits` (no sign, no point), the count into `*nd`
+ * (1..17), and the base-10 exponent of the leading digit into `*e10` (value ==
+ * 0.d1..dn * 10^(*e10 + 1)). `digits` must hold at least 18 bytes. */
+static void prism_shortest_digits(double d, char *digits, int *nd, int *e10) {
+    uint64_t bits;
+    memcpy(&bits, &d, sizeof bits);
+    int be = (int)((bits >> PRISM_F64_MANT_BITS) & 0x7ff);
+    uint64_t frac = bits & (PRISM_F64_HIDDEN - 1);
+    uint64_t f;
+    int e;
+    if (be == 0) {
+        f = frac; /* subnormal; d > 0 so frac != 0 */
+        e = PRISM_F64_MIN_EXP;
+    } else {
+        f = frac | PRISM_F64_HIDDEN; /* normal: restore the hidden leading bit */
+        e = be - PRISM_F64_EXP_BIAS;
+    }
+    /* Round-to-nearest-EVEN makes the rounding boundaries inclusive exactly when
+     * the significand is even, so a decimal landing on a boundary round-trips. */
+    int even = (f & 1) == 0;
+
+    /* Scaled exact rationals: value == R/S, and the half-gaps to the neighboring
+     * doubles are Mp/S (upper) and Mm/S (lower). Everything is scaled by 2 so a
+     * half-ulp is an integer; a decimal round-trips to `d` iff it lies in
+     * (value - Mm/S, value + Mp/S), boundaries included when `even`. */
+    DtoaBig R, S, Mp, Mm;
+    if (e >= 0) {
+        dtoa_big_set_u64(&R, f);
+        dtoa_big_shl(&R, e + 1); /* R = f * 2^(e+1) */
+        dtoa_big_set_u64(&S, 2);
+        dtoa_big_set_u64(&Mp, 1);
+        dtoa_big_shl(&Mp, e); /* Mp = 2^e */
+        Mm = Mp;
+    } else {
+        dtoa_big_set_u64(&R, f);
+        dtoa_big_shl(&R, 1); /* R = f * 2 */
+        dtoa_big_set_u64(&S, 1);
+        dtoa_big_shl(&S, 1 - e); /* S = 2^(1-e) */
+        dtoa_big_set_u64(&Mp, 1);
+        dtoa_big_set_u64(&Mm, 1);
+    }
+    /* A power-of-two significand (and not the smallest normal, whose predecessor
+     * shares its exponent) sits at a binary-exponent boundary: the gap below is
+     * half the gap above. Scale R, S, Mp by 2 and leave Mm, so Mm == Mp/2. */
+    if (f == PRISM_F64_HIDDEN && be > 1) {
+        dtoa_big_mul_small(&R, 2);
+        dtoa_big_mul_small(&S, 2);
+        dtoa_big_mul_small(&Mp, 2);
+    }
+    /* The round-trip boundaries as integer numerators over S. */
+    DtoaBig hi_num = R, lo_num = R;
+    dtoa_big_add(&hi_num, &Mp);
+    dtoa_big_sub(&lo_num, &Mm);
+
+    /* Position the leading digit: A/B == value, scaled into [1/10, 1). The
+     * estimate is corrected off-by-one exactly against the bignums. Positioning
+     * depends only on the value, so it is done once for every precision. */
+    DtoaBig A = R, B = S;
+    double lv = log10((double)f) + (double)e * PRISM_LOG10_2;
+    int k = (int)ceil(lv - 1e-10);
+    if (k >= 0) {
+        dtoa_big_mul_pow10(&B, k);
+    } else {
+        dtoa_big_mul_pow10(&A, -k);
+    }
+    for (;;) { /* pull below 1 */
+        if (dtoa_big_cmp(&A, &B) >= 0) {
+            dtoa_big_mul_small(&B, 10);
+            k++;
+        } else {
+            break;
+        }
+    }
+    for (;;) { /* push to at least 1/10 so the leading digit is nonzero */
+        DtoaBig a10 = A;
+        dtoa_big_mul_small(&a10, 10);
+        if (dtoa_big_cmp(&a10, &B) < 0) {
+            dtoa_big_mul_small(&A, 10);
+            k--;
+        } else {
+            break;
+        }
+    }
+    int base_e10 = k - 1;
+
+    for (int p = 1; p <= PRISM_FLOAT_MAX_DIGITS; p++) {
+        /* Emit p digits of A/B, correctly rounded half-to-even, into `digits`. */
+        DtoaBig cur = A, den = B;
+        for (int i = 0; i < p; i++) {
+            dtoa_big_mul_small(&cur, 10);
+            int dig = 0;
+            while (dtoa_big_cmp(&cur, &den) >= 0) {
+                dtoa_big_sub(&cur, &den);
+                dig++;
+            }
+            digits[i] = (char)('0' + dig);
+        }
+        /* Round the p-th digit on the remainder `cur`: 2*cur vs den, ties even. */
+        DtoaBig twice = cur;
+        dtoa_big_mul_small(&twice, 2);
+        int c = dtoa_big_cmp(&twice, &den);
+        int e10_p = base_e10;
+        if (c > 0 || (c == 0 && ((digits[p - 1] - '0') & 1))) {
+            int i = p - 1;
+            while (i >= 0 && digits[i] == '9') {
+                digits[i] = '0';
+                i--;
+            }
+            if (i < 0) {
+                /* 999..9 carried to 1000..0: the p-digit significand is "1"
+                 * followed by p-1 zeros, one decimal place higher. */
+                digits[0] = '1';
+                for (int j = 1; j < p; j++) digits[j] = '0';
+                e10_p++;
+            } else {
+                digits[i]++;
+            }
+        }
+        /* Reconstruct the exact p-digit integer (17 digits fit a u64). */
+        uint64_t F = 0;
+        for (int i = 0; i < p; i++) F = F * 10 + (uint64_t)(digits[i] - '0');
+
+        /* Round-trip: does F * 10^(e10_p - (p-1)) round back to exactly d? It does
+         * iff it lands strictly inside the rounding interval, or on a boundary
+         * that ties to the even significand. p == 17 always round-trips. */
+        int g = e10_p - (p - 1);
+        int ch = dtoa_cmp_decimal(F, g, &hi_num, &S);
+        int cl = dtoa_cmp_decimal(F, g, &lo_num, &S);
+        int round_trips =
+            (cl > 0 && ch < 0) || (even && (ch == 0 || cl == 0)) || p == PRISM_FLOAT_MAX_DIGITS;
+        if (round_trips) {
+            /* At the minimal p a trailing zero cannot occur (it would mean p-1
+             * already round-tripped); drop one defensively to match `fmt_g`. */
+            int cnt = p;
+            while (cnt > 1 && digits[cnt - 1] == '0') cnt--;
+            *nd = cnt;
+            *e10 = e10_p;
+            return;
+        }
+    }
+}
+
 /* Shortest decimal that round-trips back to `d`, laid out like a Python `repr`:
  * full precision with no truncation, scientific notation only when the decimal
  * exponent falls outside [-4, 16). This must stay byte-identical to the
  * interpreter's `fmt_g` (src/eval) and the Lean oracle's `fmtG` (models), which
- * are differentially tested against this runtime. Because `p` is the FEWEST
- * significant digits that round-trip, the last digit is never 0, so no trailing
- * zeros ever need stripping. */
+ * are differentially tested against this runtime. Because the digits are the
+ * FEWEST that round-trip, the last digit is never 0, so no trailing zeros ever
+ * need stripping. */
 /* Buffer size every caller of prism_fmt_float must provide; 17 significant
  * digits plus sign, point, and `e+XXX` never exceed this. */
 #define PRISM_FLOAT_BUF 64
@@ -735,27 +1297,10 @@ static int prism_fmt_float(double d, char *out) {
         return 1;
     }
 
-    char sci[40];
-    int p = 17;
-    for (int cand = 1; cand < 17; cand++) {
-        snprintf(sci, sizeof sci, "%.*e", cand - 1, d);
-        if (strtod(sci, NULL) == d) {
-            p = cand;
-            break;
-        }
-    }
-    snprintf(sci, sizeof sci, "%.*e", p - 1, d); /* "[-]D[.DDD]e+XX" */
-
-    const char *s = sci;
-    int neg = (*s == '-');
-    if (neg) s++;
+    int neg = signbit(d);
     char digits[20] = {0};
-    int nd = 0;
-    while (*s && *s != 'e') {
-        if (*s != '.') digits[nd++] = *s;
-        s++;
-    }
-    int e10 = atoi(s + 1); /* s now points at 'e' */
+    int nd = 0, e10 = 0;
+    prism_shortest_digits(neg ? -d : d, digits, &nd, &e10);
 
     if (neg) out[o++] = '-';
     if (e10 >= -4 && e10 < 16) {
@@ -1386,18 +1931,32 @@ long prism_sort_prim(long kind, long list) {
 /* Generic print for values whose type elaboration could not pin down (a var
  * read is an effect op whose row-polymorphic signature hides the payload
  * type). Cells are self-describing via their tag, so dispatch at runtime to
- * keep parity with the interpreter's dynamic show. */
+ * keep parity with the interpreter's dynamic show: a tagged immediate is an
+ * Int, the zero word is Unit, and the two payload tags render themselves.
+ *
+ * A constructor, tuple, or list cell has no runtime type or field-name table to
+ * show faithfully, so it cannot legitimately reach here; the elaborator routes
+ * every statically-known structural type through the synthesized `show`. The
+ * final `else` is an always-on guard (one tag compare, free on this IO-bound
+ * path): rather than hand a foreign cell to prism_big_show, which would read its
+ * header word as a limb count and its fields as magnitude, it traps. */
 void prism_print_int(long w) {
     if (w & 1) {
         printf("%ld", w >> 1);
     } else if (!w) {
-        printf("0");
+        printf("()"); /* Unit is the zero word; match the interpreter's `()`. */
     } else if (((long *)w)[PRISM_TAG_W] == PRISM_STR_TAG) {
         printf("%s", prism_str_data(w));
-    } else {
+    } else if (((long *)w)[PRISM_TAG_W] == PRISM_BIG_TAG) {
         long s = prism_big_show(w);
         printf("%s", prism_str_data(s));
         prism_rc_dec(s);
+    } else {
+        fprintf(stderr,
+                "fatal: print: non-printable value with heap tag %#lx reached "
+                "the raw integer printer\n",
+                (unsigned long)((long *)w)[PRISM_TAG_W]);
+        abort();
     }
 }
 
@@ -1852,15 +2411,95 @@ long prism_string_of_array(long arr) {
     return (long)out;
 }
 
+/* Classify the UTF-8 sequence at raw[i..n). On a well-formed sequence set *adv
+ * to its length and return 1. On an ill-formed one set *adv to the length of the
+ * maximal valid subpart (>=1, clamped to the bytes remaining when the sequence
+ * runs off the end) and return 0; the caller emits a single U+FFFD and skips
+ * *adv bytes. This is Rust's `from_utf8_lossy` decoder (Unicode Table 3-7 with
+ * substitution of maximal subparts), which the interpreter uses via
+ * `String::from_utf8_lossy`; the two must stay byte-identical. */
+static int prism_utf8_seq(const unsigned char *raw, long i, long n, long *adv) {
+    unsigned char b0 = raw[i];
+    if (b0 < 0x80) {
+        *adv = 1;
+        return 1;
+    }
+    if (b0 < 0xC2 || b0 > 0xF4) { /* 0x80..0xC1 and 0xF5..0xFF are invalid leads */
+        *adv = 1;
+        return 0;
+    }
+    /* Continuation-byte ranges depend on the lead: E0/ED and F0/F4 narrow the
+     * second byte to exclude overlong encodings and surrogates (Table 3-7). */
+    long lo1 = 0x80, hi1 = 0xBF;
+    long width;
+    if (b0 < 0xE0) {
+        width = 2;
+    } else if (b0 < 0xF0) {
+        width = 3;
+        if (b0 == 0xE0)
+            lo1 = 0xA0;
+        else if (b0 == 0xED)
+            hi1 = 0x9F;
+    } else {
+        width = 4;
+        if (b0 == 0xF0)
+            lo1 = 0x90;
+        else if (b0 == 0xF4)
+            hi1 = 0x8F;
+    }
+    for (long k = 1; k < width; k++) {
+        if (i + k >= n) { /* incomplete trailing sequence: one U+FFFD for the rest */
+            *adv = n - i;
+            return 0;
+        }
+        unsigned char b = raw[i + k];
+        long lo = k == 1 ? lo1 : 0x80;
+        long hi = k == 1 ? hi1 : 0xBF;
+        if (b < lo || b > hi) {
+            *adv = k; /* the k valid bytes are the maximal subpart */
+            return 0;
+        }
+    }
+    *adv = width;
+    return 1;
+}
+
 /* Build a string from an array of byte values (each a small Int 0..255, stored
-   tagged so `>> 1` recovers it). Borrows the array. */
+   tagged so `>> 1` recovers it), replacing any ill-formed UTF-8 with U+FFFD so
+   the result is byte-identical to the interpreter's lossy decode. Borrows the
+   array. */
 long prism_string_of_bytes(long arr) {
     long *p = (long *)arr;
     long n = arr_len(p);
-    long *out = prism_str_alloc(n);
+    unsigned char *raw = malloc((size_t)(n > 0 ? n : 1));
+    if (!raw) abort();
+    for (long i = 0; i < n; i++) raw[i] = (unsigned char)((p[PRISM_ARR_ELEM0 + i] >> 1) & 0xFF);
+    /* Two passes over the same deterministic decode: size, then fill. A U+FFFD
+     * (0xEF 0xBF 0xBD) is three bytes, so the output can outgrow the input. */
+    long out_len = 0;
+    for (long i = 0; i < n;) {
+        long adv;
+        out_len += prism_utf8_seq(raw, i, n, &adv) ? adv : 3;
+        i += adv;
+    }
+    long *out = prism_str_alloc(out_len);
     char *o = (char *)(out + PRISM_HDR_WORDS);
-    for (long i = 0; i < n; i++) o[i] = (char)((p[PRISM_ARR_ELEM0 + i] >> 1) & 0xFF);
-    o[n] = 0;
+    long off = 0;
+    for (long i = 0; i < n;) {
+        long adv;
+        if (prism_utf8_seq(raw, i, n, &adv)) {
+            memcpy(o + off, raw + i, (size_t)adv);
+            off += adv;
+        } else {
+            o[off] = (char)0xEF;
+            o[off + 1] = (char)0xBF;
+            o[off + 2] = (char)0xBD;
+            off += 3;
+        }
+        i += adv;
+    }
+    o[out_len] = 0;
+    free(raw);
     return (long)out;
 }
 

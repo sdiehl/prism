@@ -1,0 +1,7 @@
+-- Fixed-width literals cross the JSON bridge under their own tags: 42u64 emits
+-- {"v":"u64"} and 7i64 emits {"v":"i64"} (distinct from Int's {"v":"int"}),
+-- mirroring the i/j/u split in hash.rs. The CEK model's integers are unbounded,
+-- so it decodes both to that one type: the value round-trips, but wraparound is
+-- not modeled. No arithmetic here, since the model does not implement the
+-- fixed-width builtins (an overflowing op would diverge, by design).
+fn main() = (42u64, 7i64)

@@ -55,7 +55,14 @@ mutual
 partial def jValue (j : Json) : Except String Value := do
   match (← jStr j "v") with
     | "var" => return .var (← jStr j "x")
+    -- `int`/`i64`/`u64` are the three width tags emitted by `src/core/json.rs`
+    -- (mirroring the `hash.rs` split). The model's `Value.int` is unbounded, so
+    -- all three decode to it: the value is preserved but fixed-width wraparound
+    -- is not modeled, so an overflow divergence is invisible to the differential
+    -- harness until the CEK model gains fixed-width arithmetic.
     | "int" => return .int (← (← j.getObjVal? "n").getInt?)
+    | "i64" => return .int (← (← j.getObjVal? "n").getInt?)
+    | "u64" => return .int (← (← j.getObjVal? "n").getInt?)
     | "float" => return .float (← (← j.getObjVal? "f").getNum?).toFloat
     | "bool" => return .bool (← (← j.getObjVal? "b").getBool?)
     | "unit" => return .unit

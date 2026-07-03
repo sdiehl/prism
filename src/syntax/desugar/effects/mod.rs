@@ -31,14 +31,6 @@ use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
 
-// The tail-recursive prelude drivers `while`/`loop` desugar to: `repeat_while`
-// for a loop that can fall through, `forever` for a provably-infinite `loop`.
-const WHILE_LOOP: &str = "repeat_while";
-const FOREVER: &str = "forever";
-
-// `a ^ b` is the `Pow` class method `pow(a, b)`.
-const POW_METHOD: &str = "pow";
-
 // Lambda parameters carry no defaults in source (only top-level `fn`s do), so a
 // surface lambda param maps to a core one unchanged but for the dropped slot.
 fn core_param(p: &Param) -> Param<Core> {
@@ -166,7 +158,7 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
         // class keeps int exponentiation bignum-correct (its `Int` instance
         // multiplies) and float exponentiation a `pow_float` call.
         Expr::Bin(BinOp::Pow, a, b) => {
-            let head = evar(POW_METHOD, synth_span(cx));
+            let head = evar(names::POW_METHOD, synth_span(cx));
             return rw(
                 &call(head, vec![(**a).clone(), (**b).clone()], span),
                 env,
@@ -477,7 +469,11 @@ fn rw_sugar(
         // `[ head for x in s, <quals> ]`: re-emit the head from a thunk-stream
         // and collect the emits into a list with `scollect`.
         Sugar::Comp(head, x, s, quals) => {
-            let emit_head = call(evar("emit", head.span), vec![(**head).clone()], head.span);
+            let emit_head = call(
+                evar(names::EMIT_OP, head.span),
+                vec![(**head).clone()],
+                head.span,
+            );
             let body = sp(
                 Expr::Sugar(Sugar::For(
                     x.clone(),
@@ -488,7 +484,11 @@ fn rw_sugar(
                 span,
             );
             let thunk = lam1(UNIT_ARG, body, span);
-            rw(&call(evar("scollect", span), vec![thunk], span), env, cx)
+            rw(
+                &call(evar(names::SCOLLECT_FN, span), vec![thunk], span),
+                env,
+                cx,
+            )
         }
         // `a ?? b`: a `Fail`-discarding handler over `a` that returns `b` on
         // failure; a `Fail` raised by `b` itself escapes to the outer context.
@@ -537,7 +537,7 @@ fn rw_sugar(
         // `a?.b` is `force(a).b`: a `None` makes `force` raise `Fail`, so the
         // access is failable and chains short-circuit to the nearest handler.
         Sugar::OptChain(a, field) => {
-            let forced = call(evar("force", span), vec![(**a).clone()], span);
+            let forced = call(evar(names::FORCE_FN, span), vec![(**a).clone()], span);
             let access = sp(Expr::FieldAccess(Box::new(forced), field.clone()), span);
             rw(&access, env, cx)
         }
@@ -654,12 +654,12 @@ fn rw_while(
     // through (a false `while` condition, or a `break`), so it lowers to the
     // Unit-typed `repeat_while`.
     let driver = if cond.is_none() && !has_break {
-        let head = evar(FOREVER, synth_span(cx));
+        let head = evar(names::FOREVER, synth_span(cx));
         call(head, vec![body_thunk], span)
     } else {
         let cond_expr = cond.cloned().unwrap_or_else(|| sp(Expr::Bool(true), span));
         let cond_thunk = sp(Expr::Lam(Vec::new(), Box::new(cond_expr)), span);
-        let head = evar(WHILE_LOOP, synth_span(cx));
+        let head = evar(names::REPEAT_WHILE, synth_span(cx));
         call(head, vec![cond_thunk, body_thunk], span)
     };
     let full = wrap_if(has_break, names::BREAK_OP, driver, span);
@@ -966,9 +966,17 @@ fn fold_quals(quals: &[Qualifier], body: S<Expr>, span: Span, cx: &mut Cx) -> S<
     for q in quals.iter().rev() {
         acc = match q {
             Qualifier::Guard(g) => {
-                let guarded = call(evar("guard", synth_span(cx)), vec![g.clone()], g.span);
+                let guarded = call(
+                    evar(names::GUARD_FN, synth_span(cx)),
+                    vec![g.clone()],
+                    g.span,
+                );
                 let thunk = sp(Expr::Lam(Vec::new(), Box::new(guarded)), g.span);
-                let test = call(evar("succeeds", synth_span(cx)), vec![thunk], g.span);
+                let test = call(
+                    evar(names::SUCCEEDS_FN, synth_span(cx)),
+                    vec![thunk],
+                    g.span,
+                );
                 sp(
                     Expr::If(
                         Box::new(test),

@@ -1,0 +1,19 @@
+-- `deriving (Hash)` gives a type a canonical content address: the same blake3
+-- Merkle fold the compiler uses to hash code, applied to values. Structurally
+-- equal values hash identically on every backend, a changed field changes the
+-- digest, and no hand-written fold can drift out of sync with the type.
+--
+-- Expected output:
+--   same value, same digest: true
+--   changed field changes it: false
+--   digest length: 64
+
+type Move = Quit | Walk(Int, Int) | Say(String) deriving (Eq, Show, Hash)
+
+fn main() =
+  let a = hash(Walk(3, 4))
+  let b = hash(Walk(3, 4))
+  let c = hash(Walk(3, 5))
+  println(concat("same value, same digest: ", show(a == b)))
+  println(concat("changed field changes it: ", show(a == c)))
+  println(concat("digest length: ", show(byte_len(a))))

@@ -1,0 +1,18 @@
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+
+fn prog() : !{State} Int =
+  let x = get(())
+  put(x + 1)
+  let y = get(())
+  y * 10
+
+fn main() : Int =
+  let f =
+    handle prog() with
+      get(u, k) => \(s) -> k(s)(s)
+      put(n, k) => \(_s) -> k(())(n)
+      return r => \(_s) -> r
+  f(0)

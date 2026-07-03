@@ -1,0 +1,34 @@
+name: Setup LLVM 22
+description: >
+  Add the apt.llvm.org snapshot repo and install LLVM 22, with the downloaded
+  .deb archives cached so repeat runs skip the multi-minute download. One
+  definition shared by the Test, Lean, and MLIR jobs.
+
+inputs:
+  packages:
+    description: >
+      Extra apt packages beyond the base set (llvm-22-dev, libpolly-22-dev,
+      clang-22), space-separated. e.g. "clang-tidy-22" or "libmlir-22-dev
+      mlir-22-tools".
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Add LLVM 22 apt repo
+      shell: bash
+      run: |
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+          | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+        echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+          | sudo tee /etc/apt/sources.list.d/llvm.list
+
+    # Caches the resolved .deb set keyed by the package list, so the download
+    # (the slow part) is skipped on a hit. Pinned to a version tag; pin to a
+    # commit SHA to harden the supply chain further.
+    - name: Install LLVM 22 (cached)
+      uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: llvm-22-dev libpolly-22-dev clang-22 ${{ inputs.packages }}
+        version: llvm22

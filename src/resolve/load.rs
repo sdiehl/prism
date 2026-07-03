@@ -89,8 +89,9 @@ fn searched(roots: &[Root]) -> String {
 /// Load every module reachable from `root`'s imports, searching `roots` in order.
 ///
 /// # Errors
-/// Fails when an imported module is found in no root, is unreadable, or does not
-/// parse.
+/// Fails when an imported module is found in no root, is unreadable, does not
+/// parse, or resolves only to a source file that is itself the importer (a
+/// same-named-file self-import; see [`fetch_module`]).
 pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
     let mut out = Vec::new();
     let mut visited = BTreeSet::new();
@@ -99,23 +100,7 @@ pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
         if !visited.insert(path.join(".")) {
             continue;
         }
-        let mut src = None;
-        for r in roots {
-            if let Some(found) = r.fetch(&path)? {
-                src = Some(found);
-                break;
-            }
-        }
-        let src = src.ok_or_else(|| {
-            Error::Resolve(format!(
-                "cannot resolve module `{}` (searched: {})",
-                path.join("."),
-                searched(roots)
-            ))
-        })?;
-        let program = parse(&src)
-            .map_err(|e| Error::Resolve(format!("in module `{}`: {e}", path.join("."))))?
-            .program;
+        let program = fetch_module(&path, roots)?;
         for imp in &program.imports {
             queue.push_back(imp.path.clone());
         }
@@ -125,4 +110,45 @@ pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
         });
     }
     Ok(out)
+}
+
+// Resolve one dotted module path against the search path and parse it.
+//
+// A source file named after the module it imports collides with that import on a
+// case-insensitive filesystem: `import Quickcheck` from a file `quickcheck.pr`
+// resolves back to `quickcheck.pr` itself, silently shadowing the real
+// `Quickcheck` module (usually the stdlib one) with the importer's own text. The
+// tell is self-referential and filesystem-agnostic: the file a `Dir` root hands
+// back for path `P` is the case-colliding importer exactly when its own imports
+// include `P` (it is the very file whose `import P` put `P` on the queue). We
+// treat such a `Dir` hit as a miss and keep searching, so an embedded/stdlib
+// module of the same name wins; if nothing else supplies `P`, it is a genuine
+// self-import and we name the collision rather than emit the misleading
+// unknown-name cascade that loading the self-copy would produce.
+fn fetch_module(path: &[String], roots: &[Root]) -> Result<Program, Error> {
+    let dotted = path.join(".");
+    let mut self_collision = false;
+    for r in roots {
+        let Some(src) = r.fetch(path)? else { continue };
+        let program = parse(&src)
+            .map_err(|e| Error::Resolve(format!("in module `{dotted}`: {e}")))?
+            .program;
+        if program.imports.iter().any(|imp| imp.path == path) {
+            self_collision = true;
+            continue;
+        }
+        return Ok(program);
+    }
+    Err(Error::Resolve(if self_collision {
+        format!(
+            "module `{dotted}` resolves to a source file that imports itself: a file \
+             named after the module it imports shadows the intended `{dotted}` \
+             (case-insensitive filesystem). Rename the file or drop the self-import."
+        )
+    } else {
+        format!(
+            "cannot resolve module `{dotted}` (searched: {})",
+            searched(roots)
+        )
+    }))
 }

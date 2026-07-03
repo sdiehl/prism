@@ -1,0 +1,46 @@
+-- Rows compose like sums. AB and CD each name a pair of effects; App splices
+-- both and adds a fifth label. Aliases expand and flatten before checking, so
+-- {AB, CD, E} IS {A, B, C, D, E}: omega and flat have the same type, and the
+-- grouping is documentation that leaves no trace in the semantics.
+
+effect A {
+  ctl alpha(Unit) : Unit
+}
+
+effect B {
+  ctl beta(Unit) : Unit
+}
+
+effect C {
+  ctl gamma(Unit) : Unit
+}
+
+effect D {
+  ctl delta(Unit) : Unit
+}
+
+effect E {
+  ctl epsilon(Unit) : Unit
+}
+
+alias AB = {A, B}
+
+alias CD = {C, D}
+
+alias App = {AB, CD, E}
+
+fn phi() : !{AB} Unit =
+  alpha(())
+  beta(())
+
+fn psi() : !{CD} Unit =
+  gamma(())
+  delta(())
+
+fn omega() : !{App} Unit =
+  phi()
+  psi()
+  epsilon(())
+
+-- the flattened spelling of the same row: either may call the other
+fn flat() : !{A, B, C, D, E} Unit = omega()

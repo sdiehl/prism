@@ -23,11 +23,13 @@ use crate::stdlib::STDLIB;
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, Checked};
 
+mod accept;
 mod doctest;
 mod extract;
 mod mdbook;
 mod render;
 
+pub use accept::{accept, ExpectFile, ExpectReport};
 pub use doctest::Report;
 pub use mdbook::preprocess_book;
 
@@ -161,15 +163,41 @@ fn render_all(
 // ---------------------------------------------------------------------------
 
 const STDLIB_BLURB: &str = "Prism's standard library is ordinary Prism source, not compiler built-ins. \
-The always-on prelude wires in the core types and the type-class tower and opens the `Data.*` modules \
-with glob imports, so their names are in unqualified scope everywhere; `Replay` and `Concurrent` are \
-brought in with an explicit `import`. The pages below are generated from the module sources by \
-`prism docs`, with signatures taken from the typechecker.";
+A small always-on prelude supplies the core types, the type-class tower, and the common data modules \
+in unqualified scope; everything else is opt-in via explicit import. The pages below are generated \
+from the module sources, with signatures taken from the typechecker.";
 
 // The on-disk source path of an embedded stdlib module, derived from its dotted
 // name (`Data.List` -> `lib/std/Data/List.pr`) so it cannot drift from `STDLIB`.
 fn source_path_of(dotted: &str) -> String {
     format!("lib/std/{}.pr", dotted.replace('.', "/"))
+}
+
+/// The embedded stdlib source files eligible for expect-block rewriting: the
+/// prelude and every `Data.*`/`Replay`/`Concurrent` module, paired with the
+/// repo-relative path `--accept` writes back to.
+#[must_use]
+pub fn stdlib_expect_files() -> Vec<ExpectFile> {
+    stdlib_specs()
+        .into_iter()
+        .map(|spec| ExpectFile {
+            path: std::path::PathBuf::from(spec.source_path),
+            source: spec.src,
+        })
+        .collect()
+}
+
+/// The expect-block source files for a documented project: each module's
+/// on-disk path (resolved under `base`) and its source.
+#[must_use]
+pub fn project_expect_files(modules: &[ModuleSource], base: &Path) -> Vec<ExpectFile> {
+    modules
+        .iter()
+        .map(|m| ExpectFile {
+            path: base.join(&m.source_path),
+            source: m.source.clone(),
+        })
+        .collect()
 }
 
 fn stdlib_specs() -> Vec<ModSpec> {
@@ -218,16 +246,14 @@ pub fn stdlib_pages() -> Result<Generated, Error> {
     // shown on the index page, and the short per-definition badges on the module
     // pages (behavior hashes for functions, shape digests for types/effects).
     let h = crate::driver::stdlib_hash()?;
-    // A styled card (raw HTML, themed by run.css). The Merkle root is the
-    // headline; scheme and compiler version are secondary. The root is
-    // click-to-copy via the same handler as the per-definition pills. Kept as one
-    // contiguous HTML block (no blank lines) so CommonMark treats it as a unit.
+    // Plain CommonMark, no raw HTML or click-to-copy machinery. The `## Merkle
+    // root` heading mirrors the `## Modules` heading the index renderer emits, so
+    // the two sections read symmetrically.
     let anchor = format!(
-        "<div class=\"stdlib-fingerprint\">\n\
-         <div class=\"stdlib-fp-head\">Merkle root<span class=\"stdlib-fp-tag\">{scheme}</span></div>\n\
-         <code class=\"stdlib-fp-root\" data-copy=\"{root}\" title=\"Click to copy\">{root}</code>\n\
-         <div class=\"stdlib-fp-foot\">A content-addressed fingerprint of the entire standard library, compiled by Prism v{version}. Click the hash to copy.</div>\n\
-         </div>",
+        "## Merkle root\n\n\
+         - **Scheme**: `{scheme}`\n\
+         - **Hash**: `{root}`\n\
+         - **Compiler version**: Prism v{version}",
         scheme = h.scheme,
         root = h.root,
         version = h.version

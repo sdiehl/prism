@@ -1,0 +1,11 @@
+-- A skolem introduced under an inner `forall` must not escape into an outer
+-- existential. Checking `\(y) -> x` against `forall a. (a) -> a` makes `a`
+-- rigid, so the body `x` would have to be that rigid `a`; but `x` is `bad`'s
+-- parameter, whose type is fixed outside the quantifier. Solving it to `a`
+-- would let the skolem escape, so the call is rejected here, at `useid(...)`,
+-- not at the later use of `x`.
+fn useid(g : forall a. (a) -> a) : Int = g(10)
+
+fn bad(x) =
+  useid(\(y) -> x)
+  x

@@ -1,14 +1,17 @@
 import { defineConfig } from "vite";
 
-// Two entry points, both self-contained (base "./"): the playground (index.html)
-// and the REPL (repl.html). build-site.sh serves them at /play and /repl.
+// Three entry points, all self-contained (base "./"): the playground
+// (index.html), the REPL (repl.html), and the determinism scrubber
+// (scrubber.html). build-site.sh serves them at /play, /repl, and /scrub.
 export default defineConfig({
   base: "./",
   build: {
     outDir: "dist",
     emptyOutDir: true,
     target: "es2022",
-    rollupOptions: { input: { main: "index.html", repl: "repl.html" } },
+    rollupOptions: {
+      input: { main: "index.html", repl: "repl.html", scrubber: "scrubber.html" },
+    },
   },
   worker: { format: "es" },
 });

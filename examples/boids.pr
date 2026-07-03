@@ -1,0 +1,164 @@
+-- A boids swarm as a pure, deterministic function of the step index. Each boid
+-- is a 4-tuple (x, y, vx, vy) of fixed-point integers over a toroidal world;
+-- the flock obeys the three classic rules (cohesion, alignment, separation) in
+-- integer arithmetic, so the trajectory is byte-identical on every replay. The
+-- initial swarm is seeded from a bounded minstd stream (pure arithmetic, no
+-- effects), and one `step` advances every boid over a fixed timestep. Frame N is
+-- literally `step` composed N times on the seed, which is why the browser
+-- scrubber can position its playhead at any step by replaying to it.
+
+let world = 100000
+
+let n_boids = 32
+
+let max_v = 1100
+
+let radius2 = 256000000
+
+let sep2 = 36000000
+
+let coh = 24
+
+let ali = 12
+
+let sep = 3
+
+let seed0 = 20260702
+
+let grid_w = 32
+
+let grid_h = 16
+
+alias Boid = (Int, Int, Int, Int)
+
+fn neg(x) = 0 - x
+
+-- One step of the minstd (Park-Miller) stream, bounded below 2^31 so the
+-- arbitrary-precision Int never grows a limb: the whole simulation stays in
+-- machine-word range and every op is exact.
+fn lcg(s) = mod(s * 16807, 2147483647)
+
+-- Draw one boid from the stream, returning it paired with the advanced state.
+fn spawn(s) =
+  let s1 = lcg(s)
+  let s2 = lcg(s1)
+  let s3 = lcg(s2)
+  let s4 = lcg(s3)
+  ((mod(s1, world), mod(s2, world), mod(s3, 2 * max_v) - max_v, mod(s4, 2 * max_v) - max_v), s4)
+
+fn seed_swarm() =
+  match (foldl(\(acc, _) -> match acc of { (bs, s) => match spawn(s) of { (b, s2) => (Cons(b, bs), s2) } }, (Nil, seed0), range(0, n_boids))) of
+    (bs, _) => reverse(bs)
+
+-- Shortest signed offset on a wrapped axis, so boids near opposite edges see
+-- each other as close rather than a world apart.
+fn wrap_delta(d) =
+  let half = world / 2
+  if d > half then
+    d - world
+  elif d < neg(half) then
+    d + world
+  else
+    d
+
+-- One other boid's pull on the boid at (x, y): a 7-tuple of neighbor count, the
+-- summed offset (cohesion), the summed velocity (alignment), and the repulsion
+-- offset (separation, only within the closer radius). Non-neighbors contribute
+-- zero, so a boid never steers toward itself (its own offset is the origin).
+fn contrib(x, y, o) =
+  match o of
+    (ox, oy, ovx, ovy) =>
+      let dx = wrap_delta(ox - x)
+      let dy = wrap_delta(oy - y)
+      let d2 = dx * dx + dy * dy
+      if d2 > 0 && d2 < radius2 then
+        if d2 < sep2 then
+          (1, dx, dy, ovx, ovy, neg(dx), neg(dy))
+        else
+          (1, dx, dy, ovx, ovy, 0, 0)
+      else
+        (0, 0, 0, 0, 0, 0, 0)
+
+fn add7(a, b) =
+  match a of
+    (a0, a1, a2, a3, a4, a5, a6) =>
+      match b of
+        (b0, b1, b2, b3, b4, b5, b6) =>
+          (a0 + b0, a1 + b1, a2 + b2, a3 + b3, a4 + b4, a5 + b5, a6 + b6)
+
+fn clamp1(v) =
+  if v > max_v then
+    max_v
+  elif v < neg(max_v) then
+    neg(max_v)
+  else
+    v
+
+fn wrap_pos(p) = mod(mod(p, world) + world, world)
+
+fn step_boid(me, swarm) =
+  match me of
+    (x, y, vx, vy) =>
+      match (foldl(\(acc, o) -> add7(acc, contrib(x, y, o)), (0, 0, 0, 0, 0, 0, 0), swarm)) of
+        (cnt, sdx, sdy, svx, svy, sepx, sepy) =>
+          let dvx =
+            if cnt > 0 then
+              sdx / cnt / coh + (svx / cnt - vx) / ali + sepx / sep
+            else
+              0
+          let dvy =
+            if cnt > 0 then
+              sdy / cnt / coh + (svy / cnt - vy) / ali + sepy / sep
+            else
+              0
+          let nvx = clamp1(vx + dvx)
+          let nvy = clamp1(vy + dvy)
+          (wrap_pos(x + nvx), wrap_pos(y + nvy), nvx, nvy)
+
+replayable fn step(swarm) = map(\(b) -> step_boid(b, swarm), swarm)
+
+-- The swarm at each step 0..n, so `frames_upto(n)` IS the replay: element N is
+-- the state after N steps, a pure function of the index.
+fn frames_upto(n) = scan_left(\(s, _) -> step(s), seed_swarm(), range(0, n))
+
+fn iter_step(s, n) =
+  if n <= 0 then
+    s
+  else
+    iter_step(step(s), n - 1)
+
+fn frame_at(n) = iter_step(seed_swarm(), n)
+
+fn boid_xy(b : Boid) =
+  match b of
+    (x, y, _, _) => concat(show(x), concat(",", show(y)))
+
+fn frame_obs(swarm) = str_join(" ", map(boid_xy, swarm))
+
+-- The full trajectory as text for the browser: a header line "W H" followed by
+-- one line per frame, each a space-separated list of "x,y" integer positions.
+-- `replayable` is the compiler-checked form of the scrubber's promise: the
+-- whole trajectory reproduces from the step index alone.
+replayable fn run_trace(n) =
+  concat(concat(show(world), concat(" ", show(world))), concat("\n", str_join("\n", map(frame_obs, frames_upto(n)))))
+
+-- A coarse ASCII view of one frame, for the terminal corpus run.
+fn occupied(swarm : List(Boid), gx, gy) =
+  any(\(b) -> match b of { (x, y, _, _) => x * grid_w / world == gx && y * grid_h / world == gy }, swarm)
+
+fn render_row(swarm, gy) =
+  str_join("", map(\(gx) -> if occupied(swarm, gx, gy) then "#" else ".", range(0, grid_w)))
+
+fn render_frame(swarm) =
+  lines_of(map(\(gy) -> render_row(swarm, gy), range(0, grid_h)))
+
+fn show_frame(n) =
+  println(concat("frame ", show(n)))
+  println(render_frame(frame_at(n)))
+  println("")
+
+-- @scrubber:main-below
+fn main() =
+  show_frame(0)
+  show_frame(10)
+  show_frame(20)

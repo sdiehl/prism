@@ -36,9 +36,9 @@ fn scene() : !{Async(Int), Trace} Int =
     _ => 0
 
 -- Discharge `Async` with each policy; the residual `Trace` flows out to `main`.
-fn fifo() : !{Trace} Int = run_async(scene)
+fn fifo() : !{Trace, Fail} Int = run_async(scene)
 
-fn lifo() : !{Trace} Int = run_lifo(scene)
+fn lifo() : !{Trace, Fail} Int = run_lifo(scene)
 
 fn main() =
   handle fifo() with

@@ -1,0 +1,32 @@
+-- S6: the nursery is fail-fast. When one child fails (`fail()`), its sibling is
+-- cancelled (its `on_cancel` finalizer runs) and the failure re-raises at the
+-- scope boundary, where `default` recovers it. The sibling loops at `yield`, so
+-- it is parked when the cancellation lands; `guard(true)` gives it `Fail` in its
+-- row so it shares a type with `failer` in the `scope` list (it never fails).
+
+import Concurrent (..)
+
+fn sibling_loop() : !{Async(Int), IO, Fail} Int =
+  yield(())
+  sibling_loop()
+
+fn sibling_body() : !{Async(Int), IO, Fail} Int =
+  guard(true)
+  println("sibling: running")
+  sibling_loop()
+
+fn sibling() : !{Async(Int), IO, Fail} Int =
+  on_cancel(\() -> println("sibling finalizer ran"), sibling_body)
+
+fn failer() : !{Async(Int), IO, Fail} Int =
+  println("failer: about to fail")
+  yield(())
+  fail()
+
+fn scene() : !{Async(Int), IO, Fail} Int =
+  scope([sibling, failer])
+  0
+
+fn main() =
+  let r = default(\() -> run_async(scene), 0 - 1)
+  println("run recovered with {r}")

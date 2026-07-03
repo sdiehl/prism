@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/law_reader.pr
+---
+Reader ask-ask: OK, passed 100 tests.
+=> ()

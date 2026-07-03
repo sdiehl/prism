@@ -32,8 +32,9 @@ fn is_doc_open(text: &str) -> bool {
     t.starts_with("-- |") || t.starts_with("--|")
 }
 
-/// Strip the `--` / `-- |` / `-- ^` prefix from one comment line.
-fn strip(text: &str) -> &str {
+/// Strip the `--` / `-- |` / `-- ^` prefix (and one following space) from one
+/// comment line.
+pub(crate) fn strip(text: &str) -> &str {
     let t = text.trim_start();
     let body = t
         .strip_prefix("-- |")

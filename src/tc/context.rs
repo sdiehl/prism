@@ -113,6 +113,22 @@ impl Tc<'_> {
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
     }
 
+    // Position of a rigid type-variable (skolem) in the context, the `Uni`
+    // analogue of `index_ex`. Leftmost, matching `drop_uni`'s truncation point,
+    // so the scope test agrees with the entry that actually gets dropped.
+    fn index_uni(&self, n: Sym) -> Option<usize> {
+        self.ctx
+            .iter()
+            .position(|e| matches!(e, Entry::Uni(w) if *w == n))
+    }
+
+    // Position of a rigid row-variable (row skolem), the `RowUni` analogue.
+    fn index_row_uni(&self, n: Sym) -> Option<usize> {
+        self.ctx
+            .iter()
+            .position(|e| matches!(e, Entry::RowUni(w) if *w == n))
+    }
+
     fn solved(&self, v: u32) -> Option<Type> {
         self.ctx.iter().find_map(|e| match e {
             Entry::Solved(w, t) if *w == v => Some(t.clone()),
@@ -134,29 +150,41 @@ impl Tc<'_> {
         }
     }
 
-    // Truncating to `i` drops every existential in `ctx[i..]`. `solve` keeps every
-    // type solution strictly left-referencing (the `well_formed_before` guard), so
-    // a surviving solution (in `ctx[..i]`) never names a dropped *type* existential;
-    // this asserts that at the boundary, the compiler-bug the downstream `index_ex`
-    // `expect`s guard against. Row existentials are deliberately not asserted: the
-    // row context keeps no such ordering invariant (see `unify_row`), so its lookups
-    // stay defensive ICEs. Compiled out of release builds.
+    // Truncating to `i` drops every entry in `ctx[i..]`. `solve` keeps every type
+    // solution strictly left-referencing (the `well_formed_before` guard), so a
+    // surviving solution (in `ctx[..i]`) never names a dropped *type existential*;
+    // this asserts that at the boundary, the compiler bug the downstream `index_ex`
+    // `expect`s guard against. Existentials carry globally-unique fresh ids, so the
+    // disjointness test is exact.
+    //
+    // Skolems (`Uni`/`RowUni`) are deliberately not asserted here, for the same
+    // reason row existentials are not: the check would have no sound formulation at
+    // this boundary. A skolem is pushed under its raw forall-bound name (see the
+    // `Forall`/`RowForall` arms of `subtype`/`inst`), not a fresh one, so skolem
+    // names are not globally unique. An *ambient* rigid variable a surviving
+    // solution legitimately references (a class parameter, an outer signature's
+    // `forall`) can share a `Sym` with an unrelated in-context skolem being dropped,
+    // and a name-based disjointness test cannot tell the two apart, so it false-
+    // positives. Skolem escape is prevented soundly at its origin instead:
+    // `well_formed_before` checks *index positions* at solve time, while scopes are
+    // correctly nested, so a re-check on names at the drop boundary adds no coverage
+    // the origin guard lacks. Compiled out of release builds.
     fn assert_no_escape(&self, i: usize) {
         if !cfg!(debug_assertions) {
             return;
         }
-        let mut dropped_ty = BTreeSet::new();
+        let mut dropped_ex = BTreeSet::new();
         for e in &self.ctx[i..] {
             if let Entry::Ex(w) | Entry::Solved(w, _) = e {
-                dropped_ty.insert(*w);
+                dropped_ex.insert(*w);
             }
         }
         for e in &self.ctx[..i] {
             if let Entry::Solved(_, t) = e {
-                let mut ty = BTreeSet::new();
-                t.free_exist(&mut ty);
+                let mut ex = BTreeSet::new();
+                t.free_exist(&mut ex);
                 debug_assert!(
-                    ty.is_disjoint(&dropped_ty),
+                    ex.is_disjoint(&dropped_ex),
                     "context truncation strands a type existential referenced by a surviving solution"
                 );
             }
@@ -217,14 +245,36 @@ impl Tc<'_> {
         }
     }
 
+    // A candidate solution for existential `a` is well-scoped only if every free
+    // variable it names is bound to `a`'s left, so a later truncation that drops
+    // `a`'s right neighbours never strands a reference. The guard closes the whole
+    // variable class, not just existentials: a `Uni`/`RowUni` skolem introduced
+    // under an inner `forall` sits to `a`'s right, so solving an outer `a` to it
+    // would let the skolem escape its quantifier (the fast path in `inst` trusts
+    // exactly this predicate). An existential must be in the context (its absence
+    // is a compiler bug, rejected). A skolem *absent* from the context is not an
+    // escape: it is an ambient rigid variable bound outside every context entry
+    // (a class parameter during instance-method checking, an outer signature's
+    // `forall`), so it stands to the left of `a` by construction and is accepted;
+    // only a skolem the context actually holds is order-checked.
     pub(super) fn well_formed_before(&self, a: u32, t: &Type) -> bool {
         let Some(ai) = self.index_ex(a) else {
             return false;
         };
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
+        let mut uvars = BTreeSet::new();
+        t.free_ty_vars(&mut uvars);
+        let mut rvars = BTreeSet::new();
+        t.free_row_vars(&mut rvars);
         exs.iter()
             .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
+            && uvars
+                .iter()
+                .all(|n| self.index_uni(*n).is_none_or(|i| i < ai))
+            && rvars
+                .iter()
+                .all(|n| self.index_row_uni(*n).is_none_or(|i| i < ai))
     }
 
     pub(super) fn articulate(
@@ -284,34 +334,74 @@ impl Tc<'_> {
     // A first-class polymorphic mutable reference is deliberately outside the
     // language, so a value restriction would only reject sound programs. Do not
     // add one (and please leave this note for the next reader who wonders).
+    //
+    // What generalization does NOT do: it quantifies only free type and row
+    // existentials (see `generalize_map`), never class constraints. There is no
+    // surface syntax for a constraint on a `let` binding (only top-level `fn`s
+    // carry `given C(a)`), and no constraint inference here, so a local binding
+    // whose body incurs a dictionary obligation over a variable it would
+    // generalize (e.g. `let f = \(x) -> show(x)`) cannot carry that obligation in
+    // its scheme. The obligation is orphaned on the pre-generalization existential
+    // and surfaces at resolution as the standard unresolved-constraint diagnostic
+    // ("cannot infer the type for constraint ...", `head_key` in classes.rs); a
+    // parameter annotation does not rescue it, since the constraint is detached
+    // from the binding's type by generalization. The remedy is to lift the binding
+    // to a top-level `fn ... given C(a)`. Generalizing over constraints locally is
+    // intentionally not implemented.
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }
 
-    pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Vec<(u32, String)>) {
+    pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.apply(ty);
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
-        // One zonk per env binding feeds both the existential and the row-existential
-        // free-variable sets; the env is often the whole prelude, so walking it once
-        // rather than twice is the cheaper of two identical passes.
+        // One zonk per env binding feeds the existential, row-existential, and
+        // free-type-variable sets; the env is often the whole prelude, so walking
+        // it once rather than three times is the cheaper of identical passes.
         let mut env_exs = BTreeSet::new();
         let mut env_row_exs = BTreeSet::new();
+        let mut env_tvars = BTreeSet::new();
         for v in env.values() {
             let av = self.apply(v);
             av.free_exist(&mut env_exs);
             av.free_exist_row(&mut env_row_exs);
+            super::env::collect_type_vars(&av, &mut env_tvars);
         }
+        // Generalized existentials keep their historical id-order naming, so an
+        // all-existential scheme (every inferred function) prints byte-identically
+        // to before rigid signature variables existed.
         let gen: Vec<u32> = exs.into_iter().filter(|e| !env_exs.contains(e)).collect();
-        let mut out = t;
         let mut names = Vec::new();
         let mut mapping = Vec::new();
         for (i, e) in gen.iter().enumerate() {
             let name = var_name(i);
-            out = out.subst_exist(*e, &Type::Var(Sym::from(&name)));
             mapping.push((*e, name.clone()));
             names.push(name);
         }
+        // Rigid signature variables this scheme introduces (free here, not bound by
+        // the environment: a nested `let` inside a function sees the function's
+        // signature variables in scope, so it must not quantify them) are quantified
+        // after the existentials, in first-appearance order. A fully-annotated
+        // polymorphic function has no existentials, so its variables are named
+        // `a, b, ...` left to right, exactly as the all-existential path named them.
+        let mut rigid_seen = Vec::new();
+        free_type_vars_ordered(&t, &mut rigid_seen);
+        let mut rigids = Vec::new();
+        for v in rigid_seen.into_iter().filter(|v| !env_tvars.contains(v)) {
+            let name = var_name(names.len());
+            rigids.push((v, name.clone()));
+            names.push(name);
+        }
+        // Existentials and rigid variables are renamed through one collision-safe
+        // pass (rigids to placeholders first, so a canonical name reused as a
+        // source name cannot clobber); `finish_decl` replays the same renaming onto
+        // the declaration's constraints.
+        let renames = Renames {
+            exists: mapping,
+            rigids,
+        };
+        let mut out = renames.apply(&t);
         let mut row_exs = BTreeSet::new();
         out.free_exist_row(&mut row_exs);
         // `env_row_exs` was already accumulated in the single env walk above.
@@ -342,7 +432,74 @@ impl Tc<'_> {
         for name in names.into_iter().rev() {
             out = Type::Forall(Sym::from(&name), Box::new(out));
         }
-        (out, mapping)
+        (out, renames)
+    }
+}
+
+// The variable renaming `generalize_map` used to build an exported scheme:
+// generalized existentials and rigid signature variables, each mapped to its
+// canonical name. `finish_decl` replays it onto the declaration's class
+// constraints so a `given C(a)` names the same variable the scheme quantifies.
+pub(super) struct Renames {
+    exists: Vec<(u32, String)>,
+    rigids: Vec<(Sym, String)>,
+}
+
+impl Renames {
+    pub(super) fn apply(&self, t: &Type) -> Type {
+        // Rigid source variables move to fresh placeholders before existentials
+        // claim their canonical letters, so a source that names a variable `a`
+        // cannot be conflated with a generalized existential also named `a`.
+        let mut out = t.clone();
+        let mut placeholders = Vec::with_capacity(self.rigids.len());
+        for (src, name) in &self.rigids {
+            let ph = Sym::fresh();
+            out = out.subst_var(*src, &Type::Var(ph));
+            placeholders.push((ph, name));
+        }
+        for (e, name) in &self.exists {
+            out = out.subst_exist(*e, &Type::Var(Sym::from(name)));
+        }
+        for (ph, name) in placeholders {
+            out = out.subst_var(ph, &Type::Var(Sym::from(name)));
+        }
+        out
+    }
+}
+
+// Free type variables of a type, in first-appearance order, deduped. It does not
+// descend a `forall`, so a rank-n bound variable is correctly excluded
+// (consistent with the environment set the caller filters against). It reaches
+// type arguments carried by an effect row (a parametric effect like `Async(a)`),
+// as `free_exist` does, so a signature variable appearing only in a row (e.g.
+// `! {Async(a)}`) is still re-quantified. The arrow order is parameters, result,
+// then row arguments, matching the order `seed_decl` allocates them, so an
+// all-existential scheme's historical names are reproduced.
+fn free_type_vars_ordered(t: &Type, out: &mut Vec<Sym>) {
+    match t {
+        Type::Var(n) => {
+            if !out.contains(n) {
+                out.push(*n);
+            }
+        }
+        Type::Fun(ps, row, r) => {
+            for p in ps {
+                free_type_vars_ordered(p, out);
+            }
+            free_type_vars_ordered(r, out);
+            row.for_each_arg(&mut |a| free_type_vars_ordered(a, out));
+        }
+        Type::Con(_, ps) | Type::Tuple(ps) => {
+            for p in ps {
+                free_type_vars_ordered(p, out);
+            }
+        }
+        Type::App(h, a) => {
+            free_type_vars_ordered(h, out);
+            free_type_vars_ordered(a, out);
+        }
+        Type::Row(r) => r.for_each_arg(&mut |a| free_type_vars_ordered(a, out)),
+        _ => {}
     }
 }
 

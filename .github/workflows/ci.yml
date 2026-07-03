@@ -25,6 +25,14 @@ jobs:
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       PRISM_CC: /usr/lib/llvm-22/bin/clang
+      # Persist the native parity/leak verdicts across runs. Safe by
+      # construction: each cached verdict is keyed by a hash of the compiler's
+      # source tree (source fingerprint), so any change under src/, runtime/,
+      # lib/, or the manifests re-runs the whole corpus and only genuinely
+      # unchanged programs are skipped. A restored stale cache can never mask a
+      # regression, its markers simply miss.
+      PRISM_GATE_CACHE: "1"
+      PRISM_GATE_FINGERPRINT: source
     steps:
       - uses: actions/checkout@v7
 
@@ -36,14 +44,22 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      # The gate verdict cache, restored after rust-cache so its files are not
+      # disturbed. A loose restore-key is correct because the marker's own key
+      # carries the source/toolchain fingerprint; the per-sha save key just lets
+      # each run publish an updated snapshot.
+      - name: Cache gate verdicts
+        uses: actions/cache@v4
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-test-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-test-${{ runner.os }}-
+
       - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -qq
-          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22 clang-tidy-22
+        uses: ./.github/actions/setup-llvm
+        with:
+          packages: clang-tidy-22
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -184,20 +200,57 @@ jobs:
   lean:
     name: Lean model
     runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
     steps:
       - uses: actions/checkout@v7
 
+      # Toolchain pinned via rust-toolchain.toml (single source of truth).
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # The `prism` binary links libLLVM (inkwell), so it needs the dev libs to
+      # build even though the interpreter and `dump core-json` paths never touch
+      # codegen. Same LLVM 22 install as the Test/MLIR jobs.
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      # The differential oracle feeds the live compiler core through the verified
+      # CEK model, so it needs the compiler built alongside the model.
+      - name: Build prism
+        run: cargo build
+
       # Kernel-checks every theorem in the core model (CEK adequacy, determinism,
       # progress, effect-safety) and the differential `Certificates` whose `rfl`
-      # proofs pin model output to live `prism run` output. The toolchain is read
-      # from models/lean-toolchain (single source of truth); no mathlib, so the
-      # build is self-contained and fast. This is the one formal-methods gate that
-      # used to be able to silently break (Lean was outside CI).
+      # proofs pin model output to live `prism run` output, and builds the `oracle`
+      # executable the differential harness runs. The toolchain is read from
+      # models/lean-toolchain (single source of truth); no mathlib, so the build is
+      # self-contained and fast. This is the one formal-methods gate that used to be
+      # able to silently break (Lean was outside CI).
       - name: Build Lean model
         uses: leanprover/lean-action@v1
         with:
           lake-package-directory: models
           build-args: --wfail
+
+      # Runs the whole fixture corpus through both the verified CEK machine (via
+      # `dump core-json` piped to the `oracle` exe) and `prism run`, and fails on
+      # any divergence. This couples the proven model to the live compiler on every
+      # push; before this it passed only when run by hand.
+      - name: Differential oracle vs interpreter
+        run: models/diff_against_rust.sh
+
+      # The committed core-json certificate fixtures are a `just hash`-style
+      # artifact: regenerate them and fail if they drift from what the compiler now
+      # emits, so a stale certificate reference cannot ship.
+      - name: Certificate fixtures drift check
+        run: |
+          models/gen_fixtures.sh
+          git diff --exit-code -- models/fixtures/*.json \
+            || { echo "models/fixtures/*.json drifted; run 'just fixtures' and commit"; exit 1; }
 
   mlir:
     name: MLIR backend
@@ -212,14 +265,21 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
+      # Same gate verdict cache as the Test job, on its own key so the two jobs
+      # do not overwrite each other's snapshots. The `mlir` tag makes these
+      # markers distinct from the LLVM ones even were the dirs ever shared.
+      - name: Cache gate verdicts
+        uses: actions/cache@v4
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-mlir-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-mlir-${{ runner.os }}-
+
       - name: Install LLVM 22
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -qq
-          sudo apt-get install -y llvm-22-dev libmlir-22-dev mlir-22-tools libpolly-22-dev clang-22
+        uses: ./.github/actions/setup-llvm
+        with:
+          packages: libmlir-22-dev mlir-22-tools
 
       - name: Build with mlir backend
         run: cargo build --features mlir
@@ -235,3 +295,5 @@ jobs:
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
           TABLEGEN_220_PREFIX: /usr/lib/llvm-22
           PRISM_CC: /usr/lib/llvm-22/bin/clang
+          PRISM_GATE_CACHE: "1"
+          PRISM_GATE_FINGERPRINT: source

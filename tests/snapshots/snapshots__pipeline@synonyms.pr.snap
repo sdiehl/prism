@@ -358,6 +358,7 @@ b2:                                               ; preds = %entry
   br label %b5
 
 b1:                                               ; No predecessors!
+  call void @prism_match_error()
   unreachable
 
 b5:                                               ; preds = %b2
@@ -370,6 +371,7 @@ b5:                                               ; preds = %b2
   br label %b3
 
 b4:                                               ; No predecessors!
+  call void @prism_match_error()
   unreachable
 
 b3:                                               ; preds = %b5
@@ -381,6 +383,9 @@ b3:                                               ; preds = %b5
 
 ; Function Attrs: nounwind
 declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_inc(i64) #0

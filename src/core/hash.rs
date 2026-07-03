@@ -77,6 +77,69 @@ pub fn hash_program(core: &Core, meta: &BTreeMap<Sym, String>) -> Hashes {
     hashes
 }
 
+/// A per-definition *shallow* hash: the definition's own content (its Core
+/// structure and its out-of-Core metadata) with every dependency referred to by
+/// name rather than by substituted hash.
+///
+/// This is the complement of [`hash_program`]'s deep, Merkle-substituted hash.
+/// Under the deep hash, editing one definition moves the hash of every
+/// transitive dependent (that is the point: the hash commits to behavior). The
+/// shallow hash isolates a definition's *own* change from ripples through it, so
+/// a behavior diff can separate the handful of definitions a developer edited
+/// from the downstream cone those edits affect. It is not an identity (it does
+/// not compose across a rename of a callee) and is never stored; it exists only
+/// to attribute a deep-hash move to its source.
+#[must_use]
+pub fn shallow_hashes(core: &Core, meta: &BTreeMap<Sym, String>) -> Hashes {
+    let empty_set = BTreeSet::new();
+    let empty_hashes = Hashes::new();
+    core.fns
+        .iter()
+        .map(|f| {
+            // Empty member set and dep map, so every free symbol resolves through
+            // the encoder's stray-leaf arm and is committed by name.
+            let body = encode(f, &empty_set, None, &empty_hashes);
+            let m = meta.get(&f.name).map_or("", String::as_str);
+            let blob = format!("{SCHEME}|meta{}:{m}{body}", m.len());
+            (f.name, hex(&blob))
+        })
+        .collect()
+}
+
+/// The strongly-connected components of `core`'s dependency graph, callee-first.
+///
+/// Each component is the recursive group that must be hashed (and stored) as a
+/// unit. A singleton is the common case; a cycle (mutual recursion) is a group
+/// of two or more whose members' hashes fold in each other.
+#[must_use]
+pub fn scc_groups(core: &Core) -> Vec<Vec<Sym>> {
+    let fnmap: BTreeMap<Sym, &CoreFn> = core.fns.iter().map(|f| (f.name, f)).collect();
+    sccs(core, &fnmap)
+}
+
+/// Hash one isolated recursive group, given the content hashes of every external
+/// dependency it references, and return each member's per-definition hash.
+///
+/// This is the single-component core of [`hash_program`] (which is this run over
+/// each SCC in dependency order, threading one growing hash map). The store calls
+/// it to reproduce a stored definition's hash from its group and its dependency
+/// hashes alone, with no access to the rest of the program: seeding `deps` as the
+/// initial hash map makes every external reference resolve to its substituted
+/// hash exactly as it did in the whole-program pass, so a group serialized and
+/// read back hashes to the same value it had in context.
+#[must_use]
+pub fn hash_group(group: &[CoreFn], deps: &Hashes, meta: &BTreeMap<Sym, String>) -> Hashes {
+    let members: Vec<Sym> = group.iter().map(|f| f.name).collect();
+    let member_set: BTreeSet<Sym> = members.iter().copied().collect();
+    let fnmap: BTreeMap<Sym, &CoreFn> = group.iter().map(|f| (f.name, f)).collect();
+    let mut hashes = deps.clone();
+    hash_component(&members, &member_set, &fnmap, meta, &mut hashes);
+    members
+        .iter()
+        .filter_map(|m| hashes.get(m).map(|h| (*m, h.clone())))
+        .collect()
+}
+
 /// Hash one SCC and write each member's derived hash into `hashes`.
 fn hash_component(
     members: &[Sym],
@@ -138,6 +201,7 @@ fn encode(
         hashes,
         env: f.params.clone(),
         out: String::new(),
+        var_ids: BTreeMap::new(),
     };
     let _ = write!(e.out, "fn{}", f.params.len());
     e.comp(&f.body);
@@ -150,6 +214,15 @@ struct Enc<'a> {
     hashes: &'a Hashes,
     env: Vec<Sym>,
     out: String,
+    // Canonical, per-definition renumbering of the compiler-generated `var`
+    // operations. A `var x` desugars to State ops named `get@x@n`/`set@x@n`,
+    // where `x` is the user's chosen name and `n` a *global* State index assigned
+    // in definition order. Neither is behavior: renaming the `var` or reordering
+    // top-level definitions must not move the hash (a stated content-addressing
+    // guarantee). This maps each distinct State index to an id assigned by first
+    // occurrence in the structural walk, so the get/set pair of one variable
+    // share an id and the numbering is reorder- and rename-invariant.
+    var_ids: BTreeMap<String, u32>,
 }
 
 impl Enc<'_> {
@@ -157,6 +230,34 @@ impl Enc<'_> {
     /// neighbours in the encoding.
     fn tok(&mut self, s: &str) {
         let _ = write!(self.out, "{}:{s}", s.len());
+    }
+
+    /// Encode an effect-operation name, canonicalizing the compiler-generated
+    /// `var` operations so a `var` rename or a definition reorder does not move
+    /// the hash. A user-declared effect op is committed verbatim (renaming it is
+    /// a behavioral change, by design); only the `get@x@n`/`set@x@n` forms minted
+    /// by `var` desugaring are renumbered.
+    fn op_tok(&mut self, name: &str) {
+        let canon = self.op_name_canon(name);
+        self.tok(&canon);
+    }
+
+    // The canonical spelling of an effect-op name: `get@x@n`/`set@x@n` become
+    // `get@#k`/`set@#k`, dropping the user variable name and mapping the global
+    // State index `n` to a per-definition id `k` assigned by first occurrence.
+    // Because the id keys on the shared State index, the get and set of one `var`
+    // resolve to the same `k` whichever the walk reaches first. Any non-`var`
+    // name is returned unchanged.
+    fn op_name_canon(&mut self, name: &str) -> String {
+        let Some((verb, idx)) = crate::names::parse_var_get(name)
+            .map(|(_, n)| ("get", n))
+            .or_else(|| crate::names::parse_var_set(name).map(|(_, n)| ("set", n)))
+        else {
+            return name.to_string();
+        };
+        let next = u32::try_from(self.var_ids.len()).unwrap_or(u32::MAX);
+        let id = *self.var_ids.entry(idx.to_string()).or_insert(next);
+        format!("{verb}@#{id}")
     }
 
     /// Resolve a symbol reference: an enclosing binder (de Bruijn index), an
@@ -327,9 +428,10 @@ impl Enc<'_> {
                 self.refer(*name);
                 self.vals(args);
             }
-            // Effect operation: a leaf, committed by name.
+            // Effect operation: a leaf, committed by name (generated `var` ops
+            // canonicalized so a rename or reorder does not move the hash).
             Comp::Do(op, args) => {
-                self.tok(op.as_str());
+                self.op_tok(op.as_str());
                 self.vals(args);
             }
             Comp::Case(v, arms) => {
@@ -355,12 +457,20 @@ impl Enc<'_> {
                     }
                     _ => self.out.push('N'),
                 }
-                // Handler clauses form a set, so encode in name order.
-                let mut ops: Vec<&HandleOp> = ops.iter().collect();
-                ops.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+                // Handler clauses form a set, so encode in name order. The sort
+                // key is the *canonical* op name, so a generated `var` handler
+                // orders and renumbers with its matching `do`: two revisions that
+                // differ only by a `var` rename or a definition reorder emit the
+                // clauses in the same order. The body was walked first, so every
+                // `var` op's id is already fixed by program order.
+                let mut ops: Vec<(String, &HandleOp)> = ops
+                    .iter()
+                    .map(|op| (self.op_name_canon(op.name.as_str()), op))
+                    .collect();
+                ops.sort_by(|a, b| a.0.cmp(&b.0));
                 self.out.push('{');
-                for op in ops {
-                    self.tok(op.name.as_str());
+                for (canon, op) in ops {
+                    self.tok(&canon);
                     let mut binders = op.params.clone();
                     binders.push(op.resume);
                     self.scoped(&binders, |e| e.comp(&op.body));
@@ -470,6 +580,46 @@ mod tests {
         );
     }
 
+    // `fn f() = do get@<var>@<idx>()`, a `var` read. The `var` name and the global
+    // State index carried in the generated op name are not behavior, so a rename
+    // (`n` -> `cur`) or a reorder (a different index) must not move the hash.
+    fn var_read(var: &str, idx: u32) -> Core {
+        let op = crate::names::var_get(var, idx);
+        Core {
+            fns: vec![CoreFn {
+                name: sym("f"),
+                params: vec![],
+                dict_arity: 0,
+                body: Comp::Do(sym(&op), vec![]),
+            }],
+        }
+    }
+
+    #[test]
+    fn generated_var_ops_are_rename_and_reorder_invariant() {
+        let m = BTreeMap::new();
+        // A `var` rename (n -> cur) and a State-index shift (0 -> 7, as a reorder
+        // would produce) both leave the behavior hash fixed.
+        assert_eq!(
+            hash_program(&var_read("n", 0), &m)[&sym("f")],
+            hash_program(&var_read("cur", 7), &m)[&sym("f")],
+        );
+        // A genuinely different (user-declared) effect op is still committed by
+        // name, so it does not collide with a `var` op.
+        let real = Core {
+            fns: vec![CoreFn {
+                name: sym("f"),
+                params: vec![],
+                dict_arity: 0,
+                body: Comp::Do(sym("ask"), vec![]),
+            }],
+        };
+        assert_ne!(
+            hash_program(&var_read("n", 0), &m)[&sym("f")],
+            hash_program(&real, &m)[&sym("f")],
+        );
+    }
+
     // Same Core, different out-of-Core metadata must not collide: omitting an
     // elaboration input from the hash is the silent-miscompile hole.
     #[test]
@@ -481,6 +631,36 @@ mod tests {
             hash_program(&core, &m1)[&sym("f")],
             hash_program(&core, &m2)[&sym("f")],
         );
+    }
+
+    // A caller hashed with `hash_group`, seeded with its callee's whole-program
+    // hash, matches the caller's hash in the whole-program pass. This is the store
+    // invariant: a definition's hash is reproducible from its group plus its
+    // dependency hashes, with no access to the rest of the program.
+    #[test]
+    fn hash_group_matches_whole_program() {
+        // `g` calls `f`; two separate size-one SCCs, `f` a dependency of `g`.
+        let f = CoreFn {
+            name: sym("f"),
+            params: vec![sym("x")],
+            dict_arity: 0,
+            body: Comp::Return(Value::Var(sym("x"))),
+        };
+        let g = CoreFn {
+            name: sym("g"),
+            params: vec![sym("y")],
+            dict_arity: 0,
+            body: Comp::Call(sym("f"), vec![Value::Var(sym("y"))]),
+        };
+        let core = Core {
+            fns: vec![f, g.clone()],
+        };
+        let meta = BTreeMap::new();
+        let whole = hash_program(&core, &meta);
+        // `g`'s group is `{g}`; its only external dependency is `f`.
+        let deps = BTreeMap::from([(sym("f"), whole[&sym("f")].clone())]);
+        let group = super::hash_group(&[g], &deps, &meta);
+        assert_eq!(group[&sym("g")], whole[&sym("g")]);
     }
 
     #[test]

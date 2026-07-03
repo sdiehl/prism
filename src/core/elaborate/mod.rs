@@ -824,6 +824,16 @@ impl Elab<'_> {
                     && !vals.is_empty()
                     && !args.is_empty()
                 {
+                    // A truly polymorphic print (the argument's type is still a
+                    // free rigid variable, an enclosing parameter, not a
+                    // defaultable empty container) has no static show and is
+                    // rejected here, before either routing mode lowers it. This
+                    // gates both `print_dispatch` (raw printer) and `out_perform`
+                    // (Output capability), so no unshowable value reaches a
+                    // backend to trap or be misrendered.
+                    if self.printable_ty(&args[0], locals).is_none() {
+                        return Err(show::polymorphic_print(args[0].span));
+                    }
                     let v = vals
                         .into_iter()
                         .next()
@@ -831,7 +841,7 @@ impl Elab<'_> {
                     if self.route_output {
                         self.out_perform(v, &args[0], locals, name == "println")
                     } else {
-                        let p = self.print_dispatch(v, &args[0], locals);
+                        let p = self.print_dispatch(v, &args[0], locals)?;
                         if name == "println" {
                             Comp::Bind(
                                 Box::new(p),
@@ -1031,7 +1041,7 @@ fn pat_vars(p: &S<Pattern>, acc: &mut Locals) {
 
 const fn spanned(p: Pattern) -> S<Pattern> {
     Spanned {
-        id: crate::syntax::ast::NodeId::DUMMY,
+        id: NodeId::DUMMY,
         synth: false,
         node: p,
         span: Span::new(0, 0),

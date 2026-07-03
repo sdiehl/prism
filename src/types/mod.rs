@@ -6,4 +6,7 @@ pub use crate::tc::{
     DataInfo, DeclInfo, Dict, DictTable, EffOpInfo, Env, HeadKey, InstInfo, InstKeys, PathRes,
     Warning,
 };
-pub use ty::{show_effects, Effects, Type, CONS, EQ_CLASS, LIST, NIL, ORD_CLASS, SHOW_CLASS};
+pub use ty::{
+    show_effects, Effects, Type, ARBITRARY_CLASS, CONS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE,
+    IDENTIFIABLE_BUNDLE, LIST, NIL, ORD_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
+};

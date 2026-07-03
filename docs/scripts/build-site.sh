@@ -29,14 +29,17 @@ PRISM_MDBOOK_STRICT=1 mdbook build docs
 #    REPL (repl.html), both bundling their own wasm copy.
 (cd web && pnpm install --frozen-lockfile && pnpm build)
 
-# 4. Stitch into one tree: book at /, playground at /play/, REPL at /repl/. Both
-#    web pages share the same dist bundle; /repl/ serves repl.html as its index.
+# 4. Stitch into one tree: book at /, playground at /play/, REPL at /repl/, the
+#    determinism scrubber at /scrub/. The web pages share the same dist bundle;
+#    /repl/ and /scrub/ serve their own html as the directory index.
 rm -rf "$out"
-mkdir -p "$out/play" "$out/repl"
+mkdir -p "$out/play" "$out/repl" "$out/scrub"
 cp -R docs/book/. "$out/"
 cp -R web/dist/. "$out/play/"
 cp -R web/dist/. "$out/repl/"
+cp -R web/dist/. "$out/scrub/"
 cp -f web/dist/repl.html "$out/repl/index.html"
+cp -f web/dist/scrubber.html "$out/scrub/index.html"
 cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 
-echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/)"
+echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/, scrubber at /scrub/)"

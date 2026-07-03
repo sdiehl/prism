@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/cancel_grandchild.pr
+---
+child: running
+grandchild: running
+grandchild finalizer ran
+child finalizer ran
+scene done
+0
+=> ()

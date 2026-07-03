@@ -17,16 +17,25 @@ use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Comp, Core, CorePass, OptLevel, PassSpec, Value,
+    run_opt_spec, Comp, Core, CorePass, DepGraph, OptLevel, PassSpec, Value,
 };
-use crate::error::Error;
-use crate::eval::{run, Run, Rv};
+use crate::debug::trace;
+use crate::error::{Error, TypeError};
+use crate::eval::{run, run_traced, Run, Rv, Tape};
 use crate::flags::DynFlags;
 use crate::lex::lex;
 #[cfg(feature = "native")]
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
+#[cfg(feature = "native")]
+use crate::pkg::transport::{DiskTransport, Transport};
+#[cfg(feature = "native")]
+use crate::pkg::trust::{parse_index, verify_signature, Verdict};
 use crate::resolve::{default_roots, resolve_modules_in, Root};
+#[cfg(feature = "native")]
+use crate::store::cert::{emit, parity_cert, BACKEND_LLVM, CLAIM_PARITY_PASSED_NAME};
+use crate::store::coherence::{self, CoherenceError};
+use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
 use crate::syntax::desugar::desugar;
@@ -42,6 +51,109 @@ pub const SOURCE_EXT: &str = "pr";
 /// layout-breaking change to the envelope bumps this. It is independent of the
 /// hash scheme tag, which versions the hashing itself, not the export around it.
 const NAMESPACE_FORMAT: u32 = 1;
+
+/// The wire envelope's kind tag: the five things every serialized envelope can
+/// name.
+///
+/// One header shape, `[scheme tag][kind][contract digest][body?]`, read five ways
+/// rather than five formats. This enum is the single home of the family; the `dump namespace`
+/// export and (later) the binary codec name their kind from here rather than
+/// re-typing the strings. When the `lib/std/Wire.pr` codec needs the same
+/// strings, they cross the phase boundary as a pinned hook (the `names.rs`
+/// pattern: one canonical home with tested inverses), never a re-typed literal.
+///
+/// The textual name is what the human-facing header spells; the varint tag is
+/// reserved for the compact binary body and is pinned here so the two encodings
+/// agree on the family and its ordering before that body exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireKind {
+    /// A value at a frozen layout: contract digest names the type's `Stable.Vn`.
+    Value,
+    /// A definition: contract digest is the scheme identity, body is anonymous Core.
+    Def,
+    /// An effect signature: contract digest is the signature's shape digest.
+    Protocol,
+    /// A reified continuation: a `value` over `def` digests.
+    Kont,
+    /// A certificate: an attestation braided with the replay log.
+    Cert,
+}
+
+impl WireKind {
+    /// The textual header name, the stable string every text reader dispatches on.
+    #[must_use]
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::Value => "value",
+            Self::Def => "def",
+            Self::Protocol => "protocol",
+            Self::Kont => "kont",
+            Self::Cert => "cert",
+        }
+    }
+
+    /// The varint discriminant reserved for the compact binary codec. Not emitted
+    /// in the text envelope; pinned alongside `tag` so both encodings share one
+    /// family ordering when the binary body lands in `lib/std/Wire.pr`.
+    #[must_use]
+    pub const fn varint(self) -> u8 {
+        match self {
+            Self::Value => 0,
+            Self::Def => 1,
+            Self::Protocol => 2,
+            Self::Kont => 3,
+            Self::Cert => 4,
+        }
+    }
+
+    /// Recover a kind from its textual tag, rejecting anything outside the family.
+    #[must_use]
+    pub fn parse(tag: &str) -> Option<Self> {
+        [
+            Self::Value,
+            Self::Def,
+            Self::Protocol,
+            Self::Kont,
+            Self::Cert,
+        ]
+        .into_iter()
+        .find(|k| k.tag() == tag)
+    }
+}
+
+/// The envelope header recovered from a `dump namespace` export: enough to
+/// dispatch a reader before it touches the body.
+///
+/// [`parse`](Self::parse) rejects a
+/// scheme it does not recognize and a kind outside the family, so a stale or
+/// foreign frame is caught on the header, not three fields into the body:
+/// the contract is checked before the body, always.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvelopeHeader {
+    /// Which of the five envelope kinds this frame carries.
+    pub kind: WireKind,
+    /// The contract digest the reader checks before touching the body.
+    pub contract: String,
+    /// The export layout version (`NAMESPACE_FORMAT`).
+    pub format: u32,
+}
+
+impl EnvelopeHeader {
+    /// Parse the `envelope` object of a serialized export. Returns `None` on a
+    /// foreign scheme, an unknown kind, or a missing/ill-typed field.
+    #[must_use]
+    pub fn parse(doc: &serde_json::Value) -> Option<Self> {
+        let env = doc.get("envelope")?;
+        if env.get("scheme")?.as_str()? != crate::core::HASH_SCHEME {
+            return None;
+        }
+        Some(Self {
+            kind: WireKind::parse(env.get("kind")?.as_str()?)?,
+            contract: env.get("contract")?.as_str()?.to_string(),
+            format: u32::try_from(env.get("format")?.as_u64()?).ok()?,
+        })
+    }
+}
 
 /// Which cooperative scheduler `run_cooperative` resolves to (the `--scheduler`
 /// flag).
@@ -160,6 +272,19 @@ const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
 #[must_use]
 pub fn with_prelude(src: &str) -> String {
     format!("{PRELUDE}\n{src}")
+}
+
+/// The dotted paths of every module a source pulls in, in load order.
+///
+/// The CLI prints these as a build's file manifest. Pure (parse plus module
+/// load), no compilation; a best-effort progress aid, so callers ignore its
+/// error and let the real build surface any resolution failure.
+///
+/// # Errors
+/// Fails when the source does not parse or an import resolves in no root.
+pub fn source_modules(src: &str, roots: &[Root]) -> Result<Vec<String>, Error> {
+    let ParseResult { program, .. } = parse(src)?;
+    crate::resolve::imported_paths(&program, roots)
 }
 
 /// The boundary line [`with_custom_prelude`] stamps between a project's own
@@ -319,6 +444,137 @@ fn frontend(
     Ok((program, checked, core))
 }
 
+/// Elaborate `src` and commit its definitions into the content-addressed store.
+///
+/// The single store-population entry point. It hashes each definition over
+/// pre-optimizer elaborated Core, the one canonical identity regime, exactly as
+/// the `core-hash`/`namespace` dumps and [`store_def_inputs`] do. A committed
+/// object is therefore content-addressed independently of the optimizer level:
+/// identity is a property of the elaborated term, and the optimizer
+/// configuration (with every other toolchain choice) belongs to the verification
+/// fingerprint, not to identity. The store root comes from the `PRISM_STORE_PATH`
+/// knob (else a default cache location). Storing is a cache, so this never
+/// affects the compiled result; it only records it.
+///
+/// # Errors
+/// Fails on any front-end error or a store filesystem error.
+pub fn commit_to_store(src: &str, roots: &[Root], cfg: &Config) -> Result<CommitStats, Error> {
+    let (program, checked, core) = elaborated(src, roots)?;
+    store_commit(&program, &checked, &core, cfg)
+}
+
+// Hash the program and write it into the store at the configured root. Kept
+// beside `frontend` so the hashing inputs (borrow signatures, fip annotations,
+// principal type) are computed once, the same way every other per-definition
+// hashing site computes them.
+fn store_commit(
+    program: &Program<CorePhase>,
+    checked: &Checked,
+    core: &Core,
+    cfg: &Config,
+) -> Result<CommitStats, Error> {
+    let hash_metas = hash_meta(checked, &borrow_sigs(program), &fip_annots(program));
+    let hashes = hash_program(core, &hash_metas);
+    let graph = DepGraph::of(core);
+    let metas: BTreeMap<Sym, DefMeta> = checked
+        .decls
+        .iter()
+        .map(|d| {
+            (
+                Sym::new(&d.name),
+                DefMeta {
+                    name: d.name.clone(),
+                    ty: format!("{} ! {}", d.ty.show(), show_effects(&d.effects)),
+                    doc: String::new(),
+                },
+            )
+        })
+        .collect();
+    let root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let store = store::Store::open_or_create(&root)?;
+    // Record this program's canonical `(class, head) -> instance-hash` bindings,
+    // refusing any that a previously committed program bound to a different
+    // instance. This lifts intra-program coherence (already enforced in the type
+    // checker) across every program sharing the store. Checked before the objects
+    // are written so a rejected commit leaves the store untouched.
+    coherence::commit_canonical(&store, &program.instances, &program.canonicals, &hashes).map_err(
+        |e| match e {
+            CoherenceError::Io(io) => Error::Io(io),
+            CoherenceError::Conflict { span, msg } => Error::Type(TypeError::Other { span, msg }),
+        },
+    )?;
+    let stats = store::commit_program(&store, core, &hashes, &hash_metas, &graph, &metas)?;
+    // The first user-visible payoff of the store: check cost tracks the Merkle
+    // closure of a change. `objects_hit` are the definitions whose hash was
+    // unchanged (already compiled and stored); `objects_written` are the ones
+    // that moved and were recompiled into the store. Behind the quiet knob, like
+    // the other compiler-internal stat lines.
+    if !cfg.flags.quiet {
+        eprintln!(
+            "store: {} unchanged, {} recompiled",
+            stats.objects_hit, stats.objects_written
+        );
+    }
+    Ok(stats)
+}
+
+/// The store codec's compile front door.
+///
+/// Elaborates `src` to pre-optimization anonymous Core, the per-definition
+/// content hashes, and the elaboration metadata strings the hashes commit to,
+/// gathered exactly as every other hashing site gathers them. Everything
+/// `store::codec::encode_def` needs to serialize a definition, and everything a
+/// re-hash needs to reproduce its hash.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub fn store_def_inputs(
+    src: &str,
+) -> Result<(Core, crate::core::Hashes, BTreeMap<Sym, String>), Error> {
+    let roots = default_roots(Path::new("."));
+    let (program, checked, core) = elaborated(src, &roots)?;
+    let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
+    let hashes = hash_program(&core, &metas);
+    Ok((core, hashes, metas))
+}
+
+/// The namespace root of a program: the Merkle fold over its
+/// `def <name> -> content-hash` entries.
+///
+/// This is the single value a published package tag maps to and `prism audit`
+/// re-derives: the same digest a `dump namespace` export carries as its contract,
+/// and the same fold shape [`stdlib_hash`] uses for the whole standard library. A
+/// tag names a root; the root names the exact set of behaviors under it.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub fn namespace_root(src: &str, roots: &[Root]) -> Result<String, Error> {
+    let (program, checked, core) = elaborated(src, roots)?;
+    let hashes = hash_program(
+        &core,
+        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+    );
+    Ok(namespace_root_of(&hashes))
+}
+
+// The namespace-root fold over an already-computed `name -> content-hash` map. The
+// one definition of the fold, shared by `namespace_root`, the `dump namespace`
+// contract digest, and the package tag pointer, so all three agree by
+// construction.
+pub(crate) fn namespace_root_of(hashes: &crate::core::Hashes) -> String {
+    crate::core::hash_root(
+        &hashes
+            .iter()
+            .map(|(sym, h)| {
+                (
+                    format!("{} {}", WireKind::Def.tag(), sym.as_str()),
+                    h.clone(),
+                )
+            })
+            .collect(),
+    )
+}
+
 // The composed source that pulls in the entire documented standard library: the
 // always-on prelude (which glob-imports the `Data.*` modules) plus the two
 // modules it does not open, `Replay` and `Concurrent`. Docs and the stdlib hash
@@ -327,11 +583,14 @@ pub(crate) fn stdlib_driver_src() -> String {
     with_prelude("import Replay (..)\nimport Concurrent (..)\n")
 }
 
-// Elaborate a source to Core *before* the Core-to-Core optimizer runs, for the
-// content hash. Pre-opt Core is used so a committed root cannot depend on an
-// env-toggled pass (`Specialize`) and does not move when the optimizer is tuned,
-// and so it holds every top-level definition exactly once (the optimizer has no
-// whole-program DCE). Quiet: no warning emission, no surface lints.
+// Elaborate a source to Core *before* the Core-to-Core optimizer runs: the one
+// canonical identity surface. Every content hash is taken here, so the store
+// commit, the `core-hash`/`dupes`/`namespace` dumps, the stdlib root, and the
+// `store_def_inputs` re-hash front door all agree by construction. Pre-opt Core
+// is used so identity cannot depend on an env-toggled pass (`Specialize`) or
+// move when the optimizer is tuned, and so it holds every top-level definition
+// exactly once (the optimizer has no whole-program DCE). Quiet: no warning
+// emission, no surface lints.
 fn elaborated(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, Core), Error> {
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules_in(program, roots)?;
@@ -391,7 +650,7 @@ pub fn stdlib_hash() -> Result<StdlibHash, Error> {
         .collect();
     let mut instances: BTreeMap<String, String> = BTreeMap::new();
     for inst in &program.instances {
-        let prefix = format!("i@{}@", inst.name);
+        let prefix = crate::names::instance_method_prefix(&inst.name);
         let methods: BTreeMap<String, String> = defs_str
             .iter()
             .filter_map(|(k, v)| k.strip_prefix(&prefix).map(|m| (m.to_string(), v.clone())))
@@ -453,6 +712,15 @@ fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
         let Some(ops) = latent.get(&f.name) else {
             continue;
         };
+        // An instance method is absent from `checked.decls` (those are the
+        // top-level `fn`s); its effect discipline is enforced against the class
+        // signature at `check_instance`, where an effect-polymorphic method may
+        // legitimately perform the effects flowing through its row variable. It
+        // has no standalone inferred row to reconcile against, so validating it
+        // here against an empty row would spuriously flag that permitted effect.
+        if crate::names::is_instance_method(f.name.as_str()) {
+            continue;
+        }
         let inferred = inferred_rows
             .get(f.name.as_str())
             .copied()
@@ -523,7 +791,7 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
             }
             _ => msg,
         };
-        Error::Type(crate::error::TypeError::Other { span, msg })
+        Error::Type(TypeError::Other { span, msg })
     };
     let sigs = borrow_sigs(program);
     let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
@@ -583,10 +851,7 @@ fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(
                 },
                 offending.join("`, `")
             );
-            return Err(Error::Type(crate::error::TypeError::Other {
-                span: d.span,
-                msg,
-            }));
+            return Err(Error::Type(TypeError::Other { span: d.span, msg }));
         }
     }
     Ok(())
@@ -656,6 +921,249 @@ pub fn interpret_io_on(
     crate::eval::run_io(&core, out_sink, input).map_err(Error::Runtime)
 }
 
+/// Run `src` against the real world, recording every capability observation.
+///
+/// Streams output live (like `interpret_io_on`) and returns the process exit
+/// code, if any, plus the encoded `.replay` trace to persist and its length.
+///
+/// # Errors
+/// Fails on any front-end error or an evaluation fault.
+pub fn record_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+) -> Result<(Option<i32>, String, usize), Error> {
+    let core = prepared_core(src, roots, cfg)?;
+    let run =
+        run_traced(&core, out_sink, input, Tape::Record(Vec::new())).map_err(Error::Runtime)?;
+    Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
+}
+
+/// Replay `src` against a recorded `.replay` trace, performing no real reads.
+///
+/// Reproduces the original run's output byte for byte (a corollary of the
+/// determinism contract) and returns the process exit code, if any.
+///
+/// # Errors
+/// Fails on a front-end error, a malformed trace, an evaluation fault, or a
+/// trace that does not match the program.
+pub fn replay_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    trace: &str,
+    cfg: &Config,
+) -> Result<Option<i32>, Error> {
+    let core = prepared_core(src, roots, cfg)?;
+    let frames = trace::decode(trace).map_err(Error::Runtime)?;
+    let mut empty = std::io::Cursor::new(Vec::new());
+    let run = run_traced(
+        &core,
+        out_sink,
+        &mut empty,
+        Tape::Replay {
+            frames,
+            cursor: 0,
+            budget: None,
+        },
+    )
+    .map_err(Error::Runtime)?;
+    Ok(run.exit)
+}
+
+/// Drive the terminal reverse-step debugger over `src` and a recorded trace:
+/// read stepping commands from `cmds`, write the debugger UI to `ui`.
+///
+/// # Errors
+/// Fails on a front-end error, a malformed trace, an I/O error, or a trace that
+/// does not match the program.
+pub fn debug_on(
+    src: &str,
+    roots: &[Root],
+    trace: &str,
+    cmds: &mut dyn std::io::BufRead,
+    ui: &mut dyn std::io::Write,
+    cfg: &Config,
+) -> Result<(), Error> {
+    let core = prepared_core(src, roots, cfg)?;
+    let frames = trace::decode(trace).map_err(Error::Runtime)?;
+    crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::Runtime)
+}
+
+// Run a freshly built native binary on empty stdin, returning its stdout bytes.
+#[cfg(feature = "native")]
+fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
+    let out = Command::new(bin)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(Error::Io)?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(Error::Codegen(format!(
+            "attest: {} exited with {}",
+            bin.display(),
+            out.status
+        )))
+    }
+}
+
+// The interpreter transcript for `src` on empty stdin: the reference oracle a
+// native backend's output must match, and the second oracle when MLIR is absent.
+#[cfg(feature = "native")]
+fn interp_transcript(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<u8>, Error> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut input = std::io::Cursor::new(Vec::new());
+    interpret_io_on(src, roots, &mut out, &mut input, cfg)?;
+    Ok(out)
+}
+
+// The signed-index cross-check line for a root, or empty when no store, index, or
+// matching pointer is present. Read-only against the package index.
+#[cfg(feature = "native")]
+fn attest_index_line(root: &str, cfg: &Config) -> String {
+    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let Ok(dst) = DiskTransport::open(&store_root) else {
+        return String::new();
+    };
+    let Ok(Some(artifact)) = dst.index_artifact() else {
+        return String::new();
+    };
+    let rows = parse_index(&artifact.body);
+    let Some(row) = rows.iter().find(|r| r.root == root) else {
+        return String::new();
+    };
+    let sig = match verify_signature(&artifact, &cfg.flags) {
+        Verdict::Valid { identity: Some(id) } => format!("valid ({id})"),
+        Verdict::Valid { identity: None } => "valid".to_string(),
+        Verdict::Unsigned => "unsigned (dev mode)".to_string(),
+        Verdict::Invalid(m) => format!("INVALID: {m}"),
+        Verdict::Unavailable(m) => format!("unverifiable: {m}"),
+    };
+    format!("  index: {}@{} signature {sig}\n", row.name, row.tag)
+}
+
+// The second, independent backend for attestation: MLIR native when the feature
+// and toolchain are present, otherwise the interpreter as the second oracle with
+// the limitation named.
+// The `Result` is load-bearing under the `mlir` feature (`build_mlir_on` and the
+// native run can fail); the fallback path is infallible, so clippy sees an
+// unnecessary wrap only in the default build.
+#[cfg(feature = "native")]
+#[allow(clippy::unnecessary_wraps)]
+fn attest_second(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    tmp: &Path,
+    stem: &str,
+    interp: &[u8],
+) -> Result<(&'static str, Vec<u8>, Option<String>), Error> {
+    #[cfg(feature = "mlir")]
+    {
+        let has_tool = Command::new("mlir-translate")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if has_tool {
+            let bin = tmp.join(format!("{stem}_mlir"));
+            build_mlir_on(src, roots, &bin, cfg)?;
+            let out = run_native(&bin)?;
+            let _ = fs::remove_file(&bin);
+            return Ok(("MLIR", out, None));
+        }
+    }
+    let _ = (src, roots, cfg, tmp, stem);
+    Ok((
+        "interpreter",
+        interp.to_vec(),
+        Some(
+            "MLIR backend unavailable (build with --features mlir and install mlir-translate); \
+             the interpreter is the independent second oracle"
+                .to_string(),
+        ),
+    ))
+}
+
+/// Diverse double compilation: compile and run `src` through two independent
+/// backends and confirm their output is byte-identical, attested by the shared
+/// content hash (the whole-program namespace root).
+///
+/// This is Thompson's "Trusting Trust" defeated by construction and Wheeler's
+/// diverse double compilation, made a standing check rather than a heroic
+/// one-off: the same source, compiled two independent ways, must observably agree
+/// to the byte, and the content hash names the identity both compiled. When the
+/// MLIR toolchain is present the two backends are LLVM and MLIR; otherwise the
+/// interpreter is the independent second oracle and the limitation is printed. If
+/// a signed-index pointer exists for the root, its name, tag, and signature
+/// verdict are cross-checked and reported.
+///
+/// # Errors
+/// A front-end error, a codegen or link failure, or a divergence between the
+/// backends (the attestation's whole point is that this never happens).
+#[cfg(feature = "native")]
+pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    let root = namespace_root(src, roots)?;
+    let interp = interp_transcript(src, roots, cfg)?;
+
+    let tmp = std::env::temp_dir();
+    let stem = format!("prism_attest_{}", std::process::id());
+    let llvm_bin = tmp.join(format!("{stem}_llvm"));
+    build_on(src, roots, &llvm_bin, cfg)?;
+    let llvm_out = run_native(&llvm_bin)?;
+    let _ = fs::remove_file(&llvm_bin);
+
+    let (second_name, second_out, limitation) =
+        attest_second(src, roots, cfg, &tmp, &stem, &interp)?;
+
+    // The two backends must agree byte for byte; the interpreter oracle backstops
+    // both, so a three-way agreement is what the green line asserts.
+    if llvm_out != second_out || llvm_out != interp {
+        return Err(Error::Codegen(format!(
+            "attest: backends diverged for root {root}; LLVM and {second_name} are not \
+             byte-identical (this is the invariant the attestation exists to catch)"
+        )));
+    }
+
+    let mut out = format!("attested: {root} identical across LLVM, {second_name}\n");
+    if let Some(l) = limitation {
+        let _ = writeln!(out, "  note: {l}");
+    }
+    out.push_str(&attest_index_line(&root, cfg));
+    out.push_str(&attest_cert_line(&root, second_name, cfg));
+    Ok(out)
+}
+
+// Emit (or find) the parity certificate for a successfully attested root, and
+// report which. Never load-bearing: a store that cannot be opened or written
+// simply yields no line, so a certificate failure never fails the attestation the
+// byte-identity check already established.
+#[cfg(feature = "native")]
+fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
+    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let Ok(store) = store::Store::open_or_create(&store_root) else {
+        return String::new();
+    };
+    let cert = parity_cert(root, (BACKEND_LLVM, second_name));
+    match emit(&store, &cert) {
+        Ok(store::Written::New) => {
+            format!(
+                "  cert: emitted {CLAIM_PARITY_PASSED_NAME}@{}\n",
+                cert.scheme
+            )
+        }
+        Ok(store::Written::Hit) => {
+            format!(
+                "  cert: reused existing {CLAIM_PARITY_PASSED_NAME}@{}\n",
+                cert.scheme
+            )
+        }
+        Err(_) => String::new(),
+    }
+}
+
 // Shared front-end and rc-balance ICE check for the interpreter entries. The
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
@@ -663,7 +1171,7 @@ fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<Core, Error>
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
     let (lowered, _, warning) = lower_opt(&core, &checked.ctors, cfg)?;
-    emit_lower_warning(src, warning.as_deref());
+    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
     Ok(core)
@@ -708,7 +1216,7 @@ fn lowered_core(
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
     let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, cfg)?;
-    emit_lower_warning(src, warning.as_deref());
+    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     Ok((checked, lowered, ctors, sigs))
 }
 
@@ -716,7 +1224,12 @@ fn lowered_core(
 // the same one `emit_warnings` uses for checker diagnostics. The diagnostic
 // comes from the Core phase, which carries no source spans, so it renders as a
 // plain `warning: ...` line (an empty span makes `render_warning` skip the caret).
-fn emit_lower_warning(src: &str, warning: Option<&str>) {
+// `quiet` (from DynFlags) silences it, matching the documented PRISM_QUIET
+// contract that covers both the fallback and matcher-drift warnings.
+fn emit_lower_warning(src: &str, warning: Option<&str>, quiet: bool) {
+    if quiet {
+        return;
+    }
     if let Some(msg) = warning {
         eprint!(
             "{}",
@@ -999,7 +1512,15 @@ pub fn build_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(
     require_main(&checked)?;
     let bc = out.with_extension("bc");
     emit_llvm_bc(&core, &ctors, &bc).map_err(Error::Codegen)?;
-    cc_link(&bc, out, cfg)
+    cc_link(&bc, out, cfg)?;
+    // A successful build populates the store when the knob is on. Re-elaboration
+    // is cheap relative to codegen and only happens under the opt-in flag; the
+    // store is a cache, so a failure here would not invalidate the build (but is
+    // surfaced rather than swallowed).
+    if cfg.flags.store {
+        commit_to_store(src, roots, cfg)?;
+    }
+    Ok(())
 }
 
 // Save the offending IR at a stable path so a clang parse error points at
@@ -1333,7 +1854,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             Ok(crate::core::core_to_json(&core))
         }
         "core-hash" => {
-            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
                 &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
@@ -1367,7 +1888,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // behavior under different names (a user `fact` and the prelude
         // `factorial`, say). One line per group of clones, `<hash>  a, b, c`.
         "dupes" => {
-            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
                 &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
@@ -1396,21 +1917,24 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             }
             Ok(out)
         }
-        // The two-layer store shape as a read-only export, wrapped in a versioned
-        // envelope (the hash scheme tag, the export layout version, and the
-        // producing compiler version) so a persisted export is self-describing
-        // about its format from the first byte. Each definition carries its
-        // content hash, the anonymous layer (the direct dependency hashes, names
-        // erased, which is what the hash actually commits to), and the metadata
-        // layer (the human name and inferred type). Docs and spans belong to the
-        // metadata layer too and join it when the on-disk store lands.
+        // The two-layer store shape as a read-only export, wrapped in the one wire
+        // envelope: a header of the hash scheme tag, the kind (`def`,
+        // this being the store's definition layer), and the contract digest (the
+        // namespace's own Merkle root), plus the export layout version and the
+        // producing compiler version, so a persisted export is self-describing
+        // about its format and its content address from the first bytes. Each
+        // definition carries its content hash, the anonymous layer (the direct
+        // dependency hashes, names erased, which is what the hash actually commits
+        // to), and the metadata layer (the human name and inferred type). Docs and
+        // spans belong to the metadata layer too and join it when the on-disk
+        // store lands.
         "namespace" => {
-            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let (program, checked, core) = elaborated(src, roots)?;
             let hashes = hash_program(
                 &core,
                 &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
             );
-            let graph = crate::core::DepGraph::of(&core);
+            let graph = DepGraph::of(&core);
             let types: BTreeMap<&str, String> = checked
                 .decls
                 .iter()
@@ -1434,10 +1958,21 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                     })
                 })
                 .collect();
+            // The one envelope header: scheme tag, kind, contract
+            // digest, then the body. This export is the store's `def` layer, so
+            // its kind is `def`; its contract digest is the namespace's own root,
+            // a Merkle fold over the sorted `name -> content-hash` entries (the
+            // same fold `stdlib_hash` uses), so the digest moves under any content
+            // change and is checkable before the body is read.
+            let contract = namespace_root_of(&hashes);
             let doc = serde_json::json!({
-                "scheme": crate::core::HASH_SCHEME,
-                "format": NAMESPACE_FORMAT,
-                "compiler": env!("CARGO_PKG_VERSION"),
+                "envelope": {
+                    "scheme": crate::core::HASH_SCHEME,
+                    "kind": WireKind::Def.tag(),
+                    "contract": contract,
+                    "format": NAMESPACE_FORMAT,
+                    "compiler": env!("CARGO_PKG_VERSION"),
+                },
                 "defs": entries,
             });
             Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
@@ -1481,6 +2016,18 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let (_, lowered, _, _) = lowered_core(src, roots, cfg)?;
             Ok(pp_core_pretty(&lowered))
         }
+        // The effect-lowering tier this program's handlers lower to (`pure`,
+        // `evidence`, `state-fusion`, `local-partial`, `selective-free-monad`,
+        // `whole-program-free-monad`). A pure cost classification, never
+        // observable in output; `tests/perf_gate.rs` pins it per corpus program
+        // so a silent fusion-to-free-monad collapse surfaces as a reviewable diff.
+        "tier" => {
+            let (_, checked, core) = frontend(src, roots, cfg)?;
+            Ok(format!(
+                "{}\n",
+                crate::core::effect_strategy(&core, &checked.ctors, &cfg.flags)?
+            ))
+        }
         #[cfg(feature = "native")]
         "llvm" => {
             let (_, core, ctors) = compiled(src, roots, cfg)?;
@@ -1517,7 +2064,7 @@ pub fn query_on(
     match kind {
         "callers" | "dependents" | "deps" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
-            let graph = crate::core::DepGraph::of(&core);
+            let graph = DepGraph::of(&core);
             let sym = resolve_query_target(&graph, target)?;
             let set = match kind {
                 "callers" => graph.direct_callers(sym),
@@ -1555,9 +2102,154 @@ pub fn query_on(
     }
 }
 
+// One revision's per-definition hashes and dependency graph. `deep` is the
+// Merkle-substituted behavior identity (the regime `core-hash`, `namespace`, and
+// the store commit all share, over pre-optimizer elaborated Core); `shallow` is
+// each definition's own-content hash with dependencies by name, which attributes
+// a deep-hash move to the definition actually edited rather than to a ripple
+// through it (under the deep hash, editing one definition moves every transitive
+// dependent's hash too).
+struct Revision {
+    deep: crate::core::Hashes,
+    shallow: crate::core::Hashes,
+    graph: DepGraph,
+}
+
+fn program_hashes(src: &str, roots: &[Root]) -> Result<Revision, Error> {
+    let (program, checked, core) = elaborated(src, roots)?;
+    let meta = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
+    let deep = hash_program(&core, &meta);
+    let shallow = crate::core::shallow_hashes(&core, &meta);
+    let graph = DepGraph::of(&core);
+    Ok(Revision {
+        deep,
+        shallow,
+        graph,
+    })
+}
+
+// The prelude's own definition symbols, under the same pre-optimizer regime the
+// diff hashes both revisions with, so they can be filtered out: the prelude is
+// identical in both sources and would otherwise bury the user's own changes and
+// inflate the unchanged count.
+fn prelude_hash_names(roots: &[Root]) -> Result<std::collections::HashSet<Sym>, Error> {
+    let (_, _, core) = elaborated(PRELUDE, roots)?;
+    Ok(core.fns.into_iter().map(|f| f.name).collect())
+}
+
+/// A behavior diff between two revisions of a source.
+///
+/// Because every definition is content-addressed, two revisions diff
+/// *semantically*: match definitions by name, compare content hashes, and report
+/// what changed in behavior rather than in bytes. A pure refactor (renamed
+/// locals, renamed `var`s, reordered definitions, reformatting) leaves every
+/// hash fixed and so diffs to zero changed.
+///
+/// A real logic edit reports the exact set of definitions a developer *edited*
+/// (their own content moved, detected by the shallow hash) plus the dependents
+/// cone those edits affect (via [`DepGraph::dependents`] over the new revision).
+/// The split matters because the deep behavior hash is Merkle: editing one
+/// definition moves the hash of every transitive dependent, so a deep-hash
+/// comparison alone cannot tell the edit apart from its ripple. The shallow hash
+/// isolates the edit; the graph gives the blast radius.
+///
+/// This is store-independent: both sides are hashed in memory, so no
+/// `PRISM_STORE` and no on-disk commit are involved. Prelude definitions are
+/// filtered from both sides (they are identical in both and are not the subject
+/// of a diff).
+///
+/// # Errors
+/// Fails on any front-end error in either revision.
+pub fn diff_on(
+    old_src: &str,
+    new_src: &str,
+    roots: &[Root],
+    _cfg: &Config,
+) -> Result<String, Error> {
+    let prelude = prelude_hash_names(roots)?;
+    let old = program_hashes(old_src, roots)?;
+    let new = program_hashes(new_src, roots)?;
+
+    let is_user = |s: &Sym| !prelude.contains(s);
+    let names = |hs: &crate::core::Hashes| -> BTreeSet<Sym> {
+        hs.keys().copied().filter(is_user).collect()
+    };
+    let old_names = names(&old.deep);
+    let new_names = names(&new.deep);
+
+    // A definition present in both revisions is *edited* when its own content
+    // moved (shallow hash), *unchanged* when its behavior held (deep hash), and
+    // otherwise only rippled by a dependency (it lands in the cone below, not
+    // here). Edited lines carry the deep (behavior) hashes, the identity that
+    // actually moved.
+    let mut changed: Vec<(Sym, String, String)> = Vec::new();
+    let mut unchanged = 0usize;
+    for sym in old_names.intersection(&new_names) {
+        if old.deep[sym] == new.deep[sym] {
+            unchanged += 1;
+        } else if old.shallow[sym] != new.shallow[sym] {
+            changed.push((*sym, old.deep[sym].clone(), new.deep[sym].clone()));
+        }
+    }
+    let mut added: Vec<(Sym, String)> = new_names
+        .difference(&old_names)
+        .map(|s| (*s, new.deep[s].clone()))
+        .collect();
+    let mut removed: Vec<(Sym, String)> = old_names
+        .difference(&new_names)
+        .map(|s| (*s, old.deep[s].clone()))
+        .collect();
+
+    // The dependents cone of the edited set over the new revision's graph: every
+    // user definition transitively affected by an edit. Edited and added
+    // definitions are reported on their own lines, so they are excluded from the
+    // cone, as is the prelude (which never depends on user code).
+    let edited: BTreeSet<Sym> = changed.iter().map(|(s, _, _)| *s).collect();
+    let added_set: BTreeSet<Sym> = added.iter().map(|(s, _)| *s).collect();
+    let mut cone: BTreeSet<Sym> = BTreeSet::new();
+    for sym in &edited {
+        cone.extend(new.graph.dependents(*sym));
+    }
+    cone.retain(|s| is_user(s) && !edited.contains(s) && !added_set.contains(s));
+
+    changed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    added.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    removed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+
+    let short = |h: &str| h[..crate::core::HASH_PREFIX_HEX].to_string();
+    let mut out = String::new();
+    writeln!(
+        out,
+        "diff: {} changed, {} added, {} removed, {unchanged} unchanged",
+        changed.len(),
+        added.len(),
+        removed.len(),
+    )
+    .unwrap();
+    for (sym, oh, nh) in &changed {
+        writeln!(out, "  ~ {}  {} -> {}", sym.as_str(), short(oh), short(nh)).unwrap();
+    }
+    for (sym, nh) in &added {
+        writeln!(out, "  + {}  {}", sym.as_str(), short(nh)).unwrap();
+    }
+    for (sym, oh) in &removed {
+        writeln!(out, "  - {}  {}", sym.as_str(), short(oh)).unwrap();
+    }
+    if cone.is_empty() {
+        writeln!(out, "cone: 0 affected").unwrap();
+    } else {
+        // Sort by name: `cone` is a `BTreeSet<Sym>`, whose order is intern id, not
+        // lexicographic, so a stable human listing must sort the strings.
+        let mut names: Vec<&str> = cone.iter().map(|s| s.as_str()).collect();
+        names.sort_unstable();
+        writeln!(out, "cone: {} affected ({})", names.len(), names.join(", ")).unwrap();
+    }
+    Ok(out)
+}
+
 // Resolve a query target name to a single definition, reporting no-match and
 // ambiguity as errors so the caller can qualify.
-fn resolve_query_target(graph: &crate::core::DepGraph, target: &str) -> Result<Sym, Error> {
+fn resolve_query_target(graph: &DepGraph, target: &str) -> Result<Sym, Error> {
     let mut candidates = graph.resolve(target);
     match candidates.len() {
         1 => Ok(candidates.remove(0)),
@@ -1595,4 +2287,55 @@ fn section(out: &mut String, title: &str, body: &str) {
     writeln!(out, "== {title} ==").unwrap();
     writeln!(out, "{body}").unwrap();
     out.push('\n');
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+
+    /// The five-kind family: textual tags are distinct, varints are the distinct
+    /// contiguous discriminants the binary codec will reuse, and `parse` inverts
+    /// `tag`. This pins the family so the text header and the future body cannot
+    /// drift out of a shared ordering.
+    #[test]
+    fn kind_family_is_pinned() {
+        let all = [
+            WireKind::Value,
+            WireKind::Def,
+            WireKind::Protocol,
+            WireKind::Kont,
+            WireKind::Cert,
+        ];
+        for (i, k) in all.into_iter().enumerate() {
+            assert_eq!(WireKind::parse(k.tag()), Some(k));
+            assert_eq!(usize::from(k.varint()), i);
+        }
+        assert_eq!(WireKind::parse("gremlin"), None);
+    }
+
+    /// A `dump namespace` export parses back to its header: scheme accepted, kind
+    /// and contract digest recoverable, format matched.
+    #[test]
+    fn namespace_header_round_trips() {
+        let out = dump("namespace", "let main = 1\n").expect("namespace export");
+        let doc: serde_json::Value = serde_json::from_str(&out).expect("valid json export");
+        let hdr = EnvelopeHeader::parse(&doc).expect("header parses");
+        assert_eq!(hdr.kind, WireKind::Def);
+        assert_eq!(hdr.format, NAMESPACE_FORMAT);
+        assert!(!hdr.contract.is_empty());
+    }
+
+    /// A mismatched scheme is rejected on the header, before any body is decoded.
+    #[test]
+    fn foreign_scheme_is_rejected() {
+        let doc = serde_json::json!({
+            "envelope": {
+                "scheme": "some-other-scheme-v9",
+                "kind": WireKind::Def.tag(),
+                "contract": "deadbeef",
+                "format": NAMESPACE_FORMAT,
+            },
+        });
+        assert_eq!(EnvelopeHeader::parse(&doc), None);
+    }
 }

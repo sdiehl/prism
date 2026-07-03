@@ -13,6 +13,14 @@ runtime Rust interpreter.
 The `rfl` is a Lean *kernel* certificate -- no `native_decide`, no extra axioms --
 so a passing build is a machine-checked proof that the proven model agrees with
 the recorded oracle output on every program below.
+
+The core term here is the *erased essence* of the fixture (prelude stripped, one
+`CoreFn`); the committed `models/fixtures/<name>.json` is the FULL
+`prism dump core-json` of the same `.pr` (prelude included, ~320 fns), regenerated
+by `models/gen_fixtures.sh` (`just fixtures`) and drift-checked in the Lean CI
+job. Agreement on that full core (the model run over the exact bytes the
+compiler emits) is what `diff_against_rust.sh` checks at runtime; the `rfl`
+below is the kernel half over the essence.
 -/
 namespace Prism.Cert
 

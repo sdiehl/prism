@@ -18,7 +18,7 @@ fn msort(xs) =
     let halves = split_at(n / 2, xs)
     merge(msort(fst(halves)), msort(snd(halves)))
 
-fn print_list(xs) =
+fn print_list(xs : List(Int)) =
   match xs of
     Nil => ()
     Cons(x, rest) =>

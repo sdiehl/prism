@@ -106,6 +106,30 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      # The standard library's content-addressed Merkle root is platform
+      # independent, so compute it once (on the Linux runner, which has the
+      # binary and its LLVM runtime) and ship it as a standalone release asset:
+      # a flat file recording the fingerprint this release was cut from, for
+      # byte-for-byte verification against the docs badge and the store. The
+      # file argument is an ignored CLI placeholder (`dump stdlib-hash` reads the
+      # embedded stdlib, not the file), so any readable `.pr` serves.
+      - name: Record stdlib Merkle root
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          root="$(target/release/prism dump stdlib-hash examples/accum.pr | awk '/^root/{print $2}')"
+          [ -n "$root" ] || { echo "empty stdlib Merkle root"; exit 1; }
+          printf '%s\n' "$root" > stdlib-merkle-root.txt
+          echo "stdlib Merkle root: $root"
+
+      - name: Upload stdlib Merkle root
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdlib-merkle-root
+          path: stdlib-merkle-root.txt
+          if-no-files-found: error
+
       # macOS only: LLVM drags in z3 and zstd, and the linker bakes in their
       # exact versioned dylib name (e.g. libz3.4.15.dylib). z3 bumps that name
       # every minor release and Homebrew keeps only the current one, so the
@@ -212,6 +236,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/stdlib-merkle-root.txt
 
       # Bump Formula/prism.rb in the tap so `brew upgrade prism` sees the new
       # version. The tap ships the macOS arm64 tarball. No-op until the tap repo

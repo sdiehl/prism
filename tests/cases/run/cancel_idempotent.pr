@@ -1,0 +1,23 @@
+-- S6: double cancel is idempotent; the finalizer still runs exactly once.
+
+import Concurrent (..)
+
+fn worker_body() : !{Async(Int), IO} Int =
+  println("worker: before yield")
+  yield(())
+  println("worker: after yield (must not print)")
+  5
+
+fn worker() : !{Async(Int), IO} Int =
+  on_cancel(\() -> println("finalizer ran"), worker_body)
+
+fn scene() : !{Async(Int), IO} Int =
+  let w = fork(worker)
+  yield(())
+  cancel(w)
+  cancel(w)
+  yield(())
+  println("scene done")
+  0
+
+fn main() = println(run_async(scene))

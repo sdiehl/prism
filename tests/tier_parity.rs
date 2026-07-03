@@ -8,77 +8,26 @@
 // corpus, so the two gates together give native(auto) == native(forced):
 // tier-vs-tier agreement, enforced rather than argued.
 //
+// The build/run/diff/leak path and the parallel fan-out are shared with
+// tests/parity.rs through `common` (one leak predicate for both), so this file
+// only adds the tier-forcing filter and floor.
+//
 // Programs whose classification does not move under forcing are skipped: their
 // forced build is byte-identical to the natural one parity.rs already diffs.
 // A floor on the exercised count keeps the oracle from going vacuous if the
 // forcing knob or the strategy classifier silently breaks.
 
 use std::path::Path;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
-use std::{env, fs, thread};
 
 use prism::{default_roots, Config, EffectTier};
 
 mod common;
-use common::{corpus, interpreted, require_cc, source};
+use common::{check_native_parity, corpus, parallel_check, require_cc, source};
 
 fn forced(tier: EffectTier) -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.effect_tier = tier;
     cfg
-}
-
-// Build `case` under the forced tier and diff its run against the interpreter,
-// mirroring parity.rs (stdout byte equality, zero leaked cells).
-fn check_forced(case: &Path, tag: &str, cfg: &Config) -> Result<(), String> {
-    let full = source(case);
-    let stem = case.file_stem().unwrap().to_string_lossy();
-    let bin = env::temp_dir().join(format!("prism_tier_{tag}_{}_{stem}", std::process::id()));
-    let fail = |msg: String| {
-        for ext in ["bc", "ll"] {
-            let _ = fs::remove_file(bin.with_extension(ext));
-        }
-        let _ = fs::remove_file(&bin);
-        Err(msg)
-    };
-    if let Err(e) = prism::build_on(&full, &default_roots(Path::new(".")), &bin, cfg) {
-        return fail(format!(
-            "{}: forced {tag} build failed: {e}",
-            case.display()
-        ));
-    }
-    let out = match Command::new(&bin).env("PRISM_CHECK_LEAKS", "1").output() {
-        Ok(o) => o,
-        Err(e) => return fail(format!("{}: spawn failed: {e}", case.display())),
-    };
-    for ext in ["bc", "ll"] {
-        let _ = fs::remove_file(bin.with_extension(ext));
-    }
-    let _ = fs::remove_file(&bin);
-    let got = String::from_utf8_lossy(&out.stdout);
-    let want = interpreted(&full);
-    if got != want {
-        return Err(format!(
-            "forced {tag} output diverges for {}:\n  native: {got:?}\n  interp: {want:?}",
-            case.display()
-        ));
-    }
-    let leak = String::from_utf8_lossy(&out.stderr);
-    let leak_line = leak
-        .lines()
-        .find(|l| l.contains("cells leaked"))
-        .unwrap_or("")
-        .trim();
-    if leak_line != "prism: 0 cells leaked" {
-        return Err(format!(
-            "forced {tag}: {} did not free all cells: {}",
-            case.display(),
-            leak.trim()
-        ));
-    }
-    Ok(())
 }
 
 // Force `tier` over the corpus, exercising exactly the programs whose lowering
@@ -109,23 +58,12 @@ fn run_forced(tag: &str, tier: EffectTier, floor: usize) {
          (floor {floor}); the forcing knob or strategy classifier likely broke",
         cases.len()
     );
-    let next = AtomicUsize::new(0);
-    let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    let threads = thread::available_parallelism()
-        .map_or(4, std::num::NonZeroUsize::get)
-        .min(cases.len());
-    thread::scope(|s| {
-        for _ in 0..threads {
-            s.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                let Some(case) = cases.get(i) else { break };
-                if let Err(e) = check_forced(case, tag, &forced_cfg) {
-                    fails.lock().unwrap().push(e);
-                }
-            });
-        }
+    let roots = default_roots(base);
+    let fails = parallel_check(&cases, |case| {
+        check_native_parity(case, tag, |full, bin| {
+            prism::build_on(full, &roots, bin, &forced_cfg)
+        })
     });
-    let fails = fails.into_inner().unwrap();
     assert!(
         fails.is_empty(),
         "{} of {} forced-{tag} cases diverged from the interpreter:\n{}",

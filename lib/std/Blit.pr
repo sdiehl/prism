@@ -1,0 +1,61 @@
+-- | Range copy over the sequence types a real primitive can back.
+--
+-- One `blit` factored across the sequence-like types, instead of a separate copy
+-- routine per type. `blit(src, src_off, len, dst, dst_off)` returns a
+-- destination whose `len` elements starting at `dst_off` are the `len` elements
+-- of `src` starting at `src_off`, with the rest of `dst` unchanged. As with
+-- `memcpy`, the ranges `[src_off, src_off + len)` and `[dst_off, dst_off + len)`
+-- are expected to lie within the two sequences.
+--
+-- Instanced only where a real primitive backs the copy: `String` over the
+-- `substring` slice primitive, and `Array` over the in-place `array_get` and
+-- `array_set` primitives, so a uniquely owned array destination is overwritten
+-- without a fresh allocation. `Bytes` (a `List(Int)`) and lists in general are
+-- left uninstanced on purpose: a cons list has no random access or bulk copy, so
+-- a blit would be a structural walk that rebuilds the prefix rather than a copy.
+-- Blitting bytes at primitive speed needs an array-backed buffer, which the
+-- runtime does not yet expose.
+
+-- | Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)`
+-- and return the updated destination.
+pub class Blit(s) {
+  blit : (s, Int, Int, s, Int) -> s
+}
+
+-- | Splice the source range over the destination range with the string slice
+-- primitive: the untouched prefix and suffix of `dst` are sliced out and
+-- rejoined around the copied middle.
+instance blitString : Blit(String) {
+  fn blit(src, src_off, len, dst, dst_off) =
+    blit_string(src, src_off, len, dst, dst_off)
+}
+
+fn blit_string(
+  src : String,
+  src_off : Int,
+  len : Int,
+  dst : String,
+  dst_off : Int
+) : String =
+  concat(substring(dst, 0, dst_off), concat(substring(src, src_off, len), substring(dst, dst_off + len, str_len(dst) - (dst_off + len))))
+
+-- | Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in
+-- `0 .. len` via `array_set`, which writes in place when `dst` is uniquely owned
+-- and copies otherwise, so the observable result never depends on ownership.
+instance blitArray : Blit(Array(a)) {
+  fn blit(src, src_off, len, dst, dst_off) =
+    blit_array_go(src, src_off, len, dst, dst_off, 0)
+}
+
+fn blit_array_go(
+  src : Array(a),
+  src_off : Int,
+  len : Int,
+  dst : Array(a),
+  dst_off : Int,
+  i : Int
+) : Array(a) =
+  if i >= len then
+    dst
+  else
+    blit_array_go(src, src_off, len, array_set(dst, dst_off + i, array_get(src, src_off + i)), dst_off, i + 1)

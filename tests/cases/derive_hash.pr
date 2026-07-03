@@ -1,0 +1,11 @@
+class Hash(a) {
+  hash : (a) -> String
+}
+
+instance hashInt : Hash(Int) {
+  fn hash(x) = blake3(concat("i", show_int(x)))
+}
+
+type Pair = MkPair(Int, Int) deriving (Hash)
+
+fn main() = hash(MkPair(1, 2))

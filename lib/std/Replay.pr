@@ -1,5 +1,4 @@
--- | Record/replay handlers for the capability effects (Console, FileSystem,
--- Random, Env).
+-- | Record/replay handlers for the capability effects.
 --
 -- `record` runs an action against the real world, logging each observation
 -- into a trace; `replay` re-runs the same action against a trace, performing
@@ -11,7 +10,11 @@ import Data.List (..)
 
 import Data.String (..)
 
-type TraceEntry = TInt(Int) | TStr(String) | TBool(Bool)
+type TraceEntry
+  = TInt(Int)
+  | TStr(String)
+  | TBool(Bool)
+  | TOut
 
 alias Trace = List(TraceEntry)
 
@@ -92,6 +95,7 @@ fn enc_entry(e) =
     TInt(n) => enc_field("I", show_int(n))
     TStr(s) => enc_field("S", s)
     TBool(b) => enc_field("B", if b then "1" else "0")
+    TOut => enc_field("O", "")
 
 -- | Encode a trace to a self-delimiting string for durable storage, read back
 -- with `deserialize`.
@@ -107,6 +111,8 @@ fn de_entry(tag, payload) =
     TInt(un_int(parse_int(payload)))
   elif str_eq(tag, "B") then
     TBool(str_eq(payload, "1"))
+  elif str_eq(tag, "O") then
+    TOut
   else
     TStr(payload)
 
@@ -127,59 +133,63 @@ pub fn deserialize(s) = de_go(s, 0, char_at(":", 0))
 
 -- Durable record/replay driver. A persisted log freezes the observations of an
 -- interrupted run; a re-run replays that prefix (no real IO) and, once it is
--- exhausted, performs each NEW op for real, appending and persisting the whole
--- trace after every observation so a crash stays recoverable. The state threaded
--- through every resume is (remaining-to-replay, full-trace-reversed); the loaded
--- prefix already lives in the full trace, so replaying it never re-persists.
-fn persist(path, acc) = write_file(path, serialize(reverse(acc)))
+-- exhausted, performs each NEW op for real. The state threaded through every
+-- resume is just the remaining-to-replay trace: an op consumes its head when
+-- replaying, and when the trace runs out the op goes live. Each live observation
+-- appends ONE self-delimiting frame to the log (O(1), not a whole-file rewrite),
+-- so the total cost is linear and a crash leaves a well-formed prefix.
+fn persist_entry(path, e) = append_file(path, enc_entry(e))
 
-fn step_int(path, k, st, real) =
-  match st of
-    (Cons(TInt(x), rest), acc) => k(x)((rest, acc))
-    (Cons(_, _), _) => fail()
-    (Nil, acc) =>
+-- An input op: serve its recorded value from the trace head while replaying, or
+-- perform the real read and append the recorded value once the trace is spent. A
+-- head of the wrong variant means the trace does not match the action, a `fail`.
+fn step_int(path, k, t, real) =
+  match t of
+    Cons(TInt(x), rest) => k(x)(rest)
+    Cons(_, _) => fail()
+    Nil =>
       let x = real(())
-      let acc2 = Cons(TInt(x), acc)
-      persist(path, acc2)
-      k(x)((Nil, acc2))
+      persist_entry(path, TInt(x))
+      k(x)(Nil)
 
-fn step_str(path, k, st, real) =
-  match st of
-    (Cons(TStr(x), rest), acc) => k(x)((rest, acc))
-    (Cons(_, _), _) => fail()
-    (Nil, acc) =>
+fn step_str(path, k, t, real) =
+  match t of
+    Cons(TStr(x), rest) => k(x)(rest)
+    Cons(_, _) => fail()
+    Nil =>
       let x = real(())
-      let acc2 = Cons(TStr(x), acc)
-      persist(path, acc2)
-      k(x)((Nil, acc2))
+      persist_entry(path, TStr(x))
+      k(x)(Nil)
 
-fn step_bool(path, k, st, real) =
-  match st of
-    (Cons(TBool(x), rest), acc) => k(x)((rest, acc))
-    (Cons(_, _), _) => fail()
-    (Nil, acc) =>
+fn step_bool(path, k, t, real) =
+  match t of
+    Cons(TBool(x), rest) => k(x)(rest)
+    Cons(_, _) => fail()
+    Nil =>
       let x = real(())
-      let acc2 = Cons(TBool(x), acc)
-      persist(path, acc2)
-      k(x)((Nil, acc2))
+      persist_entry(path, TBool(x))
+      k(x)(Nil)
 
--- Output during the replayed prefix is dropped (it already fired in the run that
--- recorded the trace); once the loaded prefix is exhausted (the first state
--- component is Nil, the same "still-replaying vs live" flag the inputs thread),
--- output goes live to the real printer. The crash that froze the trace must fall
--- between an input and its following output for the boundary to be exact: that
--- output was never performed, so the live run performs it once.
-fn out_step(k, st, real) =
-  match st of
-    (Nil, acc) =>
+-- An output op records a `TOut` marker interleaved with the inputs, so an output
+-- that already ran is replayed (dropped) rather than re-performed. While the
+-- trace head is that marker the output is suppressed; once the trace is spent the
+-- output goes live. The marker is committed BEFORE the real emit, so a resumed
+-- run never double-prints an already-recorded output; the only residual window
+-- is a crash between the frame append and the emit itself (one observation wide),
+-- which the wire codec's atomic frame will later close.
+fn out_step(path, k, t, real) =
+  match t of
+    Cons(TOut, rest) => k(())(rest)
+    Cons(_, _) => fail()
+    Nil =>
+      persist_entry(path, TOut)
       real(())
-      k(())((Nil, acc))
-    (rem, acc) => k(())((rem, acc))
+      k(())(Nil)
 
 -- | Durable record/replay against a persisted log at `path`: replay the recorded
--- prefix with no real IO, then perform each new observation for real, appending
--- and persisting the trace after each so an interrupted run resumes where it left
--- off.
+-- prefix with no real IO, then perform each new observation for real, appending a
+-- frame per observation so an interrupted run resumes where it left off, exactly
+-- once at the crash boundary.
 pub fn durable(path, action) =
   let loaded =
     if prim_file_exists(path) then
@@ -189,19 +199,18 @@ pub fn durable(path, action) =
   let g =
     handle action(()) with
       con_read_int(u, k) =>
-        \(st) -> step_int(path, k, st, \(z) -> prim_read_int())
+        \(t) -> step_int(path, k, t, \(z) -> prim_read_int())
       con_read_line(u, k) =>
-        \(st) -> step_str(path, k, st, \(z) -> prim_read_line())
+        \(t) -> step_str(path, k, t, \(z) -> prim_read_line())
       fs_read_file(p, k) =>
-        \(st) -> step_str(path, k, st, \(z) -> prim_read_file(p))
+        \(t) -> step_str(path, k, t, \(z) -> prim_read_file(p))
       fs_file_exists(p, k) =>
-        \(st) -> step_bool(path, k, st, \(z) -> prim_file_exists(p))
-      rng_rand(u, k) => \(st) -> step_int(path, k, st, \(z) -> prim_rand())
-      env_get(s, k) => \(st) -> step_str(path, k, st, \(z) -> prim_getenv(s))
-      env_argc(u, k) =>
-        \(st) -> step_int(path, k, st, \(z) -> prim_args_count())
-      env_arg(i, k) => \(st) -> step_str(path, k, st, \(z) -> prim_arg(i))
-      out_print(x, k) => \(st) -> out_step(k, st, \(z) -> prim_print(x))
-      out_println(x, k) => \(st) -> out_step(k, st, \(z) -> prim_println(x))
-      return r => \(st) -> r
-  g((loaded, reverse(loaded)))
+        \(t) -> step_bool(path, k, t, \(z) -> prim_file_exists(p))
+      rng_rand(u, k) => \(t) -> step_int(path, k, t, \(z) -> prim_rand())
+      env_get(s, k) => \(t) -> step_str(path, k, t, \(z) -> prim_getenv(s))
+      env_argc(u, k) => \(t) -> step_int(path, k, t, \(z) -> prim_args_count())
+      env_arg(i, k) => \(t) -> step_str(path, k, t, \(z) -> prim_arg(i))
+      out_print(x, k) => \(t) -> out_step(path, k, t, \(z) -> prim_print(x))
+      out_println(x, k) => \(t) -> out_step(path, k, t, \(z) -> prim_println(x))
+      return r => \(t) -> r
+  g(loaded)

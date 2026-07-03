@@ -506,16 +506,6 @@ impl Isa for Inkwell<'_> {
         self.printf(".fmts", b"%s", self.pv(p).into());
     }
 
-    fn exit_with(&self, _b: &mut Buf, v: &str) {
-        let i32t = self.ctx.i32_type();
-        let c = self
-            .builder
-            .build_int_truncate(self.int(v), i32t, "")
-            .unwrap_or_else(|e| self.pint("trunc", &e));
-        let ex = self.decl("exit", self.ctx.void_type().fn_type(&[i32t.into()], false));
-        self.call_direct(ex, &[c.into()], "");
-    }
-
     fn jump(&self, _b: &mut Buf, l: &str) {
         self.act("br", self.builder.build_unconditional_branch(self.block(l)));
     }

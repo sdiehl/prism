@@ -1,0 +1,24 @@
+-- S6: a cancelled fiber runs its `on_cancel` (`final ctl`) finalizer exactly
+-- once. The worker parks at `yield`; the parent cancels it; on its next turn it
+-- unwinds through the finalizer, which prints once, and never runs its tail.
+
+import Concurrent (..)
+
+fn guarded() : !{Async(Int), IO} Int =
+  println("worker: before yield")
+  yield(())
+  println("worker: after yield (must not print)")
+  99
+
+fn worker() : !{Async(Int), IO} Int =
+  on_cancel(\() -> println("finalizer ran"), guarded)
+
+fn scene() : !{Async(Int), IO} Int =
+  let w = fork(worker)
+  yield(())
+  cancel(w)
+  yield(())
+  println("scene done")
+  0
+
+fn main() = println(run_async(scene))

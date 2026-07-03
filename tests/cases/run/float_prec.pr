@@ -1,0 +1,14 @@
+-- `show_float_prec` at the runtime buffer boundary. The precision-formatting
+-- path shares a hand-mirrored cap between the interpreter (a 63-char truncate)
+-- and the C runtime (a 64-byte `snprintf`, so 63 usable chars); the default
+-- float printer's differential test does not exercise it. These widths format
+-- exactly-representable values (so only the length cap is under test, not digit
+-- rounding) to lengths that sit just under, exactly at, and past the cap, so a
+-- future drift in either constant produces different bytes and fails the gate.
+fn main() =
+  println(show_float_prec(1.5, 60))
+  println(show_float_prec(1.5, 61))
+  println(show_float_prec(1.5, 62))
+  println(show_float_prec(1.5, 200))
+  println(show_float_prec(1048576.5, 58))
+  println(show_float_prec(3.25, 4))

@@ -356,6 +356,7 @@ b3:                                               ; preds = %entry
   ret i64 %t30
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 }
 
@@ -396,6 +397,7 @@ b3:                                               ; preds = %entry
   br i1 %t22, label %b4, label %b5
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 
 b4:                                               ; preds = %b3
@@ -485,6 +487,7 @@ b13:                                              ; preds = %b7
   ret i64 %t77
 
 b10:                                              ; preds = %b7
+  call void @prism_match_error()
   unreachable
 }
 
@@ -542,6 +545,9 @@ declare void @prism_print_nl() #0
 declare void @prism_drive_step() #0
 
 ; Function Attrs: nounwind
+declare void @prism_match_error() #0
+
+; Function Attrs: nounwind
 declare void @prism_rc_inc(i64) #0
 
 ; Function Attrs: nounwind
@@ -590,6 +596,7 @@ b3:                                               ; preds = %entry
   ]
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 
 b6:                                               ; preds = %b3
@@ -632,6 +639,7 @@ b7:                                               ; preds = %b3
   ret i64 %t49
 
 b5:                                               ; preds = %b3
+  call void @prism_match_error()
   unreachable
 }
 

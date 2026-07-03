@@ -1,0 +1,55 @@
+-- The row names the missiles. A single IO type can say only that a function
+-- does something to the world; here the international side effect is a row
+-- label, and the only way to be rid of it is to handle it.
+--
+-- A handler is a treaty: install one and every launch is intercepted before
+-- it reaches the world. war_games discharges Missiles without resuming, so
+-- from the outside it is a pure function of type () -> Int. joshua goes
+-- further: choose resumes its continuation twice, once per side, so every
+-- future of the exchange is played out under the treaty and none of them
+-- wins. No missiles were launched in the evaluation of this program.
+--
+-- Expected output:
+--   greetings professor falken
+--   winning moves: 0
+--   joshua: 0 winning moves across every future
+
+effect Missiles {
+  ctl launch(Int) : Unit
+}
+
+effect Warplan {
+  ctl choose(Unit) : Bool
+}
+
+fn first_strike() : !{Missiles} Int =
+  launch(100)
+  1
+
+fn exchange(us_first : Bool) : !{Missiles} Int =
+  if us_first then
+    launch(100)
+  else
+    launch(99)
+  1
+
+-- a strange game. the only winning move is not to play.
+fn war_games() : Int =
+  handle first_strike() with
+    launch(_warheads, _k) => 0
+    return moves => moves
+
+fn played(us_first : Bool) : Int =
+  handle exchange(us_first) with
+    launch(_warheads, _k) => 0
+    return moves => moves
+
+fn joshua() : Int =
+  handle played(choose(())) with
+    choose(_u, k) => k(true) + k(false)
+    return total => total
+
+fn main() =
+  println("greetings professor falken")
+  println("winning moves: {war_games()}")
+  println("joshua: {joshua()} winning moves across every future")

@@ -1,4 +1,4 @@
-fn print_list(xs) =
+fn print_list(xs : List(Int)) =
   match xs of
     Nil => ()
     Cons(x, rest) =>

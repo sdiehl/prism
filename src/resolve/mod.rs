@@ -50,6 +50,20 @@ pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
     roots
 }
 
+/// The dotted paths of every module `root` transitively imports, in load order.
+///
+/// A pure enumeration with no side effects: the CLI uses it to report which
+/// files enter a build, without duplicating the loader's search logic.
+///
+/// # Errors
+/// Fails when an imported module resolves in no root or does not parse.
+pub fn imported_paths(root: &Program, roots: &[Root]) -> Result<Vec<String>, Error> {
+    Ok(load(root, roots)?
+        .into_iter()
+        .map(|m| m.path.join("."))
+        .collect())
+}
+
 /// Bare names a selective import binds in unqualified scope, each mapped to the
 /// canonical symbol it resolves to.
 type Unqualified = BTreeMap<String, String>;
@@ -388,6 +402,7 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
         root.synonyms.extend(p.synonyms);
         root.classes.extend(p.classes);
         root.instances.extend(p.instances);
+        root.stable.extend(p.stable);
         root.canonicals.extend(p.canonicals);
         root.patterns.extend(p.patterns);
         root.fns.extend(p.fns);
@@ -510,6 +525,29 @@ impl<'a> Rw<'a> {
         }
         for f in &mut p.fns {
             self.decl(f, true);
+        }
+        // Resolve names inside `stable` blocks (field types, additive defaults,
+        // and converter bodies) before desugar expands them into ordinary
+        // types/fns. A converter's `{ ..vN, .. }` body binds its source rung as a
+        // local, so push that before resolving the body.
+        for sd in &mut p.stable {
+            for rung in &mut sd.rungs {
+                for field in &mut rung.fields {
+                    self.ty(&mut field.ty);
+                    if let Some(def) = &mut field.default {
+                        self.expr(def);
+                    }
+                }
+            }
+            for cv in &mut sd.converters {
+                let base = self.locals.len();
+                self.locals.push(crate::names::stable_param(&cv.from));
+                self.expr(&mut cv.base);
+                for (_, e) in &mut cv.overrides {
+                    self.expr(e);
+                }
+                self.locals.truncate(base);
+            }
         }
         self.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
     }

@@ -1,0 +1,20 @@
+-- Exercises the unified `Blit` class on each instanced sequence type: a string
+-- splice via the `substring` primitive, and an array range-copy via in-place
+-- `array_set`. Both run through the one `blit` method, so the same call shape
+-- overwrites a slice of the destination regardless of the underlying container.
+
+import Blit (..)
+
+fn show_ints(xs : List(Int)) : String = show(xs)
+
+fn main() =
+  -- Overwrite "world" inside the greeting with "there": copy 5 chars from the
+  -- source at offset 0 into the destination at offset 6.
+  println(blit("there", 0, 5, "hello world!", 6))
+  -- Same operation on an array of ints: copy [7, 8, 9] over positions 1..4.
+  let dst = array_of_list([0, 0, 0, 0, 0])
+  let src = array_of_list([7, 8, 9])
+  let out = blit(src, 0, 3, dst, 1)
+  println(show_ints(array_to_list(out)))
+  -- A zero-length blit is the identity on the destination.
+  println(blit("abc", 0, 0, "xyz", 1))

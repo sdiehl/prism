@@ -738,6 +738,15 @@ class Show(a) {
   show : (a) -> String
 }
 
+-- | A content hash of a value, as a lowercase blake3 hex digest. `deriving
+-- (Hash)` folds a value structurally into the same content-addressing scheme the
+-- compiler hashes code with (a constructor token followed by its fields' own
+-- digests), so structurally equal values hash equal, byte-for-byte identically on
+-- the interpreter and native backends. The leaf instances below anchor the fold.
+class Hash(a) {
+  hash : (a) -> String
+}
+
 -- | Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances
 -- cover homogeneous powers; a mixed `Int ^ Float` is a type error.
 class Pow(a) {
@@ -871,6 +880,41 @@ fn show_list_body(xs : List(a), first : Bool) : String given Show(a) =
     Nil => ""
     Cons(h, t) =>
       concat(concat(if first then "" else ", ", show(h)), show_list_body(t, false))
+
+-- The leaf `Hash` instances: each tags its byte encoding with a distinct prefix
+-- (so an `Int` and a same-length `String` cannot collide) and folds it through
+-- blake3. Derived instances chain these under a per-constructor Merkle node.
+instance hashInt : Hash(Int) {
+  fn hash(x) = blake3(concat("i", show_int(x)))
+}
+
+instance hashI64 : Hash(I64) {
+  fn hash(x) = blake3(concat("j", show_i64(x)))
+}
+
+instance hashU64 : Hash(U64) {
+  fn hash(x) = blake3(concat("u", show_u64(x)))
+}
+
+instance hashBool : Hash(Bool) {
+  fn hash(x) = blake3(concat("o", if x then "1" else "0"))
+}
+
+instance hashChar : Hash(Char) {
+  fn hash(x) = blake3(concat("C", show_int(ord(x))))
+}
+
+instance hashFloat : Hash(Float) {
+  fn hash(x) = blake3(concat("f", show_float(x)))
+}
+
+instance hashStr : Hash(String) {
+  fn hash(x) = blake3(concat("s", concat(show_int(byte_len(x)), concat(":", x))))
+}
+
+instance hashUnit : Hash(Unit) {
+  fn hash(x) = blake3("1")
+}
 
 instance powInt : Pow(Int) {
   fn pow(b, e) = int_pow(b, e)

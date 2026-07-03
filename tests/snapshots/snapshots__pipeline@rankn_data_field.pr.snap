@@ -242,6 +242,7 @@ b2:                                               ; preds = %entry
   br label %b0
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 
 b0:                                               ; preds = %b2
@@ -255,6 +256,9 @@ b0:                                               ; preds = %b2
 
 ; Function Attrs: nounwind
 declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_inc(i64) #0

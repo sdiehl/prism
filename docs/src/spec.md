@@ -150,7 +150,7 @@ Besides `*` and its arrows there is one further kind, `Row`, inhabited by effect
 
 ### 5.3 Inference, Generalization, and Defaulting {#inference-generalization-and-defaulting}
 
-A row is built from _labels_, the effect names of [effects and handlers](#effects-and-handlers) (a parametric effect's label carries type arguments). It is _closed_ when it ends in a fixed set of labels and _open_ when it ends in a row variable (`! {L | r}`), which stands for further labels the caller may add. An unannotated binding is generalized over its free type and row variables not fixed by the surrounding scope. Two cases default rather than generalize, both resolved in one pass at generalization. A numeric operand of an arithmetic or comparison operator left otherwise unconstrained defaults to `Int`; because the default is deferred to that pass rather than applied at the operator, a later use that fixes the operand to a fixed-width lane (`I64`/`U64`) takes precedence, so `x + y` followed by an `i64` use of `x` is fixed-width, not `Int`. An open row left unconstrained at a monomorphic declaration (one with no remaining free row variable) defaults to empty (pure); an effect-polymorphic declaration keeps its row variable, as `traverse` does in the prelude ([the standard prelude](#the-standard-prelude)).
+A row is built from _labels_, the effect names of [effects and handlers](#effects-and-handlers) (a parametric effect's label carries type arguments). It is _closed_ when it ends in a fixed set of labels and _open_ when it ends in a row variable (`! {L | r}`), which stands for further labels the caller may add. An unannotated binding is generalized over its free type and row variables not fixed by the surrounding scope. A bare type variable written in a top-level function's signature is an implicit `forall`: it is universally quantified and rigid, so the body is checked to hold for every instantiation and may neither narrow it to a concrete type nor equate two distinct signature variables (a body that does is a type error), and the declaration exports exactly the polymorphic scheme it wrote. Two cases default rather than generalize, both resolved in one pass at generalization. A numeric operand of an arithmetic or comparison operator left otherwise unconstrained defaults to `Int`; because the default is deferred to that pass rather than applied at the operator, a later use that fixes the operand to a fixed-width lane (`I64`/`U64`) takes precedence, so `x + y` followed by an `i64` use of `x` is fixed-width, not `Int`. An open row left unconstrained at a monomorphic declaration (one with no remaining free row variable) defaults to empty (pure); an effect-polymorphic declaration keeps its row variable, as `traverse` does in the prelude ([the standard prelude](#the-standard-prelude)).
 
 ### 5.4 Subsumption and Row Equivalence {#subsumption-and-row-equivalence}
 
@@ -178,7 +178,7 @@ A `type` declaration introduces an algebraic data type: a _sum_ of constructors,
 {{#include ../examples/adt.pr}}
 ```
 
-A `newtype` is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. A `deriving (C, ...)` clause generates the named instances structurally ([type classes](#type-classes)); `Eq`, `Ord`, `Show`, and `Lens` are derivable.
+A `newtype` is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. An `alias` whose body is a row literal is a _row alias_, the same transparency for a set of effect labels: usable wherever a row is written, expanded before checking, and composable with other aliases ([composing rows](#composing-rows)); a row alias takes no parameters. A `deriving (C, ...)` clause generates the named instances structurally ([type classes](#type-classes)). `Eq`, `Ord`, `Show`, `Hash`, and `Lens` are derivable everywhere: derived `Ord` compares fields lexicographically in declaration order and orders constructors by declaration, and derived `Hash` folds the value through the same blake3 Merkle construction that content-addresses code ([content-addressed core](compiler.md#content-addressed-core)), so structurally equal values carry one canonical digest on every backend. Three more classes derive against opt-in modules: `Serialize` and `Stable` (`import Wire`) for the wire codec, where `Stable` derives only when every component is itself `Stable` and a non-stable field is a compile error at the derive site, and `Arbitrary` (`import Test`) for property-test generators built from the type's structure ([stable blocks](#stable-blocks)). `deriving (Identifiable)` is shorthand for the identity starter pack, expanding to exactly `Eq`, `Ord`, `Hash`, and `Show` so an ID newtype is comparable, hashable, and printable from one keyword with no imports; a class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
 
 ### 5.7 Records {#record-types}
 
@@ -190,7 +190,9 @@ A constructor may instead take _named_ fields, `C { f : T, ... }`, making the ty
 
 ## 6. Type Classes {#type-classes}
 
-A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A constrained function receives its dictionaries as hidden arguments resolved at each call site. The following program declares a second `Ord(Int)` instance named `ordDesc` that reverses the ordering, designates the prelude's ascending `ordInt` as canonical, and selects each explicitly.
+A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A function states its constraints with a `given` clause after the return annotation, as `maximum_by_ord` and `join_shown` below do, and receives its dictionaries as hidden arguments resolved at each call site, one per constraint. The following program declares a second `Ord(Int)` instance named `ordDesc` that reverses the ordering, designates the prelude's ascending `ordInt` as canonical, and selects each explicitly.
+
+Each method in an instance body is written in expression form, `fn m(x) = e`; the brace-delimited instance body suspends layout, so a method needing several bindings chains them with `let .. in` rather than the layout-sequenced statements a top-level `fn` body admits.
 
 ```prism
 {{#include ../examples/classes.pr}}
@@ -272,6 +274,12 @@ The defining property of the row discipline: an operation handled inside a funct
 {{#include ../examples/eff_exn.pr}}
 ```
 
+The old joke about purity is that a function of type `Int -> Int` cannot launch the missiles. A single `IO` type can put it no more precisely than that: somewhere, something happens to the world. Here the international side effect is declared in the language itself, an `effect Missiles` whose row label follows `first_strike` through every signature that might perform it, and observability is what disarms it: `war_games` handles `launch` and never resumes, so its inferred type is `() -> Int`, pure. The missiles are not merely unlaunched but gone from the type. `joshua` adds multishot resumption ([effects and handlers](#effects-and-handlers)): its `choose` clause resumes the continuation once per side, so every future of the exchange is played out under the treaty handler and their scores summed. Every future is explored, none of them wins, and `joshua` is still pure. So thermonuclear war doesn't typecheck, world peace achieved.
+
+```prism
+{{#include ../examples/missiles.pr}}
+```
+
 ### 7.2 Clause Sugar {#clause-sugar}
 
 Two clause forms abbreviate common shapes. `fun op(x) => e` is tail-resumptive sugar for `op(x, k) => k(e)`, resuming exactly once. `val v = e` is an install-time constant: `e` runs once when the handler installs, and every use of `v` returns it.
@@ -290,7 +298,19 @@ A `final ctl op(x) => e` clause is non-resumable: it discards the continuation. 
 {{#include ../examples/mask.pr}}
 ```
 
-### 7.4 Local Mutation {#local-mutation}
+### 7.4 Named Handlers {#named-handlers}
+
+The statement form `with handler { ... }` scopes a handler over the remainder of the enclosing block, so a stack of handlers reads as a flat sequence of layers rather than a rightward drift of nested `handle` expressions ([composing rows](#composing-rows) puts this form to work). Adding a binder makes the handler first-class: `with f <- handler { ... }` installs the handler and binds it as an _instance_, and an operation addressed through it, `f.read()`, dispatches to that instance even when another handler of the same effect sits closer. A bare `read()` still reaches the innermost ordinary handler, so two instances of one effect can serve one scope, distinguished by name where the innermost-handler rule alone could not tell them apart. [Masking](#masking) skips handlers by position; a named handler addresses one directly.
+
+```prism
+{{#include ../examples/named_handlers.pr}}
+```
+
+Each instance desugars to a fresh private effect whose operations are unforgeable from source, so the rest of the pipeline sees ordinary effects and ordinary rows; resumption is unrestricted through an instance (the multishot clause above resumes the continuation of `h.ask()` twice). The escape analysis of [local mutation](#local-mutation) applies here too: a closure or returned value that would carry an instance out of its `with` block is rejected, so an instance never outlives its handler.
+
+The resource form `with x <- f(args)` generalizes the same shape to any function that takes its continuation last: the remainder of the block becomes a function `\(x) -> rest` appended to the call's arguments, so `f` decides when, whether, and how often to run the rest. This is the bracket idiom (acquire, use, release) written without nesting.
+
+### 7.5 Local Mutation {#local-mutation}
 
 A `var` mutates, yet the function holding it stays pure. `fib_iter` below updates two locals in a loop but has type `(Int) -> Int` with an empty row, so it is accepted where only a pure function is allowed. Prism has no mutation primitive; `var` is sugar over the effect system.
 
@@ -326,7 +346,7 @@ A `var x := e` desugars to a private two-operation effect (a get and a set); eac
 
 An escape analysis keeps the purity honest: the compiler rejects any closure or returned value that would carry the var out of its block, so the state cannot outlive its handler.
 
-### 7.5 Errors and Failure {#errors-and-failure}
+### 7.6 Errors and Failure {#errors-and-failure}
 
 Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of the [clause sugar](#clause-sugar). With the imperative `break`, `continue`, and `return` of [imperative control flow](#imperative-control-flow), they are one mechanism wearing several faces: each is a single-operation effect whose handler never resumes the captured continuation, installed only where the corresponding keyword actually occurs, so non-local control costs nothing where it is not used and (being handled at its boundary) surfaces in no effect row where it is.
 
@@ -334,6 +354,12 @@ Prism has no built-in exception type. Errors and failure are two related mechani
 
 ```prism
 {{#include ../examples/errors.pr}}
+```
+
+**Stacks of failure modes.** Because each `error` is an ordinary row label, a row alias ([composing rows](#composing-rows)) names a set of failure modes: `alias ConfigErr = {NotFound, Malformed}` states a subsystem's failure vocabulary once, and a layer above extends it structurally, `alias AppErr = {ConfigErr, NetErr}`, with no umbrella type and no wrapping. A signature `: !{AppErr} Int` reads as "may fail in exactly these ways", and because expansion flattens before checking, `catch` subtracts labels from the expanded set like any other handler: a partial catch over an alias discharges the modes it names and leaves the rest in the row.
+
+```prism
+{{#include ../examples/failure_stack.pr}}
 ```
 
 These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `error(code)` and uncatchable (it aborts); `Result` with the postfix `e?` propagation of the [expression forms](#expressions); a plain `match` on `Ok`/`Err`; and a custom non-resumable effect.
@@ -350,7 +376,23 @@ These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `e
 
 **Partiality is in the row, not the name.** ML libraries such as OCaml's Base and Core suffix a partial function with `_exn` (`List.hd_exn`) so a reader knows it may raise, a naming convention standing in for what the type itself cannot say. Prism needs no such convention: a function that may fail carries that in its effect row, whether as the anonymous `Fail` above or a named `error`, so the possibility of failure is written into the signature and the row discipline forces it to be handled before the result is used. The `_exn` suffix is the workaround for a type system that cannot express failure; the row is the version the compiler checks.
 
-### 7.6 Effect Polymorphism {#effect-polymorphism}
+### 7.7 Composing Rows {#composing-rows}
+
+A row alias composes rows the way `+` composes sums. With `AB = {A, B}` and `CD = {C, D}`, the row `{AB, CD, E}` assembles five effects from two named pairs and a fifth label: `(A + B) + (C + D) + E`. Because a row is an unordered set ([subsumption and row equivalence](#subsumption-and-row-equivalence)) and an alias expands transparently before checking, the sum flattens: any grouping and any order of the same five labels is the _same row_, so `omega` and `flat` below are interchangeable, and a grouping is chosen for the reader, not for the checker. An alias may reference other aliases (a cycle is an error at the declarations involved), and takes no parameters.
+
+```prism
+{{#include ../examples/row_compose.pr}}
+```
+
+This is the row discipline's answer to the monad-transformer stack. A transformer application fixes one composite type, `ReaderT Config (WriterT Log (Except E))`, and pays for it twice: every layer's operations are lifted through the layers above (or a class such as `MonadWriter` is threaded through, at a quadratic cost in instances), and the order of wrapping is welded into every signature even where no code depends on it. An alias instead makes the application row a name for a set, `Ctx = {Ask, Tell}` and `App = {Ctx, Invalid}` below. An operation reaches its handler by label, never by position, so there is no `lift`; a function that uses only `Tell` states `!{Tell}` and slots unchanged into `App` or any other row containing it; and two subsystems' aliases union structurally, with no adapter between their stack and ours.
+
+What a transformer stack fixes in the type, the handler site decides per call (the layering point already made for `{State, Fail}` under [higher-kinded classes](#higher-kinded-classes)). Discharged one label at a time with the scoped `with handler` layers of [named handlers](#named-handlers), the run function reads like the transformer stack it replaces, except that the order is chosen where the handlers install, free to differ between call sites without a signature changing. The application monad becomes the application row: a name for what may happen, not a recipe for how it is wrapped.
+
+```prism
+{{#include ../examples/app_stack.pr}}
+```
+
+### 7.8 Effect Polymorphism {#effect-polymorphism}
 
 A function can be generic over the effects of a thunk it is given by quantifying over a row variable in the argument's type. Below, `twice` accepts any `(Unit) -> Int` thunk and adds an open row `{| e}` for whatever that thunk performs; each call unifies `e` with the actual row (empty, `{Tick}`, or `{Say}`), and a handler discharges only the label it names, leaving the rest in `e`. This is the mechanism the prelude's `fmap` and `traverse` use to thread a per-element effect ([higher-kinded classes](#higher-kinded-classes)), so an effectful traversal needs no `Applicative` wrapper.
 
@@ -360,7 +402,15 @@ The same row variable also governs an effect operation whose argument is a compu
 {{#include ../examples/eff_poly.pr}}
 ```
 
-### 7.7 Capability Effects and IO {#capability-effects-and-io}
+### 7.9 Structured Concurrency and Cancellation {#structured-concurrency}
+
+The [`Concurrent`](./stdlib/concurrent.md) library builds structured concurrency and cancellation on the `Async` operations above, and their contract is stated here as observable behavior rather than as a property of the scheduler. A `scope(tasks)` forks a list of fibers and joins them all before it returns, so no fiber outlives the call that spawned it, and a fiber's descendants are tracked so that an action taken on a fiber reaches everything it forked.
+
+Cancellation is a cooperative unwind, not an abrupt drop. `cancel(f)` marks the fiber `f` and all of its descendants; each stops at its next suspension point (a `yield`, an `await`, a channel operation) rather than mid-step, and then unwinds through its finalizers so every resource it holds is released. A finalizer is installed with `on_cancel(cleanup, body)`, which guarantees `cleanup` runs exactly once whether `body` finishes normally or is cancelled, and nested `on_cancel` cleanups run innermost first, the same order a stack of `final ctl` handlers unwinds ([clause sugar](#clause-sugar)). Waiting on a fiber that may be cancelled never hangs: `try_await(f)` returns an `Outcome(a) = Completed(a) | Was_Cancelled`, `Completed(v)` when `f` produced `v` and `Was_Cancelled` when it was cancelled before it could, where a bare `await` would have no value to yield.
+
+A `scope` is fail-fast. If one task fails with an unhandled `fail()` ([errors and failure](#errors-and-failure)), its sibling tasks are cancelled, their `on_cancel` finalizers run, and the failure is re-raised at the scope boundary rather than being swallowed. The failure therefore leaves `run_async` in the caller's residual row: `run_async : (() -> a ! {Async(a) | e}) -> a ! {e}` discharges `Async` but a failing scope forces `Fail` into `e`, so a program that spawns fallible work carries `{Fail}` out to a handler exactly as if it had performed `fail()` directly. Cancellation and failure are thus one mechanism seen from two sides: a deliberate `cancel` and a fail-fast sibling cancellation unwind through the identical finalizer path, so a resource is released once and only once on either.
+
+### 7.10 Capability Effects and IO {#capability-effects-and-io}
 
 Reading the outside world is itself effectful, and the row records which part of the world a function reads. The nondeterministic input operations are the four _capability_ effects `Console` (`read_int`, `read_line`), `FileSystem` (`read_file`, `file_exists`), `Random` (`rand`), and `Env` (`getenv`, `args_count`, `arg`). A function that reads input names exactly that capability in its row: a function calling `read_int` carries `! {Console}`, not a blanket `! {IO}`, so the row says which part of the world is read rather than merely that some IO happens. (`Console`, `FileSystem`, `Random`, and `Env` are therefore reserved effect names, among the [keywords](#keywords). The `Concurrent` library adds a fifth capability, `Clock`, described below. One further name, `Preempt`, the row label a preemptive scheduler will discharge, is reserved not shipped: it is rejected as a user effect declaration and, being outside the `replayable`-permitted set, makes a preemptive program non-replayable by the existing row check with no new rule.)
 
@@ -382,7 +432,7 @@ The example below is the whole discipline on one page. Two fibers `sleep` and re
 {{#include ../examples/clock.pr}}
 ```
 
-### 7.8 Capability-Based Sandboxing {#capability-based-sandboxing}
+### 7.11 Capability-Based Sandboxing {#capability-based-sandboxing}
 
 Because a function's row records exactly which capabilities it exercises and a handler is what discharges a capability, a `handle` block that installs a restricted set of handlers is a sandbox: a sub-computation it runs can perform only the operations those handlers answer. A function given no `Async` handler in scope cannot spawn a fiber; a function whose row lacks `FileSystem` cannot read a file; a computation run under a world handler that stubs `read_file` to a fixed value cannot reach the real filesystem no matter what it calls, because the only interpreter for that operation in scope is the stub. Anything the sandbox does not discharge is not ambient background authority it might reach anyway, it is a label left in the row that some enclosing handler must still answer, and if none does the program does not type. This is object-capability security recovered from the effect row at no additional cost: authority is precisely the set of handlers in scope, it is delegated by passing a thunk into a handler rather than by granting an ambient permission, and it is attenuated by nesting a sub-computation inside a narrower handler that intercepts or denies operations before any outer one sees them. Concurrency is one capability among the rest rather than a privileged subsystem, so the same `handle` that sandboxes IO sandboxes spawning: a scheduler is just the handler that answers `Async`, and code with no such handler in scope is sequential by construction. The mechanism is exactly the effect handlers already described ([capability effects](#capability-effects-and-io), [effect polymorphism](#effect-polymorphism)); this section only names the security reading that the rows already justify.
 
@@ -392,7 +442,7 @@ Below, `untrusted` reads files, but `sandbox` discharges its `FileSystem` capabi
 {{#include ../examples/sandbox.pr}}
 ```
 
-### 7.9 Record and Replay {#record-and-replay}
+### 7.12 Record and Replay {#record-and-replay}
 
 A program that reads stdin, files, randomness, or the environment takes a different path each time the world answers differently, which is what makes such a run hard to reproduce. Record and replay captures one run as a trace and re-runs it deterministically: an interactive session becomes a fixed regression test, a failing run becomes a reproducible bug report that needs none of the original environment, and a program can be re-executed offline against the captured trace rather than the live world. Persisting that trace to a log as it is produced turns replay into durable execution: the module's `durable` handler reloads the logged prefix on restart and continues live once it is exhausted, so a crashed run resumes where it stopped rather than starting over. The direction this points at is a suspended computation that is itself a value, one that can be persisted and resumed later or after a crash, the durable-execution semantics other systems provide as a separate service.
 
@@ -412,7 +462,7 @@ The two pieces fit together in a few lines: `roll` is `replayable` because it re
 {{#include ../examples/durable_intro.pr}}
 ```
 
-### 7.10 Streams {#streams}
+### 7.13 Streams {#streams}
 
 Streams are the prelude's data-processing combinators, built on a single `Emit(a)` effect rather than on intermediate collections. A _producer_ performs `Emit` once per element (`srange`, `sof`); a _transformer_ handles a producer's emissions and re-emits the survivors (`smap`, `skeep`, `stake`); and a _consumer_ handles `Emit` by folding every emission into a result (`sfold`, `ssum`, `scollect`). A pipeline is the consumer wrapped around the transformers wrapped around the producer, one handler stack over one producer loop.
 
@@ -421,6 +471,14 @@ Because emission is an effect the consumer discharges, a pipeline _fuses_: `sran
 ```prism
 {{#include ../examples/streams.pr}}
 ```
+
+### 7.14 Incremental Computation {#incremental-computation}
+
+The `Incr` stdlib module (`import Incr`) is self-adjusting computation as a handler: a program builds a demand graph of source nodes and derivations, and re-reading the graph after a change recomputes only the part a change can reach. `input(v)` creates a mutable source, `get(n)` reads a node (recording the read as a dependency of whatever derivation is running), `set(n, v)` updates a source, and `memo(thunk)` wraps a derivation whose value is cached and re-demanded rather than recomputed blindly. `run_incr(action)` discharges the effect, running `action` as the root observer of a fresh graph; the ambient row of effects the derivations perform flows out unchanged, exactly as `run_async` passes a fiber's row through.
+
+The contract that makes it incremental is _early cutoff_: after a `set`, re-reading a node re-demands exactly the affected cone, and a derivation whose recomputed value is unchanged does not disturb its dependents. "Unchanged" is an exact content-hash comparison over the serialized value, the same blake3 digest that content-addresses code ([content-addressed core](./compiler.md#content-addressed-core)), not a user-written equality, so a derivation that recomputes to the same answer halts propagation with no dirty-bit bookkeeping, and a `set` to a value a source already holds is a no-op.
+
+`run_incr_durable(path, tag, action)` persists the memo table to a snapshot so a later run warms from it rather than recomputing from scratch. A warm run's output is byte-identical to a cold one, and a missing, corrupt, or foreign-tagged snapshot silently cold-starts rather than yielding a wrong answer, so the snapshot changes only cost, never result. Because warming a derivation skips its thunk, a durable derivation must be pure up to `Fail` (a thunk that printed or drew randomness would change the output if skipped), and only the derivations built before the first input-dependent read are warmed. The worked example is [`examples/leaderboard.pr`](https://github.com/sdiehl/prism/blob/main/examples/leaderboard.pr).
 
 ## 8. Expressions {#expressions}
 
@@ -575,7 +633,7 @@ A `match` arm may carry a guard, `pat if cond => body`; when the guard is false,
 {{#include ../examples/guards.pr}}
 ```
 
-A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional pattern synonym: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, from [the standard prelude](#the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a _prism_ (a composable view-and-build pair); one with only `view` is a view pattern.
+A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional pattern synonym: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, from [the standard prelude](#the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a _prism_ (a composable view-and-build pair); one with only `view` is a view pattern. The `for` target may also name a class rather than a type, with the view a method of that class: `pattern First(n) for Peek = view peek` matches a value of any type with a `Peek` instance, dispatching `peek` through the dictionary at each match site, so one synonym destructures every instance.
 
 ```prism
 {{#include ../examples/pattern_syn_sugar.pr}}
@@ -583,19 +641,49 @@ A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional p
 
 ## 10. Declarations and Programs {#declarations-and-programs}
 
-A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it. A return annotation is written `: !{R} T` for result type `T` and effect row `R`, `: ! T` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p = e)`; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
+A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it. A return annotation is written `: !{R} T` for result type `T` and effect row `R`, `: ! T` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
+
+```prism
+{{#include ../examples/named_args.pr}}
+```
 
 A function may be annotated `fip` or `fbip` to assert the fully-in-place discipline of [Lorenzen et al. (2023)](bibliography.md#lorenzen-fp2-2023). `fbip` proves the body allocates no fresh cell and calls only annotated, allocation-free functions. `fip` additionally proves linearity (each owned, non-immediate binding is consumed at most once) and bounded stack (each recursive call in the group is a tail call or a single tail-modulo-cons or tail-modulo-add). These are static checks that reject a non-conforming body; the mechanism is described under [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse). A function may additionally, or independently, be annotated `replayable` ([record and replay](#record-and-replay)), which certifies it performs only the recordable capability effects and so is reproducible from a recorded trace; `replayable` is orthogonal to `fip`/`fbip` and may combine with either.
-
-The zero-allocation guarantee also has a postfix spelling, `without alloc`, written after the return annotation: `fn dot(xs : Vec, ys : Vec) : Int without alloc = ...`, with the terser synonym `\ alloc` (`: Int \ alloc`), read as the result type with the `alloc` usage subtracted. It reads allocation as a capability the function revokes, and carries the same check as `fbip` (the body and its whole call tree allocate no fresh cell, calling only allocation-free functions), without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: !{IO} T without alloc`), and interoperates with the keyword forms: a `without alloc` function may call `fip`, `fbip`, or `without alloc` functions.
-
-The same guarantee applies to a region rather than a whole function through the block form `without alloc <block>`, which asserts that the block allocates no fresh cell. Desugar lifts the block to a synthetic top-level `without alloc` function capturing the block's free locals and replaces it with a call ([desugaring](compiler.md#desugaring)), so the identical check covers exactly the region; a `return`, `break`, or `var` inside the block behaves as if written inline, since its control or state effect tunnels out to the enclosing handler.
-
-`borrow`, `fip`/`fbip`, and `without alloc`/`\ alloc` form one family, distinct from the effect row. The effect row records what a function _does_ to the world (which operations it performs); these annotations record how a function _uses_ its values (whether it retains a borrowed argument, allocates a fresh cell, or consumes each owned value once). The two axes are orthogonal and compose freely: a function can be `without alloc` while performing `IO`, and `replayable` while being `fip`. Allocation appears on both axes for different purposes: as a usage property here, checked and forbidden by `without alloc`, and, in a future arena facility, as an ordinary effect a handler interprets to service allocation out of a region.
 
 ```prism
 {{#include ../examples/fip_list.pr}}
 ```
+
+### 10.1 Zero-Allocation Blocks {#zero-allocation-blocks}
+
+The zero-allocation guarantee has a postfix spelling, `without alloc`, written after the return annotation. It reads allocation as a capability the function revokes, and carries the same check as `fbip` (the body and its whole call tree allocate no fresh cell, calling only allocation-free functions), without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: !{IO} T without alloc`), and interoperates with the keyword forms: a `without alloc` function may call `fip`, `fbip`, or `without alloc` functions.
+
+The same guarantee applies to a region rather than a whole function through the block form `without alloc <block>`, which asserts that the block allocates no fresh cell. Desugar lifts the block to a synthetic top-level `without alloc` function capturing the block's free locals and replaces it with a call ([desugaring](compiler.md#desugaring)), so the identical check covers exactly the region; a `return`, `break`, or `var` inside the block behaves as if written inline, since its control or state effect tunnels out to the enclosing handler. `gcd` below certifies a whole function; `horner` certifies only the expression after its `let`.
+
+```prism
+{{#include ../examples/no_alloc.pr}}
+```
+
+The same certificate has a terser second spelling, `\ alloc`, read as the result type with the `alloc` usage subtracted. It is a pure synonym, checked identically; the formatter canonicalizes it to `without alloc`.
+
+```prism
+fn scale(x : Int, k : Int) : Int \ alloc = k * x
+
+fn area(w : Int, h : Int) : Int \ alloc = scale(w, h)
+```
+
+`borrow`, `fip`/`fbip`, and `without alloc`/`\ alloc` form one family, distinct from the effect row. The effect row records what a function _does_ to the world (which operations it performs); these annotations record how a function _uses_ its values (whether it retains a borrowed argument, allocates a fresh cell, or consumes each owned value once). The two axes are orthogonal and compose freely: a function can be `without alloc` while performing `IO`, and `replayable` while being `fip`. Allocation appears on both axes for different purposes: as a usage property here, checked and forbidden by `without alloc`, and, in a future arena facility, as an ordinary effect a handler interprets to service allocation out of a region.
+
+### 10.2 Stable Blocks {#stable-blocks}
+
+A serialized value is a contract across time: bytes written by yesterday's binary are read by today's, so a persisted format must never drift silently with the in-memory type. A `stable` block declares a type's frozen wire history inline, on the type itself. Each entry is a _rung_: a record layout named `V1`, `V2`, and so on, where a later rung may extend its predecessor with `..Vn` and new fields. The block's last rung is the current one, and the bare type name (`Save` below) refers to it; an earlier rung is a real type of its own, named `Save.V1`.
+
+```prism
+{{#include ../examples/stable.pr}}
+```
+
+The inline default (`fog: Int = 30`) is the entire cost of an additive change: from it the compiler generates the total `upgrade_Save_V1_V2` (fill the new field with its default) and the honest `downgrade_Save_V2_V1`, which drops the field and returns the lowered value together with a `Loss` naming what could not be carried down. A change the compiler cannot guess, such as a field changing type, is written by hand inside the block as an `upgrade Vn -> Vm = ...` or `downgrade Vm -> Vn = ... drop_loss(f)` converter. Only adjacent converters ever exist; spanning several versions composes along the ladder, so N versions cost N-1 converters, never a pairwise matrix. Upgrade after downgrade is the identity on the safe subset, a law emitted as a property test over the derived generators rather than left to review.
+
+A rung marked `frozen "<digest>"` is sealed: the digest is the rung's structural shape digest, the same construction that content-addresses every datatype ([content-addressed core](compiler.md#content-addressed-core)). Editing a sealed rung in place moves the digest and the program stops compiling, with the error naming the rung and the remedy: add a new rung instead of editing a shipped one. A rung that never shipped is reseated with `prism wire --accept <file>`, which recomputes and rewrites its digest in place, loudly. The block also derives the type's `Serialize` against the current rung, and the generated ladder functions lift a value between rungs explicitly, so an old value is carried up through its converters rather than re-parsed by hand; a frame's version rides its envelope, and dispatching an old frame through the ladder automatically is the wire library's job as that layer grows. The codec itself, the byte-level frame with its total decoder, is the `Wire` library, an opt-in import ([the standard prelude](#the-standard-prelude)): a program that never persists a value pays for none of this.
 
 ## 11. Modules {#modules}
 
@@ -668,4 +756,4 @@ geometry = { path = "../geometry" }
 
 ## 12. The Standard Prelude {#the-standard-prelude}
 
-The prelude is in scope in every module. It is ordinary Prism, not built-in, assembled from modules under `lib/std`: the prelude opens the `Data.*` modules with `import M (..)`, so their names are in unqualified scope everywhere, while `Replay` ([record and replay](#record-and-replay)) and `Concurrent` ([effect polymorphism](#effect-polymorphism)) are the exceptions, brought in only by an explicit `import`. This document does not restate the API. The [Standard Library](./stdlib/index.md) part of this book is the per-declaration reference for every prelude and stdlib module, generated from the source by `prism docs` and regenerated against the typechecker so it never drifts.
+The prelude is in scope in every module. It is ordinary Prism, not built-in, assembled from modules under `lib/std`: the prelude opens the `Data.*` modules with `import M (..)`, so their names are in unqualified scope everywhere, while `Replay` ([record and replay](#record-and-replay)), `Concurrent` ([effect polymorphism](#effect-polymorphism)), and `Incr` ([incremental computation](#incremental-computation)) are the exceptions, brought in only by an explicit `import`. This document does not restate the API. The [Standard Library](./stdlib/index.md) part of this book is the per-declaration reference for every prelude and stdlib module, generated from the source by `prism docs` and regenerated against the typechecker so it never drifts.

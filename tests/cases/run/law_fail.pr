@@ -1,0 +1,63 @@
+-- Property-tests the short-circuiting law of the prelude `Fail` handler, plus a
+-- composition law: `fail` unwinds THROUGH an inner State handler, so a state
+-- write before a failure is never observable. Both hold for every generated
+-- input.
+
+import Quickcheck (..)
+
+effect State {
+  ctl get(Unit) : Int,
+  ctl put(Int) : Unit
+}
+
+fn run_state(s0, action : () -> a ! {State | e}) =
+  let f =
+    handle action() with
+      get(_u, k) => \(s) -> k(s)(s)
+      put(v, k) => \(_s) -> k(())(v)
+      return r => \(s) -> (r, s)
+  f(s0)
+
+-- A Fail handler annotated so the effect drops from the result row (the prelude
+-- `optional` leaves `Fail` open, which a pure property cannot carry).
+fn attempt(action : () -> a ! {Fail | e}) =
+  handle action() with
+    final ctl fail() => None
+    return r => Some(r)
+
+-- Left zero: `fail` discards its continuation, so anything after it is dead. A
+-- failing computation is `None` and a pure one is `Some`, for every input.
+fn maybe_fail(b : Bool, x : Int) : Int =
+  if b then
+    fail()
+  else
+    x
+
+fn prop_short_circuit(p) =
+  match p of
+    (b, x) => attempt(\() -> maybe_fail(b, x)) == (if b then None else Some(x))
+
+-- Composition: run State inside Fail. When the action fails after a `put`, the
+-- failure unwinds past the State frame, so the write leaves nothing behind and
+-- the whole run is `None`; without the failure it is `Some` of the final pair.
+fn body(b : Bool, s1 : Int) : Int =
+  put(s1)
+  if b then
+    fail()
+  else
+    get(())
+
+fn prop_fail_through_state(t) =
+  match t of
+    (b, s0, s1) =>
+      match attempt(\() -> run_state(s0, \() -> body(b, s1))) of
+        None => b
+        Some(pair) =>
+          if b then
+            false
+          else
+            fst(pair) == s1 && snd(pair) == s1
+
+fn main() =
+  println(show_outcome("Fail short-circuit", quickcheck(gen_pair(gen_bool, gen_int), prop_short_circuit)))
+  println(show_outcome("Fail unwinds through State", quickcheck(gen_triple(gen_bool, gen_int, gen_int), prop_fail_through_state)))

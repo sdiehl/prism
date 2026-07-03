@@ -11,10 +11,18 @@
 //! verified status: `prism,run,ok`, `prism,check,ok`, `prism,norun,ok`,
 //! `prism,sig`, `prism,def`, `prism,ignore`, `prism,cfail,ok`, or a `*,err` when
 //! a block that should type-check does not.
+//!
+//! It also owns the stdlib section's book structure: SUMMARY.md lists only the
+//! stdlib index chapter, and the generated per-module pages beside it are
+//! injected as its sub-chapters here (`inject_stdlib`), ordered by the index's
+//! own module list. Regenerating the reference (`just docs-gen`) is therefore
+//! the only step that adds a module to the book; SUMMARY.md never changes.
 
+use std::collections::BTreeSet;
+use std::fs;
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::driver::{example_program, with_prelude};
 use crate::error::Error;
@@ -22,6 +30,118 @@ use crate::names::ENTRY_POINT;
 use crate::resolve::default_roots;
 
 use super::check_quiet;
+
+// The stdlib index chapter: the only stdlib entry SUMMARY.md carries. Its
+// sibling module pages become sub-chapters at build time via `inject_stdlib`.
+const STDLIB_INDEX: &str = "stdlib/index.md";
+// The book-relative directory the generated stdlib pages live in.
+const STDLIB_DIR: &str = "stdlib";
+
+// The `- [Title](./page.md)` module links of the generated stdlib index, in
+// order. Only same-directory `.md` targets count; anything else on the page is
+// prose. This is the contract with the generator's index writer: the index's
+// module list is the single source of chapter order.
+fn index_links(content: &str) -> Vec<(String, String)> {
+    let mut links = Vec::new();
+    for line in content.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("- [") else {
+            continue;
+        };
+        let Some((title, rest)) = rest.split_once("](") else {
+            continue;
+        };
+        let Some((target, _)) = rest.split_once(')') else {
+            continue;
+        };
+        let target = target.trim().trim_start_matches("./");
+        if target.strip_suffix(".md").is_some() && !target.contains('/') {
+            links.push((title.to_string(), target.to_string()));
+        }
+    }
+    links
+}
+
+// Every chapter source path already in the book, so injection never duplicates
+// a page a SUMMARY.md might still list explicitly.
+fn collect_source_paths(items: &[Value], out: &mut BTreeSet<String>) {
+    for item in items {
+        let Some(ch) = item.get("Chapter") else {
+            continue;
+        };
+        if let Some(p) = ch.get("source_path").and_then(Value::as_str) {
+            out.insert(p.to_string());
+        }
+        if let Some(subs) = ch.get("sub_items").and_then(Value::as_array) {
+            collect_source_paths(subs, out);
+        }
+    }
+}
+
+// Append the generated stdlib module pages as sub-chapters of the stdlib index
+// chapter, reading their markdown from `src_dir` (the book's source directory;
+// mdbook only loads SUMMARY chapters itself). Runs before `walk`, so injected
+// pages get their fences annotated like any hand-listed chapter. Warns when the
+// index chapter carries no module links at all, since that silently empties the
+// stdlib section (`PRISM_MDBOOK_STRICT` turns the warning into a build failure).
+fn inject_stdlib(
+    items: &mut [Value],
+    src_dir: &Path,
+    existing: &BTreeSet<String>,
+    warnings: &mut Vec<String>,
+) -> Result<(), Error> {
+    for item in items.iter_mut() {
+        let Some(ch) = item.get_mut("Chapter") else {
+            continue;
+        };
+        if ch.get("source_path").and_then(Value::as_str) != Some(STDLIB_INDEX) {
+            if let Some(subs) = ch.get_mut("sub_items").and_then(Value::as_array_mut) {
+                inject_stdlib(subs, src_dir, existing, warnings)?;
+            }
+            continue;
+        }
+        let links = index_links(ch.get("content").and_then(Value::as_str).unwrap_or(""));
+        if links.is_empty() {
+            warnings.push(format!(
+                "stdlib index ({STDLIB_INDEX}) lists no module pages; stdlib chapters not injected"
+            ));
+            return Ok(());
+        }
+        let parent_name = ch
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let parent_number: Vec<Value> = ch
+            .get("number")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let Some(subs) = ch.get_mut("sub_items").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for (title, page) in links {
+            let path = format!("{STDLIB_DIR}/{page}");
+            if path == STDLIB_INDEX || existing.contains(&path) {
+                continue;
+            }
+            let body = fs::read_to_string(src_dir.join(&path))
+                .map_err(|e| Error::Codegen(format!("mdbook preprocessor: read {path}: {e}")))?;
+            let mut number = parent_number.clone();
+            number.push(json!(subs.len() + 1));
+            subs.push(json!({ "Chapter": {
+                "name": title,
+                "content": body,
+                "number": number,
+                "sub_items": [],
+                "path": path,
+                "source_path": path,
+                "parent_names": [parent_name],
+            }}));
+        }
+        return Ok(());
+    }
+    Ok(())
+}
 
 // The first whitespace/comma-separated token of a fence info string.
 fn lang_of(info: &str) -> &str {
@@ -191,6 +311,19 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
         .get(1)
         .cloned()
         .ok_or_else(|| Error::Codegen("mdbook preprocessor: expected [context, book]".into()))?;
+    // The book's markdown source directory, from the preprocessor context (the
+    // stdlib injection reads module pages from it; mdbook itself only loads
+    // chapters SUMMARY.md names).
+    let ctx = parsed.get(0);
+    let root = ctx
+        .and_then(|c| c.get("root"))
+        .and_then(Value::as_str)
+        .unwrap_or(".");
+    let src = ctx
+        .and_then(|c| c.pointer("/config/book/src"))
+        .and_then(Value::as_str)
+        .unwrap_or("src");
+    let src_dir = Path::new(root).join(src);
     let mut warnings = Vec::new();
     // The book's chapter array is `items` (older mdbook used `sections`).
     let key = if book.get("items").is_some() {
@@ -199,6 +332,9 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
         "sections"
     };
     if let Some(items) = book.get_mut(key).and_then(Value::as_array_mut) {
+        let mut existing = BTreeSet::new();
+        collect_source_paths(items, &mut existing);
+        inject_stdlib(items, &src_dir, &existing, &mut warnings)?;
         walk(items, &mut warnings);
     }
     let json = serde_json::to_string(&book)

@@ -1,0 +1,17 @@
+-- S6: cancelling an already-completed fiber is a no-op.
+
+import Concurrent (..)
+
+fn quick() : !{Async(Int), IO} Int =
+  println("quick: done")
+  7
+
+fn scene() : !{Async(Int), IO} Int =
+  let q = fork(quick)
+  let v = await(q)
+  println("awaited {v}")
+  cancel(q)
+  println("cancel of completed fiber was a no-op")
+  v
+
+fn main() = println(run_async(scene))

@@ -2,7 +2,7 @@ use std::slice;
 
 use super::{
     pat_vars, rebind, small_int, spanned, Arm, BTreeMap, BigInt, Builtin, Comp, CoreOp, CorePat,
-    CorePhase, CtorInfo, Elab, Error, Locals, Pattern, Span, Spanned, Sym, Value, S,
+    CorePhase, CtorInfo, Elab, Error, Locals, NodeId, Pattern, Span, Spanned, Sym, Value, S,
 };
 
 // Convert a shallow surface pattern (the residual after match compilation, whose
@@ -115,6 +115,7 @@ impl Elab<'_> {
             pat_vars(&arm.pat, &mut l2);
             cases.push((self.flat_pat(&arm.pat), self.elab(&arm.body, &l2)?));
         }
+        let mut join: Option<(Sym, Comp)> = None;
         if let Some(arm) = arms.get(cut) {
             let rest = self.elab_arms(vs, &arms[cut + 1..], locals, true)?;
             let mut l2 = locals.clone();
@@ -128,16 +129,44 @@ impl Elab<'_> {
             let mut map = Vec::new();
             let pat = self.freshen(&flat, &mut map);
             let gv = self.fresh();
+            // The fallthrough `rest` lands in two positions: the guard's `else`
+            // and the wildcard arm that routes pattern-rejects. When the guarded
+            // arm's own pattern is refutable it splits into a matching branch
+            // (whose guard-`else` holds `rest`) and leaves a surviving wildcard
+            // default (also `rest`), so N such arms clone the fallthrough into 2^N
+            // copies. Bind it once as a nullary join point (a thunk over a
+            // zero-parameter lambda closing over the ambient scope) and reach it
+            // by forcing and applying that closure to no arguments from each
+            // position, turning the copies into O(1) references. The nullary
+            // lambda matters for the native backend: codegen realizes every thunk
+            // as a closure invoked through `prism_apply_n`, so an arity-0 lambda
+            // applied to zero arguments is a shape it already lowers, whereas a
+            // thunk directly wrapping a general computation is not. Beta on the
+            // empty argument list makes this observably identical to running
+            // `rest` inline, so the interpreter and effect lowering are
+            // unaffected. An irrefutable pattern instead folds the guarded arm and
+            // the wildcard into one trivial group that match compilation collapses
+            // to a single `rest`, so there we emit it inline exactly as before and
+            // nothing churns.
+            let dup = !is_trivial_pat(&pat);
+            let force_join = |j: Sym| Comp::App(Box::new(Comp::Force(Value::Var(j))), Vec::new());
+            let (else_br, wild_br) = if dup {
+                let j: Sym = self.fresh().into();
+                join = Some((j, rest));
+                (force_join(j), force_join(j))
+            } else {
+                (rest.clone(), rest)
+            };
             let test = Comp::If(
                 Value::Var(gv.clone().into()),
                 Box::new(rebind(&map, cb)),
-                Box::new(rest.clone()),
+                Box::new(else_br),
             );
             cases.push((
                 pat,
                 Comp::Bind(Box::new(rebind(&map, cg)), gv.into(), Box::new(test)),
             ));
-            cases.push((Pattern::Wild, rest));
+            cases.push((Pattern::Wild, wild_br));
         } else if nested && !matches!(cases.last(), Some((Pattern::Wild | Pattern::Var(_), _))) {
             // A nested rest runs only because an outer guard failed, never
             // because its scrutinee escaped coverage. Its unguarded arms are
@@ -148,7 +177,18 @@ impl Elab<'_> {
         if cases.is_empty() {
             return Ok(unreachable());
         }
-        self.compile_match(Value::Var(vs.into()), cases)
+        let tree = self.compile_match(Value::Var(vs.into()), cases)?;
+        Ok(match join {
+            Some((j, rest)) => Comp::Bind(
+                Box::new(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
+                    Vec::new(),
+                    Box::new(rest),
+                ))))),
+                j,
+                Box::new(tree),
+            ),
+            None => tree,
+        })
     }
 
     pub(super) fn fresh_fields(&mut self, n: usize) -> Vec<String> {
@@ -477,7 +517,7 @@ pub(super) fn desugar_record_pat(
     let n = info.args.len();
     let mut subs: Vec<S<Pattern>> = (0..n)
         .map(|_| Spanned {
-            id: crate::syntax::ast::NodeId::DUMMY,
+            id: NodeId::DUMMY,
             synth: false,
             node: Pattern::Wild,
             span: Span::new(0, 0),
@@ -490,6 +530,14 @@ pub(super) fn desugar_record_pat(
     }
     let _ = spread;
     Pattern::Ctor(ctor_name.to_string(), subs)
+}
+
+// An irrefutable column head: it matches every value and binds nothing that
+// forces a test. A match whose every arm head is trivial collapses to its first
+// arm downstream (the wildcard fallthrough arm is dropped), so a guarded arm
+// under such a column has a single-use fallthrough and needs no join point.
+const fn is_trivial_pat(p: &Pattern) -> bool {
+    matches!(p, Pattern::Wild | Pattern::Var(_))
 }
 
 pub(super) fn pattern_needs_compile(p: &Pattern) -> bool {

@@ -166,7 +166,7 @@ impl Lowerer {
         let ev: Sym = *evs.get(&clause.name)?;
 
         // Evidence: run the clause's side effects, then return the state.
-        let stripped = strip_resume(&clause.body, &resume_set(clause.resume))?;
+        let stripped = strip_resume(&clause.body, &resume_set(clause.resume), &self.drift)?;
         let st = self.fresh("st");
         let d = self.fresh("d");
         let ev_inner = Comp::Bind(

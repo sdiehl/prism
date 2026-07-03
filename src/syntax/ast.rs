@@ -1,6 +1,7 @@
 pub use marginalia::Span;
 pub use num_bigint::BigInt;
 
+use crate::kw;
 pub use crate::types::ty::Kind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +106,9 @@ pub struct Program<P: Phase = Surface> {
     pub synonyms: Vec<SynonymDecl>,
     pub classes: Vec<ClassDecl>,
     pub instances: Vec<InstanceDecl<P>>,
+    // `stable` blocks, desugared into `types`/`fns`/`instances`/`synonyms` before
+    // typecheck. Surface-only, so it is empty in a `Program<Core>`.
+    pub stable: Vec<StableDecl>,
     // Canonical-instance designations: which instance implicit resolution picks
     // when several share a `(class, type-head)`. Phase-independent (no exprs).
     pub canonicals: Vec<CanonicalDecl>,
@@ -156,6 +160,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
         }
         d.field("classes", &self.classes)
             .field("instances", &self.instances);
+        if !self.stable.is_empty() {
+            d.field("stable", &self.stable);
+        }
         if !self.canonicals.is_empty() {
             d.field("canonicals", &self.canonicals);
         }
@@ -204,6 +211,7 @@ pub enum Item {
     Canonical(CanonicalDecl),
     Pattern(PatternDecl),
     Fn(Decl),
+    Stable(StableDecl),
 }
 
 // The parser only builds `Surface` items, so `Item` stays non-generic.
@@ -338,6 +346,65 @@ pub struct Ctor {
     pub name: String,
     pub args: Vec<Ty>,
     pub fields: Option<Vec<(String, Ty)>>,
+}
+
+// A `stable` block: a datatype's frozen version history plus the converters
+// between adjacent rungs. Desugared in `syntax/desugar/stable.rs` to the frozen rung record
+// types, the current rung under the bare type name, the generated and
+// hand-written `upgrade`/`downgrade` ladder functions, and the per-rung shape
+// golden. Surface-only, like every `Item`, so it is not `Phase`-generic: desugar
+// consumes it entirely into ordinary types, functions, and instances.
+#[derive(Clone, Debug)]
+pub struct StableDecl {
+    pub name: String,
+    pub rungs: Vec<Rung>,
+    pub converters: Vec<Converter>,
+    pub span: Span,
+}
+
+// One version of a stable type. `base` is the predecessor rung it extends
+// (`..V1`), absent on the first. `fields` are the rung's own field declarations:
+// a genuinely new field carries a `default` the generated `upgrade` uses, while a
+// field reusing a base name with a changed type is a type mutation (no default,
+// requiring a hand-written converter). `frozen` is the committed shape-digest
+// golden, seeded once a rung ships; a recomputed digest that no longer matches it
+// is the frozen-format compile error.
+#[derive(Clone, Debug)]
+pub struct Rung {
+    pub name: String,
+    pub base: Option<String>,
+    pub fields: Vec<RungField>,
+    pub frozen: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct RungField {
+    pub name: String,
+    pub ty: Ty,
+    pub default: Option<SExpr>,
+}
+
+// A hand-written converter between two adjacent rungs, for a type mutation the
+// compiler cannot generate. `base`/`overrides` are the `{ ..base, f = e, .. }`
+// record body: the target rung is rebuilt field by field, taking each field from
+// `overrides` when named there and from `base.<field>` otherwise. `drop_loss`
+// names the fields a downgrade reports as dropped `Loss`.
+#[derive(Clone, Debug)]
+pub struct Converter {
+    pub dir: ConvDir,
+    pub from: String,
+    pub to: String,
+    pub base: SExpr,
+    pub overrides: Vec<(String, SExpr)>,
+    pub drop_loss: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConvDir {
+    Upgrade,
+    Downgrade,
 }
 
 #[derive(Clone, Debug)]
@@ -621,7 +688,6 @@ impl BinOp {
     /// The canonical source spelling of this operator.
     #[must_use]
     pub const fn spelling(self) -> &'static str {
-        use crate::kw;
         match self {
             Self::Add => kw::PLUS,
             Self::Sub => kw::MINUS,

@@ -24,7 +24,7 @@ mod walk;
 
 use analysis::{latent_map, monadic_set};
 use checks::{check_convention_boundaries, raw_effects};
-use diagnostics::{free_monad_warning, genuine_eff};
+use diagnostics::{free_monad_warning, genuine_eff, DriftLog};
 use runtime::{ebind_fn, qapply_fn, synth_ctor};
 use walk::collect_ops;
 
@@ -252,6 +252,11 @@ struct Lowerer {
     // it costs nothing where the stack could not grow. A whole-program rewrite of
     // the free-monad fallback only; the evidence/state fusion paths never reach it.
     trampoline: bool,
+    // Per-lowering reporter for effect-lowering matcher drift. Scopes the once-per
+    // -matcher stderr guard to this lowering (not a process-global static) and
+    // reads `quiet` from `DynFlags`, so the diagnostic is a deterministic function
+    // of (source, flags) even in a long-lived host.
+    drift: DriftLog,
 }
 
 /// # Panics
@@ -272,13 +277,44 @@ pub fn lower(
     Ok((c, ct, warning))
 }
 
+/// No residual effects survive lowering: the program compiles to direct code.
+pub const TIER_PURE: &str = "pure";
+/// Evidence passing (the Identity answer): the fastest real effect lowering.
+pub const TIER_EVIDENCE: &str = "evidence";
+/// State fusion (the State answer): an accumulator threaded through producers.
+pub const TIER_STATE_FUSION: &str = "state-fusion";
+/// Free monad confined to a disjoint component, the rest still fused.
+pub const TIER_LOCAL_PARTIAL: &str = "local-partial";
+/// Only the effectful functions reify into the free monad; the rest stay native.
+pub const TIER_SELECTIVE_FREE_MONAD: &str = "selective-free-monad";
+/// Every function reifies into the free monad: the slowest, most general path.
+pub const TIER_WHOLE_PROGRAM_FREE_MONAD: &str = "whole-program-free-monad";
+
+/// The lowering tiers in cost order, cheapest first.
+///
+/// A program's tier moving to a later index is a performance regression; moving
+/// to an earlier one is an improvement. `tests/perf_gate.rs`'s tier manifest
+/// reads this ordering to tell a silent fusion-to-free-monad collapse (fail
+/// loudly) from a genuine speedup (regenerate the golden). This array is the one
+/// canonical list of the tier names `strategy` can return, so a new tier is added
+/// here and nowhere else.
+pub const EFFECT_TIERS: [&str; 6] = [
+    TIER_PURE,
+    TIER_EVIDENCE,
+    TIER_STATE_FUSION,
+    TIER_LOCAL_PARTIAL,
+    TIER_SELECTIVE_FREE_MONAD,
+    TIER_WHOLE_PROGRAM_FREE_MONAD,
+];
+
 /// The lowering strategy a program takes.
 ///
 /// The single source of truth is `lower_impl` itself, so the classification can
-/// never drift from the decision the compiler actually makes. One of: `pure` (no
-/// effects survive), `evidence`, `state-fusion`, `local-partial` (free monad
-/// confined to a component, rest fused), `whole-program-free-monad`, or
-/// `selective-free-monad`. A perf snapshot pins this per program so a
+/// never drift from the decision the compiler actually makes. One of the
+/// [`EFFECT_TIERS`]: [`TIER_PURE`] (no effects survive), [`TIER_EVIDENCE`],
+/// [`TIER_STATE_FUSION`], [`TIER_LOCAL_PARTIAL`] (free monad confined to a
+/// component, rest fused), [`TIER_SELECTIVE_FREE_MONAD`], or
+/// [`TIER_WHOLE_PROGRAM_FREE_MONAD`]. A perf snapshot pins this per program so a
 /// fusion-to-free-monad regression is a reviewable diff.
 ///
 /// # Errors
@@ -355,7 +391,7 @@ fn lower_impl(
         ctors
     };
     if !core.fns.iter().any(|f| raw_effects(&f.body)) {
-        return Ok((core.clone(), ctors.clone(), "pure"));
+        return Ok((core.clone(), ctors.clone(), TIER_PURE));
     }
 
     let mut op_set = BTreeSet::new();
@@ -401,6 +437,7 @@ fn lower_impl(
         has_mask: core.fns.iter().any(|f| contains_mask(&f.body)),
         resume: ResumeMode::Off,
         trampoline: flags.trampoline,
+        drift: DriftLog::new(flags.quiet),
     };
 
     // The two fusion paths and the free-monad fallback are three answer-type
@@ -423,7 +460,7 @@ fn lower_impl(
     // back here with no state to undo.
     if tier == EffectTier::Auto {
         if let Some(lowered) = lo.try_lower_ev(core) {
-            return Ok((lowered, ctors.clone(), "evidence"));
+            return Ok((lowered, ctors.clone(), TIER_EVIDENCE));
         }
     }
     if tier != EffectTier::FreeMonad {
@@ -433,7 +470,7 @@ fn lower_impl(
                 ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
                 ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
             }
-            return Ok((lowered, ctors, "state-fusion"));
+            return Ok((lowered, ctors, TIER_STATE_FUSION));
         }
 
         // Global fusion failed. Before paying the free monad for the whole program,
@@ -443,7 +480,7 @@ fn lower_impl(
         // the split is not clean, so it never regresses a program that compiles today.
         if let Some((c, ct, w)) = lo.try_local(core, ctors)? {
             *warning = w;
-            return Ok((c, ct, "local-partial"));
+            return Ok((c, ct, TIER_LOCAL_PARTIAL));
         }
     }
 
@@ -519,9 +556,9 @@ fn lower_impl(
     }
 
     let strat = if lo.full {
-        "whole-program-free-monad"
+        TIER_WHOLE_PROGRAM_FREE_MONAD
     } else {
-        "selective-free-monad"
+        TIER_SELECTIVE_FREE_MONAD
     };
     Ok((Core { fns }, ctors, strat))
 }

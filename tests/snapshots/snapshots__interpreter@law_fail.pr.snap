@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/law_fail.pr
+---
+Fail short-circuit: OK, passed 100 tests.
+Fail unwinds through State: OK, passed 100 tests.
+=> ()

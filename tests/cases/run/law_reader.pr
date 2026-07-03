@@ -1,0 +1,29 @@
+-- Property-tests the ask-ask idempotence law of the Reader handler: `ask` has no
+-- effect on the environment, so two consecutive asks return the same value and
+-- the second is redundant. Checked over every generated environment.
+
+import Quickcheck (..)
+
+effect Reader {
+  ctl ask(Unit) : Int
+}
+
+fn run_reader(env, action : () -> a ! {Reader | e}) =
+  handle action() with
+    ask(_u, k) => k(env)
+    return r => r
+
+-- ask-ask: `ask() then ask()` is observationally `ask()` reused.
+fn aa_lhs() =
+  let a = ask(())
+  let b = ask(())
+  a + b * 11
+
+fn aa_rhs() =
+  let a = ask(())
+  a + a * 11
+
+fn prop_ask_ask(env) = run_reader(env, aa_lhs) == run_reader(env, aa_rhs)
+
+fn main() =
+  println(show_outcome("Reader ask-ask", quickcheck(gen_int, prop_ask_ask)))

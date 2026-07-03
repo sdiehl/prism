@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism determinism scrubber</title>
+    <meta name="description" content="Scrub a boids swarm backward and forward like a video. Each frame is a pure function of the step index, replayed deterministically in WebAssembly." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="scrub-body">
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag">determinism scrubber</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="../repl/">REPL</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Docs</a>
+      </div>
+    </header>
+    <main class="scrub-main">
+      <section class="player">
+        <div class="stage">
+          <canvas id="view" class="view"></canvas>
+          <div id="status" class="status">Loading wasm...</div>
+        </div>
+        <div class="transport">
+          <button id="play" class="play" type="button" disabled aria-label="Play">Play</button>
+          <input id="scrub" class="scrub" type="range" min="0" max="0" value="0" step="1" disabled aria-label="Timeline" />
+          <span id="frame" class="frame">step 0 / 0</span>
+        </div>
+        <p class="caption">
+          The playhead is step <b>N</b> of a single deterministic run from step 0. The swarm is a pure
+          function of the step index, so replaying from 0 to N always lands on the byte-identical frame:
+          scrubbing backward is not an undo log, it is the same computation, re-run.
+        </p>
+      </section>
+      <section class="codepanel">
+        <div class="code-scroll">
+          <pre class="code"><code id="code"></code></pre>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/scrubber.ts"></script>
+  </body>
+</html>

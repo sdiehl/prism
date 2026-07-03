@@ -1,0 +1,63 @@
+-- A live game leaderboard as an incremental computation. Scores are incremental
+-- inputs; total, ranking, champion, and banner are memoized derivations. Each
+-- memo prints when it fires, so the console shows exactly what the engine
+-- recomputed. The interesting moment is the middle edit, where early cutoff
+-- protects the banner: neo climbs but is still last, so the champion re-runs to
+-- the same "trinity" and its unchanged hash spares the banner.
+
+import Data.Map (..)
+
+import Data.List (..)
+
+import Incr (..)
+
+-- Insert into a list kept in descending-by-score order. A small comparator sort
+-- stands in for a stdlib `sort_by`; `cmp` returns -1/0/1.
+fn ins_desc(p : (String, Int), xs : List((String, Int))) : List((String, Int)) =
+  match xs of
+    Nil => Cons(p, Nil)
+    Cons(q, rest) =>
+      if cmp(snd(p), snd(q)) > 0 then
+        Cons(p, Cons(q, rest))
+      else
+        Cons(q, ins_desc(p, rest))
+
+fn by_score_desc(xs : List((String, Int))) : List((String, Int)) =
+  foldr(ins_desc, Nil, xs)
+
+pub fn leaderboard() =
+  run_incr() fn
+    let scores =
+      input(map_from_list([("neo", 3), ("trinity", 7), ("morpheus", 5)]))
+    let total =
+      memo() fn
+        println("  recompute: total")
+        sum(map_values(get(scores)))
+    let ranking =
+      memo() fn
+        println("  recompute: ranking")
+        map(fst, by_score_desc(map_to_list(get(scores))))
+    let champion =
+      memo() fn
+        println("  recompute: champion")
+        match head(get(ranking)) of
+          Some(name) => name
+          None => "nobody"
+    let banner =
+      memo() fn
+        println("  recompute: banner")
+        concat(get(champion), " is winning!")
+    let show_state =
+      \() -> println(concat("total=", concat(show(get(total)), concat("  banner=", get(banner)))))
+    println("== opening scores ==")
+    show_state()
+    println("")
+    println("== neo +2 (still last) ==")
+    set(scores, map_insert("neo", 5, get(scores)))
+    show_state()
+    println("")
+    println("== neo +6 (takes the lead) ==")
+    set(scores, map_insert("neo", 11, get(scores)))
+    show_state()
+
+pub fn main() = leaderboard()

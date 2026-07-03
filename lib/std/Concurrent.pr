@@ -2,12 +2,12 @@
 -- effects the fibers perform.
 --
 -- `fork` spawns a fiber and returns a `Fiber` handle, `yield` reschedules,
--- `await` blocks on a fiber's result, and `cancel` drops a fiber. `channel`,
--- `send`, and `recv` are a buffered FIFO channel for fiber-to-fiber messages. A
--- fiber may perform any effect row `e` in addition to `Async`; `e` is a
--- row-kinded parameter of the reified command type, so one run queue holds every
--- fiber without existential types. Because a fiber's effects tie to the ambient
--- row at `fork`, they flow out through `run_async`:
+-- `await` blocks on a fiber's result, and `cancel` requests a cooperative
+-- cancellation. `channel`, `send`, and `recv` are a buffered FIFO channel for
+-- fiber-to-fiber messages. A fiber may perform any effect row `e` in addition to
+-- `Async`; `e` is a row-kinded parameter of the reified command type, so one run
+-- queue holds every fiber without existential types. Because a fiber's effects
+-- tie to the ambient row at `fork`, they flow out through `run_async`:
 -- `run_async : (() -> a ! {Async(a) | e}) -> a ! {e}`, so a fiber that performs
 -- `E` makes the whole run demand a handler for `E`. Nothing is smuggled past the
 -- scheduler.
@@ -18,9 +18,17 @@
 -- into the scheduler state, so a program using this is whole-program free-monad;
 -- it runs in constant native stack under PRISM_TRAMPOLINE.
 --
+-- Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all
+-- its descendants; each is stopped at its next suspension point (`yield`,
+-- `await`, `send`, `recv`), never mid-step, and unwinds through its `final ctl`
+-- finalizers so every resource is released exactly once. Wrap a resource with
+-- `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's
+-- awaiters observe it through `try_await` (which yields `Was_Cancelled` rather
+-- than hanging); a fiber that fails (an unhandled `fail()`) cancels its siblings
+-- in a `scope` and re-raises at the scope boundary.
+--
 -- `scope` is a structured nursery: it forks a list of fibers and joins them all,
--- so no fiber escapes the call. `cancel` marks a fiber so the scheduler never
--- runs it again; do not `await` a cancelled fiber (it never completes).
+-- so no fiber escapes the call, and a failing child fails the whole scope.
 --
 -- A channel carries the shared result type `a`; fibers in one run share `a`
 -- (use a sum type for mixed messages or results).
@@ -28,18 +36,26 @@
 import Data.List (append)
 
 -- | The async/await effect. `fork` spawns a fiber and returns its handle,
--- `yield` reschedules, `await` blocks on a fiber's result, and `cancel` drops a
--- fiber; `channel`/`send`/`recv` are a buffered FIFO channel for fiber-to-fiber
--- messages. Discharge it with `run_async`.
+-- `yield` reschedules, `await` blocks on a fiber's result, and `cancel` requests
+-- a cooperative cancellation; `channel`/`send`/`recv` are a buffered FIFO channel
+-- for fiber-to-fiber messages. Discharge it with `run_async`.
+--
+-- The public `yield`/`await`/`send`/`recv` are thin wrappers (below) over the raw
+-- `poll_*` operations, which return a cancellation `Signal`/`Wake` the wrapper
+-- turns into a cooperative `kill`. `kill` and `vanished` never resume (per-site
+-- bottom return `b`); `run_async` absorbs the whole effect, so none of the cancel
+-- machinery surfaces in a fiber's row.
 pub effect Async(a) {
   ctl fork(() -> a ! {Async(a) | e}) : Fiber,
-  ctl yield(Unit) : Unit,
-  ctl await(Fiber) : a,
+  ctl poll_yield(Unit) : Signal,
+  ctl poll_await(Fiber) : Wake(a),
   ctl cancel(Fiber) : Unit,
   ctl channel(Unit) : Chan,
   ctl bounded(Int) : Chan,
-  ctl send(Chan, a) : Unit,
-  ctl recv(Chan) : a
+  ctl poll_send(Chan, a) : Signal,
+  ctl poll_recv(Chan) : Wake(a),
+  ctl kill(Unit) : b,
+  ctl vanished(Unit) : b
 }
 
 -- | A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
@@ -48,42 +64,143 @@ pub type Fiber = Fiber(Int)
 -- | A handle to a buffered FIFO channel, opened with `channel`.
 pub type Chan = Chan(Int)
 
+-- The scheduler's answer to a `poll_yield`/`poll_send`: `Go` resumes normally,
+-- `Stop` means this fiber has been cancelled and must unwind now.
+type Signal = Go | Stop
+
+-- The scheduler's answer to a `poll_await`/`poll_recv`: `Arrived` carries the
+-- awaited value, `Gone` means the awaited fiber was cancelled, and `Halt` means
+-- this (waiting) fiber has itself been cancelled and must unwind.
+type Wake(a) = Arrived(a) | Gone | Halt
+
+-- | The outcome of `try_await`: a fiber that completed with a value, or one that
+-- was cancelled before it could.
+pub type Outcome(a) = Completed(a) | Was_Cancelled
+
+-- | Reschedule the current fiber. A cooperative yield point; also a cancellation
+-- point (a cancelled fiber unwinds here instead of resuming).
+pub fn yield(u : Unit) : !{Async(a)} Unit =
+  match poll_yield(()) of
+    Go => ()
+    Stop => kill(())
+
+-- | Block until fiber `f` finishes, returning its result. If `f` was cancelled,
+-- this raises the in-scheduler `vanished` signal (observe it with `try_await`);
+-- if the waiting fiber is itself cancelled, it unwinds here.
+pub fn await(f : Fiber) : !{Async(a)} a =
+  match poll_await(f) of
+    Arrived(v) => v
+    Gone => vanished(())
+    Halt => kill(())
+
+-- | Send `v` on channel `c`. On a bounded channel a full buffer parks the sender
+-- until a receiver drains it; a cancellation delivered while parked unwinds here.
+pub fn send(c : Chan, v : a) : !{Async(a)} Unit =
+  match poll_send(c, v) of
+    Go => ()
+    Stop => kill(())
+
+-- | Receive a value from channel `c`, parking until one is available. A
+-- cancellation delivered while parked unwinds here.
+pub fn recv(c : Chan) : !{Async(a)} a =
+  match poll_recv(c) of
+    Arrived(v) => v
+    Gone => kill(())
+    Halt => kill(())
+
+-- | Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup`
+-- once before the cancellation propagates outward. This is a forwarding handler:
+-- every `Async` operation `body` performs is relayed unchanged to the enclosing
+-- `run_async`, so the finalizer is transparent except on the cancel path. Nest
+-- these for stacked resources; each `cleanup` runs exactly once, innermost first.
+pub fn on_cancel(
+  cleanup : () -> Unit ! {| e},
+  body : () -> r ! {Async(a) | e}
+) : r =
+  handle body() with
+    fork(child, k) => k(fork(child))
+    poll_yield(u, k) => k(poll_yield(()))
+    poll_await(f, k) => k(poll_await(f))
+    cancel(f, k) => k(cancel(f))
+    channel(u, k) => k(channel(()))
+    bounded(n, k) => k(bounded(n))
+    poll_send(c, v, k) => k(poll_send(c, v))
+    poll_recv(c, k) => k(poll_recv(c))
+    final ctl vanished(u) => vanished(())
+    final ctl kill(u) =>
+      cleanup()
+      kill(())
+    return r => r
+
+-- | Await fiber `f`, observing cancellation as a value instead of a signal:
+-- `Completed(v)` if `f` finished, `Was_Cancelled` if it was cancelled. Never
+-- hangs on a cancelled fiber. A forwarding handler that catches only the
+-- `vanished` signal `await` raises for a cancelled target.
+pub fn try_await(f : Fiber) : Outcome(a) =
+  handle Completed(await(f)) with
+    fork(child, k) => k(fork(child))
+    poll_yield(u, k) => k(poll_yield(()))
+    poll_await(g, k) => k(poll_await(g))
+    cancel(g, k) => k(cancel(g))
+    channel(u, k) => k(channel(()))
+    bounded(n, k) => k(bounded(n))
+    poll_send(c, v, k) => k(poll_send(c, v))
+    poll_recv(c, k) => k(poll_recv(c))
+    final ctl kill(u) => kill(())
+    final ctl vanished(u) => Was_Cancelled
+    return r => r
+
 -- One reified step of a fiber, over the fiber effect row `e`. The captured
 -- continuation performs `e` when resumed, off the native stack.
 type Cmd(a, e : Row)
   = Forked((Fiber) -> Cmd(a, e) ! {e}, () -> a ! {Async(a) | e})
-  | Yielded((Unit) -> Cmd(a, e) ! {e})
-  | Awaited(Int, (a) -> Cmd(a, e) ! {e})
-  | Cancelled(Int, (Unit) -> Cmd(a, e) ! {e})
+  | Yielded((Signal) -> Cmd(a, e) ! {e})
+  | Awaited(Int, (Wake(a)) -> Cmd(a, e) ! {e})
+  | Cancelling(Int, (Unit) -> Cmd(a, e) ! {e})
   | Opened((Chan) -> Cmd(a, e) ! {e})
   | OpenedCap(Int, (Chan) -> Cmd(a, e) ! {e})
-  | Sent(Int, a, (Unit) -> Cmd(a, e) ! {e})
-  | Recving(Int, (a) -> Cmd(a, e) ! {e})
+  | Sent(Int, a, (Signal) -> Cmd(a, e) ! {e})
+  | Recving(Int, (Wake(a)) -> Cmd(a, e) ! {e})
+  | Died
+  | Failed
   | Finished(a)
 
--- Run a fiber body to its next effect, reifying that effect as a command.
+-- Run a fiber body to its next effect, reifying that effect as a command. The
+-- three `final ctl` clauses catch the fiber's terminal control signals when they
+-- reach its top: `kill`/`vanished` (a completed cancellation unwind) and an
+-- unhandled `fail()` (a fiber failure, which makes the nursery fail-fast).
 fn step(body : () -> a ! {Async(a) | e}) : Cmd(a, e) =
   handle body() with
     fork(child, k) => Forked(k, child)
-    yield(u, k) => Yielded(k)
-    await(f, k) =>
+    poll_yield(u, k) => Yielded(k)
+    poll_await(f, k) =>
       match f of
         Fiber(fid) => Awaited(fid, k)
     cancel(f, k) =>
       match f of
-        Fiber(fid) => Cancelled(fid, k)
+        Fiber(fid) => Cancelling(fid, k)
     channel(u, k) => Opened(k)
     bounded(cap, k) => OpenedCap(cap, k)
-    send(c, v, k) =>
+    poll_send(c, v, k) =>
       match c of
         Chan(cid) => Sent(cid, v, k)
-    recv(c, k) =>
+    poll_recv(c, k) =>
       match c of
         Chan(cid) => Recving(cid, k)
+    final ctl kill(u) => Died
+    final ctl vanished(u) => Died
+    final ctl fail() => Failed
     return r => Finished(r)
 
--- A runnable fiber: its id plus a thunk that resumes it to the next command.
-type Ready(a, e : Row) = Ready(Int, () -> Cmd(a, e) ! {e})
+-- A runnable fiber: its id plus two resume thunks. `go` resumes it normally;
+-- `stop` delivers its cancellation (drives it into its `kill` unwind). `run_next`
+-- picks `stop` exactly when the fiber is in the `cancelled` set, so a cancel that
+-- lands while the fiber sits in the run queue is honoured at dequeue time.
+type Ready(a, e : Row) = Ready(
+  Int,
+  () -> Cmd(a, e) ! {e},
+  () -> Cmd(a, e) ! {e}
+)
 
 -- `enq` is the scheduling policy: it decides where a newly-runnable fiber enters
 -- the run queue, and is the ONLY thing that varies between schedulers. FIFO
@@ -91,15 +208,19 @@ type Ready(a, e : Row) = Ready(Int, () -> Cmd(a, e) ! {e})
 -- pushes to the front for depth-first, run-newest-first order. `drive` threads it
 -- untouched, so a new policy is another handler over the same `Async` effect with
 -- no change to the fibers: swap `enq`, swap the policy.
+--
+-- `kids` records fork parentage so `cancel` reaches a fiber's descendants;
+-- `cancelled` is the deterministic set of fibers asked to stop.
 type Sched(a, e : Row) = Sched {
   queue: List(Ready(a, e)),
   results: List((Int, a)),
-  waiters: List((Int, Int, (a) -> Cmd(a, e) ! {e})),
+  waiters: List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {e})),
   cancelled: List(Int),
+  kids: List((Int, Int)),
   chans: List((Int, List(a))),
   caps: List((Int, Int)),
-  recv_waiters: List((Int, Int, (a) -> Cmd(a, e) ! {e})),
-  senders: List((Int, Int, a, () -> Cmd(a, e) ! {e})),
+  recv_waiters: List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {e})),
+  senders: List((Int, Int, a, (Signal) -> Cmd(a, e) ! {e})),
   next: Int,
   enq: (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
 }
@@ -122,22 +243,56 @@ fn is_member(fid : Int, xs : List(Int)) : Bool =
       else
         is_member(fid, r)
 
--- Move every awaiter of `fid` into the run queue, resumed with the result `v`,
--- entering the queue by the scheduler's policy `enq`.
+-- The direct children of `p` recorded in the fork tree.
+fn children_of(p : Int, kids : List((Int, Int))) : List(Int) =
+  match kids of
+    Nil => Nil
+    Cons((par, ch), rest) =>
+      if par == p then
+        Cons(ch, children_of(p, rest))
+      else
+        children_of(p, rest)
+
+-- `roots` and all their transitive descendants, accumulated into `acc` (a set).
+fn descendants(
+  roots : List(Int),
+  kids : List((Int, Int)),
+  acc : List(Int)
+) : List(Int) =
+  match roots of
+    Nil => acc
+    Cons(r, rest) =>
+      if is_member(r, acc) then
+        descendants(rest, kids, acc)
+      else
+        descendants(append(children_of(r, kids), rest), kids, Cons(r, acc))
+
+-- Add each of `xs` to the set `acc` (idempotent), skipping duplicates.
+fn fold_add(xs : List(Int), acc : List(Int)) : List(Int) =
+  match xs of
+    Nil => acc
+    Cons(x, rest) =>
+      if is_member(x, acc) then
+        fold_add(rest, acc)
+      else
+        fold_add(rest, Cons(x, acc))
+
+-- Move every awaiter of `fid` into the run queue, resumed with `w` (the `go`
+-- delivery) or `Halt` (the `stop` delivery), entering the queue by policy `enq`.
 fn wake(
   fid : Int,
-  v : a,
-  ws : List((Int, Int, (a) -> Cmd(a, e) ! {| e})),
+  w : Wake(a),
+  ws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})),
   acc : List(Ready(a, e)),
   enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
-) : (List((Int, Int, (a) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
+) : (List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
   match ws of
     Nil => (Nil, acc)
     Cons((f, who, k), rest) =>
       if f == fid then
-        wake(fid, v, rest, enq(acc, Ready(who, \() -> k(v))), enq)
+        wake(fid, w, rest, enq(acc, Ready(who, \() -> k(w), \() -> k(Halt))), enq)
       else
-        match wake(fid, v, rest, acc, enq) of
+        match wake(fid, w, rest, acc, enq) of
           (kept, out) => (Cons((f, who, k), kept), out)
 
 -- Take the head of channel `cid`'s buffer if any, returning it with the buffers
@@ -175,8 +330,8 @@ fn chan_put(
 -- Remove the first receiver blocked on channel `cid`, returning it plus the rest.
 fn take_recv(
   cid : Int,
-  rws : List((Int, Int, (a) -> Cmd(a, e) ! {| e}))
-) : Option((Int, (a) -> Cmd(a, e) ! {| e}, List((Int, Int, (a) -> Cmd(a, e) ! {| e})))) =
+  rws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e}))
+) : Option((Int, (Wake(a)) -> Cmd(a, e) ! {| e}, List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})))) =
   match rws of
     Nil => None
     Cons((c, who, k), rest) =>
@@ -216,8 +371,8 @@ fn chan_len(cid : Int, chans : List((Int, List(a)))) : Int =
 -- returning it plus the remaining blocked senders.
 fn take_sender(
   cid : Int,
-  ss : List((Int, Int, a, () -> Cmd(a, e) ! {| e}))
-) : Option((Int, a, () -> Cmd(a, e) ! {| e}, List((Int, Int, a, () -> Cmd(a, e) ! {| e})))) =
+  ss : List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e}))
+) : Option((Int, a, (Signal) -> Cmd(a, e) ! {| e}, List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})))) =
   match ss of
     Nil => None
     Cons((c, who, v, k), rest) =>
@@ -229,23 +384,127 @@ fn take_sender(
           Some((w2, v2, k2, kept)) =>
             Some((w2, v2, k2, Cons((c, who, v, k), kept)))
 
+-- Pull every waiter belonging to a cancelled fiber out of `ws`, enqueuing each so
+-- it runs its `kill` unwind (`Halt` delivery), and return the remaining waiters
+-- with the grown queue. Used when a cancel lands on a fiber parked on `await`.
+fn evict_waiters(
+  victims : List(Int),
+  ws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})),
+  q : List(Ready(a, e)),
+  enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
+) : (List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
+  match ws of
+    Nil => (Nil, q)
+    Cons((f, who, k), rest) =>
+      if is_member(who, victims) then
+        evict_waiters(victims, rest, enq(q, Ready(who, \() -> k(Halt), \() -> k(Halt))), enq)
+      else
+        match evict_waiters(victims, rest, q, enq) of
+          (kept, out) => (Cons((f, who, k), kept), out)
+
+-- Pull every blocked sender belonging to a cancelled fiber out of `ss`, enqueuing
+-- each so it runs its `kill` unwind (`Stop` delivery).
+fn evict_senders(
+  victims : List(Int),
+  ss : List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})),
+  q : List(Ready(a, e)),
+  enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))
+) : (List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})), List(Ready(a, e))) =
+  match ss of
+    Nil => (Nil, q)
+    Cons((c, who, v, k), rest) =>
+      if is_member(who, victims) then
+        evict_senders(victims, rest, enq(q, Ready(who, \() -> k(Stop), \() -> k(Stop))), enq)
+      else
+        match evict_senders(victims, rest, q, enq) of
+          (kept, out) => (Cons((c, who, v, k), kept), out)
+
+-- Mark `roots` and their descendants cancelled (idempotently), and reschedule any
+-- of them parked on `await`/`recv`/`send` so they get a turn to run their
+-- finalizers. Fibers still in the run queue need no surgery: `run_next` delivers
+-- their `stop` thunk once they are in `cancelled`.
+fn cancel_tree(roots : List(Int), s : Sched(a, e)) : Sched(a, e) =
+  let victims = descendants(roots, s.kids, Nil)
+  let cancelled2 = fold_add(victims, s.cancelled)
+  match evict_waiters(victims, s.waiters, s.queue, s.enq) of
+    (waiters2, q1) =>
+      match evict_waiters(victims, s.recv_waiters, q1, s.enq) of
+        (recv2, q2) =>
+          match evict_senders(victims, s.senders, q2, s.enq) of
+            (senders2, q3) =>
+              Sched {
+                ..s,
+                cancelled = cancelled2,
+                waiters = waiters2,
+                recv_waiters = recv2,
+                senders = senders2,
+                queue = q3
+              }
+
+-- Every live fiber except `me`: the ids in the run queue, waiters, recv-waiters,
+-- and senders. Used to make a `scope` fail-fast when one fiber fails.
+fn others(me : Int, s : Sched(a, e)) : List(Int) =
+  let a1 = queue_ids(s.queue, Nil)
+  let a2 = waiter_ids(s.waiters, a1)
+  let a3 = waiter_ids(s.recv_waiters, a2)
+  let a4 = sender_ids(s.senders, a3)
+  remove(me, a4)
+
+fn queue_ids(q : List(Ready(a, e)), acc : List(Int)) : List(Int) =
+  match q of
+    Nil => acc
+    Cons(Ready(id, _, _), rest) => queue_ids(rest, Cons(id, acc))
+
+fn waiter_ids(
+  ws : List((Int, Int, (Wake(a)) -> Cmd(a, e) ! {| e})),
+  acc : List(Int)
+) : List(Int) =
+  match ws of
+    Nil => acc
+    Cons((_, who, _), rest) => waiter_ids(rest, Cons(who, acc))
+
+fn sender_ids(
+  ss : List((Int, Int, a, (Signal) -> Cmd(a, e) ! {| e})),
+  acc : List(Int)
+) : List(Int) =
+  match ss of
+    Nil => acc
+    Cons((_, who, _, _), rest) => sender_ids(rest, Cons(who, acc))
+
+fn remove(x : Int, xs : List(Int)) : List(Int) =
+  match xs of
+    Nil => Nil
+    Cons(y, rest) =>
+      if x == y then
+        remove(x, rest)
+      else
+        Cons(y, remove(x, rest))
+
 -- Interpret the command produced by fiber `me`, threading the scheduler `s`. The
 -- main fiber has id 0; when it finishes, the whole run returns its result.
 fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
   match cmd of
     Forked(parent, child) =>
       let cid = s.next
-      let q = (s.enq)(s.queue, Ready(cid, \() -> step(child)))
-      drive(me, parent(Fiber(cid)), Sched { ..s, next = cid + 1, queue = q })
+      let q =
+        (s.enq)(s.queue, Ready(cid, \() -> step(child), \() -> step(child)))
+      drive(me, parent(Fiber(cid)), Sched { ..s, next = cid + 1, queue = q, kids = Cons((me, cid), s.kids) })
     Yielded(k) =>
-      run_next(Sched { ..s, queue = (s.enq)(s.queue, Ready(me, \() -> k(()))) })
+      run_next(Sched {
+        ..s,
+        queue = (s.enq)(s.queue, Ready(me, \() -> k(Go), \() -> k(Stop)))
+      })
     Awaited(fid, k) =>
       match lookup_result(fid, s.results) of
-        Some(v) => drive(me, k(v), s)
+        Some(v) => drive(me, k(Arrived(v)), s)
         None =>
-          run_next(Sched { ..s, waiters = append(s.waiters, [(fid, me, k)]) })
-    Cancelled(fid, k) =>
-      drive(me, k(()), Sched { ..s, cancelled = Cons(fid, s.cancelled) })
+          if is_member(fid, s.cancelled) then
+            drive(me, k(Gone), s)
+          else
+            run_next(Sched { ..s, waiters = append(s.waiters, [(fid, me, k)]) })
+    Cancelling(fid, k) =>
+      let s2 = cancel_tree([fid], s)
+      drive(me, k(()), s2)
     Opened(k) =>
       let cid = s.next
       drive(me, k(Chan(cid)), Sched { ..s, next = cid + 1, chans = Cons((cid, Nil), s.chans) })
@@ -260,48 +519,59 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
     Sent(cid, v, k) =>
       match take_recv(cid, s.recv_waiters) of
         Some((who, kr, rest)) =>
-          let q = (s.enq)(s.queue, Ready(who, \() -> kr(v)))
-          drive(me, k(()), Sched { ..s, recv_waiters = rest, queue = q })
+          let q =
+            (s.enq)(s.queue, Ready(who, \() -> kr(Arrived(v)), \() -> kr(Halt)))
+          drive(me, k(Go), Sched { ..s, recv_waiters = rest, queue = q })
         None =>
           match cap_of(cid, s.caps) of
             Some(cap) =>
               if chan_len(cid, s.chans) >= cap then
-                run_next(Sched {
-                  ..s,
-                  senders = append(s.senders, [(cid, me, v, \() -> k(()))])
-                })
+                run_next(Sched { ..s, senders = append(s.senders, [(cid, me, v, k)]) })
               else
-                drive(me, k(()), Sched { ..s, chans = chan_put(cid, v, s.chans) })
+                drive(me, k(Go), Sched { ..s, chans = chan_put(cid, v, s.chans) })
             None =>
-              drive(me, k(()), Sched { ..s, chans = chan_put(cid, v, s.chans) })
+              drive(me, k(Go), Sched { ..s, chans = chan_put(cid, v, s.chans) })
     Recving(cid, k) =>
       match chan_take(cid, s.chans) of
         Some((v, chans2)) =>
           match take_sender(cid, s.senders) of
             Some((who, sv, sk, srest)) =>
-              let q = (s.enq)(s.queue, Ready(who, sk))
-              drive(me, k(v), Sched {
+              let q =
+                (s.enq)(s.queue, Ready(who, \() -> sk(Go), \() -> sk(Stop)))
+              drive(me, k(Arrived(v)), Sched {
                 ..s,
                 chans = chan_put(cid, sv, chans2),
                 senders = srest,
                 queue = q
               })
-            None => drive(me, k(v), Sched { ..s, chans = chans2 })
+            None => drive(me, k(Arrived(v)), Sched { ..s, chans = chans2 })
         None =>
           match take_sender(cid, s.senders) of
             Some((who, sv, sk, srest)) =>
-              let q = (s.enq)(s.queue, Ready(who, sk))
-              drive(me, k(sv), Sched { ..s, senders = srest, queue = q })
+              let q =
+                (s.enq)(s.queue, Ready(who, \() -> sk(Go), \() -> sk(Stop)))
+              drive(me, k(Arrived(sv)), Sched { ..s, senders = srest, queue = q })
             None =>
               run_next(Sched {
                 ..s,
                 recv_waiters = append(s.recv_waiters, [(cid, me, k)])
               })
+    Died =>
+      if me == 0 then
+        fail()
+      else
+        match wake(me, Gone, s.waiters, s.queue, s.enq) of
+          (ws, q) => run_next(Sched { ..s, waiters = ws, queue = q })
+    Failed =>
+      if me == 0 then
+        fail()
+      else
+        run_next(cancel_tree(others(me, s), s))
     Finished(r) =>
       if me == 0 then
         r
       else
-        match wake(me, r, s.waiters, s.queue, s.enq) of
+        match wake(me, Arrived(r), s.waiters, s.queue, s.enq) of
           (ws, q) =>
             run_next(Sched {
               ..s,
@@ -310,32 +580,39 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
               queue = q
             })
 
--- Dequeue the next runnable fiber, skipping any that have been cancelled.
+-- Dequeue the next runnable fiber. A cancelled fiber runs its `stop` thunk (into
+-- its `kill` unwind); otherwise its `go` thunk. An empty queue with a failure
+-- pending re-raises that failure at the run boundary.
 fn run_next(s : Sched(a, e)) : a =
   match s.queue of
-    Nil => error(1)
-    Cons(Ready(id, resume), rest) =>
+    Nil => fail()
+    Cons(Ready(id, go, stop), rest) =>
       if is_member(id, s.cancelled) then
-        run_next(Sched { ..s, queue = rest })
+        drive(id, stop(), Sched { ..s, queue = rest })
       else
-        drive(id, resume(), Sched { ..s, queue = rest })
+        drive(id, go(), Sched { ..s, queue = rest })
 
--- | Run `main` and its fibers cooperatively under the FIFO (round-robin) policy,
--- returning `main`'s result. The fibers' effects `e` flow out unchanged, so the
--- caller still handles them.
-pub fn run_async(main : () -> a ! {Async(a) | e}) : a =
-  drive(0, step(main), Sched {
+-- The initial scheduler state, parameterised only by the enqueue policy `enq`.
+fn fresh(enq : (List(Ready(a, e)), Ready(a, e)) -> List(Ready(a, e))) : Sched(a, e) =
+  Sched {
     queue = Nil,
     results = Nil,
     waiters = Nil,
     cancelled = Nil,
+    kids = Nil,
     chans = Nil,
     caps = Nil,
     recv_waiters = Nil,
     senders = Nil,
     next = 1,
-    enq = \(q, r) -> append(q, [r])
-  })
+    enq = enq
+  }
+
+-- | Run `main` and its fibers cooperatively under the FIFO (round-robin) policy,
+-- returning `main`'s result. The fibers' effects `e` flow out unchanged, so the
+-- caller still handles them.
+pub fn run_async(main : () -> a ! {Async(a) | e}) : a =
+  drive(0, step(main), fresh(\(q, r) -> append(q, [r])))
 
 -- | The policy-neutral entry point: run `main` under the deployment's default
 -- cooperative scheduler. It is `run_async` (FIFO) by default, and the `--scheduler`
@@ -353,18 +630,7 @@ pub fn run_cooperative(main : () -> a ! {Async(a) | e}) : a = run_async(main)
 -- prints) differs. This is the concrete proof that policy is a handler: the fibers
 -- are unchanged, only the run function is swapped.
 pub fn run_lifo(main : () -> a ! {Async(a) | e}) : a =
-  drive(0, step(main), Sched {
-    queue = Nil,
-    results = Nil,
-    waiters = Nil,
-    cancelled = Nil,
-    chans = Nil,
-    caps = Nil,
-    recv_waiters = Nil,
-    senders = Nil,
-    next = 1,
-    enq = \(q, r) -> Cons(r, q)
-  })
+  drive(0, step(main), fresh(\(q, r) -> Cons(r, q)))
 
 -- Fork every task, returning the fiber handles in order.
 fn fork_all(tasks : List(() -> a ! {Async(a) | e})) : List(Fiber) =
@@ -380,7 +646,9 @@ fn await_all(fs : List(Fiber)) : List(a) =
 
 -- | Structured nursery: run `tasks` concurrently and join them all, returning
 -- the results in order. Every task completes before `scope` returns, so no fiber
--- escapes the call.
+-- escapes the call. The nursery is fail-fast: if one task fails (an unhandled
+-- `fail()`), its siblings are cancelled (their `on_cancel` finalizers run) and
+-- the failure is re-raised at the scope boundary.
 pub fn scope(tasks : List(() -> a ! {Async(a) | e})) : List(a) =
   await_all(fork_all(tasks))
 

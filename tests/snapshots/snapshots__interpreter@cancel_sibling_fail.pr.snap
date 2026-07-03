@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/cancel_sibling_fail.pr
+---
+sibling: running
+failer: about to fail
+sibling finalizer ran
+run recovered with -1
+=> ()

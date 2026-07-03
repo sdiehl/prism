@@ -15,6 +15,7 @@ extern crate libmimalloc_sys as _;
 #[cfg(feature = "native")]
 pub mod codegen;
 pub mod core;
+pub mod debug;
 pub mod docs;
 pub mod driver;
 pub mod error;
@@ -27,6 +28,11 @@ pub mod kw;
 pub mod lex;
 pub mod names;
 pub mod parse;
+// The package manager is native-only: it drives `crate::project` builds and the
+// disk transport, neither of which exists in a wasm build, and every use site
+// (the driver's transport/trust imports, the CLI) is already `native`-gated.
+#[cfg(feature = "native")]
+pub mod pkg;
 #[cfg(feature = "native")]
 pub mod project;
 #[cfg(feature = "native")]
@@ -34,6 +40,7 @@ pub mod repl;
 pub mod resolve;
 pub(crate) mod scc;
 pub mod stdlib;
+pub mod store;
 pub mod sym;
 pub mod syntax;
 pub(crate) mod tc;
@@ -48,24 +55,26 @@ pub mod wasm;
 pub const ASCII_PRINTABLE_LO: u8 = 0x20;
 pub const ASCII_PRINTABLE_HI: u8 = 0x7E;
 
-pub use core::{CorePass, OptLevel, PassSpec};
+pub use core::{CorePass, OptLevel, PassSpec, EFFECT_TIERS};
 pub use docs::{
-    preprocess_book, project_pages, stdlib_pages, DocPage, Generated, ModuleSource, Report,
+    accept, preprocess_book, project_expect_files, project_pages, stdlib_expect_files,
+    stdlib_pages, DocPage, ExpectFile, ExpectReport, Generated, ModuleSource, Report,
 };
 #[cfg(feature = "native")]
-pub use driver::{build, build_at, build_on, emit_ir};
+pub use driver::{attest_on, build, build_at, build_on, emit_ir};
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
 pub use driver::{
-    check, check_at, check_on, core_ir, core_ir_full, core_of, dump, dump_at, dump_on,
-    effect_strategy_full, effect_strategy_on, effect_warnings_full, example_program, interpret,
-    interpret_at, interpret_io_at, interpret_io_on, off_platform_builtins, query_on, rc_balanced,
-    report, report_at, report_on, shape_digests_of, stdlib_hash, valid_backend_opt,
+    check, check_at, check_on, commit_to_store, core_ir, core_ir_full, core_of, debug_on, diff_on,
+    dump, dump_at, dump_on, effect_strategy_full, effect_strategy_on, effect_warnings_full,
+    example_program, interpret, interpret_at, interpret_io_at, interpret_io_on, namespace_root,
+    off_platform_builtins, query_on, rc_balanced, record_on, replay_on, report, report_at,
+    report_on, shape_digests_of, source_modules, stdlib_hash, store_def_inputs, valid_backend_opt,
     with_custom_prelude, with_prelude, Config, Scheduler, StdlibHash, BACKEND_OPT_LEVELS,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use flags::{DynFlags, EffectTier};
-pub use fmt::{format, format_check};
+pub use fmt::{format, format_check, format_wire_accept};
 pub use resolve::{default_roots, project_roots, Root};
 pub use sym::Sym;
 pub use types::show_effects;

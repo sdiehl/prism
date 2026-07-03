@@ -159,6 +159,10 @@ pub(super) fn synth_ctor(type_name: &str, tag: usize, n: usize) -> CtorInfo {
         type_name: type_name.into(),
         params: vec![],
         param_kinds: vec![],
+        // Arity-carrying placeholders only: every consumer of a synthesized ctor
+        // reads `args.len()` (the field count), never the element types, and the
+        // backend lays every field out as a uniform i64 cell, so the `Int` here is
+        // never read semantically. It is not a claim that the fields are integers.
         args: vec![Type::Int; n],
         tag,
         fields: vec![],

@@ -19,6 +19,7 @@
 
 use std::collections::BTreeSet;
 
+use super::diagnostics::DriftLog;
 use super::flow::{self, Loc};
 use super::{contains_mask, each_subcomp, each_value, thunks_in_value, Env, Lowerer, MaskOp};
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
@@ -97,7 +98,7 @@ impl Lowerer {
     // where its handler was installed, not under its own binding), and wrap it
     // in a lambda over the op params.
     fn clause_evidence(&mut self, op: &HandleOp, env: &Env, loc: &Loc) -> Option<Value> {
-        let stripped = strip_resume(&op.body, &resume_set(op.resume))?;
+        let stripped = strip_resume(&op.body, &resume_set(op.resume), &self.drift)?;
         let body = self.thread_ev(&stripped, env, loc)?;
         let params = if op.params.is_empty() {
             vec![self.fresh("u")]
@@ -330,7 +331,7 @@ impl Lowerer {
                 return false;
             };
             ops.iter()
-                .all(|op| strip_resume(&op.body, &resume_set(op.resume)).is_some())
+                .all(|op| strip_resume(&op.body, &resume_set(op.resume), &self.drift).is_some())
         })
     }
 }
@@ -356,20 +357,20 @@ pub(super) fn resume_set(resume: Sym) -> BTreeSet<Sym> {
 // return None, so the caller falls back to the general (non-fused) lowering
 // rather than miscompiling. Checked at every level since each recursive call
 // re-enters here.
-pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
-    let stripped = strip_resume_go(c, aliases)?;
+pub(super) fn strip_resume(c: &Comp, aliases: &BTreeSet<Sym>, drift: &DriftLog) -> Option<Comp> {
+    let stripped = strip_resume_go(c, aliases, drift)?;
     if !fv::comp(&stripped).is_disjoint(aliases) {
         debug_assert!(
             false,
             "strip_resume accepted a clause but left a resume reference: elaborated shape drifted"
         );
-        super::diagnostics::report_shape_drift("strip_resume");
+        drift.shape_drift("strip_resume");
         return None;
     }
     Some(stripped)
 }
 
-fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
+fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>, drift: &DriftLog) -> Option<Comp> {
     match c {
         Comp::App(f, args) if matches!(f.as_ref(), Comp::Force(Value::Var(v)) if aliases.contains(v)) =>
         {
@@ -386,7 +387,7 @@ fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
                 if aliases.contains(v) {
                     let mut a2 = aliases.clone();
                     a2.insert(*x);
-                    return strip_resume(n, &a2);
+                    return strip_resume(n, &a2, drift);
                 }
             }
             if !fv::comp(m).is_disjoint(aliases) {
@@ -395,7 +396,7 @@ fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
             Some(Comp::Bind(
                 m.clone(),
                 *x,
-                Box::new(strip_resume(n, aliases)?),
+                Box::new(strip_resume(n, aliases, drift)?),
             ))
         }
         Comp::If(v, t, e) => {
@@ -404,8 +405,8 @@ fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
             }
             Some(Comp::If(
                 v.clone(),
-                Box::new(strip_resume(t, aliases)?),
-                Box::new(strip_resume(e, aliases)?),
+                Box::new(strip_resume(t, aliases, drift)?),
+                Box::new(strip_resume(e, aliases, drift)?),
             ))
         }
         Comp::Case(v, arms) => {
@@ -414,7 +415,7 @@ fn strip_resume_go(c: &Comp, aliases: &BTreeSet<Sym>) -> Option<Comp> {
             }
             let arms = arms
                 .iter()
-                .map(|(p, b)| Some((p.clone(), strip_resume(b, aliases)?)))
+                .map(|(p, b)| Some((p.clone(), strip_resume(b, aliases, drift)?)))
                 .collect::<Option<Vec<_>>>()?;
             Some(Comp::Case(v.clone(), arms))
         }

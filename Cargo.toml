@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -35,6 +35,7 @@ cc = "1"
 lalrpop = "0.23"
 
 [dev-dependencies]
+blake3 = "1"
 insta = { version = "1.41", features = ["glob"] }
 
 # `native` (the LLVM backend, the `prism` CLI, and the REPL) is the default.
@@ -82,6 +83,14 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
+
+# Faster incremental builds and links for the dev/test loop: line-number-only
+# debuginfo (backtraces keep file:line, only debugger variable inspection is
+# lost) and unpacked debuginfo (no .dSYM bundling step on macOS). Release builds,
+# which the gate and shipped binaries use, are unaffected.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
 
 # `cargo release <version>` bumps the manifest, stamps the changelog, tags
 # v<version>, and pushes; the Release workflow builds and publishes from the tag.

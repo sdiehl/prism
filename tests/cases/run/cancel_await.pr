@@ -1,0 +1,23 @@
+-- S6: awaiting a cancelled fiber never hangs. `try_await` observes the
+-- cancellation as `Was_Cancelled` instead of blocking forever.
+
+import Concurrent (..)
+
+fn looper() : !{Async(Int), IO} Int =
+  yield(())
+  yield(())
+  99
+
+fn scene() : !{Async(Int), IO} Int =
+  let w = fork(looper)
+  yield(())
+  cancel(w)
+  match try_await(w) of
+    Completed(v) =>
+      println("completed {v}")
+      v
+    Was_Cancelled =>
+      println("await observed Cancelled")
+      0 - 1
+
+fn main() = println(run_async(scene))

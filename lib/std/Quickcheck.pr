@@ -1,0 +1,278 @@
+-- | Property testing: run a boolean property over many generated inputs and
+-- report the first counterexample, deterministically.
+--
+-- A `Gen(a)` is a seeded, sized function producing an `a`. It draws its
+-- randomness from the ambient `Random` effect, and the runner discharges that
+-- effect with a seeded SplitMix64 handler, so a whole run is a pure function of
+-- its seed. There is no real IO here: `quickcheck` performs no `prim_rand`, only
+-- the seeded stream, so a property that fails fails the same way on every
+-- backend and reruns identically from the reported seed. Determinism is the
+-- language's contract, and a flaky property test would violate it.
+--
+-- The generator TYPE and its combinators live here; a derived `Arbitrary(a)`
+-- class (see `Wire`/deriving) supplies `arbitrary : Gen(a)` for user types by
+-- composing these combinators, so a derived instance plugs in with no rework.
+--
+-- Shrinking is intentionally omitted. The seam is the seed and size carried on a
+-- failing `Outcome`: a counterexample reproduces exactly via `gen_at`, and a
+-- future `shrink : (a) -> List(a)` hook would thread through `check_go` without
+-- changing this surface.
+
+import Data.List (..)
+
+-- The SplitMix64 mixing constants (the increment gamma and the two output
+-- multipliers) and its three output shift distances, named once here so the
+-- pseudo-random stream is one canonical definition.
+let splitmix_gamma : U64 = 11400714819323198485u64
+
+let splitmix_mix1 : U64 = 13787848793156543929u64
+
+let splitmix_mix2 : U64 = 10723151780598845931u64
+
+let shift_a : U64 = 30u64
+
+let shift_b : U64 = 27u64
+
+let shift_c : U64 = 31u64
+
+-- The SplitMix64 output for counter state `s`: advance the counter by gamma,
+-- then avalanche it. The state is just the incrementing counter, so `sm_next`
+-- is the raw advance and `sm_out` mixes the advanced value.
+fn sm_out(s : U64) : U64 =
+  let z0 = u64_add(s, splitmix_gamma)
+  let z1 = u64_mul(u64_xor(z0, u64_shr(z0, shift_a)), splitmix_mix1)
+  let z2 = u64_mul(u64_xor(z1, u64_shr(z1, shift_b)), splitmix_mix2)
+  u64_xor(z2, u64_shr(z2, shift_c))
+
+fn sm_next(s : U64) : U64 = u64_add(s, splitmix_gamma)
+
+-- | Run `action` with the `Random` effect served by a seeded SplitMix64 stream,
+-- so the result is a pure function of `seed`. This is the REPLAYABLE handler the
+-- runner installs; call it directly to reproduce a single draw off a seed.
+pub fn run_seeded(seed : U64, action : () -> a ! {Random | e}) =
+  let f =
+    handle action() with
+      rng_rand(_u, k) => \(s) -> k(int_of_u64(sm_out(s)))(sm_next(s))
+      return r => \(_s) -> r
+  f(seed)
+
+-- A random natural in `[0, n)`, folded from a full-width draw so it never goes
+-- negative regardless of the drawn sign. Requires `n > 0`.
+fn nat_below(n : Int) = int_of_u64(u64_rem(to_u64(rand()), to_u64(n)))
+
+-- | A seeded, sized generator of `a`. Apply it with `gen_run`; build one with
+-- the combinators below. The size bounds recursive shapes (list length, tree
+-- depth); make it explicit so derived instances for recursive types stay finite.
+pub type Gen(a) = Gen((Int) -> a ! {Random})
+
+-- | Draw one value from `g` at the given size, performing `Random`.
+pub fn gen_run(g : Gen(a), size : Int) =
+  match g of
+    Gen(f) => f(size)
+
+-- | Draw a value from `g` deterministically off `seed` at `size`, no IO. This is
+-- the reproduce-a-counterexample entry point.
+pub fn gen_at(g : Gen(a), seed : U64, size : Int) : a =
+  run_seeded(seed, \() -> gen_run(g, size))
+
+-- | The generator that ignores size and randomness and always yields `x`.
+pub fn gen_const(x : a) : Gen(a) = Gen(\(_size) -> x)
+
+-- | Map `f` over every value a generator produces.
+pub fn gen_map(f : (a) -> b, g : Gen(a)) : Gen(b) =
+  Gen(\(size) -> f(gen_run(g, size)))
+
+-- | Combine two generators with `f`, drawing both at the same size.
+pub fn gen_map2(f : (a, b) -> c, ga : Gen(a), gb : Gen(b)) : Gen(c) =
+  Gen(\(size) -> f(gen_run(ga, size), gen_run(gb, size)))
+
+-- | Monadic bind: draw an `a`, then draw from the generator `f` picks for it.
+pub fn gen_bind(g : Gen(a), f : (a) -> Gen(b)) : Gen(b) =
+  Gen(\(size) -> gen_run(f(gen_run(g, size)), size))
+
+-- | Build a generator that sees the current size, for recursive shapes that
+-- branch on remaining fuel.
+pub fn gen_sized(f : (Int) -> Gen(a)) : Gen(a) =
+  Gen(\(size) -> gen_run(f(size), size))
+
+-- | Run `g` at a fixed size, ignoring the ambient one (shrink a recursive
+-- position by resizing it smaller).
+pub fn gen_resize(n : Int, g : Gen(a)) : Gen(a) = Gen(\(_size) -> gen_run(g, n))
+
+-- Total non-empty indexing: `first` when `i <= 0`, else walk `rest`, falling
+-- back to `first` past the end (unreachable, since callers draw `i` in range).
+-- Taking the collection as head-plus-tail makes non-emptiness a type guarantee,
+-- so there is no `Fail` and the generator row stays `{Random}`.
+fn nth_nonempty(first : a, rest : List(a), i : Int) : a =
+  if i <= 0 then
+    first
+  else
+    match rest of
+      Cons(h, t) => nth_nonempty(h, t, i - 1)
+      Nil => first
+
+-- | Pick one of `g0`/`rest` uniformly, then draw from it (one arm per
+-- constructor, the shape a derived sum-type instance uses).
+pub fn gen_choose(g0 : Gen(a), rest : List(Gen(a))) : Gen(a) =
+  Gen() fn(size)
+    gen_run(nth_nonempty(g0, rest, nat_below(1 + length(rest))), size)
+
+-- | Pick one of the given values uniformly (`x0` or one of `rest`).
+pub fn gen_one_of(x0 : a, rest : List(a)) : Gen(a) =
+  Gen(\(_size) -> nth_nonempty(x0, rest, nat_below(1 + length(rest))))
+
+-- A signed value in `[-(size+1), size+1)`, the small readable band the numeric
+-- generators fall back to between edge cases.
+fn small_signed(size : Int) =
+  let m = size + 1
+  nat_below(2 * m) - m
+
+-- Draw an `Int`, mixing the edge cases (`0`, `1`, `-1`, a full-width value)
+-- with a small readable one so both corner and typical inputs are covered.
+fn int_at(size : Int) =
+  let pick = nat_below(8)
+  if pick == 0 then
+    0
+  elif pick == 1 then
+    1
+  elif pick == 2 then
+    0 - 1
+  elif pick == 3 then
+    rand()
+  else
+    small_signed(size)
+
+-- | Generator of `Int`, biased toward the edge cases (`0`, `1`, `-1`, and a
+-- full-width draw) alongside small readable values.
+pub let gen_int : Gen(Int) = Gen(int_at)
+
+-- | Generator of `I64`, reusing the `Int` distribution.
+pub let gen_i64 : Gen(I64) = gen_map(\(x) -> to_i64(x), gen_int)
+
+-- | Generator of `U64`, reusing the `Int` distribution (negatives wrap).
+pub let gen_u64 : Gen(U64) = gen_map(\(x) -> to_u64(x), gen_int)
+
+-- | Generator of `Bool`.
+pub let gen_bool : Gen(Bool) = Gen(\(_size) -> nat_below(2) == 0)
+
+-- The nasty float draw: zeros, one, and the three non-finite values, so a
+-- roundtrip or ordering property meets `NaN` and the infinities.
+fn float_at(size : Int) =
+  let pick = nat_below(9)
+  if pick == 0 then
+    0.0
+  elif pick == 1 then
+    1.0
+  elif pick == 2 then
+    0.0 -. 1.0
+  elif pick == 3 then
+    1.0 /. 0.0
+  elif pick == 4 then
+    (0.0 -. 1.0) /. 0.0
+  elif pick == 5 then
+    0.0 /. 0.0
+  else
+    let m = size + 1
+    to_float(small_signed(size)) /. to_float(m)
+
+-- | Generator of `Float`, including the nasty values (`+/-0`, `+/-inf`, `NaN`).
+pub let gen_float : Gen(Float) = Gen(float_at)
+
+-- | Generator of a printable-ASCII `Char`.
+pub let gen_char : Gen(Char) = Gen(\(_size) -> chr(32 + nat_below(95)))
+
+fn rand_bytes(n : Int, arr : Array(Int)) =
+  if n <= 0 then
+    arr
+  else
+    rand_bytes(n - 1, array_push(arr, 32 + nat_below(95)))
+
+-- | Generator of a printable-ASCII `String`, length bounded by size.
+pub let gen_string : Gen(String) =
+  Gen() fn(size)
+    string_of_bytes(rand_bytes(nat_below(size + 1), array_empty()))
+
+fn list_of(g : Gen(a), size : Int, n : Int) =
+  if n <= 0 then
+    Nil
+  else
+    Cons(gen_run(g, size), list_of(g, size, n - 1))
+
+-- | Generator of a `List(a)` whose length is bounded by size.
+pub fn gen_list(g : Gen(a)) : Gen(List(a)) =
+  Gen(\(size) -> list_of(g, size, nat_below(size + 1)))
+
+-- | Generator of `Option(a)`: `None` a quarter of the time, else `Some`.
+pub fn gen_option(g : Gen(a)) : Gen(Option(a)) =
+  Gen() fn(size)
+    if nat_below(4) == 0 then
+      None
+    else
+      Some(gen_run(g, size))
+
+-- | Generator of a pair, both drawn at the same size.
+pub fn gen_pair(ga : Gen(a), gb : Gen(b)) : Gen((a, b)) =
+  Gen(\(size) -> (gen_run(ga, size), gen_run(gb, size)))
+
+-- | Generator of a triple, all drawn at the same size.
+pub fn gen_triple(ga : Gen(a), gb : Gen(b), gc : Gen(c)) : Gen((a, b, c)) =
+  Gen(\(size) -> (gen_run(ga, size), gen_run(gb, size), gen_run(gc, size)))
+
+-- | How a property run configures the seeded stream: the base `seed`, the number
+-- of cases to try (`count`), and the largest size handed to a generator
+-- (`max_size`).
+pub type Config = Cfg { seed: U64, count: Int, max_size: Int }
+
+-- | The default configuration: a fixed base seed, 100 cases, sizes up to 20.
+pub let default_config : Config =
+  Cfg { seed = 2463534242u64, count = 100, max_size = 20 }
+
+-- | The result of a property run: `Passed(n)` after `n` cases held, or
+-- `Failed(value, index, seed, size)` with the first counterexample and the seed
+-- and size that reproduce it via `gen_at`.
+pub type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int)
+
+-- The per-case seed: a well-mixed function of the base seed and the case index,
+-- so each case is independent and any single one reproduces on its own.
+fn seed_for(base : U64, i : Int) : U64 =
+  sm_out(u64_add(base, u64_mul(to_u64(i), splitmix_gamma)))
+
+fn check_go(
+  cfg : Config,
+  gen : Gen(a),
+  prop : (a) -> Bool,
+  i : Int
+) : Outcome(a) =
+  if i >= cfg.count then
+    Passed(i)
+  else
+    let sz = 1 + mod(i, cfg.max_size)
+    let sd = seed_for(cfg.seed, i)
+    let x = gen_at(gen, sd, sz)
+    if prop(x) then
+      check_go(cfg, gen, prop, i + 1)
+    else
+      Failed(x, i, sd, sz)
+
+-- | Run `prop` over `cfg.count` inputs from `gen`, returning the first
+-- counterexample or the count that passed. Deterministic in `cfg.seed`.
+pub fn check_with(cfg : Config, gen : Gen(a), prop : (a) -> Bool) : Outcome(a) =
+  check_go(cfg, gen, prop, 0)
+
+-- | Run `prop` over the default configuration.
+pub fn quickcheck(gen : Gen(a), prop : (a) -> Bool) : Outcome(a) =
+  check_with(default_config, gen, prop)
+
+-- | True when a run found no counterexample.
+pub fn passed(o : Outcome(a)) : Bool =
+  match o of
+    Passed(_) => true
+    Failed(_, _, _, _) => false
+
+-- | Render an outcome for `name` as one report line (pass) or a block naming the
+-- counterexample and the seed and size that reproduce it.
+pub fn show_outcome(name : String, o : Outcome(a)) : String given Show(a) =
+  match o of
+    Passed(n) => concat_all([name, ": OK, passed ", show(n), " tests."])
+    Failed(x, i, sd, sz) =>
+      concat_all([name, ": FAILED after ", show(i), " tests.\n  counterexample: ", show(x), "\n  reproduce: seed ", show(sd), " size ", show(sz)])

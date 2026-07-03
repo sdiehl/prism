@@ -316,6 +316,7 @@ b3:                                               ; preds = %entry
   br i1 %t31, label %b8, label %b9
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 
 b4:                                               ; preds = %b2
@@ -363,6 +364,9 @@ b10:                                              ; preds = %b9, %b11
   %t44 = musttail call i64 @prism_length.trmc(i64 %t24, i64 %t43)
   ret i64 %t44
 }
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_dec(i64) #0
