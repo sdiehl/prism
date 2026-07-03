@@ -40,8 +40,6 @@ jobs:
         include:
           - os: macos-14  # Apple Silicon runner; host target is aarch64-apple-darwin
             target: aarch64-apple-darwin
-          - os: macos-15-intel  # Intel runner; host target is x86_64-apple-darwin
-            target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm  # GitHub public ARM64 runner
@@ -336,6 +334,11 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest
       - uses: docker/build-push-action@v6
+        # Don't upload the buildx build-record (.dockerbuild) artifact: the publish
+        # job downloads *all* artifacts and choked trying to fetch that stray record.
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+          DOCKER_BUILD_SUMMARY: "false"
         with:
           context: .
           load: ${{ !startsWith(github.ref, 'refs/tags/v') }}
