@@ -40,8 +40,12 @@ jobs:
         include:
           - os: macos-14  # Apple Silicon runner; host target is aarch64-apple-darwin
             target: aarch64-apple-darwin
+          - os: macos-15-intel  # Intel runner; host target is x86_64-apple-darwin
+            target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm  # GitHub public ARM64 runner
+            target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v7
 
@@ -114,7 +118,7 @@ jobs:
       # file argument is an ignored CLI placeholder (`dump stdlib-hash` reads the
       # embedded stdlib, not the file), so any readable `.pr` serves.
       - name: Record stdlib Merkle root
-        if: runner.os == 'Linux'
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           set -euo pipefail
           root="$(target/release/prism dump stdlib-hash examples/accum.pr | awk '/^root/{print $2}')"
@@ -123,7 +127,7 @@ jobs:
           echo "stdlib Merkle root: $root"
 
       - name: Upload stdlib Merkle root
-        if: runner.os == 'Linux'
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/upload-artifact@v4
         with:
           name: stdlib-merkle-root
@@ -203,12 +207,32 @@ jobs:
       - name: Version from tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      # Collect both platforms' tarballs/checksums into dist/.
+      # Collect every platform's tarball/checksum into dist/.
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # Content-address the whole release: a canonical SHA256SUMS manifest over
+      # every shipped asset (sorted for determinism, verifiable with
+      # `sha256sum -c SHA256SUMS`), then a single release Merkle root = the sha256
+      # of that manifest. One hash-friendly value that commits to the entire asset
+      # set, mirroring the stdlib Merkle root discipline the language itself uses.
+      - name: Checksums and release Merkle root
+        run: |
+          set -euo pipefail
+          cd dist
+          : > SHA256SUMS
+          for f in $(find . -maxdepth 1 -type f \
+                       ! -name 'SHA256SUMS' ! -name 'release-merkle-root.txt' \
+                       ! -name '*.sha256' -printf '%f\n' | sort); do
+            sha256sum "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
+          root="$(sha256sum SHA256SUMS | awk '{print $1}')"
+          printf '%s\n' "$root" > release-merkle-root.txt
+          echo "release Merkle root: $root"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -237,6 +261,8 @@ jobs:
             dist/*.tar.gz
             dist/*.tar.gz.sha256
             dist/stdlib-merkle-root.txt
+            dist/SHA256SUMS
+            dist/release-merkle-root.txt
 
       # Bump Formula/prism.rb in the tap so `brew upgrade prism` sees the new
       # version. The tap ships the macOS arm64 tarball. No-op until the tap repo

@@ -409,6 +409,28 @@ jobs:
           ./result/bin/prism --version
           ./result/bin/prism check examples/accum.pr
 
+      # Drift guard: the nix build path must embed the exact stdlib the cargo path
+      # pins. Assert the nix-built binary's stdlib Merkle root equals the committed
+      # golden that `just hash` regenerates from the cargo build (and that CI checks
+      # elsewhere via `prism docs --stdlib --check`). A mismatch means the crane
+      # source filter dropped/staled a stdlib source or the two paths' LLVM skewed.
+      # The `.pr` file arg is an ignored placeholder; dump reads the embedded stdlib.
+      - name: Stdlib Merkle root parity (nix vs committed golden)
+        run: |
+          set -euo pipefail
+          golden="$(grep -oE '[0-9a-f]{64}' docs/src/stdlib/index.md | head -1)"
+          got="$(./result/bin/prism dump stdlib-hash examples/accum.pr | awk '/^root/{print $2}')"
+          echo "committed golden: $golden"
+          echo "nix-built binary: $got"
+          [ -n "$golden" ] || { echo "no golden root found in docs/src/stdlib/index.md"; exit 1; }
+          [ "$golden" = "$got" ] || { echo "stdlib Merkle root drift between nix and cargo build paths"; exit 1; }
+
+      # Keep the wasm bundle output building (interpreter-only, no LLVM); it feeds
+      # the web/docs build and would otherwise bit-rot until someone ran it. Also
+      # seeds the wasm closure into Cachix.
+      - name: Build wasm bundle
+        run: nix build .#wasm --print-build-logs
+
       # Uploaded even if the build step fails, so the resolved lockfile is always
       # retrievable from the run.
       - name: Upload flake.lock

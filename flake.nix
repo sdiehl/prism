@@ -81,7 +81,7 @@
 
       packages = forAllSystems (system:
         let
-          inherit (envFor system) pkgs rust llvm libInputs;
+          inherit (envFor system) pkgs toolchain rust llvm libInputs;
           craneLib = (crane.mkLib pkgs).overrideToolchain rust;
 
           # Crane's default filter keeps only Cargo-relevant files. The compiler
@@ -116,10 +116,44 @@
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           prism = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
+
+          # WebAssembly bundle: interpreter-only front-end (no LLVM, cdylib), the
+          # nix equivalent of `just wasm` (--no-default-features --features wasm on
+          # wasm32-unknown-unknown, then wasm-bindgen --target web). wasm-bindgen-cli
+          # MUST match the wasm-bindgen crate version in Cargo.lock exactly, so pin
+          # it here rather than take nixpkgs' default (which drifts and errors).
+          rustWasm = pkgs.rust-bin.stable.${toolchain.toolchain.channel}.minimal.override {
+            targets = [ "wasm32-unknown-unknown" ];
+          };
+          craneWasm = (crane.mkLib pkgs).overrideToolchain rustWasm;
+          # nixpkgs ships versioned wasm-bindgen-cli attrs; pick the one matching
+          # the wasm-bindgen crate in Cargo.lock (0.2.126). Bump both together.
+          wasmBindgen = pkgs.wasm-bindgen-cli_0_2_126;
+          wasmArgs = {
+            inherit src;
+            strictDeps = true;
+            doCheck = false;
+            cargoExtraArgs = "--no-default-features --features wasm";
+            CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+          };
+          prism-wasm = craneWasm.buildPackage (wasmArgs // {
+            cargoArtifacts = craneWasm.buildDepsOnly wasmArgs;
+            nativeBuildInputs = [ wasmBindgen pkgs.binaryen ];
+            # buildPackage emits target/wasm32-unknown-unknown/release/prism.wasm;
+            # wasm-bindgen turns it into the web-target JS + _bg.wasm pair the docs
+            # and web app consume, then wasm-opt -Oz shrinks it (what wasm-pack does
+            # internally) for the small, deterministic bundle the README advertises.
+            postInstall = ''
+              wasm-bindgen --target web --out-dir $out/pkg --out-name prism \
+                target/wasm32-unknown-unknown/release/prism.wasm
+              wasm-opt -Oz -o $out/pkg/prism_bg.wasm $out/pkg/prism_bg.wasm
+            '';
+          });
         in
         {
           default = prism;
           inherit prism;
+          wasm = prism-wasm;
         });
 
       apps = forAllSystems (system: {
