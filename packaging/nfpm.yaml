@@ -1,0 +1,26 @@
+# deb/rpm/apk via `nfpm package`. VERSION and PKG_ARCH come from the environment.
+name: prism
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+section: devel
+priority: optional
+maintainer: "Stephen Diehl <stephen.m.diehl@gmail.com>"
+description: An effect-typed functional language that compiles to native code through LLVM.
+homepage: "https://github.com/sdiehl/prism"
+license: "MIT"
+
+contents:
+  - src: ./target/release/prism
+    dst: /usr/bin/prism
+  - src: ./LICENSE
+    dst: /usr/share/doc/prism/LICENSE
+
+overrides:
+  deb:
+    depends: [llvm-22, clang-22]
+  rpm:
+    depends: [llvm, clang]
+  apk:
+    depends: [llvm22, clang]

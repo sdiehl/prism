@@ -1,0 +1,11 @@
+/target
+/target-mlir
+/result
+/result-*
+/.git
+/docs/book
+/web/node_modules
+/web/dist
+/web/pkg
+/models/.lake
+/public

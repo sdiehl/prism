@@ -1,0 +1,26 @@
+# Maintainer: Stephen Diehl <stephen.m.diehl@gmail.com>
+# Binary package tracking the GitHub release tarballs. Refresh sums with updpkgsums.
+pkgname=prism-bin
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="An effect-typed functional language that compiles to native code through LLVM"
+arch=('x86_64' 'aarch64')
+url="https://github.com/sdiehl/prism"
+license=('MIT')
+depends=('llvm' 'clang')
+provides=('prism')
+conflicts=('prism')
+source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/prism-$pkgver-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/prism-$pkgver-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  case "$CARCH" in
+    x86_64) _triple=x86_64-unknown-linux-gnu ;;
+    aarch64) _triple=aarch64-unknown-linux-gnu ;;
+  esac
+  local _dir="prism-$pkgver-$_triple"
+  install -Dm755 "$_dir/prism" "$pkgdir/usr/bin/prism"
+  install -Dm644 "$_dir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

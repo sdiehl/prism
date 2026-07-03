@@ -170,6 +170,28 @@ docs: docs-gen wasm
 release VERSION:
     cargo release {{VERSION}} --execute
 
+# deb/rpm/apk for the host arch into dist/ (needs nfpm; use a Linux binary).
+pkg VERSION: build-release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export VERSION="{{VERSION}}"
+    case "$(uname -m)" in
+      x86_64|amd64)  export PKG_ARCH=amd64 ;;
+      aarch64|arm64) export PKG_ARCH=arm64 ;;
+      *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+    esac
+    mkdir -p dist
+    for fmt in deb rpm apk; do nfpm package -f packaging/nfpm.yaml -p "$fmt" -t dist; done
+    ls -1 dist
+
+# Self-contained image bundling LLVM. Push manually when ready.
+docker TAG="prism:dev":
+    docker build -t "{{TAG}}" .
+
+# One command: deb, rpm, apk, and the docker image for this host.
+dist VERSION: (pkg VERSION)
+    just docker "prism:{{VERSION}}"
+
 smoke: build
     # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
     for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done
