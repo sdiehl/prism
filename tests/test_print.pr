@@ -1,0 +1,3 @@
+fn main() =
+  let msg = "ping"
+  eprintln("msg is: {msg}")
