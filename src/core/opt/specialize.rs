@@ -213,10 +213,15 @@ impl Specializer {
         let subst: BTreeMap<Sym, Value> = ps.into_iter().zip(vals2).collect();
         self.reductions += 1;
         // Freshen the method body's own binders before substituting the argument
-        // values in: `subst_comp` is not capture-avoiding, so a call-site value
-        // whose free variable happens to match one of the method's internal
-        // `let`/`case`/lambda binders would otherwise be captured. Freshening makes
-        // every internal binder a unique reserved name no source value can mention.
+        // values in. Capture is NOT the reason: `subst_comp` is capture-avoiding
+        // (its `Subst::enter` renames any binder colliding with a free variable of
+        // a live substituted value). The freshen exists because this same shared
+        // method body is materialized at every specialization site, and the
+        // pipeline invariant is that binders stay globally unique (see
+        // `names::FRESH_SPECIALIZE`); without it, N reductions of one instance
+        // method would emit N copies sharing the original binder names, which a
+        // later hoisting/duplicating pass could conflate. Freshening gives each
+        // materialization its own `%sp`-namespaced binders.
         let body = rename::freshen(&lbody, &mut self.fresh, names::FRESH_SPECIALIZE);
         Some(subst_comp(
             &body,

@@ -1,0 +1,19 @@
+-- Zero-allocation certificates. gcd carries `without alloc`: the body and its
+-- whole call tree (here, itself) allocate no fresh heap cell, checked
+-- statically. horner asserts the same for a region: the block is lifted to a
+-- synthetic `without alloc` function capturing its free locals, so the
+-- identical check covers exactly that region.
+
+fn gcd(a : Int, b : Int) : Int without alloc =
+  if b == 0 then
+    a
+  else
+    gcd(b, a % b)
+
+fn horner(a : Int, b : Int, c : Int, x : Int) : Int =
+  let scaled = x * 2
+  without alloc (a * scaled + b) * scaled + c
+
+fn main() =
+  println(gcd(48, 18))
+  println(horner(1, 2, 3, 5))

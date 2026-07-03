@@ -315,6 +315,11 @@ pub(crate) fn index(
     if let Some(anchor) = anchor {
         let _ = writeln!(out, "{anchor}\n");
     }
+    // A heading (not just a blank line) between the anchor and the module list:
+    // CommonMark merges two `-` bullet lists separated only by a blank line into
+    // one continuous list, so without it the fingerprint bullets and the module
+    // index would render as a single run-on list.
+    let _ = writeln!(out, "## Modules\n");
     for (slug, title, summary) in entries {
         if summary.is_empty() {
             let _ = writeln!(out, "- [{title}](./{slug}.md)");

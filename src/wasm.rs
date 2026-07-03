@@ -78,6 +78,37 @@ pub fn run(src: &str) -> String {
     }
 }
 
+// The boids scrubber source. Its definitions are shared verbatim with the
+// terminal corpus example; the browser appends its own `main` that prints the
+// whole trajectory, so nothing about the swarm's motion depends on which entry
+// point runs it. The split marker fences off the example's own `main` so the
+// two entry points never collide in one program.
+const BOIDS_SRC: &str = include_str!("../examples/boids.pr");
+const BOIDS_MAIN_SPLIT: &str = "-- @scrubber:main-below";
+
+/// Run the boids swarm for `steps` deterministic steps and return the whole
+/// trajectory as text.
+///
+/// The first line is `W H` (the toroidal world dimensions); each following line
+/// is one frame, a space-separated list of `x,y` integer positions. Frame N is
+/// `step` composed N times on the seeded swarm, a pure function of the index, so
+/// the browser scrubber positions its playhead at any frame by replaying to it.
+/// On any front-end or runtime error, returns the rendered diagnostic instead.
+#[wasm_bindgen]
+#[must_use]
+pub fn boids_run(steps: u32) -> String {
+    let defs = BOIDS_SRC
+        .split(BOIDS_MAIN_SPLIT)
+        .next()
+        .unwrap_or(BOIDS_SRC);
+    let driver = format!("{defs}\nfn main() = print(run_trace({steps}))\n");
+    let full = with_prelude(&driver);
+    match interpret(&full) {
+        Ok(r) => r.term,
+        Err(e) => format!("error: {e}"),
+    }
+}
+
 /// Pretty-print a snippet, or return the parse/lex error as text.
 #[wasm_bindgen]
 #[must_use]

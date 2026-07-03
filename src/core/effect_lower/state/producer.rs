@@ -214,7 +214,7 @@ impl Lowerer {
         if !evs.contains_key(&clause.name) || !is_id_return(*return_var, return_body.as_deref()) {
             return None;
         }
-        let stripped = strip_resume(&clause.body, &resume_set(clause.resume))?;
+        let stripped = strip_resume(&clause.body, &resume_set(clause.resume), &self.drift)?;
         let acc = self.fresh("acc");
         let ev_body = self.thread_st(&stripped, evs, loc, acc)?;
         let mut ev_params = clause.params.clone();

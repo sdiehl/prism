@@ -2,9 +2,11 @@
 
    This is hand-written documentation that mirrors the real parser in
    src/syntax/grammar.lalrpop (terminal spellings from src/lex/token.rs, AST
-   node names from src/syntax/ast.rs). It is not machine-checked: treat the
-   lalrpop file as authoritative for fine precedence detail where the two ever
-   disagree. The reference manual (docs/src/spec.md) renders the sections below
+   node names from src/syntax/ast.rs). Its keyword coverage is machine-checked:
+   a test (tests/grammar_ebnf.rs) fails if the lexer defines a reserved word
+   this file never mentions as a terminal. Structure and precedence are not
+   checked, so treat the lalrpop file as authoritative for fine precedence
+   detail where the two ever disagree. The reference manual (docs/src/spec.md) renders the sections below
    by mdbook anchor include, so this file is the one place each rule lives.
 
    Layout / offside: the lexer feeds the parser, then an offside pass inserts the
@@ -60,7 +62,7 @@ program   ->  { topdecl }                       -- separated by layout
 topdecl   ->  [ "pub" | "opaque" ] item
 item      ->  import | datatype | newtype | synonym | rowalias
            |  classdecl | instancedecl | canonicaldecl | effectdecl
-           |  errordecl | patterndecl | constdecl | fundecl
+           |  errordecl | patterndecl | stabledecl | constdecl | fundecl
 
 import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
            |  "pub" "import" modpath [ "(" name , ... ")" ]
@@ -81,9 +83,10 @@ field     ->  varid ":" type
 deriving  ->  "deriving" "(" conid , ... ")"
 
 constdecl ->  "let" varid [ ":" type ] "=" expr
-fundecl   ->  [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
-                [ retann ] [ given ] "=" expr [ wheres ]
+fundecl   ->  [ "replayable" ] [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
+                [ retann ] [ alloccert ] [ given ] "=" expr [ wheres ]
 param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
+alloccert ->  "without" "alloc" | "\\" "alloc"  -- zero-alloc certificate over the whole call tree ("\ alloc" is the terser spelling)
 retann    ->  ":" "!" "{" [ label , ... ] "}" type
            |  ":" "!" type
            |  ":" type
@@ -105,6 +108,18 @@ errordecl    ->  "error" conid [ "(" type , ... ")" ]
 
 patterndecl  ->  "pattern" conid "(" [ varid , ... ] ")" "for" conid "="
                    "view" expr [ "make" expr ]
+
+-- A `stable` block declares a serializable type's frozen version history:
+-- the rungs, then the hand-written converters for the
+-- type mutations the compiler cannot generate. Real braces, so entries are
+-- comma-separated. "frozen", "upgrade", "downgrade", and "drop_loss" are
+-- contextual, recognized positionally inside the block rather than reserved.
+stabledecl   ->  "stable" conid "{" stableitem , ... "}"
+stableitem   ->  rung | converter
+rung         ->  conid "=" "{" [ ".." conid "," ] rungfield , ... "}" [ "frozen" string ]
+rungfield    ->  varid ":" type [ "=" expr ]     -- an additive field carries a default
+converter    ->  ( "upgrade" | "downgrade" ) conid "->" conid "="
+                   "{" ".." expr { "," varid "=" expr } "}" [ "drop_loss" "(" varid , ... ")" ]
 (* ANCHOR_END: decls *)
 
 (* ANCHOR: types *)
@@ -136,6 +151,8 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
          |  "\\" "(" [ varid , ... ] ")" "->" expr  -- lambda
          |  "match" expr "of" { arm }
          |  "handle" expr "with" handler
+         |  "with" [ varid "<-" ] "handler" handler  expr  -- scoped handler (named if `x <-`), then continue
+         |  "with" [ varid "<-" ] appexpr  expr            -- scoped resource from a call, then continue
          |  "throw" conid [ "(" expr , ... ")" ]
          |  "try" expr "catch" { catcharm }
          |  "transact" expr "else" expr
@@ -149,8 +166,9 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
 
 opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
          |  appexpr
-appexpr ->  appexpr "(" [ expr , ... ] [ "using" iname , ... ] ")"
+appexpr ->  appexpr "(" [ arg , ... ] [ "using" iname , ... ] ")"
                                                      -- application; `using` selects instances
+arg     ->  [ varid ":=" ] expr                      -- an argument may be passed by name
          |  appexpr "[" expr "]"                      -- indexed read a[i]
          |  appexpr "." varid                         -- field access
          |  appexpr "." varid "(" [ expr , ... ] ")" -- method call (UFCS)
@@ -175,7 +193,10 @@ gen      ->  varid "in" expr
 qual     ->  "if" expr | "let" varid "=" expr
 iname    ->  varid | qualid                          -- an instance name
 fieldval ->  varid "=" expr                          -- a record field binding
-path     ->  varid { "." varid }                     -- a nested field path
+path     ->  pathseg { "." pathseg }                 -- a nested field path
+pathseg  ->  varid | "each" | "?" conid              -- field step, bulk map over a collection, or case-narrowing step
+          |  pathseg "[" expr "]"                      -- indexed step
+          |  "(" path "where" expr ")"                 -- filtered traversal
 binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
          |  "==" | "/=" | "<" | "<=" | ">" | ">="
          |  "+" | "-" | "*" | "/" | "%" | "^"

@@ -32,6 +32,7 @@ pub(super) const READ_LINE: &str = "prism_prim_read_line";
 pub(super) const RAND: &str = "prism_prim_rand";
 pub(super) const SRAND: &str = "prism_srand";
 pub(super) const FATAL: &str = "prism_fatal";
+pub(super) const ERROR_INT: &str = "prism_error_int";
 
 // Local mutable cells (the runtime form of an escape-checked `var`).
 pub(super) const REF_NEW: &str = "prism_ref_new";
@@ -46,10 +47,12 @@ pub(super) const INT_DIV: &str = "prism_rt_int_div";
 pub(super) const INT_REM: &str = "prism_rt_int_rem";
 pub(super) const INT_CMP: &str = "prism_rt_int_cmp";
 
-// Effect-machine instrumentation and the over-application trap.
+// Effect-machine instrumentation and the two miscompile traps: the
+// over-application trap and the non-exhaustive-`case` trap.
 pub(super) const EFFOP_ALLOC: &str = "prism_effop_alloc";
 pub(super) const DRIVE_STEP: &str = "prism_drive_step";
 pub(super) const APPLY_ERROR: &str = "prism_apply_error";
+pub(super) const MATCH_ERROR: &str = "prism_match_error";
 
 // Every runtime symbol named above, for the drift guard.
 #[cfg(test)]
@@ -70,6 +73,7 @@ const ALL: &[&str] = &[
     RAND,
     SRAND,
     FATAL,
+    ERROR_INT,
     REF_NEW,
     REF_GET,
     REF_SET,
@@ -82,6 +86,7 @@ const ALL: &[&str] = &[
     EFFOP_ALLOC,
     DRIVE_STEP,
     APPLY_ERROR,
+    MATCH_ERROR,
 ];
 
 #[cfg(test)]

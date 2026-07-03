@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
 use crate::lex::Token;
 
@@ -25,6 +25,7 @@ extern {
         "as"     => Token::As,
         "type"   => Token::Type,
         "newtype" => Token::Newtype,
+        "stable" => Token::Stable,
         "opaque" => Token::Opaque,
         "effect" => Token::Effect,
         "error"  => Token::KwError,
@@ -189,6 +190,7 @@ Item: Item = {
     <i:InstanceD> => Item::Instance(i),
     <c:CanonicalD> => Item::Canonical(c),
     <p:PatternD> => Item::Pattern(p),
+    <s:StableD> => Item::Stable(s),
     <c:ConstD> => Item::Fn(c),
     <f:Fn> => Item::Fn(f),
 };
@@ -229,6 +231,86 @@ PatClause: (String, S<Expr>, Span) = {
     } else {
         Err(lalrpop_util::ParseError::User {
             error: (Span::new(l, r), "expected `view` or `make` in pattern declaration".to_string()),
+        })
+    },
+};
+
+// A `stable` block. Real braces, so entries are
+// comma-separated like a class body: the rungs first, then any hand-written
+// converters. `build_stable` partitions the interleaved list.
+StableD: StableDecl = {
+    <l:@L> "stable" <name:"uid"> "{" <items:Comma<StableItem>> "}" <r:@R> =>?
+        crate::syntax::desugar::build_stable(name, items, Span::new(l, r))
+            .map_err(|error| lalrpop_util::ParseError::User { error }),
+};
+
+StableItem: crate::syntax::desugar::StableItem = {
+    <r:Rung> => crate::syntax::desugar::StableItem::Rung(r),
+    <c:Converter> => crate::syntax::desugar::StableItem::Conv(c),
+};
+
+// `V2 = { ..V1, tif: TimeInForce = GoodTillCancel } frozen "<digest>"`.
+Rung: Rung = {
+    <l:@L> <name:"uid"> "=" "{" <body:RungBody> "}" <frozen:FrozenBadge?> <r:@R> => {
+        let (base, fields) = body;
+        Rung { name, base, fields, frozen, span: Span::new(l, r) }
+    },
+};
+
+RungBody: (Option<String>, Vec<RungField>) = {
+    ".." <base:"uid"> <fs:("," <RungField>)*> => (Some(base), fs),
+    <fs:Comma<RungField>> => (None, fs),
+};
+
+RungField: RungField = {
+    <name:"ident"> ":" <ty:Type> <default:("=" <Expr>)?> => RungField { name, ty, default },
+};
+
+// The committed per-rung shape golden. `frozen` is contextual (an ident, not a
+// reserved word); the digest rides in a string literal so a hex digest that
+// starts with a digit still lexes cleanly.
+FrozenBadge: String = {
+    <l:@L> <kw:"ident"> <h:"str"> <r:@R> =>? if kw == "frozen" {
+        Ok(h)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `frozen` after a rung, found `{kw}`")),
+        })
+    },
+};
+
+// `upgrade V2 -> V3 = { ..v2, qty = e }` / `downgrade V3 -> V2 = { ..v3, .. } drop_loss(qty)`.
+Converter: Converter = {
+    <l:@L> <dir:ConvKw> <from:"uid"> "->" <to:"uid"> "=" <body:ConvBody> <drop:DropLoss?> <r:@R> => {
+        let (base, overrides) = body;
+        Converter { dir, from, to, base, overrides, drop_loss: drop.unwrap_or_default(), span: Span::new(l, r) }
+    },
+};
+
+ConvKw: ConvDir = {
+    <l:@L> <kw:"ident"> <r:@R> =>? match kw.as_str() {
+        "upgrade" => Ok(ConvDir::Upgrade),
+        "downgrade" => Ok(ConvDir::Downgrade),
+        _ => Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `upgrade` or `downgrade`, found `{kw}`")),
+        }),
+    },
+};
+
+ConvBody: (S<Expr>, Vec<(String, S<Expr>)>) = {
+    "{" ".." <base:Expr> <rest:("," <ConvField>)*> "}" => (base, rest),
+};
+
+ConvField: (String, S<Expr>) = {
+    <name:"ident"> "=" <e:Expr> => (name, e),
+};
+
+DropLoss: Vec<String> = {
+    <l:@L> <kw:"ident"> "(" <ns:Comma<"ident">> ")" <r:@R> =>? if kw == "drop_loss" {
+        Ok(ns)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `drop_loss`, found `{kw}`")),
         })
     },
 };

@@ -1,0 +1,15 @@
+-- The quickcheck harness catching real counterexamples, so the law suite is not
+-- vacuously green. Each property below is deliberately false; the runner must
+-- report the first counterexample (shown via Show) together with the seed and
+-- size that reproduce it exactly through `gen_at`. Output is a pure function of
+-- the fixed default seed, so it is identical on every backend.
+
+import Quickcheck (..)
+
+fn is_true(b) = b
+
+fn is_empty(xs) = length(xs) == 0
+
+fn main() =
+  println(show_outcome("every Bool holds (false)", quickcheck(gen_bool, is_true)))
+  println(show_outcome("every list is empty (false)", quickcheck(gen_list(gen_bool), is_empty)))

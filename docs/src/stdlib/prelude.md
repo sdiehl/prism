@@ -80,6 +80,16 @@ class Show(a) {
 
 Canonical rendering to a `String`, dispatched by dictionary. `show(x)` reads `x`'s `Show` instance, so a value prints canonically even in a polymorphic context (where the runtime representation alone cannot tell, say, a `Bool` from an `Int`). Derive it with `deriving (Show)`; strings render quoted and escaped, records with their field names.
 
+### `Hash`
+
+```prism,def,h-af56efed0cf692e03764e98bedaa4fd7cf00d0b23c9f116057576cc9b4241391
+class Hash(a) {
+  hash : (a) -> String
+}
+```
+
+A content hash of a value, as a lowercase blake3 hex digest. `deriving (Hash)` folds a value structurally into the same content-addressing scheme the compiler hashes code with (a constructor token followed by its fields' own digests), so structurally equal values hash equal, byte-for-byte identically on the interpreter and native backends. The leaf instances below anchor the fold.
+
 ### `Pow`
 
 ```prism,def,h-390c82aeb07696d244298074c027bf9c4c286a6a6ab345b0328b0d903e689bdd
@@ -349,6 +359,54 @@ instance showList : Show(List(a))
 ```
 
 Lists render in bracket form, `[a, b, c]`, matching the print-site generator; the elements recurse through their own `Show`.
+
+### `hashInt`
+
+```prism,def,h-7ecfb37d3310753051aba6fe293dbe6ac3f229ab2a29075b4284ba35041c4a18
+instance hashInt : Hash(Int)
+```
+
+### `hashI64`
+
+```prism,def,h-9f38ff0627a9710c1748347d9e64004f6bc8e5f11bf3ba52d24e0b040fcfa63e
+instance hashI64 : Hash(I64)
+```
+
+### `hashU64`
+
+```prism,def,h-fc58aa2174715a979d27e43f9b5c249639e007f261d66ac3ee8a8ab5dd659e30
+instance hashU64 : Hash(U64)
+```
+
+### `hashBool`
+
+```prism,def,h-5824490bad33670fd57909e99285d2bd37c914b8989f78b739f97a5abbf837ff
+instance hashBool : Hash(Bool)
+```
+
+### `hashChar`
+
+```prism,def,h-e9cab9d1b38e4fc725f994baa160e095068512f06f2aa1d488e2d20f9d1896b5
+instance hashChar : Hash(Char)
+```
+
+### `hashFloat`
+
+```prism,def,h-9a2df12e4c8cfa5a1709149fd33d12329d692d8f22ddc8478b55bd8d2a74e14f
+instance hashFloat : Hash(Float)
+```
+
+### `hashStr`
+
+```prism,def,h-c448748a64101f68a26e8fae08fc53001b0c884f92a8944bef7a19940c03aa96
+instance hashStr : Hash(String)
+```
+
+### `hashUnit`
+
+```prism,def,h-6914da7d3e177a02689570b8a98ec48383f0a9a5b6157e90d56502b16a75bf2e
+instance hashUnit : Hash(Unit)
+```
 
 ### `powInt`
 

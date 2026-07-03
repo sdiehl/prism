@@ -1,0 +1,65 @@
+-- | Per-type value generators for property testing.
+--
+-- A generator is the unwrapped `Quickcheck.Gen`: a size-bounded draw from the
+-- ambient `Random` capability. That makes a run deterministic under a seed (the
+-- `Quickcheck` runner serves `Random` from a seeded SplitMix64 stream), and lets
+-- a derived instance recurse through its fields' `arbitrary` while composing
+-- cleanly with the `Gen` combinators. The primitive instances delegate to
+-- `Quickcheck`'s canonical generators, so a derived type draws from the same
+-- distributions the hand-written harness does.
+--
+-- Wrap an instance back into a `Gen` with `arb_gen` to feed it to `quickcheck`.
+
+import Quickcheck (..)
+
+-- | A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends
+-- the budget on depth: at each recursive constructor it draws its fields a size
+-- smaller, and once the budget runs out it restricts to non-recursive
+-- constructors, so generation always terminates.
+pub class Arbitrary(a) {
+  arbitrary : (Int) -> a ! {Random | e}
+}
+
+-- | The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for
+-- `quickcheck`/`gen_at`.
+pub fn arb_gen() : Gen(a) given Arbitrary(a) = Gen(\(size) -> arbitrary(size))
+
+instance arbitraryInt : Arbitrary(Int) {
+  fn arbitrary(size) = gen_run(gen_int, size)
+}
+
+instance arbitraryI64 : Arbitrary(I64) {
+  fn arbitrary(size) = gen_run(gen_i64, size)
+}
+
+instance arbitraryU64 : Arbitrary(U64) {
+  fn arbitrary(size) = gen_run(gen_u64, size)
+}
+
+instance arbitraryBool : Arbitrary(Bool) {
+  fn arbitrary(size) = gen_run(gen_bool, size)
+}
+
+instance arbitraryUnit : Arbitrary(Unit) {
+  fn arbitrary(size) = ()
+}
+
+instance arbitraryChar : Arbitrary(Char) {
+  fn arbitrary(size) = gen_run(gen_char, size)
+}
+
+instance arbitraryFloat : Arbitrary(Float) {
+  fn arbitrary(size) = gen_run(gen_float, size)
+}
+
+instance arbitraryString : Arbitrary(String) {
+  fn arbitrary(size) = gen_run(gen_string, size)
+}
+
+instance arbitraryOption : Arbitrary(Option(a)) given Arbitrary(a) {
+  fn arbitrary(size) = gen_run(gen_option(Gen(\(s) -> arbitrary(s))), size)
+}
+
+instance arbitraryList : Arbitrary(List(a)) given Arbitrary(a) {
+  fn arbitrary(size) = gen_run(gen_list(Gen(\(s) -> arbitrary(s))), size)
+}

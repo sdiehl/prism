@@ -1,0 +1,25 @@
+-- `deriving (Identifiable)` is the ID starter pack: one keyword derives Eq,
+-- Ord, Hash, and Show, so an ordinary newtype with no test imports is usable as
+-- a comparable, hashable, printable identifier. The explicit `Show` on `Tag`
+-- must not derive twice.
+type UserId = UserId(Int) deriving (Identifiable)
+
+type Tag = Tag(String) deriving (Show, Identifiable)
+
+fn print_all(xs : List(UserId)) =
+  match xs of
+    Nil => ()
+    Cons(x, rest) =>
+      println(show(x))
+      print_all(rest)
+
+fn main() =
+  println(show(UserId(1) == UserId(1)))
+  println(show(UserId(1) == UserId(2)))
+  println(cmp(UserId(1), UserId(2)))
+  println(cmp(UserId(2), UserId(1)))
+  println(show(hash(UserId(7)) == hash(UserId(7))))
+  println(show(hash(UserId(7)) == hash(UserId(8))))
+  println(show(UserId(42)))
+  println(show(Tag("x")))
+  print_all(sort_by_ord([UserId(3), UserId(1), UserId(2)]))

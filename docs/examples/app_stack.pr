@@ -1,0 +1,50 @@
+-- An application row in place of a transformer stack. Ask is the reader layer,
+-- Tell the writer, Invalid the exception; Ctx names the ambient pair and App
+-- adds failure. A function states the part of the stack it uses (greet needs
+-- only Tell) and slots into any row that contains it, with no lifting. The
+-- run function is a flat sequence of scoped handlers, one per label, in an
+-- order chosen here rather than fixed by a type.
+--
+-- Expected output:
+--   hello
+--   step 3
+--   7
+--   hello
+--   step 99
+--   0
+
+effect Ask {
+  ctl ask(Unit) : Int
+}
+
+effect Tell {
+  ctl tell(String) : Unit
+}
+
+error Invalid(Int)
+
+alias Ctx = {Ask, Tell}
+
+alias App = {Ctx, Invalid}
+
+fn greet() : !{Tell} Unit = tell("hello")
+
+fn step(n) : !{App} Int =
+  greet()
+  let limit = ask(())
+  tell("step {n}")
+  if n > limit then
+    throw Invalid(n)
+  else
+    limit - n
+
+fn run_app(n) =
+  with handler
+    fun ask(_u) => 10
+  with handler
+    fun tell(m) => println(m)
+  try step(n) catch { Invalid(_bad) => 0 }
+
+fn main() =
+  println(run_app(3))
+  println(run_app(99))

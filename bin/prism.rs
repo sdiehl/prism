@@ -21,20 +21,15 @@ use prism::error::Error;
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
-    /// A `.pr` file to compile to a native binary named after it (a directory or
-    /// `prism.toml` compiles the whole project). With no path the REPL starts.
-    /// Override the output with `-o`; interpret instead with `prism run`.
+    /// A `.pr` file or project to compile; no path starts the REPL
     file: Option<PathBuf>,
-    /// Output path for the compiled binary (default: the source file's stem, or
-    /// `target/<package name>` for a project)
+    /// Output path for the compiled binary
     #[arg(short, long)]
     out: Option<PathBuf>,
-    /// Lower through the MLIR backend instead of the textual LLVM emitter
+    /// Use the MLIR backend instead of LLVM
     #[arg(long)]
     mlir: bool,
-    /// Optimization level: `-O0` none (representation only), `-O1` (default)
-    /// dictionary specialization, `-O2` all of `-O1` (room for more). Bare `-O`
-    /// is the highest. Applies to building, running, and `dump core`.
+    /// Core optimizer level (0-2; bare -O is highest)
     #[arg(
         short = 'O',
         long = "opt",
@@ -44,104 +39,105 @@ struct Cli {
         default_missing_value = "2"
     )]
     opt: Option<String>,
-    /// Run an explicit ordered pass list, overriding `-O` (mutually exclusive
-    /// with it). Syntax `[pre:<names>][;late:<names>]`, names comma-separated;
-    /// a bare list is the pre stage. Pre passes: `EraseNewtypes`, `Specialize`;
-    /// late pass: `Simplify`. Example:
-    /// `--passes 'pre:EraseNewtypes,Specialize;late:Simplify'`.
+    /// Explicit pass list, overriding -O (see docs)
     #[arg(long = "passes", value_name = "SPEC", global = true)]
     passes: Option<String>,
-    /// LLVM-backend optimization level handed to the C compiler as `-O<LEVEL>`:
-    /// `0`, `1`, `2` (default), `3`, or `s`/`z` for size. This tunes clang's own
-    /// pipeline over the emitted bitcode and is distinct from `-O`, which tunes
-    /// Prism's Core optimizer. Also settable via `PRISM_BACKEND_OPT`. Pick the
-    /// compiler with `PRISM_CC` (default `clang`) and pass it arbitrary extra
-    /// flags with `PRISM_CC_FLAGS` (e.g. `-march=native`, `-g`).
+    /// C-compiler optimization level for the emitted code (0-3, s, z)
     #[arg(long = "backend-opt", value_name = "LEVEL", global = true)]
     backend_opt: Option<String>,
-    /// Which cooperative scheduler the policy-neutral `run_cooperative` entry binds
-    /// to: `cooperative` (FIFO round-robin, the default) or `lifo` (depth-first).
-    /// Only `run_cooperative` is retargeted; `run_async`/`run_lifo` name a concrete
-    /// policy and are never rewritten, so this picks the default wrap, never the
-    /// semantics. Also settable via `PRISM_SCHEDULER`.
+    /// Default cooperative scheduler policy (cooperative or lifo)
     #[arg(long = "scheduler", value_name = "POLICY", global = true)]
     scheduler: Option<String>,
-    /// Turn off the newtype-erasure pass everywhere in the pipeline (composes
-    /// with both `-O` and `--passes`). Both backends rely on it; disabling it is
-    /// your choice.
+    /// Disable the newtype-erasure pass
     #[arg(long, global = true)]
     no_erase_newtypes: bool,
-    /// Turn off the dictionary-specialization pass everywhere in the pipeline
-    /// (the flag form of `PRISM_NO_SPECIALIZE`).
+    /// Disable the dictionary-specialization pass
     #[arg(long, global = true)]
     no_specialize: bool,
-    /// Turn off the gentle simplifier pass everywhere in the pipeline.
+    /// Disable the simplifier pass
     #[arg(long, global = true)]
     no_simplify: bool,
-    /// Turn off the inliner pass everywhere in the pipeline.
+    /// Disable the inliner pass
     #[arg(long, global = true)]
     no_inline: bool,
-    /// Turn off the scalar-CSE pass everywhere in the pipeline.
+    /// Disable the scalar-CSE pass
     #[arg(long, global = true)]
     no_cse: bool,
-    /// Drop the constant-stack native effect driver, forcing eligible handlers
-    /// onto the mutually-recursive thunk driver (the flag form of
-    /// `PRISM_NATIVE_EFFECTS=0`). Default on.
+    /// Disable the native effect driver
     #[arg(long, global = true)]
     no_native_effects: bool,
-    /// Drop the whole-program free-monad trampoline (the flag form of
-    /// `PRISM_TRAMPOLINE=0`). Default on.
+    /// Disable the free-monad trampoline
     #[arg(long, global = true)]
     no_trampoline: bool,
-    /// Run Core Lint between optimization passes, aborting on ill-formed Core (the
-    /// flag form of `PRISM_CORE_LINT`).
+    /// Run Core Lint between optimization passes
     #[arg(long, global = true)]
     core_lint: bool,
-    /// Dump per-pass rewrite tick counts to stderr (the flag form of
-    /// `PRISM_OPT_STATS`).
+    /// Print per-pass rewrite counts to stderr
     #[arg(long, global = true)]
     opt_stats: bool,
-    /// Dump Core after each optimization pass to SINK: `stdout`, `stderr`, or a
-    /// base directory (the flag form of `PRISM_DUMP_CORE`).
+    /// Dump Core after each pass to SINK (stdout, stderr, or a directory)
     #[arg(long = "dump-core", value_name = "SINK", global = true)]
     dump_core: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Type-check and run a program in the interpreter
-    Run { file: PathBuf },
-    /// Compile the enclosing project (the nearest `prism.toml`) to a native
-    /// executable; fails outside a project. Compile a single file with
-    /// `prism <file.pr>`.
+    /// Type-check and run in the interpreter
+    Run {
+        file: PathBuf,
+        /// Capture the run's trace to a `.replay` file
+        #[arg(long, value_name = "PATH")]
+        record: Option<PathBuf>,
+    },
+    /// Reproduce a recorded run from a `.replay` trace
+    Replay {
+        /// The program the trace was recorded against
+        file: PathBuf,
+        /// The `.replay` trace file to reproduce
+        trace: PathBuf,
+    },
+    /// Reverse-step debugger over a `.replay` trace
+    Debug {
+        /// The program the trace was recorded against
+        file: PathBuf,
+        /// The `.replay` trace file to step through
+        trace: PathBuf,
+    },
+    /// Compile the enclosing project to a native binary
     Build {
-        /// Where to start the search for the project's `prism.toml` (default: the
-        /// current directory)
+        /// Where to start the search for the project's `prism.toml`
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Output path for the compiled binary (default: `target/<package name>`)
+        /// Output path for the compiled binary
         #[arg(short, long)]
         out: Option<PathBuf>,
-        /// Lower through the MLIR backend instead of the textual LLVM emitter
+        /// Use the MLIR backend instead of LLVM
         #[arg(long)]
         mlir: bool,
     },
-    /// Remove the build-artifact directory (`target/`). In a project it is the
-    /// one at the package root; otherwise the one under the given path.
+    /// Remove the build-artifact directory (`target/`)
     Clean {
-        /// Where to start the search for the project's `prism.toml` (default: the
-        /// current directory)
+        /// Where to start the search for the project's `prism.toml`
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Type-check and print inferred signatures and effects
+    /// Type-check and print inferred signatures
     Check { file: PathBuf },
-    /// Print one pipeline artifact: tokens, ast, types, core, core-json, core-hash,
-    /// shape, dupes, namespace, stdlib-hash, fbip, lowered, llvm, mlir
+    /// Print one pipeline phase artifact
+    ///
+    /// PHASE is one of: tokens, ast, types, core, core-json, core-hash, shape,
+    /// dupes, namespace, stdlib-hash, fbip, lowered, tier, llvm, mlir.
     Dump { phase: String, file: PathBuf },
-    /// Query the definition dependency graph: `callers` (direct), `dependents`
-    /// (the transitive closure a change would affect), `deps` (transitive
-    /// dependencies), or `uses-type` (definitions whose type mentions a type)
+    /// Behavior diff by content hash
+    Diff {
+        /// The old revision (a `.pr` file, directory, or `prism.toml`)
+        old: PathBuf,
+        /// The new revision (a `.pr` file, directory, or `prism.toml`)
+        new: PathBuf,
+    },
+    /// Attest two backends emit identical output
+    Attest { file: PathBuf },
+    /// Query the definition dependency graph
     Query {
         /// callers | dependents | deps | uses-type
         kind: String,
@@ -158,8 +154,7 @@ enum Cmd {
         #[arg(long)]
         no_banner: bool,
     },
-    /// Format source files in place; with no path, every `.pr` file under the
-    /// current directory is formatted recursively; `-` filters stdin to stdout
+    /// Format source files in place
     Fmt {
         /// Files or directories to format; `-` for stdin, default current dir
         files: Vec<PathBuf>,
@@ -167,8 +162,7 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
-    /// Generate Markdown API docs (one page per module) from `-- |` doc
-    /// comments, with signatures taken from the typechecker
+    /// Generate Markdown API docs from doc comments
     Docs {
         /// Project directory, `prism.toml`, or `.pr` file to document
         #[arg(default_value = ".")]
@@ -182,6 +176,10 @@ enum Cmd {
         /// Run the doctests (`prism` blocks in doc comments) instead of writing
         #[arg(long)]
         test: bool,
+        /// Rewrite stale/empty `output` expectation blocks with the actual output
+        /// (implies `--test`); exits nonzero if anything was rewritten
+        #[arg(long, visible_alias = "bless")]
+        accept: bool,
         /// Check only: exit 1 if any committed page is out of date, write nothing
         #[arg(long)]
         check: bool,
@@ -189,8 +187,51 @@ enum Cmd {
         #[arg(long)]
         open: bool,
     },
-    /// mdbook preprocessor: classify and live-check `prism` code blocks. Invoked
-    /// by mdbook via `[preprocessor.prism]`, not directly.
+    /// Reseat stable-block rung digests
+    Wire {
+        /// Recompute and rewrite the goldens in place (required; a bare `wire` is a
+        /// no-op guard against an accidental rewrite)
+        #[arg(long)]
+        accept: bool,
+        /// The `.pr` file whose `stable` blocks to reseat
+        file: PathBuf,
+    },
+    /// Add a dependency, pinning its resolved root hash
+    Add {
+        /// The git reference or content-hash pin to depend on
+        target: String,
+    },
+    /// Explain why a hash is in the build closure
+    Why {
+        /// The dependency name or content hash to explain
+        target: String,
+    },
+    /// Materialize a namespace to a canonical `.pr` file
+    Export {
+        /// The project directory, `prism.toml`, or `.pr` file to export
+        file: PathBuf,
+        /// Output directory for the `.pr` projection and its manifest
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+    /// Sign and log a name -> root pointer at a tag
+    Publish {
+        /// The project directory, `prism.toml`, or `.pr` file to publish
+        file: PathBuf,
+        /// The git tag this release is cut at (an opaque label, never a range)
+        #[arg(long)]
+        tag: String,
+        /// The published name (default: the package name, or the file stem)
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Re-verify published roots against the store
+    Audit {
+        /// Accept an unsigned (dev-mode) index instead of failing on it
+        #[arg(long)]
+        allow_unsigned: bool,
+    },
+    /// mdbook preprocessor for `prism` code blocks
     #[command(hide = true)]
     Mdbook {
         /// mdbook passes `supports <renderer>` here; the book JSON otherwise
@@ -366,6 +407,14 @@ fn build_input(
     if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| (Error::Io(e), full.clone(), name.clone()))?;
     }
+    // Report the modules entering the build, one per line, before compiling.
+    // Best-effort: a resolution failure here is swallowed so the real build below
+    // produces the authoritative diagnostic.
+    if let Ok(modules) = prism::source_modules(&full, &roots) {
+        for m in &modules {
+            println!("  compiling {m}");
+        }
+    }
     build_dispatch(mlir, &full, &roots, &out, cfg).map_err(|e| (e, full, name))?;
     println!("wrote {}", out.display());
     Ok(())
@@ -392,7 +441,7 @@ fn clean_cmd(path: &Path) -> Result<(), (Error, String, String)> {
 
 fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)> {
     match cmd {
-        Cmd::Run { file } => {
+        Cmd::Run { file, record } => {
             let (full, roots, name, _) = resolve_input(&file)?;
             // Stream `print` to the terminal and read from real stdin so the CLI
             // behaves like a normal program. `exit(n)` maps to a real process
@@ -401,6 +450,22 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)
             let stdin = std::io::stdin();
             let mut out = stdout.lock();
             let mut input = stdin.lock();
+            // `--record`: capture the observation trace and write it out; the run
+            // still streams live to the terminal.
+            if let Some(path) = record {
+                let (exit, trace, n_obs) =
+                    prism::record_on(&full, &roots, &mut out, &mut input, cfg)
+                        .map_err(|e| (e, full.clone(), name.clone()))?;
+                drop(out);
+                drop(input);
+                std::fs::write(&path, &trace)
+                    .map_err(|e| (Error::Io(e), full, path.display().to_string()))?;
+                eprintln!("recorded {n_obs} observations to {}", path.display());
+                if let Some(code) = exit {
+                    std::process::exit(code);
+                }
+                return Ok(());
+            }
             let run = prism::interpret_io_on(&full, &roots, &mut out, &mut input, cfg)
                 .map_err(|e| (e, full, name))?;
             drop(out);
@@ -409,6 +474,30 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)
                 std::process::exit(code);
             }
             println!("=> {}", run.value.show());
+            Ok(())
+        }
+        Cmd::Replay { file, trace } => {
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let trace_src = read(&trace).map_err(|e| (e, String::new(), file_name(&trace)))?;
+            let stdout = std::io::stdout();
+            let mut out = stdout.lock();
+            let exit = prism::replay_on(&full, &roots, &mut out, &trace_src, cfg)
+                .map_err(|e| (e, full, name))?;
+            drop(out);
+            if let Some(code) = exit {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
+        Cmd::Debug { file, trace } => {
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let trace_src = read(&trace).map_err(|e| (e, String::new(), file_name(&trace)))?;
+            let stdin = std::io::stdin();
+            let stdout = std::io::stdout();
+            let mut cmds = stdin.lock();
+            let mut ui = stdout.lock();
+            prism::debug_on(&full, &roots, &trace_src, &mut cmds, &mut ui, cfg)
+                .map_err(|e| (e, full, name))?;
             Ok(())
         }
         Cmd::Build { path, out, mlir } => {
@@ -445,6 +534,20 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)
             println!("{out}");
             Ok(())
         }
+        Cmd::Attest { file } => {
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let out = prism::attest_on(&full, &roots, cfg).map_err(|e| (e, full, name))?;
+            print!("{out}");
+            Ok(())
+        }
+        Cmd::Diff { old, new } => {
+            let (old_full, _, old_name, _) = resolve_input(&old)?;
+            let (new_full, roots, new_name, _) = resolve_input(&new)?;
+            let out = prism::diff_on(&old_full, &new_full, &roots, cfg)
+                .map_err(|e| (e, new_full, format!("{old_name} -> {new_name}")))?;
+            print!("{out}");
+            Ok(())
+        }
         Cmd::Query { kind, name, file } => {
             let (full, roots, disp, _) = resolve_input(&file)?;
             let out =
@@ -462,15 +565,93 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)
             Ok(())
         }
         Cmd::Fmt { files, check } => fmt_cmd(&files, check),
+        Cmd::Wire { accept, file } => wire_cmd(accept, &file),
         Cmd::Docs {
             path,
             out,
             stdlib,
             test,
+            accept,
             check,
             open,
-        } => docs_cmd(&path, out, stdlib, test, check, open),
+        } => docs_cmd(&path, out, stdlib, test, accept, check, open),
+        Cmd::Add { target } => pkg_report(prism::pkg::cmd::add(&target, cfg), &target),
+        Cmd::Why { target } => pkg_report(prism::pkg::cmd::why(&target, cfg), &target),
+        Cmd::Export { file, out } => {
+            let (full, roots, _name, default_out) = resolve_input(&file)?;
+            let user_src = user_source(&file)?;
+            let stem = out_stem(&default_out);
+            let out_dir = out.unwrap_or_else(|| PathBuf::from("target").join("export"));
+            pkg_report(
+                prism::pkg::export::export_cmd(&user_src, &full, &roots, &out_dir, &stem),
+                &file.display().to_string(),
+            )
+        }
+        Cmd::Publish { file, tag, name } => {
+            let (full, roots, _disp, default_out) = resolve_input(&file)?;
+            let pkg_name = name.unwrap_or_else(|| out_stem(&default_out));
+            pkg_report(
+                prism::pkg::trust::publish_cmd(&full, &roots, &pkg_name, &tag, cfg),
+                &file.display().to_string(),
+            )
+        }
+        Cmd::Audit { allow_unsigned } => audit_cli(cfg, allow_unsigned),
         Cmd::Mdbook { rest } => mdbook_cmd(&rest),
+    }
+}
+
+// Print a package-command summary, mapping its error into the dispatch tuple.
+// The raw user source of an export/publish input, without the prelude that
+// `resolve_input` prepends: the entry file of a project, or the file itself. Kept
+// separate because `export` writes this text back out and must not materialize the
+// prelude into it.
+fn user_source(arg: &Path) -> Result<String, (Error, String, String)> {
+    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == "prism.toml");
+    if is_project {
+        let project = prism::project::load_project(arg)
+            .map_err(|e| (e, String::new(), arg.display().to_string()))?;
+        read(&project.entry).map_err(|e| (e, String::new(), file_name(&project.entry)))
+    } else {
+        read(arg).map_err(|e| (e, String::new(), file_name(arg)))
+    }
+}
+
+// The namespace stem/name of an input, taken from the default output name
+// `resolve_input` computes (the package name for a project, the file stem for a
+// single file).
+fn out_stem(default_out: &Path) -> String {
+    default_out.file_name().map_or_else(
+        || "namespace".to_string(),
+        |s| s.to_string_lossy().into_owned(),
+    )
+}
+
+// `prism audit`: render the report and set the exit code from its verdict.
+fn audit_cli(cfg: &prism::Config, allow_unsigned: bool) -> Result<(), (Error, String, String)> {
+    let report = prism::pkg::trust::audit_cmd(cfg, allow_unsigned)
+        .map_err(|e| (e, String::new(), "audit".to_string()))?;
+    print!("{}", report.render());
+    if report.ok() {
+        Ok(())
+    } else {
+        Err((
+            Error::Resolve("audit failed".into()),
+            String::new(),
+            "audit".to_string(),
+        ))
+    }
+}
+
+fn pkg_report(result: Result<String, Error>, arg: &str) -> Result<(), (Error, String, String)> {
+    match result {
+        Ok(report) => {
+            print!("{report}");
+            if !report.ends_with('\n') {
+                println!();
+            }
+            Ok(())
+        }
+        Err(e) => Err((e, String::new(), arg.to_string())),
     }
 }
 
@@ -527,22 +708,28 @@ fn docs_cmd(
     out: Option<PathBuf>,
     stdlib: bool,
     test: bool,
+    accept: bool,
     check: bool,
     open: bool,
 ) -> Result<(), (Error, String, String)> {
-    let (generated, roots, base, default_out) = if stdlib {
+    // `--accept` (`--bless`) rewrites the inline `output` expectation blocks, so
+    // it always runs the doctests.
+    let test = test || accept;
+    let (generated, roots, base, default_out, expect_files) = if stdlib {
         let g = prism::stdlib_pages().map_err(|e| (e, String::new(), "<stdlib>".into()))?;
         (
             g,
             prism::default_roots(Path::new(".")),
             PathBuf::from("."),
             PathBuf::from("target").join("docs"),
+            prism::stdlib_expect_files(),
         )
     } else {
         let (modules, roots, base, default_out, title) = resolve_docs_input(path)?;
+        let files = prism::project_expect_files(&modules, &base);
         let g = prism::project_pages(modules, &roots, &title)
             .map_err(|e| (e, String::new(), file_name(path)))?;
-        (g, roots, base, default_out)
+        (g, roots, base, default_out, files)
     };
 
     if test {
@@ -556,15 +743,8 @@ fn docs_cmd(
             report.failures.len(),
             report.ignored
         );
-        return if report.failures.is_empty() {
-            Ok(())
-        } else {
-            Err((
-                Error::Codegen("doctest failures".into()),
-                String::new(),
-                String::new(),
-            ))
-        };
+        let expect = prism::accept(&expect_files, &roots, &base, accept);
+        return expect_result(report.failures.is_empty(), accept, &expect);
     }
 
     let dir = out.unwrap_or(default_out);
@@ -595,12 +775,46 @@ fn docs_cmd(
         let p = dir.join(format!("{}.md", page.slug));
         std::fs::write(&p, &page.markdown)
             .map_err(|e| (Error::Io(e), String::new(), p.display().to_string()))?;
+        println!("  {}", p.display());
     }
     println!("wrote {} pages to {}", generated.pages.len(), dir.display());
     if open {
         open_path(&dir.join("index.md"));
     }
     Ok(())
+}
+
+// Report an expect pass loudly (like `just snap`) and turn it into an exit code.
+// In accept mode a rewrite is a nonzero exit so CI can never silently bless; in
+// check mode a mismatch or run failure is nonzero. `doctests_ok` folds in the
+// ordinary compile/run doctest result.
+fn expect_result(
+    doctests_ok: bool,
+    accept: bool,
+    expect: &prism::ExpectReport,
+) -> Result<(), (Error, String, String)> {
+    for origin in &expect.rewritten {
+        eprintln!("blessed {origin}");
+    }
+    for (origin, msg) in &expect.failures {
+        eprintln!("FAIL {origin}: {msg}");
+    }
+    println!(
+        "expect: {} checked, {} rewritten, {} failed",
+        expect.checked,
+        expect.rewritten.len(),
+        expect.failures.len()
+    );
+    let ok = doctests_ok && expect.failures.is_empty() && (!accept || expect.rewritten.is_empty());
+    if ok {
+        Ok(())
+    } else {
+        Err((
+            Error::Codegen("doctest failures".into()),
+            String::new(),
+            String::new(),
+        ))
+    }
 }
 
 // Resolve a docs PATH into modules + roots. A `prism.toml` (or a directory under
@@ -751,6 +965,28 @@ fn glob_pr(root: &Path) -> Vec<PathBuf> {
 // walked, as is any directory path. Explicitly named files must parse. Files
 // reached by walking are skipped with a notice if they do not, so one
 // unparseable fixture cannot fail a whole-tree run.
+// Reseat the wire goldens of a single file's `stable` blocks. Without `--accept`
+// it is a deliberate no-op, so an accidental `prism wire foo.pr` never rewrites.
+fn wire_cmd(accept: bool, file: &Path) -> Result<(), (Error, String, String)> {
+    let name = file_name(file);
+    let src = read(file).map_err(|e| (e, String::new(), name.clone()))?;
+    if !accept {
+        eprintln!(
+            "wire: pass --accept to reseat the goldens in {}",
+            file.display()
+        );
+        return Ok(());
+    }
+    let reseated = prism::format_wire_accept(&src).map_err(|e| (e, src.clone(), name.clone()))?;
+    if reseated == src {
+        eprintln!("{}: goldens already current", file.display());
+        return Ok(());
+    }
+    std::fs::write(file, &reseated).map_err(|e| (Error::Io(e), String::new(), name))?;
+    eprintln!("{}: goldens reseated", file.display());
+    Ok(())
+}
+
 fn fmt_cmd(paths: &[PathBuf], check: bool) -> Result<(), (Error, String, String)> {
     if paths.len() == 1 && paths[0].as_os_str() == "-" {
         return fmt_stdin();

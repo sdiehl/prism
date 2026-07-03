@@ -86,6 +86,11 @@ pub enum Builtin {
     Substring,
     CharAt,
     ShowChar,
+    // blake3 of a string's bytes, returned as lowercase hex. The one runtime hash
+    // primitive, shared by every derived `Hash` instance: the interpreter calls
+    // the `blake3` crate, the native runtime a portable in-repo blake3, and the
+    // two must agree byte-for-byte (gated by `tests/hash_value_parity.rs`).
+    Blake3,
     ParseInt,
     // Materializes a bignum literal that overflows the 63-bit immediate from its
     // decimal text. Not surface-callable; emitted only by the elaborator, where
@@ -186,6 +191,7 @@ impl Builtin {
         Self::Substring,
         Self::CharAt,
         Self::ShowChar,
+        Self::Blake3,
         Self::ParseInt,
         Self::BigLit,
         Self::ParseFloat,
@@ -260,6 +266,7 @@ impl Builtin {
             Self::Substring => "substring",
             Self::CharAt => "char_at",
             Self::ShowChar => "show_char",
+            Self::Blake3 => "blake3",
             Self::ParseInt => "parse_int",
             Self::BigLit => "big_lit",
             Self::ParseFloat => "parse_float",
@@ -381,6 +388,7 @@ impl Builtin {
             // already-tagged word. String ops, fixed-width arithmetic on boxed
             // 64-bit cells, and the elaborator-only ops all sit here.
             Self::Concat
+            | Self::Blake3
             | Self::ParseInt
             | Self::BigLit
             | Self::ParseFloat
@@ -485,6 +493,7 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("substring", 3, BuiltinKind::Str),
     ("char_at", 2, BuiltinKind::Str),
     ("show_char", 1, BuiltinKind::Str),
+    ("blake3", 1, BuiltinKind::Str),
     ("ord", 1, BuiltinKind::Coerce),
     ("chr", 1, BuiltinKind::Coerce),
     ("parse_int", 1, BuiltinKind::Str),

@@ -1,0 +1,43 @@
+-- S6: cancellation reaches a grandchild. The child forks a grandchild; both
+-- loop at `yield`, so cancelling the child unwinds both, running both
+-- finalizers. Looping bodies keep both fibers parked so the cancel is
+-- deterministic regardless of interleaving.
+
+import Concurrent (..)
+
+fn gkid_loop() : !{Async(Int), IO} Int =
+  yield(())
+  gkid_loop()
+
+fn gkid_body() : !{Async(Int), IO} Int =
+  println("grandchild: running")
+  gkid_loop()
+
+fn gkid() : !{Async(Int), IO} Int =
+  on_cancel(\() -> println("grandchild finalizer ran"), gkid_body)
+
+fn child_loop() : !{Async(Int), IO} Int =
+  yield(())
+  child_loop()
+
+fn child_body() : !{Async(Int), IO} Int =
+  let g = fork(gkid)
+  println("child: running")
+  child_loop()
+
+fn child() : !{Async(Int), IO} Int =
+  on_cancel(\() -> println("child finalizer ran"), child_body)
+
+fn scene() : !{Async(Int), IO} Int =
+  let c = fork(child)
+  yield(())
+  yield(())
+  yield(())
+  cancel(c)
+  yield(())
+  yield(())
+  yield(())
+  println("scene done")
+  0
+
+fn main() = println(run_async(scene))

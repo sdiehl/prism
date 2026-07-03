@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/identifiable.pr
+---
+true
+false
+-1
+1
+true
+false
+UserId(42)
+Tag("x")
+UserId(1)
+UserId(2)
+UserId(3)
+=> ()

@@ -1,0 +1,32 @@
+-- Property testing with derived generators: `deriving (Arbitrary)` writes the
+-- generator from the type's structure, and `quickcheck` runs a property over a
+-- seeded stream of values. Randomness routes through the `Random` effect under
+-- a SplitMix64 handler, so every run is a pure function of the seed: a failure
+-- reports the seed that reproduces it exactly.
+--
+-- Expected output:
+--   flip twice is identity: OK
+--   depth never negative: OK
+
+import Test (..)
+
+import Quickcheck (..)
+
+fn report(name : String, o : Outcome(a)) =
+  println(concat(name, if passed(o) then ": OK" else ": FAILED"))
+
+type Tree = Leaf | Node(Tree, Int, Tree) deriving (Eq, Show, Arbitrary)
+
+fn flip(t : Tree) : Tree =
+  match t of
+    Leaf => Leaf
+    Node(l, x, r) => Node(flip(r), x, flip(l))
+
+fn depth(t : Tree) : Int =
+  match t of
+    Leaf => 0
+    Node(l, _, r) => 1 + max(depth(l), depth(r))
+
+fn main() =
+  report("flip twice is identity", quickcheck(arb_gen(), \(t) -> flip(flip(t)) == t))
+  report("depth never negative", quickcheck(arb_gen(), \(t) -> depth(t) >= 0))

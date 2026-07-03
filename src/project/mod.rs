@@ -7,10 +7,35 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::core::HASH_SCHEME;
 use crate::error::Error;
 
 /// The manifest filename a project is keyed by.
 const MANIFEST: &str = "prism.toml";
+
+/// Separator between the hash scheme and the hex digest in a bare hash-pin
+/// dependency (`<scheme>:<hex>`). The scheme itself is never re-spelled here; it
+/// is [`HASH_SCHEME`], so a pin string and every store key agree on one tag.
+const HASH_PIN_SEP: char = ':';
+
+/// Render a content hash as a bare hash-pin dependency string,
+/// `<HASH_SCHEME>:<hex>`. The one place the pin surface syntax is spelled.
+#[must_use]
+pub fn hash_pin(hex: &str) -> String {
+    format!("{HASH_SCHEME}{HASH_PIN_SEP}{hex}")
+}
+
+/// The hex digest of a bare hash-pin string `<HASH_SCHEME>:<hex>`.
+///
+/// `None` when the string is not a pin under the canonical scheme (a plain path
+/// string, or a pin under some other scheme this build does not speak). The
+/// inverse of [`hash_pin`].
+#[must_use]
+pub fn parse_hash_pin(s: &str) -> Option<&str> {
+    let (scheme, hex) = s.split_once(HASH_PIN_SEP)?;
+    let hex_ok = !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit());
+    (scheme == HASH_SCHEME && hex_ok).then_some(hex)
+}
 
 /// A parsed `prism.toml`:
 ///
@@ -31,18 +56,36 @@ pub struct Manifest {
     /// Optional `[package] prelude`, a path (relative to the root) whose contents
     /// replace the built-in prelude for this project. Absent uses the built-in.
     pub prelude: Option<PathBuf>,
-    /// `[dependencies]` path dependencies: each `name = { path = "..." }` maps a
-    /// dependency name to its project root, relative to this manifest's root.
+    /// `[dependencies]` entries: each maps a dependency name to where its code
+    /// comes from (a local path, a git release named by an opaque tag, or a bare
+    /// content-hash pin).
     pub dependencies: Vec<Dependency>,
 }
 
-/// A local path dependency: another Prism project whose modules resolve under
-/// its own source root. No versions or registry yet (that is a later phase);
-/// `path` is relative to the depending project's root.
-#[derive(Debug, Clone)]
+/// One `[dependencies]` entry: a name and the source its code resolves from.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
     pub name: String,
-    pub path: PathBuf,
+    pub source: DepSource,
+}
+
+/// Where a dependency's code comes from.
+///
+/// Every form resolves to a single content hash before a build; the three differ
+/// only in how that hash is named. A version is always an opaque label, never a
+/// range: coexistence is by hash, so there is nothing to solve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DepSource {
+    /// A local path dependency: another Prism project whose modules resolve under
+    /// its own source root. `path` is relative to the depending project's root.
+    Path(PathBuf),
+    /// A git-hosted release at `url`, pinned to the opaque tag `version`. The tag
+    /// is a human label the signed index maps to a root hash; it carries no range
+    /// or ordering semantics.
+    Git { url: String, version: String },
+    /// A fully explicit content-hash pin (the hex digest under [`HASH_SCHEME`]).
+    /// Terminal: the hash is the identity, so nothing about it is re-resolved.
+    Hash(String),
 }
 
 impl Manifest {
@@ -86,9 +129,10 @@ impl Manifest {
         })
     }
 
-    // `[dependencies]` is a table of `name = { path = "..." }`. A bare-string
-    // form (`name = "..."`) is accepted as shorthand for the path. Anything else
-    // is rejected so a typo cannot silently drop a dependency.
+    // `[dependencies]` is a table of `name = <source>`. Three source forms:
+    // `{ path = ".." }` (or a bare path string), `{ git = "..", version = ".." }`,
+    // and a bare hash-pin string `<scheme>:<hex>`. Anything else is rejected so a
+    // typo cannot silently drop a dependency.
     fn parse_deps(table: &toml::Table) -> Result<Vec<Dependency>, Error> {
         let Some(deps) = table.get("dependencies") else {
             return Ok(Vec::new());
@@ -98,23 +142,50 @@ impl Manifest {
             .ok_or_else(|| Error::Resolve("prism.toml: [dependencies] must be a table".into()))?;
         deps.iter()
             .map(|(name, val)| {
-                let path = match val {
-                    toml::Value::String(s) => s.as_str(),
-                    toml::Value::Table(t) => t.get("path").and_then(toml::Value::as_str).ok_or_else(
-                        || Error::Resolve(format!("prism.toml: dependency `{name}` needs a `path`")),
-                    )?,
-                    _ => {
-                        return Err(Error::Resolve(format!(
-                            "prism.toml: dependency `{name}` must be a path string or `{{ path = .. }}`"
-                        )))
-                    }
-                };
                 Ok(Dependency {
                     name: name.clone(),
-                    path: PathBuf::from(path),
+                    source: parse_dep_source(name, val)?,
                 })
             })
             .collect()
+    }
+}
+
+// The source of one `[dependencies]` entry. A bare string is a hash pin when it
+// carries the canonical scheme prefix, otherwise the path shorthand; a table
+// selects on its key (`git` before `path`, since a git dep also names a version).
+fn parse_dep_source(name: &str, val: &toml::Value) -> Result<DepSource, Error> {
+    match val {
+        toml::Value::String(s) => Ok(parse_hash_pin(s).map_or_else(
+            || DepSource::Path(PathBuf::from(s)),
+            |hex| DepSource::Hash(hex.to_string()),
+        )),
+        toml::Value::Table(t) => {
+            if let Some(url) = t.get("git").and_then(toml::Value::as_str) {
+                let version = t
+                    .get("version")
+                    .and_then(toml::Value::as_str)
+                    .ok_or_else(|| {
+                        Error::Resolve(format!(
+                            "prism.toml: git dependency `{name}` needs a `version` tag"
+                        ))
+                    })?;
+                Ok(DepSource::Git {
+                    url: url.to_string(),
+                    version: version.to_string(),
+                })
+            } else if let Some(path) = t.get("path").and_then(toml::Value::as_str) {
+                Ok(DepSource::Path(PathBuf::from(path)))
+            } else {
+                Err(Error::Resolve(format!(
+                    "prism.toml: dependency `{name}` must set `path`, `git` (with `version`), \
+                     or be a `{HASH_SCHEME}:<hex>` pin string"
+                )))
+            }
+        }
+        _ => Err(Error::Resolve(format!(
+            "prism.toml: dependency `{name}` must be a path/pin string or an inline table"
+        ))),
     }
 }
 
@@ -194,7 +265,13 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
     visiting.push(key);
     let mut dep_src_dirs = Vec::new();
     for dep in &manifest.dependencies {
-        let dep_proj = load_project_rec(&root.join(&dep.path), visiting)
+        // Only path dependencies extend the module search path; git and hash
+        // dependencies resolve through the store from their locked root hash (the
+        // resolver seam), not from a source directory on disk.
+        let DepSource::Path(rel) = &dep.source else {
+            continue;
+        };
+        let dep_proj = load_project_rec(&root.join(rel), visiting)
             .map_err(|e| Error::Resolve(format!("dependency `{}`: {e}", dep.name)))?;
         dep_src_dirs.push(dep_proj.src_dir);
         for d in dep_proj.dep_src_dirs {
@@ -216,7 +293,8 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
 
 #[cfg(test)]
 mod tests {
-    use super::Manifest;
+    use super::{hash_pin, parse_hash_pin, DepSource, Manifest};
+    use std::path::PathBuf;
 
     #[test]
     fn parses_name_entry_and_default_src() {
@@ -250,14 +328,69 @@ mod tests {
         let mut deps: Vec<_> = m
             .dependencies
             .iter()
-            .map(|d| (d.name.as_str(), d.path.to_str().unwrap()))
+            .map(|d| (d.name.as_str(), d.source.clone()))
             .collect();
-        deps.sort_unstable();
-        assert_eq!(deps, [("geo", "../geo"), ("util", "../util")]);
+        deps.sort_by(|a, b| a.0.cmp(b.0));
+        assert_eq!(
+            deps,
+            [
+                ("geo", DepSource::Path(PathBuf::from("../geo"))),
+                ("util", DepSource::Path(PathBuf::from("../util"))),
+            ]
+        );
     }
 
     #[test]
-    fn dependency_without_path_is_an_error() {
+    fn parses_git_and_hash_dependency_forms() {
+        let pin = hash_pin("9f86d081");
+        let text = format!(
+            "[package]\nname = \"app\"\n\n[bin]\nentry = \"src/main.pr\"\n\n\
+             [dependencies]\n\
+             http = {{ git = \"github.com/prism-lang/http\", version = \"2.0\" }}\n\
+             crypto = \"{pin}\"\n"
+        );
+        let m = Manifest::parse(&text).unwrap();
+        let mut deps: Vec<_> = m
+            .dependencies
+            .iter()
+            .map(|d| (d.name.as_str(), d.source.clone()))
+            .collect();
+        deps.sort_by(|a, b| a.0.cmp(b.0));
+        assert_eq!(
+            deps,
+            [
+                ("crypto", DepSource::Hash("9f86d081".to_string())),
+                (
+                    "http",
+                    DepSource::Git {
+                        url: "github.com/prism-lang/http".to_string(),
+                        version: "2.0".to_string(),
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn hash_pin_round_trips_and_rejects_foreign_schemes() {
+        assert_eq!(parse_hash_pin(&hash_pin("abc123")), Some("abc123"));
+        // A path string is not a pin; a pin under another scheme is not ours.
+        assert_eq!(parse_hash_pin("../util"), None);
+        assert_eq!(parse_hash_pin("sha256:9f86"), None);
+        // A pin with a non-hex digest is rejected rather than misread as a pin.
+        assert_eq!(parse_hash_pin(&hash_pin("nothex!")), None);
+    }
+
+    #[test]
+    fn git_dependency_without_version_is_an_error() {
+        assert!(Manifest::parse(
+            "[package]\nname = \"a\"\n\n[bin]\nentry = \"s.pr\"\n\n[dependencies]\nx = { git = \"g/h\" }\n",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn dependency_with_no_recognised_key_is_an_error() {
         assert!(Manifest::parse(
             "[package]\nname = \"a\"\n\n[bin]\nentry = \"s.pr\"\n\n[dependencies]\nx = { version = \"1\" }\n",
         )

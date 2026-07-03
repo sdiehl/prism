@@ -20,6 +20,15 @@ use crate::resolve::Root;
 
 use super::check_quiet;
 
+/// The fence language tag marking a runnable example (```` ```prism ````).
+pub(crate) const FENCE_PRISM: &str = "prism";
+/// The fence language tag marking an expected-output block (```` ```output ````)
+/// that follows an example; see `super::accept`.
+pub(crate) const FENCE_OUTPUT: &str = "output";
+// Fence attributes that make a `prism` block a non-runnable reference block
+// (generated signatures / declarations), never a doctest.
+const REFERENCE_ATTRS: [&str; 2] = ["sig", "def"];
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Mode {
     Check,
@@ -46,7 +55,7 @@ pub struct Report {
 
 // Map fence attributes to a mode; unknown attributes are ignored so a future
 // attribute does not break an older compiler.
-fn mode_of(info: &str) -> Mode {
+pub(crate) fn mode_of(info: &str) -> Mode {
     for tok in info
         .split([',', ' '])
         .map(str::trim)
@@ -64,8 +73,15 @@ fn mode_of(info: &str) -> Mode {
 
 // The language tag of a fence info string is the first token (`prism`,
 // `prism,no_run`, `text`, ...).
-fn lang_of(info: &str) -> &str {
+pub(crate) fn lang_of(info: &str) -> &str {
     info.split([',', ' ']).next().unwrap_or("").trim()
+}
+
+// Whether a `prism` fence carries a reference attribute (`sig`/`def`), marking a
+// generated signature/declaration block that is shown but never executed.
+pub(crate) fn is_reference_fence(info: &str) -> bool {
+    info.split([',', ' '])
+        .any(|t| REFERENCE_ATTRS.contains(&t.trim()))
 }
 
 /// Pull every ```` ```prism ```` fenced block out of one docstring, tagging each
@@ -80,10 +96,7 @@ pub(crate) fn examples_in(origin: &str, doc: &str) -> Vec<Example> {
         };
         // `sig`/`def` are non-runnable reference blocks (generated signatures and
         // declarations), never doctests.
-        let is_doctest = lang_of(info) == "prism"
-            && !info
-                .split([',', ' '])
-                .any(|t| matches!(t.trim(), "sig" | "def"));
+        let is_doctest = lang_of(info) == FENCE_PRISM && !is_reference_fence(info);
         let mode = mode_of(info);
         let mut code = String::new();
         for body in lines.by_ref() {
@@ -148,4 +161,29 @@ pub(crate) fn run(examples: &[Example], roots: &[Root], base: &Path) -> Report {
         }
     }
     r
+}
+
+/// Run one example as an implicit-`main` program and render its observable
+/// output as expectation lines: the `print` transcript if it printed anything,
+/// otherwise the result value. Each line is trailing-trimmed so it round-trips
+/// through the source formatter. Returns a human-readable reason on a
+/// compile/run failure. Shared by the expect-block checker and `--accept`
+/// rewriter (`super::accept`) so both agree on what "actual output" means.
+pub(crate) fn actual_output(
+    code: &str,
+    roots: &[Root],
+    base: &Path,
+) -> Result<Vec<String>, String> {
+    let full = with_prelude(&example_program(code));
+    let checked = check_quiet(&full, roots).map_err(|e| format!("compile error: {e}"))?;
+    if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
+        return Err("example has no `main` and no expression to run".into());
+    }
+    let run = interpret_at(&full, base).map_err(|e| format!("run error: {e}"))?;
+    let text = if run.term.is_empty() {
+        run.value.show()
+    } else {
+        run.term
+    };
+    Ok(text.lines().map(|l| l.trim_end().to_string()).collect())
 }

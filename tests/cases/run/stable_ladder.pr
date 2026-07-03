@@ -1,0 +1,54 @@
+-- The `stable` block generates the wire ladder that
+-- `wire_laws.pr` writes by hand: frozen rung types, a total `upgrade` that
+-- defaults a new field, a `downgrade` that drops it and records the `Loss`, and a
+-- structural codec. This is the positive round-trip case and the generated
+-- roundtrip law, property-tested over the derived `Arbitrary` generators.
+--
+-- `Order` is the current rung (V2); `Order.V1` is its frozen predecessor. Editing
+-- a sealed rung in place moves its `frozen` shape digest and is a compile error
+-- (see tests/stable_block.rs); reseat a never-shipped rung with `prism wire
+-- --accept`.
+
+import Wire (..)
+
+import Test (..)
+
+import Quickcheck (..)
+
+stable Order {
+  V1 = { id: Int, qty: Int, sym: String } frozen "377ee9c637d0924c",
+  V2 = { ..V1, tif: Int = 0 }
+}
+
+-- Discharge Fail to an explicit default so a fallible reader is a pure property.
+fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
+  handle action() with
+    final ctl fail() => d
+    return r => r
+
+-- encode then decode returns the original current-rung value and consumes every
+-- byte it wrote.
+fn rt_go(x : Order) : Bool =
+  match decode(encode(x)) of
+    (v, r) => v == x && wire_is_empty(r)
+
+fn rt(x : Order) : Bool = caught(false, \() -> rt_go(x))
+
+-- Upgrade after downgrade is the identity on the safe subset: a lossless
+-- downgrade (the new field held its default) upgrades back to the original.
+fn ladder_adjacent(o : Order) : Bool =
+  match downgrade_Order_V2_V1(o) of
+    (lo, l) =>
+      if lossless(l) then
+        upgrade_Order_V1_V2(lo) == o
+      else
+        true
+
+fn report(name : String, o : Outcome(a)) =
+  println(concat(name, if passed(o) then ": OK" else ": FAILED"))
+
+fn body() =
+  report("stable roundtrip", quickcheck(arb_gen(), rt))
+  report("stable ladder adjacent", quickcheck(arb_gen(), ladder_adjacent))
+
+fn main() = default(body, ())

@@ -29,6 +29,24 @@ pub const NIL: &str = "Nil";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";
+// The content-addressed structural hash class, in the prelude beside `Eq`/`Ord`.
+pub const HASH_CLASS: &str = "Hash";
+// The opt-in wire classes, defined in `lib/std/Wire.pr` (out of the prelude), and
+// the property-generator class in `lib/std/Test.pr`. `deriving` resolves each of
+// these bare names to its imported canonical form.
+pub const SERIALIZE_CLASS: &str = "Serialize";
+pub const STABLE_CLASS: &str = "Stable";
+pub const ARBITRARY_CLASS: &str = "Arbitrary";
+
+// `deriving (Identifiable)` is surface sugar, not a class: it expands to the
+// identity starter pack, the classes that make a value usable as an ID. The set
+// is exactly those derivable with zero imports (all four live in the prelude),
+// so an ID newtype in an ordinary program compiles as written. `Arbitrary` is
+// deliberately absent: its class lives behind `import Test`, and random
+// generation is a testing concern, not part of a value's identity; a program
+// that wants it writes `deriving (Identifiable, Arbitrary)`.
+pub const IDENTIFIABLE: &str = "Identifiable";
+pub const IDENTIFIABLE_BUNDLE: [&str; 4] = [EQ_CLASS, ORD_CLASS, HASH_CLASS, SHOW_CLASS];
 
 // A row label: an effect name plus its instantiation arguments (zero for
 // non-parametric effects). `Emit(Int)` and `Emit(String)` are distinct labels
@@ -109,6 +127,27 @@ impl EffRow {
                     a.free_exist_row(acc);
                 }
                 r.free_exist_row(acc);
+            }
+            _ => {}
+        }
+    }
+
+    // Free rigid row-variable (row skolem) names of the row, the `RowUni`-kind
+    // dual of `free_exist_row`. Rows carry no binders of their own; label
+    // arguments are types, walked for the row skolems nested inside them. Drives
+    // `Type::free_row_vars` through the type/row alternation.
+    fn walk_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
+        match self {
+            Self::Var(n) => {
+                if !bound.contains(n) {
+                    acc.insert(*n);
+                }
+            }
+            Self::Extend(l, rest) => {
+                for a in &l.args {
+                    a.walk_row_vars(bound, acc);
+                }
+                rest.walk_vars(bound, acc);
             }
             _ => {}
         }
@@ -338,6 +377,83 @@ impl Type {
                 a.free_exist_row(acc);
             }
             Self::Row(r) => r.free_exist_row(acc),
+            _ => {}
+        }
+    }
+
+    // Free rigid type-variable (skolem) names, the `Uni`-kind dual of
+    // `free_exist`. A variable bound by an enclosing `Forall` in `self` is not
+    // free, so a well-formed generalized scheme collects the empty set; a name
+    // left over here is a skolem that escaped its quantifier.
+    pub fn free_ty_vars(&self, acc: &mut BTreeSet<Sym>) {
+        self.walk_ty_vars(&mut Vec::new(), acc);
+    }
+
+    // Free rigid row-variable (row skolem) names, the `RowUni`-kind dual of
+    // `free_exist_row`; a variable bound by an enclosing `RowForall` is excluded.
+    pub fn free_row_vars(&self, acc: &mut BTreeSet<Sym>) {
+        self.walk_row_vars(&mut Vec::new(), acc);
+    }
+
+    fn walk_ty_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
+        match self {
+            Self::Var(n) => {
+                if !bound.contains(n) {
+                    acc.insert(*n);
+                }
+            }
+            Self::Forall(n, t) => {
+                bound.push(*n);
+                t.walk_ty_vars(bound, acc);
+                bound.pop();
+            }
+            Self::RowForall(_, t) => t.walk_ty_vars(bound, acc),
+            Self::Fun(ps, row, r) => {
+                for p in ps {
+                    p.walk_ty_vars(bound, acc);
+                }
+                row.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc));
+                r.walk_ty_vars(bound, acc);
+            }
+            Self::Con(_, ps) | Self::Tuple(ps) => {
+                for p in ps {
+                    p.walk_ty_vars(bound, acc);
+                }
+            }
+            Self::App(h, a) => {
+                h.walk_ty_vars(bound, acc);
+                a.walk_ty_vars(bound, acc);
+            }
+            Self::Row(r) => r.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc)),
+            _ => {}
+        }
+    }
+
+    fn walk_row_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
+        match self {
+            Self::Fun(ps, row, r) => {
+                for p in ps {
+                    p.walk_row_vars(bound, acc);
+                }
+                row.walk_vars(bound, acc);
+                r.walk_row_vars(bound, acc);
+            }
+            Self::RowForall(n, t) => {
+                bound.push(*n);
+                t.walk_row_vars(bound, acc);
+                bound.pop();
+            }
+            Self::Forall(_, t) => t.walk_row_vars(bound, acc),
+            Self::Con(_, ps) | Self::Tuple(ps) => {
+                for p in ps {
+                    p.walk_row_vars(bound, acc);
+                }
+            }
+            Self::App(h, a) => {
+                h.walk_row_vars(bound, acc);
+                a.walk_row_vars(bound, acc);
+            }
+            Self::Row(r) => r.walk_vars(bound, acc),
             _ => {}
         }
     }

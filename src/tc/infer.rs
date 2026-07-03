@@ -30,6 +30,19 @@ struct DeclSeed {
 // a second type is polymorphic recursion, which only a signature can type. An
 // annotated function already checks against its signature (and so supports
 // polymorphic recursion), so its errors pass through unchanged.
+// The type variables a generalized scheme quantifies, read off its leading
+// `forall`/`RowForall` prefix (only the type binders; row binders are skipped).
+fn forall_ty_binders(t: &Type, out: &mut BTreeSet<Sym>) {
+    match t {
+        Type::Forall(n, b) => {
+            out.insert(*n);
+            forall_ty_binders(b, out);
+        }
+        Type::RowForall(_, b) => forall_ty_binders(b, out),
+        _ => {}
+    }
+}
+
 fn poly_recursion_hint(e: TypeError, d: &Decl<Core>) -> TypeError {
     if super::env::fully_annotated(d) {
         return e;
@@ -76,6 +89,22 @@ fn show_path<P: crate::syntax::ast::Phase>(steps: &[PathStep<P>]) -> String {
         })
         .collect::<Vec<_>>()
         .join(".")
+}
+
+// Which operator family drives the shared numeric-defaulting ladder. The three
+// families agree on the core lattice (accept `Int`, pin a fixed-width lane,
+// defer an unsolved existential) and differ only in how they treat the leftover
+// operand type, which `numeric_ladder` selects on.
+#[derive(Clone, Copy)]
+enum NumClass {
+    // `==`/`!=`: every scalar with structural equality is a fixed lane; anything
+    // else dispatches through its `Eq` instance.
+    Eq,
+    // `<`/`<=`/`>`/`>=`: `Float` belongs to the dotted operators and is rejected
+    // numerically; anything non-numeric dispatches through its `Ord` instance.
+    Ord,
+    // `+`/`-`/`*`: anything not on a numeric lane is rejected numerically.
+    Arith,
 }
 
 impl Tc<'_> {
@@ -818,6 +847,64 @@ impl Tc<'_> {
         Ok(Type::Int)
     }
 
+    // The defer-or-fix ladder shared by every numeric/comparison operator, over
+    // the already-applied left-operand type `t`. `Int` is the default lane and is
+    // accepted as-is; a fixed-width lane pins `id` so later width inference agrees;
+    // an unsolved existential defers to the `resolve_all` pass, where a still-later
+    // use can pin its width before the `Int` default fires. Only the leftover case
+    // differs per operator family (`NumClass`), and `blame` is the span the
+    // numeric rejection points at. Callers own the operator's result type; this
+    // only records the classification side effects.
+    fn numeric_ladder(
+        &mut self,
+        class: NumClass,
+        t: &Type,
+        id: NodeId,
+        span: Span,
+        blame: Span,
+    ) -> Result<(), TypeError> {
+        match t {
+            Type::Int => Ok(()),
+            Type::I64 | Type::U64 => {
+                self.fixed.insert(id, t.clone());
+                Ok(())
+            }
+            Type::Exist(_) => {
+                self.num_default.push((id, span, t.clone()));
+                Ok(())
+            }
+            _ => match class {
+                NumClass::Eq => match t {
+                    Type::Float | Type::Bool | Type::Str => {
+                        self.fixed.insert(id, t.clone());
+                        Ok(())
+                    }
+                    _ => {
+                        self.wanted.push(Wanted {
+                            id,
+                            span,
+                            items: vec![(EQ_CLASS.into(), t.clone(), None)],
+                        });
+                        Ok(())
+                    }
+                },
+                NumClass::Ord => {
+                    if matches!(t, Type::Float) {
+                        self.default_numeric(t, blame).map(|_| ())
+                    } else {
+                        self.wanted.push(Wanted {
+                            id,
+                            span,
+                            items: vec![(ORD_CLASS.into(), t.clone(), None)],
+                        });
+                        Ok(())
+                    }
+                }
+                NumClass::Arith => self.default_numeric(t, blame).map(|_| ()),
+            },
+        }
+    }
+
     fn synth_bin(
         &mut self,
         env: &Env,
@@ -849,20 +936,7 @@ impl Tc<'_> {
                 let ta = self.instantiate_constrained(&ta, &[], id, span, None);
                 self.check(env, b, &ta)?;
                 let ta = self.apply(&ta);
-                match &ta {
-                    Type::Int => {}
-                    Type::I64 | Type::U64 | Type::Float | Type::Bool | Type::Str => {
-                        self.fixed.insert(id, ta);
-                    }
-                    // Defer like the arithmetic arm: a later use may still pin
-                    // this to a fixed-width lane before the `Int` default applies.
-                    Type::Exist(_) => self.num_default.push((id, span, ta)),
-                    _ => self.wanted.push(Wanted {
-                        id,
-                        span,
-                        items: vec![(EQ_CLASS.into(), ta, None)],
-                    }),
-                }
+                self.numeric_ladder(NumClass::Eq, &ta, id, span, a.span)?;
                 Ok(Type::Bool)
             }
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
@@ -871,27 +945,7 @@ impl Tc<'_> {
                 let ta = self.instantiate_constrained(&ta, &[], id, span, None);
                 self.check(env, b, &ta)?;
                 let ta = self.apply(&ta);
-                match &ta {
-                    Type::Int => {}
-                    Type::I64 | Type::U64 => {
-                        self.fixed.insert(id, ta);
-                    }
-                    // Float comparison belongs to the dotted operators (`<.`),
-                    // same as the arithmetic arm below.
-                    Type::Float => {
-                        self.default_numeric(&ta, a.span)?;
-                    }
-                    // Defer like the arithmetic arm: a later use may still pin
-                    // this to a fixed-width lane before the `Int` default applies.
-                    Type::Exist(_) => self.num_default.push((id, span, ta)),
-                    // Everything else dispatches through its Ord instance: the
-                    // operator elaborates to `cmp(a, b) <op> 0`.
-                    _ => self.wanted.push(Wanted {
-                        id,
-                        span,
-                        items: vec![(ORD_CLASS.into(), ta, None)],
-                    }),
-                }
+                self.numeric_ladder(NumClass::Ord, &ta, id, span, a.span)?;
                 Ok(Type::Bool)
             }
             _ => {
@@ -918,16 +972,7 @@ impl Tc<'_> {
                     Type::Exist(_) => {
                         self.check(env, b, &ta)?;
                         let t = self.apply(&ta);
-                        match &t {
-                            Type::I64 | Type::U64 => {
-                                self.fixed.insert(id, t.clone());
-                            }
-                            Type::Int => {}
-                            Type::Exist(_) => self.num_default.push((id, span, t.clone())),
-                            other => {
-                                self.default_numeric(other, b.span)?;
-                            }
-                        }
+                        self.numeric_ladder(NumClass::Arith, &t, id, span, b.span)?;
                         t
                     }
                     // Float belongs to the dotted operators; anything else is not
@@ -1343,12 +1388,19 @@ impl Tc<'_> {
         }
         let mut ty_ex = BTreeMap::new();
         let mut row_ex = BTreeMap::new();
+        // A bare signature type variable is an implicit `forall a` and enters the
+        // body check rigid (a `Type::Var`, which the unifier refuses to equate
+        // with a concrete type or a second rigid variable), so a body that would
+        // narrow `a` to `Int` is a type error rather than a silent specialization;
+        // `finish_decl` re-quantifies these into the exported polymorphic scheme.
+        // Row variables stay flexible (effect inference is principal).
+        let rigid_ty = super::env::signature_ty_vars(d, self.data);
         let no_rigid = BTreeSet::new();
         let mut doms = Vec::new();
         for p in &d.params {
             let t = match &p.ty {
                 Some(ann) => {
-                    let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+                    let mut a = Annot::with_rigid(&mut ty_ex, &mut row_ex, &rigid_ty, &no_rigid);
                     self.convert_annot(ann, &mut a)
                 }
                 None => Type::Exist(self.push_ex()),
@@ -1357,14 +1409,14 @@ impl Tc<'_> {
         }
         let ret = match &d.ret {
             Some(ann) => {
-                let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+                let mut a = Annot::with_rigid(&mut ty_ex, &mut row_ex, &rigid_ty, &no_rigid);
                 self.convert_annot(ann, &mut a)
             }
             None => Type::Exist(self.push_ex()),
         };
         let mut cur = Vec::new();
         for c in &d.constraints {
-            let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+            let mut a = Annot::with_rigid(&mut ty_ex, &mut row_ex, &rigid_ty, &no_rigid);
             let t = self.convert_annot(&c.ty, &mut a);
             cur.push((c.class.clone(), t));
         }
@@ -1388,7 +1440,8 @@ impl Tc<'_> {
                     .args
                     .iter()
                     .map(|t| {
-                        let mut a = Annot::new(&mut ty_ex, &mut row_ex, &no_rigid);
+                        let mut a =
+                            Annot::with_rigid(&mut ty_ex, &mut row_ex, &rigid_ty, &no_rigid);
                         self.convert_annot(t, &mut a)
                     })
                     .collect();
@@ -1497,17 +1550,25 @@ impl Tc<'_> {
         // Unconstrained ambient rows default to empty (pure); only rows tied to
         // a parameter's row variable survive as effect polymorphism.
         let self_ty = default_open_rows(&self.apply(&seed.self_ty));
-        let (g, mapping) = self.generalize_map(env, &self_ty);
+        let (g, renames) = self.generalize_map(env, &self_ty);
         if !d.constraints.is_empty() {
+            // The scheme's quantified type variables; a constraint may mention only
+            // these. A rigid signature variable that no parameter or result uses is
+            // not among them, so `given C(b)` on an unused `b` is ambiguous.
+            let mut quantified = BTreeSet::new();
+            forall_ty_binders(&g, &mut quantified);
             let mut final_cs = Vec::new();
             for ((class, t), c) in seed.cur.iter().zip(&d.constraints) {
-                let mut t2 = self.apply(t);
-                for (e, name) in &mapping {
-                    t2 = t2.subst_exist(*e, &Type::Var(Sym::from(name)));
-                }
+                let mut t2 = renames.apply(&self.apply(t));
+                // Ambiguous if the constraint carries an existential inference never
+                // fixed, or a type variable the scheme does not quantify: no call
+                // site could ever determine which instance to pass.
                 let mut left = BTreeSet::new();
                 t2.free_exist(&mut left);
-                if !left.is_empty() {
+                let mut tvars = BTreeSet::new();
+                super::env::collect_type_vars(&t2, &mut tvars);
+                let stray = !tvars.is_subset(&quantified);
+                if !left.is_empty() || stray {
                     for e in &left {
                         t2 = t2.subst_exist(*e, &Type::Var("_".into()));
                     }

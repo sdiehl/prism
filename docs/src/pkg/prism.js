@@ -1,6 +1,31 @@
 /* @ts-self-types="./prism.d.ts" */
 
 /**
+ * Run the boids swarm for `steps` deterministic steps and return the whole
+ * trajectory as text.
+ *
+ * The first line is `W H` (the toroidal world dimensions); each following line
+ * is one frame, a space-separated list of `x,y` integer positions. Frame N is
+ * `step` composed N times on the seeded swarm, a pure function of the index, so
+ * the browser scrubber positions its playhead at any frame by replaying to it.
+ * On any front-end or runtime error, returns the rendered diagnostic instead.
+ * @param {number} steps
+ * @returns {string}
+ */
+export function boids_run(steps) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.boids_run(steps);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * The fully lowered CBPV core IR of the snippet's own functions (prelude
  * elided): effects lowered, reference counting and FBIP reuse applied. The
  * lowest-level view the browser can produce. The LLVM back-end is native only.

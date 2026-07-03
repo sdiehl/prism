@@ -12,6 +12,8 @@ use std::fmt::Write;
 use std::slice;
 
 use super::rt;
+#[cfg(feature = "mlir")]
+use crate::core::builtins::Builtin;
 use crate::core::builtins::{builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
@@ -187,7 +189,6 @@ pub(super) trait Isa {
     fn call_void(&self, b: &mut Buf, f: &str, args: &[String]);
     fn musttail_call(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
     fn printf_str(&self, b: &mut Buf, p: &str);
-    fn exit_with(&self, b: &mut Buf, v: &str);
     fn jump(&self, b: &mut Buf, l: &str);
     fn cond_br(&self, b: &mut Buf, c: &str, lt: &str, lf: &str);
     fn switch(&self, b: &mut Buf, v: &str, default: &str, cases: &[(i64, String)]);
@@ -505,13 +506,18 @@ impl<'a, I: Isa> Cg<'a, I> {
                     Ok(self.isa.const_int(&mut self.b, 0))
                 }
             },
+            // `error(v)` is the Exn fault, not a clean exit: an internal string
+            // message routes through `prism_fatal`, an `error(n)` int payload
+            // through `prism_error_int`. Both report to stderr and terminate with
+            // status 1 (the interpreter's fault behavior); the int is not a
+            // process exit code (that is the separate `exit` builtin).
             Comp::Error(v) => {
                 let r = self.value(regs, v)?;
                 if matches!(v, Value::Str(_)) {
                     self.isa.call_void(&mut self.b, rt::FATAL, &[r]);
                 } else {
                     let code = self.untag(&r);
-                    self.isa.exit_with(&mut self.b, &code);
+                    self.isa.call_void(&mut self.b, rt::ERROR_INT, &[code]);
                 }
                 Ok(self.isa.const_int(&mut self.b, 0))
             }
@@ -893,6 +899,11 @@ impl<'a, I: Isa> Cg<'a, I> {
         if let Some(idx) = wild_idx {
             self.isa.jump(&mut self.b, &arm_lbls[idx]);
         } else {
+            // Exhaustiveness proves this dead for well-typed code; a compiler bug
+            // that slips an uncovered tag here aborts with a diagnostic (matching
+            // the interpreter's clean error) rather than executing raw-UB
+            // `unreachable`, mirroring the apply-arity trap.
+            self.isa.call_void(&mut self.b, rt::MATCH_ERROR, &[]);
             self.isa.unreachable(&mut self.b);
         }
 
@@ -1488,7 +1499,7 @@ pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
         .iter()
         .filter(|(_, _, kind)| *kind == BuiltinKind::Str)
         .map(|(name, arity, _)| {
-            let sym = crate::core::builtins::Builtin::from_name(name)
+            let sym = Builtin::from_name(name)
                 .expect("ICE: str builtin name not in Builtin")
                 .sym();
             (sym, *arity)

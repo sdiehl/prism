@@ -4,7 +4,7 @@ instance ordRev : Ord(Int) {
 
 canonical Ord(Int) = ordInt
 
-fn print_all(xs) =
+fn print_all(xs : List(Int)) =
   match xs of
     Nil => ()
     Cons(x, rest) =>

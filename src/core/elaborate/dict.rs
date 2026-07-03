@@ -2,6 +2,7 @@ use super::{
     builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
     Elab, Error, FloatOp, IoOp, NodeId, Sym, Type, Value,
 };
+use crate::names;
 use crate::types::SHOW_CLASS;
 
 impl Elab<'_> {
@@ -307,25 +308,21 @@ fn first_dict<'a>(ds: &'a [Dict], name: &str) -> Result<&'a Dict, Error> {
 }
 
 // The native-sort key for a `sort`/`sort_by_ord` call, or `None` to keep the
-// generic path. Matches the canonical primitive `Ord` instances by name so a
-// user instance with a different ordering is never silently specialized; the
-// dict must be a concrete instance with no superclass context. The kind tags
-// match `prism_sort_prim`: 0 Integer, 1 I64, 2 U64, 3 Float.
+// generic path. A single `Dict::Global` means the `Ord` dictionary is a
+// statically known instance (not a runtime dict parameter); matching it against
+// the canonical primitive instance names is then sufficient, because coherence
+// makes each such name the one true ordering for its type. Its superclass
+// context (every `Ord` carries an `Eq` dict, since `Ord(a) given Eq(a)`) is
+// irrelevant here: the native kernel compares by the element type, not through
+// the dictionary, so a non-empty context must NOT veto specialization. The
+// instance-name and kind-tag families both live in `names`
+// (`SORT_PRIM_INSTANCES`), the single place the tags agree with `prism_sort_prim`.
 fn sort_kind(name: &str, ds: &[Dict]) -> Option<i64> {
-    if name != "sort" && name != "sort_by_ord" {
+    if name != names::SORT_FN && name != names::SORT_BY_ORD_FN {
         return None;
     }
-    let [Dict::Global(inst, ctxs)] = ds else {
+    let [Dict::Global(inst, _ctxs)] = ds else {
         return None;
     };
-    if !ctxs.is_empty() {
-        return None;
-    }
-    match inst.as_str() {
-        "ordInt" => Some(0),
-        "ordI64" => Some(1),
-        "ordU64" => Some(2),
-        "ordFloat" => Some(3),
-        _ => None,
-    }
+    names::sort_prim_kind(inst.as_str())
 }

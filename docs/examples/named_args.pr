@@ -1,0 +1,13 @@
+-- Named and default arguments. A call may omit trailing defaulted parameters
+-- or pass any argument by name. The two combine freely, and named arguments
+-- may be reordered.
+
+fn rect(w, h := 1, border := 0) = w * h + border
+
+fn main() =
+  println(rect(5))
+  println(rect(5, 3))
+  println(rect(5, 3, 2))
+  println(rect(5, border := 100))
+  println(rect(w := 2, h := 4))
+  println(rect(h := 4, w := 2))

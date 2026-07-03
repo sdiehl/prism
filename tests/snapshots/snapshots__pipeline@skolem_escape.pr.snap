@@ -1,0 +1,145 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/skolem_escape.pr
+---
+== tokens ==
+VOpen Fn Ident("useid") LParen Ident("g") Colon Forall Ident("a") Dot LParen Ident("a") RParen Arrow Ident("a") RParen Colon KwInt Eq Ident("g") LParen Int(IntLit { value: 10, suffix: None }) RParen VSemi Fn Ident("bad") LParen Ident("x") RParen Eq VOpen Ident("useid") LParen Lambda LParen Ident("y") RParen Arrow Ident("x") RParen VSemi Ident("x") VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "useid",
+            params: [
+                Param {
+                    name: "g",
+                    ty: Some(
+                        Forall(
+                            [
+                                "a",
+                            ],
+                            Fun(
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                                Empty,
+                                Var(
+                                    "a",
+                                ),
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "g",
+                        ),
+                        span: 459..460,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 10,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 461..463,
+                        },
+                    ],
+                ),
+                span: 459..464,
+            },
+            wheres: [],
+            span: 418..464,
+        },
+        Decl {
+            name: "bad",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "useid",
+                                ),
+                                span: 480..485,
+                            },
+                            [
+                                Spanned {
+                                    node: Lam(
+                                        [
+                                            Param {
+                                                name: "y",
+                                                ty: None,
+                                                borrow: false,
+                                                default: None,
+                                            },
+                                        ],
+                                        Spanned {
+                                            node: Var(
+                                                "x",
+                                            ),
+                                            span: 494..495,
+                                        },
+                                    ),
+                                    span: 486..495,
+                                },
+                            ],
+                        ),
+                        span: 480..496,
+                    },
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 499..500,
+                    },
+                ),
+                span: 480..500,
+            },
+            wheres: [],
+            span: 466..500,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `bad`: type mismatch: expected a, got ?3
+    ╭─[ <source>:10:17 ]
+    │
+ 10 │   useid(\(y) -> x)
+    │                 ┬  
+    │                 ╰── in `bad`: type mismatch: expected a, got ?3
+────╯

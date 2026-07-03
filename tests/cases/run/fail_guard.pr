@@ -11,7 +11,7 @@ fn pipeline(a, b, c) =
     println(3)
     99
 
-fn report(o) =
+fn report(o : Option(Int)) =
   match o of
     None => println(0)
     Some(n) => println(n)

@@ -141,12 +141,6 @@ impl Isa for MlirText {
         Self::printf(b, "fmt_s", p, "!llvm.ptr");
     }
 
-    fn exit_with(&self, b: &mut Buf, v: &str) {
-        let c = b.tmp();
-        b.line(&format!("{c} = llvm.trunc {v} : i64 to i32"));
-        b.line(&format!("llvm.call @exit({c}) : (i32) -> ()"));
-    }
-
     fn jump(&self, b: &mut Buf, l: &str) {
         b.line(&format!("llvm.br ^{l}"));
     }
@@ -198,16 +192,17 @@ impl Isa for MlirText {
     }
 
     fn prelude(&self, out: &mut String, seen: &mut BTreeSet<String>) {
-        // The fixed runtime declarations. Some (the `taq` ops, `exit`) also reach
-        // the per-use declares below, so each is registered in `seen` to keep the
+        // The fixed runtime declarations. Some (the `taq` ops) also reach the
+        // per-use declares below, so each is registered in `seen` to keep the
         // textual module from declaring a symbol twice (which fails to verify).
         const FIXED: &[&str] = &[
             "llvm.func @printf(!llvm.ptr, ...) -> i32",
-            "llvm.func @exit(i32)",
             "llvm.func @prism_alloc(i64) -> !llvm.ptr",
             "llvm.func @prism_div_zero()",
             "llvm.func @prism_apply_error()",
+            "llvm.func @prism_match_error()",
             "llvm.func @prism_fatal(i64)",
+            "llvm.func @prism_error_int(i64)",
             "llvm.func @prism_rc_inc(i64)",
             "llvm.func @prism_rc_dec(i64)",
             "llvm.func @prism_reuse_token(i64) -> i64",

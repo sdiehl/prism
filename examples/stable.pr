@@ -1,0 +1,37 @@
+-- A `stable` block declares a type's frozen wire history inline: `Save` names
+-- the current rung (V2), `Save.V1` the shipped predecessor. The one-line `= 30`
+-- default is the entire cost of the additive change: the compiler generates the
+-- total `upgrade` (fill the new field), the honest `downgrade` (drop it and
+-- record the `Loss`), and the codec. Editing the sealed V1 in place is a compile
+-- error; evolution is a new rung, never a flag day.
+--
+-- Expected output:
+--   roundtrip hero: Ada
+--   roundtrip depth: 12
+--   dropped by old client: ["fog"]
+--   restored default fog: 30
+
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int } frozen "c6da77960d4168ba",
+  V2 = { ..V1, fog: Int = 30 }
+}
+
+-- The generated codec round-trips the current rung through bytes.
+fn reload(s : Save) : Save =
+  match decode(encode(s)) of
+    (v, _rest) => v
+
+fn body() =
+  let s = reload(Save { hero = "Ada", depth = 12, fog = 30 })
+  println(concat("roundtrip hero: ", s.hero))
+  println(concat("roundtrip depth: ", show(s.depth)))
+  -- An old client speaks V1: downgrading names exactly what it cannot carry.
+  match downgrade_Save_V2_V1(s) of
+    (old, loss) =>
+      println(concat("dropped by old client: ", show(loss_names(loss))))
+      -- Walking back up restores the declared default.
+      println(concat("restored default fog: ", show(upgrade_Save_V1_V2(old).fog)))
+
+fn main() = default(body, ())

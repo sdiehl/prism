@@ -54,7 +54,7 @@ fn depth(e) : ! Int =
     Mul(a, b) => 1 + max(depth(a), depth(b))
     Div(a, b) => 1 + max(depth(a), depth(b))
 
-fn show_result(r) : !{IO} Unit =
+fn show_result(r : Result(Int, a)) : !{IO} Unit =
   match r of
     Ok(v) => println(v)
     Err(_) => println(0 - 999)

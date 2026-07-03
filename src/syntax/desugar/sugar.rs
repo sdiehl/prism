@@ -7,12 +7,65 @@ use super::{call, evar, sp, sp_sugar, Cx};
 use crate::error::TypeError;
 use crate::names;
 use crate::syntax::ast::{
-    Arm, BinOp, Core, Expr, Marker, NodeId, Param, Pattern, PatternDecl, Spanned, Sugar, S,
+    Arm, BinOp, Converter, Core, Expr, Marker, NodeId, Param, Pattern, PatternDecl, Rung, Spanned,
+    StableDecl, Sugar, S,
 };
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
 // clause); any other keyword is the optional `make` clause.
 const VIEW_KW: &str = "view";
+
+// One entry of a `stable` block body: a version rung or a hand-written converter.
+// The parser collects them interleaved (they share the comma-separated body);
+// `build_stable` partitions them and enforces the ordering invariant.
+#[derive(Debug)]
+pub enum StableItem {
+    Rung(Rung),
+    Conv(Converter),
+}
+
+/// Assemble a `stable` block from its parsed entries.
+///
+/// The rungs (in declaration order, which is version order) come first and the
+/// hand-written converters after; a rung following a converter is rejected so the
+/// version history reads top to bottom.
+///
+/// # Errors
+/// Fails on an empty block or a rung following a converter.
+pub fn build_stable(
+    name: String,
+    items: Vec<StableItem>,
+    span: Span,
+) -> Result<StableDecl, (Span, String)> {
+    let mut rungs = Vec::new();
+    let mut converters = Vec::new();
+    for item in items {
+        match item {
+            StableItem::Rung(r) => {
+                if !converters.is_empty() {
+                    return Err((
+                        r.span,
+                        format!(
+                            "rung `{}` must come before the converters in `stable {name}`",
+                            r.name
+                        ),
+                    ));
+                }
+                rungs.push(r);
+            }
+            StableItem::Conv(c) => converters.push(c),
+        }
+    }
+    if rungs.is_empty() {
+        return Err((span, format!("`stable {name}` declares no version rungs")));
+    }
+    Ok(StableDecl {
+        name,
+        rungs,
+        converters,
+        span,
+    })
+}
 
 #[must_use]
 const fn with_sentinel(l: usize, r: usize) -> S<Expr> {

@@ -1,0 +1,281 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/derive_hash.pr
+---
+== tokens ==
+VOpen Class UIdent("Hash") LParen Ident("a") RParen LBrace Ident("hash") Colon LParen Ident("a") RParen Arrow KwString RBrace VSemi Instance Ident("hashInt") Colon UIdent("Hash") LParen KwInt RParen LBrace Fn Ident("hash") LParen Ident("x") RParen Eq Ident("blake3") LParen Ident("concat") LParen StringLit("i") Comma Ident("show_int") LParen Ident("x") RParen RParen RParen RBrace VSemi Type UIdent("Pair") Eq UIdent("MkPair") LParen KwInt Comma KwInt RParen Deriving LParen UIdent("Hash") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("hash") LParen UIdent("MkPair") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Pair",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "MkPair",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [
+                (
+                    "Hash",
+                    163..167,
+                ),
+            ],
+            newtype: false,
+            span: 124..168,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "Hash",
+            param: "a",
+            supers: [],
+            methods: [
+                (
+                    "hash",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Empty,
+                        Str,
+                    ),
+                ),
+            ],
+            span: 0..40,
+        },
+    ],
+    instances: [
+        InstanceDecl {
+            name: "hashInt",
+            class: "Hash",
+            head: Int,
+            context: [],
+            methods: [
+                Decl {
+                    name: "hash",
+                    params: [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    ret: None,
+                    eff: None,
+                    constraints: [],
+                    body: Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "blake3",
+                                ),
+                                span: 88..94,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "concat",
+                                            ),
+                                            span: 95..101,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Str(
+                                                    "i",
+                                                ),
+                                                span: 102..105,
+                                            },
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "show_int",
+                                                        ),
+                                                        span: 107..115,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Var(
+                                                                "x",
+                                                            ),
+                                                            span: 116..117,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 107..118,
+                                            },
+                                        ],
+                                    ),
+                                    span: 95..119,
+                                },
+                            ],
+                        ),
+                        span: 88..120,
+                    },
+                    wheres: [],
+                    span: 75..120,
+                },
+            ],
+            module: "",
+            span: 42..122,
+        },
+    ],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "hash",
+                        ),
+                        span: 182..186,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "MkPair",
+                                    ),
+                                    span: 187..193,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 194..195,
+                                    },
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 2,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 197..198,
+                                    },
+                                ],
+                            ),
+                            span: 187..199,
+                        },
+                    ],
+                ),
+                span: 182..200,
+            },
+            wheres: [],
+            span: 170..200,
+        },
+    ],
+}
+
+== types ==
+main : () -> String
+
+== core (cbpv) ==
+fn main() =
+  return 1 to t@0; return 2 to t@1; return MkPair(t@0, t@1) to t@2; i@hashPair@hash(t@2)
+fn i@hashInt@hash(x) =
+  return "i" to t@3; return x to t@4; show_int(t@4) to t@5; concat(t@3, t@5) to t@6; blake3(t@6)
+fn hashInt() =
+  return _DHash(thunk { \_p0. i@hashInt@hash(_p0) })
+fn i@hashPair@hash(_x) =
+  return _x to t@7; case t@7 { MkPair(_f0, _f1) => return "c6:MkPair/0" to t@8; return _f0 to t@9; i@hashInt@hash(t@9) to t@10; return _f1 to t@11; i@hashInt@hash(t@11) to t@12; concat(t@10, t@12) to t@13; concat(t@8, t@13) to t@14; blake3(t@14) }
+fn hashPair() =
+  return _DHash(thunk { \_p0. i@hashPair@hash(_p0) })
+
+== fbip (rc) ==
+fn main() =
+  return 1 to t@0; return 2 to t@1; return MkPair(t@0, t@1) to t@2; i@hashPair@hash(t@2)
+fn i@hashInt@hash(x) =
+  return "i" to t@3; return x to t@4; show_int(t@4) to t@5; concat(t@3, t@5) to t@6; blake3(t@6)
+fn hashInt() =
+  return _DHash(thunk { \_p0. i@hashInt@hash(_p0) })
+fn i@hashPair@hash(_x) =
+  return _x to t@7; case t@7 { MkPair(_f0, _f1) => dup _f0 to _; dup _f1 to _; drop t@7 to _; return "c6:MkPair/0" to t@8; return _f0 to t@9; i@hashInt@hash(t@9) to t@10; return _f1 to t@11; i@hashInt@hash(t@11) to t@12; concat(t@10, t@12) to t@13; concat(t@8, t@13) to t@14; blake3(t@14) }
+fn hashPair() =
+  return _DHash(thunk { \_p0. i@hashPair@hash(_p0) })
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@.str0 = private constant [12 x i8] c"c6:MkPair/0\00"
+@.str1 = private constant [2 x i8] c"i\00"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t1 = call i64 @prism_i.hashInt.hash(i64 3)
+  %t3 = call i64 @prism_i.hashInt.hash(i64 5)
+  %t4 = call i64 @prism_str_concat(i64 %t1, i64 %t3)
+  call void @prism_rc_dec(i64 %t1)
+  call void @prism_rc_dec(i64 %t3)
+  %t5 = call i64 @prism_str_lit(ptr @.str0, i64 11)
+  %t6 = call i64 @prism_str_concat(i64 %t5, i64 %t4)
+  call void @prism_rc_dec(i64 %t5)
+  call void @prism_rc_dec(i64 %t4)
+  %t7 = call i64 @prism_blake3(i64 %t6)
+  call void @prism_rc_dec(i64 %t6)
+  ret i64 %t7
+}
+
+; Function Attrs: nounwind
+define i64 @prism_i.hashInt.hash(i64 %a0) #0 {
+entry:
+  %t0 = call i64 @prism_show_int(i64 %a0)
+  call void @prism_rc_dec(i64 %a0)
+  %t1 = call i64 @prism_str_lit(ptr @.str1, i64 1)
+  %t2 = call i64 @prism_str_concat(i64 %t1, i64 %t0)
+  call void @prism_rc_dec(i64 %t1)
+  call void @prism_rc_dec(i64 %t0)
+  %t3 = call i64 @prism_blake3(i64 %t2)
+  call void @prism_rc_dec(i64 %t2)
+  ret i64 %t3
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_str_concat(i64, i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_blake3(i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_show_int(i64) #0
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 16e2a2205632f027b1ed555721b06ae259890538cad64aa0386a1bff8be42061

@@ -10,7 +10,7 @@ instance ordList : Ord(List(a)) given Ord(a) {
     }
 }
 
-fn print_all(xs) =
+fn print_all(xs : List(Int)) =
   match xs of
     Nil => ()
     Cons(x, rest) =>

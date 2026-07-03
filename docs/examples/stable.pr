@@ -1,0 +1,19 @@
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int } frozen "c6da77960d4168ba",
+  V2 = { ..V1, fog: Int = 30 }
+}
+
+fn reload(s : Save) : Save =
+  match decode(encode(s)) of
+    (v, _rest) => v
+
+fn body() =
+  let s = reload(Save { hero = "Ada", depth = 12, fog = 30 })
+  match downgrade_Save_V2_V1(s) of
+    (old, loss) =>
+      println(show(loss_names(loss)))
+      println(show(upgrade_Save_V1_V2(old).fog))
+
+fn main() = default(body, ())

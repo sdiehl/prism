@@ -43,6 +43,24 @@ impl<'a> Annot<'a> {
             rigid_row: empty,
         }
     }
+
+    // Convert against a supplied rigid type-variable set (and a separate, usually
+    // empty, rigid row set). Used to seed a top-level function body where the bare
+    // signature type variables are rigid (an implicit `forall`), so the body
+    // cannot silently narrow one to a concrete type.
+    pub(super) const fn with_rigid(
+        ty_ex: &'a mut BTreeMap<String, u32>,
+        row_ex: &'a mut BTreeMap<String, u32>,
+        rigid_ty: &'a BTreeSet<String>,
+        rigid_row: &'a BTreeSet<String>,
+    ) -> Self {
+        Self {
+            ty_ex,
+            row_ex,
+            rigid_ty,
+            rigid_row,
+        }
+    }
 }
 
 impl Tc<'_> {
@@ -187,6 +205,8 @@ impl Tc<'_> {
                     Type::Exist(e)
                 }
             }
+            // A `var` state cell reuses the pinned existential id it was desugared to;
+            // see the canonical note on `ast::Ty::State`.
             ast::Ty::State(n) => Type::Exist(*n),
             ast::Ty::Forall(names, body) => {
                 let mut rows = BTreeSet::new();
@@ -414,6 +434,8 @@ pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
                 Type::Var(s)
             }
         }
+        // A `var` state cell reuses the pinned existential id it was desugared to;
+        // see the canonical note on `ast::Ty::State`.
         ast::Ty::State(n) => Type::Exist(*n),
         ast::Ty::Forall(names, body) => wrap_forall(
             &names.iter().map(Sym::from).collect::<Vec<_>>(),
@@ -571,6 +593,86 @@ fn ann_row_var_names(
     t.each_child(&mut |c| ann_row_var_names(c, data, out));
 }
 
+// Type-variable names appearing free (not bound by a nested `forall`) in an
+// annotation. A name at a `Row`-kinded position is an effect-row variable, not a
+// type variable, so `signature_ty_vars` subtracts those; this walk alone does
+// not distinguish them.
+fn ann_free_ty_vars(t: &ast::Ty, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
+    match t {
+        ast::Ty::Var(n) => {
+            if !bound.iter().any(|b| b == n) {
+                out.insert(n.clone());
+            }
+        }
+        ast::Ty::App(v, args) => {
+            if !bound.iter().any(|b| b == v) {
+                out.insert(v.clone());
+            }
+            for a in args {
+                ann_free_ty_vars(a, bound, out);
+            }
+        }
+        ast::Ty::Forall(names, body) => {
+            let k = names.len();
+            bound.extend(names.iter().cloned());
+            ann_free_ty_vars(body, bound, out);
+            bound.truncate(bound.len() - k);
+        }
+        _ => t.each_child(&mut |c| ann_free_ty_vars(c, bound, out)),
+    }
+}
+
+// The bare type variables of a top-level function's signature (parameters,
+// return, `given` constraints, and parametric-effect arguments), excluding any
+// bound by a nested `forall` and any that sit at a row position. Each is an
+// implicit `forall a`: it enters the body check rigid so the body cannot narrow
+// it, and generalization re-quantifies it into the exported scheme. A constant
+// has no signature arrow to quantify, so it yields nothing.
+pub(super) fn signature_ty_vars(
+    d: &Decl<Core>,
+    data: &BTreeMap<String, super::DataInfo>,
+) -> BTreeSet<String> {
+    if d.konst {
+        return BTreeSet::new();
+    }
+    let mut out = BTreeSet::new();
+    let mut bound = Vec::new();
+    for p in &d.params {
+        if let Some(t) = &p.ty {
+            ann_free_ty_vars(t, &mut bound, &mut out);
+        }
+    }
+    if let Some(t) = &d.ret {
+        ann_free_ty_vars(t, &mut bound, &mut out);
+    }
+    for c in &d.constraints {
+        ann_free_ty_vars(&c.ty, &mut bound, &mut out);
+    }
+    if let Some(ls) = &d.eff {
+        for al in ls {
+            for a in &al.args {
+                ann_free_ty_vars(a, &mut bound, &mut out);
+            }
+        }
+    }
+    let mut rows = BTreeSet::new();
+    for p in &d.params {
+        if let Some(t) = &p.ty {
+            ann_row_var_names(t, data, &mut rows);
+        }
+    }
+    if let Some(t) = &d.ret {
+        ann_row_var_names(t, data, &mut rows);
+    }
+    for c in &d.constraints {
+        ann_row_var_names(&c.ty, data, &mut rows);
+    }
+    for r in &rows {
+        out.remove(r.as_str());
+    }
+    out
+}
+
 pub(super) fn annotation_scheme(
     d: &Decl<Core>,
     data: &BTreeMap<String, super::DataInfo>,
@@ -679,6 +781,7 @@ const BUILTINS: &[(&str, &str)] = &[
     ("ord", "(Char) -> Int"),
     ("chr", "(Int) -> Char"),
     ("show_char", "(Char) -> String"),
+    ("blake3", "(String) -> String"),
     ("parse_int", "(String) -> Option(Int)"),
     ("prim_getenv", "(String) -> String ! {IO}"),
     ("prim_read_file", "(String) -> String ! {IO}"),

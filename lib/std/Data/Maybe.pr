@@ -1,4 +1,4 @@
--- | Operations over `Option(a)` (`None` / `Some(a)`).
+-- | Operations over `Option`.
 --
 -- The type is wired in; the prelude opens this module, so these are in
 -- unqualified scope everywhere.

@@ -2,7 +2,7 @@
  *
  * Standalone and self-contained: this file is NOT yet wired into prism_rt.c or
  * codegen. It is the runtime substrate the `with_arena` handler will bump into
- * once the reification seam lands (see ARENAS.md); kept apart so the allocator
+ * once effect lowering can direct allocations into a region; kept apart so the allocator
  * can be built, tested, and reasoned about on its own.
  *
  * The design is the textbook region allocator (Hanson, "C Interfaces and
@@ -21,9 +21,10 @@
  */
 
 #ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE                                                                            \
-    200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard      \
-               feature-test macro */
+// clang-format off: a feature-test macro must be one line, and the NOLINT must
+// stay on it to suppress the reserved-identifier lint.
+#define _POSIX_C_SOURCE 200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard feature-test macro */
+// clang-format on
 #endif
 
 #include <stdalign.h>
@@ -107,6 +108,11 @@ PrismArena *prism_arena_create(size_t block_size) {
  * valid aligned pointer that owns no bytes. */
 void *prism_arena_alloc_aligned(PrismArena *a, size_t size, size_t align) {
     if (align < PRISM_ARENA_ALIGN) { align = PRISM_ARENA_ALIGN; }
+    /* prism_align_up masks with align-1, which only rounds correctly for a power
+     * of two; a stray non-power-of-two would silently mis-align every object.
+     * Alignment is a compile-time-shaped input, so a violation is a codegen bug:
+     * trap always rather than hand back a mis-aligned pointer. */
+    if ((align & (align - 1)) != 0) { abort(); }
     for (;;) {
         PrismBlock *b = a->cur;
         size_t start;

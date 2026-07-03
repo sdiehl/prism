@@ -181,8 +181,8 @@
   border-color: rgba(160, 168, 178, 0.22);
 }
 
-/* Copyable elements (hash pills, the Merkle root) invite a click and confirm
-   with a brief "Copied" bubble, reusing the chip tooltip machinery. */
+/* Copyable elements (hash pills) invite a click and confirm with a brief
+   "Copied" bubble, reusing the chip tooltip machinery. */
 .prism-copyable {
   cursor: pointer;
 }
@@ -193,75 +193,4 @@
 .prism-chip.prism-copied::after,
 .prism-chip.prism-copied::before {
   opacity: 1;
-}
-
-/* The Merkle-root fingerprint card on the stdlib index: a quiet framed block with
-   the root as the headline, scheme and compiler version around it. Theme-neutral
-   (currentColor + translucent fills), so it reads on light and dark. */
-.stdlib-fingerprint {
-  margin: 1.3rem 0 1.7rem;
-  padding: 0.9rem 1.1rem;
-  border: 1px solid rgba(160, 168, 178, 0.28);
-  border-radius: 10px;
-  background: rgba(160, 168, 178, 0.06);
-}
-.stdlib-fp-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-.stdlib-fp-tag {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  color: #9aa0ab;
-  background: rgba(160, 168, 178, 0.12);
-  border: 1px solid rgba(160, 168, 178, 0.24);
-}
-.stdlib-fp-root {
-  position: relative;
-  display: inline-block;
-  margin: 0.55rem 0 0.5rem;
-  padding: 0.2rem 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.95rem;
-  line-height: 1.4;
-  word-break: break-all;
-  cursor: pointer;
-  color: inherit;
-  background: rgba(174, 160, 224, 0.16);
-  border: 1px solid rgba(174, 160, 224, 0.32);
-  border-radius: 6px;
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-.stdlib-fp-root:hover {
-  background: rgba(174, 160, 224, 0.24);
-  border-color: rgba(174, 160, 224, 0.5);
-}
-.stdlib-fp-root.prism-copied::after {
-  content: "Copied";
-  position: absolute;
-  bottom: calc(100% + 7px);
-  left: 1.2rem;
-  background: #12161c;
-  color: #d6d8e0;
-  border: 1px solid #333a44;
-  border-radius: 6px;
-  padding: 0.25rem 0.55rem;
-  font-size: 0.8rem;
-  font-family: system-ui, sans-serif;
-  white-space: nowrap;
-}
-.stdlib-fp-foot {
-  font-size: 0.85rem;
-  opacity: 0.68;
 }

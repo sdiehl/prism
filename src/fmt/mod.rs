@@ -6,8 +6,8 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, BinOp, CatchArm, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern, Program, Qualifier,
-    Sugar, SugarArm, Surface, S,
+    Arm, BinOp, CatchArm, ConvDir, Converter, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern,
+    Program, Qualifier, Rung, StableDecl, Sugar, SugarArm, Surface, S,
 };
 
 pub(crate) mod decl;
@@ -50,6 +50,40 @@ pub fn format(src: &str) -> Result<String, Error> {
     Ok(cx.fmt_program(&program))
 }
 
+/// Reseat every `stable` block's per-rung shape golden, then format.
+///
+/// Each shipped rung's `frozen "<digest>"` badge is rewritten to its recomputed
+/// shape digest and the current rung's badge is dropped. This is the loud reseat
+/// path behind `prism wire --accept`, the analogue of `just snap` for the goldens.
+///
+/// # Errors
+/// Fails when the source does not parse or a `stable` block is malformed.
+pub fn format_wire_accept(src: &str) -> Result<String, Error> {
+    let ParseResult {
+        mut program,
+        trivia,
+    } = parse(src)?;
+    for sd in &mut program.stable {
+        let digests = crate::syntax::desugar::stable_rung_digests(sd)?;
+        let total = sd.rungs.len();
+        for (idx, rung) in sd.rungs.iter_mut().enumerate() {
+            rung.frozen = if idx + 1 == total {
+                None
+            } else {
+                digests
+                    .iter()
+                    .find(|(v, _)| v == &rung.name)
+                    .map(|(_, d)| d.clone())
+            };
+        }
+    }
+    let cx = Fmt {
+        source: src,
+        trivia: &trivia,
+    };
+    Ok(cx.fmt_program(&program))
+}
+
 /// # Errors
 /// Fails when the source does not parse.
 pub fn format_check(src: &str) -> Result<bool, Error> {
@@ -78,6 +112,33 @@ fn dot_parts<'a>(f: &'a S<Expr>, args: &'a [S<Expr>]) -> Option<DotCall<'a>> {
         Expr::Var(name) if f.synth && !args.is_empty() => Some((name, &args[0], &args[1..])),
         _ => None,
     }
+}
+
+// The structural shape of a call `f(args)` once its head is decoded. Both the
+// flat/break printer (`fmt_call_flat`) and the inline printer decode through
+// this one classifier so they can never disagree on how a call head reads; a
+// missing arm here once let the break path drop a `using` clause, re-emitting
+// `f(a, using I)` as `f(using I)(a)` and breaking format round-trip.
+enum CallShape<'a> {
+    Recv(&'a S<Expr>),                              // `recv?`
+    Dot(DotCall<'a>),                               // `recv.name(rest)`
+    Inst(&'a S<Expr>, &'a [String], &'a [S<Expr>]), // `inner(args, using names)`
+    Plain(&'a S<Expr>, &'a [S<Expr>]),              // `f(args)`
+}
+
+// Decode a call head into its `CallShape`. Ordering is priority: a `?` receiver,
+// then a UFCS dot call, then explicit instance selection, then a plain call.
+fn call_shape<'a>(f: &'a S<Expr>, args: &'a [S<Expr>]) -> CallShape<'a> {
+    if let Some(recv) = try_recv(f, args) {
+        return CallShape::Recv(recv);
+    }
+    if let Some(dot) = dot_parts(f, args) {
+        return CallShape::Dot(dot);
+    }
+    if let Expr::Inst(inner, names) = &f.node {
+        return CallShape::Inst(inner, names, args);
+    }
+    CallShape::Plain(f, args)
 }
 
 // A dot receiver must stay postfix-tight. Anything looser is parenthesized.
@@ -395,6 +456,61 @@ impl Fmt<'_> {
         }
     }
 
+    // A `stable` block, one rung or converter per line inside real braces (so the
+    // entries are comma-separated, like a class body). Always multi-line, so the
+    // layout is a pure function of the tree and round-trips idempotently; the
+    // per-rung `frozen "<digest>"` golden is preserved verbatim.
+    fn fmt_stable(&self, sd: &StableDecl) -> String {
+        let mut lines: Vec<String> = Vec::new();
+        for r in &sd.rungs {
+            lines.push(self.fmt_rung(r));
+        }
+        for c in &sd.converters {
+            lines.push(self.fmt_converter(c));
+        }
+        let body = lines
+            .iter()
+            .map(|l| format!("{INDENT}{l}"))
+            .collect::<Vec<_>>()
+            .join(",\n");
+        format!("{} {} {{\n{body}\n}}", kw::STABLE, sd.name)
+    }
+
+    fn fmt_rung(&self, r: &Rung) -> String {
+        let mut fields: Vec<String> = Vec::new();
+        if let Some(base) = &r.base {
+            fields.push(format!("..{base}"));
+        }
+        for f in &r.fields {
+            let mut fld = format!("{}: {}", f.name, fmt_ty(&f.ty));
+            if let Some(def) = &f.default {
+                write!(fld, " = {}", self.fmt_expr(def, 0, Mode::Flat)).unwrap();
+            }
+            fields.push(fld);
+        }
+        let mut line = format!("{} = {{ {} }}", r.name, fields.join(", "));
+        if let Some(digest) = &r.frozen {
+            write!(line, " {} \"{digest}\"", kw::FROZEN).unwrap();
+        }
+        line
+    }
+
+    fn fmt_converter(&self, c: &Converter) -> String {
+        let word = match c.dir {
+            ConvDir::Upgrade => kw::UPGRADE,
+            ConvDir::Downgrade => kw::DOWNGRADE,
+        };
+        let mut parts: Vec<String> = vec![format!("..{}", self.fmt_expr(&c.base, 0, Mode::Flat))];
+        for (name, e) in &c.overrides {
+            parts.push(format!("{name} = {}", self.fmt_expr(e, 0, Mode::Flat)));
+        }
+        let mut line = format!("{word} {} -> {} = {{ {} }}", c.from, c.to, parts.join(", "));
+        if !c.drop_loss.is_empty() {
+            write!(line, " {}({})", kw::DROP_LOSS, c.drop_loss.join(", ")).unwrap();
+        }
+        line
+    }
+
     fn fmt_program(&self, prog: &Program) -> String {
         let mut items: Vec<(usize, usize, String)> = Vec::new();
         // Restore the visibility marker the parser stripped into `prog.exports` /
@@ -441,6 +557,9 @@ impl Fmt<'_> {
         }
         for c in &prog.classes {
             items.push((c.span.start, c.span.end, pubd(&c.name, fmt_class(c))));
+        }
+        for sd in &prog.stable {
+            items.push((sd.span.start, sd.span.end, self.fmt_stable(sd)));
         }
         for i in &prog.instances {
             items.push((i.span.start, i.span.end, self.fmt_instance(i)));
@@ -515,27 +634,37 @@ impl Fmt<'_> {
         if let Some(s) = self.fmt_interp(f, args) {
             return s;
         }
-        if let Some(recv) = try_recv(f, args) {
-            return format!("{}{}", self.fmt_dot_recv(recv, indent), kw::QUESTION);
-        }
-        if let Some((name, recv, rest)) = dot_parts(f, args) {
-            let rest_s: Vec<String> = rest
-                .iter()
+        let flat_args = |xs: &[S<Expr>]| -> Vec<String> {
+            xs.iter()
                 .map(|a| self.fmt_expr(a, indent, Mode::Flat))
-                .collect();
-            return format!(
+                .collect()
+        };
+        match call_shape(f, args) {
+            CallShape::Recv(recv) => {
+                format!("{}{}", self.fmt_dot_recv(recv, indent), kw::QUESTION)
+            }
+            CallShape::Dot((name, recv, rest)) => format!(
                 "{}.{name}({})",
                 self.fmt_dot_recv(recv, indent),
-                rest_s.join(", ")
-            );
+                flat_args(rest).join(", ")
+            ),
+            CallShape::Inst(inner, names, args) => {
+                let inner_s = paren_if(
+                    callee_parens(&inner.node),
+                    self.fmt_expr(inner, indent, Mode::Flat),
+                );
+                let using = format!("{} {}", kw::USING, names.join(", "));
+                if args.is_empty() {
+                    format!("{inner_s}({using})")
+                } else {
+                    format!("{inner_s}({}, {using})", flat_args(args).join(", "))
+                }
+            }
+            CallShape::Plain(f, args) => {
+                let f_s = paren_if(callee_parens(&f.node), self.fmt_expr(f, indent, Mode::Flat));
+                format!("{f_s}({})", flat_args(args).join(", "))
+            }
         }
-        let f_s = self.fmt_expr(f, indent, Mode::Flat);
-        let f_s = paren_if(callee_parens(&f.node), f_s);
-        let args_s: Vec<String> = args
-            .iter()
-            .map(|a| self.fmt_expr(a, indent, Mode::Flat))
-            .collect();
-        format!("{f_s}({})", args_s.join(", "))
     }
 
     // One offside block: a let chain printed as indented statements. `from` is the
@@ -927,45 +1056,42 @@ impl Fmt<'_> {
                 if self.has_comments(f.span.end, e.span.end) {
                     return None;
                 }
-                if let Some(recv) = try_recv(f, args) {
-                    let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
-                    return Some(format!("{recv_s}{}", kw::QUESTION));
-                }
-                if let Some((name, recv, rest)) = dot_parts(f, args) {
-                    let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
-                    let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
-                    let rest_s: Option<Vec<_>> = rest
-                        .iter()
+                let flat_args = |xs: &[S<Expr>]| -> Option<Vec<String>> {
+                    xs.iter()
                         .map(|a| self.fmt_expr_inline(a, Mode::Flat))
-                        .collect();
-                    return rest_s.map(|a| format!("{recv_s}.{name}({})", a.join(", ")));
+                        .collect()
+                };
+                match call_shape(f, args) {
+                    CallShape::Recv(recv) => {
+                        let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
+                        let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
+                        Some(format!("{recv_s}{}", kw::QUESTION))
+                    }
+                    CallShape::Dot((name, recv, rest)) => {
+                        let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
+                        let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
+                        flat_args(rest).map(|a| format!("{recv_s}.{name}({})", a.join(", ")))
+                    }
+                    // Explicit instance selection: fold the callee's names back into
+                    // a trailing `using` clause on this call.
+                    CallShape::Inst(inner, names, args) => {
+                        let inner_s = self.fmt_expr_inline(inner, mode)?;
+                        let inner_s = paren_if(callee_parens(&inner.node), inner_s);
+                        flat_args(args).map(|a| {
+                            let using = format!("{} {}", kw::USING, names.join(", "));
+                            if a.is_empty() {
+                                format!("{inner_s}({using})")
+                            } else {
+                                format!("{inner_s}({}, {using})", a.join(", "))
+                            }
+                        })
+                    }
+                    CallShape::Plain(f, args) => {
+                        let f_s = self.fmt_expr_inline(f, mode)?;
+                        let f_s = paren_if(callee_parens(&f.node), f_s);
+                        flat_args(args).map(|a| format!("{f_s}({})", a.join(", ")))
+                    }
                 }
-                // Explicit instance selection: the callee is an `Expr::Inst`, so
-                // fold its names back into a trailing `using` clause on this call.
-                if let Expr::Inst(inner, names) = &f.node {
-                    let inner_s = self.fmt_expr_inline(inner, mode)?;
-                    let inner_s = paren_if(callee_parens(&inner.node), inner_s);
-                    let args: Option<Vec<_>> = args
-                        .iter()
-                        .map(|a| self.fmt_expr_inline(a, Mode::Flat))
-                        .collect();
-                    return args.map(|a| {
-                        let using = format!("{} {}", kw::USING, names.join(", "));
-                        if a.is_empty() {
-                            format!("{inner_s}({using})")
-                        } else {
-                            format!("{inner_s}({}, {using})", a.join(", "))
-                        }
-                    });
-                }
-                let f_s = self.fmt_expr_inline(f, mode)?;
-                let f_s = paren_if(callee_parens(&f.node), f_s);
-                let args: Option<Vec<_>> = args
-                    .iter()
-                    .map(|a| self.fmt_expr_inline(a, Mode::Flat))
-                    .collect();
-                args.map(|a| format!("{f_s}({})", a.join(", ")))
             }
             Expr::Pipe(x, f) => {
                 let x_s = self.fmt_expr_inline(x, mode)?;

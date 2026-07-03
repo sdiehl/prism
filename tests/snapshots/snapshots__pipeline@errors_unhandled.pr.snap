@@ -208,6 +208,7 @@ b3:                                               ; preds = %entry
   br i1 %t40, label %b4, label %b5
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 
 b4:                                               ; preds = %b3
@@ -304,8 +305,12 @@ b3:                                               ; preds = %entry
   ret i64 %t30
 
 b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 }
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
 
 ; Function Attrs: nounwind
 declare void @prism_rc_inc(i64) #0

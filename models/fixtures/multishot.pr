@@ -1,0 +1,15 @@
+effect Coin {
+  ctl coin(Unit) : Bool
+}
+
+fn prog() : !{Coin} Int =
+  let x = coin(())
+  if x then
+    1
+  else
+    0
+
+fn main() : Int =
+  handle prog() with
+    coin(u, k) => k(true) + k(false)
+    return r => r

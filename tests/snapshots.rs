@@ -130,7 +130,7 @@ fn var_stays_pure() {
 fn bounded_stack_rule_is_fip_only() {
     let prog = |kw: &str| {
         prism::with_prelude(&format!(
-            "fip fn wrap(x) = x\n{kw} fn relay(x) = wrap(relay(x))\nfn main() = println(relay(1))"
+            "fip fn wrap(x) = x\n{kw} fn relay(x) = wrap(relay(x))\nfn main() = println((relay(1) : Int))"
         ))
     };
     prism::dump("core", &prog("fbip")).expect("fbip may recurse non-tail");
@@ -148,7 +148,7 @@ fn bounded_stack_rule_is_fip_only() {
 #[cfg(feature = "native")]
 #[test]
 fn fip_tail_recursion_lowers_to_a_loop() {
-    let src = prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println(spin(1))");
+    let src = prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println((spin(1) : Int))");
     let ir = prism::emit_ir(&src).expect("tail-recursive fip must be accepted");
     let start = ir
         .find("define i64 @prism_spin(")

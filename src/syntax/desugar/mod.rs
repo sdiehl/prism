@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::ast::{
-    BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, InstanceDecl, IntLit, Param,
-    Pattern, Phase, Program, Spanned, Suffix, Ty, S,
+    BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, InstanceDecl, IntLit, NodeId,
+    Param, Pattern, Phase, Program, Spanned, Suffix, Ty, S,
 };
 use crate::error::TypeError;
 use crate::fresh::Fresh;
@@ -21,6 +21,7 @@ mod aliases;
 mod derive;
 mod effects;
 mod ids;
+mod stable;
 mod sugar;
 mod synonyms;
 
@@ -28,11 +29,13 @@ use aliases::expand_aliases;
 use derive::derive_instances;
 use effects::{rw, wrap_return, Binding, Vars};
 use ids::assign_ids;
+use stable::expand_stable;
+pub(crate) use stable::stable_rung_digests;
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    assign_stmt, compound_assign, compound_stmt, dot_call, interp_lit, let_pat, let_stmt, open_if,
-    pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail,
+    assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, interp_lit, let_pat,
+    let_stmt, open_if, pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -373,6 +376,11 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     // effect's op are all rejected here rather than silently overwriting.
     let errors = lower_errors(&mut prog);
     check_effect_dups(&prog)?;
+    // Expand `stable` blocks into rung types, ladder functions, and synonyms
+    // before deriving (the rungs derive their codecs) and synonym expansion (the
+    // current-rung version tag is a synonym), and before the frozen goldens are
+    // gated against the recomputed per-rung shape digests.
+    expand_stable(&mut prog)?;
     expand_synonyms(&mut prog)?;
     expand_aliases(&mut prog)?;
     derive_instances(&mut prog)?;
@@ -471,6 +479,8 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         synonyms: prog.synonyms,
         classes: prog.classes,
         instances,
+        // Consumed by `expand_stable` above into ordinary types/fns/instances.
+        stable: Vec::new(),
         canonicals: prog.canonicals,
         patterns: Vec::new(),
         fns,
@@ -497,7 +507,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
 // `builtins`, and a drift guard test pins each to its prelude definition.
 fn wrap_main_world(fns: &mut [Decl<Core>]) {
     let names: BTreeSet<&str> = fns.iter().map(|d| d.name.as_str()).collect();
-    if !names.contains("run_io") || !names.contains(names::ENTRY_POINT) {
+    if !names.contains(names::RUN_IO) || !names.contains(names::ENTRY_POINT) {
         return;
     }
     let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -535,7 +545,7 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
         let span = d.body.span;
         let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
         let action = lam1(names::UNIT_ARG, body, span);
-        d.body = call(evar("run_io", span), vec![action], span);
+        d.body = call(evar(names::RUN_IO, span), vec![action], span);
     }
 }
 
@@ -623,7 +633,7 @@ fn seed(params: &[Param]) -> Vars {
 
 pub(super) const fn spat(node: Pattern, span: Span) -> S<Pattern> {
     Spanned {
-        id: crate::syntax::ast::NodeId::DUMMY,
+        id: NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -642,7 +652,7 @@ pub(super) fn eint<P: Phase>(i: usize, span: Span) -> S<Expr<P>> {
 
 pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
     Spanned {
-        id: crate::syntax::ast::NodeId::DUMMY,
+        id: NodeId::DUMMY,
         synth: false,
         node,
         span,
@@ -652,7 +662,7 @@ pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
 // Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
 pub(super) const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
     Spanned {
-        id: crate::syntax::ast::NodeId::DUMMY,
+        id: NodeId::DUMMY,
         synth: true,
         node,
         span,

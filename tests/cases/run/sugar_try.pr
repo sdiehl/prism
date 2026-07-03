@@ -13,7 +13,7 @@ fn check(n) =
   half(n)?
   Ok(n)
 
-fn report(r) =
+fn report(r : Result(Int, Int)) =
   match r of
     Ok(v) => println(v)
     Err(e) => println(e)

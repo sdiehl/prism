@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use super::diagnostics::DriftLog;
 use super::runtime::{ctor_pat, epure};
 use super::{
     Lowerer, ResumeMode, EBIND, EOP, EPURE, ERESUME, MKCONS, MKCONS_TAG, MKNIL, MKNIL_TAG, OP_TAG,
@@ -672,7 +673,7 @@ impl Lowerer {
         };
         let mut clauses = Vec::new();
         for op in ops {
-            let Some(sc) = state_clause(op) else {
+            let Some(sc) = state_clause(op, &self.drift) else {
                 return Ok(None);
             };
             clauses.push(sc);
@@ -1064,7 +1065,7 @@ struct StateClause {
     b: Value,
 }
 
-fn state_clause(op: &HandleOp) -> Option<StateClause> {
+fn state_clause(op: &HandleOp, drift: &DriftLog) -> Option<StateClause> {
     let Comp::Return(Value::Thunk(t)) = &op.body else {
         return None;
     };
@@ -1107,7 +1108,7 @@ fn state_clause(op: &HandleOp) -> Option<StateClause> {
                     false,
                     "state_clause matched a clause that still references the resume: elaborated shape drifted"
                 );
-                super::diagnostics::report_shape_drift("state_clause");
+                drift.shape_drift("state_clause");
                 return None;
             }
             return Some(StateClause {

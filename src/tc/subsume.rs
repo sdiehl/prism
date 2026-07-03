@@ -25,6 +25,15 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // Constructor arguments are matched covariantly (each `x <: y`), with no
+            // separate invariant rule for mutable containers like `Array`. That is
+            // sound only because every value is copy-on-write: `array_set` mutates in
+            // place only when the cell is uniquely owned (rc 1) and copies otherwise,
+            // so two live aliases can never share a cell across a mutation. Without
+            // that, covariance on a mutable element type would be a classic hole (write
+            // through a widened view, read the change back through the original). With
+            // it, no such observation exists, so covariance is safe. The value-
+            // semantics guarantee is pinned by `tests/cases/run/array_value_semantics.pr`.
             (Type::Con(n, xs), Type::Con(m, ys)) if n == m && xs.len() == ys.len() => {
                 for (x, y) in xs.iter().zip(ys) {
                     let x = self.apply(x);

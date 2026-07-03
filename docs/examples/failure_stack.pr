@@ -1,0 +1,60 @@
+-- A row alias names a stack of failure modes. ConfigErr is the failure
+-- vocabulary of the config subsystem, NetErr of the transport; AppErr splices
+-- both. Expansion flattens, so !{AppErr} is exactly {NotFound, Malformed,
+-- Timeout}, and a partial catch subtracts labels from that set: config_safe
+-- discharges ConfigErr and its row keeps only NetErr.
+--
+-- Expected output:
+--   8105
+--   80
+
+error NotFound(String)
+
+error Malformed(String)
+
+error Timeout(Int)
+
+alias ConfigErr = {NotFound, Malformed}
+
+alias NetErr = {Timeout}
+
+alias AppErr = {ConfigErr, NetErr}
+
+fn read_port(cfg, key) : !{ConfigErr} Int =
+  match cfg of
+    Nil => throw NotFound(key)
+    Cons(pair, rest) =>
+      let (k, v) = pair
+      if k == key then
+        if v == "8080" then
+          8080
+        else
+          throw Malformed(v)
+      else
+        read_port(rest, key)
+
+fn ping(ms) : !{NetErr} Int =
+  if ms > 100 then
+    throw Timeout(ms)
+  else
+    ms
+
+fn boot(cfg) : !{AppErr} Int = read_port(cfg, "http") + ping(25)
+
+-- a partial catch: ConfigErr's labels are discharged, Timeout remains
+fn config_safe(cfg) : !{NetErr} Int =
+  try boot(cfg) catch { NotFound(_k) => 80, Malformed(_s) => 80 }
+
+fn main() =
+  let good = [("http", "8080")]
+  let bad = [("http", "oops")]
+  let full =
+    try
+      boot(good)
+    catch
+      NotFound(_k) => 0
+      Malformed(_s) => 0
+      Timeout(_ms) => 0
+  println(full)
+  let fallback = try config_safe(bad) catch { Timeout(_ms) => 0 }
+  println(fallback)

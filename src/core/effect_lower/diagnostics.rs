@@ -1,7 +1,7 @@
 //! Free-monad fallback diagnostics.
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::analysis::open_resume_escapes;
 use super::checks::{all_calls, raw_effects};
@@ -49,27 +49,55 @@ pub(super) fn free_monad_warning(
     ))
 }
 
-// A fast-path matcher (`strip_resume` / `state_clause`) accepted a clause but
-// then found its own post-condition violated: a `resume` reference survived a
-// strip that is supposed to erase the continuation. That can only happen if
-// upstream elaboration drifted from the ANF shape these matchers recognize. In
-// debug builds the call site's `debug_assert!` panics so the drift is caught in
-// development; in release the matcher rejects the clause and the caller falls
-// back to the correct (non-fused) lowering. That fallback is silent, so a benign
-// elaborator refactor would read as an unexplained performance cliff. This makes
-// the drift observable on stderr once per process: a compiler-internal signal,
-// not a user error, and output stays correct. `PRISM_QUIET` silences it like the
-// other fallback warnings and keeps it off the byte-checked stdout channel.
-pub(super) fn report_shape_drift(matcher: &str) {
-    static WARNED: AtomicBool = AtomicBool::new(false);
-    if std::env::var_os("PRISM_QUIET").is_some() || WARNED.swap(true, Ordering::Relaxed) {
-        return;
+// Per-lowering reporter for effect-lowering matcher drift. A fast-path matcher
+// (`strip_resume` / `state_clause`) accepted a clause but then found its own
+// post-condition violated: a `resume` reference survived a strip that is supposed
+// to erase the continuation. That can only happen if upstream elaboration drifted
+// from the ANF shape these matchers recognize. In debug builds the call site's
+// `debug_assert!` panics so the drift is caught in development; in release the
+// matcher rejects the clause and the caller falls back to the correct (non-fused)
+// lowering. That fallback is silent, so a benign elaborator refactor would read as
+// an unexplained performance cliff. This surfaces the drift on stderr once per
+// matcher: a compiler-internal signal, not a user error, and output stays correct.
+//
+// The once-guard is scoped to a single lowering, not a process-global static, and
+// `quiet` comes from `DynFlags` (read once in `DynFlags::from_env`) rather than a
+// second raw `PRISM_QUIET` env read here. So the stderr diagnostic is a
+// deterministic function of (source, flags) within every compilation, including a
+// long-lived host that lowers many programs in one process. It stays off the
+// byte-checked stdout channel like the other fallback warnings.
+pub(super) struct DriftLog {
+    quiet: bool,
+    warned: RefCell<BTreeSet<&'static str>>,
+}
+
+impl DriftLog {
+    pub(super) const fn new(quiet: bool) -> Self {
+        Self {
+            quiet,
+            warned: RefCell::new(BTreeSet::new()),
+        }
     }
-    eprintln!(
-        "warning: effect-lowering matcher drift in `{matcher}`: an elaborated clause shape \
-         changed, so a fusion fast path was skipped (output is correct but un-fused). This is \
-         a compiler-internal signal; please report it."
-    );
+
+    pub(super) fn shape_drift(&self, matcher: &'static str) {
+        if !self.should_report(matcher) {
+            return;
+        }
+        eprintln!(
+            "warning: effect-lowering matcher drift in `{matcher}`: an elaborated clause shape \
+             changed, so a fusion fast path was skipped (output is correct but un-fused). This is \
+             a compiler-internal signal; please report it."
+        );
+    }
+
+    // Whether this drift should reach stderr: never when quiet, and only the first
+    // time this lowering sees this matcher. Split out so the once/quiet policy is
+    // testable without capturing stderr (the drift itself is unreachable from
+    // well-formed source: a `debug_assert` guards it and it fires only on internal
+    // ANF drift).
+    fn should_report(&self, matcher: &'static str) -> bool {
+        !self.quiet && self.warned.borrow_mut().insert(matcher)
+    }
 }
 
 // The genuinely effectful functions: those with a non-empty latent set. This is
@@ -121,4 +149,32 @@ fn free_monad_causes(core: &Core, monadified: &BTreeSet<Sym>, fl: &Latent) -> Ve
         causes.push("an effect reaches `main` unhandled".to_string());
     }
     causes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DriftLog;
+
+    // The drift warning is silent under quiet and, per lowering, fires at most once
+    // per matcher; a fresh lowering reports again. This is the property the old
+    // process-global `AtomicBool` broke (it silenced every later compilation in a
+    // long-lived host), so it is the one worth pinning.
+    #[test]
+    fn drift_report_is_once_per_matcher_per_lowering() {
+        let log = DriftLog::new(false);
+        assert!(log.should_report("state_clause"), "first drift warns");
+        assert!(!log.should_report("state_clause"), "same matcher deduped");
+        assert!(log.should_report("strip_resume"), "distinct matcher warns");
+
+        // Quiet silences unconditionally.
+        let quiet = DriftLog::new(true);
+        assert!(!quiet.should_report("state_clause"), "quiet is silent");
+
+        // A separate lowering (a new program in the same process) warns again.
+        let next = DriftLog::new(false);
+        assert!(
+            next.should_report("state_clause"),
+            "a fresh lowering is not silenced by a prior one"
+        );
+    }
 }

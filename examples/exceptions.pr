@@ -37,7 +37,7 @@ fn quarter(n) =
   let q = half(h)?
   Ok(q)
 
-fn report(r) =
+fn report(r : Result(Int, String)) =
   match r of
     Ok(v) => println(v)
     Err(e) => println(e)

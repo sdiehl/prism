@@ -14,9 +14,18 @@
 // silent skip: these ratchets are worthless if they pass without ever building
 // natively.
 
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
+
+// Corpus discovery and prelude-prepending source loader, shared with the parity
+// oracles. The tier manifest below pins the same program set those gates diff, so
+// it reuses the one definition of "the runnable corpus" rather than rediscovering
+// it. (Integration note: `common` is being consolidated; `corpus`/`source` are the
+// only two helpers this file leans on.)
+mod common;
 
 fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
@@ -466,4 +475,216 @@ fn scheduler_yield_loop_runs_in_constant_stack() {
         }
     }
     assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// H2: join points in match compilation (static Core-size ratchet).
+//
+// Unlike the runtime ratchets above, this one needs no native build: it pins a
+// property of the elaborated Core itself. A guarded match compiles each arm to
+// `if guard then body else <fallthrough>` plus a wildcard arm that also routes
+// to the fallthrough. Placing the fallthrough in both positions by clone made N
+// guarded arms emit 2^N copies of it (verified: the shared default body appeared
+// 2, 4, 16, 64 times at N = 1, 2, 4, 6). The join-point lowering binds the
+// fallthrough once as a thunk and reaches it with a `Force` from each position,
+// so its body is emitted once no matter how many guarded arms precede it, and
+// total Core size grows linearly rather than exponentially in N.
+//
+// Prelude-free (`println` is a builtin, the type is inline) so the check is a
+// pure function of the match compiler, independent of stdlib state.
+fn guarded_match(n: usize) -> String {
+    let mut s = String::from("type T = A | B(Int)\nfn test(p : (T, Int)) : Int =\n  match p of\n");
+    for i in 0..n {
+        // A refutable head (`B(x)`) on each arm keeps the wildcard fallthrough
+        // arm alive through match compilation, which is what triggers the
+        // two-position placement the join point shares.
+        writeln!(s, "    (B(x), y) if x + y == {i} => {i}").unwrap();
+    }
+    // A distinctive default whose occurrence count is the fallthrough copy count.
+    s.push_str("    _ => 31337\n");
+    s.push_str("fn main() : !{IO} Unit =\n  println(test((B(2), 3)))\n");
+    s
+}
+
+#[test]
+fn guarded_match_fallthrough_is_shared_not_duplicated() {
+    // The shared fallthrough body must be emitted a constant number of times,
+    // regardless of how many guarded arms precede it: 2^N duplication would grow
+    // this without bound.
+    let copies = |n: usize| {
+        prism::dump("core", &guarded_match(n))
+            .expect("guarded match compiles")
+            .matches("31337")
+            .count()
+    };
+    let (c4, c16) = (copies(4), copies(16));
+    assert!(
+        c4 <= 2 && c16 == c4,
+        "guarded-match fallthrough duplicated: {c4} copies at 4 arms, {c16} at 16; the join \
+         point must emit the fallthrough body a constant number of times (2^N regression)"
+    );
+
+    // Total Core size must grow linearly, not exponentially: doubling the guarded
+    // arm count roughly doubles the size (the 2^N form quadrupled it every two
+    // arms). A 3x bound on a 2x doubling leaves slack while failing the blowup by
+    // a wide margin (the pre-join form was ~29x larger at 8 arms than at 4).
+    let size = |n: usize| {
+        prism::dump("core", &guarded_match(n))
+            .expect("guarded match compiles")
+            .len()
+    };
+    let (s8, s16) = (size(8), size(16));
+    assert!(
+        s16 < 3 * s8,
+        "guarded-match Core size is super-linear: {s8} bytes at 8 arms, {s16} at 16 \
+         (a 2x arm count must stay well under the 3x bound); the fallthrough is being duplicated"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// H3: the tier-hit manifest (committed golden of per-program lowering tier).
+//
+// `tier_parity.rs` proves the cascade is observationally invisible and the
+// ratchets above spot-check bespoke sources, but nothing asserts a real corpus
+// program still HITS its intended tier: an elaborator refactor could defeat every
+// effect-lowering fast path corpus-wide, keep byte-identical output, and pass all
+// those gates as an invisible performance collapse. This manifest is the cheapest
+// enforcement of the north star (the cascade stays a pure cost decision only if
+// someone is watching the cost): it records the lowering tier of every corpus
+// program as a committed golden and fails when one regresses onto a slower tier.
+//
+// The tier is the whole-program strategy `effect_lower` already computes,
+// surfaced through `prism::effect_strategy_full` (and the `dump tier` phase). A
+// regression (a move to a costlier tier in `EFFECT_TIERS` order) fails loudly and
+// names the functions that lost fusion; an improvement or a corpus change also
+// fails, with instructions to regenerate. Regenerate with `just tier-accept` (or
+// `PRISM_ACCEPT_TIER_MANIFEST=1`), reviewing the diff exactly like a snapshot.
+
+const TIER_MANIFEST: &str = "tests/tier_manifest.txt";
+const TIER_MANIFEST_ACCEPT: &str = "PRISM_ACCEPT_TIER_MANIFEST";
+const TIER_MANIFEST_HEADER: &str = "\
+# Effect-lowering tier manifest (H3). One `<program>\\t<tier>` line per corpus
+# program, sorted. The golden pinned by tests/perf_gate.rs::tier_manifest_holds.
+# A tier moving to a costlier one (see prism::EFFECT_TIERS order) is a silent
+# performance regression and fails CI; regenerate after a reviewed improvement
+# with `just tier-accept`. Do not hand-edit.
+";
+
+// The corpus as `(dir/name.pr label, tier)` rows, sorted by label. The label is
+// the path relative to the crate root, matching the parity oracles' program names.
+fn corpus_tiers() -> Vec<(String, String)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut rows: Vec<(String, String)> = common::corpus()
+        .into_iter()
+        .map(|path| {
+            let label = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            let tier = prism::effect_strategy_full(&common::source(&path), root)
+                .unwrap_or_else(|e| panic!("{label}: tier classification failed: {e}"));
+            (label, tier.to_string())
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+fn render_manifest(rows: &[(String, String)]) -> String {
+    let mut s = String::from(TIER_MANIFEST_HEADER);
+    for (label, tier) in rows {
+        s.push_str(label);
+        s.push('\t');
+        s.push_str(tier);
+        s.push('\n');
+    }
+    s
+}
+
+fn parse_manifest(text: &str) -> BTreeMap<String, String> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let (label, tier) = l
+                .split_once('\t')
+                .expect("tier manifest line is `label<TAB>tier`");
+            (label.to_string(), tier.to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn tier_manifest_holds() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join(TIER_MANIFEST);
+    let current = corpus_tiers();
+
+    // Accept path: rewrite the golden and pass, the loud INSTA_UPDATE-style
+    // regen a reviewed tier improvement (or corpus change) takes.
+    if env::var_os(TIER_MANIFEST_ACCEPT).is_some() {
+        fs::write(&path, render_manifest(&current)).expect("write tier manifest");
+        eprintln!(
+            "tier manifest regenerated: {} programs -> {}",
+            current.len(),
+            TIER_MANIFEST
+        );
+        return;
+    }
+
+    let golden = parse_manifest(&fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read tier manifest {TIER_MANIFEST} ({e}); regenerate with `just tier-accept`"
+        )
+    }));
+
+    // Cost rank of a tier: its index in the cheapest-first `EFFECT_TIERS`. A move
+    // to a higher rank is the regression this gate exists to catch.
+    let rank = |t: &str| prism::EFFECT_TIERS.iter().position(|x| *x == t);
+    let mut regressions: Vec<String> = Vec::new();
+    let mut changes: Vec<String> = Vec::new();
+
+    for (label, tier) in &current {
+        match golden.get(label) {
+            Some(want) if want == tier => {}
+            Some(want) if matches!((rank(want), rank(tier)), (Some(a), Some(b)) if b > a) => {
+                // Name the functions that lost fusion so the failure points at the
+                // handler to investigate, not just the program.
+                let culprits =
+                    prism::effect_warnings_full(&common::source(&root.join(label)), root)
+                        .unwrap_or_default();
+                let why = if culprits.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n      lost fusion: {}", culprits.join("; "))
+                };
+                regressions.push(format!(
+                    "  {label}: REGRESSED {want} -> {tier} (costlier tier){why}"
+                ));
+            }
+            Some(want) => changes.push(format!("  {label}: improved {want} -> {tier}")),
+            None => changes.push(format!("  {label}: new program at tier {tier}")),
+        }
+    }
+    for label in golden.keys() {
+        if !current.iter().any(|(l, _)| l == label) {
+            changes.push(format!("  {label}: was in golden, no longer in corpus"));
+        }
+    }
+
+    assert!(
+        regressions.is_empty(),
+        "effect-lowering tier regressed for {} program(s) (a silent performance \
+         collapse; investigate the fast-path matcher before regenerating):\n{}",
+        regressions.len(),
+        regressions.join("\n")
+    );
+    assert!(
+        changes.is_empty(),
+        "tier manifest is stale for {} program(s); review these (each is an \
+         improvement or a corpus change, not a regression) and regenerate with \
+         `just tier-accept`:\n{}",
+        changes.len(),
+        changes.join("\n")
+    );
 }

@@ -94,6 +94,25 @@ pub const REPLAY_DRIVERS: &[&str] = &["Replay.record", "Replay.replay", "Replay.
 pub const REPEAT_WHILE: &str = "repeat_while";
 pub const FOREVER: &str = "forever";
 
+// The prelude helper functions and stream op the desugarer and elaborator emit
+// calls to by name while lowering surface sugar: `run_io` is the default IO world
+// handler that `wrap_main_world` wraps `main` in; `force` is the `?.`/`??` Option
+// forcer; `guard`/`succeeds` are list-comprehension qualifier tests; `scollect`
+// collects a comprehension's `emit`s into a list; `concat_map` flattens a mapped
+// stream; `emit` is the `Stream` effect op a comprehension head performs; and
+// `str_escape` renders a `String` as a quoted literal in a derived `Show`. Each is
+// a compiler<->prelude string contract with no other home, so the drift-guard test
+// pins every one to its prelude definition, exactly as the loop drivers above are
+// pinned: a rename fails the build instead of silently breaking the sugar.
+pub const RUN_IO: &str = "run_io";
+pub const FORCE_FN: &str = "force";
+pub const GUARD_FN: &str = "guard";
+pub const SUCCEEDS_FN: &str = "succeeds";
+pub const SCOLLECT_FN: &str = "scollect";
+pub const CONCAT_MAP_FN: &str = "concat_map";
+pub const EMIT_OP: &str = "emit";
+pub const STR_ESCAPE_FN: &str = "str_escape";
+
 // The prelude class methods that operator elaboration and `deriving` call by
 // name: `==`/`!=` dispatch through `eq`, `<`/`<=`/`>`/`>=` through `cmp`, and
 // derived Show instances through `show`. One definition here keeps `derive.rs`,
@@ -102,11 +121,132 @@ pub const FOREVER: &str = "forever";
 pub const EQ_METHOD: &str = "eq";
 pub const ORD_METHOD: &str = "cmp";
 pub const SHOW_METHOD: &str = "show";
+// The prelude `Hash` method a derived instance folds fields through; its body
+// leans on the `blake3` builtin (canonical in `core::builtins`), so only the
+// method name is a prelude contract pinned here.
+pub const HASH_METHOD: &str = "hash";
+// The prelude `Functor` method the optic-path lowering (`each`) rewrites to, and
+// the `Pow` method the `^` operator desugars to. The desugarer calls both by
+// name like the operator methods above, so they are pinned to their prelude class
+// signatures by the same drift guard.
+pub const FMAP_METHOD: &str = "fmap";
+pub const POW_METHOD: &str = "pow";
+// The wire (`lib/std/Wire.pr`) and property-generator (`lib/std/Test.pr`) methods
+// a derived instance emits by name. Pinned to those modules' class signatures by
+// the drift-guard test, exactly as the prelude methods above are pinned to the
+// prelude.
+pub const ENCODE_METHOD: &str = "encode";
+pub const DECODE_METHOD: &str = "decode";
+pub const ARBITRARY_METHOD: &str = "arbitrary";
+// The codec combinators a derived `Serialize` body threads a `Bytes` through:
+// the encoder appends a constructor tag and joins field encodings, the decoder
+// peels a tag off the front. Their bodies live in the wire library (built
+// separately); these are the names the derivation and that library agree on, so
+// they have one home here rather than a bare string re-typed at each use.
+pub const WIRE_TAG: &str = "wire_tag";
+pub const WIRE_CAT: &str = "wire_cat";
+pub const WIRE_EMPTY: &str = "wire_empty";
+pub const WIRE_GET_TAG: &str = "wire_get_tag";
+
+// The `stable`-block version ladder. A stable type
+// desugars to one frozen rung type per version and a set of plain adjacent
+// converter functions; these helpers are the single home for the generated
+// names, so the desugar that emits a converter and the ladder-composition that
+// calls it agree without either re-typing a string. (The two-parameter `Migrate`
+// class the design reserves needs a grammar that does not exist yet, so the
+// converters are plain functions, not instances.) The names are only ever
+// generated, never parsed back to recover a fact, so this is name synthesis, not
+// a cross-phase string contract.
+
+/// The frozen rung type minted for version `ver` of stable type `ty`.
+///
+/// (`Order`, `V1` -> `Order.V1`.) The newest rung keeps the bare type name, so a
+/// program builds and matches the current version as the type itself; a shipped
+/// predecessor wears the dotted version tag.
+#[must_use]
+pub fn stable_rung(ty: &str, ver: &str) -> String {
+    format!("{ty}.{ver}")
+}
+
+/// The generated total upgrade between two adjacent rungs (`V1 -> V2`).
+#[must_use]
+pub fn stable_upgrade(ty: &str, from: &str, to: &str) -> String {
+    format!("upgrade_{ty}_{from}_{to}")
+}
+
+/// The generated partial downgrade between two adjacent rungs (`V2 -> V1`),
+/// returning `(older, Loss)`.
+#[must_use]
+pub fn stable_downgrade(ty: &str, from: &str, to: &str) -> String {
+    format!("downgrade_{ty}_{from}_{to}")
+}
+
+/// The ladder-composition decode dispatch for a stable type: given a source
+/// version index and a body, decode that rung and walk it up to the current type.
+#[must_use]
+pub fn stable_decode_ladder(ty: &str) -> String {
+    format!("decode_ladder_{ty}")
+}
+
+/// A converter's single parameter, the lowercased source rung tag (`V2` -> `v2`),
+/// so a hand-written `{ ..v2, .. }` body binds it.
+#[must_use]
+pub fn stable_param(ver: &str) -> String {
+    ver.to_lowercase()
+}
+// The property-generator combinators a derived `Arbitrary` composes: the runner
+// (`gen_run`), the applicative pieces (`gen_const`/`gen_bind`), the sum picker
+// (`gen_choose`), and the depth control (`gen_resize`) from `Quickcheck`, plus
+// `arb_gen` from `Test` that wraps a field's instance back into a generator. A
+// derived body suspends its recursion inside these so its own effect stays flat.
+pub const QC_GEN_RUN: &str = "gen_run";
+pub const QC_GEN_CONST: &str = "gen_const";
+pub const QC_GEN_BIND: &str = "gen_bind";
+pub const QC_GEN_CHOOSE: &str = "gen_choose";
+pub const QC_GEN_RESIZE: &str = "gen_resize";
+pub const QC_ARB_GEN: &str = "arb_gen";
 
 // The plain prelude helper derived Ord instances lean on to order constructor
 // tags. Pinned like `CAP_WRAPPERS` by the drift-guard test. (Derived Show's
 // `concat` is a compiler builtin, canonical in `core::builtins`, not here.)
 pub const INT_CMP: &str = "int_cmp";
+
+// The two prelude entry points whose call on a canonical primitive `Ord` lowers
+// to the native sort kernel (`SortPrim`); any other function keeps the generic
+// merge sort. Matched by name in the elaborator, pinned to the prelude by the
+// drift guard.
+pub const SORT_FN: &str = "sort";
+pub const SORT_BY_ORD_FN: &str = "sort_by_ord";
+
+// The kind tag the native sort kernel (`prism_sort_prim`, `runtime/prism_rt.c`)
+// switches on to pick a comparison: this table is the elaborator's half of that
+// cross-phase contract, so a tag here that disagrees with the C `switch` silently
+// misorders one element type. The pairing is pinned end-to-end by the native
+// sort test (`tests/sort_kind.rs`), which sorts a sign-distinguishing list of
+// each type and diffs native against the interpreter; the names are pinned to
+// their prelude instances by the drift guard.
+pub const SORT_KIND_INTEGER: i64 = 0;
+pub const SORT_KIND_I64: i64 = 1;
+pub const SORT_KIND_U64: i64 = 2;
+pub const SORT_KIND_FLOAT: i64 = 3;
+pub const SORT_PRIM_INSTANCES: &[(&str, i64)] = &[
+    ("ordInt", SORT_KIND_INTEGER),
+    ("ordI64", SORT_KIND_I64),
+    ("ordU64", SORT_KIND_U64),
+    ("ordFloat", SORT_KIND_FLOAT),
+];
+
+// The native sort kind for a canonical primitive `Ord` instance, or `None` to
+// keep the generic merge sort (a user instance, or a non-primitive type). The
+// inverse-ish lookup into `SORT_PRIM_INSTANCES`, so the elaborator never respells
+// the tag literals.
+#[must_use]
+pub fn sort_prim_kind(inst: &str) -> Option<i64> {
+    SORT_PRIM_INSTANCES
+        .iter()
+        .find(|(n, _)| *n == inst)
+        .map(|(_, k)| *k)
+}
 
 // Recognizers for the loop-control ops, used by `erase_control` to match the
 // handler templates the desugar emits (op names only; binders are alpha-renamed).
@@ -264,11 +404,33 @@ pub fn dict_ctor(class: &str) -> String {
     format!("{DICT_PREFIX}{class}")
 }
 
+// Prefix marking a top-level function lowered from an instance method. The `@`
+// is unforgeable in source, so no user function can collide with one.
+pub const INSTANCE_METHOD_PREFIX: &str = "i@";
+
 // The top-level function lowered from instance `inst`'s method `method`
 // (e.g. `i@Show_Int@show`), called from that instance's dictionary thunks.
 #[must_use]
 pub fn instance_method(inst: &str, method: &str) -> String {
-    format!("i@{inst}@{method}")
+    format!("{INSTANCE_METHOD_PREFIX}{inst}@{method}")
+}
+
+// The shared prefix of every top-level function lowered from instance `inst`'s
+// methods (`i@<inst>@`). Both the stdlib fingerprint and the store's coherence
+// binding recover an instance's method hashes by stripping this from the lowered
+// names, so the sigil has one home rather than a re-typed `i@{}@` at each site.
+#[must_use]
+pub fn instance_method_prefix(inst: &str) -> String {
+    format!("{INSTANCE_METHOD_PREFIX}{inst}@")
+}
+
+// Whether a lowered top-level name is an instance method (minted by
+// `instance_method`). Its effect discipline is enforced against the class
+// signature at `check_instance`, so passes keyed on top-level `fn` rows treat it
+// separately.
+#[must_use]
+pub fn is_instance_method(name: &str) -> bool {
+    name.starts_with(INSTANCE_METHOD_PREFIX)
 }
 
 // FBIP reuse token bound to the scrutinee variable it recycles.
@@ -300,19 +462,21 @@ pub fn snapshot(n: u32) -> String {
     format!("snap@{n}")
 }
 
+const NOALLOC_PREFIX: &str = "noalloc@";
+
 // The top-level function a `without alloc { .. }` block lifts to. The `@` keeps
 // it out of the source-identifier namespace; the block's captured locals become
 // its parameters, and it carries the zero-allocation certificate.
 #[must_use]
 pub fn without_alloc_block(n: u32) -> String {
-    format!("noalloc@{n}")
+    format!("{NOALLOC_PREFIX}{n}")
 }
 
 // Whether a name is a lifted `without alloc { .. }` block (so a diagnostic can
 // name it "block" rather than leak the synthetic function name).
 #[must_use]
 pub fn is_without_alloc_block(name: &str) -> bool {
-    name.starts_with("noalloc@")
+    name.starts_with(NOALLOC_PREFIX)
 }
 
 // Per-element binder for an `each` path step desugared to `map`.
@@ -385,8 +549,14 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CAP_WRAPPERS, EQ_METHOD, FOREVER, INT_CMP, ORD_METHOD, REPEAT_WHILE, REPLAY_DRIVERS,
-        SHOW_METHOD,
+        is_var_get, is_var_runner, is_var_set, is_without_alloc_block, module_of, parse_var_get,
+        parse_var_runner, parse_var_set, private, sort_prim_kind, var_get, var_runner, var_set,
+        without_alloc_block, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, EMIT_OP,
+        ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, GUARD_FN, HASH_METHOD, INT_CMP,
+        ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST,
+        QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHOW_METHOD,
+        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT,
+        WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
     };
 
     // The capability wrappers and Replay drivers are load-bearing prelude names
@@ -413,11 +583,15 @@ mod tests {
         }
     }
 
-    // The loop drivers, class methods, and derive helpers are the remaining
-    // string contracts between the compiler and the prelude: `erase_control`
-    // matches the loop drivers, operator elaboration and `deriving` call the
-    // methods and helpers. Pin each to its prelude definition so a rename fails
-    // the build instead of silently degrading a tier or breaking deriving.
+    // The loop drivers, class methods, and desugar helpers are the string
+    // contracts between the compiler and the prelude: `erase_control` matches the
+    // loop drivers, operator/optic elaboration and `deriving` call the methods, and
+    // the desugarer emits calls to the helper functions and the `emit` op while
+    // lowering sugar. Each name now has a single home in `names`, referenced from
+    // both its emit and its match site, so those two directions agree by
+    // construction; this guard pins the remaining direction, name<->prelude, so a
+    // prelude rename fails the build instead of silently degrading a tier or
+    // breaking deriving or a comprehension.
     #[test]
     fn prelude_hook_names_resolve_to_prelude_definitions() {
         let prelude = include_str!("../lib/prelude.pr");
@@ -427,15 +601,203 @@ mod tests {
                 "loop driver `{w}` (names) has no `fn {w}(` in the prelude"
             );
         }
-        for m in [EQ_METHOD, ORD_METHOD, SHOW_METHOD] {
+        for m in [
+            EQ_METHOD,
+            ORD_METHOD,
+            SHOW_METHOD,
+            HASH_METHOD,
+            FMAP_METHOD,
+            POW_METHOD,
+        ] {
             assert!(
                 prelude.contains(&format!("{m} :")),
                 "class method `{m}` (names) has no `{m} :` signature in the prelude"
             );
         }
+        // The free helper functions the desugarer emits calls to while lowering
+        // sugar: the IO world handler, the Option forcer, and the comprehension
+        // qualifier/collector helpers.
+        for f in [
+            RUN_IO,
+            FORCE_FN,
+            GUARD_FN,
+            SUCCEEDS_FN,
+            SCOLLECT_FN,
+            CONCAT_MAP_FN,
+            STR_ESCAPE_FN,
+        ] {
+            assert!(
+                prelude.contains(&format!("fn {f}(")),
+                "prelude helper `{f}` (names) has no `fn {f}(` in the prelude"
+            );
+        }
+        // The `Stream` effect op a comprehension head performs.
+        assert!(
+            prelude.contains(&format!("ctl {EMIT_OP}(")),
+            "stream op `{EMIT_OP}` (names) has no `ctl {EMIT_OP}(` in the prelude"
+        );
         assert!(
             prelude.contains(&format!("fn {INT_CMP}(")),
             "derive helper `{INT_CMP}` (names) has no `fn {INT_CMP}(` in the prelude"
         );
+    }
+
+    // The opt-in wire/property classes and combinators a derived `Serialize` or
+    // `Arbitrary` calls by name live outside the prelude (`Wire`/`Test`/
+    // `Quickcheck`). Pin each name the derivation emits to the module signature it
+    // resolves to, so a rename in either half fails the build rather than breaking
+    // deriving silently, exactly as the prelude hooks above are pinned.
+    #[test]
+    fn library_hook_names_resolve_to_module_definitions() {
+        let wire = include_str!("../lib/std/Wire.pr");
+        for m in [ENCODE_METHOD, DECODE_METHOD] {
+            assert!(
+                wire.contains(&format!("{m} :")),
+                "class method `{m}` (names) has no `{m} :` signature in Wire.pr"
+            );
+        }
+        // The byte builders a derived `Serialize` body threads a `Bytes` through:
+        // `wire_cat`/`wire_tag`/`wire_get_tag` are functions, `wire_empty` a value
+        // binding. Pin each to its Wire.pr definition, as the methods above are.
+        for f in [WIRE_CAT, WIRE_TAG, WIRE_GET_TAG] {
+            assert!(
+                wire.contains(&format!("fn {f}(")),
+                "wire builder `{f}` (names) has no `fn {f}(` in Wire.pr"
+            );
+        }
+        assert!(
+            wire.contains(&format!("let {WIRE_EMPTY} :")),
+            "wire builder `{WIRE_EMPTY}` (names) has no `let {WIRE_EMPTY} :` in Wire.pr"
+        );
+        // The wire envelope's scheme tag is the one home of the hash scheme string
+        // on the Prism side; it must match the compiler constant it mirrors, so a
+        // scheme bump moves both together.
+        assert!(
+            wire.contains(&format!("\"{}\"", crate::core::hash::SCHEME)),
+            "Wire.pr scheme tag drifted from `hash::SCHEME` ({})",
+            crate::core::hash::SCHEME
+        );
+        let test = include_str!("../lib/std/Test.pr");
+        assert!(
+            test.contains(&format!("{ARBITRARY_METHOD} :")),
+            "class method `{ARBITRARY_METHOD}` (names) has no signature in Test.pr"
+        );
+        assert!(
+            test.contains(&format!("fn {QC_ARB_GEN}(")),
+            "generator bridge `{QC_ARB_GEN}` (names) has no `fn {QC_ARB_GEN}(` in Test.pr"
+        );
+        let qc = include_str!("../lib/std/Quickcheck.pr");
+        for f in [
+            QC_GEN_RUN,
+            QC_GEN_CONST,
+            QC_GEN_BIND,
+            QC_GEN_CHOOSE,
+            QC_GEN_RESIZE,
+        ] {
+            assert!(
+                qc.contains(&format!("fn {f}(")),
+                "generator combinator `{f}` (names) has no `fn {f}(` in Quickcheck.pr"
+            );
+        }
+    }
+
+    // The `var_*` name codecs are string inverses the `erase_var` pass and the
+    // handler desugar consume: `var_get`/`var_set` mint `get@x@n`/`set@x@n` that
+    // `parse_var_get`/`parse_var_set` must recover, and `var_runner`/
+    // `parse_var_runner` likewise. Round-trip every constructor through its
+    // parser and predicate, and confirm each parser rejects a name it never
+    // mints (the `#hash`-file model demands tested inverses, not comments).
+    #[test]
+    fn var_name_codecs_round_trip() {
+        for (x, n) in [("x", 0u32), ("acc", 7), ("s", u32::MAX)] {
+            let ns = n.to_string();
+            let g = var_get(x, n);
+            assert!(is_var_get(&g) && !is_var_set(&g) && !is_var_runner(&g));
+            assert_eq!(parse_var_get(&g), Some((x, ns.as_str())));
+            assert_eq!(parse_var_set(&g), None);
+
+            let s = var_set(x, n);
+            assert!(is_var_set(&s) && !is_var_get(&s) && !is_var_runner(&s));
+            assert_eq!(parse_var_set(&s), Some((x, ns.as_str())));
+            assert_eq!(parse_var_get(&s), None);
+
+            let r = var_runner(n);
+            assert!(is_var_runner(&r) && !is_var_get(&r) && !is_var_set(&r));
+            assert_eq!(parse_var_runner(&r), Some(ns.as_str()));
+        }
+        // Non-matching strings: wrong prefix, and a prefixed name missing the
+        // `@n` tail the constructor always appends.
+        assert_eq!(parse_var_get("set@x@1"), None);
+        assert_eq!(parse_var_get("get@notail"), None);
+        assert_eq!(parse_var_set("plain"), None);
+        assert_eq!(parse_var_runner("nope"), None);
+        assert!(!is_var_get("plain") && !is_var_set("plain") && !is_var_runner("plain"));
+    }
+
+    // `module_of` is the inverse of `private`: the module of a private name is
+    // whatever preceded the `@`. Round-trip both a root and a nested module, and
+    // pin the two boundary behaviors (an exported `.`-name and a bare root name).
+    #[test]
+    fn module_name_codec_round_trips() {
+        for m in ["Data", "Data.Map"] {
+            assert_eq!(module_of(&private(m, "helper")), m);
+        }
+        assert_eq!(module_of("Data.Map.insert"), "Data.Map");
+        assert_eq!(module_of("bare"), "");
+    }
+
+    // `is_without_alloc_block` recognizes exactly the names `without_alloc_block`
+    // mints, and nothing else.
+    #[test]
+    fn without_alloc_block_round_trips() {
+        assert!(is_without_alloc_block(&without_alloc_block(0)));
+        assert!(is_without_alloc_block(&without_alloc_block(42)));
+        assert!(!is_without_alloc_block("noalloc"));
+        assert!(!is_without_alloc_block("plain"));
+    }
+
+    // `sort_prim_kind` maps each canonical primitive `Ord` instance to the tag
+    // the native kernel switches on, and returns `None` (generic merge sort) for
+    // anything else. Pin the mapping and the fail-safe, and confirm the tags are
+    // distinct so no two element types collapse onto one comparison.
+    #[test]
+    fn sort_prim_kind_maps_canonical_instances() {
+        let mut tags = Vec::new();
+        for (name, tag) in SORT_PRIM_INSTANCES {
+            assert_eq!(sort_prim_kind(name), Some(*tag));
+            tags.push(*tag);
+        }
+        tags.sort_unstable();
+        tags.dedup();
+        assert_eq!(
+            tags.len(),
+            SORT_PRIM_INSTANCES.len(),
+            "sort kind tags collide"
+        );
+        // A real `Ord` instance with no native kernel, and a non-instance, both
+        // fall back to the generic path.
+        assert_eq!(sort_prim_kind("ordStr"), None);
+        assert_eq!(sort_prim_kind("nope"), None);
+    }
+
+    // The sort entry points and the native-kernel instance names are string
+    // contracts with the prelude, like the class methods above; pin each so a
+    // prelude rename fails the build instead of silently dropping specialization.
+    #[test]
+    fn sort_hook_names_resolve_to_prelude_definitions() {
+        let prelude = include_str!("../lib/prelude.pr");
+        for f in [SORT_FN, SORT_BY_ORD_FN] {
+            assert!(
+                prelude.contains(&format!("fn {f}(")),
+                "sort entry `{f}` (names) has no `fn {f}(` in the prelude"
+            );
+        }
+        for (inst, _) in SORT_PRIM_INSTANCES {
+            assert!(
+                prelude.contains(&format!("instance {inst} :")),
+                "sort instance `{inst}` (names::SORT_PRIM_INSTANCES) has no \
+                 `instance {inst} :` in the prelude"
+            );
+        }
     }
 }

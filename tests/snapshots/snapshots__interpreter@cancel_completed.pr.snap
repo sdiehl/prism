@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/cancel_completed.pr
+---
+quick: done
+awaited 7
+cancel of completed fiber was a no-op
+7
+=> ()

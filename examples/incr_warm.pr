@@ -1,0 +1,34 @@
+-- A pure incremental summary that survives process restarts. The scores are
+-- incremental inputs; the total, count, and average are memoized derivations.
+-- `run_incr_durable` snapshots the memo results to a file, so a SECOND run of this
+-- program warms every memo from that snapshot and recomputes nothing, yet prints
+-- byte-for-byte the same line. Deleting or corrupting the snapshot changes only
+-- cost, never the output: the file is a cache, never a source of truth.
+--
+-- The memos hold no output of their own (a warm hit skips the thunk, and skipping
+-- a print would change what you see), so the program is pure up to failure, which
+-- is exactly the row `run_incr_durable` requires. The single line is printed once,
+-- at the end, from the values the graph produced.
+--
+-- Run it twice:
+--   prism run examples/incr_warm.pr   # cold: computes and writes the snapshot
+--   prism run examples/incr_warm.pr   # warm: reuses the snapshot, same output
+
+import Data.Map (..)
+
+import Data.List (..)
+
+import Incr (..)
+
+fn snap_path() = "target/incr_warm.snap"
+
+pub fn summary() =
+  run_incr_durable(snap_path(), "incr-warm-v1") fn
+    let scores =
+      input(map_from_list([("neo", 3), ("trinity", 7), ("morpheus", 5)]))
+    let total = memo(\() -> sum(map_values(get(scores))))
+    let count = memo(\() -> length(map_values(get(scores))))
+    let avg = memo(\() -> get(total) / get(count))
+    concat("total=", concat(show_int(get(total)), concat("  count=", concat(show_int(get(count)), concat("  avg=", show_int(get(avg)))))))
+
+pub fn main() = println(summary())

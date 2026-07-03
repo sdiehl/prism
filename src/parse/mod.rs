@@ -65,6 +65,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let mut canonicals = Vec::new();
     let mut patterns = Vec::new();
     let mut fns = Vec::new();
+    let mut stable = Vec::new();
     let mut imports = Vec::new();
     let mut exports = BTreeSet::new();
     let mut opaques = BTreeSet::new();
@@ -94,6 +95,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             Item::Canonical(c) => canonicals.push(c),
             Item::Pattern(p) => patterns.push(p),
             Item::Fn(f) => fns.push(f),
+            Item::Stable(s) => stable.push(s),
         }
     }
     Ok(ParseResult {
@@ -105,6 +107,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             synonyms,
             classes,
             instances,
+            stable,
             canonicals,
             patterns,
             fns,
@@ -128,6 +131,7 @@ fn export_name(item: &Item) -> Option<&str> {
         Item::Class(c) => Some(&c.name),
         Item::Pattern(p) => Some(&p.name),
         Item::Fn(f) => Some(&f.name),
+        Item::Stable(s) => Some(&s.name),
         Item::Instance(_) | Item::Canonical(_) | Item::Import(_) => None,
     }
 }

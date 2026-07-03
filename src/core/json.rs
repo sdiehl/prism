@@ -51,8 +51,14 @@ const fn op_name(op: CoreOp) -> &'static str {
 fn value(v: &Value) -> J {
     match v {
         Value::Var(x) => json!({"v": "var", "x": x.as_str()}),
-        Value::Int(n) | Value::I64(n) => json!({"v": "int", "n": n}),
-        Value::U64(n) => json!({"v": "int", "n": n}),
+        // Distinct width tags mirror the `i`/`j`/`u` split in `hash.rs::val`, so a
+        // fixed-width value stays distinguishable across the bridge instead of
+        // collapsing to one `int`. The Lean decoder maps all three back (see
+        // `models/Json.lean`); the model's arithmetic is unbounded, so this
+        // preserves the value, not wraparound.
+        Value::Int(n) => json!({"v": "int", "n": n}),
+        Value::I64(n) => json!({"v": "i64", "n": n}),
+        Value::U64(n) => json!({"v": "u64", "n": n}),
         Value::Float(f) => json!({"v": "float", "f": f}),
         Value::Bool(b) => json!({"v": "bool", "b": b}),
         Value::Unit => json!({"v": "unit"}),

@@ -16,6 +16,85 @@ use crate::types::{CONS, NIL};
 use Builtin as B;
 use FloatOp as F;
 
+/// One recorded observation on a program's execution: the result of a
+/// capability read (an integer, a string, or a boolean) or an output boundary.
+///
+/// This is the in-memory form of a `.replay` frame; the string codec that makes
+/// it durable lives in `crate::debug::trace`, mirroring `Replay.pr`'s tags
+/// (I/S/B/O). A whole run's trace is the ordered list of these observations, and
+/// determinism makes the list a complete, replayable record of the run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Obs {
+    Int(i64),
+    Str(String),
+    Bool(bool),
+    Out,
+}
+
+/// How the interpreter's capability I/O is governed for one run.
+///
+/// `Live` performs real I/O (the ordinary path). `Record` performs real I/O and
+/// logs every observation. `Replay` serves each capability read from a recorded
+/// trace and re-performs outputs live, so a deterministic program reproduces its
+/// original transcript byte for byte; an optional `budget` halts the run after
+/// that many observations, which is the mechanism behind replay-to-N stepping.
+#[derive(Debug)]
+pub enum Tape {
+    Live,
+    Record(Vec<Obs>),
+    Replay {
+        frames: Vec<Obs>,
+        cursor: usize,
+        budget: Option<usize>,
+    },
+}
+
+// The observation kind a capability read must yield, so a replayed trace that
+// does not match the program (wrong variant at the cursor) is a detectable
+// error rather than a silent divergence.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ObsKind {
+    Int,
+    Str,
+    Bool,
+}
+
+// Log a real read's result as the matching observation frame.
+fn obs_of_rv(kind: ObsKind, v: &Rv) -> Result<Obs, String> {
+    match (kind, v) {
+        (ObsKind::Int, Rv::Int(n)) => Ok(Obs::Int(*n)),
+        (ObsKind::Str, Rv::Str(s)) => Ok(Obs::Str(s.clone())),
+        (ObsKind::Bool, Rv::Bool(b)) => Ok(Obs::Bool(*b)),
+        _ => Err(format!(
+            "record: capability read produced {v:?}, not a {kind:?}"
+        )),
+    }
+}
+
+// Serve a recorded frame as a value, checking it is the kind the program asked
+// for at this point in the trace.
+fn rv_of_obs(kind: ObsKind, frame: &Obs) -> Result<Rv, String> {
+    match (kind, frame) {
+        (ObsKind::Int, Obs::Int(n)) => Ok(Rv::Int(*n)),
+        (ObsKind::Str, Obs::Str(s)) => Ok(Rv::Str(s.clone())),
+        (ObsKind::Bool, Obs::Bool(b)) => Ok(Rv::Bool(*b)),
+        _ => Err(format!(
+            "replay: trace does not match program (expected a {kind:?})"
+        )),
+    }
+}
+
+// The observation kind a capability `StrBuiltin` yields, or `None` for a builtin
+// that is not a world read (so it stays on the ordinary pure path).
+const fn capability_kind(b: Builtin) -> Option<ObsKind> {
+    match b {
+        Builtin::ReadFile | Builtin::Getenv | Builtin::Arg => Some(ObsKind::Str),
+        Builtin::FileExists => Some(ObsKind::Bool),
+        Builtin::ArgsCount => Some(ObsKind::Int),
+        _ => None,
+    }
+}
+
 // How values that have no surface syntax render in `show`/`repr`. `print` goes
 // through `show`, so these must stay byte-identical to the native runtime's own
 // output; keeping them as named constants makes that contract changeable in one
@@ -348,6 +427,14 @@ pub struct Machine<'a> {
     // Set by `exit(n)`: evaluation unwinds and the host maps it to a process
     // exit (CLI) or a returned status (REPL/wasm), never a `process::exit` here.
     exit: Option<i32>,
+    // Governs capability I/O for record/replay/debug. `Live` is the ordinary
+    // path (no behavior change). See [`Tape`].
+    tape: Tape,
+    // Observations performed so far, and whether the run stopped at a replay
+    // budget. `halted` unwinds like `exit`, so replay-to-N stops in constant
+    // stack without special-casing every frame.
+    observed: usize,
+    halted: bool,
 }
 
 // The borrowed `dyn Write`/`dyn BufRead` handles are not `Debug`; show only the
@@ -381,6 +468,11 @@ const DEFAULT_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 // internal state on every draw.
 const SPLITMIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
+// The C runtime's `prism_show_float_prec` formats `%.*f` into a 64-byte buffer,
+// so it can emit at most 63 characters. The interpreter mirrors that cap to stay
+// byte-identical with the native backend.
+const RT_FLOAT_PREC_MAX_CHARS: usize = 63;
+
 const fn splitmix64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(SPLITMIX_GAMMA);
     let mut z = *state;
@@ -408,7 +500,100 @@ impl<'a> Machine<'a> {
             out_sink,
             input,
             exit: None,
+            tape: Tape::Live,
+            observed: 0,
+            halted: false,
         }
+    }
+
+    /// Governs this machine's capability I/O for record/replay/debug.
+    pub fn set_tape(&mut self, tape: Tape) {
+        self.tape = tape;
+    }
+
+    // True when a replay budget is set and already reached, so the next
+    // observation must halt the run instead of being performed.
+    const fn budget_hit(&self) -> bool {
+        matches!(&self.tape, Tape::Replay { budget: Some(b), .. } if self.observed >= *b)
+    }
+
+    // Consume the next recorded frame under `Replay`, advancing the cursor. A
+    // spent trace is a mismatch: the program asked for more than was recorded.
+    fn next_frame(&mut self) -> Result<Obs, String> {
+        match &mut self.tape {
+            Tape::Replay { frames, cursor, .. } => {
+                let f = frames
+                    .get(*cursor)
+                    .cloned()
+                    .ok_or("replay: trace exhausted before the program finished")?;
+                *cursor += 1;
+                Ok(f)
+            }
+            _ => Err("next_frame off a non-replay tape".into()),
+        }
+    }
+
+    // Perform one capability read of the given kind. Under `Live` the real read
+    // runs; under `Record` it runs and its result is logged; under `Replay` the
+    // recorded value is served and the real read is skipped. Reaching a replay
+    // budget sets `halted` and returns a placeholder the unwinding discards.
+    fn observe(
+        &mut self,
+        kind: ObsKind,
+        real: impl FnOnce(&mut Self) -> Result<Rv, String>,
+    ) -> Result<Rv, String> {
+        if matches!(self.tape, Tape::Live) {
+            return real(self);
+        }
+        if self.budget_hit() {
+            self.halted = true;
+            return Ok(Rv::Unit);
+        }
+        if matches!(self.tape, Tape::Replay { .. }) {
+            let frame = self.next_frame()?;
+            let v = rv_of_obs(kind, &frame)?;
+            self.observed += 1;
+            return Ok(v);
+        }
+        // Record: perform for real, then log the observation.
+        let v = real(self)?;
+        let obs = obs_of_rv(kind, &v)?;
+        if let Tape::Record(frames) = &mut self.tape {
+            frames.push(obs);
+        }
+        self.observed += 1;
+        Ok(v)
+    }
+
+    // Perform one output observation. Under `Replay` the recorded `Out` boundary
+    // is consumed and the output re-performed live (reproducing the transcript);
+    // under `Record` the output fires and an `Out` boundary is logged.
+    fn observe_out(
+        &mut self,
+        emit: impl FnOnce(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if matches!(self.tape, Tape::Live) {
+            return emit(self);
+        }
+        if self.budget_hit() {
+            self.halted = true;
+            return Ok(());
+        }
+        if matches!(self.tape, Tape::Replay { .. }) {
+            let frame = self.next_frame()?;
+            if frame != Obs::Out {
+                return Err("replay: trace does not match program (expected an output)".into());
+            }
+            emit(self)?;
+            self.observed += 1;
+            return Ok(());
+        }
+        emit(self)?;
+        if let Tape::Record(frames) = &mut self.tape {
+            frames.push(Obs::Out);
+        }
+        self.observed += 1;
+        Ok(())
     }
 
     /// # Errors
@@ -428,8 +613,9 @@ impl<'a> Machine<'a> {
         let mut state = State::Eval(root, env);
         loop {
             // `exit` short-circuits the whole program: stop unwinding and hand
-            // the last value back so the host can act on `self.exit`.
-            if self.exit.is_some() {
+            // the last value back so the host can act on `self.exit`. A replay
+            // budget halt unwinds the same way (replay-to-N stops here).
+            if self.exit.is_some() || self.halted {
                 if let State::Ret(v) = state {
                     return Ok(v);
                 }
@@ -512,18 +698,26 @@ impl<'a> Machine<'a> {
                 let rv = atom(&env, a)?;
                 let s = rv.show();
                 self.out.push(rv);
-                write!(self.out_sink, "{s}").map_err(|e| format!("print: {e}"))?;
-                self.out_sink.flush().ok();
-                self.term.push_str(&s);
+                self.observe_out(|m| {
+                    write!(m.out_sink, "{s}").map_err(|e| format!("print: {e}"))?;
+                    m.out_sink.flush().ok();
+                    m.term.push_str(&s);
+                    Ok(())
+                })?;
                 State::Ret(Rv::Unit)
             }
             Node::PrintNl => {
-                writeln!(self.out_sink).map_err(|e| format!("println: {e}"))?;
-                self.out_sink.flush().ok();
-                self.term.push('\n');
+                self.observe_out(|m| {
+                    writeln!(m.out_sink).map_err(|e| format!("println: {e}"))?;
+                    m.out_sink.flush().ok();
+                    m.term.push('\n');
+                    Ok(())
+                })?;
                 State::Ret(Rv::Unit)
             }
-            Node::Rand => State::Ret(Rv::Int((splitmix64(&mut self.rng) >> 2).cast_signed())),
+            Node::Rand => State::Ret(self.observe(ObsKind::Int, |m| {
+                Ok(Rv::Int((splitmix64(&mut m.rng) >> 2).cast_signed()))
+            })?),
             Node::Srand(a) => {
                 self.rng = match atom(&env, a)? {
                     Rv::Int(n) => n.cast_unsigned(),
@@ -531,25 +725,24 @@ impl<'a> Machine<'a> {
                 };
                 State::Ret(Rv::Unit)
             }
-            Node::ReadInt => {
+            Node::ReadInt => State::Ret(self.observe(ObsKind::Int, |m| {
                 let mut line = String::new();
-                self.input
+                m.input
                     .read_line(&mut line)
                     .map_err(|e| format!("read_int: {e}"))?;
-                let n = line
-                    .trim()
+                line.trim()
                     .parse::<i64>()
-                    .map_err(|e| format!("read_int: {e}"))?;
-                State::Ret(Rv::Int(n))
-            }
-            Node::ReadLine => {
+                    .map(Rv::Int)
+                    .map_err(|e| format!("read_int: {e}"))
+            })?),
+            Node::ReadLine => State::Ret(self.observe(ObsKind::Str, |m| {
                 let mut line = String::new();
-                self.input
+                m.input
                     .read_line(&mut line)
                     .map_err(|e| format!("read_line: {e}"))?;
                 let s = line.strip_suffix('\n').unwrap_or(&line);
-                State::Ret(Rv::Str(s.strip_suffix('\r').unwrap_or(s).into()))
-            }
+                Ok(Rv::Str(s.strip_suffix('\r').unwrap_or(s).into()))
+            })?),
             Node::Error(a) => {
                 return Err(match atom(&env, a)? {
                     Rv::Str(s) => s,
@@ -580,6 +773,12 @@ impl<'a> Machine<'a> {
                 if let (Builtin::Exit, [Rv::Int(n)]) = (*name, vals.as_slice()) {
                     self.exit = Some(*n as i32);
                     State::Ret(Rv::Unit)
+                } else if let Some(kind) = capability_kind(*name) {
+                    // A world read (file/env): route through the tape so it is
+                    // recorded or served from a trace like the other capabilities.
+                    let nm = *name;
+                    let v = self.observe(kind, move |_m| str_builtin(nm, &vals))?;
+                    State::Ret(v)
                 } else {
                     State::Ret(str_builtin(*name, &vals)?)
                 }
@@ -809,11 +1008,10 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         (B::ShowBool, [Rv::Bool(b)]) => Ok(Rv::Str(b.to_string())),
         (B::ShowFloat, [Rv::Float(f)]) => Ok(Rv::Str(fmt_g(*f))),
         (B::ShowFloatPrec, [Rv::Float(f), Rv::Int(d)]) => {
-            // The runtime writes `%.*f` into a 64-byte buffer, so it can only
-            // return the first 63 (ASCII) chars; mirror that cap to stay byte
-            // identical with the backend.
+            // Cap at the runtime's buffer width to stay byte identical (see
+            // `RT_FLOAT_PREC_MAX_CHARS`).
             let mut s = format!("{f:.*}", usize::try_from(*d).unwrap_or(0));
-            s.truncate(63);
+            s.truncate(RT_FLOAT_PREC_MAX_CHARS);
             Ok(Rv::Str(s))
         }
         (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(a.powf(*b))),
@@ -830,6 +1028,9 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
                 s.chars().nth(idx).map_or(-1, |c| i64::from(c as u32))
             })))
         }
+        // Hash a string's raw bytes with blake3, returned as lowercase hex. The
+        // native runtime's `prism_blake3` must produce the identical string.
+        (B::Blake3, [Rv::Str(s)]) => Ok(Rv::Str(blake3::hash(s.as_bytes()).to_hex().to_string())),
         (B::ShowChar, [Rv::Int(cp)]) => Ok(Rv::Str(
             u32::try_from(*cp)
                 .ok()
@@ -1031,7 +1232,14 @@ fn rv_key_cmp(a: &Rv, b: &Rv) -> Ordering {
 // `0.1` stays "0.1", `0.1 +. 0.2` shows "0.30000000000000004", `100.0` is
 // "100", `1e100` is "1e+100". Rust's `{:e}` is correctly rounded (round half to
 // even) like the printf family, so the digits and exponent agree with C.
-fn fmt_g(d: f64) -> String {
+// `pub` so the native float-formatter parity test (`tests/float_fmt.rs`) can
+// diff the C runtime's shortest-round-trip output against this, the canonical
+// interpreter form. Exposing it changes no output; the C side conforms to this.
+// The `unwrap`s rest on `{:e}` invariants (always an `e`, always parseable), so
+// the function does not panic for any finite or non-finite `f64`.
+#[must_use]
+#[allow(clippy::missing_panics_doc)]
+pub fn fmt_g(d: f64) -> String {
     if d.is_nan() {
         return "nan".to_string();
     }
@@ -1289,6 +1497,59 @@ pub fn run_io(
         out: m.out,
         term: m.term,
         exit: m.exit,
+    })
+}
+
+/// The result of a traced run: the transcript plus the observation trace and how
+/// far the run got.
+#[derive(Debug)]
+pub struct TracedRun {
+    /// The full `print` transcript, exactly as it reached the sink.
+    pub term: String,
+    /// `Some(code)` when the program called `exit(code)`.
+    pub exit: Option<i32>,
+    /// Under `Record`, the observations captured; under `Replay`, the trace
+    /// that was served (unchanged), so a debugger can inspect it.
+    pub frames: Vec<Obs>,
+    /// Observations performed before the run ended (finished or hit a budget).
+    pub observed: usize,
+    /// Whether the run stopped at a replay budget rather than running to
+    /// completion, which is how replay-to-N halts.
+    pub halted: bool,
+}
+
+/// Run `core` under a [`Tape`], returning the transcript and the observation
+/// trace.
+///
+/// This is the one entry the record/replay/debug drivers share: `Record`
+/// captures a trace against the real world, `Replay` reproduces a recorded run
+/// (byte-identically, by determinism), and a `Replay` with a budget halts after
+/// N observations for reverse-step debugging.
+///
+/// # Errors
+/// Fails when `main` is missing, evaluation faults, or a replayed trace does not
+/// match the program.
+pub fn run_traced(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    tape: Tape,
+) -> Result<TracedRun, String> {
+    let g = globals(core);
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let mut m = Machine::new(&g, out_sink, input);
+    m.set_tape(tape);
+    m.comp(&Env::default(), &main.body)?;
+    let frames = match m.tape {
+        Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
+        Tape::Live => Vec::new(),
+    };
+    Ok(TracedRun {
+        term: m.term,
+        exit: m.exit,
+        frames,
+        observed: m.observed,
+        halted: m.halted,
     })
 }
 

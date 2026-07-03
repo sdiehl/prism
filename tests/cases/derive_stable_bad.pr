@@ -1,0 +1,7 @@
+class Stable(a) {
+
+}
+
+type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)
+
+fn main() = 0

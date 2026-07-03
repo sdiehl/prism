@@ -4,11 +4,11 @@
 fn main() =
   let xs = [y for x in srange(1, 8), if even(x), let y = x * x, if y > 10]
   for v in sof(xs) do
-    println(v)
+    println((v : Int))
   for x in srange(1, 5),
       let d = x * x,
       if odd(d) do
-    println(d)
+    println((d : Int))
   println(ssum(sof([x for x in srange(1, 5)])))
   -- Failable guard: `at_list` fails past the end, so the guard prunes those
   -- indices (and the `false` flag) instead of escaping. Keeps 0 and 2.

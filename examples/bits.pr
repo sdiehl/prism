@@ -23,10 +23,10 @@ fbip fn xorshift(h : U64) : U64 =
 -- Fold a list of byte values into a 64-bit hash, mixing after each. The fold
 -- walks a list (allocation in the seed), so it is ordinary; the per-step mix it
 -- calls is the fip-checked kernel above.
-fn hash(xs : List(Int)) : U64 =
+fn hash_ints(xs : List(Int)) : U64 =
   match xs of
     Nil => to_u64(1469598103934665603)
-    Cons(b, rest) => xorshift(u64_xor(hash(rest), to_u64(b)))
+    Cons(b, rest) => xorshift(u64_xor(hash_ints(rest), to_u64(b)))
 
 fn main() : !{IO} Unit =
   let a = to_i64(12)
@@ -41,4 +41,4 @@ fn main() : !{IO} Unit =
   -- 240
   println(int_of_u64(u64_shr(to_u64(256), to_u64(8))))
   -- 1
-  println(int_of_u64(hash([104, 101, 108, 108, 111])))
+  println(int_of_u64(hash_ints([104, 101, 108, 108, 111])))

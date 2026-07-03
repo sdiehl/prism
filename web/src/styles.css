@@ -250,31 +250,8 @@ main.show-sigs .sigpane {
   color: #ff9a93;
   font-weight: 600;
 }
-.tk-kw {
-  color: #8a3fa0;
-}
-.tk-ty {
-  color: #2660a4;
-}
-.tk-ctor {
-  color: #2660a4;
-}
-.tk-num {
-  color: #9a6a00;
-}
-.tk-lit {
-  color: #9a6a00;
-}
-.tk-str {
-  color: #3a7a55;
-}
-.tk-com {
-  color: #9aa0a6;
-  font-style: italic;
-}
-.tk-op {
-  color: var(--muted);
-}
+/* Prism token colours (`tk-*`) now live in theme.css, shared with the scrubber
+   page; the highlight layer that consumes them stays here. */
 
 /* Narrow viewports (phones): the two side-by-side panes stack vertically, the
    header wraps onto multiple rows, controls grow to fill the width with larger

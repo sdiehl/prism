@@ -207,6 +207,7 @@ fn cook(inner: &str) -> Result<String, LexFail> {
 }
 use marginalia::{BuiltinKind, Classify, TriviaPiece};
 
+use crate::kw;
 use crate::syntax::ast::{IntLit, Suffix};
 
 // Logos callbacks must take `&mut Lexer` even when read-only.
@@ -258,6 +259,8 @@ pub enum Token {
     Type,
     #[token("newtype")]
     Newtype,
+    #[token("stable")]
+    Stable,
     #[token("opaque")]
     Opaque,
     #[token("effect")]
@@ -518,7 +521,6 @@ pub enum Token {
 
 impl Token {
     const fn text(&self) -> &'static str {
-        use crate::kw;
         match self {
             Self::Fn => kw::FN,
             Self::Fip => kw::FIP,
@@ -531,6 +533,7 @@ impl Token {
             Self::As => kw::AS,
             Self::Type => kw::TYPE,
             Self::Newtype => kw::NEWTYPE,
+            Self::Stable => kw::STABLE,
             Self::Opaque => kw::OPAQUE,
             Self::Effect => kw::EFFECT,
             Self::KwError => kw::ERROR,
@@ -637,7 +640,23 @@ impl Token {
             Self::QuestionDot => kw::QUESTION_DOT,
             Self::Question => kw::QUESTION,
             Self::Tilde => kw::TILDE,
-            _ => "",
+            // Value-carrying and layout-virtual tokens have no fixed spelling;
+            // they are enumerated (rather than caught by `_`) so a newly added
+            // token cannot ship without an explicit spelling decision here.
+            Self::Float(_)
+            | Self::StringLit(_)
+            | Self::CharLit(_)
+            | Self::Int(_)
+            | Self::Ident(_)
+            | Self::UIdent(_)
+            | Self::QualName(_)
+            | Self::Comment(_)
+            | Self::VOpen
+            | Self::VClose
+            | Self::VSemi
+            | Self::InterpStart(_)
+            | Self::InterpMid(_)
+            | Self::InterpEnd(_) => "",
         }
     }
 }
@@ -741,6 +760,7 @@ mod tests {
             (Token::As, kw::AS),
             (Token::Type, kw::TYPE),
             (Token::Newtype, kw::NEWTYPE),
+            (Token::Stable, kw::STABLE),
             (Token::Opaque, kw::OPAQUE),
             (Token::Effect, kw::EFFECT),
             (Token::KwError, kw::ERROR),
@@ -770,6 +790,10 @@ mod tests {
             (Token::Borrow, kw::BORROW),
             (Token::In, kw::IN),
             (Token::For, kw::FOR),
+            (Token::While, kw::WHILE),
+            (Token::Loop, kw::LOOP),
+            (Token::Break, kw::BREAK),
+            (Token::Continue, kw::CONTINUE),
             (Token::Do, kw::DO),
             (Token::If, kw::IF),
             (Token::Then, kw::THEN),
@@ -781,6 +805,7 @@ mod tests {
             (Token::Forall, kw::FORALL),
             (Token::True, kw::TRUE),
             (Token::False, kw::FALSE),
+            (Token::Using, kw::USING),
             (Token::KwInt, kw::TY_INT),
             (Token::KwBool, kw::TY_BOOL),
             (Token::KwUnit, kw::TY_UNIT),
@@ -814,6 +839,10 @@ mod tests {
             (Token::Lambda, kw::LAMBDA),
             (Token::PlusDot, kw::PLUS_DOT),
             (Token::MinusDot, kw::MINUS_DOT),
+            (Token::PlusEq, kw::PLUS_EQ),
+            (Token::MinusEq, kw::MINUS_EQ),
+            (Token::StarEq, kw::STAR_EQ),
+            (Token::PercentEq, kw::PERCENT_EQ),
             (Token::Plus, kw::PLUS),
             (Token::Minus, kw::MINUS),
             (Token::StarDot, kw::STAR_DOT),

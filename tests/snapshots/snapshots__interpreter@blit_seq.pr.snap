@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/blit_seq.pr
+---
+hello there!
+[0, 7, 8, 9, 0]
+xyz
+=> ()

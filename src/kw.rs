@@ -19,6 +19,17 @@ pub const IMPORT: &str = "import";
 pub const AS: &str = "as";
 pub const TYPE: &str = "type";
 pub const NEWTYPE: &str = "newtype";
+// The `stable` block introducer: a type's frozen serialization history declared
+// inline as a ladder of rungs. A reserved word: the corpus never uses `stable` as
+// an identifier, so reserving it is consistent with every other declaration
+// introducer and breaks nothing. The words inside a `stable` block are contextual,
+// recognized positionally rather than reserved.
+pub const STABLE: &str = "stable";
+pub const UPGRADE: &str = "upgrade";
+pub const DOWNGRADE: &str = "downgrade";
+pub const DROP_LOSS: &str = "drop_loss";
+// Trailing per-rung shape-digest golden: `V1 = { .. } frozen "<digest>"`.
+pub const FROZEN: &str = "frozen";
 // Kind annotations on a type parameter (`type Cmd(a, e : Row)`). `Type` is the
 // default and prints bare; only `Row` is emitted.
 pub const KIND_ROW: &str = "Row";

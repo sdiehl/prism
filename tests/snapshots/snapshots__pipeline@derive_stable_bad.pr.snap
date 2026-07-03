@@ -1,0 +1,101 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/derive_stable_bad.pr
+---
+== tokens ==
+VOpen Class UIdent("Stable") LParen Ident("a") RParen LBrace RBrace VSemi Type UIdent("Config") Eq UIdent("C") LBrace Ident("retry") Colon KwInt Comma Ident("on_fail") Colon LParen KwUnit RParen Arrow KwUnit RBrace Deriving LParen UIdent("Stable") RParen VSemi Fn Ident("main") LParen RParen Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Config",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "C",
+                    args: [
+                        Int,
+                        Fun(
+                            [
+                                Unit,
+                            ],
+                            Empty,
+                            Unit,
+                        ),
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "retry",
+                                Int,
+                            ),
+                            (
+                                "on_fail",
+                                Fun(
+                                    [
+                                        Unit,
+                                    ],
+                                    Empty,
+                                    Unit,
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [
+                (
+                    "Stable",
+                    88..94,
+                ),
+            ],
+            newtype: false,
+            span: 22..95,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "Stable",
+            param: "a",
+            supers: [],
+            methods: [],
+            span: 0..20,
+        },
+    ],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 109..110,
+            },
+            wheres: [],
+            span: 97..110,
+        },
+    ],
+}
+
+== types ==
+Type Error: cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
+   ╭─[ <source>:5:67 ]
+   │
+ 5 │ type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)
+   │                                                                   ───┬──  
+   │                                                                      ╰──── cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
+───╯

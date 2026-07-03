@@ -42,8 +42,15 @@ clippy:
 # Full test suite; print only summaries, failures, and compile errors.
 t:
     #!/usr/bin/env bash
-    set -o pipefail
-    cargo test --all 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked|warning:"
+    set -eo pipefail
+    # cargo-nextest when present (faster, more parallel, failures-only output),
+    # else cargo test. nextest does not run Rust doctests, so run those too.
+    if command -v cargo-nextest >/dev/null; then
+        cargo nextest run --all --status-level fail
+    else
+        cargo test --all 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked|warning:"
+    fi
+    cargo test --doc 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked"
 
 # Run one test target or filter, filtered the same way. e.g. `just t1 fmt_records`
 t1 FILTER:
@@ -68,11 +75,55 @@ b:
     echo "$out" | grep -E "error|warning" || echo "build clean"
     exit $code
 
-# Correctness gates to run before declaring done.
-gate:
+# Type-check only, no codegen or linking: the quickest "did I break it" signal.
+c:
     #!/usr/bin/env bash
-    set -o pipefail
-    cargo test --test parity --test tier_parity --test perf_gate --test snapshots 2>&1 | grep -E "test result:|FAILED|error\["
+    out=$(cargo check --all-targets 2>&1); code=$?
+    echo "$out" | grep -E "error|warning" || echo "check clean"
+    exit $code
+
+# Compile one program to a native binary and run it (fast codegen smoke).
+smoke1 FILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A codegen sanity check without the whole parity corpus.
+    # e.g. `just smoke1 examples/accum.pr`
+    bin="$(mktemp "${TMPDIR:-/tmp}/prism_smoke1.XXXXXX")"
+    trap 'rm -f "$bin" "$bin".bc "$bin".ll' EXIT
+    cargo run --quiet -- "{{FILE}}" -o "$bin"
+    "$bin"
+
+# The four correctness oracles, filtered to summaries/failures; one definition
+# the three public gate recipes share. Callers pass the cargo profile flags and
+# inherit the environment (e.g. PRISM_GATE_CACHE), so the target list and filter
+# live in exactly one place. Built --release for `gate`/`gate-fast` so the
+# compiler-under-test runs optimized over the whole native corpus (identical
+# coverage to debug, several times faster); `target/release` is separate from the
+# debug artifacts `just t` uses, so the two profiles do not thrash each other.
+_gate *FLAGS:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    targets="--test parity --test tier_parity --test perf_gate --test snapshots --test store_oracle"
+    if command -v cargo-nextest >/dev/null; then
+        cargo nextest run {{FLAGS}} $targets --status-level fail
+    else
+        cargo test {{FLAGS}} $targets 2>&1 | grep -E "test result:|FAILED|error\["
+    fi
+
+# Full correctness gate before declaring done (release profile).
+gate:
+    @just _gate --release
+
+# The gate in the debug profile: slower, but skips the one-time release compile.
+gate-debug:
+    @just _gate
+
+# The gate with the content-addressed verdict cache on. Trustworthy by default
+# (keyed on the compiler binary, so any source change invalidates it); fall back
+# to `just gate` after changing the cache's own fingerprint logic (in
+# tests/common/mod.rs) or adding a compile-time input outside src/runtime/lib.
+gate-fast:
+    @PRISM_GATE_CACHE=1 just _gate --release
 
 fmt-examples: build-release
     ./target/release/prism fmt --check
@@ -130,3 +181,43 @@ release VERSION:
 smoke: build
     # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
     for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done
+
+# Regenerate the committed Lean differential-oracle certificate fixtures
+# (models/fixtures/*.json) from `prism dump core-json`. These pin the compiler
+# core that Certificates.lean's kernel proofs reference; CI's Lean job diffs the
+# regenerated output and fails on drift. Run after a change that shifts the
+# emitted core, and commit the result (the `just hash` / `docs-gen` idiom).
+fixtures: build
+    cd models && ./gen_fixtures.sh
+
+# accept the effect-lowering tier manifest (tests/tier_manifest.txt). Run after
+# a reviewed tier improvement or a corpus change; the golden then diffs like a
+# snapshot and CI fails on any un-accepted tier regression. Review the
+# resulting diff before committing.
+tier-accept:
+    PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test perf_gate tier_manifest_holds -- --nocapture
+
+# Bless doctest expectations: rewrite every stale or empty inline `output` block
+# with the example's actual output, in place, `ppx_expect` style. Point PATH at a
+# project/dir/.pr file, or pass `--stdlib` for the embedded standard library
+# (rebuild afterwards to pick the change up). Exits nonzero when anything is
+# rewritten, so review the diff before committing; a clean run is already green.
+bless PATH=".":
+    cargo run -- docs {{PATH}} --test --accept
+
+# Capture the determinism-scrubber GIF. The front-page loop is: let the
+# swarm play a few seconds, then grab the timeline thumb and drag it slowly left
+# then right twice, so the flock rewinds and replays. Recorded silently, that
+# reads as scrubbing a running program like video.
+#
+#   just scrub                       # serve the page, opens /scrubber.html
+#   # then, with any screen recorder scoped to the canvas + timeline:
+#   #   1. press Play, watch ~3s of flocking
+#   #   2. press Pause, drag the thumb fully left (rewind), then fully right
+#   #   3. repeat the drag once more; stop the recording at ~5s
+#   # crop to the stage, export a looping GIF (e.g. gifski --fps 24 --width 640)
+#
+# The motion is a pure function of the step index, so the capture is
+# reproducible frame-for-frame: the same drag always yields the same GIF.
+scrub: wasm
+    cd web && pnpm install && pnpm gen-examples && pnpm exec vite --open /scrubber.html

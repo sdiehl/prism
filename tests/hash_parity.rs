@@ -1,10 +1,16 @@
 // The content-hash parity gate: the load-bearing invariant behind
-// content-addressed Core. A definition's hash is meant to commit to everything
-// its compilation reads, so *equal hash implies a byte-identical compiled
-// artifact*, and any codegen-visible change must move the hash. That is the
-// content-addressed analogue of the interpreter/native parity oracle: there the
-// claim is "same Core, same output on every backend"; here it is "same hash, same
-// emitted artifact," together with its dual "different artifact, different hash."
+// content-addressed Core. A definition's hash names its pre-optimizer elaborated
+// term, and everything past that term (the deterministic Core-to-Core optimizer
+// and codegen) is a pure function of it under a fixed toolchain. So, holding the
+// compiler build and optimizer configuration fixed (the verification fingerprint,
+// which is exactly what carries optimizer/flag drift), *equal hash implies a
+// byte-identical compiled artifact*, and any change visible to the elaborated
+// term or to codegen must move the hash. That is the content-addressed analogue
+// of the interpreter/native parity oracle: there the claim is "same Core, same
+// output on every backend"; here it is "same hash, same emitted artifact," with
+// its dual "different artifact, different hash." Identity is deliberately
+// optimizer-independent; the optimizer level rides in the fingerprint, not the
+// hash, so this gate fixes it while it runs.
 //
 // The artifact compared is the emitted LLVM IR text (`emit_ir`), which is finer
 // than stdout: it reflects codegen choices (rc insertion, lowering) that never

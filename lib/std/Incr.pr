@@ -1,0 +1,490 @@
+-- | Incremental computation as a handler over a content-addressed dependency
+-- graph.
+--
+-- An incremental computation is a demand-driven graph of two node kinds: an
+-- `input` is a changeable cell you `set`; a `memo` node caches a pure or
+-- replayable thunk keyed by its content. Reading a node from inside another node
+-- (`get`) records a dependency edge, because the read goes through the effect and
+-- `run_incr` sits in the middle: the effect is the instrumentation. After a
+-- `set`, re-reading a node re-demands exactly the affected cone, and a memo whose
+-- recomputed value is unchanged (by content hash) does not disturb its
+-- dependents. That early cutoff is the whole game, and here it is an exact
+-- `blake3` comparison over the serialized value, not a user-written equality.
+--
+-- The engine is the spec's demand() verbatim: verify a memo's recorded deps by
+-- re-demanding each and comparing hashes; return the cached value if they all
+-- match; else rerun, capturing a fresh dep set. It is one tail-resumptive handler
+-- that re-installs itself to run a memo thunk (so the thunk's own `get`s are
+-- caught as that node's deps), threading the node table as parameter-passed
+-- state that Perceus reclaims when the `run_incr` scope drops.
+--
+-- Values are heterogeneous across a single run (an `Int` total beside a `Map` of
+-- scores), so the engine works over the type-erased `Bytes` a `Serialize`
+-- instance produces, and the typed surface (`input`/`get`/`set`/`memo`) encodes
+-- at the boundary where the type is known. A node handle `Incr(a)` is a
+-- phantom-typed key, so `get` on it round-trips back to `a`.
+
+import Data.Map (..)
+
+import Data.List (..)
+
+import Data.String (..)
+
+import Wire (..)
+
+-- The raw, type-erased effect the engine actually handles: node handles are
+-- string keys and values are `Bytes`. The typed surface below wraps it. The memo
+-- thunk may read other nodes (`IncrRaw`) and perform any replayable effect (`e`).
+-- The memo thunk reaches the operation already erased to `() -> Bytes`, built by
+-- the `after` combinator (a named function, not a fresh lambda at the perform
+-- site: a literal lambda there severs the ambient-row tie that lets the thunk's
+-- effects flow out through `run_incr`).
+pub effect IncrRaw(x) {
+  ctl incr_input(Bytes) : String,
+  ctl incr_get(String) : Bytes,
+  ctl incr_set(String, Bytes) : Unit,
+  ctl incr_memo(() -> Bytes ! {IncrRaw(x) | e}) : String
+}
+
+-- Compose an encoder after a thunk, preserving the thunk's effect row so the
+-- erased `() -> Bytes` still carries `{IncrRaw(Unit) | e}` out to the perform site.
+fn after(
+  t : () -> a ! {IncrRaw(Unit) | e},
+  f : (a) -> Bytes
+) : () -> Bytes ! {IncrRaw(Unit) | e} =
+  \() -> f(t())
+
+-- A node in the demand graph. `MemoN` holds its (erased) thunk, its last dep set
+-- as `[(depKey, depHash)]`, and its last `(valueBytes, valueHash)` once computed
+-- (`None` before the first demand: memo is lazy). The node is parameterized by the
+-- ambient effect row `e` its thunks perform (beyond reading nodes): within one
+-- `run_incr` every thunk shares that row, so the parameter stays uniform and no
+-- effect leaks into a run whose thunks did not perform it.
+type Node(e : Row)
+  = InputN(Bytes, String)
+  | MemoN(() -> Bytes ! {IncrRaw(Unit) | e}, List((String, String)), Option((Bytes, String)))
+
+-- A durable snapshot entry: a memo's recorded dep set and its cached result
+-- bytes, loaded from a prior run's snapshot file. The result hash is recomputed
+-- from the bytes on load (`vhash`), so a snapshot never stores a bytes/hash pair
+-- that could disagree.
+type Warm = Warm(List((String, String)), Bytes)
+
+-- The threaded state. The first three fields are the live engine: the node table
+-- keyed by node key, the demander stack (the memo nodes currently being
+-- (re)computed, innermost first) used to attach each `get` as an edge of its
+-- demander, and a monotonic counter that names each node by its creation order.
+--
+-- The last three fields carry durability, and are inert for the in-memory
+-- `run_incr`. `warm` is the cache loaded from a snapshot, consulted when a memo is
+-- (re)created. `prefix_open` is true until the first `get`/`set` of the run: node
+-- creation before that point is a deterministic function of the source alone (the
+-- creation prefix), so a prefix node's creation index pairs with the same site on
+-- every run, and only prefix memos are eligible for durable reuse. `persist` lists
+-- exactly those eligible keys. A node created after the first `get`/`set` is
+-- input-dependent (its index could name a different site on another run), so it is
+-- scratch-only: never cached, never persisted, always recomputed. That is what
+-- keeps a warm run's output byte-identical to a cold run.
+type St(e : Row) = St(
+  Map(String, Node(e)),
+  List(String),
+  Int,
+  Map(String, Warm),
+  Bool,
+  List(String)
+)
+
+fn st_tbl(s) =
+  match s of
+    St(m, _, _, _, _, _) => m
+
+fn st_put(s, key, n) =
+  match s of
+    St(m, d, c, w, p, ps) => St(map_insert(key, n, m), d, c, w, p, ps)
+
+fn st_push(s, key) =
+  match s of
+    St(m, d, c, w, p, ps) => St(m, Cons(key, d), c, w, p, ps)
+
+fn st_pop(s) =
+  match s of
+    St(m, d, c, w, p, ps) =>
+      match d of
+        Cons(_, r) => St(m, r, c, w, p, ps)
+        Nil => St(m, Nil, c, w, p, ps)
+
+-- Take the next fresh node key and advance the counter.
+fn st_fresh(s) =
+  match s of
+    St(m, d, c, w, p, ps) => (St(m, d, c + 1, w, p, ps), show_int(c))
+
+-- The durable side of `St`: the loaded warm cache, whether the creation prefix is
+-- still open, appending an eligible (prefix) memo key, and reading the eligible
+-- set back out at snapshot time.
+fn st_warm(s) =
+  match s of
+    St(_, _, _, w, _, _) => w
+
+fn st_prefix_open(s) =
+  match s of
+    St(_, _, _, _, p, _) => p
+
+fn st_close_prefix(s) =
+  match s of
+    St(m, d, c, w, _, ps) => St(m, d, c, w, false, ps)
+
+fn st_add_persist(s, key) =
+  match s of
+    St(m, d, c, w, p, ps) => St(m, d, c, w, p, Cons(key, ps))
+
+fn st_persist_keys(s) =
+  match s of
+    St(_, _, _, _, _, ps) => ps
+
+-- An injective string rendering of a byte string (decimal bytes, comma
+-- delimited), hashed by `blake3`. Equal values serialize to equal `Bytes` (the
+-- `Serialize` instances are canonical, notably `Map` over its sorted key list),
+-- so equal values share a hash and cutoff is exact.
+fn bytes_str(bs) =
+  match bs of
+    Bytes(xs) => concat_all(map(\(b) -> concat(show_int(b), ","), xs))
+
+fn vhash(bs) = blake3(bytes_str(bs))
+
+-- Attach an edge from the current demander (stack head) to `dep` at `dep`'s
+-- current hash, by prepending to the demander's in-progress dep list.
+fn record_edge(s, dep, dephash) =
+  match s of
+    St(m, d, _c, _w, _p, _ps) =>
+      match d of
+        Nil => s
+        Cons(cur, _) =>
+          match map_lookup(cur, m) of
+            Some(MemoN(th, deps, res)) =>
+              st_put(s, cur, MemoN(th, Cons((dep, dephash), deps), res))
+            _ => s
+
+-- Demand a node, returning (state', valueBytes). The heart of the engine.
+fn demand(s : St(e), key : String) : (St(e), Bytes) =
+  match map_lookup(key, st_tbl(s)) of
+    None => (s, wire_empty)
+    Some(InputN(bytes, _h)) => (s, bytes)
+    Some(MemoN(th, deps, res)) =>
+      match res of
+        None => recompute(s, key, th)
+        Some((rbytes, _rhash)) =>
+          let vr = verify(s, deps)
+          match vr of
+            (s2, true) => (s2, rbytes)
+            (s2, false) => recompute(s2, key, th)
+
+-- Verify every recorded dep still hashes to its stored value: re-demand each and
+-- compare. Threads state, since a re-demand may itself recompute.
+fn verify(s : St(e), deps : List((String, String))) : (St(e), Bool) =
+  match deps of
+    Nil => (s, true)
+    Cons((dk, dh), rest) =>
+      let (s2, dv) = demand(s, dk)
+      if str_eq(vhash(dv), dh) then
+        verify(s2, rest)
+      else
+        (s2, false)
+
+-- Recompute a memo: clear its dep list, push it as the demander, run its thunk
+-- under a fresh handler (capturing a fresh dep set), pop, store the new value and
+-- hash, and return. If the new hash equals the old, dependents that re-demand see
+-- an unchanged hash and their own verify passes: that is early cutoff, with no
+-- explicit dirty bit.
+fn recompute(
+  s : St(e),
+  key : String,
+  th : () -> Bytes ! {IncrRaw(Unit) | e}
+) : (St(e), Bytes) =
+  let s1 = st_put(s, key, MemoN(th, Nil, None))
+  let s2 = st_push(s1, key)
+  let (s3, rbytes) = run_thunk(s2, th)
+  let s4 = st_pop(s3)
+  let deps =
+    match map_lookup(key, st_tbl(s4)) of
+      Some(MemoN(_, ds, _)) => ds
+      _ => Nil
+  let s5 = st_put(s4, key, MemoN(th, deps, Some((rbytes, vhash(rbytes)))))
+  (s5, rbytes)
+
+fn reg_input(s, bytes) =
+  let (s1, key) = st_fresh(s)
+  (st_put(s1, key, InputN(bytes, vhash(bytes))), key)
+
+-- Register a memo. In the creation prefix, a matching warm-cache entry is
+-- installed as the node's initial state (its live thunk `th` alongside the cached
+-- deps and result), so the first demand verifies the deps and hits without
+-- recomputing; the key is recorded as durable-eligible. Outside the prefix the
+-- node is scratch-only: cold, never persisted.
+fn reg_memo(s, th) =
+  let (s1, key) = st_fresh(s)
+  if st_prefix_open(s1) then
+    match map_lookup(key, st_warm(s1)) of
+      Some(Warm(deps, bytes)) =>
+        (st_add_persist(st_put(s1, key, MemoN(th, deps, Some((bytes, vhash(bytes))))), key), key)
+      None => (st_add_persist(st_put(s1, key, MemoN(th, Nil, None)), key), key)
+  else
+    (st_put(s1, key, MemoN(th, Nil, None)), key)
+
+-- `set` is a no-op when the new value hashes equal to the current one, so an
+-- assignment that does not change anything propagates to nothing.
+fn do_set(s, key, bytes) =
+  match map_lookup(key, st_tbl(s)) of
+    Some(InputN(_old, oh)) =>
+      if str_eq(vhash(bytes), oh) then
+        s
+      else
+        st_put(s, key, InputN(bytes, vhash(bytes)))
+    _ => s
+
+fn do_get(s : St(e), key : String) : (St(e), Bytes) =
+  let (s1, v) = demand(s, key)
+  let s2 = record_edge(s1, key, vhash(v))
+  (s2, v)
+
+-- The self-reinstalling handler: install `IncrRaw` over `action`, threading `St`
+-- as the parameter-passed state, and return `(finalState, result)`. `demand`
+-- calls this to run a memo thunk so the thunk's `get`s are caught here again. The
+-- explicit signature makes the polymorphic recursion (used at the erased memo
+-- thunk type and at the outer action type) well typed.
+fn run_thunk(s : St(e), action : () -> a ! {IncrRaw(Unit) | e}) : (St(e), a) =
+  let f =
+    handle action() with
+      incr_input(bytes, k) =>
+        \(st) -> let (st2, key) = reg_input(st, bytes) in k(key)(st2)
+      incr_memo(th, k) =>
+        \(st) -> let (st2, key) = reg_memo(st, th) in k(key)(st2)
+      incr_set(key, bytes, k) =>
+        \(st) -> let st2 = do_set(st_close_prefix(st), key, bytes) in k(())(st2)
+      incr_get(key, k) =>
+        \(st) -> let (st2, v) = do_get(st_close_prefix(st), key) in k(v)(st2)
+      return x => \(st) -> (st, x)
+  f(s)
+
+-- | Discharge the `Incr` effect, running `action` as the root observer of a fresh
+-- demand graph. The node table lives only for this scope. The ambient row `e`
+-- (the replayable effects the memo thunks perform beyond reading nodes) flows out
+-- unchanged, exactly as `run_async` passes its fibers' row through.
+pub fn run_incr(action : () -> a ! {IncrRaw(Unit) | e}) : a =
+  let r = run_thunk(St(map_empty, Nil, 0, map_empty, false, Nil), action)
+  snd(r)
+
+-- ---------- typed surface over the erased engine ----------
+
+-- | A handle to an incremental node carrying values of type `a`. It is a
+-- phantom-typed wrapper over the node's content key; `get` on it returns `a`.
+pub type Incr(a) = IncrRef(String)
+
+-- Decode bytes we ourselves encoded, keeping only the value. `decode` is total
+-- over hostile input and so carries `Fail`; on bytes the engine round-tripped it
+-- never fires, but `Fail` (a replayable effect) rides `get`'s row honestly.
+fn decode_exn(bs : Bytes) : a given Serialize(a) =
+  match decode(bs) of
+    (v, _rest) => v
+
+-- | Create an input node holding `v`. Its key is its creation order in the run.
+pub fn input(v : a) : Incr(a) given Serialize(a) = IncrRef(incr_input(encode(v)))
+
+-- | Read a node, recording a dependency edge from the memo currently being
+-- computed (if any) to this node.
+pub fn get(node : Incr(a)) : a given Serialize(a) =
+  match node of
+    IncrRef(key) => decode_exn(incr_get(key))
+
+-- | Update an input node. A no-op when `v` is equal (by content) to the node's
+-- current value.
+pub fn set(node : Incr(a), v : a) : Unit given Serialize(a) =
+  match node of
+    IncrRef(key) => incr_set(key, encode(v))
+
+-- | A derived node caching `thunk` by content, with early cutoff on its result:
+-- a cache hit reuses the value and skips the thunk, so a memo that does not
+-- recompute does not re-perform its (replayable) effects. Its key is its creation
+-- order in the run.
+--
+-- Write a multi-statement memo with the trailing block form, whose statements
+-- read other nodes with `get`:
+--
+-- ```text
+-- let ranking = memo() fn
+--   let live = get(scores)
+--   sort_desc(map_to_list(live))
+-- ```
+--
+-- A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
+pub fn memo(thunk : () -> a ! {IncrRaw(Unit) | e}) : Incr(a) given Serialize(a) =
+  IncrRef(incr_memo(after(thunk, encode)))
+
+-- ---------- durable snapshot: warm the graph across process restarts ----------
+
+-- The four parallel lists a snapshot stores: for each eligible memo, its key, its
+-- dep keys, its dep hashes, and its result bytes. Parallel lists sidestep a tuple
+-- codec, exactly as `Serialize(Map)` does.
+type Snap = Snap(
+  List(String),
+  List(List(String)),
+  List(List(String)),
+  List(Bytes)
+)
+
+let snap_name : String = "prism-incr-snapshot"
+
+let snap_version : String = "1"
+
+let snap_sep : String = "\t"
+
+-- Parse the decimal-comma byte rendering (`bytes_str`) back to a body, skipping
+-- any piece that is not an integer (notably the trailing empty piece after the
+-- final comma), so a padded or truncated tail cannot inject a stray byte.
+fn snap_ints(pieces) =
+  match pieces of
+    Nil => Nil
+    Cons(p, rest) =>
+      match parse_int(p) of
+        Some(n) => Cons(n, snap_ints(rest))
+        None => snap_ints(rest)
+
+fn snap_parse_bytes(s) = Bytes(snap_ints(split(char_at(",", 0), s)))
+
+-- Gather the eligible (prefix) memos that have a computed result into four
+-- parallel lists; a memo without a result yet is dropped.
+fn snap_collect(s, keys) =
+  match keys of
+    Nil => Snap(Nil, Nil, Nil, Nil)
+    Cons(key, rest) =>
+      match snap_collect(s, rest) of
+        Snap(ks, dks, dhs, bys) =>
+          match map_lookup(key, st_tbl(s)) of
+            Some(MemoN(_, deps, Some((bytes, _h)))) =>
+              Snap(Cons(key, ks), Cons(map(fst, deps), dks), Cons(map(snd, deps), dhs), Cons(bytes, bys))
+            _ => Snap(ks, dks, dhs, bys)
+
+fn snap_encode(s) =
+  match snap_collect(s, st_persist_keys(s)) of
+    Snap(ks, dks, dhs, bys) =>
+      wire_cat(encode(ks), wire_cat(encode(dks), wire_cat(encode(dhs), encode(bys))))
+
+fn snap_zip_deps(
+  ks : List(String),
+  hs : List(String)
+) : List((String, String)) =
+  match ks of
+    Nil => Nil
+    Cons(k, kr) =>
+      match hs of
+        Nil => Nil
+        Cons(h, hr) => Cons((k, h), snap_zip_deps(kr, hr))
+
+fn snap_build(
+  ks : List(String),
+  dks : List(List(String)),
+  dhs : List(List(String)),
+  bys : List(Bytes)
+) : Map(String, Warm) =
+  match ks of
+    Nil => map_empty
+    Cons(k, kr) =>
+      match dks of
+        Cons(dk, dkr) =>
+          match dhs of
+            Cons(dh, dhr) =>
+              match bys of
+                Cons(by, byr) =>
+                  map_insert(k, Warm(snap_zip_deps(dk, dh), by), snap_build(kr, dkr, dhr, byr))
+                Nil => map_empty
+            Nil => map_empty
+        Nil => map_empty
+
+fn snap_len_ok(ks, dks, dhs, bys) =
+  length(ks) == length(dks) && length(dks) == length(dhs) && length(dhs) == length(bys)
+
+-- Decode the four lists and rebuild the cache. A length mismatch is a corrupt
+-- snapshot and cold-starts wholesale (never a partial load). Runs under a Fail
+-- handler at the call site, so a truncated or malformed body cold-starts too.
+fn snap_decode(body : String) : Map(String, Warm) =
+  match decode(snap_parse_bytes(body)) of
+    (ks, r1) =>
+      match decode(r1) of
+        (dks, r2) =>
+          match decode(r2) of
+            (dhs, r3) =>
+              match decode(r3) of
+                (bys, _r4) =>
+                  if snap_len_ok(ks, dks, dhs, bys) then
+                    snap_build(ks, dks, dhs, bys)
+                  else
+                    map_empty
+
+fn snap_try(body) =
+  handle snap_decode(body) with
+    final ctl fail() => map_empty
+    return m => m
+
+-- The header pins the format name, version, caller tag, and a `blake3` digest of
+-- the body. The digest is what makes corruption a cold start rather than a wrong
+-- answer: a warm hit returns cached bytes without re-running the thunk, so a body
+-- tampered into a still-decodable but different value would otherwise flow through
+-- silently. The content store's production path gets this for free (an entry is
+-- addressed by its content hash); the file substrate reconstructs it here.
+fn snap_header_ok(header, tag, body) =
+  match split(char_at(snap_sep, 0), header) of
+    Cons(nm, Cons(ver, Cons(tg, Cons(dg, Nil)))) =>
+      str_eq(nm, snap_name) && str_eq(ver, snap_version) && str_eq(tg, tag) && str_eq(dg, blake3(body))
+    _ => false
+
+fn snap_body(content, tag) =
+  let nl = index_of_from(char_at("\n", 0), content, 0)
+  if nl < 0 then
+    map_empty
+  else
+    let body = substring(content, nl + 1, str_len(content) - nl - 1)
+    if snap_header_ok(substring(content, 0, nl), tag, body) then
+      snap_try(body)
+    else
+      map_empty
+
+-- Load the warm cache from `path`. A missing, corrupt, foreign, wrong-`tag`, or
+-- wrong-version snapshot is a silent cold start (an empty cache), never an error
+-- and never a partial load: the header (name, version, tag, body digest) is
+-- checked before the body, and the body decodes under a Fail handler.
+fn snap_load(path, tag) =
+  if prim_file_exists(path) then
+    snap_body(prim_read_file(path), tag)
+  else
+    map_empty
+
+fn snap_header(tag, body) =
+  concat(snap_name, concat(snap_sep, concat(snap_version, concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))))))
+
+fn snap_save(path, tag, s) =
+  let body = bytes_str(snap_encode(s))
+  let _w = write_file(path, concat(snap_header(tag, body), concat("\n", body)))
+  ()
+
+-- | Discharge the `Incr` effect with a durable snapshot at `path`, tagged by
+-- `tag` (the caller-named program identity: a snapshot written under a different
+-- tag cold-starts). This is the file-substrate form of the production path, which
+-- rides the content-addressed store once a program can hold a runtime handle on
+-- it; the same reduced table is what that store persists.
+--
+-- The action must be pure up to `Fail`, so its row is closed at
+-- `{IncrRaw(Unit), Fail}`: a warm hit skips the memo thunk, and skipping a thunk
+-- that printed or drew a random would change the output, so only effect-free
+-- thunks may be reused across runs. Only the creation prefix (the memos built
+-- before the first `get`/`set`) is warmed and persisted; input-dependent memos
+-- stay scratch and recompute. Within those bounds a warm run's output is
+-- byte-identical to a cold run, and deleting or corrupting the snapshot changes
+-- only cost, never the result.
+pub fn run_incr_durable(
+  path : String,
+  tag : String,
+  action : () -> a ! {IncrRaw(Unit), Fail}
+) : a =
+  let warm = snap_load(path, tag)
+  let (sfin, result) = run_thunk(St(map_empty, Nil, 0, warm, true, Nil), action)
+  snap_save(path, tag, sfin)
+  result

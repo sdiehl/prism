@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: out
+input_file: tests/cases/run/cancel_idempotent.pr
+---
+worker: before yield
+finalizer ran
+scene done
+0
+=> ()

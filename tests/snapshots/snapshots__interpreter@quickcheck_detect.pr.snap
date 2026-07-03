@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/quickcheck_detect.pr
+---
+every Bool holds (false): FAILED after 0 tests.
+  counterexample: false
+  reproduce: seed 6340811551041280257 size 1
+every list is empty (false): FAILED after 0 tests.
+  counterexample: [true]
+  reproduce: seed 6340811551041280257 size 1
+=> ()

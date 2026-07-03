@@ -1,14 +1,12 @@
 use super::{
     subst_ty, wrap_binds, BTreeMap, BTreeSet, Builtin, Comp, CoreFn, CorePhase, Elab, Error, Expr,
-    IoOp, Locals, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
+    IoOp, Locals, NodeId, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
 };
+use crate::names;
 
 // Name prefix for a generated structural `show` function, completed by the
 // type's injective mangling.
 const SHOW_FN_PREFIX: &str = "_show_";
-
-// The prelude function that renders a `String` as a quoted, escaped literal.
-const STR_ESCAPE_FN: &str = "str_escape";
 
 impl Elab<'_> {
     // Like `local_ty`, but for printing: resolve the print-site type to a
@@ -39,28 +37,32 @@ impl Elab<'_> {
         v: Value,
         arg_expr: &S<Expr<CorePhase>>,
         locals: &Locals,
-    ) -> Comp {
-        match self.printable_ty(arg_expr, locals) {
+    ) -> Result<Comp, Error> {
+        Ok(match self.printable_ty(arg_expr, locals) {
             Some(Type::Float) => Comp::Io(IoOp::PrintF, vec![v]),
             Some(Type::Str) => Comp::Io(IoOp::PrintS, vec![v]),
-            // Int (and unknown types) print through the runtime integer printer.
+            // Int prints through the runtime integer printer. `None` is a value
+            // whose type is a free rigid var (an enclosing parameter): its type
+            // is unknowable here, so it likewise lowers to the raw printer, which
+            // self-dispatches on the cell tag at runtime (Int/Unit/String/bignum)
+            // and traps on any other cell rather than misread it. A structural
+            // value can only reach that path through a truly polymorphic `print`,
+            // which no static type could have shown.
             Some(Type::Int) | None => Comp::Io(IoOp::Print, vec![v]),
             // Everything else (ADTs, tuples, lists, I64/U64/Bool, Unit) reuses the
             // type-directed structural printer so native matches the interpreter.
-            Some(ty) => self
-                .show_for_type(v.clone(), &ty, arg_expr.span)
-                .map_or_else(
-                    |_| Comp::Io(IoOp::Print, vec![v]),
-                    |show| {
-                        let s = self.fresh();
-                        Comp::Bind(
-                            Box::new(show),
-                            s.clone().into(),
-                            Box::new(Comp::Io(IoOp::PrintS, vec![Value::Var(s.into())])),
-                        )
-                    },
-                ),
-        }
+            // A known-but-unshowable type (e.g. a function) is a hard error here,
+            // not a silent fall-through to the raw printer that would garble it.
+            Some(ty) => {
+                let show = self.show_for_type(v, &ty, arg_expr.span)?;
+                let s = self.fresh();
+                Comp::Bind(
+                    Box::new(show),
+                    s.clone().into(),
+                    Box::new(Comp::Io(IoOp::PrintS, vec![Value::Var(s.into())])),
+                )
+            }
+        })
     }
 
     // Lower a `print`/`println` call to a perform of the `Output` capability so
@@ -124,7 +126,7 @@ impl Elab<'_> {
             // A nested string renders quoted and escaped, matching the `Show`
             // instance. A top-level `print`/`show` of a bare string is handled
             // by the caller before it reaches here, so it stays raw.
-            Type::Str => Comp::Call(STR_ESCAPE_FN.into(), vec![v]),
+            Type::Str => Comp::Call(names::STR_ESCAPE_FN.into(), vec![v]),
             Type::Unit => Comp::Return(Value::Str("()".into())),
             Type::Con(name, args) => Comp::Call(
                 self.ensure_show_con(name.as_str(), args, span)?.into(),
@@ -245,7 +247,7 @@ impl Elab<'_> {
             let subs = fvars
                 .iter()
                 .map(|fv| Spanned {
-                    id: crate::syntax::ast::NodeId::DUMMY,
+                    id: NodeId::DUMMY,
                     synth: false,
                     node: Pattern::Var(fv.clone()),
                     span: Span::new(0, 0),
@@ -271,7 +273,7 @@ impl Elab<'_> {
     ) -> Result<String, Error> {
         let tail = format!("{fname}_tl");
         let pvar = |n: &str| Spanned {
-            id: crate::syntax::ast::NodeId::DUMMY,
+            id: NodeId::DUMMY,
             synth: false,
             node: Pattern::Var(n.into()),
             span: Span::new(0, 0),
@@ -325,7 +327,7 @@ impl Elab<'_> {
         let subs = fvars
             .iter()
             .map(|fv| Spanned {
-                id: crate::syntax::ast::NodeId::DUMMY,
+                id: NodeId::DUMMY,
                 synth: false,
                 node: Pattern::Var(fv.clone()),
                 span: Span::new(0, 0),
@@ -414,6 +416,21 @@ fn has_var(t: &Type) -> bool {
         Type::Forall(_, b) | Type::RowForall(_, b) => has_var(b),
         _ => false,
     }
+}
+
+// A `print`/`println` whose argument type is still a free rigid variable (an
+// enclosing function's parameter, not a defaultable empty container) has no
+// static show: no type here could render the value, and lowering it to the raw
+// printer would abort at runtime on a structural cell. Rejected at the print
+// call site; the raw-printer runtime trap remains behind it as defense in depth.
+pub(super) fn polymorphic_print(span: Span) -> Error {
+    Error::Type(TypeError::Other {
+        span,
+        msg: "cannot print a value of polymorphic type: its type is not known \
+              here, so no printer can render it. Use `show(x)` with a `Show` \
+              constraint, or annotate the argument with a concrete type"
+            .into(),
+    })
 }
 
 fn unshowable(ty: Option<&Type>, span: Span) -> Error {

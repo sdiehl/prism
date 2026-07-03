@@ -15,6 +15,7 @@
 //! default off (opt in by being present).
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use crate::core::OptLevel;
 use crate::driver::{valid_backend_opt, Scheduler, BACKEND_OPT_LEVELS, DEFAULT_BACKEND_OPT};
@@ -49,6 +50,50 @@ impl EffectTier {
             "state" => Some(Self::State),
             "free-monad" => Some(Self::FreeMonad),
             _ => None,
+        }
+    }
+}
+
+/// Which external tool signs and verifies the `name -> root` index.
+///
+/// Signing is never done in-process: Prism shells to a ubiquitous system tool
+/// behind one narrow seam, so no cryptographic dependency enters the compiler.
+/// `Unsigned` is an explicit development escape hatch, loudly marked in output
+/// and refused by `prism audit` unless the operator opts in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SignMode {
+    /// `ssh-keygen -Y sign` / `-Y verify`: namespaced signatures over the index,
+    /// present on any machine with OpenSSH (the shipping default).
+    #[default]
+    Ssh,
+    /// `minisign -S` / `-V`: an acceptable alternative behind the same seam when
+    /// it is installed.
+    Minisign,
+    /// No signature: the index is emitted in the clear and marked UNSIGNED. A dev
+    /// convenience only; `prism audit` treats an unsigned index as a failure
+    /// unless told otherwise.
+    Unsigned,
+}
+
+impl SignMode {
+    /// Parse a `PRISM_SIGN_MODE` spelling (`ssh`, `minisign`, `unsigned`).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "ssh" | "ssh-keygen" => Some(Self::Ssh),
+            "minisign" => Some(Self::Minisign),
+            "unsigned" | "none" | "dev" => Some(Self::Unsigned),
+            _ => None,
+        }
+    }
+
+    /// The human label shown in `publish`/`audit` output.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ssh => "ssh-keygen",
+            Self::Minisign => "minisign",
+            Self::Unsigned => "unsigned (dev)",
         }
     }
 }
@@ -124,6 +169,29 @@ pub struct DynFlags {
     /// once and falls back to `auto` (the tier-parity test independently asserts
     /// the forcing engaged, so a typo cannot make the oracle silently vacuous).
     pub effect_tier: EffectTier,
+    /// `PRISM_STORE` (default off): after a successful compile, commit the
+    /// program's definitions into the on-disk content-addressed store. The store
+    /// is a cache, never load-bearing for correctness, so it is opt-in and does
+    /// not perturb the oracles when off.
+    pub store: bool,
+    /// `PRISM_STORE_PATH` (default none): override the store root. Absent falls
+    /// back to a user-wide cache directory, then `target/prism-store`; see
+    /// [`crate::store::disk::resolve_store_path`].
+    pub store_path: Option<PathBuf>,
+    /// `PRISM_SIGN_MODE` (default `ssh`): which external tool signs and verifies
+    /// the `name -> root` index. See [`SignMode`].
+    pub sign_mode: SignMode,
+    /// `PRISM_SIGN_KEY` (default none): the signing key handed to the signer
+    /// (`ssh-keygen -Y sign -f <key>`, or `minisign -s <key>`). Required to
+    /// `publish` a signed index; absent forces the unsigned path.
+    pub sign_key: Option<PathBuf>,
+    /// `PRISM_SIGN_IDENTITY` (default none): the signer principal recorded in the
+    /// signature namespace (`ssh-keygen -Y sign -I`/`-n`) and matched on verify.
+    pub sign_identity: Option<String>,
+    /// `PRISM_SIGN_ALLOWED_SIGNERS` (default none): the `allowed_signers` file
+    /// `ssh-keygen -Y verify` checks the index signature against (or a minisign
+    /// public key). Required to verify a signed index during `audit`.
+    pub sign_allowed_signers: Option<PathBuf>,
 }
 
 impl Default for DynFlags {
@@ -142,6 +210,12 @@ impl Default for DynFlags {
             no_specialize: false,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
+            store: false,
+            store_path: None,
+            sign_mode: SignMode::default(),
+            sign_key: None,
+            sign_identity: None,
+            sign_allowed_signers: None,
         }
     }
 }
@@ -172,8 +246,30 @@ impl DynFlags {
                 .and_then(|s| Scheduler::parse(&s))
                 .unwrap_or_default(),
             effect_tier: effect_tier_from_env(),
+            store: env_present("PRISM_STORE"),
+            store_path: std::env::var_os("PRISM_STORE_PATH").map(PathBuf::from),
+            sign_mode: sign_mode_from_env(),
+            sign_key: std::env::var_os("PRISM_SIGN_KEY").map(PathBuf::from),
+            sign_identity: std::env::var("PRISM_SIGN_IDENTITY").ok(),
+            sign_allowed_signers: std::env::var_os("PRISM_SIGN_ALLOWED_SIGNERS").map(PathBuf::from),
         }
     }
+}
+
+// The signing seam from `PRISM_SIGN_MODE`. An unrecognized value is reported once
+// and falls back to the default (ssh) rather than silently signing nothing.
+fn sign_mode_from_env() -> SignMode {
+    std::env::var("PRISM_SIGN_MODE").map_or_else(
+        |_| SignMode::default(),
+        |s| {
+            SignMode::parse(&s).unwrap_or_else(|| {
+                eprintln!(
+                    "ignoring invalid PRISM_SIGN_MODE={s:?} (expected ssh, minisign, unsigned); using ssh"
+                );
+                SignMode::default()
+            })
+        },
+    )
 }
 
 // The effect-tier cap from `PRISM_EFFECT_TIER`. An unrecognized value is

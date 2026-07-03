@@ -1,0 +1,553 @@
+-- | The opt-in serialization layer.
+--
+-- Serialization is deliberately out of the always-on prelude: a program that
+-- never persists a value imports none of this. Everything here is pure total
+-- functions over `Bytes`; writing those bytes to a file, a socket, or a replay
+-- log is a capability routed through the effect system, never performed here.
+--
+-- The surface has three layers. The `Serialize` class and its instances are the
+-- codec: a value's compact positional body, derived structurally by
+-- `deriving (Serialize)` and bottoming out in the primitive instances below. The
+-- envelope (`wire_encode_value`/`wire_decode_value`) wraps a body in the frame
+-- `[scheme tag][kind][contract digest][body?]`, checked before the body so a
+-- stale layout is rejected up front. The version ladder (`compose_upgrade`/
+-- `compose_downgrade`) spans frozen versions with O(n) adjacent converters.
+--
+-- ## The frame
+--
+-- Every serialized thing is one envelope, read left to right, each header part
+-- checked before the next is touched:
+--
+-- ```text
+--    +------------+------+-----------------+ - - - - - - +
+--    | scheme tag | kind | contract digest |    body?    |
+--    +------------+------+-----------------+ - - - - - - +
+--
+--    scheme tag       length-prefixed string, always "prism-core-hash-v1";
+--                     a foreign scheme is rejected before anything else
+--    kind             uvarint naming what the digest identifies:
+--                     value 0, def 1, protocol 2, kont 3, cert 4
+--    contract digest  length-prefixed hex shape digest of the expected
+--                     layout, checked before the body is decoded
+--    body?            the compact positional encoding below; an absent
+--                     body is a pure reference, named by its digest
+--
+--    body encoding    Int and I64 as zigzag LEB128 varints, U64 and
+--                     constructor tags as plain LEB128, strings and
+--                     lists length-prefixed with the length bounded on
+--                     both encode and decode, a sum as its constructor
+--                     tag followed by its arguments, a product as its
+--                     fields in declaration order, no padding
+-- ```
+--
+-- ## The `Bytes` representation
+--
+-- `Bytes` is a `List(Int)` of byte values in `0..255`. This is the pragmatic
+-- pure-Prism choice: a `String`-of-bytes would round-trip a value differently on
+-- the two backends, because the interpreter's `string_of_bytes` repairs invalid
+-- UTF-8 lossily while the native runtime keeps raw bytes, so byte-for-byte parity
+-- (the language's contract) would break on any non-textual byte. A `List(Int)` is
+-- ordinary algebraic data that both backends thread identically. The cost is
+-- space (a cons cell plus a boxed word per byte) and an O(n) `wire_cat`; a
+-- byte-array builtin is the eventual performance path, but correctness and parity
+-- come first. `encode` builds its body right-nested, so the concatenations are
+-- linear, and `decode` consumes from the front, so a whole decode is linear.
+--
+-- ## Totality
+--
+-- `decode` is total. Every read consumes at least one byte from a finite,
+-- strictly shrinking list, so decode always terminates; a truncated or hostile
+-- input runs out of bytes and fails through `Fail` rather than looping or
+-- panicking. Varints are length-capped and container and string lengths are
+-- bounded on both encode and decode, so a hostile length prefix cannot force
+-- unbounded work. The frame's total decoder checks the scheme, kind, and digest
+-- before touching the body and rejects trailing bytes after the value.
+--
+-- ## Deriving
+--
+-- `deriving (Serialize)` writes the codec: a product encodes its fields in
+-- declaration order, a sum prefixes a constructor tag, and each field defers to
+-- its own instance. `deriving (Stable)` succeeds only when every component is
+-- itself `Stable`, so the derivability is the proof that a frozen format contains
+-- no unserializable value.
+
+import Data.List (..)
+
+import Data.Map (..)
+
+-- The varint radix (7 data bits per byte, the eighth a continuation flag) and the
+-- byte cap that bounds a single varint, so a hostile all-continuation run cannot
+-- read forever. Ten radix-128 groups cover a full 64-bit magnitude.
+let varint_radix : Int = 128
+
+let varint_max_bytes : Int = 10
+
+-- The inclusive length bound on a decoded string or container, enforced on encode
+-- and decode alike so a hostile length prefix is rejected outright (2^20 bytes).
+let wire_len_max : Int = 1048576
+
+-- The largest Unicode scalar a `Char` may decode to (U+10FFFF).
+let char_max : Int = 1114111
+
+-- A byte value is masked into `0..255` on the way in, so a builder never smuggles
+-- a wider word into the buffer.
+let byte_mask : Int = 256
+
+-- | A compact, positional byte body: a `List(Int)` of byte values in `0..255`.
+-- The concrete representation is owned by the codec; a derived instance only ever
+-- threads a `Bytes` through the builders below, never inspects it.
+pub type Bytes = Bytes(List(Int))
+
+-- | What a downgrade could not carry down: the names of the fields dropped when
+-- lowering a value to an older frozen version. A downgrade never silently
+-- discards, it reports every field it had to drop.
+pub type Loss = Loss(List(String))
+
+-- | The codec, derived structurally by `deriving (Serialize)`. `encode` writes a
+-- value's compact positional body; `decode` reads one back, returning the value
+-- alongside the bytes that follow it so a reader can thread a frame's fields in
+-- declaration order. Decode is total: it fails through `Fail` on a truncated or
+-- malformed body rather than panicking, so hostile input is one ordinary failure
+-- channel.
+pub class Serialize(a) {
+  encode : (a) -> Bytes,
+  decode : (Bytes) -> (a, Bytes) ! {Fail | e}
+}
+
+-- | The structural witness that a type's format is frozen-serializable: a record
+-- is `Stable` when all its fields are, a sum when all its variants' arguments
+-- are. It is a marker with no methods precisely so that the _derivability_ is the
+-- whole content of the proof. Persisting a type with a non-stable component
+-- (a function, an effectful thunk) fails at the `deriving (Stable)` site, at
+-- compile time, naming the offending field.
+pub class Stable(a) {
+
+}
+
+-- The empty body.
+pub let wire_empty : Bytes = Bytes(Nil)
+
+-- | Concatenate two byte bodies. Right-nested use keeps a whole encode linear.
+pub fn wire_cat(a : Bytes, b : Bytes) : Bytes =
+  match a of
+    Bytes(xs) =>
+      match b of
+        Bytes(ys) => Bytes(append(xs, ys))
+
+-- A one-byte body, the value masked into `0..255`.
+fn wire_byte(b : Int) : Bytes = Bytes(Cons(mod(b, byte_mask), Nil))
+
+-- Peel one byte off the front, or `fail()` when the body is exhausted. This is
+-- the single place a truncated input turns into a `Fail`.
+fn wire_uncons(bs : Bytes) : (Int, Bytes) =
+  match bs of
+    Bytes(Nil) => fail()
+    Bytes(Cons(h, t)) => (h, Bytes(t))
+
+-- | True when a body has no bytes left. The reader uses it to reject trailing
+-- bytes after a value, and a peer uses it to tell a reference frame (no body)
+-- from an inline one.
+pub fn wire_is_empty(bs : Bytes) : Bool =
+  match bs of
+    Bytes(Nil) => true
+    Bytes(Cons(_h, _t)) => false
+
+-- | The number of bytes in a body.
+pub fn wire_len(bs : Bytes) : Int =
+  match bs of
+    Bytes(xs) => length(xs)
+
+-- An unsigned LEB128 varint: the low seven bits per byte, the high bit set on
+-- every byte but the last. Small values cost one byte.
+fn put_uvarint(n : Int) : Bytes =
+  let lo = mod(n, varint_radix)
+  let hi = n / varint_radix
+  if hi == 0 then
+    wire_byte(lo)
+  else
+    wire_cat(wire_byte(lo + varint_radix), put_uvarint(hi))
+
+-- Read an unsigned varint low-to-high, capped at `varint_max_bytes` so a hostile
+-- run of continuation bytes cannot read unboundedly. `mult` is the place value of
+-- the current group.
+fn get_uvarint_go(
+  bs : Bytes,
+  mult : Int,
+  acc : Int,
+  count : Int
+) : (Int, Bytes) =
+  if count >= varint_max_bytes then
+    fail()
+  else
+    match wire_uncons(bs) of
+      (b, rest) =>
+        let acc2 = acc + mod(b, varint_radix) * mult
+        if b < varint_radix then
+          (acc2, rest)
+        else
+          get_uvarint_go(rest, mult * varint_radix, acc2, count + 1)
+
+fn get_uvarint(bs : Bytes) : (Int, Bytes) = get_uvarint_go(bs, 1, 0, 0)
+
+-- | Encode a constructor tag (a small non-negative integer) as a varint. The
+-- derived `Serialize` for a sum prefixes its body with this.
+pub fn wire_tag(i : Int) : Bytes = put_uvarint(i)
+
+-- | Peel a constructor tag off the front of a body, returning it and the rest.
+-- The derived `Serialize` for a sum reads this before dispatching on the tag.
+pub fn wire_get_tag(bs : Bytes) : (Int, Bytes) = get_uvarint(bs)
+
+-- Zigzag a signed integer to a non-negative one so small negatives stay small
+-- under LEB128: `0, -1, 1, -2, 2 -> 0, 1, 2, 3, 4`.
+fn zigzag(x : Int) : Int =
+  if x >= 0 then
+    2 * x
+  else
+    0 - 1 - 2 * x
+
+fn unzigzag(z : Int) : Int =
+  if mod(z, 2) == 0 then
+    z / 2
+  else
+    (0 - 1 - z) / 2
+
+fn put_svarint(x : Int) : Bytes = put_uvarint(zigzag(x))
+
+fn get_svarint(bs : Bytes) : (Int, Bytes) =
+  match get_uvarint(bs) of
+    (z, r) => (unzigzag(z), r)
+
+instance serializeInt : Serialize(Int) {
+  fn encode(x) = put_svarint(x),
+  fn decode(bs) = get_svarint(bs)
+}
+
+-- The primitive and container codecs. Each instance method is a one-liner that
+-- delegates to a top-level `enc_*`/`dec_*` function, so the readers that thread
+-- and pattern-match the remaining bytes stay ordinary functions.
+fn dec_i64(bs : Bytes) : (I64, Bytes) =
+  match get_svarint(bs) of
+    (n, r) => (to_i64(n), r)
+
+instance serializeI64 : Serialize(I64) {
+  fn encode(x) = put_svarint(int_of_i64(x)),
+  fn decode(bs) = dec_i64(bs)
+}
+
+fn dec_u64(bs : Bytes) : (U64, Bytes) =
+  match get_uvarint(bs) of
+    (n, r) => (to_u64(n), r)
+
+instance serializeU64 : Serialize(U64) {
+  fn encode(x) = put_uvarint(int_of_u64(x)),
+  fn decode(bs) = dec_u64(bs)
+}
+
+fn enc_bool(b : Bool) : Bytes = wire_byte(if b then 1 else 0)
+
+fn dec_bool(bs : Bytes) : (Bool, Bytes) =
+  match wire_uncons(bs) of
+    (v, r) =>
+      if v == 0 then
+        (false, r)
+      elif v == 1 then
+        (true, r)
+      else
+        fail()
+
+instance serializeBool : Serialize(Bool) {
+  fn encode(b) = enc_bool(b),
+  fn decode(bs) = dec_bool(bs)
+}
+
+instance serializeUnit : Serialize(Unit) {
+  fn encode(_u) = wire_empty,
+  fn decode(bs) = ((), bs)
+}
+
+fn dec_char(bs : Bytes) : (Char, Bytes) =
+  match get_uvarint(bs) of
+    (n, r) =>
+      if n > char_max then
+        fail()
+      else
+        (chr(n), r)
+
+instance serializeChar : Serialize(Char) {
+  fn encode(c) = put_uvarint(ord(c)),
+  fn decode(bs) = dec_char(bs)
+}
+
+-- Append a string's raw UTF-8 bytes to a body, one byte per index. A `String` is
+-- always valid UTF-8, so reconstructing it with `string_of_bytes` on decode is
+-- lossless on both backends.
+fn string_body(s : String, i : Int, n : Int) : Bytes =
+  if i >= n then
+    wire_empty
+  else
+    wire_cat(wire_byte(byte_at(s, i)), string_body(s, i + 1, n))
+
+-- Read exactly `n` bytes into an array, failing if the body runs out first.
+fn take_bytes(bs : Bytes, n : Int, arr : Array(Int)) : (Array(Int), Bytes) =
+  if n <= 0 then
+    (arr, bs)
+  else
+    match wire_uncons(bs) of
+      (b, rest) => take_bytes(rest, n - 1, array_push(arr, b))
+
+fn enc_string(s : String) : Bytes =
+  wire_cat(put_uvarint(byte_len(s)), string_body(s, 0, byte_len(s)))
+
+fn dec_string(bs : Bytes) : (String, Bytes) =
+  match get_uvarint(bs) of
+    (n, r) =>
+      if n > wire_len_max then
+        fail()
+      else
+        match take_bytes(r, n, array_empty()) of
+          (arr, rest) => (string_of_bytes(arr), rest)
+
+instance serializeString : Serialize(String) {
+  fn encode(s) = enc_string(s),
+  fn decode(bs) = dec_string(bs)
+}
+
+-- Encode a list's elements in order, no per-element framing (the length prefix
+-- fixes the count). Right-nested so the whole encode stays linear.
+fn encode_elems(xs : List(a)) : Bytes given Serialize(a) =
+  match xs of
+    Nil => wire_empty
+    Cons(h, t) => wire_cat(encode(h), encode_elems(t))
+
+-- Decode exactly `n` elements, threading the remaining bytes. Each element read
+-- consumes at least one byte, so a hostile length is bounded by the input.
+fn decode_elems(bs : Bytes, n : Int) : (List(a), Bytes) given Serialize(a) =
+  if n <= 0 then
+    (Nil, bs)
+  else
+    match decode(bs) of
+      (x, r1) =>
+        match decode_elems(r1, n - 1) of
+          (xs, r2) => (Cons(x, xs), r2)
+
+fn enc_list(xs : List(a)) : Bytes given Serialize(a) =
+  wire_cat(put_uvarint(length(xs)), encode_elems(xs))
+
+fn dec_list(bs : Bytes) : (List(a), Bytes) given Serialize(a) =
+  match get_uvarint(bs) of
+    (n, r) =>
+      if n > wire_len_max then
+        fail()
+      else
+        decode_elems(r, n)
+
+instance serializeList : Serialize(List(a)) given Serialize(a) {
+  fn encode(xs) = enc_list(xs),
+  fn decode(bs) = dec_list(bs)
+}
+
+-- `Bytes` is itself serializable as the length-prefixed list of its byte values,
+-- so a body may carry another already-encoded body verbatim (the incremental
+-- snapshot stores each memo's result bytes this way).
+fn enc_bytes(b : Bytes) : Bytes =
+  match b of
+    Bytes(xs) => enc_list(xs)
+
+fn dec_bytes(bs : Bytes) : (Bytes, Bytes) =
+  match dec_list(bs) of
+    (xs, r) => (Bytes(xs), r)
+
+instance serializeBytes : Serialize(Bytes) {
+  fn encode(b) = enc_bytes(b),
+  fn decode(bs) = dec_bytes(bs)
+}
+
+fn enc_option(o : Option(a)) : Bytes given Serialize(a) =
+  match o of
+    None => wire_byte(0)
+    Some(x) => wire_cat(wire_byte(1), encode(x))
+
+fn dec_option(bs : Bytes) : (Option(a), Bytes) given Serialize(a) =
+  match wire_uncons(bs) of
+    (t, r) =>
+      if t == 0 then
+        (None, r)
+      elif t == 1 then
+        match decode(r) of
+          (x, r2) => (Some(x), r2)
+      else
+        fail()
+
+instance serializeOption : Serialize(Option(a)) given Serialize(a) {
+  fn encode(o) = enc_option(o),
+  fn decode(bs) = dec_option(bs)
+}
+
+-- A map serializes canonically as two parallel lists, its keys then its values,
+-- both in ascending key order. This is canonical (two maps that are equal but
+-- were built by different insertion orders serialize identically, so they hash
+-- equal, which the incremental engine's early cutoff relies on) and avoids a
+-- tuple codec (tuples have no nominal head to key a `Serialize` instance on; a
+-- compiler-synthesized tuple instance is a later item). Decoding zips the lists
+-- back and rebuilds the tree with the ambient `Ord(k)`.
+fn enc_map(m : Map(k, v)) : Bytes given Serialize(k), Serialize(v) =
+  wire_cat(encode(map_keys(m)), encode(map_values(m)))
+
+fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
+  match ks of
+    Nil => Nil
+    Cons(k, kr) =>
+      match vs of
+        Nil => Nil
+        Cons(v, vr) => Cons((k, v), zip_pairs(kr, vr))
+
+fn dec_map(bs : Bytes) : (Map(k, v), Bytes) given Ord(k), Serialize(k), Serialize(v) =
+  match decode(bs) of
+    (ks, r1) =>
+      match decode(r1) of
+        (vs, r2) => (map_from_list(zip_pairs(ks, vs)), r2)
+
+instance serializeMap : Serialize(Map(k, v)) given Ord(k), Serialize(k), Serialize(v) {
+  fn encode(m) = enc_map(m),
+  fn decode(bs) = dec_map(bs)
+}
+
+-- The envelope. Every serialized thing is one frame:
+--
+--     [ scheme tag ][ kind ][ contract digest ][ body? ]
+--
+-- The scheme tag governs the whole wire; a scheme bump migrates every kind in one
+-- motion. The kind names what the digest identifies. The contract digest is the
+-- shape digest of the expected layout, checked before the body. The body is
+-- optional: a frame with no body is a pure reference (the peer resolves the digest
+-- from its store), a frame with a body inlines the value. Reference and inline are
+-- the same frame, told apart only by whether any bytes follow the digest.
+
+-- The scheme tag on every hash in the tree (`src/core/hash.rs::SCHEME`). Pinned
+-- here as the wire library's single home for it, checked against the compiler
+-- constant by the `library_hook_names_resolve_to_module_definitions` drift guard
+-- in `src/names.rs`.
+pub let wire_scheme_tag : String = "prism-core-hash-v1"
+
+-- The five reserved kinds. `value` is implemented now; `def`, `protocol`, `kont`,
+-- and `cert` are reserved so the frame shape exists before their bodies do.
+pub let wire_kind_value : Int = 0
+
+pub let wire_kind_def : Int = 1
+
+pub let wire_kind_protocol : Int = 2
+
+pub let wire_kind_kont : Int = 3
+
+pub let wire_kind_cert : Int = 4
+
+-- A length-prefixed string, reusing the `String` codec, for the scheme tag and
+-- the digest inside a frame.
+fn put_frame_str(s : String) : Bytes = encode(s)
+
+fn get_frame_str(bs : Bytes) : (String, Bytes) = decode(bs)
+
+-- | Build a frame around a body. `wire_ref` builds the bodyless reference form.
+pub fn wire_frame(kind : Int, digest : String, body : Bytes) : Bytes =
+  wire_cat(put_frame_str(wire_scheme_tag), wire_cat(wire_tag(kind), wire_cat(put_frame_str(digest), body)))
+
+-- | A pure reference: a frame that carries its contract digest and no body. Its
+-- identity is the digest; a peer resolves the body from its store or requests it.
+pub fn wire_ref(kind : Int, digest : String) : Bytes =
+  wire_frame(kind, digest, wire_empty)
+
+-- | Open a frame, checking the scheme, kind, and digest before the body and
+-- returning the body bytes that follow. Any header mismatch fails through `Fail`,
+-- so a stale layout is rejected on a cheap comparison, never by a corrupt field.
+pub fn wire_open(bs : Bytes, kind : Int, digest : String) : Bytes =
+  match get_frame_str(bs) of
+    (scheme, r1) =>
+      if scheme == wire_scheme_tag then
+        match wire_get_tag(r1) of
+          (k, r2) =>
+            if k == kind then
+              match get_frame_str(r2) of
+                (d, r3) =>
+                  if d == digest then
+                    r3
+                  else
+                    fail()
+            else
+              fail()
+      else
+        fail()
+
+-- | True when a well-formed frame for `kind`/`digest` carries no body (a pure
+-- reference). Fails if the header itself does not match.
+pub fn wire_is_reference(bs : Bytes, kind : Int, digest : String) : Bool =
+  wire_is_empty(wire_open(bs, kind, digest))
+
+-- | Encode a value as a `value`-kind frame carrying the given contract digest.
+-- The digest is passed in for now: it is the type's shape digest, which the
+-- compiler computes but does not yet thread to a derived instance (the seam a
+-- later `shape_digest` intrinsic closes).
+pub fn wire_encode_value(digest : String, x : a) : Bytes given Serialize(a) =
+  wire_frame(wire_kind_value, digest, encode(x))
+
+-- | Decode a `value`-kind frame: check the header, decode the body, and reject
+-- trailing bytes. A bodyless reference frame fails here, because a value cannot be
+-- materialized without its bytes.
+pub fn wire_decode_value(bs : Bytes, digest : String) : a given Serialize(a) =
+  match decode(wire_open(bs, wire_kind_value, digest)) of
+    (v, rest) =>
+      if wire_is_empty(rest) then
+        v
+      else
+        fail()
+
+-- The version ladder. Frozen versions are spanned by O(n) adjacent converters
+-- composed along the ladder, never the N-squared matrix. `upgrade` is total (it
+-- defaults new fields); `downgrade` is partial and honest (it reports the fields
+-- it had to drop as a `Loss`). The `Migrate(lo, hi)` class this would package is
+-- deferred to the multi-parameter-class grammar; until then the ladder is these
+-- plain functions, which the `stable` block desugar composes.
+
+-- | The empty `Loss`: a downgrade that dropped nothing.
+pub let no_loss : Loss = Loss(Nil)
+
+-- | A `Loss` naming the fields a downgrade dropped.
+pub fn dropped(names : List(String)) : Loss = Loss(names)
+
+-- | The field names inside a `Loss`.
+pub fn loss_names(l : Loss) : List(String) =
+  match l of
+    Loss(ns) => ns
+
+-- | True when a `Loss` dropped nothing, so the downgrade was lossless. The safe
+-- subset of a version step is exactly the values whose downgrade is lossless.
+pub fn lossless(l : Loss) : Bool = length(loss_names(l)) == 0
+
+-- | Merge two losses along a composed downgrade.
+pub fn loss_union(a : Loss, b : Loss) : Loss =
+  Loss(append(loss_names(a), loss_names(b)))
+
+-- | Compose two adjacent upgrades into one spanning upgrade.
+pub fn compose_upgrade(lo_mid : (a) -> b, mid_hi : (b) -> c) : (a) -> c =
+  \(x) -> mid_hi(lo_mid(x))
+
+-- | Compose two adjacent downgrades into one spanning downgrade, unioning the
+-- losses each step reported.
+pub fn compose_downgrade(
+  hi_mid : (c) -> (b, Loss),
+  mid_lo : (b) -> (a, Loss)
+) : (c) -> (a, Loss) =
+  \(z) -> match hi_mid(z) of { (m, l1) => match mid_lo(m) of { (x, l2) => (x, loss_union(l1, l2)) } }
+
+-- | How to reconcile a higher-version value that a reader cannot represent at its
+-- own version: `Reject` refuses it, `LargestSafeSubset` downgrades it and keeps
+-- the `Loss`. A version mismatch always has one of these defined outcomes, never
+-- undefined behavior.
+pub type Policy = Reject | LargestSafeSubset
+
+-- | Apply a mismatch policy to a downgrade. `Reject` fails through `Fail`;
+-- `LargestSafeSubset` runs the downgrade and returns the lowered value with the
+-- fields it had to drop.
+pub fn reconcile(p : Policy, down : (hi) -> (lo, Loss), x : hi) : (lo, Loss) =
+  match p of
+    Reject => fail()
+    LargestSafeSubset => down(x)

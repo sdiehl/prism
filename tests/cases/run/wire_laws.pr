@@ -1,0 +1,180 @@
+-- The wire codec's laws, property-tested under derived generators:
+-- encode/decode roundtrips for a product, a sum, and a nested
+-- recursive type; upgrade-after-downgrade is the identity on the safe subset for
+-- both an adjacent and a composed version step; the envelope checks its digest and
+-- rejects trailing bytes; and decode terminates on hostile random input, never
+-- hanging or panicking. Every generator is seeded, so the whole run is a pure
+-- function of its seed and reproduces identically on both backends.
+
+import Wire (..)
+
+import Test (..)
+
+import Quickcheck (..)
+
+-- A product, a sum with a nullary variant, and a nested recursive type, each
+-- deriving the whole bundle so the codec and the generator are both structural.
+type Point = Point(Int, String, Bool) deriving (Eq, Show, Serialize, Arbitrary)
+
+type Shape
+  = Circle(Int)
+  | Rect(Int, Int)
+  | Dot
+  deriving (Eq, Show, Serialize, Arbitrary)
+
+type Tree
+  = Leaf
+  | Node(Tree, Int, Tree)
+  deriving (Eq, Show, Serialize, Arbitrary)
+
+-- Discharge Fail to an explicit default. Annotating the thunk `! {Fail | e}` is
+-- what lets inference drop Fail from the result row, so a fallible reader becomes
+-- a pure `Bool` property; the prelude `default` leaves Fail open, which a pure
+-- property cannot carry (the pattern `law_fail.pr` established).
+fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
+  handle action() with
+    final ctl fail() => d
+    return r => r
+
+-- Roundtrip and size sanity in one: a decode returns the original value and
+-- consumes every byte encode wrote (no trailing bytes left over). The `_go`
+-- reader threads Fail (decode is total, so a real decode never trips it); `caught`
+-- discharges it so the property is a pure `(a) -> Bool`.
+fn rt_point_go(x : Point) : Bool =
+  match decode(encode(x)) of
+    (v, r) => v == x && wire_is_empty(r)
+
+fn rt_point(x : Point) : Bool = caught(false, \() -> rt_point_go(x))
+
+fn rt_shape_go(x : Shape) : Bool =
+  match decode(encode(x)) of
+    (v, r) => v == x && wire_is_empty(r)
+
+fn rt_shape(x : Shape) : Bool = caught(false, \() -> rt_shape_go(x))
+
+fn rt_tree_go(x : Tree) : Bool =
+  match decode(encode(x)) of
+    (v, r) => v == x && wire_is_empty(r)
+
+fn rt_tree(x : Tree) : Bool = caught(false, \() -> rt_tree_go(x))
+
+-- Three frozen rungs and their adjacent converters. A field addition upgrades by
+-- defaulting the new field and downgrades by dropping it, recording the drop as a
+-- Loss only when the field held a non-default value.
+type V0 = V0(Int) deriving (Eq, Show, Serialize, Arbitrary)
+
+type V1 = V1(Int, Int) deriving (Eq, Show, Serialize, Arbitrary)
+
+type V2 = V2(Int, Int, Int) deriving (Eq, Show, Serialize, Arbitrary)
+
+let qty_default : Int = 0
+
+let tif_default : Int = 0
+
+fn up01(o : V0) : V1 =
+  match o of
+    V0(a) => V1(a, qty_default)
+
+fn down10(o : V1) : (V0, Loss) =
+  match o of
+    V1(a, b) => (V0(a), if b == qty_default then no_loss else dropped(["qty"]))
+
+fn up12(o : V1) : V2 =
+  match o of
+    V1(a, b) => V2(a, b, tif_default)
+
+fn down21(o : V2) : (V1, Loss) =
+  match o of
+    V2(a, b, c) =>
+      (V1(a, b), if c == tif_default then no_loss else dropped(["tif"]))
+
+-- Upgrade after downgrade is the identity on the safe subset (a lossless
+-- downgrade), for one adjacent step.
+fn ladder_adjacent(o : V2) : Bool =
+  match down21(o) of
+    (lo, l) =>
+      if lossless(l) then
+        up12(lo) == o
+      else
+        true
+
+-- The same law across a composed two-rung span: the composed converters are
+-- exactly the adjacent ones chained, never a bespoke direct converter.
+fn up02(o : V0) : V2 = compose_upgrade(up01, up12)(o)
+
+fn down20(o : V2) : (V0, Loss) = compose_downgrade(down21, down10)(o)
+
+fn ladder_composed(o : V2) : Bool =
+  match down20(o) of
+    (lo, l) =>
+      if lossless(l) then
+        up02(lo) == o
+      else
+        true
+
+-- The envelope roundtrips a value under its contract digest, rejects a frame
+-- opened under a different digest, and rejects a frame with a byte appended after
+-- the body. All three go through Fail, discharged here to a Bool.
+let good_digest : String = "1c0ffee"
+
+let wrong_digest : String = "0ddba11"
+
+fn dec_shape_at(bs : Bytes, dig : String) : Shape = wire_decode_value(bs, dig)
+
+fn envelope_ok(x : Shape) : Bool =
+  caught(false) fn
+    dec_shape_at(wire_encode_value(good_digest, x), good_digest) == x
+
+-- The `&& false` forces the decode: if the frame is (wrongly) accepted the thunk
+-- yields false, but a correct reject aborts through Fail and `caught` returns its
+-- true default. So a true result means the frame was rejected as it should be.
+fn envelope_wrong_digest(x : Shape) : Bool =
+  caught(true) fn
+    dec_shape_at(wire_encode_value(good_digest, x), wrong_digest) == x && false
+
+fn envelope_trailing(x : Shape) : Bool =
+  caught(true) fn
+    dec_shape_at(wire_cat(wire_encode_value(good_digest, x), wire_tag(0)), good_digest) == x && false
+
+fn envelope_law(x : Shape) : Bool =
+  envelope_ok(x) && envelope_wrong_digest(x) && envelope_trailing(x)
+
+-- Fold a drawn Int into a byte value, and a generator of arbitrary byte strings
+-- to fuzz the decoder with.
+fn to_byte(x : Int) : Int =
+  let m = mod(x, 256)
+  if m < 0 then
+    m + 256
+  else
+    m
+
+let gen_byte : Gen(Int) = gen_map(to_byte, gen_int)
+
+let gen_bytes : Gen(Bytes) = gen_map(\(xs) -> Bytes(xs), gen_list(gen_byte))
+
+-- Decode a hostile byte string as a Tree, discharging Fail. The property is that
+-- this always terminates with a Bool, never hangs or panics; the value is
+-- irrelevant, so the property is trivially true and the run finishing is the test.
+fn decode_tree(bs : Bytes) : (Tree, Bytes) = decode(bs)
+
+fn try_tree(bs : Bytes) : Bool =
+  match decode_tree(bs) of
+    (_v, _r) => true
+
+fn hostile(bs : Bytes) : Bool =
+  let _ok = caught(false, \() -> try_tree(bs))
+  true
+
+fn report(name : String, o : Outcome(a)) =
+  println(concat(name, if passed(o) then ": OK" else ": FAILED"))
+
+fn body() =
+  report("roundtrip product", quickcheck(arb_gen(), rt_point))
+  report("roundtrip sum", quickcheck(arb_gen(), rt_shape))
+  report("roundtrip recursive", quickcheck(arb_gen(), rt_tree))
+  report("ladder adjacent", quickcheck(arb_gen(), ladder_adjacent))
+  report("ladder composed", quickcheck(arb_gen(), ladder_composed))
+  report("envelope digest+trailing", quickcheck(arb_gen(), envelope_law))
+  report("hostile decode terminates", quickcheck(gen_bytes, hostile))
+
+fn main() = default(body, ())

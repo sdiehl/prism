@@ -1,4 +1,4 @@
--- | Operations over `Result(a, e)` (`Ok(a)` / `Err(e)`).
+-- | Operations over `Result`.
 --
 -- The type is wired in; the prelude opens this module, so these are in
 -- unqualified scope everywhere.

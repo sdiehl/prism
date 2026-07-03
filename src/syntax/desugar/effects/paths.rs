@@ -426,7 +426,7 @@ fn to_list(
             let lam = lam1(&e, body, synth_span(cx));
             // concat_map(\e -> <foci of e>, focus)
             Ok(call(
-                evar("concat_map", synth_span(cx)),
+                evar(names::CONCAT_MAP_FN, synth_span(cx)),
                 vec![lam, focus],
                 synth_span(cx),
             ))
@@ -533,7 +533,7 @@ fn to_list_case(
 
 fn fmap_call(f: S<Expr>, container: S<Expr>, cx: &mut Cx) -> S<Expr> {
     call(
-        evar("fmap", synth_span(cx)),
+        evar(names::FMAP_METHOD, synth_span(cx)),
         vec![f, container],
         synth_span(cx),
     )
