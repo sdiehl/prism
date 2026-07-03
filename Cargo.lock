@@ -827,6 +827,7 @@ dependencies = [
  "marginalia",
  "num-bigint",
  "offsides",
+ "rustix",
  "rustyline",
  "serde_json",
  "thiserror",

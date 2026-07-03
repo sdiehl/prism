@@ -16,11 +16,19 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PRISM="${PRISM:-../target/debug/prism}"
 
-# The fixtures with a kernel certificate in Certificates.lean. The whole 23-file
-# corpus is checked live against the model by diff_against_rust.sh; only these
-# carry a committed dump, because only these are referenced by name.
-CERT_FIXTURES=(inc mul vec tup ite)
+# The fixtures with a kernel certificate in Certificates.lean. The whole corpus
+# is checked live against the model by diff_against_rust.sh; only these carry a
+# committed dump, because only these are referenced by name. Beyond the pure
+# core (inc/mul/vec/tup/ite), the effect fragment is certified too: fact
+# (recursion), ask (single-resume handler), multishot (resumed twice), abort
+# (handler that discards the continuation).
+CERT_FIXTURES=(inc mul vec tup ite fact ask multishot abort)
 
+# `dump core-json` pretty-prints itself (src/core/json.rs), so the committed
+# dumps are readable rather than one long line, with no external formatter to
+# install in CI. `models/fixtures/*.json` is excluded from dprint (see
+# dprint.json) so the formatter does not rewrite this shape and fight the drift
+# check.
 for name in "${CERT_FIXTURES[@]}"; do
   "$PRISM" dump core-json "fixtures/$name.pr" > "fixtures/$name.json"
 done

@@ -30,6 +30,11 @@ thiserror = "2.0"
 toml = { version = "1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
+# Unix advisory file locking (`flock`) for the on-disk store index. Only pulled
+# for unix targets; the wasm build has no filesystem and uses a no-op fallback.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [build-dependencies]
 cc = "1"
 lalrpop = "0.23"

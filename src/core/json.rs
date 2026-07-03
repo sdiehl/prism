@@ -9,7 +9,7 @@
 //! the Lean side maps the ones it models to their erased forms and rejects the
 //! rest, so only the pure + effects fragment round-trips.
 
-use serde_json::{json, Map, Value as J};
+use serde_json::{json, to_string_pretty, Map, Value as J};
 
 use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
 use crate::sym::Sym;
@@ -171,7 +171,12 @@ fn core_fn(f: &CoreFn) -> J {
 }
 
 /// Serialize a whole core program to the Lean-readable JSON schema.
+///
+/// Pretty printed (the Lean decoder's `Json.parse` skips whitespace) so the
+/// committed `models/fixtures/*.json` dumps are readable rather than one long
+/// line.
 #[must_use]
 pub fn core_to_json(core: &Core) -> String {
-    json!({"fns": J::Array(core.fns.iter().map(core_fn).collect())}).to_string()
+    let doc = json!({"fns": J::Array(core.fns.iter().map(core_fn).collect())});
+    to_string_pretty(&doc).unwrap_or_default()
 }

@@ -820,7 +820,9 @@ The model's central theorem connects the two. A big-step natural semantics speci
 
 Determinism, progress, and effect-safety therefore rest on `propext` and `Quot.sound` alone, with `Classical.choice` confined to the float-formatting path.
 
-The full stack of trust, top to bottom: the pseudocode traditionally known as mathematics, then the code that actually _is_ mathematics (the Lean 4 kernel), then a hand-written Core-JSON-Lean mangler, and finally the most non-trivial subset of my pile of shit code that I could be bothered to verify. Maybe more someday, but I'm tired, so probably not. So Prism depends on the axiom of choice and some JSON mangling and a prayer, but I guess that's better than nothing.
+The full stack of trust, top to bottom: the pseudocode traditionally known as mathematics, then the code that actually _is_ mathematics (the Lean 4 kernel), then a hand-written Core-JSON-Lean mangler, and finally the most non-trivial subset of my pile of shit code that I could be bothered to verify. Maybe more someday, but I'm tired, so probably not. So Prism depends on the axiom of choice and some JSON mangling, the correctness of the Lean 4 kernel and a prayer, but I guess that's better than nothing.
+
+Maybe one day I'll do a full mechanization of the typechecker algorithm, but that is going to be highly non-trivial, so probably not.
 
 ### 13.2 The Model as a Differential Oracle {#the-model-as-a-differential-oracle}
 

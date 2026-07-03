@@ -185,6 +185,45 @@ pub fn corpus() -> Vec<PathBuf> {
         .collect()
 }
 
+/// Env var naming how many CI shards the corpus is split across; unset or `<= 1`
+/// runs the whole corpus. Paired with [`SHARD_INDEX_ENV`].
+const SHARD_TOTAL_ENV: &str = "PRISM_SHARD_TOTAL";
+/// Env var naming this shard's 0-based index (`0 <= index < total`).
+const SHARD_INDEX_ENV: &str = "PRISM_SHARD_INDEX";
+
+/// Partition a sorted corpus for CI sharding: with `PRISM_SHARD_TOTAL=n` (n > 1)
+/// set, keep only the cases whose position mod n equals `PRISM_SHARD_INDEX`, so n
+/// parallel CI jobs cover the corpus between them. Unset or `n <= 1` returns the
+/// list unchanged, so local runs and the tier oracle are unaffected. The corpus is
+/// already sorted, so the partition is identical on every machine.
+pub fn shard(cases: Vec<PathBuf>) -> Vec<PathBuf> {
+    let total = env::var(SHARD_TOTAL_ENV)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+    if total <= 1 {
+        return cases;
+    }
+    let index = env::var(SHARD_INDEX_ENV)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
+    shard_by(cases, total, index)
+}
+
+/// The pure index-mod-total split behind [`shard`]: keep the cases at positions
+/// `p` with `p % total == index % total`. Over `index in 0..total` the results are
+/// disjoint and cover every case exactly once.
+pub fn shard_by(cases: Vec<PathBuf>, total: usize, index: usize) -> Vec<PathBuf> {
+    let index = index % total;
+    cases
+        .into_iter()
+        .enumerate()
+        .filter(move |(i, _)| i % total == index)
+        .map(|(_, p)| p)
+        .collect()
+}
+
 /// The committed programs that drop out of `corpus()`, as their `dir/name.pr`
 /// labels. Compared against `CORPUS_SKIPS` to catch silent corpus shrinkage.
 pub fn corpus_drops() -> Vec<String> {

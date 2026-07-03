@@ -39,18 +39,10 @@ clippy:
 
 # --- fast inner loop: filtered output, exit codes preserved ---
 
-# Full test suite; print only summaries, failures, and compile errors.
+# Full test suite via nextest (failures-only), then doctests (nextest skips them).
 t:
-    #!/usr/bin/env bash
-    set -eo pipefail
-    # cargo-nextest when present (faster, more parallel, failures-only output),
-    # else cargo test. nextest does not run Rust doctests, so run those too.
-    if command -v cargo-nextest >/dev/null; then
-        cargo nextest run --all --status-level fail
-    else
-        cargo test --all 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked|warning:"
-    fi
-    cargo test --doc 2>&1 | grep -E "test result:|FAILED|error\[|error:|panicked"
+    cargo nextest run --all --status-level fail
+    cargo test --doc
 
 # Run one test target or filter, filtered the same way. e.g. `just t1 fmt_records`
 t1 FILTER:
@@ -205,19 +197,6 @@ tier-accept:
 bless PATH=".":
     cargo run -- docs {{PATH}} --test --accept
 
-# Capture the determinism-scrubber GIF. The front-page loop is: let the
-# swarm play a few seconds, then grab the timeline thumb and drag it slowly left
-# then right twice, so the flock rewinds and replays. Recorded silently, that
-# reads as scrubbing a running program like video.
-#
-#   just scrub                       # serve the page, opens /scrubber.html
-#   # then, with any screen recorder scoped to the canvas + timeline:
-#   #   1. press Play, watch ~3s of flocking
-#   #   2. press Pause, drag the thumb fully left (rewind), then fully right
-#   #   3. repeat the drag once more; stop the recording at ~5s
-#   # crop to the stage, export a looping GIF (e.g. gifski --fps 24 --width 640)
-#
-# The motion is a pure function of the step index, so the capture is
-# reproducible frame-for-frame: the same drag always yields the same GIF.
+# Serve the determinism-scrubber page (opens /scrubber.html).
 scrub: wasm
     cd web && pnpm install && pnpm gen-examples && pnpm exec vite --open /scrubber.html

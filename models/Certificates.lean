@@ -1,49 +1,80 @@
 import CEK
 
 /-
-Differential certificates (the non-probabilistic, kernel-checked half of the
-oracle). For each curated program, a `:= rfl` theorem proves that the
-formally-verified CEK model (`CEK.lean`) evaluates it to *exactly* the value the
-LIVE Rust interpreter produced -- the `=> ...` printed by `prism run` on the
-matching `models/fixtures/<name>.pr` (see `diff_against_rust.sh`). Each program
-here encodes the identical core IR as `models/fixtures/<name>.json`, so the same
-case is checked three ways: kernel proof (here), the runtime Lean oracle, and the
-runtime Rust interpreter.
+Differential certificates: the kernel-checked half of the oracle. For each
+curated program a `:= rfl` theorem proves the verified CEK model (`CEK.lean`)
+evaluates it to exactly the value the live Rust interpreter printed for the
+matching `models/fixtures/<name>.pr`, so every case is pinned three ways -- this
+kernel proof, the runtime Lean oracle, and the Rust interpreter
+(`diff_against_rust.sh`). The term below is the erased essence of each fixture;
+its full `prism dump core-json` is committed as `models/fixtures/<name>.json`.
 
-The `rfl` is a Lean *kernel* certificate -- no `native_decide`, no extra axioms --
-so a passing build is a machine-checked proof that the proven model agrees with
-the recorded oracle output on every program below.
-
-The core term here is the *erased essence* of the fixture (prelude stripped, one
-`CoreFn`); the committed `models/fixtures/<name>.json` is the FULL
-`prism dump core-json` of the same `.pr` (prelude included, ~320 fns), regenerated
-by `models/gen_fixtures.sh` (`just fixtures`) and drift-checked in the Lean CI
-job. Agreement on that full core (the model run over the exact bytes the
-compiler emits) is what `diff_against_rust.sh` checks at runtime; the `rfl`
-below is the kernel half over the essence.
+This is the load-bearing module. A passing `rfl` is a Lean *kernel* certificate
+(no `native_decide`, no extra axioms) that the proven model and the compiler
+agree on every program below. If it ever fails to compile, that is the rare red
+build that is a mathematical event rather than a typo.
 -/
 namespace Prism.Cert
 
-def incΓ : Core := ⟨[⟨"inc", ["n"], .prim .add (.var "n") (.int 1)⟩]⟩
-
+-- Programs, as the erased essence of each fixture. `Γ0` is the empty function
+-- environment, for the cases whose whole body is inlined into the query.
 def Γ0 : Core := ⟨[]⟩
 
--- prism run fixtures/inc.pr  =>  42
-theorem inc : run 100 incΓ (load (.call "inc" [.int 41])) = (.ret (.int 42), []) := rfl
+def incΓ : Core := ⟨[⟨"inc", ["n"], .prim .add (.var "n") (.int 1)⟩]⟩
 
--- prism run fixtures/mul.pr  =>  42
-theorem mul : run 100 Γ0 (load (.prim .mul (.int 6) (.int 7))) = (.ret (.int 42), []) := rfl
+def factΓ : Core := ⟨[⟨"fact", ["n"],
+  .bind (.prim .le (.var "n") (.int 1)) "c"
+    (.ite (.var "c")
+      (.ret (.int 1))
+      (.bind (.prim .sub (.var "n") (.int 1)) "m"
+        (.bind (.call "fact" [.var "m"]) "r"
+          (.prim .mul (.var "n") (.var "r")))))⟩]⟩
 
--- prism run fixtures/vec.pr  =>  Vec2(9, 4)
-theorem vec : run 100 Γ0 (load (.case (.ctor "Vec2" 0 [.int 3, .int 4]) [(.ctor "Vec2" [.var "x", .var "y"], .ret (.ctor "Vec2" 0 [.int 9, .var "y"]))])) = (.ret (.data "Vec2" 0 [.int 9, .int 4]), []) :=
-  rfl
+def askBody : Comp :=
+  .handle
+    (.bind (.doOp "ask" [.unit]) "x" (.prim .add (.var "x") (.int 1)))
+    (some "x") (some (.ret (.var "x")))
+    [.mk "ask" ["u"] "k" (.app (.ret (.var "k")) [.int 5])]
 
--- prism run fixtures/tup.pr  =>  (1, 2)
-theorem tup : run 100 Γ0 (load (.ret (.tuple [.int 1, .int 2]))) = (.ret (.tuple [.int 1, .int 2]), []) :=
-  rfl
+def multishotBody : Comp :=
+  .handle
+    (.bind (.doOp "coin" [.unit]) "x" (.ite (.var "x") (.ret (.int 1)) (.ret (.int 0))))
+    (some "r") (some (.ret (.var "r")))
+    [.mk "coin" ["u"] "k"
+      (.bind (.app (.ret (.var "k")) [.bool true]) "a"
+        (.bind (.app (.ret (.var "k")) [.bool false]) "b"
+          (.prim .add (.var "a") (.var "b"))))]
 
--- prism run fixtures/ite.pr  =>  1
-theorem ite : run 100 Γ0 (load (.ite (.bool true) (.ret (.int 1)) (.ret (.int 2)))) = (.ret (.int 1), []) :=
-  rfl
+def abortBody : Comp :=
+  .handle
+    (.bind (.doOp "abort" [.int 99]) "x" (.prim .add (.var "x") (.int 1)))
+    (some "r") (some (.ret (.var "r")))
+    [.mk "abort" ["code"] "k" (.ret (.var "code"))]
+
+-- Expected outputs: exactly the value `prism run fixtures/<name>.pr` printed.
+def output_inc : Conf := (.ret (.int 42), [])
+def output_mul : Conf := (.ret (.int 42), [])
+def output_vec : Conf := (.ret (.data "Vec2" 0 [.int 9, .int 4]), [])
+def output_tup : Conf := (.ret (.tuple [.int 1, .int 2]), [])
+def output_ite : Conf := (.ret (.int 1), [])
+def output_fact : Conf := (.ret (.int 720), [])
+def output_ask : Conf := (.ret (.int 6), [])
+def output_multishot : Conf := (.ret (.int 1), [])
+def output_abort : Conf := (.ret (.int 99), [])
+
+-- Pure core: arithmetic, a called function, constructor + case, tuples, if.
+theorem inc : run 100 incΓ (load (.call "inc" [.int 41])) = output_inc := rfl
+theorem mul : run 100 Γ0 (load (.prim .mul (.int 6) (.int 7))) = output_mul := rfl
+theorem vec : run 100 Γ0 (load (.case (.ctor "Vec2" 0 [.int 3, .int 4])
+  [(.ctor "Vec2" [.var "x", .var "y"], .ret (.ctor "Vec2" 0 [.int 9, .var "y"]))])) = output_vec := rfl
+theorem tup : run 100 Γ0 (load (.ret (.tuple [.int 1, .int 2]))) = output_tup := rfl
+theorem ite : run 100 Γ0 (load (.ite (.bool true) (.ret (.int 1)) (.ret (.int 2)))) = output_ite := rfl
+
+-- Effect fragment: self-recursion, and handlers that resume once (ask), twice
+-- (multishot), or discard the continuation entirely (abort).
+theorem fact : run 500 factΓ (load (.call "fact" [.int 6])) = output_fact := rfl
+theorem ask : run 500 Γ0 (load askBody) = output_ask := rfl
+theorem multishot : run 500 Γ0 (load multishotBody) = output_multishot := rfl
+theorem abort : run 500 Γ0 (load abortBody) = output_abort := rfl
 
 end Prism.Cert

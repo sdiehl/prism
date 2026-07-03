@@ -19,7 +19,7 @@
 
 use std::collections::BTreeSet;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
@@ -30,8 +30,14 @@ mod common;
 use common::have;
 use common::{
     check_native_parity, corpus, corpus_drops, interpreted, leak_free, parallel_check, require_cc,
-    source, CORPUS_SKIPS,
+    shard, shard_by, source, CORPUS_SKIPS,
 };
+
+// When the corpus oracle is delegated to the sharded `parity` CI matrix, the
+// umbrella `cargo test --all` run sets this so it does not also run the whole
+// corpus serially in the main job. Unset (a normal local `cargo test`, and the
+// sanitizer re-runs) runs the full corpus.
+const CORPUS_SHARDED_ENV: &str = "PRISM_CORPUS_SHARDED";
 
 // Build and diff the whole corpus across cores, collecting every failure so one
 // run reports all divergences rather than aborting at the first. The build/run/
@@ -39,7 +45,7 @@ use common::{
 // oracle (`tests/tier_parity.rs`). Corpus shrinkage is guarded separately by
 // `corpus_skip_list_is_exact`, not a percentage floor.
 fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync) {
-    let cases = corpus();
+    let cases = shard(corpus());
     let fails = parallel_check(&cases, |case| check_native_parity(case, tag, &build));
     assert!(
         fails.is_empty(),
@@ -82,8 +88,36 @@ fn corpus_skip_list_is_exact() {
 
 #[test]
 fn native_matches_interpreter() {
+    // The umbrella `cargo test --all` delegates the full corpus to the sharded
+    // `parity` CI matrix; a local run (env unset) exercises the whole corpus here.
+    if env::var_os(CORPUS_SHARDED_ENV).is_some() {
+        return;
+    }
     require_cc();
     run_corpus("llvm", prism::build);
+}
+
+// The shards must tile the corpus: disjoint and covering every case exactly once,
+// so the sharded `parity` CI matrix loses no coverage. `SHARDS` must match the
+// matrix length in ci.yml.
+#[test]
+fn shards_tile_the_corpus() {
+    const SHARDS: usize = 4;
+    // A count not divisible by SHARDS, so uneven tails are exercised.
+    let full: Vec<PathBuf> = (0..37)
+        .map(|i| PathBuf::from(format!("case{i}.pr")))
+        .collect();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for k in 0..SHARDS {
+        for p in shard_by(full.clone(), SHARDS, k) {
+            assert!(seen.insert(p), "a case landed in two shards");
+        }
+    }
+    assert_eq!(
+        seen.len(),
+        full.len(),
+        "shards must cover every case exactly once"
+    );
 }
 
 #[cfg(feature = "mlir")]

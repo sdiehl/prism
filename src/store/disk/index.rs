@@ -31,12 +31,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+use rustix::fs::{flock, FlockOperation};
 
 use super::{atomic_write, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
 
@@ -47,21 +45,6 @@ const CANONICAL_FILE: &str = "canonical";
 const NAMES_HEADER: &str = "prism-store-names\tv1";
 const DEPS_HEADER: &str = "prism-store-deps\tv1";
 const CANONICAL_HEADER: &str = "prism-store-canonical\tv1";
-
-// Lock acquisition: how long to wait for a peer writer before presuming its lock
-// is stale (left by a killed process) and stealing it. Generous relative to a
-// read-modify-write of a flat file, so a live peer is never stolen from.
-const LOCK_POLL: Duration = Duration::from_millis(5);
-const LOCK_TRIES: u32 = 200;
-
-// How many poll-then-steal rounds acquisition attempts before giving up. A held
-// lock is released within one read-modify-write, so contention clears in well
-// under a round; the extra rounds only guard against a pathological stall.
-const STEAL_ROUNDS: u32 = 8;
-
-// A per-process monotonic counter, so two threads in one process that contend
-// for the lock still stamp distinct owner tokens.
-static LOCK_NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// A `(class, type-head)` pair identifying a canonical instance binding. This is
 /// the on-disk key shape; coherence enforcement owns the semantics.
@@ -77,90 +60,42 @@ fn index_dir(root: &Path) -> PathBuf {
     root.join(INDEX_DIR)
 }
 
-// The advisory lock. `create_new` gives O_EXCL semantics; a peer's live lock
-// blocks us until it releases, and a stale lock (writer killed mid-update) is
-// stolen once the wait elapses so a crash can never deadlock the store. Each
-// holder stamps the file with a unique owner token so a stealer and `Drop` only
-// ever remove a lock they still own, never one a peer has since taken.
+// The advisory lock serializing index writers: an exclusive `flock` on the lock
+// file. A second writer -- in this process or another -- blocks in `acquire`
+// until the holder releases, and the kernel drops the lock when the holder's
+// file handle closes, including on a crash, so a killed writer never leaves a
+// stale lock to deadlock or race a steal against. Readers do not lock (see the
+// module header). Holding the open handle is holding the lock; `Drop` (closing
+// the file) releases it.
 struct Lock {
-    path: PathBuf,
-    token: String,
-}
-
-// A unique owner stamp: this process's id, a nanosecond timestamp, and a
-// per-process counter, distinct across every acquisition even within one process.
-fn owner_token() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let n = LOCK_NONCE.fetch_add(1, Ordering::Relaxed);
-    format!("{}-{nanos}-{n}", process::id())
+    _file: fs::File,
 }
 
 impl Lock {
     fn acquire(root: &Path) -> io::Result<Self> {
         let dir = index_dir(root);
         fs::create_dir_all(&dir)?;
-        let path = dir.join(LOCK_FILE);
-        let token = owner_token();
-        for _ in 0..STEAL_ROUNDS {
-            for _ in 0..LOCK_TRIES {
-                match Self::create_stamped(&path, &token) {
-                    Ok(()) => return Ok(Self { path, token }),
-                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => sleep(LOCK_POLL),
-                    Err(e) => return Err(e),
-                }
-            }
-            // The holder never yielded across a full poll window, so presume it
-            // died mid-update (a live writer releases within one read-modify-write)
-            // and steal. Remove the lock only while it still carries the stamp we
-            // timed out against, so a peer that already stole and now holds is not
-            // wiped; then race to recreate under O_EXCL. Exactly one stealer's
-            // `create_new` wins and holds -- a loser sees `AlreadyExists` and
-            // rejoins the poll rather than proceeding as a second holder (the
-            // lost update this closes). A sub-poll TOCTOU between the stamp check
-            // and the remove stays possible, but the ownership-checked `Drop`
-            // still prevents any cross-deletion, and the index is a rebuildable
-            // cache.
-            let stale = fs::read_to_string(&path).ok();
-            if stale.is_some() && fs::read_to_string(&path).ok() == stale {
-                let _ = fs::remove_file(&path);
-            }
-            match Self::create_stamped(&path, &token) {
-                Ok(()) => return Ok(Self { path, token }),
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => sleep(LOCK_POLL),
-                Err(e) => return Err(e),
-            }
-        }
-        Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "index lock is contended",
-        ))
-    }
-
-    // Create the lock file exclusively (O_EXCL) and stamp our owner token into it.
-    fn create_stamped(path: &Path, token: &str) -> io::Result<()> {
-        fs::OpenOptions::new()
+        let file = fs::OpenOptions::new()
+            .create(true)
             .write(true)
-            .create_new(true)
-            .open(path)?
-            .write_all(token.as_bytes())
-    }
-
-    // Whether the lock file still carries our stamp: true only while we hold it.
-    fn owned(&self) -> bool {
-        fs::read_to_string(&self.path).is_ok_and(|s| s == self.token)
+            .truncate(false)
+            .open(dir.join(LOCK_FILE))?;
+        lock_exclusive(&file)?;
+        Ok(Self { _file: file })
     }
 }
 
-impl Drop for Lock {
-    fn drop(&mut self) {
-        // Release only a lock we still own. If a peer presumed us dead and stole
-        // it, the file carries a different stamp and is left for its new holder.
-        if self.owned() {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+// Take the exclusive advisory lock, blocking until no other handle holds it. On
+// non-unix targets (the wasm build has neither real threads nor a filesystem)
+// this degrades to a no-op: acquisition succeeds without mutual exclusion.
+#[cfg(unix)]
+fn lock_exclusive(file: &fs::File) -> io::Result<()> {
+    flock(file, FlockOperation::LockExclusive).map_err(io::Error::from)
+}
+
+#[cfg(not(unix))]
+fn lock_exclusive(_file: &fs::File) -> io::Result<()> {
+    Ok(())
 }
 
 // Read a line-oriented index file, skipping the header, returning the data
@@ -292,8 +227,12 @@ pub(super) fn canonical(root: &Path, key: &CanonicalKey) -> io::Result<Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;
+
+    // A per-process counter so concurrent tests never collide on a temp dir.
+    static NONCE: AtomicU64 = AtomicU64::new(0);
 
     struct TempDir {
         path: PathBuf,
@@ -302,7 +241,8 @@ mod tests {
     impl TempDir {
         fn new(tag: &str) -> Self {
             let mut path = std::env::temp_dir();
-            path.push(format!("prism-index-{tag}-{}", owner_token()));
+            let n = NONCE.fetch_add(1, Ordering::Relaxed);
+            path.push(format!("prism-index-{tag}-{}-{n}", std::process::id()));
             fs::create_dir_all(&path).unwrap();
             Self { path }
         }
@@ -314,31 +254,24 @@ mod tests {
         }
     }
 
-    // A stealer must win the lock outright: it removes the presumed-stale file
-    // and holds under its own stamp.
+    // A lock file a dead writer left behind holds no kernel lock, so a new writer
+    // acquires immediately rather than deadlocking, and re-acquires after release:
+    // the crash-safety the advisory `flock` buys over a hand-rolled steal.
     #[test]
-    fn steal_reacquires_a_stale_lock() {
-        let tmp = TempDir::new("steal");
+    fn stale_lock_file_does_not_block() {
+        let tmp = TempDir::new("stale");
         let root = &tmp.path;
         fs::create_dir_all(index_dir(root)).unwrap();
         fs::write(index_dir(root).join(LOCK_FILE), b"dead-writer").unwrap();
 
-        let lock = Lock::acquire(root).expect("steals the stale lock");
-        assert!(
-            lock.owned(),
-            "holder must carry its own stamp after a steal"
-        );
-        drop(lock);
-        assert!(
-            !index_dir(root).join(LOCK_FILE).exists(),
-            "an owned lock is released on drop"
-        );
+        drop(Lock::acquire(root).expect("a leftover lock file must not block"));
+        drop(Lock::acquire(root).expect("re-acquires after release"));
     }
 
     // Two writers contending over an index whose lock a dead writer left behind
-    // must serialize through the steal, not both take it and clobber: both
-    // bindings have to survive. Pre-fix, the loser also "held" and the later
-    // whole-file rewrite dropped the winner's entry.
+    // must serialize, not both proceed and clobber: both bindings have to survive.
+    // Pre-fix, a racy lock-steal let both "hold" and the later whole-file rewrite
+    // dropped the winner's entry.
     #[test]
     fn contended_writers_keep_both_updates() {
         let tmp = TempDir::new("contend");

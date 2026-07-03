@@ -61,6 +61,12 @@ jobs:
         with:
           packages: clang-tidy-22
 
+      # cargo-nextest runs every test binary's tests in one global scheduler, so
+      # the many small suites fill cores continuously instead of queueing binary
+      # after binary. It skips Rust doctests, which are run separately below.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -101,12 +107,21 @@ jobs:
             echo "stub markers found (see above)"; exit 1
           fi
 
-      # Runs the whole suite, including the parity/leak gate (parity.rs) and the
-      # runtime performance ratchet (perf_gate.rs): evidence-passing/stream fusion
-      # must allocate zero free-monad cells and FBIP reuse must fire at runtime,
-      # regressions parity alone cannot see (identical output, zero leaks).
+      # Runs the whole suite, including the runtime performance ratchet
+      # (perf_gate.rs): evidence-passing/stream fusion must allocate zero
+      # free-monad cells and FBIP reuse must fire at runtime, regressions parity
+      # alone cannot see (identical output, zero leaks). The heavy native-parity
+      # corpus is delegated to the sharded `parity` job below (PRISM_CORPUS_SHARDED),
+      # so it is not also run serially here; the sanitizer re-runs still cover it.
       - name: Run tests
-        run: cargo test --all
+        env:
+          PRISM_CORPUS_SHARDED: "1"
+        run: cargo nextest run --workspace
+
+      # nextest does not run Rust doctests (the `--test` in `-- | ... --test`
+      # doc examples and rustdoc code blocks); cover them with a plain run.
+      - name: Run doctests
+        run: cargo test --doc
 
       # Re-run the native parity corpus with the C runtime built under ASan +
       # UBSan, so runtime undefined behavior (e.g. a signed left-shift on a
@@ -178,6 +193,20 @@ jobs:
 
       - name: Build wasm bundle
         run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+
+      # The whole Prism compiler, gzipped, must still fit on a 1.44 MB floppy
+      # disk. A real binary-size ratchet wearing a joke: if this ever fails,
+      # Prism has outgrown 1998 and someone shipped a megabyte without noticing.
+      - name: Fits on a floppy disk
+        run: |
+          FLOPPY=1474560  # bytes on a 3.5" HD floppy (1.44 "MB" = 1440 * 1024)
+          GZ=$(gzip -9 -c web/pkg/prism_bg.wasm | wc -c | tr -d ' ')
+          echo "gzipped wasm: $GZ B / floppy: $FLOPPY B"
+          if [ "$GZ" -gt "$FLOPPY" ]; then
+            echo "::error::Prism no longer fits on a floppy: gzipped wasm is $GZ B, a floppy holds $FLOPPY B ($((GZ - FLOPPY)) B over)."
+            exit 1
+          fi
+          echo "Fits with $((FLOPPY - GZ)) B to spare. Eject safely."
 
       - uses: pnpm/action-setup@v6
         with:
@@ -297,3 +326,73 @@ jobs:
           PRISM_CC: /usr/lib/llvm-22/bin/clang
           PRISM_GATE_CACHE: "1"
           PRISM_GATE_FINGERPRINT: source
+
+  # The heavy native-parity corpus, split across N shards that run in parallel so
+  # wall-clock is corpus/N rather than the whole thing serially in the Test job
+  # (which delegates it here via PRISM_CORPUS_SHARDED). Each shard runs the sorted
+  # corpus's cases at positions (mod N) == shard; together they cover every case.
+  parity:
+    name: Native parity (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_GATE_CACHE: "1"
+      PRISM_GATE_FINGERPRINT: source
+      PRISM_SHARD_TOTAL: "4"
+      PRISM_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # Per-shard gate-verdict cache: each shard owns a distinct key so the four
+      # runs do not overwrite each other's snapshots.
+      - name: Cache gate verdicts
+        uses: actions/cache@v4
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-parity-${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-parity-${{ matrix.shard }}-${{ runner.os }}-
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      - name: Native parity (shard ${{ matrix.shard }} of 4)
+        run: cargo test --test parity native_matches_interpreter
+
+  nix:
+    name: Nix dev shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Lock flake inputs
+        run: nix flake lock
+
+      - name: Build dev shell
+        run: nix develop --command bash -c "rustc --version && clang --version && just --version"
+
+      # Uploaded even if the build step fails, so the resolved lockfile is always
+      # retrievable from the run.
+      - name: Upload flake.lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
