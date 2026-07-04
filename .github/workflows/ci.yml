@@ -394,7 +394,7 @@ jobs:
       # anything newly built. A cache miss or Cachix outage only makes this job
       # slower (falls back to cache.nixos.org + local build), never wrong.
       - name: Cachix
-        uses: cachix/cachix-action@v15
+        uses: cachix/cachix-action@v17
         with:
           name: prism-lang
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
