@@ -228,6 +228,15 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # merge-multiple keeps each artifact's internal layout, so the Linux
+      # packages (uploaded from dist/) arrive nested at dist/dist/. Flatten
+      # everything into dist/ so the release globs and the checksum manifest see it.
+      - name: Flatten artifacts into dist/
+        run: |
+          find dist -mindepth 2 -type f -exec mv -f -t dist {} +
+          find dist -mindepth 1 -type d -empty -delete
+          ls -1 dist
+
       - name: Checksums and release Merkle root
         run: ./scripts/release-hashes.sh dist
 
