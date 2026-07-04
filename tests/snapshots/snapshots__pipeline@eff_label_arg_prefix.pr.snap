@@ -1,0 +1,162 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/eff_label_arg_prefix.pr
+---
+== tokens ==
+VOpen Effect UIdent("Tag") LParen Ident("a") RParen VOpen Ctl Ident("put") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("wants_int") LParen Ident("s") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Tag") LParen KwInt RParen Bar Ident("e") RBrace RParen Colon KwInt Eq Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("wants_int") LParen Lambda LParen Ident("_u") RParen Arrow Ident("put") LParen StringLit("hi") RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Tag",
+            params: [
+                "a",
+            ],
+            ops: [
+                EffOp {
+                    name: "put",
+                    params: [
+                        Var(
+                            "a",
+                        ),
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 453..486,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "wants_int",
+            params: [
+                Param {
+                    name: "s",
+                    ty: Some(
+                        Fun(
+                            [
+                                Unit,
+                            ],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "Tag",
+                                        args: [
+                                            Int,
+                                        ],
+                                    },
+                                ],
+                                Some(
+                                    "e",
+                                ),
+                            ),
+                            Unit,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 1,
+                        suffix: None,
+                    },
+                ),
+                span: 546..547,
+            },
+            wheres: [],
+            span: 488..547,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 561..568,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "wants_int",
+                                    ),
+                                    span: 569..578,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "_u",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "put",
+                                                        ),
+                                                        span: 588..591,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Str(
+                                                                "hi",
+                                                            ),
+                                                            span: 592..596,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 588..597,
+                                            },
+                                        ),
+                                        span: 579..597,
+                                    },
+                                ],
+                            ),
+                            span: 569..598,
+                        },
+                    ],
+                ),
+                span: 561..599,
+            },
+            wheres: [],
+            span: 549..599,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: type mismatch: expected Int, got String
+    ╭─[ <source>:12:44 ]
+    │
+ 12 │ fn main() = println(wants_int(\(_u) -> put("hi")))
+    │                                            ──┬─  
+    │                                              ╰─── in `main`: type mismatch: expected Int, got String
+────╯
