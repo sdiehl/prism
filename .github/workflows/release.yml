@@ -342,7 +342,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         # Don't upload the buildx build-record (.dockerbuild) artifact: the publish
         # job downloads *all* artifacts and choked trying to fetch that stray record.
         env:
