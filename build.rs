@@ -44,6 +44,17 @@ const RUNTIME_DIR: &str = "runtime";
 // embedded copy, the build-script compile, and the native link step all agree.
 const LIBM_SUBDIR: &str = "libm";
 
+// Vendored libm units excluded from the compile and every native link.
+// `nearbyint.c` is the only vendored file that calls libm's floating-point
+// environment (`fetestexcept`/`feclearexcept`), which on glibc live in the system
+// libm. No Prism operation reaches `nearbyint` (`round` lowers to `round.c`), so
+// compiling it would force `-lm` onto every native link and the runtime oracle
+// purely to satisfy a never-executed reference, breaking the self-contained "no
+// system libm" invariant that keeps float results identical across platforms. The
+// source stays vendored; re-admit it here once a Prism op needs it, and provide
+// its fenv calls in-runtime rather than from the platform.
+const LIBM_EXCLUDE: &[&str] = &["nearbyint.c"];
+
 // `(relative-name, is_header)` for every vendored libm file, sorted for a stable
 // manifest. Names are `libm/<file>` so they materialize into a subdirectory and
 // each `#include "libm.h"` resolves from the including file's own directory.
@@ -53,6 +64,7 @@ fn libm_files(manifest_dir: &str) -> Vec<(String, bool)> {
         .unwrap_or_else(|e| panic!("reading {dir}: {e}"))
         .filter_map(Result::ok)
         .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|f| !LIBM_EXCLUDE.contains(&f.as_str()))
         .filter_map(
             |f| match Path::new(&f).extension().and_then(OsStr::to_str) {
                 Some("h") => Some((format!("{LIBM_SUBDIR}/{f}"), true)),
