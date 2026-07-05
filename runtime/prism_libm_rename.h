@@ -8,36 +8,38 @@
  * a native program links it too) -- so a plain `cos` can silently resolve to the
  * system copy in one binary and the vendored copy in another, breaking parity.
  *
- * Renaming every entry point the `prism_m_*` wrappers call gives each a unique
- * symbol that only the vendored translation units define and only prism references,
- * so no system math symbol is ever named. Included AFTER any <math.h> so the
- * platform's real-named declarations are processed first and left inert; the
- * vendored TUs (via libm.h) and the wrappers (prism_libm.c) both include this, so
- * definitions, internal cross-calls, and the wrapper calls all use the renamed name.
+ * We rename the LINK-TIME symbol with `#pragma redefine_extname`, not a `#define`.
+ * A macro `#define cos prism_v_cos` would corrupt glibc's <math.h>, which builds
+ * its SIMD declaration macros by token-pasting the function name (`__DECL_SIMD_##cos`
+ * becomes `__DECL_SIMD_prism_v_cos`, an undefined identifier). redefine_extname
+ * leaves the header's tokens alone and only renames the emitted/resolved symbol, so
+ * every definition, internal cross-call, and wrapper call binds to prism_v_* while
+ * <math.h> compiles unchanged. Force-included at the top of every libm unit and
+ * pulled in by prism_libm.c, ahead of the declarations it applies to.
  */
 #ifndef PRISM_LIBM_RENAME_H
 #define PRISM_LIBM_RENAME_H
 
-#define sin prism_v_sin
-#define cos prism_v_cos
-#define tan prism_v_tan
-#define asin prism_v_asin
-#define acos prism_v_acos
-#define atan prism_v_atan
-#define sinh prism_v_sinh
-#define cosh prism_v_cosh
-#define tanh prism_v_tanh
-#define exp prism_v_exp
-#define exp2 prism_v_exp2
-#define expm1 prism_v_expm1
-#define log prism_v_log
-#define log2 prism_v_log2
-#define log10 prism_v_log10
-#define log1p prism_v_log1p
-#define cbrt prism_v_cbrt
-#define pow prism_v_pow
-#define atan2 prism_v_atan2
-#define hypot prism_v_hypot
-#define fmod prism_v_fmod
+#pragma redefine_extname sin prism_v_sin
+#pragma redefine_extname cos prism_v_cos
+#pragma redefine_extname tan prism_v_tan
+#pragma redefine_extname asin prism_v_asin
+#pragma redefine_extname acos prism_v_acos
+#pragma redefine_extname atan prism_v_atan
+#pragma redefine_extname sinh prism_v_sinh
+#pragma redefine_extname cosh prism_v_cosh
+#pragma redefine_extname tanh prism_v_tanh
+#pragma redefine_extname exp prism_v_exp
+#pragma redefine_extname exp2 prism_v_exp2
+#pragma redefine_extname expm1 prism_v_expm1
+#pragma redefine_extname log prism_v_log
+#pragma redefine_extname log2 prism_v_log2
+#pragma redefine_extname log10 prism_v_log10
+#pragma redefine_extname log1p prism_v_log1p
+#pragma redefine_extname cbrt prism_v_cbrt
+#pragma redefine_extname pow prism_v_pow
+#pragma redefine_extname atan2 prism_v_atan2
+#pragma redefine_extname hypot prism_v_hypot
+#pragma redefine_extname fmod prism_v_fmod
 
 #endif /* PRISM_LIBM_RENAME_H */
