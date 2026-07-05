@@ -243,12 +243,14 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm \
             --target web --out-dir web/pkg --out-name prism
 
-      # The whole Prism compiler, gzipped, must still fit on a 1.44 MB floppy
-      # disk. A real binary-size ratchet wearing a joke: if this ever fails,
-      # Prism has outgrown 1998 and someone shipped a megabyte without noticing.
+      # The whole Prism compiler, gzipped, must still fit on a 3.5" floppy disk.
+      # A real binary-size ratchet wearing a joke: if this ever fails, Prism has
+      # outgrown the floppy era entirely. It has grown past the 1.44 MB HD disk,
+      # so the ratchet moves up to the 2.88 MB ED floppy, the largest 3.5" format
+      # ever made. When this one fails too, there is no bigger floppy to reach for.
       - name: Fits on a floppy disk
         run: |
-          FLOPPY=1474560  # bytes on a 3.5" HD floppy (1.44 "MB" = 1440 * 1024)
+          FLOPPY=2949120  # bytes on a 3.5" ED floppy (2.88 "MB" = 2880 * 1024)
           GZ=$(gzip -9 -c web/pkg/prism_bg.wasm | wc -c | tr -d ' ')
           echo "gzipped wasm: $GZ B / floppy: $FLOPPY B"
           if [ "$GZ" -gt "$FLOPPY" ]; then
