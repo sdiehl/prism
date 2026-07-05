@@ -136,8 +136,12 @@ fn build_helper() -> PathBuf {
     let dir = std::env::temp_dir().join(&stem);
     std::fs::create_dir_all(&dir).unwrap();
     // Compile the split runtime modules from the one canonical list, the same
-    // sources the native backend links.
+    // sources the native backend links. `prism_libm.c`'s `prism_m_*` wrappers
+    // reference the namespaced `prism_v_*` math symbols, which live only in the
+    // vendored libm archive, so link that too (the same bytes the interpreter and
+    // native backend link); linking the runtime sources alone leaves them undefined.
     let rt_sources = prism::codegen::rt::write_runtime(&dir).unwrap();
+    let libm_archive = prism::codegen::rt::write_libm_archive(&dir).unwrap();
     let shim = dir.join(format!("{stem}.c"));
     let bin = dir.join(&stem);
     // The shim provides prism_main (the runtime's main calls it), reads raw
@@ -160,6 +164,7 @@ fn build_helper() -> PathBuf {
         .args(["-O2", "-w"])
         .arg(&shim)
         .args(&rt_sources)
+        .arg(&libm_archive)
         .arg("-o")
         .arg(&bin)
         .output()
