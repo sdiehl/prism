@@ -121,6 +121,14 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut manifest = String::from("pub static RUNTIME_FILES: &[(&str, &str, bool)] = &[\n");
     let libm = libm_files(&manifest_dir);
+    // The vendored libm is deliberately NOT in this manifest: the native backend
+    // links the single pre-built archive `libprism_libm.a` (embedded via
+    // include_bytes! in codegen::rt) instead of recompiling the sources, so the
+    // interpreter and every native binary share one byte-identical libm.
+    // Recompiling it a second, different way (the cc-rs invocation below vs the raw
+    // clang link in cc_link) is what made the non-correctly-rounded transcendentals
+    // diverge by a ULP. `prism_libm.c` (a RUNTIME_SOURCE) still declares and calls
+    // the standard names; they resolve from the linked archive.
     let entries = RUNTIME_HEADERS
         .iter()
         .map(|name| ((*name).to_string(), true))
@@ -128,8 +136,7 @@ fn main() {
             RUNTIME_SOURCES
                 .iter()
                 .map(|name| ((*name).to_string(), false)),
-        )
-        .chain(libm.iter().cloned());
+        );
     for (name, is_header) in entries {
         let abs = format!("{manifest_dir}/{RUNTIME_DIR}/{name}");
         writeln!(
@@ -180,6 +187,10 @@ fn main() {
             }
         }
         libm_rt.compile("prism_libm");
+        // Export the exact archive path so codegen::rt can embed it (include_bytes!)
+        // and the native backend links THESE bytes, never a recompile. One libm,
+        // shared by the interpreter and every native binary.
+        println!("cargo:rustc-env=PRISM_LIBM_ARCHIVE={out_dir}/libprism_libm.a");
         // No `-lm`: the vendored libm above provides every math symbol. Linking
         // the system libm is the actual source of cross-platform float
         // divergence, so it is deliberately absent from every native link.

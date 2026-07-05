@@ -51,6 +51,26 @@ pub fn write_runtime(dir: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(sources)
 }
 
+/// The single vendored-libm archive, compiled exactly once by build.rs and
+/// embedded here. Both the interpreter (which links it at build time) and every
+/// native binary (via [`write_libm_archive`] + the link step) use THESE bytes, so
+/// the non-correctly-rounded transcendentals are bit-identical across backends. A
+/// second, differently-invoked recompile is what let them drift by a ULP.
+#[cfg(feature = "native")]
+pub const LIBM_ARCHIVE: &[u8] = include_bytes!(env!("PRISM_LIBM_ARCHIVE"));
+
+/// Materialize the embedded libm archive into `dir` and return its path, for the
+/// native link step to link directly instead of recompiling the libm sources.
+///
+/// # Errors
+/// Fails on any filesystem error writing the archive.
+#[cfg(feature = "native")]
+pub fn write_libm_archive(dir: &Path) -> io::Result<PathBuf> {
+    let path = dir.join("libprism_libm.a");
+    fs::write(&path, LIBM_ARCHIVE)?;
+    Ok(path)
+}
+
 // Allocation and reference counting.
 pub(super) const ALLOC: &str = "prism_alloc";
 pub(super) const REUSE_ALLOC: &str = "prism_reuse_alloc";

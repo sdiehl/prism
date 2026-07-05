@@ -2102,8 +2102,10 @@ mod tests {
         let bin = dir.join(&stem);
         // Materialize the split runtime modules from the one canonical list and
         // compile all of them, so this oracle links the same sources the native
-        // backend does.
+        // backend does. The vendored libm is linked as the one pre-built archive
+        // (the same bytes the interpreter and native backend use), not recompiled.
         let rt_sources = crate::codegen::rt::write_runtime(&dir).unwrap();
+        let libm_archive = crate::codegen::rt::write_libm_archive(&dir).unwrap();
         // The runtime owns `main` and calls `prism_main`; the harness supplies it
         // and returns a tagged immediate 0 (exit code 0).
         std::fs::write(
@@ -2123,6 +2125,7 @@ mod tests {
             .args(["-O0", "-w"])
             .arg(&src)
             .args(&rt_sources)
+            .arg(&libm_archive)
             .arg("-o")
             .arg(&bin)
             .output()

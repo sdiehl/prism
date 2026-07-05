@@ -22,7 +22,15 @@ impl Isa for MlirText {
 
     fn const_float(&self, b: &mut Buf, f: f64) -> String {
         let t = b.tmp();
-        b.line(&format!("{t} = llvm.mlir.constant({f:.17e} : f64) : f64"));
+        // Emit the exact IEEE-754 bit pattern as a hex float. MLIR's FloatAttr
+        // rejects `inf`/`nan` (what a decimal format prints for non-finite values),
+        // and the hex form is exact for every double (signed zero, subnormals, and
+        // the specials included), so the MLIR backend lowers bit-for-bit the same
+        // constant the LLVM backend does, which is what float parity requires.
+        b.line(&format!(
+            "{t} = llvm.mlir.constant(0x{:016X} : f64) : f64",
+            f.to_bits()
+        ));
         t
     }
 

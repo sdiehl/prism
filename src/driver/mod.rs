@@ -1688,6 +1688,12 @@ fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
     // The directory is unique to `out`, so concurrent builds do not collide.
     let rt_dir = out.with_extension("prism_rt.d");
     let sources = crate::codegen::rt::write_runtime(&rt_dir)?;
+    // The vendored libm is linked as the one pre-built archive (compiled once by
+    // build.rs, the same bytes the interpreter uses), never recompiled here: the
+    // transcendentals are not correctly-rounded, so a second, differently-invoked
+    // compile diverges by a ULP and breaks parity. It links after the objects that
+    // reference it (`prism_libm.c`), so the archive resolves their `sin`/`atan`/...
+    let libm_archive = crate::codegen::rt::write_libm_archive(&rt_dir)?;
     // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
     // the corpus runs under UBSan and any new runtime UB aborts the program.
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
@@ -1719,6 +1725,7 @@ fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
         .args(extra.split_whitespace())
         .arg(ir)
         .args(&sources)
+        .arg(&libm_archive)
         .arg("-o")
         .arg(out)
         .output()
