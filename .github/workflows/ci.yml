@@ -99,6 +99,11 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.10
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
       - name: Install LLVM 22
         uses: ./.github/actions/setup-llvm
       - name: ASan + UBSan runtime
@@ -136,6 +141,11 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
 
       # The gate verdict cache, restored after rust-cache so its files are not
       # disturbed. A loose restore-key is correct because the marker's own key
@@ -228,6 +238,11 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
 
       # cdylib is not in Cargo.toml (rlib-only, so native builds skip the dead
       # dylib); we ask for it here via `cargo rustc --crate-type cdylib` and drive
@@ -291,6 +306,11 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
 
       # The `prism` binary links libLLVM (inkwell), so it needs the dev libs to
       # build even though the interpreter and `dump core-json` paths never touch
@@ -349,6 +369,11 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
 
       # Same gate verdict cache as the Test job, on its own key so the two jobs
       # do not overwrite each other's snapshots. The `mlir` tag makes these
@@ -413,6 +438,11 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
 
       # Per-shard gate-verdict cache: each shard owns a distinct key so the four
       # runs do not overwrite each other's snapshots.
