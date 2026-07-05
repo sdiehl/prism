@@ -51,10 +51,11 @@ pub fn write_runtime(dir: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(sources)
 }
 
-/// The single vendored-libm archive, compiled exactly once by build.rs and
-/// embedded here. Both the interpreter (which links it at build time) and every
-/// native binary (via [`write_libm_archive`] + the link step) use THESE bytes, so
-/// the non-correctly-rounded transcendentals are bit-identical across backends. A
+/// The single vendored-libm archive, compiled exactly once by build.rs.
+///
+/// Embedded here so both the interpreter (which links it at build time) and every
+/// native binary (via [`write_libm_archive`] + the link step) use THESE bytes, and
+/// the non-correctly-rounded transcendentals stay bit-identical across backends. A
 /// second, differently-invoked recompile is what let them drift by a ULP.
 #[cfg(feature = "native")]
 pub const LIBM_ARCHIVE: &[u8] = include_bytes!(env!("PRISM_LIBM_ARCHIVE"));
