@@ -17,14 +17,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Build the site and upload it as the single `github-pages` artifact. Split from
+  # the deploy below (GitHub's recommended two-job shape) because a single job that
+  # both uploads and deploys leaves the prior attempt's artifact behind when the
+  # run is re-run: `deploy-pages` then fails with "Multiple artifacts named
+  # github-pages". With the upload confined to this job that `deploy` depends on,
+  # each run resolves to exactly one artifact.
+  build:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       PRISM_CC: /usr/lib/llvm-22/bin/clang
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
 
@@ -74,5 +77,15 @@ jobs:
         with:
           path: public
 
+  # Deploy the artifact the build job produced. Kept separate so a deploy re-run
+  # never re-uploads, and the GitHub Pages environment/URL binds to exactly this
+  # job. Needs nothing from the checkout: `deploy-pages` pulls the run's artifact.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
