@@ -19,6 +19,7 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_int.h",
     "prism_float.h",
     "prism_libm.h",
+    "prism_libm_rename.h",
     "prism_effect.h",
     "prism_array.h",
     "prism_buffer.h",
@@ -176,17 +177,33 @@ fn main() {
         // -ffp-contract=off pin. Each unit resolves its `#include "libm.h"` from
         // its own directory, so no extra include path is needed.
         let mut libm_rt = cc::Build::new();
+        // Force-include the prism_v_* rename header at the top of every libm unit
+        // (before its own <math.h>), so even the units that pull <math.h> directly
+        // instead of libm.h get their public entry points namespaced. This is what
+        // stops the vendored transcendentals from being shadowed by the platform
+        // libm at link time (the source of a ULP of cross-binary float drift).
+        let rename_hdr = format!("{manifest_dir}/{RUNTIME_DIR}/prism_libm_rename.h");
         libm_rt
             .compiler(&cc)
             .opt_level(2)
             .warnings(false)
-            .flag("-ffp-contract=off");
+            .flag("-ffp-contract=off")
+            .flag("-include")
+            .flag(&rename_hdr);
         for (name, is_header) in &libm {
             if !is_header {
                 libm_rt.file(format!("{RUNTIME_DIR}/{name}"));
             }
         }
         libm_rt.compile("prism_libm");
+        // Rerun (rebuild the archive, which reruns the include_bytes! embed) when any
+        // vendored unit, a libm header, or the rename header changes. cc-rs tracks the
+        // .c it compiles, but not the headers they include, and these are no longer in
+        // the manifest loop that emitted rerun-if-changed, so declare them here.
+        for (name, _) in &libm {
+            println!("cargo:rerun-if-changed={RUNTIME_DIR}/{name}");
+        }
+        println!("cargo:rerun-if-changed={RUNTIME_DIR}/prism_libm_rename.h");
         // Export the exact archive path so codegen::rt can embed it (include_bytes!)
         // and the native backend links THESE bytes, never a recompile. One libm,
         // shared by the interpreter and every native binary.

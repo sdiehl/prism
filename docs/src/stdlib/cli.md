@@ -4,7 +4,7 @@
 
 CLI: an applicative command-line parser as a first-class value.
 
-A parser is a pure value describing what a command accepts: typed options (long/short, valued or switch, with defaults), typed positionals, and named subcommands. Parsers compose applicatively (`build2`/`build3`/`build4` over `map_p`/`ap_p`/`pure_p`) into the user's own result type, so a well-typed parser yields *exactly* that type or a rich error, never a half-filled record. The illegal state (a config with a missing required field, a subcommand without its arguments) is unrepresentable: the constructor cannot be applied until every part has parsed.
+A parser is a pure value describing what a command accepts: typed options (long/short, valued or switch, with defaults), typed positionals, and named subcommands. Parsers compose applicatively (`build2`/`build3`/`build4` over `map_p`/`ap_p`/`pure_p`) into the user's own result type, so a well-typed parser yields _exactly_ that type or a rich error, never a half-filled record. The illegal state (a config with a missing required field, a subcommand without its arguments) is unrepresentable: the constructor cannot be applied until every part has parsed.
 
 One description, three artifacts: the same `Command` value drives all three. It is the parser (`run_argv`), turning argv into the result type or an error. It is the help text (`help_text`), rendered from the option and argument specs the parser carries, so `--help` can never drift from what parses. And it is the errors (inside `run_argv`), which name the offending token, state the form expected, and print the usage line derived from those same specs.
 

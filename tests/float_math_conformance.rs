@@ -178,6 +178,17 @@ fn build_helper() -> PathBuf {
     let dir = std::env::temp_dir().join(&stem);
     std::fs::create_dir_all(&dir).unwrap();
     let rt_sources = prism::codegen::rt::write_runtime(&dir).unwrap();
+    let libm_archive = prism::codegen::rt::write_libm_archive(&dir).unwrap();
+    eprintln!(
+        "DBG archive {:?} bytes={} has_prism_v_cos={}",
+        libm_archive,
+        std::fs::metadata(&libm_archive).map(|m| m.len()).unwrap_or(0),
+        Command::new("nm")
+            .arg(&libm_archive)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("prism_v_cos"))
+            .unwrap_or(false)
+    );
     let shim = dir.join(format!("{stem}.c"));
     let bin = dir.join(&stem);
 

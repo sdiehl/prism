@@ -11,6 +11,11 @@
 #include <stdint.h>
 #include <float.h>
 #include <math.h>
+/* Prism: the vendored public entry points (sin/cos/atan/...) are namespaced to
+   prism_v_* to avoid colliding with the platform libm; the rename header is
+   force-included at the top of every libm translation unit by the build (a
+   -include flag), before its own <math.h>, so it reaches even the units that pull
+   <math.h> directly rather than this header. */
 /* Prism: musl's trig kernels __sin/__cos/__tan (and long-double variants) take
    reduced-argument signatures, but glibc's <math.h> above already declares those
    reserved names as one-argument aliases of the public functions. On glibc that

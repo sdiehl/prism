@@ -4,6 +4,10 @@
  * codegen and the interpreter address a single, prism-namespaced surface and the
  * standard names stay an internal detail of the vendored translation units. */
 #include "prism_libm.h"
+/* Namespace the vendored functions to prism_v_* (same header the vendored TUs use)
+ * so these wrappers call the uniquely-named vendored copies, never the platform
+ * libm. This makes the declarations and calls below expand to prism_v_*. */
+#include "prism_libm_rename.h"
 
 /* The vendored functions carry their standard C names; declare the ones we call
  * here rather than pulling <math.h> (whose prototypes clang could route to its
