@@ -23,6 +23,11 @@ fn tfold(g, z, t) =
     Leaf(x) => g(x, z)
     Branch(l, r) => tfold(g, tfold(g, z, r), l)
 
+fn tfoldl(g, z, t) =
+  match t of
+    Leaf(x) => g(z, x)
+    Branch(l, r) => tfoldl(g, tfoldl(g, z, l), r)
+
 fn twalk(g, t) =
   match t of
     Leaf(x) => Leaf(g(x))
@@ -33,6 +38,7 @@ instance functorTree : Functor(Tree)
 
 instance foldableTree : Foldable(Tree)
   fn fold_r(g, z, t) = tfold(g, z, t)
+  fn fold_l(g, z, t) = tfoldl(g, z, t)
 
 instance traversableTree : Traversable(Tree)
   fn traverse(g, t) = twalk(g, t)

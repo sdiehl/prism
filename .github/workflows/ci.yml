@@ -212,6 +212,19 @@ jobs:
           ./target/release/prism docs --stdlib --check --out docs/src/stdlib
           ./target/release/prism docs --stdlib --test
 
+      # The book's prose blocks and the `docs/examples/*.pr` files pulled in via
+      # `{{#include}}` are live-checked only by the `prism mdbook` preprocessor,
+      # which runs solely under `mdbook build`. That build lived only in pages.yml
+      # (main-only), so a doc block that stopped type-checking (e.g. an example
+      # instance missing a newly-required class method) surfaced on the post-merge
+      # Pages deploy instead of on the PR. Run the same strict build here so a stale
+      # doc block is a red PR check, not a red main deploy. Uses the release binary
+      # built above; `PRISM_MDBOOK_STRICT=1` turns a non-type-checking block fatal.
+      - name: Install mdbook
+        run: cargo install mdbook mdbook-tabs
+      - name: Book doc-blocks type-check (strict)
+        run: PRISM_MDBOOK_STRICT=1 mdbook build docs
+
       - name: Build release
         run: cargo build --all --release
 
