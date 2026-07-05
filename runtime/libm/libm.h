@@ -11,6 +11,19 @@
 #include <stdint.h>
 #include <float.h>
 #include <math.h>
+/* Prism: musl's trig kernels __sin/__cos/__tan (and long-double variants) take
+   reduced-argument signatures, but glibc's <math.h> above already declares those
+   reserved names as one-argument aliases of the public functions. On glibc that
+   is a fatal "conflicting types" error (Apple's libm does not declare them, so it
+   built there). Rename musl's kernels past the point <math.h> is included: glibc's
+   own declarations, already processed with the real names, are left untouched, and
+   every kernel definition and caller below sees the renamed symbol consistently. */
+#define __sin prism_km_sin
+#define __cos prism_km_cos
+#define __tan prism_km_tan
+#define __sinl prism_km_sinl
+#define __cosl prism_km_cosl
+#define __tanl prism_km_tanl
 /* Prism: musl assumes <endian.h>/__BYTE_ORDER; every target we compile for
    (x86-64, aarch64) is little-endian, so define it portably here. */
 #if !defined(__BYTE_ORDER)

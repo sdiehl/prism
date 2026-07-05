@@ -47,6 +47,42 @@ def fence_masked_lines(text):
     return out
 
 
+def mask_inline_code(line):
+    """Blank out inline code spans (backtick-delimited), preserving length so
+    link-like text inside them is not parsed as a Markdown link. Markdown never
+    renders `[x](y)` inside a code span as a link, so a format string such as
+    `YYYY-MM-DDTHH:MM:SS[.frac](Z|(+|-)HH:MM)` is not a broken link. CommonMark:
+    an opening run of n backticks is closed by the next run of exactly n."""
+    out = []
+    i, n = 0, len(line)
+    while i < n:
+        if line[i] != "`":
+            out.append(line[i])
+            i += 1
+            continue
+        j = i
+        while j < n and line[j] == "`":
+            j += 1
+        run = j - i
+        k, closed = j, False
+        while k < n:
+            if line[k] == "`":
+                p = k
+                while p < n and line[p] == "`":
+                    p += 1
+                if p - k == run:
+                    out.append(" " * (p - i))
+                    i, closed = p, True
+                    break
+                k = p
+            else:
+                k += 1
+        if not closed:
+            out.append(line[i:j])
+            i = j
+    return "".join(out)
+
+
 def anchors_of(path):
     if path not in anchor_cache:
         anchors = set()
@@ -108,7 +144,7 @@ def main():
         raw_lines = text.splitlines()
         masked_lines = fence_masked_lines(text)
         for lineno, (raw, masked) in enumerate(zip(raw_lines, masked_lines), start=1):
-            for m in LINK_RE.finditer(masked):
+            for m in LINK_RE.finditer(mask_inline_code(masked)):
                 check_link(md_file, lineno, m.group(1))
             for m in INCLUDE_RE.finditer(raw):
                 check_include(md_file, lineno, m.group(1))
