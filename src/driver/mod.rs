@@ -1676,7 +1676,12 @@ fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
 
 #[cfg(feature = "native")]
 fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
-    let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
+    // Default to the exact compiler that built the interpreter's runtime + libm
+    // (baked by build.rs), not a bare "clang": musl's transcendentals are not
+    // correctly-rounded, so native and interpreter must use the identical toolchain
+    // or their float results diverge by a ULP. `PRISM_CC` still overrides (e.g. the
+    // sanitizer job), but then it is the caller's job to match the build.
+    let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
     // Materialize the embedded runtime (the split C modules and their headers)
     // into a per-output directory and compile every source in one clang
     // invocation, so ThinLTO still inlines the runtime into the generated code.

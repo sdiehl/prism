@@ -2079,7 +2079,9 @@ mod tests {
         // path would let two oracles clobber each other's source and binary.
         static SEQ: AtomicU64 = AtomicU64::new(0);
 
-        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
+        // Same compiler the runtime was built with (see `cc_link`): keeps this
+        // oracle's C on the identical toolchain as the interpreter it checks.
+        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
         if !Command::new(&cc)
             .arg("--version")
             .output()

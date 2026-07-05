@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 // The one canonical list of C runtime translation units and their headers. It is
 // defined here, in exactly one place, and every consumer derives from it: this
@@ -86,6 +87,32 @@ fn main() {
         env::var("TARGET").unwrap_or_default()
     );
 
+    // The C compiler that builds the runtime and the vendored libm. It MUST be the
+    // same compiler the native backend links generated programs with (`cc_link` in
+    // src/driver/mod.rs), because musl's transcendentals (sin/atan/exp/...) are not
+    // IEEE-correctly-rounded: their last bit is a function of the toolchain, so a
+    // gcc-built interpreter libm and a clang-built native libm disagree by ~1 ULP
+    // and break float parity. We resolve it exactly as `cc_link` does (`PRISM_CC`,
+    // else clang) and bake the choice plus its version in, so the native backend
+    // and the runtime oracle default to this identical compiler rather than each
+    // guessing a system default. Optimization level is a second toolchain input to
+    // those same functions (clang -O0 and -O2 disagree by a ULP on atan even with
+    // FP contraction off): the interpreter libm here is fixed at -O2, and the
+    // native link uses -O2 by default, so they agree on the default path. Making
+    // the libm opt level independent of the program's -O is the remaining step to
+    // close the contract fully (see cc_link).
+    println!("cargo:rerun-if-env-changed=PRISM_CC");
+    let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
+    println!("cargo:rustc-env=PRISM_BUILD_CC={cc}");
+    let cc_version = Command::new(&cc)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().map(str::trim).map(str::to_string))
+        .unwrap_or_default();
+    println!("cargo:rustc-env=PRISM_BUILD_CC_VERSION={cc_version}");
+
     // Emit the embedded-runtime manifest for src/codegen/rt.rs. Generated for every
     // target (including wasm, which compiles rt.rs but not the C) so the include!
     // always resolves; the include_str! paths are absolute so they resolve from
@@ -120,7 +147,7 @@ fn main() {
     // runs the interpreter alone, so skip it (and the bogus -lm).
     if env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
         let mut rt = cc::Build::new();
-        rt.include(RUNTIME_DIR).opt_level(2);
+        rt.compiler(&cc).include(RUNTIME_DIR).opt_level(2);
         // FP contraction stays off everywhere the runtime is compiled, matching
         // the native link step: an FMA fused on one platform and not another
         // breaks byte-for-byte float parity with the interpreter.
@@ -143,6 +170,7 @@ fn main() {
         // its own directory, so no extra include path is needed.
         let mut libm_rt = cc::Build::new();
         libm_rt
+            .compiler(&cc)
             .opt_level(2)
             .warnings(false)
             .flag("-ffp-contract=off");
