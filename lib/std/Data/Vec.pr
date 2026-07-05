@@ -6,9 +6,9 @@
 -- position is declined at the parser. This module therefore ships exactly the
 -- operations that equality-only indexing can type honestly:
 --
---   * `vempty` and `vsingle` pin a literal length (`0`, `1`).
---   * `vmap` preserves the length (`n` appears on both sides).
---   * `vzip` requires equal lengths (both `n`); a length clash is a compile
+--   - `vempty` and `vsingle` pin a literal length (`0`, `1`).
+--   - `vmap` preserves the length (`n` appears on both sides).
+--   - `vzip` requires equal lengths (both `n`); a length clash is a compile
 --     error that names both lengths.
 --
 -- Two operations are deliberately absent because their result length is not

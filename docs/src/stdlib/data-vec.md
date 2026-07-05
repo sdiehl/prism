@@ -6,7 +6,7 @@ Fixed-length vectors indexed by a `Nat` dimension.
 
 `Vec(a, n)` is a list of `a` whose length `n` is a type-level natural. The `Nat` kind unifies dimensions by equality of literals and variables only: there is no successor structure and no arithmetic, and `n + m` in a dimension position is declined at the parser. This module therefore ships exactly the operations that equality-only indexing can type honestly:
 
-- `vempty` and `vsingle` pin a literal length (`0`, `1`). * `vmap` preserves the length (`n` appears on both sides). * `vzip` requires equal lengths (both `n`); a length clash is a compile error that names both lengths.
+- `vempty` and `vsingle` pin a literal length (`0`, `1`). - `vmap` preserves the length (`n` appears on both sides). - `vzip` requires equal lengths (both `n`); a length clash is a compile error that names both lengths.
 
 Two operations are deliberately absent because their result length is not expressible under equality-only unification: a length-changing `vcons : (a, Vec(a, n)) -> Vec(a, n + 1)` and an append `(Vec(a, n), Vec(a, m)) -> Vec(a, n + m)`. That is the declined line; writing either `n + 1` produces a pointed rejection rather than a bare parse error.
 

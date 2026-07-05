@@ -7,10 +7,10 @@
 -- fault on a zero divisor. This module layers the four Rust-style safe families
 -- on top of those defaults, through the one `Checked` class:
 --
---   * `checked_*` return `Option`, `None` exactly on overflow or a zero divisor;
---   * `saturating_*` clamp to the lane bound the overflow crossed;
---   * `wrapping_*` name the wrap semantics the raw operators already have;
---   * `overflowing_*` return the wrapped result paired with an overflow flag.
+--   - `checked_*` return `Option`, `None` exactly on overflow or a zero divisor;
+--   - `saturating_*` clamp to the lane bound the overflow crossed;
+--   - `wrapping_*` name the wrap semantics the raw operators already have;
+--   - `overflowing_*` return the wrapped result paired with an overflow flag.
 --
 -- `Checked` sits beside the numeric tower (`Num`/`Div`), not above or below it:
 -- it takes no superclass and defines no raw arithmetic of its own. The anchoring
@@ -32,11 +32,11 @@
 --
 -- Laws, tested on both backends over the lane boundaries:
 --
---   * `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred,
+--   - `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred,
 --     and `None` otherwise;
---   * `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff
+--   - `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff
 --     `checked_op(x, y)` is `None`;
---   * `saturating_op(x, y)` equals the wrapped result when no overflow occurred,
+--   - `saturating_op(x, y)` equals the wrapped result when no overflow occurred,
 --     and otherwise the bound that was crossed (`I64` min/max, `0`, `U64` max).
 
 -- The lane bounds, as exact `Int` values. Written with `^` rather than as raw

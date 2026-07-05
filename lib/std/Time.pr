@@ -2,12 +2,12 @@
 --
 -- Three value types keep the two kinds of clock reading from being confused:
 --
---   * `Instant` is a monotonic reading (nanoseconds from an unspecified origin).
+--   - `Instant` is a monotonic reading (nanoseconds from an unspecified origin).
 --     Only differences of instants are meaningful; the origin is arbitrary. Use
 --     it to measure elapsed time, never to name a point in the calendar.
---   * `Wall` is a system-clock reading: nanoseconds since the Unix epoch
+--   - `Wall` is a system-clock reading: nanoseconds since the Unix epoch
 --     (1970-01-01T00:00:00Z), in UTC. Use it to stamp and format a moment.
---   * `Duration` is a signed span of nanoseconds, the difference of two readings.
+--   - `Duration` is a signed span of nanoseconds, the difference of two readings.
 --
 -- Both readings come from the one `Clock` capability (declared in `Concurrent`):
 -- `mono_clock` performs `mono_now`, `wall_clock` performs `wall_now`. Which

@@ -6,7 +6,7 @@ Time: instants, wall-clock timestamps, durations, and RFC 3339.
 
 Three value types keep the two kinds of clock reading from being confused:
 
-- `Instant` is a monotonic reading (nanoseconds from an unspecified origin). Only differences of instants are meaningful; the origin is arbitrary. Use it to measure elapsed time, never to name a point in the calendar. * `Wall` is a system-clock reading: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z), in UTC. Use it to stamp and format a moment. * `Duration` is a signed span of nanoseconds, the difference of two readings.
+- `Instant` is a monotonic reading (nanoseconds from an unspecified origin). Only differences of instants are meaningful; the origin is arbitrary. Use it to measure elapsed time, never to name a point in the calendar. - `Wall` is a system-clock reading: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z), in UTC. Use it to stamp and format a moment. - `Duration` is a signed span of nanoseconds, the difference of two readings.
 
 Both readings come from the one `Clock` capability (declared in `Concurrent`): `mono_clock` performs `mono_now`, `wall_clock` performs `wall_now`. Which reading a program actually gets is a property of the installed handler, not of the call site. `Concurrent.run_clock` serves every `Clock` op from a virtual counter, so a test's time is a pure function of its `sleep`s; `run_clock_real` here serves the two real reads from the OS clock. Both real reads are recorded capability observations, so a time-reading program replays byte-for-byte.
 
