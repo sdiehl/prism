@@ -78,7 +78,7 @@ impl OptLevel {
 pub enum CorePass {
     /// Whole-program stream fusion of pull-`Sequence` pipelines: collapse a
     /// recognized producer|>transformer|>consumer chain into one allocation-free
-    /// loop (see [`fuse`]). Off by default; injected pre-lowering only when
+    /// loop (see `fuse`). Off by default; injected pre-lowering only when
     /// `DynFlags::fuse` is set, never listed by [`pipeline`].
     Fuse,
     /// Erase single-field `newtype` boxes. Mandatory at every level: it is a

@@ -241,7 +241,10 @@ function render(states: NodeState[], pulse: boolean): void {
       if (!to) continue;
       const line = document.createElementNS(SVG_NS, "path");
       const midY = (from.y + to.y) / 2;
-      line.setAttribute("d", `M ${from.x} ${from.y} C ${from.x} ${midY}, ${to.x} ${midY}, ${to.x} ${to.y}`);
+      line.setAttribute(
+        "d",
+        `M ${from.x} ${from.y} C ${from.x} ${midY}, ${to.x} ${midY}, ${to.x} ${to.y}`,
+      );
       line.setAttribute("class", hot ? "edge edge--hot" : "edge");
       svg.appendChild(line);
     }

@@ -89,7 +89,8 @@
           # Crane's default filter keeps only Cargo-relevant files. The compiler
           # embeds non-.rs inputs at build time: the stdlib via include_str!, the C
           # runtime compiled by build.rs, the LALRPOP grammar processed by build.rs,
-          # and examples/boids.pr. Those paths must be unioned back in or the build
+          # and the examples/*.pr the wasm feature embeds (src/wasm.rs). Those paths
+          # must be unioned back in or the build
           # fails (grammar) or embeds stale/absent sources (stdlib). A stdlib mismatch
           # would surface as a `dump stdlib-hash` divergence from `cargo build`.
           fs = pkgs.lib.fileset;
@@ -101,6 +102,8 @@
               ./runtime
               ./rust-toolchain.toml
               ./examples/boids.pr
+              ./examples/chaos_swarm.pr
+              ./examples/pendulum.pr
               ./src/syntax/grammar.lalrpop
             ];
           };

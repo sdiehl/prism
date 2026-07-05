@@ -37,16 +37,16 @@
 //!
 //! # The claim vocabulary
 //!
-//! Exactly one claim is live this release: [`Claim::ParityPassed`](crate::store::cert::Claim::ParityPassed). The shape is
+//! Exactly one claim is live this release: [`Claim::ParityPassed`]. The shape is
 //! reserved for future kinds (a Lean-checked property drawn from `models/Prism.lean`
-//! is the intended next rung, claim [`CLAIM_LEAN_CHECKED`](crate::store::cert::CLAIM_LEAN_CHECKED)); any claim this build
-//! does not verify decodes as [`Claim::Reserved`](crate::store::cert::Claim::Reserved) and is reported as
+//! is the intended next rung, claim [`CLAIM_LEAN_CHECKED`]); any claim this build
+//! does not verify decodes as [`Claim::Reserved`] and is reported as
 //! recognized-but-unverifiable rather than an error, so an old build reads a newer
 //! certificate's envelope without mistaking it for corruption.
 //!
 //! # Totality
 //!
-//! [`decode_cert`](crate::store::cert::decode_cert) never panics on hostile bytes: every varint is byte-capped and
+//! [`decode_cert`] never panics on hostile bytes: every varint is byte-capped and
 //! every length is bounded (the shared `def`-codec reader), the scheme and kind are
 //! checked before the body, and trailing bytes are rejected. Decode is a `Result`.
 

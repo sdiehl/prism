@@ -148,7 +148,11 @@ async function sender(root: HTMLElement): Promise<void> {
     void tabB.offsetWidth;
     tabB.classList.add("tp-pulse");
     const k = lineCount(prefix);
-    const last = prefix.split("\n").filter((l) => l.length > 0).at(-1) ?? "";
+    const last =
+      prefix
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .at(-1) ?? "";
     story.className = "tp-story";
     story.innerHTML = ack.ok
       ? `Tab A printed the first <b>${k}</b> line${k === 1 ? "" : "s"} (through &ldquo;${last}&rdquo;), then paused. Its live continuation, a <b>${ack.bytes}-byte</b> snapshot, flew to Tab B, which confirmed the <a href="${DOC_HASH}" target="_blank" rel="noopener">code hash</a> matched and resumed at line <b>${k + 1}</b>. It never re-ran those first ${k} steps.`
@@ -182,7 +186,11 @@ async function sender(root: HTMLElement): Promise<void> {
       ? "a corrupted continuation is crossing the channel…"
       : "the paused continuation is crossing the channel…";
 
-    chan.postMessage({ kind: "env", bytes: Array.from(wireBytes), bundle: teleport_bundle() } satisfies EnvMsg);
+    chan.postMessage({
+      kind: "env",
+      bytes: Array.from(wireBytes),
+      bundle: teleport_bundle(),
+    } satisfies EnvMsg);
   });
 
   root.removeAttribute("data-status");

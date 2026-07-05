@@ -53,11 +53,11 @@
 //!
 //! # Totality
 //!
-//! [`decode_kont`] never panics on hostile bytes: every varint is byte-capped,
+//! [`decode_kont`](crate::eval::kont::decode_kont) never panics on hostile bytes: every varint is byte-capped,
 //! every length is bounded, the scheme, kind and bundle are checked before the
 //! body, child indices are range-checked against the already-parsed prefix,
 //! reconstruction runs against an expansion budget, and trailing bytes are
-//! rejected. [`encode_kont`] is fallible: a value that cannot cross the suspend
+//! rejected. [`encode_kont`](crate::eval::kont::encode_kont) is fallible: a value that cannot cross the suspend
 //! boundary (a graph nested past the suspendable depth, the fingerprint of an
 //! unserializable capture or a cycle) is refused by name rather than encoded.
 
@@ -143,7 +143,7 @@ pub enum KontState {
 /// boundary is explicit: what cannot cross says so by name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SuspendError {
-    /// A value reachable from the continuation nests past [`MAX_SUSPEND_DEPTH`]
+    /// A value reachable from the continuation nests past `MAX_SUSPEND_DEPTH`
     /// (the fingerprint of an unserializable capture or a cycle); the string names
     /// where the encoder gave up.
     NonSerializable(String),

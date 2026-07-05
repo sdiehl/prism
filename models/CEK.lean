@@ -105,6 +105,16 @@ def deltaR : BinOp → Rv → Rv → Option Rv
   | .gef, .float a, .float b => some (.bool (a ≥ b))
   | _, _, _ => none
 
+/-- Unary negation on runtime values, the `neg` analogue of `deltaR`. The two
+    integer lanes negate an `Int`; the `float` lane is a real IEEE fneg (`-f`
+    flips the sign bit, so `-0.0` and `+0.0` stay distinct), which the executable
+    machine evaluates where the substitution `negD` leaves floats abstract. -/
+def negR : NegLane → Rv → Option Rv
+  | .int, .int n => some (.int (-n))
+  | .i64, .int n => some (.int (-n))
+  | .float, .float f => some (.float (-f))
+  | _, _ => none
+
 /-- Pattern match against a runtime value, mirroring `match_pat`. -/
 def matchPatR : Pat → Rv → Option (List (String × Rv))
   | .wild, _ => some []
@@ -190,6 +200,10 @@ def step (Γ : Core) : Conf → Option Conf
         match atomEval env a, atomEval env b with
           | some av, some bv => (deltaR op av bv).map (fun w => (.ret w, stk))
           | _, _ => none
+      | .neg lane v =>
+        match atomEval env v with
+          | some av => (negR lane av).map (fun w => (.ret w, stk))
+          | none => none
       | .call name args =>
         match lookupFn Γ name, atomEval.atomEvalL env args with
           | some f, some avs => if avs.length < f.params.length then some (.ret (.closure (f.params.drop avs.length) f.body (extendEnv f.params avs [])), stk) else some (.eval f.body (extendEnv f.params avs []), stk)
@@ -291,6 +305,7 @@ inductive BEval (Γ : Core) : Env → Comp → Rv → Prop where
   | iteT : atomEval env cnd = some (.bool true) → BEval Γ env t w → BEval Γ env (.ite cnd t e) w
   | iteF : atomEval env cnd = some (.bool false) → BEval Γ env e w → BEval Γ env (.ite cnd t e) w
   | prim : atomEval env a = some av → atomEval env b = some bv → deltaR op av bv = some w → BEval Γ env (.prim op a b) w
+  | neg : atomEval env v = some av → negR lane av = some w → BEval Γ env (.neg lane v) w
   | callFull : lookupFn Γ name = some f → atomEval.atomEvalL env args = some avs → ¬avs.length < f.params.length → BEval Γ (extendEnv f.params avs []) f.body w → BEval Γ env (.call name args) w
   | callPart : lookupFn Γ name = some f → atomEval.atomEvalL env args = some avs → avs.length < f.params.length → BEval Γ env (.call name args) (.closure (f.params.drop avs.length) f.body (extendEnv f.params avs []))
   | case : atomEval env scrut = some sv → matchArmsR sv arms = some (body, binds) → BEval Γ (binds ++ env) body w → BEval Γ env (.case scrut arms) w
@@ -359,6 +374,10 @@ theorem bigstep_runs {Γ : Core} {env : Env} {c : Comp} {w : Rv} (h : BEval Γ e
         intro S
         exact Runs.step (by
           simp [step, ha, hb, hd]) .refl
+      | neg hv hd =>
+        intro S
+        exact Runs.step (by
+          simp [step, hv, hd]) .refl
       | callFull hf hargs hlen _ ihb =>
         intro S
         exact Runs.step (by

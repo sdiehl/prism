@@ -100,5 +100,17 @@ double prism_m_fmod(double x, double y) {
  * `Sqrt` FloatOp's intrinsic lowering). Defining it here means the vendored set
  * needs no system libm even at -O0, where clang would otherwise emit a libcall. */
 double sqrt(double x) {
-    return __builtin_sqrt(x);
+    /* Emit the hardware IEEE square-root instruction directly on the real
+     * targets. `__builtin_sqrt` is permitted to lower to a call to this very
+     * function (GCC's -Winfinite-recursion flags exactly that), so name the
+     * instruction ourselves; the fallback keeps other archs building. */
+    double r;
+#if defined(__x86_64__)
+    __asm__("sqrtsd %1, %0" : "=x"(r) : "x"(x));
+#elif defined(__aarch64__)
+    __asm__("fsqrt %d0, %d1" : "=w"(r) : "w"(x));
+#else
+    r = __builtin_sqrt(x);
+#endif
+    return r;
 }
