@@ -9,8 +9,8 @@ A `Sequence` is a pull producer: a thunk that, when forced with `(())`, yields o
 ## Type
 
 ```text
-type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
-Seq(a)       = (Unit) -> Step(a)          -- read `Seq(a)` in the prose as this
+  type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
+  Seq(a)       = (Unit) -> Step(a)          -- read `Seq(a)` in the prose as this
 ```
 
 The step continuation is ordinary data, not an effect, so every combinator is a total pure function over `Step`. That is the whole reason this substrate exists: an earlier push design routed elements through a shared `Emit` effect, and a single `Emit(a)` label per scope made element-type changes, heterogeneous `zip`, and mixing two element types in one function unrepresentable. On pull `Step` the element type is a plain type parameter, so `map : Seq(a) -> Seq(b)` type-changes freely, `zip : (Seq(a), Seq(b)) -> Seq((a, b))` is genuinely heterogeneous, and a consumer's per-element function may perform any ambient effect (it runs directly, with no handler closing the row over it). Every combinator below exercises one of those, and the correctness corpus in `tests/cases/run` pins them on both backends.
@@ -24,8 +24,8 @@ The step continuation is ordinary data, not an effect, so every combinator is a 
 The combinators keep their natural names (`map`, `filter`, `take`, `zip`, ...), which collide with the prelude's eager `List` surface. That is why this module is opt-in and NOT opened by the prelude: the flat namespace has no shadowing, so the documented idiom is a qualified import at the use site:
 
 ```text
-import Sequence as Seq          -- qualified: Seq.map, Seq.filter, Seq.take
-Seq.to_list(Seq.filter(Seq.map(Seq.range(1, 100), \(x) -> x * x), even))
+  import Sequence as Seq          -- qualified: Seq.map, Seq.filter, Seq.take
+  Seq.to_list(Seq.filter(Seq.map(Seq.range(1, 100), \(x) -> x * x), even))
 ```
 
 A selective `import Sequence (unfold, iterate)` also works for names that do not clash with the prelude.

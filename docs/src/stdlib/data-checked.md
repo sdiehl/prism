@@ -6,7 +6,13 @@ Safe arithmetic families over the machine-integer lanes.
 
 The raw operators (`+`/`-`/`*` on `I64`/`U64`, and integer `/`/`%`) keep their pinned defaults: fixed-width addition, subtraction, and multiplication wrap two's-complement, negating `I64` min wraps back to `I64` min, division truncates toward zero with the remainder taking the dividend's sign, and both fault on a zero divisor. This module layers the four Rust-style safe families on top of those defaults, through the one `Checked` class:
 
+<<<<<<< Updated upstream
 - `checked_*` return `Option`, `None` exactly on overflow or a zero divisor; - `saturating_*` clamp to the lane bound the overflow crossed; - `wrapping_*` name the wrap semantics the raw operators already have; - `overflowing_*` return the wrapped result paired with an overflow flag.
+||||||| Stash base
+- `checked_*` return `Option`, `None` exactly on overflow or a zero divisor; * `saturating_*` clamp to the lane bound the overflow crossed; * `wrapping_*` name the wrap semantics the raw operators already have; * `overflowing_*` return the wrapped result paired with an overflow flag.
+=======
+* `checked_*` return `Option`, `None` exactly on overflow or a zero divisor; * `saturating_*` clamp to the lane bound the overflow crossed; * `wrapping_*` name the wrap semantics the raw operators already have; * `overflowing_*` return the wrapped result paired with an overflow flag.
+>>>>>>> Stashed changes
 
 `Checked` sits beside the numeric tower (`Num`/`Div`), not above or below it: it takes no superclass and defines no raw arithmetic of its own. The anchoring law is that `wrapping_add`/`wrapping_sub`/`wrapping_mul`/`wrapping_neg` agree exactly with the fixed-width lane's raw `+`/`-`/`*` and unary `-`, so once the `Num` instances land they and these `wrapping_*` are the same function by construction. `wrapping_neg` on `U64` is wrapping two's-complement, matching the other `U64` operations (`wrapping_neg(0)` is `0`, `wrapping_neg(x)` is `U64_MAX - x + 1` otherwise).
 
@@ -14,7 +20,13 @@ Overflow is detected exactly: each fixed-width operand is widened to the unbound
 
 Laws, tested on both backends over the lane boundaries:
 
+<<<<<<< Updated upstream
 - `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred, and `None` otherwise; - `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff `checked_op(x, y)` is `None`; - `saturating_op(x, y)` equals the wrapped result when no overflow occurred, and otherwise the bound that was crossed (`I64` min/max, `0`, `U64` max).
+||||||| Stash base
+- `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred, and `None` otherwise; * `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff `checked_op(x, y)` is `None`; * `saturating_op(x, y)` equals the wrapped result when no overflow occurred, and otherwise the bound that was crossed (`I64` min/max, `0`, `U64` max).
+=======
+* `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred, and `None` otherwise; * `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff `checked_op(x, y)` is `None`; * `saturating_op(x, y)` equals the wrapped result when no overflow occurred, and otherwise the bound that was crossed (`I64` min/max, `0`, `U64` max).
+>>>>>>> Stashed changes
 
 ## Instances
 
