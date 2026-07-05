@@ -253,7 +253,7 @@ static void prism_shortest_digits(double d, char *digits, int *nd, int *e10) {
      * estimate is corrected off-by-one exactly against the bignums. Positioning
      * depends only on the value, so it is done once for every precision. */
     DtoaBig A = R, B = S;
-    double lv = log10((double)f) + (double)e * PRISM_LOG10_2;
+    double lv = prism_m_log10((double)f) + (double)e * PRISM_LOG10_2;
     int k = (int)ceil(lv - 1e-10);
     if (k >= 0) {
         dtoa_big_mul_pow10(&B, k);
