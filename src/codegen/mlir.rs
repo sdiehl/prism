@@ -78,11 +78,32 @@ impl Isa for MlirText {
     }
 
     fn fptosi_sat(&self, b: &mut Buf, dst: &str, v: &str) {
-        // The saturating fp->int pin is expressed with the LLVM intrinsic on the
-        // default backend. The textual MLIR path (experimental, feature-gated, not
-        // in the determinism gate) emits the plain conversion; matching the
-        // saturating semantics here is a follow-up if MLIR becomes gated.
-        b.line(&format!("{dst} = llvm.fptosi {v} : f64 to i64"));
+        // Saturating fp->int, bit-identical to the LLVM backend's `llvm.fptosi.sat`
+        // (NaN -> 0, out-of-range -> i64::MIN/MAX). The MLIR LLVM dialect has no
+        // `fptosi.sat` op, so call the LLVM intrinsic by symbol; `mlir-translate`
+        // binds it to the real intrinsic. Declared in `prelude`.
+        //
+        // HERE BE DRAGONS. This line used to emit a plain `llvm.fptosi`, which is
+        // *undefined behavior* for an out-of-range input (e.g. `truncate(1e300)`).
+        // The cost of getting it wrong was a multi-hour goose chase, because the
+        // symptom hides on every cheap way to test it:
+        //   - arm64 does not exploit the poison; only x86_64 does. Docker on Apple
+        //     Silicon runs arm64 by default, so every local repro passed. You MUST
+        //     `docker run --platform linux/amd64` (or a real x86 box) to see it.
+        //   - It only bites under ThinLTO (`cc_link` uses `-flto=thin`): LTO proves
+        //     the poison is unreachable and plants a trap. `-O2` without LTO passes.
+        //   - The crash is a *trap/segfault after buffered stdout is written but not
+        //     flushed*, so the parity harness saw empty native output ("output
+        //     diverges, native: \"\"") rather than a value mismatch or a link error.
+        //   - The interpreter and the LLVM backend both saturate, so the divergence
+        //     is MLIR-only and invisible to the LLVM parity shards and sanitizers.
+        // The general rule this cost us: any op here that can emit an LLVM `poison`
+        // or trigger UB (fp->int, `udiv`/`urem` by zero, oversized shifts, GEP OOB)
+        // MUST match the LLVM backend's well-defined lowering exactly, and MLIR
+        // parity has to be exercised on x86_64-under-LTO or it proves nothing.
+        b.line(&format!(
+            "{dst} = llvm.call @\"llvm.fptosi.sat.i64.f64\"({v}) : (f64) -> i64"
+        ));
     }
 
     fn cast_i2f(&self, b: &mut Buf, dst: &str, v: &str) {
@@ -267,6 +288,10 @@ impl Isa for MlirText {
             "llvm.func @prism_prim_rand() -> i64",
             "llvm.func @prism_srand(i64)",
             "llvm.func @prism_str_lit(!llvm.ptr, i64) -> i64",
+            // The saturating fp->int intrinsic, called by `fptosi_sat`. Quoted
+            // because the symbol has dots; `mlir-translate` binds it to the real
+            // `@llvm.fptosi.sat.i64.f64` (an unused declaration is harmless).
+            "llvm.func @\"llvm.fptosi.sat.i64.f64\"(f64) -> i64",
         ];
         for line in FIXED {
             let name = line
@@ -433,9 +458,17 @@ fn check(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-// The symbol name following an `@`: leading run of identifier characters
-// (MLIR symbols here are alphanumeric plus `_` and `.`).
+// The symbol name following an `@`: either a quoted `@"a.b.c"` (the name is the
+// quoted content, used for symbols like the `llvm.fptosi.sat.i64.f64` intrinsic
+// whose dots are legal but whose bare form the reference scan would misparse) or
+// a bare leading run of identifier characters (alphanumeric plus `_` and `.`).
+// The same reader runs on both definitions and references, so a quoted def and a
+// quoted use resolve to the identical key.
 fn symbol(rest: &str) -> &str {
+    if let Some(after) = rest.strip_prefix('"') {
+        let end = after.find('"').unwrap_or(after.len());
+        return &after[..end];
+    }
     let end = rest
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
         .unwrap_or(rest.len());
