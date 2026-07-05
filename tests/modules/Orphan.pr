@@ -1,5 +1,4 @@
 import Typ (Widget)
 
-instance weq : Eq(Widget) {
+instance weq : Eq(Widget)
   fn eq(a, b) = true
-}

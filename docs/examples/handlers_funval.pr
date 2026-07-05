@@ -11,12 +11,11 @@
 --   ready
 --   70      (tag 0 + width(3) + width(4), each * 10)
 
-effect App {
-  ctl name() : String,
-  ctl tag() : Int,
-  ctl width(Int) : Int,
+effect App
+  ctl name() : String
+  ctl tag() : Int
+  ctl width(Int) : Int
   ctl log(String) : Unit
-}
 
 fn render() : !{App} Int =
   log(name())

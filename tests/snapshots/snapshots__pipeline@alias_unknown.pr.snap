@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/alias_unknown.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Tick") LBrace Ctl Ident("tick") LParen KwUnit RParen Colon KwInt RBrace VSemi Alias UIdent("App") Eq LBrace UIdent("Tick") Comma UIdent("Missing") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+VOpen Effect UIdent("Tick") VOpen Ctl Ident("tick") LParen KwUnit RParen Colon KwInt VClose VSemi Alias UIdent("App") Eq LBrace UIdent("Tick") Comma UIdent("Missing") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Unit,
                     ],
                     ret: Int,
+                    grade: Many,
                 },
             ],
-            span: 0..38,
+            span: 0..34,
         },
     ],
     errors: [],
@@ -39,7 +40,7 @@ Program {
                     args: [],
                 },
             ],
-            span: 40..67,
+            span: 36..63,
         },
     ],
     classes: [],
@@ -57,7 +58,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 81..88,
+                        span: 77..84,
                     },
                     [
                         Spanned {
@@ -67,23 +68,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 89..90,
+                            span: 85..86,
                         },
                     ],
                 ),
-                span: 81..91,
+                span: 77..87,
             },
             wheres: [],
-            span: 69..91,
+            span: 65..87,
         },
     ],
 }
 
 == types ==
 Type Error: unknown effect `Missing` in alias `App`
-   ╭─[ <source>:5:1 ]
+   ╭─[ <source>:4:1 ]
    │
- 5 │ alias App = {Tick, Missing}
+ 4 │ alias App = {Tick, Missing}
    │ ─────────────┬─────────────  
    │              ╰─────────────── unknown effect `Missing` in alias `App`
 ───╯

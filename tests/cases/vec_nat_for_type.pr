@@ -1,0 +1,6 @@
+-- A dimension literal in a position that wants a type: `Vec`'s first parameter
+-- has kind `Type`, so the literal `3` there is a kind mismatch. The check peels
+-- `Vec`'s `Kind::Fun` arrow and compares the argument's kind at each position.
+type Vec(a, n : Nat) = MkVec(List(a))
+
+fn demo(x : Vec(3, Int)) : Int = 0

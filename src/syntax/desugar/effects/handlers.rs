@@ -10,7 +10,7 @@ use super::escape::{escapes, free_resume};
 use super::{rw, Binding, Vars};
 use crate::error::TypeError;
 use crate::names::{self, CONT};
-use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, HandlerArm, SugarArm, Ty, S};
+use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, SugarArm, Ty, S};
 use crate::syntax::desugar::{call, evar, sp, Cx};
 
 pub(super) type Vals = Vec<(String, S<Expr<Core>>)>;
@@ -37,6 +37,151 @@ fn poly_ret(sig: &EffOp, eff_params: &[String]) -> bool {
     ty_vars(&sig.ret, &mut rv);
     rv.into_iter()
         .any(|v| !pv.contains(&v) && !eff_params.contains(&v))
+}
+
+// The declared grade of `op`, or `Many` for an op with no signature in scope
+// (a compiler-synthesized effect never carries a stricter grade at a user-
+// written clause, so the check never bites it).
+fn declared_grade(op: &str, cx: &Cx) -> Grade {
+    cx.op_sigs
+        .get(op)
+        .map_or(Grade::Many, |(_, _, sig)| sig.grade)
+}
+
+// Reject a handler clause more general than its op's declared grade (the whole
+// typing rule: clause grade at most op grade). The caret lands on the clause,
+// naming the op, its declared grade, and what the clause did.
+fn check_grade(op: &str, clause: Grade, span: Span, cx: &Cx) -> Result<(), TypeError> {
+    let declared = declared_grade(op, cx);
+    if clause <= declared {
+        return Ok(());
+    }
+    let did = match clause {
+        Grade::Zero => unreachable!("Zero is the least grade, never exceeds a declared grade"),
+        Grade::One => "this clause resumes the continuation",
+        Grade::Many => "this clause may resume the continuation more than once",
+    };
+    let limit = match declared {
+        Grade::Zero => "which never resumes",
+        Grade::One => "which resumes exactly once, in tail position",
+        Grade::Many => unreachable!("Many is the greatest grade, nothing exceeds it"),
+    };
+    Err(TypeError::Other {
+        span,
+        msg: format!(
+            "handler clause for `{op}` exceeds its declared grade `{}` ({limit}): {did}",
+            declared.keyword()
+        ),
+    })
+}
+
+// The grade of a bare `ctl` clause, read from how its body uses the continuation
+// binder `k`. A single direct tail application is `One`; no use is `Zero`;
+// anything else (more than one application, `k` used as a plain value, or `k`
+// applied under a nested lambda whose call count is unknown) is `Many`. This is
+// the same single-shot classification `effect_lower::erase_var` recomputes over
+// Core, run here as the up-front check; it is conservative, so a clause it
+// cannot prove single-shot is `Many` and a stricter declared grade rejects it.
+fn bare_ctl_grade(body: &S<Expr<Core>>, k: &str) -> Grade {
+    let mut direct = 0usize;
+    let mut escaped = false;
+    scan_k(body, k, false, &mut direct, &mut escaped);
+    if escaped || direct > 1 {
+        Grade::Many
+    } else if direct == 1 {
+        Grade::One
+    } else {
+        Grade::Zero
+    }
+}
+
+// Classify every occurrence of `k` in `e`: a direct call head at lambda depth
+// zero is a tail resume (counted); anything else is an escape. `under` tracks
+// whether the subtree sits inside a lambda, where the call count is unknown.
+// Core phase carries no `Sugar`, so this covers every residual `Expr` variant.
+fn scan_k(e: &S<Expr<Core>>, k: &str, under: bool, direct: &mut usize, escaped: &mut bool) {
+    match &e.node {
+        Expr::Var(n) if n == k => *escaped = true,
+        Expr::Call(h, args) => {
+            if matches!(&h.node, Expr::Var(n) if n == k) {
+                if under {
+                    *escaped = true;
+                } else {
+                    *direct += 1;
+                }
+            } else {
+                scan_k(h, k, under, direct, escaped);
+            }
+            for a in args {
+                scan_k(a, k, under, direct, escaped);
+            }
+        }
+        Expr::Lam(_, b) => scan_k(b, k, true, direct, escaped),
+        Expr::Bin(_, a, b) | Expr::Pipe(a, b) | Expr::Let(_, a, b) | Expr::Index(a, b) => {
+            scan_k(a, k, under, direct, escaped);
+            scan_k(b, k, under, direct, escaped);
+        }
+        Expr::If(a, b, c) => {
+            scan_k(a, k, under, direct, escaped);
+            scan_k(b, k, under, direct, escaped);
+            scan_k(c, k, under, direct, escaped);
+        }
+        Expr::FieldAccess(a, _) | Expr::Inst(a, _) | Expr::Ann(a, _) | Expr::Mask(_, a) => {
+            scan_k(a, k, under, direct, escaped);
+        }
+        Expr::Match(s, arms) => {
+            scan_k(s, k, under, direct, escaped);
+            for a in arms {
+                if let Some(g) = &a.guard {
+                    scan_k(g, k, under, direct, escaped);
+                }
+                scan_k(&a.body, k, under, direct, escaped);
+            }
+        }
+        Expr::Handle(b, arms) => {
+            scan_k(b, k, under, direct, escaped);
+            for a in arms {
+                match a {
+                    HandlerArm::Return(_, body) | HandlerArm::Op(_, _, _, body) => {
+                        scan_k(body, k, under, direct, escaped);
+                    }
+                    #[expect(
+                        clippy::uninhabited_references,
+                        reason = "Never is uninhabited in Core; arm is unreachable"
+                    )]
+                    HandlerArm::Sugar(never) => match *never {},
+                }
+            }
+        }
+        Expr::List(es) | Expr::Tuple(es) => {
+            for a in es {
+                scan_k(a, k, under, direct, escaped);
+            }
+        }
+        Expr::RecordCreate(_, fs) => {
+            for (_, a) in fs {
+                scan_k(a, k, under, direct, escaped);
+            }
+        }
+        Expr::RecordUpdate(b, _, fs) => {
+            scan_k(b, k, under, direct, escaped);
+            for (_, a) in fs {
+                scan_k(a, k, under, direct, escaped);
+            }
+        }
+        Expr::RecordUpdatePath(b, ups) => {
+            scan_k(b, k, under, direct, escaped);
+            for (steps, op) in ups {
+                for s in steps {
+                    if let Some(x) = s.sub_expr() {
+                        scan_k(x, k, under, direct, escaped);
+                    }
+                }
+                scan_k(op.expr(), k, under, direct, escaped);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn check_resumable(op: &str, span: Span, cx: &Cx) -> Result<(), TypeError> {
@@ -81,10 +226,15 @@ pub(super) fn rw_arms(
                     env2.insert(p.clone(), Binding::Local);
                 }
                 env2.insert(k.clone(), Binding::Local);
-                HandlerArm::Op(op.clone(), ps.clone(), k.clone(), rw(body, &env2, cx)?)
+                let body2 = rw(body, &env2, cx)?;
+                // A bare `ctl` clause's grade is read from how it uses `k`.
+                check_grade(op, bare_ctl_grade(&body2, k), body.span, cx)?;
+                HandlerArm::Op(op.clone(), ps.clone(), k.clone(), body2)
             }
             HandlerArm::Sugar(SugarArm::Fun(op, ps, body)) => {
                 check_resumable(op, body.span, cx)?;
+                // `fun` resumes exactly once, in tail position: grade One.
+                check_grade(op, Grade::One, body.span, cx)?;
                 let mut env2 = env.clone();
                 for p in ps {
                     env2.insert(p.clone(), Binding::Local);
@@ -96,6 +246,8 @@ pub(super) fn rw_arms(
             }
             HandlerArm::Sugar(SugarArm::Val(v, init)) => {
                 check_resumable(v, init.span, cx)?;
+                // `val` resumes once with an install-time constant: grade One.
+                check_grade(v, Grade::One, init.span, cx)?;
                 let init2 = rw(init, env, cx)?;
                 let tmp = names::val_tmp(cx.next.bump());
                 let is = init2.span;
@@ -110,6 +262,8 @@ pub(super) fn rw_arms(
                         msg: "final ctl clause cannot resume".into(),
                     });
                 }
+                // `final ctl` never resumes (grade Zero), the least grade, so it
+                // satisfies any declared grade with no further check.
                 let mut env2 = env.clone();
                 for p in ps {
                     env2.insert(p.clone(), Binding::Local);
@@ -201,6 +355,9 @@ pub(super) fn rw_named(
             name: mangled.clone(),
             params: sig.params.clone(),
             ret: sig.ret.clone(),
+            // The cloned private op keeps the source op's declared grade, so a
+            // named handler is checked against the same multiplicity.
+            grade: sig.grade,
         });
         ops.insert(op.clone(), mangled);
     }

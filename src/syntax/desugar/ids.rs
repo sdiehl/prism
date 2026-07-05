@@ -93,7 +93,11 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
                 expr(x, next);
             }
         }
-        Expr::FieldAccess(a, _) | Expr::Mask(_, a) | Expr::Inst(a, _) | Expr::Ann(a, _) => {
+        Expr::FieldAccess(a, _)
+        | Expr::Mask(_, a)
+        | Expr::Inst(a, _)
+        | Expr::Ann(a, _)
+        | Expr::Neg(a) => {
             expr(a, next);
         }
         Expr::RecordCreate(_, fs) => {

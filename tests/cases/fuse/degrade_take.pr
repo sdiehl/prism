@@ -1,0 +1,5 @@
+-- Degrades to not fusing (stateful take over an infinite iterate), still correct.
+import Sequence as Seq
+
+fn main() : !{IO} Unit =
+  println(Seq.sum(Seq.take(Seq.iterate(1, \(x) -> x * 2), 10)))

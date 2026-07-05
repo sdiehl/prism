@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/classes_effectful.pr
 ---
 == tokens ==
-VOpen Class UIdent("Loud") LParen Ident("a") RParen LBrace Ident("loud") Colon LParen Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("loudInt") Colon UIdent("Loud") LParen KwInt RParen LBrace Fn Ident("loud") LParen Ident("x") RParen Eq Let Ident("_") Eq Ident("println") LParen Ident("x") RParen In Ident("x") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("loud") LParen Int(IntLit { value: 3, suffix: None }) RParen VClose
+VOpen Class UIdent("Loud") LParen Ident("a") RParen VOpen Ident("loud") Colon LParen Ident("a") RParen Arrow KwInt VClose VSemi Instance Ident("loudInt") Colon UIdent("Loud") LParen KwInt RParen VOpen Fn Ident("loud") LParen Ident("x") RParen Eq VOpen Ident("println") LParen Ident("x") RParen VSemi Ident("x") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("loud") LParen Int(IntLit { value: 3, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -31,7 +31,7 @@ Program {
                     ),
                 ),
             ],
-            span: 0..37,
+            span: 0..33,
         },
     ],
     instances: [
@@ -63,34 +63,34 @@ Program {
                                         node: Var(
                                             "println",
                                         ),
-                                        span: 93..100,
+                                        span: 83..90,
                                     },
                                     [
                                         Spanned {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 101..102,
+                                            span: 91..92,
                                         },
                                     ],
                                 ),
-                                span: 93..103,
+                                span: 83..93,
                             },
                             Spanned {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 107..108,
+                                span: 98..99,
                             },
                         ),
-                        span: 85..108,
+                        span: 83..99,
                     },
                     wheres: [],
-                    span: 72..108,
+                    span: 66..99,
                 },
             ],
             module: "",
-            span: 39..110,
+            span: 35..99,
         },
     ],
     fns: [
@@ -106,7 +106,7 @@ Program {
                         node: Var(
                             "loud",
                         ),
-                        span: 124..128,
+                        span: 113..117,
                     },
                     [
                         Spanned {
@@ -116,23 +116,24 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 129..130,
+                            span: 118..119,
                         },
                     ],
                 ),
-                span: 124..131,
+                span: 113..120,
             },
             wheres: [],
-            span: 112..131,
+            span: 101..120,
         },
     ],
 }
 
 == types ==
 Type Error: instance method `loudInt.loud` must be pure; it performs IO
-   ╭─[ <source>:6:16 ]
+   ╭─[ <source>:6:5 ]
    │
- 6 │   fn loud(x) = let _ = println(x) in x
-   │                ───────────┬───────────  
-   │                           ╰───────────── instance method `loudInt.loud` must be pure; it performs IO
+ 6 │ ╭─▶     println(x)
+ 7 │ ├─▶     x
+   │ │           
+   │ ╰─────────── instance method `loudInt.loud` must be pure; it performs IO
 ───╯

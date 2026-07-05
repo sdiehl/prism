@@ -1,0 +1,36 @@
+-- The stored-witness stopgap for the implicit ordering path. A serialized map
+-- carries its keys in the writer's `Ord(k)` order. When it is read back where a
+-- different `Ord(k)` is canonical (an ordered container crossing a package
+-- boundary between two programs that canonicalize different orderings), the keys
+-- arrive out of order and the read faults through `Fail`, deterministically and
+-- identically on both backends, rather than silently rebuilding a mis-ordered
+-- tree. A map written and read under the same ordering passes untouched.
+--
+-- This is the dynamic half of the ordered-container coherence story. The static
+-- half (the branded witness) is `examples/ordered_witness.pr`; Phase 3's
+-- dictionary reflection makes the implicit path static too.
+--
+-- Expected output:
+--   ok, size 3
+--   FAULT: map arrived ordered by a different Ord(k)
+
+import Wire (..)
+
+import Data.Map (..)
+
+fn body_ok(body : Bytes) : String =
+  match decode(body) of
+    (m, _) => concat("ok, size ", show_int(map_size((m : Map(Int, String)))))
+
+fn read_map(body : Bytes) : String =
+  handle body_ok(body) with
+    final ctl fail() => "FAULT: map arrived ordered by a different Ord(k)"
+    return r => r
+
+fn main() =
+  -- Keys ascending under the reader's canonical Ord(Int): a clean round trip.
+  let ascending = wire_cat(encode([1, 2, 3]), encode(["a", "b", "c"]))
+  -- Keys descending: as written by a reverse ordering that crossed a boundary.
+  let descending = wire_cat(encode([3, 2, 1]), encode(["c", "b", "a"]))
+  println(read_map(ascending))
+  println(read_map(descending))

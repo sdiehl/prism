@@ -36,7 +36,7 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ## The `Bytes` representation
 
-`Bytes` is a `List(Int)` of byte values in `0..255`. This is the pragmatic pure-Prism choice: a `String`-of-bytes would round-trip a value differently on the two backends, because the interpreter's `string_of_bytes` repairs invalid UTF-8 lossily while the native runtime keeps raw bytes, so byte-for-byte parity (the language's contract) would break on any non-textual byte. A `List(Int)` is ordinary algebraic data that both backends thread identically. The cost is space (a cons cell plus a boxed word per byte) and an O(n) `wire_cat`; a byte-array builtin is the eventual performance path, but correctness and parity come first. `encode` builds its body right-nested, so the concatenations are linear, and `decode` consumes from the front, so a whole decode is linear.
+`Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on both backends (the parity contract a `String`-of-bytes would break, since the interpreter's `string_of_bytes` repairs invalid UTF-8 lossily). The cursor makes `decode` cheap: peeling a byte off the front advances the offset in O(1) with no copy, so a whole decode is linear. Encode accumulates into a growable buffer builder (`buf_push`, amortized O(1)), so building a container or a string body stays linear rather than paying the quadratic cost a right-nested immutable `wire_cat` would incur. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)` view for callers that still want it.
 
 ## Totality
 
@@ -50,15 +50,15 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ### `Bytes`
 
-```prism,def
-type Bytes = Bytes(List(Int))
+```prism,def,h-1e257de4af8d36e5e8a8eb79a4b892c7622554eaead4d315c8e65bae6dc70fd2
+type Bytes = Bytes(Buf, Int)
 ```
 
-A compact, positional byte body: a `List(Int)` of byte values in `0..255`. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it.
+A compact, positional byte body: an unboxed byte buffer and a read cursor, `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it.
 
 ### `Loss`
 
-```prism,def
+```prism,def,h-872469b0292502435111803b3451cf947d33a3fe080d8f17142fe575c9920de8
 type Loss = Loss(List(String))
 ```
 
@@ -66,7 +66,7 @@ What a downgrade could not carry down: the names of the fields dropped when lowe
 
 ### `Policy`
 
-```prism,def
+```prism,def,h-5dc51c6827cc98bcca416e5723e8a170df1441af861548a417f6106c046a4e15
 type Policy = Reject | LargestSafeSubset
 ```
 
@@ -76,21 +76,18 @@ How to reconcile a higher-version value that a reader cannot represent at its ow
 
 ### `Serialize`
 
-```prism,def
-class Serialize(a) {
-  encode : (a) -> Bytes,
+```prism,def,h-9d21f7df8da7066c58726f9df102fedbf15d7530cccad700d425e69d53425141
+class Serialize(a)
+  encode : (a) -> Bytes
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
-}
 ```
 
 The codec, derived structurally by `deriving (Serialize)`. `encode` writes a value's compact positional body; `decode` reads one back, returning the value alongside the bytes that follow it so a reader can thread a frame's fields in declaration order. Decode is total: it fails through `Fail` on a truncated or malformed body rather than panicking, so hostile input is one ordinary failure channel.
 
 ### `Stable`
 
-```prism,def
-class Stable(a) {
-
-}
+```prism,def,h-0fb640d949423dc00312b82400fb54b4066dcbd26bc8ccd3b86f9030946aaadf
+class Stable(a)
 ```
 
 The structural witness that a type's format is frozen-serializable: a record is `Stable` when all its fields are, a sum when all its variants' arguments are. It is a marker with no methods precisely so that the _derivability_ is the whole content of the proof. Persisting a type with a non-stable component (a function, an effectful thunk) fails at the `deriving (Stable)` site, at compile time, naming the offending field.
@@ -99,262 +96,306 @@ The structural witness that a type's format is frozen-serializable: a record is 
 
 ### `serializeInt`
 
-```prism,def
+```prism,def,h-25fefc867da6eae869f3b264c01064f37532a7961b05ffa5840514b23bfbba10
 instance serializeInt : Serialize(Int)
 ```
 
 ### `serializeI64`
 
-```prism,def
+```prism,def,h-64181680839bf2ef0df0c7b7119d2c137c9d5019a6adfad48794387fab775206
 instance serializeI64 : Serialize(I64)
 ```
 
 ### `serializeU64`
 
-```prism,def
+```prism,def,h-84342f8ece25686e21d02a31f6faf4d08009e2beb8c8b42ebcf37f5804c9d512
 instance serializeU64 : Serialize(U64)
 ```
 
 ### `serializeBool`
 
-```prism,def
+```prism,def,h-bcfd7d29a8119ad7ffee7756fd856fe715b27b4d217b6c679934a34d44de582c
 instance serializeBool : Serialize(Bool)
 ```
 
 ### `serializeUnit`
 
-```prism,def
+```prism,def,h-a3f44ebebdfefa139afae2d3cc0df48325de3f4bc4502f36f004ca3753c0f2cb
 instance serializeUnit : Serialize(Unit)
 ```
 
 ### `serializeChar`
 
-```prism,def
+```prism,def,h-c09aaebe912d075bd8f08f85bba0b70a062e77d7d25435281a225be45c6a61c9
 instance serializeChar : Serialize(Char)
 ```
 
 ### `serializeString`
 
-```prism,def
+```prism,def,h-dcf783d5ebcb5b64ca2cbc4aa00ea850171aa9bf6b7d79fbd7a11a0218deba6a
 instance serializeString : Serialize(String)
 ```
 
 ### `serializeList`
 
-```prism,def
+```prism,def,h-435f4e5e8cddd16e77d3a66a0ba4ec652f6936d35e204a25780be762bb6031e7
 instance serializeList : Serialize(List(a))
 ```
 
 ### `serializeBytes`
 
-```prism,def
+```prism,def,h-516046ee3f5be68f268d783599ad46c21e8286183a06d731f114c2dc089250b7
 instance serializeBytes : Serialize(Bytes)
 ```
 
 ### `serializeOption`
 
-```prism,def
+```prism,def,h-8d0b8fb24d9f88954a1fd1aa42a2d5616acde9f3daf8028573d3a88182d0d31c
 instance serializeOption : Serialize(Option(a))
+```
+
+### `serializePair`
+
+```prism,def,h-68195bcfac7ede37c641be44ea403e76259cd60a2da5ca0453e28abce025ef58
+instance serializePair : Serialize((a, b))
+```
+
+### `serializeTriple`
+
+```prism,def,h-f01c6a5185fbb95265958d025f0957fbc6989efed94693c222ff8dcfbf12cbed
+instance serializeTriple : Serialize((a, b, c))
 ```
 
 ### `serializeMap`
 
-```prism,def
-instance serializeMap : Serialize(Map(k, v))
+```prism,def,h-4be09fb20bfeca10412e91f54f1e227bd4fecd61c6d0000e3bb6c28f320751a7
+instance serializeMap : Serialize(Map(k, v, ord))
 ```
 
 ## Functions and Values
 
+### `bytes_of_buf`
+
+```prism,sig,h-846f398ad27188512bad2f7372e42a4eccab255dbbbb673fa7ace3e82e7f2615
+bytes_of_buf : (Buf) -> Wire.Bytes
+```
+
+### `bytes_buf`
+
+```prism,sig,h-d8789008a86566313a955d8a7f866eecb0c0ea78632de857b491fc0fed6a63ba
+bytes_buf : (Wire.Bytes) -> Buf
+```
+
+### `bytes_at`
+
+```prism,sig,h-b85b2b24ac1001645a7f628800f3b12e8faa3c17ad22a2bf98842000b4c94da7
+bytes_at : (Wire.Bytes, Int) -> Int
+```
+
 ### `wire_empty`
 
-```prism,sig
-let wire_empty()
+```prism,sig,h-ebb5493e9145dfa9a685e0c8803c4b948b63fa4a57a6c02a423bddcfbcef0c78
+wire_empty : Wire.Bytes
 ```
 
 ### `wire_cat`
 
-```prism,sig
-fn wire_cat(a, b)
+```prism,sig,h-d4cb793ac4e0d88b036a425f770810636a1808bffe22d0bccc45eea1493583ca
+wire_cat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
-Concatenate two byte bodies. Right-nested use keeps a whole encode linear.
+Concatenate two byte bodies into a fresh buffer.
 
 ### `wire_is_empty`
 
-```prism,sig
-fn wire_is_empty(bs)
+```prism,sig,h-deb8353354ab9d7b67ff4df3cde20fd46b88d482ffd16733a268d0585a53b526
+wire_is_empty : (Wire.Bytes) -> Bool
 ```
 
 True when a body has no bytes left. The reader uses it to reject trailing bytes after a value, and a peer uses it to tell a reference frame (no body) from an inline one.
 
 ### `wire_len`
 
-```prism,sig
-fn wire_len(bs)
+```prism,sig,h-f0dbed28d6ac96ae85f83415437c16e120fead543af86695d20b76643d02995f
+wire_len : (Wire.Bytes) -> Int
 ```
 
 The number of bytes in a body.
 
+### `bytes_of_list`
+
+```prism,sig,h-ba096af663910cb0bae7b08ddc6d46fb45579ebf926893d2e00d1a5b0e793ae9
+bytes_of_list : (List(Int)) -> Wire.Bytes
+```
+
+Build a body from a `List(Int)` of byte values (each masked into `0..255`), and read a body back out as that list. These bridge the buffer representation to the older list view for callers that thread bytes as ordinary data.
+
+### `bytes_to_list`
+
+```prism,sig,h-b13ac8ba038c9a8b93c30dd1a06bde121f90d73ecd44800d336786c4b0a0e389
+bytes_to_list : (Wire.Bytes) -> List(Int)
+```
+
 ### `wire_tag`
 
-```prism,sig
-fn wire_tag(i)
+```prism,sig,h-3e7e6c8ed8aa36453a0f7859cfc65db47b423e9d53e649494adf57867cc5db38
+wire_tag : (Int) -> Wire.Bytes
 ```
 
 Encode a constructor tag (a small non-negative integer) as a varint. The derived `Serialize` for a sum prefixes its body with this.
 
 ### `wire_get_tag`
 
-```prism,sig
-fn wire_get_tag(bs)
+```prism,sig,h-b80e7a5744fb1f7612ebbc76e20dfc4b15a0449767bcc5bbec3038b27cce36df
+wire_get_tag : (Wire.Bytes) -> (Int, Wire.Bytes) ! {Fail}
 ```
 
 Peel a constructor tag off the front of a body, returning it and the rest. The derived `Serialize` for a sum reads this before dispatching on the tag.
 
 ### `wire_scheme_tag`
 
-```prism,sig
-let wire_scheme_tag()
+```prism,sig,h-c7794a0117e444eac7df9c500b1c0335d3908c4c45e1086bffc931885279aaec
+wire_scheme_tag : String
 ```
 
 ### `wire_kind_value`
 
-```prism,sig
-let wire_kind_value()
+```prism,sig,h-f1826bfe53041d69f75cb4a03be94aaba269a9293eb6e23c74e6df40de72b98d
+wire_kind_value : Int
 ```
 
 ### `wire_kind_def`
 
-```prism,sig
-let wire_kind_def()
+```prism,sig,h-80656a2461bd0ed7fe637ab872907ae76b0895966634361560f8311ce9bef2e1
+wire_kind_def : Int
 ```
 
 ### `wire_kind_protocol`
 
-```prism,sig
-let wire_kind_protocol()
+```prism,sig,h-305e58056d40593a3042955c09fce9c77b725350af344295f26bd9771262a4d9
+wire_kind_protocol : Int
 ```
 
 ### `wire_kind_kont`
 
-```prism,sig
-let wire_kind_kont()
+```prism,sig,h-fb245c2fd25651b2922adfe1a698b3b6fdd84e8c70090f50b03ac4a41de81335
+wire_kind_kont : Int
 ```
 
 ### `wire_kind_cert`
 
-```prism,sig
-let wire_kind_cert()
+```prism,sig,h-70cc211ca0b666c7ed45ce43acc47ebe643f7003e2c5668a50777808b4bba573
+wire_kind_cert : Int
 ```
 
 ### `wire_frame`
 
-```prism,sig
-fn wire_frame(kind, digest, body)
+```prism,sig,h-a85c1a98162034164615dd23ac766a878028adff8a9d1f92f8c3fa5eac53fdd2
+wire_frame : (Int, String, Wire.Bytes) -> Wire.Bytes
 ```
 
 Build a frame around a body. `wire_ref` builds the bodyless reference form.
 
 ### `wire_ref`
 
-```prism,sig
-fn wire_ref(kind, digest)
+```prism,sig,h-5b296d3afaa94bdd343414613090e83cff9adebf9057ae7a7faeba891aba3b54
+wire_ref : (Int, String) -> Wire.Bytes
 ```
 
 A pure reference: a frame that carries its contract digest and no body. Its identity is the digest; a peer resolves the body from its store or requests it.
 
 ### `wire_open`
 
-```prism,sig
-fn wire_open(bs, kind, digest)
+```prism,sig,h-f8c74bf920074d9083f33768c5406616d9b358ce84606b792c84691f3e8a4852
+wire_open : (Wire.Bytes, Int, String) -> Wire.Bytes ! {Fail}
 ```
 
 Open a frame, checking the scheme, kind, and digest before the body and returning the body bytes that follow. Any header mismatch fails through `Fail`, so a stale layout is rejected on a cheap comparison, never by a corrupt field.
 
 ### `wire_is_reference`
 
-```prism,sig
-fn wire_is_reference(bs, kind, digest)
+```prism,sig,h-cfd0dd4787c33daef09c03ea427aa75093b2a9624f9f6745118bc9645325d961
+wire_is_reference : (Wire.Bytes, Int, String) -> Bool ! {Fail}
 ```
 
 True when a well-formed frame for `kind`/`digest` carries no body (a pure reference). Fails if the header itself does not match.
 
 ### `wire_encode_value`
 
-```prism,sig
-fn wire_encode_value(digest, x)
+```prism,sig,h-5b7a627e4913b6b500916ba1f642956937bbbe1d7185094914ce67558c234767
+wire_encode_value : forall a. (String, a) -> Wire.Bytes
 ```
 
 Encode a value as a `value`-kind frame carrying the given contract digest. The digest is passed in for now: it is the type's shape digest, which the compiler computes but does not yet thread to a derived instance (the seam a later `shape_digest` intrinsic closes).
 
 ### `wire_decode_value`
 
-```prism,sig
-fn wire_decode_value(bs, digest)
+```prism,sig,h-8efb50aeabb7e029696bc291fe35f54d768e482ce7720ac7e077f309b9143092
+wire_decode_value : forall a. (Wire.Bytes, String) -> a ! {Fail}
 ```
 
 Decode a `value`-kind frame: check the header, decode the body, and reject trailing bytes. A bodyless reference frame fails here, because a value cannot be materialized without its bytes.
 
 ### `no_loss`
 
-```prism,sig
-let no_loss()
+```prism,sig,h-978eb6b064926def1e55e2a4169ed5b1ffebc3897889c31120baf1d6c85372ed
+no_loss : Wire.Loss
 ```
 
 The empty `Loss`: a downgrade that dropped nothing.
 
 ### `dropped`
 
-```prism,sig
-fn dropped(names)
+```prism,sig,h-8900be4b92d532f5d5903ac2f6108e7043b06e016949aeb941d16aee2c7b037f
+dropped : (List(String)) -> Wire.Loss
 ```
 
 A `Loss` naming the fields a downgrade dropped.
 
 ### `loss_names`
 
-```prism,sig
-fn loss_names(l)
+```prism,sig,h-9a89afc2d9726ca74d9d440def8cf573f70f31182be40663b30f4d1c716535e2
+loss_names : (Wire.Loss) -> List(String)
 ```
 
 The field names inside a `Loss`.
 
 ### `lossless`
 
-```prism,sig
-fn lossless(l)
+```prism,sig,h-b13330cb440d70d6c372ba55a1afcbdd1ec4763558c599b959213ad477167b0f
+lossless : (Wire.Loss) -> Bool
 ```
 
 True when a `Loss` dropped nothing, so the downgrade was lossless. The safe subset of a version step is exactly the values whose downgrade is lossless.
 
 ### `loss_union`
 
-```prism,sig
-fn loss_union(a, b)
+```prism,sig,h-0e221f447be4e2d74bbc31a64bcfdf44a4f0d2483de741f5373168fe7e31d2b1
+loss_union : (Wire.Loss, Wire.Loss) -> Wire.Loss
 ```
 
 Merge two losses along a composed downgrade.
 
 ### `compose_upgrade`
 
-```prism,sig
-fn compose_upgrade(lo_mid, mid_hi)
+```prism,sig,h-dd9111fb2473a64636d124f5d5a21d6958267950be33ebb31a7101b007f0c018
+compose_upgrade : forall a b c. ((a) -> b, (b) -> c) -> (a) -> c
 ```
 
 Compose two adjacent upgrades into one spanning upgrade.
 
 ### `compose_downgrade`
 
-```prism,sig
-fn compose_downgrade(hi_mid, mid_lo)
+```prism,sig,h-9f1550c1780c24d2170cbf5bc60fff651c0bd13c8403ee49dcfc21b8efacc875
+compose_downgrade : forall a b c. ((a) -> (b, Wire.Loss), (b) -> (c, Wire.Loss)) -> (a) -> (c, Wire.Loss)
 ```
 
 Compose two adjacent downgrades into one spanning downgrade, unioning the losses each step reported.
 
 ### `reconcile`
 
-```prism,sig
-fn reconcile(p, down, x)
+```prism,sig,h-2d0b610e13adc9b66bdc4dd45823195b3268f46196448ef5aa2c0e2cc62875f9
+reconcile : forall a b. (Wire.Policy, (a) -> (b, Wire.Loss), a) -> (b, Wire.Loss) ! {Fail}
 ```
 
 Apply a mismatch policy to a downgrade. `Reject` fails through `Fail`; `LargestSafeSubset` runs the downgrade and returns the lowered value with the fields it had to drop.

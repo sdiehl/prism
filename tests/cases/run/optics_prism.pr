@@ -22,6 +22,8 @@ fn main() =
   -- terminal `?Ctor` replaces the whole matched constructor
   println({ c | ?Circle ~ \(x) -> Square { side = 1 } })
   -- `each` then prism: focus the Circles of a list, Squares untouched
-  let shapes =
-    Cons(Circle { radius = 1 }, Cons(Square { side = 2 }, Cons(Circle { radius = 3 }, Nil)))
+  let shapes = Cons(
+      Circle { radius = 1 },
+      Cons(Square { side = 2 }, Cons(Circle { radius = 3 }, Nil)),
+    )
   println({ shapes | each.?Circle.radius ~ double })

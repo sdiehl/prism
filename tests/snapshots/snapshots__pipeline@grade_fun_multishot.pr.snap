@@ -1,0 +1,173 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/grade_fun_multishot.pr
+---
+== tokens ==
+VOpen Effect UIdent("Poll") VOpen Fun Ident("poll") LParen KwUnit RParen Colon KwInt VClose VSemi Fn Ident("use_it") LParen RParen Colon Bang LBrace UIdent("Poll") RBrace KwInt Eq Ident("poll") LParen LParen RParen RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("use_it") LParen RParen With VOpen Ident("poll") LParen Ident("u") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 1, suffix: None }) RParen Plus Ident("k") LParen Int(IntLit { value: 2, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Poll",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "poll",
+                    params: [
+                        Unit,
+                    ],
+                    ret: Int,
+                    grade: One,
+                },
+            ],
+            span: 146..180,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "use_it",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Poll",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "poll",
+                        ),
+                        span: 210..214,
+                    },
+                    [
+                        Spanned {
+                            node: Unit,
+                            span: 215..217,
+                        },
+                    ],
+                ),
+                span: 210..218,
+            },
+            wheres: [],
+            span: 182..218,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "use_it",
+                                ),
+                                span: 241..247,
+                            },
+                            [],
+                        ),
+                        span: 241..249,
+                    },
+                    [
+                        Op(
+                            "poll",
+                            [
+                                "u",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Bin(
+                                    Add,
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 273..274,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 275..276,
+                                                },
+                                            ],
+                                        ),
+                                        span: 273..277,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 280..281,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 2,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 282..283,
+                                                },
+                                            ],
+                                        ),
+                                        span: 280..284,
+                                    },
+                                ),
+                                span: 273..284,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 301..302,
+                            },
+                        ),
+                    ],
+                ),
+                span: 234..302,
+            },
+            wheres: [],
+            span: 220..302,
+        },
+    ],
+}
+
+== types ==
+Type Error: handler clause for `poll` exceeds its declared grade `fun` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+    ╭─[ <source>:10:19 ]
+    │
+ 10 │     poll(u, k) => k(1) + k(2)
+    │                   ─────┬─────  
+    │                        ╰─────── handler clause for `poll` exceeds its declared grade `fun` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+────╯

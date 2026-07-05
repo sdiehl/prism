@@ -29,10 +29,9 @@ fn trace(m : Moore(s, i, o), st : s, ins : List(i)) : List(o) =
 fn run(m : Moore(s, i, o), ins : List(i)) : List(o) = trace(m, m.init, ins)
 
 -- The interaction interface as an effect: pull the next input, push an output.
-effect Drive {
-  ctl pull(Unit) : Int,
+effect Drive
+  ctl pull(Unit) : Int
   ctl push(Int) : Unit
-}
 
 fn drive(m : Moore(Int, Int, Int), st : Int) : !{Drive} Unit =
   push((m.out)(st))

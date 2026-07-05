@@ -56,6 +56,10 @@ snap FILTER="":
     INSTA_UPDATE=always cargo test {{FILTER}} 2>&1 | grep -E "test result:|error\[|error:" || true
     git status --short tests/snapshots || true
 
+# Interactively accept/reject pending snapshot changes (needs cargo-insta).
+review:
+    cargo insta review
+
 # Format .pr files in place with the debug binary (whole tree if no args).
 fmtw *FILES:
     cargo run --quiet -- fmt {{FILES}}
@@ -124,8 +128,16 @@ ci: fmt-check clippy test fmt-examples
 
 # Build the wasm playground bundle and sync it into the docs (docs/src/pkg), so
 # the mdbook playground always runs the current compiler (no stale-bundle drift).
+#
+# The cdylib crate-type lives here, not in Cargo.toml: `[lib]` is rlib-only so
+# native builds do not link a dead ~23 MB dylib, and `cargo rustc --crate-type
+# cdylib` asks for the wasm dynamic library only when building for wasm. That
+# replaces `wasm-pack build`, which hard-requires cdylib in the manifest. The
+# wasm-bindgen CLI must match the `wasm-bindgen` crate version (wasm-pack caches a
+# matching one; otherwise `cargo install wasm-bindgen-cli`).
 wasm:
-    wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+    cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown --release --no-default-features --features wasm
+    wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm --target web --out-dir web/pkg --out-name prism
     cp web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 
 examples:

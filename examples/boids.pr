@@ -44,10 +44,22 @@ fn spawn(s) =
   let s2 = lcg(s1)
   let s3 = lcg(s2)
   let s4 = lcg(s3)
-  ((mod(s1, world), mod(s2, world), mod(s3, 2 * max_v) - max_v, mod(s4, 2 * max_v) - max_v), s4)
+  (
+      (
+          mod(s1, world),
+          mod(s2, world),
+          mod(s3, 2 * max_v) - max_v,
+          mod(s4, 2 * max_v) - max_v,
+        ),
+      s4,
+    )
 
 fn seed_swarm() =
-  match (foldl(\(acc, _) -> match acc of { (bs, s) => match spawn(s) of { (b, s2) => (Cons(b, bs), s2) } }, (Nil, seed0), range(0, n_boids))) of
+  match (foldl(
+        \(acc, _) -> match acc of { (bs, s) => match spawn(s) of { (b, s2) => (Cons(b, bs), s2) } },
+        (Nil, seed0),
+        range(0, n_boids),
+      )) of
     (bs, _) => reverse(bs)
 
 -- Shortest signed offset on a wrapped axis, so boids near opposite edges see
@@ -99,7 +111,11 @@ fn wrap_pos(p) = mod(mod(p, world) + world, world)
 fn step_boid(me, swarm) =
   match me of
     (x, y, vx, vy) =>
-      match (foldl(\(acc, o) -> add7(acc, contrib(x, y, o)), (0, 0, 0, 0, 0, 0, 0), swarm)) of
+      match (foldl(
+            \(acc, o) -> add7(acc, contrib(x, y, o)),
+            (0, 0, 0, 0, 0, 0, 0),
+            swarm,
+          )) of
         (cnt, sdx, sdy, svx, svy, sepx, sepy) =>
           let dvx =
             if cnt > 0 then
@@ -140,14 +156,59 @@ fn frame_obs(swarm) = str_join(" ", map(boid_xy, swarm))
 -- `replayable` is the compiler-checked form of the scrubber's promise: the
 -- whole trajectory reproduces from the step index alone.
 replayable fn run_trace(n) =
-  concat(concat(show(world), concat(" ", show(world))), concat("\n", str_join("\n", map(frame_obs, frames_upto(n)))))
+  concat(
+      concat(show(world), concat(" ", show(world))),
+      concat("\n", str_join("\n", map(frame_obs, frames_upto(n)))),
+    )
+
+-- Full observable state of one boid: "x,y,vx,vy". The scrubber only needs the
+-- position, but branching a timeline continues the run from a frame, so it needs
+-- the velocity too; this is the state the fork carries and perturbs.
+fn boid_full(b : Boid) =
+  match b of
+    (x, y, vx, vy) => str_join(",", [show(x), show(y), show(vx), show(vy)])
+
+fn frame_full(swarm) = str_join(" ", map(boid_full, swarm))
+
+-- The swarm at each step 0..n starting from an ARBITRARY state, not the seed:
+-- element N is `step` composed N times on `s0`. `frames_upto` is this anchored at
+-- `seed_swarm()`; a branched timeline anchors it at a perturbed frame instead.
+fn frames_from(s0 : List(Boid), n) =
+  scan_left(\(s, _) -> step(s), s0, range(0, n))
+
+-- The full-state trajectory (positions and velocities) from the seed, so a
+-- branching frontend can fork at any frame and continue it. Same header as
+-- `run_trace`; each line is a space-separated list of "x,y,vx,vy".
+replayable fn run_trace_full(n) =
+  concat(
+      concat(show(world), concat(" ", show(world))),
+      concat("\n", str_join("\n", map(frame_full, frames_upto(n)))),
+    )
+
+-- The full-state trajectory continued from a given swarm `s0` (the fork's
+-- perturbed frame). A pure function of `s0` and `n`, so replaying a branch is
+-- byte-identical: this is the run-from-state the timeline forks with.
+replayable fn run_trace_from(s0 : List(Boid), n) =
+  concat(
+      concat(show(world), concat(" ", show(world))),
+      concat("\n", str_join("\n", map(frame_full, frames_from(s0, n)))),
+    )
 
 -- A coarse ASCII view of one frame, for the terminal corpus run.
 fn occupied(swarm : List(Boid), gx, gy) =
-  any(\(b) -> match b of { (x, y, _, _) => x * grid_w / world == gx && y * grid_h / world == gy }, swarm)
+  any(
+      \(b) -> match b of { (x, y, _, _) => x * grid_w / world == gx && y * grid_h / world == gy },
+      swarm,
+    )
 
 fn render_row(swarm, gy) =
-  str_join("", map(\(gx) -> if occupied(swarm, gx, gy) then "#" else ".", range(0, grid_w)))
+  str_join(
+      "",
+      map(
+          \(gx) -> if occupied(swarm, gx, gy) then "#" else ".",
+          range(0, grid_w),
+        ),
+    )
 
 fn render_frame(swarm) =
   lines_of(map(\(gy) -> render_row(swarm, gy), range(0, grid_h)))

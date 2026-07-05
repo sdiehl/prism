@@ -1,0 +1,10 @@
+Link:
+  %tok  = call i64 @prism_reuse_token(i64 %xs)   ; rc==1 -> the shell; else null
+  ; ... compute h + 1 and bump(t) ...
+  %c    = call ptr @prism_reuse_alloc(i64 %tok, i64 2)  ; reuse shell, or fresh
+  %tp   = getelementptr i8, ptr %c, i64 8
+  store i64 2, ptr %tp               ; Link tag
+  %f0   = getelementptr i8, ptr %c, i64 24
+  store i64 %h1, ptr %f0             ; h + 1
+  %f1   = getelementptr i8, ptr %c, i64 32
+  store i64 %rest, ptr %f1           ; bump(t)

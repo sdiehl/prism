@@ -94,6 +94,20 @@ pub enum Value {
     Tuple(Vec<Self>),
 }
 
+// The numeric lane a unary negation runs in. Unary minus elaborates to a
+// genuine `Comp::Neg` node, never a `0 - x` desugar, for two reasons: float
+// negation must flip the sign bit and preserve signed zero (a real `fneg`, not
+// `0.0 -. x` which would map `-0.0` to `+0.0`), and the numeric operator classes
+// re-elaborate `-x` as the `Num` negate method, which must produce
+// byte-identical Core to this node so the swap is invisible. `U64` has no lane:
+// negating an unsigned value is rejected in the typechecker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NegLane {
+    Int,
+    I64,
+    Float,
+}
+
 #[derive(Clone, Debug)]
 pub struct HandleOp {
     pub name: Sym,
@@ -165,6 +179,11 @@ pub enum Comp {
     Error(Value),
     Case(Value, Vec<(CorePat, Self)>),
     FloatBuiltin(FloatOp, Value),
+    // Genuine unary negation in a numeric lane (`NegLane`); the operand is always
+    // a value. Kept a distinct node rather than a `0 - x` subtract so float
+    // negation lowers to a real sign-bit flip and the `Num` negate method can
+    // reproduce it byte-for-byte.
+    Neg(NegLane, Value),
     Do(Sym, Vec<Value>),
     Handle {
         body: Box<Self>,
@@ -223,6 +242,7 @@ impl Comp {
             Self::Error(_) => "Error",
             Self::Case(..) => "Case",
             Self::FloatBuiltin(..) => "FloatBuiltin",
+            Self::Neg(..) => "Neg",
             Self::Do(..) => "Do",
             Self::Handle { .. } => "Handle",
             Self::Mask(..) => "Mask",

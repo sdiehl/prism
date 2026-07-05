@@ -7,6 +7,8 @@ examples/async_capability.pr: whole-program-free-monad
 examples/calc.pr: evidence
 examples/capabilities.pr: evidence
 examples/channels.pr: whole-program-free-monad
+examples/chaos_swarm.pr: whole-program-free-monad
+examples/cli.pr: selective-free-monad
 examples/clock.pr: whole-program-free-monad
 examples/comprehension.pr: whole-program-free-monad
 examples/condition.pr: selective-free-monad
@@ -28,8 +30,10 @@ examples/effects.pr: selective-free-monad
 examples/errors.pr: selective-free-monad
 examples/exceptions.pr: selective-free-monad
 examples/game.pr: evidence
+examples/grade_isolation.pr: selective-free-monad
 examples/handlers_funval.pr: evidence
 examples/hangman.pr: evidence
+examples/incr_trace.pr: whole-program-free-monad
 examples/incr_warm.pr: whole-program-free-monad
 examples/indexing.pr: whole-program-free-monad
 examples/interaction.pr: state-fusion
@@ -58,6 +62,7 @@ examples/stable.pr: whole-program-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
+examples/time.pr: whole-program-free-monad
 examples/transact.pr: selective-free-monad
 examples/ufcs.pr: state-fusion
 examples/validate.pr: whole-program-free-monad
@@ -97,6 +102,8 @@ tests/cases/run/for_blocks.pr: evidence
 tests/cases/run/for_break.pr: whole-program-free-monad
 tests/cases/run/forward.pr: selective-free-monad
 tests/cases/run/fs.pr: evidence
+tests/cases/run/fs_bytes.pr: evidence
+tests/cases/run/grade_ops.pr: selective-free-monad
 tests/cases/run/handler_funval.pr: evidence
 tests/cases/run/incr_diff.pr: whole-program-free-monad
 tests/cases/run/indexing_ops.pr: selective-free-monad
@@ -114,6 +121,7 @@ tests/cases/run/open_nontail.pr: selective-free-monad
 tests/cases/run/opt_chain.pr: selective-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad
 tests/cases/run/optics_read.pr: selective-free-monad
+tests/cases/run/ordered_wire_stopgap.pr: whole-program-free-monad
 tests/cases/run/param_eff.pr: evidence
 tests/cases/run/quickcheck_detect.pr: whole-program-free-monad
 tests/cases/run/reified_under_world.pr: whole-program-free-monad
@@ -123,8 +131,11 @@ tests/cases/run/stable_ladder.pr: whole-program-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion
 tests/cases/run/sugar_if.pr: evidence
+tests/cases/run/thunk_effect_absorb.pr: whole-program-free-monad
+tests/cases/run/tuple_eq_ord.pr: selective-free-monad
 tests/cases/run/var_in_handler.pr: selective-free-monad
 tests/cases/run/var_under_handlers.pr: selective-free-monad
+tests/cases/run/vec_head.pr: whole-program-free-monad
 tests/cases/run/while_state.pr: whole-program-free-monad
 tests/cases/run/wire_laws.pr: whole-program-free-monad
 tests/cases/run/with_handler.pr: selective-free-monad

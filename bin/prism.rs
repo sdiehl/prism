@@ -63,6 +63,12 @@ struct Cli {
     /// Disable the scalar-CSE pass
     #[arg(long, global = true)]
     no_cse: bool,
+    /// Force stream fusion of pull-Sequence pipelines below -O2 (on at -O2)
+    #[arg(long, global = true)]
+    fuse: bool,
+    /// Disable the stream-fusion pass
+    #[arg(long, global = true)]
+    no_fuse: bool,
     /// Disable the native effect driver
     #[arg(long, global = true)]
     no_native_effects: bool,
@@ -102,6 +108,24 @@ enum Cmd {
         file: PathBuf,
         /// The `.replay` trace file to step through
         trace: PathBuf,
+    },
+    /// Pause a running program at a step and snapshot it to a `kont` file
+    Suspend {
+        /// The program to run
+        file: PathBuf,
+        /// Pause after this many machine steps (0 snapshots before the first step)
+        #[arg(long, value_name = "STEP")]
+        at: usize,
+        /// Where to write the `kont` snapshot
+        #[arg(short, long, value_name = "PATH")]
+        out: PathBuf,
+    },
+    /// Resume a program from a `kont` snapshot, running it to completion
+    Resume {
+        /// The program the snapshot was captured against
+        file: PathBuf,
+        /// The `kont` snapshot file to resume
+        snapshot: PathBuf,
     },
     /// Compile the enclosing project to a native binary
     Build {
@@ -291,6 +315,7 @@ fn main() -> ExitCode {
             (cli.no_simplify, prism::CorePass::Simplify),
             (cli.no_inline, prism::CorePass::Inline),
             (cli.no_cse, prism::CorePass::Cse),
+            (cli.no_fuse, prism::CorePass::Fuse),
         ]
         .into_iter()
         .filter_map(|(off, pass)| off.then_some(pass)),
@@ -302,6 +327,9 @@ fn main() -> ExitCode {
     }
     if cli.no_trampoline {
         cfg.flags.trampoline = false;
+    }
+    if cli.fuse {
+        cfg.flags.fuse = true;
     }
     if cli.core_lint {
         cfg.flags.core_lint = true;
@@ -324,6 +352,14 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        // A runtime fault prints exactly what the native trap prints (the C
+        // runtime's `fatal: <msg>` on stderr, exit 1), so a faulting program is
+        // byte-identical across backends; compile-time errors keep the
+        // span-annotated diagnostic report.
+        Err((Error::Runtime(msg), _, _)) => {
+            eprintln!("fatal: {msg}");
+            ExitCode::FAILURE
+        }
         Err((e, src, name)) => {
             eprint!("{}", e.render(&src, &name));
             ExitCode::FAILURE
@@ -498,6 +534,54 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> Result<(), (Error, String, String)
             let mut ui = stdout.lock();
             prism::debug_on(&full, &roots, &trace_src, &mut cmds, &mut ui, cfg)
                 .map_err(|e| (e, full, name))?;
+            Ok(())
+        }
+        Cmd::Suspend { file, at, out } => {
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let stdout = std::io::stdout();
+            let stdin = std::io::stdin();
+            let mut sink = stdout.lock();
+            let mut input = stdin.lock();
+            let result = prism::suspend_on(&full, &roots, &mut sink, &mut input, at, cfg)
+                .map_err(|e| (e, full.clone(), name.clone()))?;
+            drop(sink);
+            drop(input);
+            match result {
+                prism::SuspendResult::Suspended(bytes) => {
+                    std::fs::write(&out, &bytes)
+                        .map_err(|e| (Error::Io(e), full, out.display().to_string()))?;
+                    eprintln!(
+                        "suspended after {at} steps to {} ({} bytes)",
+                        out.display(),
+                        bytes.len()
+                    );
+                    Ok(())
+                }
+                prism::SuspendResult::Done(exit) => {
+                    // The budget was past the program's length: it simply ran.
+                    eprintln!("program completed in fewer than {at} steps; nothing suspended");
+                    if let Some(code) = exit {
+                        std::process::exit(code);
+                    }
+                    Ok(())
+                }
+            }
+        }
+        Cmd::Resume { file, snapshot } => {
+            let (full, roots, name, _) = resolve_input(&file)?;
+            let bytes = std::fs::read(&snapshot)
+                .map_err(|e| (Error::Io(e), String::new(), file_name(&snapshot)))?;
+            let stdout = std::io::stdout();
+            let stdin = std::io::stdin();
+            let mut sink = stdout.lock();
+            let mut input = stdin.lock();
+            let exit = prism::resume_on(&full, &roots, &bytes, &mut sink, &mut input, cfg)
+                .map_err(|e| (e, full, name))?;
+            drop(sink);
+            drop(input);
+            if let Some(code) = exit {
+                std::process::exit(code);
+            }
             Ok(())
         }
         Cmd::Build { path, out, mlir } => {

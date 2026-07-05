@@ -1,6 +1,5 @@
-effect Coin {
+effect Coin
   ctl coin(Unit) : Bool
-}
 
 fn prog() : !{Coin} Int =
   let x = coin(())

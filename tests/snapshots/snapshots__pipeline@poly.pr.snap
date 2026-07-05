@@ -160,7 +160,7 @@ Program {
 }
 
 == types ==
-twice : forall a e0. ((a) -> a ! {e0}, a) -> a ! {e0}
+twice : forall e0 a. ((a) -> a ! {e0}, a) -> a ! {e0}
 inc : (Int) -> Int
 main : () -> Unit ! {IO}
 

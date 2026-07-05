@@ -15,6 +15,23 @@ use crate::syntax::ast::{
 // clause); any other keyword is the optional `make` clause.
 const VIEW_KW: &str = "view";
 
+// The flip messages shown when a `class`/`instance`/`effect` body is opened with
+// a brace instead of layout. Each names the construct and the member it holds so
+// the fix reads off the message.
+pub const FLIP_CLASS: &str =
+    "class bodies use layout: remove the braces and put each method on its own indented line";
+pub const FLIP_INSTANCE: &str =
+    "instance bodies use layout: remove the braces and put each member on its own indented line";
+pub const FLIP_EFFECT: &str =
+    "effect bodies use layout: remove the braces and put each operation on its own indented line";
+
+// Shown when a type-argument position holds dimension arithmetic (`Vec(a, n + 1)`).
+// The `Nat` kind unifies dimensions by equality of literals and variables only, so
+// there is no `+` on a dimension; the message states what a dimension may be.
+pub const DECLINE_DIM_ARITH: &str =
+    "arithmetic on dimensions is not supported: a dimension is a plain natural literal \
+     (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only";
+
 // One entry of a `stable` block body: a version rung or a hand-written converter.
 // The parser collects them interleaved (they share the comma-separated body);
 // `build_stable` partitions them and enforces the ordering invariant.

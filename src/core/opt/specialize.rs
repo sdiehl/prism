@@ -333,7 +333,12 @@ fn dce(c: &Comp, builders: &BTreeMap<Sym, Vec<Value>>) -> Comp {
 // of a live substituted value, minting fresh `prefix`-namespaced names from the
 // caller's counter. Safety is thus a property of `Subst` itself, not of callers
 // remembering to pre-freshen the term.
-fn subst_comp(c: &Comp, s: &BTreeMap<Sym, Value>, counter: &mut u32, prefix: &'static str) -> Comp {
+pub(crate) fn subst_comp(
+    c: &Comp,
+    s: &BTreeMap<Sym, Value>,
+    counter: &mut u32,
+    prefix: &'static str,
+) -> Comp {
     Subst { counter, prefix }.comp(c, s)
 }
 

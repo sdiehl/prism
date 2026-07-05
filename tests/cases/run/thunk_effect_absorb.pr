@@ -1,0 +1,32 @@
+-- An unparameterized effect whose op takes a thunk with an open effect row
+-- `{Wrap | e}`. The thunk performs a second effect (Out); correct row absorption
+-- ties the open tail `e` to the ambient row at the perform site, so `out(7)`
+-- flows out to the enclosing `Out` handler and `7` prints before the result `3`.
+-- Before the fix a non-parametric op like `wrap` dropped the thunk's row unless
+-- the effect carried a phantom type parameter; `Wrap` is unparameterized and
+-- still absorbs it. `run_wrap` re-installs itself to run the thunk (as `Incr`
+-- does), so a thunk's own `Wrap` performs are re-handled while its `e` flows out.
+effect Out
+  ctl out(Int) : Unit
+
+effect Wrap
+  ctl wrap(() -> Int ! {Wrap | e}) : Int
+
+fn run_wrap(action : () -> a ! {Wrap | e}) : a =
+  handle action() with
+    wrap(th, k) => k(run_wrap(th))
+    return x => x
+
+fn inner() : !{Out} Int =
+  out(7)
+  3
+
+fn driver() : !{Wrap, Out} Int = wrap(inner)
+
+fn work() : !{Out} Int = run_wrap(driver)
+
+fn main() =
+  println(handle work() with {
+    out(n, k) => let _ = println(n) in k(()),
+    return r => r
+  })

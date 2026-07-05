@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/num_fixed_wrap.pr
+---
+-9223372036854775808
+-2
+-9223372036854775808
+0
+0
+-1
+=> ()

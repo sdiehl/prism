@@ -29,6 +29,18 @@ pub fn summary() =
     let total = memo(\() -> sum(map_values(get(scores))))
     let count = memo(\() -> length(map_values(get(scores))))
     let avg = memo(\() -> get(total) / get(count))
-    concat("total=", concat(show_int(get(total)), concat("  count=", concat(show_int(get(count)), concat("  avg=", show_int(get(avg)))))))
+    concat(
+        "total=",
+        concat(
+            show_int(get(total)),
+            concat(
+                "  count=",
+                concat(
+                    show_int(get(count)),
+                    concat("  avg=", show_int(get(avg))),
+                  ),
+              ),
+          ),
+      )
 
 pub fn main() = println(summary())

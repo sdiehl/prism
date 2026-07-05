@@ -1,0 +1,32 @@
+-- Unary minus across every numeric lane, plus the pinned precedence and the
+-- boundary values. The whole program must produce byte-identical output on the
+-- interpreter and both native backends.
+
+fn negi(x) : ! Int = -x
+
+fn negf(x) : ! Float = -x
+
+fn negw(x) : ! I64 = -x
+
+fn main() : !{IO} Unit =
+  -- Int lane: exact bignum negation.
+  println(-5)
+  println(negi(7))
+  println(- -5)
+  println(3 - -2)
+  -- Float lane: a genuine IEEE sign flip, so signed zero is preserved
+  -- (`-0.0` is not `+0.0`), which `1.0 / x` makes observable as -inf.
+  println(-1.5)
+  println(negf(2.5))
+  println(negf(0.0))
+  println(1.0 / negf(0.0))
+  println(1.0 / negf(-0.0))
+  -- I64 lane: two's-complement wrap, so negating the minimum is itself.
+  println(-5i64)
+  println(negw(42i64))
+  println(-9223372036854775808i64)
+  println(negw(-9223372036854775808i64))
+  -- Precedence: tighter than every binary operator, looser than application.
+  println(-2 * 3)
+  println(-2 ^ 2)
+  println(-negi(4) + 1)

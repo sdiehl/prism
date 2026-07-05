@@ -1,0 +1,46 @@
+-- Branded ordering witnesses. `with_ordering(cmp, body)` hands `body` a witness
+-- carrying a comparator; every map built through that witness is branded with
+-- the witness's private, scope-local brand. Two witnesses carry incompatible
+-- brands, so a map built under one can never be handed to the other's
+-- operations, and the mismatch is caught at compile time (see
+-- tests/cases/ordered_cross_witness.pr). This is the statically coherent,
+-- explicit half of the ordered-container story: the same keys can be held under
+-- an ascending and a descending order at once without ever being confused.
+--
+-- Expected output:
+--   [(1, "a"), (2, "b"), (3, "c")]
+--   [(3, "c"), (2, "b"), (1, "a")]
+--   asc has 1: true
+--   desc has 9: false
+
+import Data.Ordered (..)
+
+fn asc(a : Int, b : Int) : Int = a - b
+
+fn desc(a : Int, b : Int) : Int = b - a
+
+-- Polymorphic in the witness brand, so it runs under any ordering. The brand
+-- never escapes: `build` returns an ordinary list, not a branded map.
+fn build(w : OrdWitness(Int, brand)) : List((Int, String)) =
+  ord_to_list(
+      w,
+      ord_insert(
+          w,
+          2,
+          "b",
+          ord_insert(w, 1, "a", ord_insert(w, 3, "c", ord_empty(w))),
+        ),
+    )
+
+fn has(w : OrdWitness(Int, brand), key : Int) : Bool =
+  ord_member(w, key, ord_insert(w, 1, "a", ord_empty(w)))
+
+fn main() =
+  print(with_ordering(asc, build))
+  print(with_ordering(desc, build))
+  println(
+      concat("asc has 1: ", show_bool(with_ordering(asc, \(w) -> has(w, 1)))),
+    )
+  println(
+      concat("desc has 9: ", show_bool(with_ordering(desc, \(w) -> has(w, 9)))),
+    )

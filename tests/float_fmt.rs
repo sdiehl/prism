@@ -132,10 +132,12 @@ fn corpus() -> Vec<u64> {
 }
 
 fn build_helper() -> PathBuf {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let rt = root.join("runtime/prism_rt.c");
-    let dir = std::env::temp_dir();
     let stem = format!("prism_float_fmt_{}", std::process::id());
+    let dir = std::env::temp_dir().join(&stem);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Compile the split runtime modules from the one canonical list, the same
+    // sources the native backend links.
+    let rt_sources = prism::codegen::rt::write_runtime(&dir).unwrap();
     let shim = dir.join(format!("{stem}.c"));
     let bin = dir.join(&stem);
     // The shim provides prism_main (the runtime's main calls it), reads raw
@@ -157,8 +159,7 @@ fn build_helper() -> PathBuf {
     let out = Command::new(cc())
         .args(["-O2", "-w"])
         .arg(&shim)
-        .arg(&rt)
-        .arg("-lm")
+        .args(&rt_sources)
         .arg("-o")
         .arg(&bin)
         .output()
@@ -168,7 +169,6 @@ fn build_helper() -> PathBuf {
         "compiling the float-formatter helper failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let _ = std::fs::remove_file(&shim);
     bin
 }
 

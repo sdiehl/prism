@@ -29,26 +29,19 @@ pub fn leaderboard() =
   run_incr() fn
     let scores =
       input(map_from_list([("neo", 3), ("trinity", 7), ("morpheus", 5)]))
-    let total =
-      memo() fn
-        println("  recompute: total")
-        sum(map_values(get(scores)))
-    let ranking =
-      memo() fn
-        println("  recompute: ranking")
-        map(fst, by_score_desc(map_to_list(get(scores))))
-    let champion =
-      memo() fn
-        println("  recompute: champion")
-        match head(get(ranking)) of
-          Some(name) => name
-          None => "nobody"
-    let banner =
-      memo() fn
-        println("  recompute: banner")
-        concat(get(champion), " is winning!")
-    let show_state =
-      \() -> println(concat("total=", concat(show(get(total)), concat("  banner=", get(banner)))))
+    let total = memo(
+        \() -> let _ = println("  recompute: total") in sum(map_values(get(scores))),
+      )
+    let ranking = memo(
+        \() -> let _ = println("  recompute: ranking") in by_score_desc(map_to_list(get(scores))),
+      )
+    let champion = memo(
+        \() -> let _ = println("  recompute: champion") in match head(get(ranking)) of { Some(top) => fst(top), None => "nobody" },
+      )
+    let banner = memo(
+        \() -> let _ = println("  recompute: banner") in concat(get(champion), " is winning!"),
+      )
+    let show_state = \() -> println(concat("total=", concat(show(get(total)), concat("  banner=", get(banner)))))
     println("== opening scores ==")
     show_state()
     println("")

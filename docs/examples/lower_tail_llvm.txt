@@ -1,0 +1,12 @@
+define i64 @prism_sumto(i64 %n, i64 %acc) {
+entry:
+  %z = icmp eq i64 %n, 1              ; n == 0 (0 is the immediate 1)
+  br i1 %z, label %base, label %rec
+base:
+  ret i64 %acc
+rec:
+  %n1   = ...                         ; n - 1  } untag, native op, re-tag,
+  %acc1 = ...                         ; acc+n  } bignum runtime call on overflow
+  %r = musttail call i64 @prism_sumto(i64 %n1, i64 %acc1)
+  ret i64 %r
+}

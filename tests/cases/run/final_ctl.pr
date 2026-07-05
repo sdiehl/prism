@@ -6,19 +6,16 @@
 -- continuation that spans an inner handler's region, and a local named
 -- `resume`, which shadows the rejection and stays an ordinary binding.
 
-effect Abort {
+effect Abort
   ctl abort(Int) : Int
-}
 
-effect Tick {
+effect Tick
   ctl tick(Int) : Int
-}
 
-effect Mix {
-  ctl ask() : Int,
-  ctl double(Int) : Int,
+effect Mix
+  ctl ask() : Int
+  ctl double(Int) : Int
   ctl quit(Int) : Int
-}
 
 fn first(xs) =
   match xs of

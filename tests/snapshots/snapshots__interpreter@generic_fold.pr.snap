@@ -1,0 +1,25 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/generic_fold.pr
+---
+10
+24
+3
+true
+true
+Some(2)
+true
+[4, 5]
+true
+10
+0
+true
+[7]
+Some(3)
+Some(42)
+Some(6)
+Some([1, 2, 3])
+None
+Some([1, 2, 3])
+=> ()

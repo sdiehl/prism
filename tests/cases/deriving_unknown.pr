@@ -1,6 +1,5 @@
-class Eq(a) {
+class Eq(a)
   eq : (a, a) -> Bool
-}
 
 type Foo = A | B deriving (Eq, Monoid)
 

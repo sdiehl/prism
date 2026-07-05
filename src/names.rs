@@ -38,7 +38,11 @@ pub const CONTINUE_OP: &str = "loop@continue";
 // of names, so the `replayable` row check reads it rather than re-spelling the
 // literal list.
 pub const OUTPUT_EFFECT: &str = "Output";
-pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random", "Env"];
+// `Clock` (declared in `Concurrent`, not the prelude) joins the replayable set:
+// its real reads (`wall_now`/`mono_now`) are recorded observations like the other
+// capabilities, and its virtual reads (`now`/`sleep` under `run_clock`) are pure,
+// so a `replayable` function may perform `Clock`.
+pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random", "Env", "Clock"];
 
 // The concurrency preemption seam. `Preempt` is the row label a preemptive
 // scheduler will discharge, gating the yield-safepoint pass; it is reserved not
@@ -71,6 +75,7 @@ pub const CAP_WRAPPERS: &[&str] = &[
     "read_int",
     "read_line",
     "read_file",
+    "read_file_bytes",
     "file_exists",
     "rand",
     "getenv",
@@ -85,6 +90,13 @@ pub const CAP_WRAPPERS: &[&str] = &[
 // the desugarer (world-handler decision) and the elaborator (output routing), so
 // the two stay in lockstep from one definition.
 pub const REPLAY_DRIVERS: &[&str] = &["Replay.record", "Replay.replay", "Replay.durable"];
+
+// The `Incr` trace-replay drivers. Like `REPLAY_DRIVERS`, their presence switches
+// `print`/`println` onto the interceptable `Output` capability, so an effectful
+// memo's output can be recorded on a miss and replayed on a durable hit. Read by
+// the same desugarer and elaborator sites, and validated against `Incr.pr`.
+pub const INCR_REPLAY_DRIVERS: &[&str] =
+    &["Incr.run_incr_durable_replay", "Incr.run_incr_store_replay"];
 
 // The prelude tail-recursive loop drivers a `while`/`loop` desugars to.
 // `erase_control` recognizes calls to them by name to lower a recognized loop to
@@ -131,6 +143,25 @@ pub const HASH_METHOD: &str = "hash";
 // signatures by the same drift guard.
 pub const FMAP_METHOD: &str = "fmap";
 pub const POW_METHOD: &str = "pow";
+// The numerical tower methods (`NUM.md`): the arithmetic operators dispatch
+// through these when an operand is `Num`/`Div`-polymorphic, and the prelude
+// instance bodies define them. Names deliberately avoid `add`/`mul`/`negate`,
+// which ordinary corpus programs define as free functions; a collision would make
+// a class method shadow user code (the `eq_pair` lesson). Pinned to the prelude
+// class signatures by the same drift guard as the methods above.
+pub const NUM_ADD_METHOD: &str = "plus";
+pub const NUM_SUB_METHOD: &str = "minus";
+pub const NUM_MUL_METHOD: &str = "times";
+pub const NUM_NEG_METHOD: &str = "negated";
+pub const DIV_QUOT_METHOD: &str = "quotient";
+pub const DIV_MOD_METHOD: &str = "modulo";
+// The literal-injection method: a bare integer literal used at a `Num`
+// polymorphic type elaborates through `from_int`, so generic `given Num(a)` code
+// may write `x + 1`. It is the compile-time-erased analogue of `fromInteger`:
+// monomorphic literals never reach it (they carry their lane's constant
+// directly), and where a generic function is specialized to a concrete lane the
+// call collapses to that lane's conversion of the constant.
+pub const NUM_FROMINT_METHOD: &str = "from_int";
 // The wire (`lib/std/Wire.pr`) and property-generator (`lib/std/Test.pr`) methods
 // a derived instance emits by name. Pinned to those modules' class signatures by
 // the drift-guard test, exactly as the prelude methods above are pinned to the
@@ -218,7 +249,7 @@ pub const INT_CMP: &str = "int_cmp";
 pub const SORT_FN: &str = "sort";
 pub const SORT_BY_ORD_FN: &str = "sort_by_ord";
 
-// The kind tag the native sort kernel (`prism_sort_prim`, `runtime/prism_rt.c`)
+// The kind tag the native sort kernel (`prism_sort_prim`, `runtime/prism_sort.c`)
 // switches on to pick a comparison: this table is the elaborator's half of that
 // cross-phase contract, so a tag here that disagrees with the C `switch` silently
 // misorders one element type. The pairing is pinned end-to-end by the native
@@ -354,9 +385,12 @@ pub fn parse_var_set(name: &str) -> Option<(&str, &str)> {
     name.strip_prefix(VAR_SET_PREFIX)?.rsplit_once('@')
 }
 
+// The head sigil of the private effect a `var` cell desugars to: `Var@{x}@{n}`.
+const VAR_EFFECT_HEAD: &str = "Var";
+
 #[must_use]
 pub fn var_effect(x: &str, n: u32) -> String {
-    format!("Var@{x}@{n}")
+    format!("{VAR_EFFECT_HEAD}@{x}@{n}")
 }
 
 #[must_use]
@@ -367,6 +401,38 @@ pub fn named_op(op: &str, inst: &str, n: u32) -> String {
 #[must_use]
 pub fn named_effect(eff: &str, inst: &str, n: u32) -> String {
     format!("{eff}@{inst}@{n}")
+}
+
+// A compiler-synthesized scoped effect that has leaked into an inferred row
+// because a value carrying it escaped its introducing scope. Recovering the
+// origin lets a "missing effect" diagnostic name the escape route instead of
+// exposing the mangled label; the `@` sigil is unforgeable from source, so the
+// two spellings never collide with a user effect. This is the tested inverse of
+// `var_effect` and `named_effect` (facts travel as data, not by re-parsing a
+// name at a use site: the one home is here, with a round-trip test).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScopedEscape<'a> {
+    /// A named handler instance `inst` handling effect `effect` (`named_effect`).
+    NamedInstance { effect: &'a str, instance: &'a str },
+    /// A `var` cell named `name` (`var_effect`).
+    Var { name: &'a str },
+}
+
+#[must_use]
+pub fn parse_scoped_escape(label: &str) -> Option<ScopedEscape<'_>> {
+    let (head, rest) = label.split_once('@')?;
+    let (mid, tail) = rest.rsplit_once('@')?;
+    if mid.is_empty() || tail.is_empty() || !tail.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if head == VAR_EFFECT_HEAD {
+        Some(ScopedEscape::Var { name: mid })
+    } else {
+        Some(ScopedEscape::NamedInstance {
+            effect: head,
+            instance: mid,
+        })
+    }
 }
 
 // The single op of the effect synthesized for `error Name(..)`.
@@ -526,6 +592,16 @@ pub fn lowered(hint: &str, n: u32) -> String {
 // binders stay globally unique across the pipeline.
 pub const FRESH_INLINE: &str = "%i";
 pub const FRESH_SPECIALIZE: &str = "%sp";
+pub const FRESH_FUSE: &str = "%fu";
+
+// The top-level join function stream fusion emits when it ties a driven pipeline's
+// knot. `n` is a compilation-deterministic counter so two fused pipelines in one
+// program get distinct names; the `%` lead is unforgeable, so the join collides
+// with no source function and no other synthesized name.
+#[must_use]
+pub fn fused_join(n: u32) -> String {
+    format!("%fuse${n}")
+}
 
 // A binder alpha-renamed to a fresh name by a duplicating pass (the inliner
 // splicing a callee body, the specializer materializing a shared method body).
@@ -549,14 +625,17 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_var_get, is_var_runner, is_var_set, is_without_alloc_block, module_of, parse_var_get,
-        parse_var_runner, parse_var_set, private, sort_prim_kind, var_get, var_runner, var_set,
-        without_alloc_block, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, EMIT_OP,
-        ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, GUARD_FN, HASH_METHOD, INT_CMP,
-        ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST,
-        QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHOW_METHOD,
-        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT,
-        WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
+        is_var_get, is_var_runner, is_var_set, is_without_alloc_block, module_of, named_effect,
+        parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set, private,
+        sort_prim_kind, throw_op, var_effect, var_get, var_runner, var_set, without_alloc_block,
+        ScopedEscape, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
+        DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER,
+        GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS, INT_CMP, NUM_ADD_METHOD, NUM_FROMINT_METHOD,
+        NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
+        QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE,
+        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHOW_METHOD, SORT_BY_ORD_FN, SORT_FN,
+        SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG,
+        WIRE_TAG,
     };
 
     // The capability wrappers and Replay drivers are load-bearing prelude names
@@ -579,6 +658,14 @@ mod tests {
             assert!(
                 replay.contains(&format!("fn {short}(")),
                 "Replay driver `{d}` (names::REPLAY_DRIVERS) has no `fn {short}(` in Replay.pr"
+            );
+        }
+        let incr = include_str!("../lib/std/Incr.pr");
+        for d in INCR_REPLAY_DRIVERS {
+            let short = d.strip_prefix("Incr.").unwrap_or(d);
+            assert!(
+                incr.contains(&format!("fn {short}(")),
+                "Incr driver `{d}` (names::INCR_REPLAY_DRIVERS) has no `fn {short}(` in Incr.pr"
             );
         }
     }
@@ -608,6 +695,13 @@ mod tests {
             HASH_METHOD,
             FMAP_METHOD,
             POW_METHOD,
+            NUM_ADD_METHOD,
+            NUM_SUB_METHOD,
+            NUM_MUL_METHOD,
+            NUM_NEG_METHOD,
+            NUM_FROMINT_METHOD,
+            DIV_QUOT_METHOD,
+            DIV_MOD_METHOD,
         ] {
             assert!(
                 prelude.contains(&format!("{m} :")),
@@ -732,6 +826,30 @@ mod tests {
         assert_eq!(parse_var_set("plain"), None);
         assert_eq!(parse_var_runner("nope"), None);
         assert!(!is_var_get("plain") && !is_var_set("plain") && !is_var_runner("plain"));
+    }
+
+    // `parse_scoped_escape` recovers the origin of a leaked scoped effect so a
+    // diagnostic can name it. Round-trip both spellings and pin that a user
+    // effect (no `@`), a throw op (one `@`), and a non-numeric tail all miss.
+    #[test]
+    fn scoped_escape_round_trips() {
+        for (eff, inst, n) in [("Ask", "f", 0u32), ("Emit", "conf", 42)] {
+            let e = named_effect(eff, inst, n);
+            assert_eq!(
+                parse_scoped_escape(&e),
+                Some(ScopedEscape::NamedInstance {
+                    effect: eff,
+                    instance: inst
+                })
+            );
+        }
+        for (x, n) in [("x", 0u32), ("acc", 7)] {
+            let v = var_effect(x, n);
+            assert_eq!(parse_scoped_escape(&v), Some(ScopedEscape::Var { name: x }));
+        }
+        assert_eq!(parse_scoped_escape("Ask"), None);
+        assert_eq!(parse_scoped_escape(&throw_op("NotFound")), None);
+        assert_eq!(parse_scoped_escape("Eff@f@x"), None);
     }
 
     // `module_of` is the inverse of `private`: the module of a private name is

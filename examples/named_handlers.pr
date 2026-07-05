@@ -12,13 +12,11 @@
 --   inner/named
 --   70
 
-effect Read {
+effect Read
   ctl read() : String
-}
 
-effect Ask {
+effect Ask
   ctl ask() : Int
-}
 
 -- two instances of one effect. Dispatch is by instance, not by innermost.
 fn sources() =

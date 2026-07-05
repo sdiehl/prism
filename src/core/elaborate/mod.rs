@@ -5,17 +5,21 @@ use marginalia::Span;
 use num_bigint::Sign;
 
 use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
-use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
+use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value};
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
-use crate::names::{self, dict_ctor, instance_method, EQ_METHOD, ORD_METHOD};
+use crate::names::{
+    self, dict_ctor, instance_method, DIV_MOD_METHOD, DIV_QUOT_METHOD, EQ_METHOD, NUM_ADD_METHOD,
+    NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD,
+};
 use crate::sym::Sym;
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
     Pattern, Program, Spanned, Suffix, S,
 };
 use crate::types::{
-    infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, EQ_CLASS, LIST, NIL, ORD_CLASS,
+    infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
+    NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
 
 mod dict;
@@ -268,6 +272,7 @@ impl Elab<'_> {
         match fixed {
             Some(Type::I64) => Comp::Return(Value::I64(to_wrapped_i64(&lit.value))),
             Some(Type::U64) => Comp::Return(Value::U64(to_wrapped_u64(&lit.value))),
+            Some(Type::Float) => Comp::Return(Value::Float(to_float_lit(&lit.value))),
             _ => small_int(&lit.value).map_or_else(
                 || Comp::StrBuiltin(Builtin::BigLit, vec![Value::Str(lit.value.to_string())]),
                 |n| Comp::Return(Value::Int(n)),
@@ -298,6 +303,81 @@ impl Elab<'_> {
             }
         };
         Ok(Comp::StrBuiltin(b, args))
+    }
+
+    // The `Float` lane of the arithmetic operators, the exact target the dotted
+    // spellings (`+.` etc.) already lower to, so a plain `+` on `Float` and a `+.`
+    // produce byte-identical Core. `%` is `fmod` (a two-argument builtin, not a
+    // `CoreOp`); the rest are the float `CoreOp`s.
+    fn float_bin(op: BinOp, va: &Value, vb: &Value) -> Result<Comp, Error> {
+        if op == BinOp::Rem {
+            return Ok(Comp::StrBuiltin(
+                Builtin::Fmod,
+                vec![va.clone(), vb.clone()],
+            ));
+        }
+        let core_op = match op {
+            BinOp::Add => CoreOp::Addf,
+            BinOp::Sub => CoreOp::Subf,
+            BinOp::Mul => CoreOp::Mulf,
+            BinOp::Div => CoreOp::Divf,
+            _ => return Err(Error::Ice(format!("`{op:?}` is not a float arithmetic op"))),
+        };
+        Ok(Comp::Prim(core_op, va.clone(), vb.clone()))
+    }
+
+    // Unary minus, lowered per the lane the checker recorded on the node. A
+    // literal operand is const-folded: exact, and the only way the I64 minimum is
+    // built without overflowing the positive magnitude. Otherwise the operand is
+    // bound and negated by a genuine `Comp::Neg` node in the lane the typechecker
+    // resolved: `Int`, `I64` (wrapping two's-complement, so negating the minimum
+    // wraps to itself), or `Float` (a real sign-bit flip that preserves signed
+    // zero). The node is deliberately not a `0 - x` subtract: it lowers to a true
+    // `fneg` on the float lane, and it is the byte-identical target the `Num`
+    // negate method re-elaborates to.
+    fn elab_neg(
+        &mut self,
+        inner: &S<Expr<CorePhase>>,
+        id: NodeId,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        match &inner.node {
+            Expr::Int(lit) => {
+                let negated = IntLit {
+                    value: -lit.value.clone(),
+                    suffix: lit.suffix,
+                };
+                return Ok(self.int_value(&negated, id));
+            }
+            Expr::Float(f) => return Ok(Comp::Return(Value::Float(-f))),
+            _ => {}
+        }
+        let c = self.elab(inner, locals)?;
+        let v = self.fresh();
+        let operand = Value::Var(v.clone().into());
+        // A `Num`-polymorphic operand dispatches through the `negated` method; a
+        // monomorphic lane keeps the direct `Comp::Neg` node (byte-identical to
+        // the surface negation, the target the `Num` negate method re-elaborates to).
+        if let Some(ds) = self.dicts.get(&id).cloned() {
+            let d0 = ds
+                .first()
+                .ok_or_else(|| Error::Ice("empty dictionary set for unary minus".into()))?;
+            let idx = self
+                .checked
+                .classes
+                .get(&Sym::from(NUM_CLASS))
+                .and_then(|c| c.methods.iter().position(|(n, _)| n == NUM_NEG_METHOD))
+                .ok_or_else(|| Error::Ice(format!("no `{NUM_NEG_METHOD}` method on class Num")))?;
+            let call = self.method_invoke(Sym::from(NUM_CLASS), idx, d0, vec![operand])?;
+            return Ok(Comp::Bind(Box::new(c), v.into(), Box::new(call)));
+        }
+        let lane = match self.checked.fixed.get(&id).cloned() {
+            Some(Type::I64) => NegLane::I64,
+            Some(Type::Float) => NegLane::Float,
+            _ => NegLane::Int,
+        };
+        let neg = Comp::Neg(lane, operand);
+        Ok(Comp::Bind(Box::new(c), v.into(), Box::new(neg)))
     }
 
     fn negate(&mut self, c: Comp) -> Comp {
@@ -444,8 +524,99 @@ impl Elab<'_> {
         ))
     }
 
+    // The class and method a tower arithmetic operator dispatches through:
+    // `+`/`-`/`*` are `Num.plus`/`minus`/`times`, `/`/`%` are
+    // `Div.quotient`/`modulo`. Kept beside the `Num`/`Div` names so the operator
+    // -> method mapping has one home.
+    const fn arith_method(op: BinOp) -> Option<(&'static str, &'static str)> {
+        Some(match op {
+            BinOp::Add => (NUM_CLASS, NUM_ADD_METHOD),
+            BinOp::Sub => (NUM_CLASS, NUM_SUB_METHOD),
+            BinOp::Mul => (NUM_CLASS, NUM_MUL_METHOD),
+            BinOp::Div => (DIV_CLASS, DIV_QUOT_METHOD),
+            BinOp::Rem => (DIV_CLASS, DIV_MOD_METHOD),
+            _ => return None,
+        })
+    }
+
+    // `a + b` (and the other arithmetic operators) on a `Num`/`Div`-polymorphic
+    // operand: dispatch through the class method, exactly as `elab_ord` does for
+    // `<`. Only reached when the typechecker recorded a dictionary for this node;
+    // a monomorphic lane stays on the direct-primitive arm below. The method
+    // returns the result value directly (no comparison-to-zero step).
+    fn elab_arith(
+        &mut self,
+        op: BinOp,
+        a: &S<Expr<CorePhase>>,
+        b: &S<Expr<CorePhase>>,
+        id: NodeId,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let (class, method) = Self::arith_method(op)
+            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a tower arithmetic op")))?;
+        let ca = self.elab(a, locals)?;
+        let cb = self.elab(b, locals)?;
+        let va = self.fresh();
+        let vb = self.fresh();
+        let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
+        let ds = self
+            .dicts
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::Ice("no dictionary for arithmetic operator".into()))?;
+        let d0 = ds
+            .first()
+            .ok_or_else(|| Error::Ice("empty dictionary set for arithmetic operator".into()))?;
+        let idx = self
+            .checked
+            .classes
+            .get(&Sym::from(class))
+            .and_then(|c| c.methods.iter().position(|(n, _)| n == method))
+            .ok_or_else(|| Error::Ice(format!("no `{method}` method on class {class}")))?;
+        let call = self.method_invoke(Sym::from(class), idx, d0, args)?;
+        Ok(Comp::Bind(
+            Box::new(ca),
+            va.into(),
+            Box::new(Comp::Bind(Box::new(cb), vb.into(), Box::new(call))),
+        ))
+    }
+
+    // A `Num`-polymorphic integer literal: build the value in the `Int` lane (no
+    // `fixed` entry means `int_value` yields the `Int` form) and inject it into
+    // the resolved lane through `from_int`. Where the enclosing function is
+    // specialized to a concrete lane, the dictionary and the call collapse to that
+    // lane's constant conversion; monomorphic literals never reach here.
+    fn elab_from_int_lit(&mut self, lit: &IntLit, id: NodeId) -> Result<Comp, Error> {
+        let int_comp = self.int_value(lit, id);
+        let ds = self
+            .dicts
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| Error::Ice("no dictionary for numeric literal".into()))?;
+        let d0 = ds
+            .first()
+            .ok_or_else(|| Error::Ice("empty dictionary set for numeric literal".into()))?;
+        let idx = self
+            .checked
+            .classes
+            .get(&Sym::from(NUM_CLASS))
+            .and_then(|c| c.methods.iter().position(|(n, _)| n == NUM_FROMINT_METHOD))
+            .ok_or_else(|| Error::Ice(format!("no `{NUM_FROMINT_METHOD}` method on class Num")))?;
+        let v = self.fresh();
+        let call = self.method_invoke(
+            Sym::from(NUM_CLASS),
+            idx,
+            d0,
+            vec![Value::Var(v.clone().into())],
+        )?;
+        Ok(Comp::Bind(Box::new(int_comp), v.into(), Box::new(call)))
+    }
+
     fn elab(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         Ok(match &e.node {
+            Expr::Int(lit) if self.dicts.contains_key(&e.id) => {
+                self.elab_from_int_lit(lit, e.id)?
+            }
             Expr::Int(lit) => self.int_value(lit, e.id),
             Expr::Float(f) => Comp::Return(Value::Float(*f)),
             Expr::Char(c) => Comp::Return(Value::Int(i64::from(u32::from(*c)))),
@@ -513,24 +684,29 @@ impl Elab<'_> {
             {
                 self.elab_ord(*op, a, b, e.id, locals)?
             }
+            Expr::Bin(
+                op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem),
+                a,
+                b,
+            ) if self.dicts.contains_key(&e.id) => self.elab_arith(*op, a, b, e.id, locals)?,
             Expr::Bin(op, a, b) => {
                 let ca = self.elab(a, locals)?;
                 let cb = self.elab(b, locals)?;
                 let va = self.fresh();
                 let vb = self.fresh();
-                let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
-                let prim = if let Some(ty @ (Type::I64 | Type::U64)) =
-                    self.checked.fixed.get(&e.id).cloned()
-                {
-                    self.fixed_bin(*op, &ty, args)?
-                } else {
-                    let core_op = CoreOp::from_binop(*op)
-                        .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
-                    Comp::Prim(
-                        core_op,
-                        Value::Var(va.clone().into()),
-                        Value::Var(vb.clone().into()),
-                    )
+                let lhs_val = Value::Var(va.clone().into());
+                let rhs_val = Value::Var(vb.clone().into());
+                let args = vec![lhs_val.clone(), rhs_val.clone()];
+                let prim = match self.checked.fixed.get(&e.id).cloned() {
+                    Some(ty @ (Type::I64 | Type::U64)) => self.fixed_bin(*op, &ty, args)?,
+                    // The tower brought `Float` onto the plain operators; lower to
+                    // the same float primitive the dotted spelling emits.
+                    Some(Type::Float) => Self::float_bin(*op, &lhs_val, &rhs_val)?,
+                    _ => {
+                        let core_op = CoreOp::from_binop(*op)
+                            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+                        Comp::Prim(core_op, lhs_val, rhs_val)
+                    }
                 };
                 Comp::Bind(
                     Box::new(ca),
@@ -538,6 +714,7 @@ impl Elab<'_> {
                     Box::new(Comp::Bind(Box::new(cb), vb.into(), Box::new(prim))),
                 )
             }
+            Expr::Neg(inner) => self.elab_neg(inner, e.id, locals)?,
             Expr::If(c, t, e2) => {
                 let cc = self.elab(c, locals)?;
                 let ct = self.elab(t, locals)?;
@@ -806,7 +983,15 @@ impl Elab<'_> {
             vals.push(Value::Var(v.into()));
         }
         let body = match &f.node {
-            Expr::Var(name) if !locals.contains_key(name) && self.dicts.contains_key(&f.id) => {
+            // `print`/`println` resolve a `Show` dictionary for a polymorphic
+            // argument, but are lowered by the print branch below (which also owns
+            // the raw/structural fast path for a concrete argument), not by the
+            // generic dictionary call.
+            Expr::Var(name)
+                if !locals.contains_key(name)
+                    && self.dicts.contains_key(&f.id)
+                    && !matches!(name.as_str(), "print" | "println") =>
+            {
                 self.dict_call(name, f.id, vals, &mut binds)?
             }
             Expr::Inst(inner, _) => {
@@ -824,33 +1009,46 @@ impl Elab<'_> {
                     && !vals.is_empty()
                     && !args.is_empty()
                 {
-                    // A truly polymorphic print (the argument's type is still a
-                    // free rigid variable, an enclosing parameter, not a
-                    // defaultable empty container) has no static show and is
-                    // rejected here, before either routing mode lowers it. This
-                    // gates both `print_dispatch` (raw printer) and `out_perform`
-                    // (Output capability), so no unshowable value reaches a
-                    // backend to trap or be misrendered.
-                    if self.printable_ty(&args[0], locals).is_none() {
-                        return Err(show::polymorphic_print(args[0].span));
-                    }
+                    let newline = name == "println";
                     let v = vals
                         .into_iter()
                         .next()
                         .ok_or_else(|| Error::Ice("empty print args".into()))?;
-                    if self.route_output {
-                        self.out_perform(v, &args[0], locals, name == "println")
-                    } else {
-                        let p = self.print_dispatch(v, &args[0], locals)?;
-                        if name == "println" {
-                            Comp::Bind(
-                                Box::new(p),
-                                self.fresh().into(),
-                                Box::new(Comp::Io(IoOp::PrintNl, vec![])),
-                            )
-                        } else {
-                            p
+                    match self.printable_ty(&args[0], locals) {
+                        // A concrete or defaultable argument keeps the
+                        // type-directed structural printer: byte-identical output,
+                        // no dictionary, raw top-level strings.
+                        Some(_) => {
+                            if self.route_output {
+                                self.out_perform(v, &args[0], locals, newline)
+                            } else {
+                                let p = self.print_dispatch(v, &args[0], locals)?;
+                                if newline {
+                                    Comp::Bind(
+                                        Box::new(p),
+                                        self.fresh().into(),
+                                        Box::new(Comp::Io(IoOp::PrintNl, vec![])),
+                                    )
+                                } else {
+                                    p
+                                }
+                            }
                         }
+                        // A polymorphic argument (a rigid type var) has no static
+                        // show. The typechecker resolved a `Show` dictionary for it
+                        // (from an enclosing `given Show(a)`); render through that
+                        // dictionary so `a = Bool` prints `true`/`false`, never the
+                        // raw tag integer. A prelude-free program has no `Show`
+                        // class and so no dictionary here: it is rejected, with the
+                        // raw-printer runtime trap remaining behind that.
+                        None => match self.dicts.get(&f.id).and_then(|ds| ds.first()).cloned() {
+                            Some(d) => {
+                                let shown =
+                                    self.method_invoke(Sym::from(SHOW_CLASS), 0, &d, vec![v])?;
+                                self.print_string(shown, newline)
+                            }
+                            None => return Err(show::polymorphic_print(args[0].span)),
+                        },
                     }
                 } else if name == names::DISPLAY_FN && !vals.is_empty() && !args.is_empty() {
                     // A string-interpolation hole: rendered by the type-directed
@@ -1078,6 +1276,14 @@ fn to_wrapped_i64(n: &BigInt) -> i64 {
     to_wrapped_u64(n) as i64
 }
 
+// The `f64` an integer literal denotes when it adopts a `Float` lane from context
+// (`let x : Float = 1`). The decimal parse is correctly rounded and identical on
+// every platform, so the resolved lane constant is deterministic; nothing is
+// converted at runtime.
+fn to_float_lit(n: &BigInt) -> f64 {
+    n.to_string().parse::<f64>().unwrap_or(f64::NAN)
+}
+
 pub fn builtin_arities(arity: &mut BTreeMap<String, usize>) {
     for (name, n, _) in BUILTINS {
         arity.insert((*name).into(), *n);
@@ -1102,9 +1308,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     // with its own reified handlers is never wrapped in a world handler it cannot
     // fuse through. `Output` interception only changes behaviour where it matters.
     let route_output = effect_ops.contains("out_print")
-        && crate::names::REPLAY_DRIVERS
+        && (crate::names::REPLAY_DRIVERS
             .iter()
-            .any(|f| arity.contains_key(*f));
+            .any(|f| arity.contains_key(*f))
+            || crate::names::INCR_REPLAY_DRIVERS
+                .iter()
+                .any(|f| arity.contains_key(*f)));
     let consts: BTreeMap<String, &S<Expr<CorePhase>>> = prog
         .fns
         .iter()
@@ -1302,9 +1511,12 @@ pub fn elaborate_expr(
         checked,
         dicts,
         route_output: effect_ops.contains("out_print")
-            && crate::names::REPLAY_DRIVERS
+            && (crate::names::REPLAY_DRIVERS
                 .iter()
-                .any(|f| arity.contains_key(*f)),
+                .any(|f| arity.contains_key(*f))
+                || crate::names::INCR_REPLAY_DRIVERS
+                    .iter()
+                    .any(|f| arity.contains_key(*f))),
         effect_ops,
         show_fns: Vec::new(),
         show_seen: BTreeSet::new(),

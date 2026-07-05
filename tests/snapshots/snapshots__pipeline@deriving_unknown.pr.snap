@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/deriving_unknown.pr
 ---
 == tokens ==
-VOpen Class UIdent("Eq") LParen Ident("a") RParen LBrace Ident("eq") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool RBrace VSemi Type UIdent("Foo") Eq UIdent("A") Bar UIdent("B") Deriving LParen UIdent("Eq") Comma UIdent("Monoid") RParen VSemi Fn Ident("main") LParen RParen Eq UIdent("A") VClose
+VOpen Class UIdent("Eq") LParen Ident("a") RParen VOpen Ident("eq") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool VClose VSemi Type UIdent("Foo") Eq UIdent("A") Bar UIdent("B") Deriving LParen UIdent("Eq") Comma UIdent("Monoid") RParen VSemi Fn Ident("main") LParen RParen Eq UIdent("A") VClose
 
 == ast ==
 Program {
@@ -28,15 +28,15 @@ Program {
             deriving: [
                 (
                     "Eq",
-                    66..68,
+                    62..64,
                 ),
                 (
                     "Monoid",
-                    70..76,
+                    66..72,
                 ),
             ],
             newtype: false,
-            span: 39..77,
+            span: 35..73,
         },
     ],
     effects: [],
@@ -64,7 +64,7 @@ Program {
                     ),
                 ),
             ],
-            span: 0..37,
+            span: 0..33,
         },
     ],
     instances: [],
@@ -79,19 +79,19 @@ Program {
                 node: Var(
                     "A",
                 ),
-                span: 91..92,
+                span: 87..88,
             },
             wheres: [],
-            span: 79..92,
+            span: 75..88,
         },
     ],
 }
 
 == types ==
 Type Error: unknown class in deriving: Monoid
-   ╭─[ <source>:5:32 ]
+   ╭─[ <source>:4:32 ]
    │
- 5 │ type Foo = A | B deriving (Eq, Monoid)
+ 4 │ type Foo = A | B deriving (Eq, Monoid)
    │                                ───┬──  
    │                                   ╰──── unknown class in deriving: Monoid
 ───╯

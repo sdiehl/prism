@@ -22,12 +22,14 @@ use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
 mod cse;
+mod fuse;
 mod inline;
 mod lint;
 mod rename;
 mod simplify;
 mod specialize;
 use cse::cse_counted;
+use fuse::fuse_counted;
 use inline::inline_counted;
 pub use lint::lint;
 use simplify::simplify_counted;
@@ -74,6 +76,11 @@ impl OptLevel {
 /// passes slot in here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CorePass {
+    /// Whole-program stream fusion of pull-`Sequence` pipelines: collapse a
+    /// recognized producer|>transformer|>consumer chain into one allocation-free
+    /// loop (see [`fuse`]). Off by default; injected pre-lowering only when
+    /// `DynFlags::fuse` is set, never listed by [`pipeline`].
+    Fuse,
     /// Erase single-field `newtype` boxes. Mandatory at every level: it is a
     /// representation decision both backends consume, not an optimization.
     EraseNewtypes,
@@ -94,6 +101,7 @@ impl CorePass {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Fuse => "Fuse",
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
             Self::Simplify => "Simplify",
@@ -107,6 +115,7 @@ impl CorePass {
     #[must_use]
     pub fn from_name(s: &str) -> Option<Self> {
         [
+            Self::Fuse,
             Self::EraseNewtypes,
             Self::Specialize,
             Self::Simplify,
@@ -121,9 +130,12 @@ impl CorePass {
     #[must_use]
     pub const fn stage(self) -> PassStage {
         match self {
-            // Erasure is a representation both backends consume; specialization
-            // needs the pre-lowering dictionary shapes.
-            Self::EraseNewtypes | Self::Specialize => PassStage::PreLowering,
+            // Fusion must see the whole-program Core (the embedded stdlib is part of
+            // the one program, which is what makes cross-module fusion free) and run
+            // before effect lowering rewrites the shapes it matches on. Erasure is a
+            // representation both backends consume; specialization needs the
+            // pre-lowering dictionary shapes.
+            Self::Fuse | Self::EraseNewtypes | Self::Specialize => PassStage::PreLowering,
             // The simplifier, inliner, and CSE must run after effect lowering:
             // pre-lowering they rewrite the Core shapes the var/State fusion
             // analysis matches on.
@@ -322,12 +334,18 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
             CorePass::Cse,
             CorePass::Simplify,
         ],
-        // O2 = O1 with a second inline/simplify round before CSE. The first
-        // inlining can turn a two-hop call chain into a single site that only the
-        // second round can paste, so a wrapper that inlined into another wrapper is
-        // flattened here. Both passes are fixed-point/idempotent, so the extra
-        // round is a no-op once the program settles and never loops.
+        // O2 = O1 with stream fusion up front and a second inline/simplify round
+        // before CSE. Fusion runs first (pre-lowering) so recognized pull-stream
+        // pipelines collapse to loops before anything else shapes the Core; it is
+        // default-on here only because its full battery (the ON/OFF differential
+        // oracle, parity, Core Lint on fused output) is green, and `--no-fuse`
+        // turns it back off. The second inline round: the first inlining can turn
+        // a two-hop call chain into a single site that only the second round can
+        // paste, so a wrapper that inlined into another wrapper is flattened here.
+        // Both passes are fixed-point/idempotent, so the extra round is a no-op
+        // once the program settles and never loops.
         OptLevel::O2 => vec![
+            CorePass::Fuse,
             CorePass::EraseNewtypes,
             CorePass::Specialize,
             CorePass::Simplify,
@@ -377,6 +395,7 @@ fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: 
 
 fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
     let (out, ticks) = match pass {
+        CorePass::Fuse => fuse_counted(core),
         CorePass::EraseNewtypes => erase_newtypes_counted(core, &cx.newtype_ctors),
         CorePass::Specialize => specialize_counted(core),
         CorePass::Simplify => simplify_counted(core),
@@ -410,10 +429,16 @@ pub fn run(
     disabled: &[CorePass],
     flags: &DynFlags,
 ) -> (Core, PassStats) {
-    let passes: Vec<CorePass> = pipeline(level)
+    let mut passes: Vec<CorePass> = pipeline(level)
         .into_iter()
         .filter(|p| p.stage() == stage)
         .collect();
+    // Stream fusion is default-on at `-O2` (listed by `pipeline` there, removable
+    // with `--no-fuse` via `disabled`); the `PRISM_FUSE`/`--fuse` flag force-runs
+    // it at the lower levels too, for experiments and the differential oracle.
+    if flags.fuse && stage == PassStage::PreLowering && !passes.contains(&CorePass::Fuse) {
+        passes.insert(0, CorePass::Fuse);
+    }
     run_passes(core, nt, &passes, disabled, flags)
 }
 

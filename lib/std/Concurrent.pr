@@ -45,18 +45,17 @@ import Data.List (append)
 -- turns into a cooperative `kill`. `kill` and `vanished` never resume (per-site
 -- bottom return `b`); `run_async` absorbs the whole effect, so none of the cancel
 -- machinery surfaces in a fiber's row.
-pub effect Async(a) {
-  ctl fork(() -> a ! {Async(a) | e}) : Fiber,
-  ctl poll_yield(Unit) : Signal,
-  ctl poll_await(Fiber) : Wake(a),
-  ctl cancel(Fiber) : Unit,
-  ctl channel(Unit) : Chan,
-  ctl bounded(Int) : Chan,
-  ctl poll_send(Chan, a) : Signal,
-  ctl poll_recv(Chan) : Wake(a),
-  ctl kill(Unit) : b,
+pub effect Async(a)
+  ctl fork(() -> a ! {Async(a) | e}) : Fiber
+  ctl poll_yield(Unit) : Signal
+  ctl poll_await(Fiber) : Wake(a)
+  ctl cancel(Fiber) : Unit
+  ctl channel(Unit) : Chan
+  ctl bounded(Int) : Chan
+  ctl poll_send(Chan, a) : Signal
+  ctl poll_recv(Chan) : Wake(a)
+  ctl kill(Unit) : b
   ctl vanished(Unit) : b
-}
 
 -- | A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
 pub type Fiber = Fiber(Int)
@@ -290,7 +289,13 @@ fn wake(
     Nil => (Nil, acc)
     Cons((f, who, k), rest) =>
       if f == fid then
-        wake(fid, w, rest, enq(acc, Ready(who, \() -> k(w), \() -> k(Halt))), enq)
+        wake(
+            fid,
+            w,
+            rest,
+            enq(acc, Ready(who, \() -> k(w), \() -> k(Halt))),
+            enq,
+          )
       else
         match wake(fid, w, rest, acc, enq) of
           (kept, out) => (Cons((f, who, k), kept), out)
@@ -397,7 +402,12 @@ fn evict_waiters(
     Nil => (Nil, q)
     Cons((f, who, k), rest) =>
       if is_member(who, victims) then
-        evict_waiters(victims, rest, enq(q, Ready(who, \() -> k(Halt), \() -> k(Halt))), enq)
+        evict_waiters(
+            victims,
+            rest,
+            enq(q, Ready(who, \() -> k(Halt), \() -> k(Halt))),
+            enq,
+          )
       else
         match evict_waiters(victims, rest, q, enq) of
           (kept, out) => (Cons((f, who, k), kept), out)
@@ -414,7 +424,12 @@ fn evict_senders(
     Nil => (Nil, q)
     Cons((c, who, v, k), rest) =>
       if is_member(who, victims) then
-        evict_senders(victims, rest, enq(q, Ready(who, \() -> k(Stop), \() -> k(Stop))), enq)
+        evict_senders(
+            victims,
+            rest,
+            enq(q, Ready(who, \() -> k(Stop), \() -> k(Stop))),
+            enq,
+          )
       else
         match evict_senders(victims, rest, q, enq) of
           (kept, out) => (Cons((c, who, v, k), kept), out)
@@ -488,12 +503,23 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
       let cid = s.next
       let q =
         (s.enq)(s.queue, Ready(cid, \() -> step(child), \() -> step(child)))
-      drive(me, parent(Fiber(cid)), Sched { ..s, next = cid + 1, queue = q, kids = Cons((me, cid), s.kids) })
+      drive(
+          me,
+          parent(Fiber(cid)),
+          Sched {
+            ..s,
+            next = cid + 1,
+            queue = q,
+            kids = Cons((me, cid), s.kids)
+          },
+        )
     Yielded(k) =>
-      run_next(Sched {
-        ..s,
-        queue = (s.enq)(s.queue, Ready(me, \() -> k(Go), \() -> k(Stop)))
-      })
+      run_next(
+          Sched {
+            ..s,
+            queue = (s.enq)(s.queue, Ready(me, \() -> k(Go), \() -> k(Stop)))
+          },
+        )
     Awaited(fid, k) =>
       match lookup_result(fid, s.results) of
         Some(v) => drive(me, k(Arrived(v)), s)
@@ -507,15 +533,23 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
       drive(me, k(()), s2)
     Opened(k) =>
       let cid = s.next
-      drive(me, k(Chan(cid)), Sched { ..s, next = cid + 1, chans = Cons((cid, Nil), s.chans) })
+      drive(
+          me,
+          k(Chan(cid)),
+          Sched { ..s, next = cid + 1, chans = Cons((cid, Nil), s.chans) },
+        )
     OpenedCap(cap, k) =>
       let cid = s.next
-      drive(me, k(Chan(cid)), Sched {
-        ..s,
-        next = cid + 1,
-        chans = Cons((cid, Nil), s.chans),
-        caps = Cons((cid, cap), s.caps)
-      })
+      drive(
+          me,
+          k(Chan(cid)),
+          Sched {
+            ..s,
+            next = cid + 1,
+            chans = Cons((cid, Nil), s.chans),
+            caps = Cons((cid, cap), s.caps)
+          },
+        )
     Sent(cid, v, k) =>
       match take_recv(cid, s.recv_waiters) of
         Some((who, kr, rest)) =>
@@ -526,9 +560,18 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
           match cap_of(cid, s.caps) of
             Some(cap) =>
               if chan_len(cid, s.chans) >= cap then
-                run_next(Sched { ..s, senders = append(s.senders, [(cid, me, v, k)]) })
+                run_next(
+                    Sched {
+                      ..s,
+                      senders = append(s.senders, [(cid, me, v, k)])
+                    },
+                  )
               else
-                drive(me, k(Go), Sched { ..s, chans = chan_put(cid, v, s.chans) })
+                drive(
+                    me,
+                    k(Go),
+                    Sched { ..s, chans = chan_put(cid, v, s.chans) },
+                  )
             None =>
               drive(me, k(Go), Sched { ..s, chans = chan_put(cid, v, s.chans) })
     Recving(cid, k) =>
@@ -538,24 +581,34 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
             Some((who, sv, sk, srest)) =>
               let q =
                 (s.enq)(s.queue, Ready(who, \() -> sk(Go), \() -> sk(Stop)))
-              drive(me, k(Arrived(v)), Sched {
-                ..s,
-                chans = chan_put(cid, sv, chans2),
-                senders = srest,
-                queue = q
-              })
+              drive(
+                  me,
+                  k(Arrived(v)),
+                  Sched {
+                    ..s,
+                    chans = chan_put(cid, sv, chans2),
+                    senders = srest,
+                    queue = q
+                  },
+                )
             None => drive(me, k(Arrived(v)), Sched { ..s, chans = chans2 })
         None =>
           match take_sender(cid, s.senders) of
             Some((who, sv, sk, srest)) =>
               let q =
                 (s.enq)(s.queue, Ready(who, \() -> sk(Go), \() -> sk(Stop)))
-              drive(me, k(Arrived(sv)), Sched { ..s, senders = srest, queue = q })
+              drive(
+                  me,
+                  k(Arrived(sv)),
+                  Sched { ..s, senders = srest, queue = q },
+                )
             None =>
-              run_next(Sched {
-                ..s,
-                recv_waiters = append(s.recv_waiters, [(cid, me, k)])
-              })
+              run_next(
+                  Sched {
+                    ..s,
+                    recv_waiters = append(s.recv_waiters, [(cid, me, k)])
+                  },
+                )
     Died =>
       if me == 0 then
         fail()
@@ -573,12 +626,14 @@ fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
       else
         match wake(me, Arrived(r), s.waiters, s.queue, s.enq) of
           (ws, q) =>
-            run_next(Sched {
-              ..s,
-              results = Cons((me, r), s.results),
-              waiters = ws,
-              queue = q
-            })
+            run_next(
+                Sched {
+                  ..s,
+                  results = Cons((me, r), s.results),
+                  waiters = ws,
+                  queue = q
+                },
+              )
 
 -- Dequeue the next runnable fiber. A cancelled fiber runs its `stop` thunk (into
 -- its `kill` unwind); otherwise its `go` thunk. An empty queue with a failure
@@ -658,10 +713,17 @@ pub fn scope(tasks : List(() -> a ! {Async(a) | e})) : List(a) =
 -- no real clock and no time primitive. A fiber may perform `Clock`; since the
 -- scheduler does not handle it, it flows out of `run_async` to an enclosing
 -- `run_clock` like any other capability.
-pub effect Clock {
-  ctl now(Unit) : Int,
+-- `now`/`sleep` are the logical scheduler clock (virtual ticks). `wall_now` and
+-- `mono_now` are the real-time reads (nanoseconds): the system wall clock (Unix
+-- epoch, UTC) and a monotonic counter. All four share the one `Clock` capability;
+-- which reading you get is a property of the installed handler, not the call.
+-- `run_clock` serves every op from the virtual counter (deterministic tests);
+-- `Time.run_clock_real` serves `wall_now`/`mono_now` from the recorded OS clock.
+pub effect Clock
+  ctl now(Unit) : Int
   ctl sleep(Int) : Unit
-}
+  ctl wall_now(Unit) : Int
+  ctl mono_now(Unit) : Int
 
 -- | Run `action` against a logical clock starting at 0, returning its result.
 -- `now()` reads the current time; `sleep(d)` advances it by `d`. Time is a pure
@@ -672,5 +734,7 @@ pub fn run_clock(action : () -> a ! {Clock | e}) : a =
     handle action() with
       now(u, k) => \(t) -> k(t)(t)
       sleep(d, k) => \(t) -> k(())(t + d)
+      wall_now(u, k) => \(t) -> k(t)(t)
+      mono_now(u, k) => \(t) -> k(t)(t)
       return r => \(t) -> r
   g(0)

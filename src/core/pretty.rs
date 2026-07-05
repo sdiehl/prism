@@ -235,6 +235,7 @@ pub fn pp_comp(c: &Comp) -> String {
             format!("case {} {{ {} }}", pp_value(v), arms.join(" | "))
         }
         Comp::FloatBuiltin(op, v) => format!("{}({})", op.name(), pp_value(v)),
+        Comp::Neg(_, v) => format!("{}{}", kw::MINUS, pp_value(v)),
         Comp::Dup(v) => format!("dup {}", pp_value(v)),
         Comp::Drop(v) => format!("drop {}", pp_value(v)),
         Comp::WithReuse { token, freed, body } => {

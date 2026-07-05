@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/decl_brace_effect.pr
+---
+== tokens ==
+VOpen Effect UIdent("State") LBrace Ctl Ident("get") LParen KwUnit RParen Colon KwInt RBrace VClose
+
+== parse ==
+Parse Error: effect bodies use layout: remove the braces and put each operation on its own indented line
+   ╭─[ <source>:1:14 ]
+   │
+ 1 │ effect State {
+   │              ┬  
+   │              ╰── here
+───╯

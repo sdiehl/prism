@@ -5,9 +5,8 @@
 -- Running it exercises the fixed row all the way through the scheduler.
 import Concurrent (..)
 
-effect Trace {
+effect Trace
   ctl note(Int) : Unit
-}
 
 fn worker(n : Int) : !{Async(Int), Trace} Int =
   note(n)

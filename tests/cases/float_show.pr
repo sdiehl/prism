@@ -2,9 +2,9 @@
 -- scientific notation only outside the [-4, 16) decimal-exponent window. The
 -- interpreter, the native C runtime, and the Lean oracle must all agree.
 fn main() =
-  println(0.1 +. 0.2)
-  println(10.0 /. 3.0)
-  println(100.0 *. 1.0)
+  println(0.1 + 0.2)
+  println(10.0 / 3.0)
+  println(100.0 * 1.0)
   println(10000000000000000.0)
   println(0.00001)
-  println(0.0 -. 2.5)
+  println(0.0 - 2.5)

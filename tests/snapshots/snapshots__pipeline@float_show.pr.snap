@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/float_show.pr
 ---
 == tokens ==
-VOpen Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Float(0.1) PlusDot Float(0.2) RParen VSemi Ident("println") LParen Float(10.0) SlashDot Float(3.0) RParen VSemi Ident("println") LParen Float(100.0) StarDot Float(1.0) RParen VSemi Ident("println") LParen Float(1e16) RParen VSemi Ident("println") LParen Float(1e-5) RParen VSemi Ident("println") LParen Float(0.0) MinusDot Float(2.5) RParen VClose VClose
+VOpen Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Float(0.1) Plus Float(0.2) RParen VSemi Ident("println") LParen Float(10.0) Slash Float(3.0) RParen VSemi Ident("println") LParen Float(100.0) Star Float(1.0) RParen VSemi Ident("println") LParen Float(1e16) RParen VSemi Ident("println") LParen Float(1e-5) RParen VSemi Ident("println") LParen Float(0.0) Minus Float(2.5) RParen VClose VClose
 
 == ast ==
 Program {
@@ -35,7 +35,7 @@ Program {
                             [
                                 Spanned {
                                     node: Bin(
-                                        Addf,
+                                        Add,
                                         Spanned {
                                             node: Float(
                                                 0.1,
@@ -46,14 +46,14 @@ Program {
                                             node: Float(
                                                 0.2,
                                             ),
-                                            span: 256..259,
+                                            span: 255..258,
                                         },
                                     ),
-                                    span: 249..259,
+                                    span: 249..258,
                                 },
                             ],
                         ),
-                        span: 241..260,
+                        span: 241..259,
                     },
                     Spanned {
                         node: Let(
@@ -64,30 +64,30 @@ Program {
                                         node: Var(
                                             "println",
                                         ),
-                                        span: 263..270,
+                                        span: 262..269,
                                     },
                                     [
                                         Spanned {
                                             node: Bin(
-                                                Divf,
+                                                Div,
                                                 Spanned {
                                                     node: Float(
                                                         10.0,
                                                     ),
-                                                    span: 271..275,
+                                                    span: 270..274,
                                                 },
                                                 Spanned {
                                                     node: Float(
                                                         3.0,
                                                     ),
-                                                    span: 279..282,
+                                                    span: 277..280,
                                                 },
                                             ),
-                                            span: 271..282,
+                                            span: 270..280,
                                         },
                                     ],
                                 ),
-                                span: 263..283,
+                                span: 262..281,
                             },
                             Spanned {
                                 node: Let(
@@ -98,30 +98,30 @@ Program {
                                                 node: Var(
                                                     "println",
                                                 ),
-                                                span: 286..293,
+                                                span: 284..291,
                                             },
                                             [
                                                 Spanned {
                                                     node: Bin(
-                                                        Mulf,
+                                                        Mul,
                                                         Spanned {
                                                             node: Float(
                                                                 100.0,
                                                             ),
-                                                            span: 294..299,
+                                                            span: 292..297,
                                                         },
                                                         Spanned {
                                                             node: Float(
                                                                 1.0,
                                                             ),
-                                                            span: 303..306,
+                                                            span: 300..303,
                                                         },
                                                     ),
-                                                    span: 294..306,
+                                                    span: 292..303,
                                                 },
                                             ],
                                         ),
-                                        span: 286..307,
+                                        span: 284..304,
                                     },
                                     Spanned {
                                         node: Let(
@@ -132,18 +132,18 @@ Program {
                                                         node: Var(
                                                             "println",
                                                         ),
-                                                        span: 310..317,
+                                                        span: 307..314,
                                                     },
                                                     [
                                                         Spanned {
                                                             node: Float(
                                                                 1e16,
                                                             ),
-                                                            span: 318..337,
+                                                            span: 315..334,
                                                         },
                                                     ],
                                                 ),
-                                                span: 310..338,
+                                                span: 307..335,
                                             },
                                             Spanned {
                                                 node: Let(
@@ -154,18 +154,18 @@ Program {
                                                                 node: Var(
                                                                     "println",
                                                                 ),
-                                                                span: 341..348,
+                                                                span: 338..345,
                                                             },
                                                             [
                                                                 Spanned {
                                                                     node: Float(
                                                                         1e-5,
                                                                     ),
-                                                                    span: 349..356,
+                                                                    span: 346..353,
                                                                 },
                                                             ],
                                                         ),
-                                                        span: 341..357,
+                                                        span: 338..354,
                                                     },
                                                     Spanned {
                                                         node: Call(
@@ -173,48 +173,48 @@ Program {
                                                                 node: Var(
                                                                     "println",
                                                                 ),
-                                                                span: 360..367,
+                                                                span: 357..364,
                                                             },
                                                             [
                                                                 Spanned {
                                                                     node: Bin(
-                                                                        Subf,
+                                                                        Sub,
                                                                         Spanned {
                                                                             node: Float(
                                                                                 0.0,
                                                                             ),
-                                                                            span: 368..371,
+                                                                            span: 365..368,
                                                                         },
                                                                         Spanned {
                                                                             node: Float(
                                                                                 2.5,
                                                                             ),
-                                                                            span: 375..378,
+                                                                            span: 371..374,
                                                                         },
                                                                     ),
-                                                                    span: 368..378,
+                                                                    span: 365..374,
                                                                 },
                                                             ],
                                                         ),
-                                                        span: 360..379,
+                                                        span: 357..375,
                                                     },
                                                 ),
-                                                span: 341..379,
+                                                span: 338..375,
                                             },
                                         ),
-                                        span: 310..379,
+                                        span: 307..375,
                                     },
                                 ),
-                                span: 286..379,
+                                span: 284..375,
                             },
                         ),
-                        span: 263..379,
+                        span: 262..375,
                     },
                 ),
-                span: 241..379,
+                span: 241..375,
             },
             wheres: [],
-            span: 227..379,
+            span: 227..375,
         },
     ],
 }

@@ -42,6 +42,62 @@ pub mod writer;
 use std::collections::BTreeSet;
 
 use crate::error::Error;
+use crate::pkg::lock::Lock;
+
+/// The standard library the compiler embeds, rendered as its single root hash.
+///
+/// This is the value a lockfile pins against ([`lock::Lock::pin_std`]): "the Std
+/// this build resolved to" is exactly this fold. Recomputing it and comparing to
+/// the pin is how a build tells whether it ships the same standard library the
+/// lock was written for ([`std_pin_status`]).
+///
+/// # Errors
+/// Fails only if the embedded standard library does not elaborate, a compiler bug.
+pub fn stdlib_root() -> Result<String, Error> {
+    Ok(crate::driver::stdlib_hash()?.root)
+}
+
+/// Where a lockfile's Std pin stands against the standard library this compiler
+/// embeds.
+///
+/// The three cases are the whole distribution story the store supports
+/// today: a lock can be unpinned, agree, or disagree, and a disagreement is
+/// named exactly (both roots) rather than papered over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StdPin {
+    /// The lock records no Std root; the build runs against the embedded stdlib.
+    Unpinned,
+    /// The pinned root equals the embedded stdlib's root: this build is on the
+    /// standard library the lock was resolved against.
+    Match,
+    /// The pinned root differs from the embedded stdlib's: the compiler ships a
+    /// different Std than the lock was written for. Both roots are reported.
+    Mismatch { pinned: String, embedded: String },
+}
+
+/// Compare `lock`'s Std pin against the standard library this compiler embeds.
+///
+/// A program or package pins the Std root it was resolved against; this is the
+/// check that a later build is running on that same standard library. Two locks
+/// that pin different Std roots describe different worlds and are told apart here
+/// rather than silently coexisting, the same way two dependency hashes do.
+///
+/// # Errors
+/// Fails only if the embedded standard library does not elaborate, a compiler bug.
+pub fn std_pin_status(lock: &Lock) -> Result<StdPin, Error> {
+    let Some(pinned) = lock.std_root() else {
+        return Ok(StdPin::Unpinned);
+    };
+    let embedded = stdlib_root()?;
+    if pinned == embedded {
+        Ok(StdPin::Match)
+    } else {
+        Ok(StdPin::Mismatch {
+            pinned: pinned.to_string(),
+            embedded,
+        })
+    }
+}
 
 /// The set of content hashes reachable from the shared standard-library root.
 ///

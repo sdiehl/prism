@@ -63,6 +63,8 @@
               pkgs.pre-commit
               pkgs.dprint
               pkgs.sccache
+              pkgs.cargo-insta
+              pkgs.cargo-nextest
             ];
 
             buildInputs = libInputs;
@@ -139,6 +141,11 @@
           prism-wasm = craneWasm.buildPackage (wasmArgs // {
             cargoArtifacts = craneWasm.buildDepsOnly wasmArgs;
             nativeBuildInputs = [ wasmBindgen pkgs.binaryen ];
+            # `[lib] crate-type` is rlib-only in Cargo.toml so native builds skip
+            # the dead cdylib; ask for the wasm cdylib here with `cargo rustc
+            # --crate-type cdylib` (plain `cargo build` would only emit the rlib
+            # and postInstall would find no prism.wasm).
+            cargoBuildCommand = "cargo rustc --release --lib --crate-type cdylib";
             # buildPackage emits target/wasm32-unknown-unknown/release/prism.wasm;
             # wasm-bindgen turns it into the web-target JS + _bg.wasm pair the docs
             # and web app consume, then wasm-opt -Oz shrinks it (what wasm-pack does

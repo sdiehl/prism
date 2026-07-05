@@ -111,6 +111,8 @@ pub enum LexError {
     UnterminatedHole { offset: usize },
     #[error("unterminated string literal")]
     UnterminatedString { offset: usize },
+    #[error("malformed numeric literal: `_` separators must sit between two digits")]
+    NumberSeparator { offset: usize },
 }
 
 impl LexError {
@@ -120,7 +122,8 @@ impl LexError {
             Self::Invalid { offset }
             | Self::EmptyHole { offset }
             | Self::UnterminatedHole { offset }
-            | Self::UnterminatedString { offset } => *offset,
+            | Self::UnterminatedString { offset }
+            | Self::NumberSeparator { offset } => *offset,
         }
     }
 }

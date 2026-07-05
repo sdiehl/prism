@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/multishot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Yield") LBrace Ctl Ident("yield") LParen KwInt RParen Colon KwBool RBrace VSemi Fn Ident("collect_bools") LParen RParen Eq VOpen Handle LParen Let Ident("a") Eq Ident("yield") LParen Int(IntLit { value: 1, suffix: None }) RParen In Let Ident("b") Eq Ident("yield") LParen Int(IntLit { value: 2, suffix: None }) RParen In Let Ident("c") Eq Ident("yield") LParen Int(IntLit { value: 3, suffix: None }) RParen In If Ident("a") Then If Ident("b") Then If Ident("c") Then Int(IntLit { value: 7, suffix: None }) Else Int(IntLit { value: 6, suffix: None }) Else Int(IntLit { value: 5, suffix: None }) Else Int(IntLit { value: 4, suffix: None }) RParen With VOpen Ident("yield") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("v") Gt Int(IntLit { value: 1, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("collect_bools") LParen RParen RParen VClose
+VOpen Effect UIdent("Yield") VOpen Ctl Ident("yield") LParen KwInt RParen Colon KwBool VClose VSemi Fn Ident("collect_bools") LParen RParen Eq VOpen Handle LParen Let Ident("a") Eq Ident("yield") LParen Int(IntLit { value: 1, suffix: None }) RParen In Let Ident("b") Eq Ident("yield") LParen Int(IntLit { value: 2, suffix: None }) RParen In Let Ident("c") Eq Ident("yield") LParen Int(IntLit { value: 3, suffix: None }) RParen In If Ident("a") Then If Ident("b") Then If Ident("c") Then Int(IntLit { value: 7, suffix: None }) Else Int(IntLit { value: 6, suffix: None }) Else Int(IntLit { value: 5, suffix: None }) Else Int(IntLit { value: 4, suffix: None }) RParen With VOpen Ident("yield") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("v") Gt Int(IntLit { value: 1, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("collect_bools") LParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Int,
                     ],
                     ret: Bool,
+                    grade: Many,
                 },
             ],
-            span: 0..40,
+            span: 0..36,
         },
     ],
     errors: [],
@@ -47,7 +48,7 @@ Program {
                                         node: Var(
                                             "yield",
                                         ),
-                                        span: 81..86,
+                                        span: 77..82,
                                     },
                                     [
                                         Spanned {
@@ -57,11 +58,11 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 87..88,
+                                            span: 83..84,
                                         },
                                     ],
                                 ),
-                                span: 81..89,
+                                span: 77..85,
                             },
                             Spanned {
                                 node: Let(
@@ -72,7 +73,7 @@ Program {
                                                 node: Var(
                                                     "yield",
                                                 ),
-                                                span: 105..110,
+                                                span: 101..106,
                                             },
                                             [
                                                 Spanned {
@@ -82,11 +83,11 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 111..112,
+                                                    span: 107..108,
                                                 },
                                             ],
                                         ),
-                                        span: 105..113,
+                                        span: 101..109,
                                     },
                                     Spanned {
                                         node: Let(
@@ -97,7 +98,7 @@ Program {
                                                         node: Var(
                                                             "yield",
                                                         ),
-                                                        span: 129..134,
+                                                        span: 125..130,
                                                     },
                                                     [
                                                         Spanned {
@@ -107,11 +108,11 @@ Program {
                                                                     suffix: None,
                                                                 },
                                                             ),
-                                                            span: 135..136,
+                                                            span: 131..132,
                                                         },
                                                     ],
                                                 ),
-                                                span: 129..137,
+                                                span: 125..133,
                                             },
                                             Spanned {
                                                 node: If(
@@ -119,7 +120,7 @@ Program {
                                                         node: Var(
                                                             "a",
                                                         ),
-                                                        span: 144..145,
+                                                        span: 140..141,
                                                     },
                                                     Spanned {
                                                         node: If(
@@ -127,7 +128,7 @@ Program {
                                                                 node: Var(
                                                                     "b",
                                                                 ),
-                                                                span: 154..155,
+                                                                span: 150..151,
                                                             },
                                                             Spanned {
                                                                 node: If(
@@ -135,7 +136,7 @@ Program {
                                                                         node: Var(
                                                                             "c",
                                                                         ),
-                                                                        span: 164..165,
+                                                                        span: 160..161,
                                                                     },
                                                                     Spanned {
                                                                         node: Int(
@@ -144,7 +145,7 @@ Program {
                                                                                 suffix: None,
                                                                             },
                                                                         ),
-                                                                        span: 171..172,
+                                                                        span: 167..168,
                                                                     },
                                                                     Spanned {
                                                                         node: Int(
@@ -153,10 +154,10 @@ Program {
                                                                                 suffix: None,
                                                                             },
                                                                         ),
-                                                                        span: 178..179,
+                                                                        span: 174..175,
                                                                     },
                                                                 ),
-                                                                span: 161..179,
+                                                                span: 157..175,
                                                             },
                                                             Spanned {
                                                                 node: Int(
@@ -165,10 +166,10 @@ Program {
                                                                         suffix: None,
                                                                     },
                                                                 ),
-                                                                span: 185..186,
+                                                                span: 181..182,
                                                             },
                                                         ),
-                                                        span: 151..186,
+                                                        span: 147..182,
                                                     },
                                                     Spanned {
                                                         node: Int(
@@ -177,19 +178,19 @@ Program {
                                                                 suffix: None,
                                                             },
                                                         ),
-                                                        span: 192..193,
+                                                        span: 188..189,
                                                     },
                                                 ),
-                                                span: 141..193,
+                                                span: 137..189,
                                             },
                                         ),
-                                        span: 121..193,
+                                        span: 117..189,
                                     },
                                 ),
-                                span: 97..193,
+                                span: 93..189,
                             },
                         ),
-                        span: 72..194,
+                        span: 68..190,
                     },
                     [
                         Op(
@@ -204,7 +205,7 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 219..220,
+                                        span: 215..216,
                                     },
                                     [
                                         Spanned {
@@ -214,7 +215,7 @@ Program {
                                                     node: Var(
                                                         "v",
                                                     ),
-                                                    span: 221..222,
+                                                    span: 217..218,
                                                 },
                                                 Spanned {
                                                     node: Int(
@@ -223,14 +224,14 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 225..226,
+                                                    span: 221..222,
                                                 },
                                             ),
-                                            span: 221..226,
+                                            span: 217..222,
                                         },
                                     ],
                                 ),
-                                span: 219..227,
+                                span: 215..223,
                             },
                         ),
                         Return(
@@ -239,15 +240,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 244..245,
+                                span: 240..241,
                             },
                         ),
                     ],
                 ),
-                span: 65..245,
+                span: 61..241,
             },
             wheres: [],
-            span: 42..245,
+            span: 38..241,
         },
         Decl {
             name: "main",
@@ -261,7 +262,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 259..266,
+                        span: 255..262,
                     },
                     [
                         Spanned {
@@ -270,18 +271,18 @@ Program {
                                     node: Var(
                                         "collect_bools",
                                     ),
-                                    span: 267..280,
+                                    span: 263..276,
                                 },
                                 [],
                             ),
-                            span: 267..282,
+                            span: 263..278,
                         },
                     ],
                 ),
-                span: 259..283,
+                span: 255..279,
             },
             wheres: [],
-            span: 247..283,
+            span: 243..279,
         },
     ],
 }

@@ -4,7 +4,7 @@
 
 Singly-linked list operations.
 
-The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language (list literals, deriving); this module is the function surface over them. The prelude opens it, so these names are in scope unqualified everywhere; a project module reaches them with `import Data.List`.
+The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language (list literals, deriving); this module is the function surface over them. The prelude opens it, so these names are in scope unqualified everywhere; a project module reaches them with `import Data.List`. The container-generic queries (`length`, `sum`, `all`, `find`, and friends) live in `Data.Foldable` and work on any `Foldable`, this type included.
 
 ## Functions and Values
 
@@ -48,14 +48,6 @@ last : forall a. (List(a)) -> Option(a)
 
 The final element as `Some`, or `None` when the list is empty.
 
-### `length`
-
-```prism,sig,h-b926059c6babd162c556da7b9ab784b02b0296f425437acfab4cf45c9a96e200
-length : forall a. (List(a)) -> Int
-```
-
-The number of elements.
-
 ### `nth`
 
 ```prism,sig,h-4a12566ca508f24a88d93646d86300e412f190771dbe4800e221e3cee604332f
@@ -82,16 +74,16 @@ The list with its first `n` elements removed.
 
 ### `take_while`
 
-```prism,sig,h-a3e0c9964da7d022425e5cd283859572c4b5ed4ba16c5d5825404864a6edd655
-take_while : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
+```prism,sig,h-68280c76ea5b2beffec0d25de67903d55518547712ba4b172948207295d58564
+take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
 The longest prefix of elements satisfying `p`.
 
 ### `drop_while`
 
-```prism,sig,h-fd4a452e547af76ead57111081df99a6bc558e388d0efe5c7dc2f41bf6832555
-drop_while : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
+```prism,sig,h-1a4eeb23e8a7584eb1a07ca05393512a53399ed84494895aeaf048b179c13c96
+drop_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
 The suffix remaining after `take_while(p, xs)`.
@@ -106,8 +98,8 @@ split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 
 ### `map`
 
-```prism,sig,h-3b92e864d678fbbcf18a4d54f0bdf87ebb8b7f9f4466c009cb6527ed399cf522
-map : forall a b e0. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
+```prism,sig,h-8b924de0ba185423f89b3f585ed226b915af4fc6fcc502200b01907cdc325c93
+map : forall e0 a b. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
 ```
 
 Apply `f` to every element, preserving order and length.
@@ -118,8 +110,8 @@ map(\(x) -> x + 1, [1, 2, 3])
 
 ### `filter`
 
-```prism,sig,h-6d745c3a2525694b26cbcc623c67f3ca16d14534e44e370feb6ebeb9995057a6
-filter : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
+```prism,sig,h-604c207dcd71c4c460254f4d6c2194f3cf6f8d3fb2e57485f2079ab5d16be3bf
+filter : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
 Keep the elements satisfying `p`.
@@ -130,16 +122,16 @@ filter(\(x) -> x > 1, [1, 2, 3])
 
 ### `foldr`
 
-```prism,sig,h-7d41fe2a82e8361e1162e95fd70c8e2079620dc96c05be5810310b60ecb77ea3
-foldr : forall a b e0. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
+```prism,sig,h-307d635e70d91a52a833c6fb86d44680288e386aef4060a9a672ad3297fd50d3
+foldr : forall e0 a b. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
 ```
 
 Right fold: `f(x0, f(x1, ... f(xn, z)))`.
 
 ### `foldl`
 
-```prism,sig,h-0d17191fb74e4cb93eb31816a13695cca38593de5bcb1576318c27f94c108ab0
-foldl : forall a b e0. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
+```prism,sig,h-e33a4d899e5ff2572c8c6462526e87ab54c660f0c05e545192d6ec4d148af5d6
+foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
 ```
 
 Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
@@ -158,7 +150,7 @@ Concatenate two lists.
 
 ### `reverse`
 
-```prism,sig,h-6521eaa6c57a6cdf5cde1f4e76850bc6986af9cc3ccd9bf2a4a5f2719df8d5e3
+```prism,sig,h-714b75c0baf0959822b9ca8ac609c621ec0569e18a92f51062a2a980104893e6
 reverse : forall a. (List(a)) -> List(a)
 ```
 
@@ -166,7 +158,7 @@ The list in reverse order.
 
 ### `flatten`
 
-```prism,sig,h-75d457418c59c4955dcefc17f3d15172a0d182e86d33ea9cf468b9000024a925
+```prism,sig,h-b9d5b7e52887e8309c45b3b3af33b776e5a65560bf34a64c9161e18ad18227cf
 flatten : forall a. (List(List(a))) -> List(a)
 ```
 
@@ -174,23 +166,23 @@ Concatenate a list of lists.
 
 ### `concat_map`
 
-```prism,sig,h-8c655a99914bc9d943f88690e251dcaad961b8371e24a64322f9713cd22c9129
-concat_map : forall a b e0. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
+```prism,sig,h-475a38a499fe5b201a0ad252d2606eaa059d76d9b9e1b39e2888d4b4e9f9c878
+concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
 Map `f` over the list and concatenate the resulting lists.
 
 ### `zip_with`
 
-```prism,sig,h-729d8a2ac1ac4c02085ba87986a59e5a04135907fe45a105e171ce18b6f07a7e
-zip_with : forall a b c e0. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
+```prism,sig,h-2846a9f9c52c3efd943d728dc35a12216fc84f4063401f501f76b5d4aac68e37
+zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
 ```
 
 Combine two lists elementwise with `f`, stopping at the shorter length.
 
 ### `zip`
 
-```prism,sig,h-c57301583ace127c7f1b5b0a0b5c53ff7ddbfd2710b5337c5e7df8171cc89cb7
+```prism,sig,h-8269f2027d6a13baa8dbd91c7bf6320ec5b0f12902ca96557b09c6c1ecc957eb
 zip : forall a b. (List(a), List(b)) -> List((a, b))
 ```
 
@@ -198,79 +190,39 @@ Pair up two lists elementwise, stopping at the shorter length.
 
 ### `unzip`
 
-```prism,sig,h-83f9e1ad50670be58a1773f5c4a4885d0942435be63027ac06958a4adf3e71db
+```prism,sig,h-af84c86ef6ca241c573b055e45c8eb497a1eedd1039d5d733a2f7d3220f64e60
 unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 ```
 
 Split a list of pairs into a pair of lists.
 
-### `all`
-
-```prism,sig,h-fbcf2236ba7fe2cc8b3c178938880fa28094b82acf3cec3bb885d6a1213e2136
-all : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Bool ! {e0}
-```
-
-True when every element satisfies `p` (vacuously true for `Nil`).
-
-### `any`
-
-```prism,sig,h-d04e5923edee8f0a5338e1ab8b895d4bba57b3f8722a0cf5179b6d86d9c7c73f
-any : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Bool ! {e0}
-```
-
-True when some element satisfies `p`.
-
 ### `count`
 
-```prism,sig,h-775e4181b1f47861e4a06f0292027ff0eb428f619ee9e231e99dbd4d632a9d44
-count : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
+```prism,sig,h-59b95af4868e1004358a0d6bb006328bac6c0d83d36d4498748127c3d384ce2d
+count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
 The number of elements satisfying `p`.
 
-### `find`
-
-```prism,sig,h-96fca6c21a33e5a33698a07a7515f9846aa7552d2001bbc20dcdb51fe6c1190e
-find : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Option(a) ! {e0}
-```
-
-The first element satisfying `p` as `Some`, or `None`.
-
 ### `position_go`
 
-```prism,sig,h-d480c0aae9bff7198edcbb173554b333ac5bf05b2d4eef359b3e183531c7fe1f
-position_go : forall a e0. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0}
+```prism,sig,h-3decd7b498123715bb50c56b5dab38e68140139e74fbc126d151de8dd212be8a
+position_go : forall e0 a. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0}
 ```
 
 Helper for `position`: search from index `n`.
 
 ### `position`
 
-```prism,sig,h-e20542962f03ff0578c93d3beffed914624dfabd093f0066e6e3692360197a12
-position : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
+```prism,sig,h-ea767f2f2864a204bcb71606d3eadd9275ea7b8e08690acff1e5931b0ba034c1
+position : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
 ```
 
 The index of the first element satisfying `p` as `Some`, or `None`.
 
-### `sum`
-
-```prism,sig,h-586cb9ec1fe05ac068a4ca140b09e15a9928a8306af3aa4809fd337b28e73e9f
-sum : (List(Int)) -> Int
-```
-
-The sum of a list of numbers (`0` for `Nil`).
-
-### `product`
-
-```prism,sig,h-d880eb05c917aad554c2a3e69dd594f3207bf21bb44fa86c3bc50240a969dd1a
-product : (List(Int)) -> Int
-```
-
-The product of a list of numbers (`1` for `Nil`).
-
 ### `maximum`
 
-```prism,sig,h-53c1913f234c342346ffbfb3032be3f4f2842bff6ea31de3c1add5264f4caca6
+```prism,sig,h-8ff9577c56d3928d012d53ed91726b8ff50d2f6b7947e70f7fbc954cee209f41
 maximum : (List(Int)) -> Option(Int)
 ```
 
@@ -278,7 +230,7 @@ The greatest element as `Some`, or `None` for the empty list.
 
 ### `minimum`
 
-```prism,sig,h-6cd9857e1810127c41e548c283645bf125482950228cab1266c65b741e4490e5
+```prism,sig,h-1f0a6fc24b717bc5a0d9ec68bcc13e5c20dc69ff7863dd7035780bf319428c70
 minimum : (List(Int)) -> Option(Int)
 ```
 
@@ -306,8 +258,8 @@ range(0, 5)
 
 ### `tabulate`
 
-```prism,sig,h-95f195e0afc82884ae9db33444d1e61abf891ac5bdffd025e8f6425369f3a734
-tabulate : forall a e0. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
+```prism,sig,h-3d7da257b0be72991742e4c3251d9eba60b752746733cab86b26fd0d1b9b3066
+tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 ```
 
 The list `[f(0), f(1), ..., f(n-1)]`.
@@ -330,8 +282,8 @@ The first element as `Some`, or `None` (an `Option` view of the head).
 
 ### `partition`
 
-```prism,sig,h-6abab46e2a781bb24a1c33b2b9c645c251f3989a42306a9f8932cf07603e4a4d
-partition : forall a e0. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
+```prism,sig,h-cbb904b9550220166c1af452d9d3e4a3fbc0a65436bb536cf9e0cc05c40fa98d
+partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
 ```
 
 Split into `(matching, non-matching)` by predicate `p`.
@@ -346,16 +298,16 @@ Break the list into consecutive chunks of up to `n` elements.
 
 ### `scan_left`
 
-```prism,sig,h-025ffb43255fc0490e160acf78996308ae2155d4a5831f65006360f89ca1e990
-scan_left : forall a b e0. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
+```prism,sig,h-a4ff3cce5944931400de677ef5eb1951a6f44b4b21845b195e4f907a292af129
+scan_left : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
 ```
 
 Left scan: the running accumulators of `foldl`, starting from `z`.
 
 ### `list_ap`
 
-```prism,sig,h-2486ec5c9541a277bd8973ac76fb7f65890b3f2165dafe37cabe7f91a8f31d59
-list_ap : forall a b e0. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
+```prism,sig,h-b9efd279c5f0560bcb808cf146db54207bfad419639179ba80ba045c0d477e01
+list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 
 Applicative apply for lists: every function in `fs` applied to every `x`.

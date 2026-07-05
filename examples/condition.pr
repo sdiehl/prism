@@ -11,9 +11,8 @@
 --   -1
 --   600
 
-effect Signal {
+effect Signal
   ctl raise_cond(Int) : Int
-}
 
 -- Signals on a zero divisor and divides by whatever the handler resumes.
 fn checked_div(n, d) : !{Signal} Int =

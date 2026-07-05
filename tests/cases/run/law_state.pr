@@ -6,10 +6,9 @@
 
 import Quickcheck (..)
 
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
 -- The canonical State handler: parameter-passing, returning (result, final).
 fn run_state(s0, action : () -> a ! {State | e}) =
@@ -61,9 +60,22 @@ fn pp_rhs(s2) =
 fn prop_put_put(t) =
   match t of
     (s0, s1, s2) =>
-      state_eq(run_state(s0, \() -> pp_lhs(s1, s2)), run_state(s0, \() -> pp_rhs(s2)))
+      state_eq(
+          run_state(s0, \() -> pp_lhs(s1, s2)),
+          run_state(s0, \() -> pp_rhs(s2)),
+        )
 
 fn main() =
   println(show_outcome("State get-get", quickcheck(gen_int, prop_get_get)))
-  println(show_outcome("State put-get", quickcheck(gen_pair(gen_int, gen_int), prop_put_get)))
-  println(show_outcome("State put-put", quickcheck(gen_triple(gen_int, gen_int, gen_int), prop_put_put)))
+  println(
+      show_outcome(
+          "State put-get",
+          quickcheck(gen_pair(gen_int, gen_int), prop_put_get),
+        ),
+    )
+  println(
+      show_outcome(
+          "State put-put",
+          quickcheck(gen_triple(gen_int, gen_int, gen_int), prop_put_put),
+        ),
+    )

@@ -34,11 +34,19 @@ A singly-linked list: `Nil`, or `Cons(head, tail)`. Backs `[..]` literals.
 
 ### `Map`
 
-```prism,def,h-a88df08dfd8312f2095ec919ccb45ea7b62da2cefd99292bf4e471487792df17
-type Map(k, v) = Tip | Bin(Int, k, v, Map(k, v), Map(k, v))
+```prism,def,h-0a2a6a32a74412813196ec026a33246e63a6668d7d395c9f90472e1f1b6ed3c0
+type Map(k, v, ord) = Tip | Bin(Int, k, v, Map(k, v, ord), Map(k, v, ord))
 ```
 
-A persistent ordered map, an AVL tree (`Tip`/`Bin`); see `Data.Map`.
+A persistent ordered map, an AVL tree (`Tip`/`Bin`); see `Data.Map`. The third parameter `ord` is a phantom brand recording the ordering witness the map was built under; it never appears in a field, so an unbranded `Map(k, v)` is the same type under-applied (a fresh brand per use). See `Data.Map`.
+
+### `Canonical`
+
+```prism,def,h-b9710b3157f6ffc5861090da54f1d7aa6d55693efe14595ab22c75ea60695ccf
+type Canonical = MkCanonical
+```
+
+The brand of a map built under the ambient canonical ordering, when no explicit ordering witness is in scope. A map built inside `with w <- ordering` carries `w`'s private brand instead, so a value of one brand never unifies with the other. Maps stored in a container that pins a concrete brand (rather than staying brand-polymorphic) use this one.
 
 ### `HashMap`
 
@@ -53,9 +61,8 @@ A separate-chaining hash table with `String` keys, built on the growable `Array`
 ### `Eq`
 
 ```prism,def,h-1e62258038f5aff48534d4e652cc7b32567677fd16e21b5506bf2c0ec9c1c4ee
-class Eq(a) {
+class Eq(a)
   eq : (a, a) -> Bool
-}
 ```
 
 Equality. `eq` backs `==`/`/=`.
@@ -63,9 +70,8 @@ Equality. `eq` backs `==`/`/=`.
 ### `Ord`
 
 ```prism,def,h-2af84651fc6223ec85f83dda45323ccc11b0543e83b7cfdd94999cc951d1c363
-class Ord(a) given Eq(a) {
+class Ord(a) given Eq(a)
   cmp : (a, a) -> Int
-}
 ```
 
 Total order. `cmp(x, y)` returns `-1`, `0`, or `1`; backs `<`/`<=`/`>`/`>=`.
@@ -73,9 +79,8 @@ Total order. `cmp(x, y)` returns `-1`, `0`, or `1`; backs `<`/`<=`/`>`/`>=`.
 ### `Show`
 
 ```prism,def,h-a6d529f2246f1864ff955643c7b1aa77e7d1347699da1b1ee22fbba885239ff8
-class Show(a) {
+class Show(a)
   show : (a) -> String
-}
 ```
 
 Canonical rendering to a `String`, dispatched by dictionary. `show(x)` reads `x`'s `Show` instance, so a value prints canonically even in a polymorphic context (where the runtime representation alone cannot tell, say, a `Bool` from an `Int`). Derive it with `deriving (Show)`; strings render quoted and escaped, records with their field names.
@@ -83,9 +88,8 @@ Canonical rendering to a `String`, dispatched by dictionary. `show(x)` reads `x`
 ### `Hash`
 
 ```prism,def,h-af56efed0cf692e03764e98bedaa4fd7cf00d0b23c9f116057576cc9b4241391
-class Hash(a) {
+class Hash(a)
   hash : (a) -> String
-}
 ```
 
 A content hash of a value, as a lowercase blake3 hex digest. `deriving (Hash)` folds a value structurally into the same content-addressing scheme the compiler hashes code with (a constructor token followed by its fields' own digests), so structurally equal values hash equal, byte-for-byte identically on the interpreter and native backends. The leaf instances below anchor the fold.
@@ -93,40 +97,60 @@ A content hash of a value, as a lowercase blake3 hex digest. `deriving (Hash)` f
 ### `Pow`
 
 ```prism,def,h-390c82aeb07696d244298074c027bf9c4c286a6a6ab345b0328b0d903e689bdd
-class Pow(a) {
+class Pow(a)
   pow : (a, a) -> a
-}
 ```
 
 Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances cover homogeneous powers; a mixed `Int ^ Float` is a type error.
 
+### `Num`
+
+```prism,def,h-7f1dd7185ac47ad67c286fe232e269a521d4ec8b1422a246787bc07573a291af
+class Num(a)
+  plus : (a, a) -> a
+  minus : (a, a) -> a
+  times : (a, a) -> a
+  negated : (a) -> a
+  from_int : (Int) -> a
+```
+
+The additive-multiplicative core of the numerical tower: `+`, `-`, `*`, and unary minus (`negated`) over one lane. A monomorphic operand keeps its direct lane primitive (the dictionary never survives specialization); a `given Num(a)` operand dispatches here. `Div` is split off so a type with addition but no sensible division stays representable. No implicit coercion: an operand's lane is fixed by its type, and only literals adapt to context.
+
+### `Div`
+
+```prism,def,h-005e9fb85bd7ff213416440c6f77ada7e962916c413fb372fac4c5cecbd9145c
+class Div(a)
+  quotient : (a, a) -> a
+  modulo : (a, a) -> a
+```
+
+Division and remainder, the `/` and `%` operators. Integer lanes truncate toward zero with the remainder taking the dividend's sign and fault on a zero divisor; `Float` division is IEEE (never faults) and `%` is `fmod`.
+
 ### `Functor`
 
 ```prism,def,h-35ff0c66df51275d1a40d6a83d85ea446bb4295f0fe5d5cbc161e64655e4dc84
-class Functor(f) {
+class Functor(f)
   fmap : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
-}
 ```
 
 A container that can be mapped over. `fmap` is effect-polymorphic, so mapping an effectful function threads its row `e` through.
 
 ### `Foldable`
 
-```prism,def,h-3a33d133ee34488e82c49b1a19219951cb7b59011f434391ef59bc80e07cb315
-class Foldable(t) {
+```prism,def,h-a6542b936e31b0a809139aca63c91811a7ac2a64652938aa58c7d823530cfc3c
+class Foldable(t)
   fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
-}
+  fold_l : ((b, a) -> b ! {| e}, b, t(a)) -> b ! {| e}
 ```
 
-A container collapsible with an effect-polymorphic right fold.
+A container collapsible with an effect-polymorphic fold from either end. `fold_l` must be tail recursive in every instance: the aggregations in `Data.Foldable` ride it, so a million-element container folds in constant stack on the native backend.
 
 ### `Applicative`
 
 ```prism,def,h-ff924537d122de5cb70f8caa3642a9e384b3d0d6e77a6b5b849b9e9298742b74
-class Applicative(f) given Functor(f) {
-  pure : (a) -> f(a),
+class Applicative(f) given Functor(f)
+  pure : (a) -> f(a)
   ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
-}
 ```
 
 A `Functor` with `pure` (inject a value) and `ap` (apply a wrapped function).
@@ -134,9 +158,8 @@ A `Functor` with `pure` (inject a value) and `ap` (apply a wrapped function).
 ### `Monad`
 
 ```prism,def,h-20e67448ee96b8e3c63987095773b0ed629d03bce4826121965701c00801598c
-class Monad(m) given Applicative(m) {
+class Monad(m) given Applicative(m)
   bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
-}
 ```
 
 Structural sequencing via `bind`. Side effects ride the effect system, so this is for `List`/`Option`-style structure rather than do-notation.
@@ -144,9 +167,8 @@ Structural sequencing via `bind`. Side effects ride the effect system, so this i
 ### `Traversable`
 
 ```prism,def,h-99d51e54f82576caf2277fc392a517f7a116f25a56deea889d47516c24829713
-class Traversable(t) given Functor(t), Foldable(t) {
+class Traversable(t) given Functor(t), Foldable(t)
   traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}
-}
 ```
 
 An effect-polymorphic traversal: `traverse` is an effectful `map`, the per-element effect row `e` replacing the classic `Applicative` parameter.
@@ -156,9 +178,8 @@ An effect-polymorphic traversal: `traverse` is an effectful `map`, the per-eleme
 ### `Emit`
 
 ```prism,def,h-ba91a990a806c50b9519dca2e1a67c09b836444bbe38e38818b42da3ae8252a0
-effect Emit(a) {
+effect Emit(a)
   ctl emit(a) : Unit
-}
 ```
 
 The stream effect: `emit(x)` yields one element to the enclosing consumer.
@@ -166,10 +187,9 @@ The stream effect: `emit(x)` yields one element to the enclosing consumer.
 ### `Output`
 
 ```prism,def,h-39f981c8652b998e20a080265184646ee7b8ed303a7ede35fcd102ec8b881a66
-effect Output {
-  ctl out_print(String) : Unit,
+effect Output
+  ctl out_print(String) : Unit
   ctl out_println(String) : Unit
-}
 ```
 
 Console output as an interceptable capability. `print`/`println` perform these ops; the default `run_io` handler discharges them to the real terminal, while replay/durable drop them during a replayed prefix.
@@ -177,31 +197,29 @@ Console output as an interceptable capability. `print`/`println` perform these o
 ### `Console`
 
 ```prism,def,h-91fcb6eb318baeea64057792d041a817656926de3d6ca4d994b6773617859348
-effect Console {
-  ctl con_read_int(Unit) : Int,
+effect Console
+  ctl con_read_int(Unit) : Int
   ctl con_read_line(Unit) : String
-}
 ```
 
 Console input capability. The surface wrappers `read_int`/`read_line` perform these ops; `run_io` discharges each by resuming with the matching `prim_*` builtin, and the tail-resumptive handlers fuse to direct calls.
 
 ### `FileSystem`
 
-```prism,def,h-700ed8eb54dd956884b62a7dc89c3a6b9d0059d1b9e69dec5792ebbbaca8a23c
-effect FileSystem {
-  ctl fs_read_file(String) : String,
+```prism,def,h-759f11014b90dcfc7424a865d8e009a91ebe2958614253265d24db51bd3e5e67
+effect FileSystem
+  ctl fs_read_file(String) : String
+  ctl fs_read_bytes(String) : Buf
   ctl fs_file_exists(String) : Bool
-}
 ```
 
-File-system read capability (`read_file`, `file_exists`).
+File-system read capability (`read_file`, `read_bytes`, `file_exists`).
 
 ### `Random`
 
 ```prism,def,h-6fff37bdb302654e80373dec569df4176d12a191e1af5890c3ba0380dd164c16
-effect Random {
+effect Random
   ctl rng_rand(Unit) : Int
-}
 ```
 
 Random-number capability (`rand`).
@@ -209,11 +227,10 @@ Random-number capability (`rand`).
 ### `Env`
 
 ```prism,def,h-3d8a6cd048c666941860a539025d9fbe6f781a06add5c352f8c3ec17ccdae058
-effect Env {
-  ctl env_get(String) : String,
-  ctl env_argc(Unit) : Int,
+effect Env
+  ctl env_get(String) : String
+  ctl env_argc(Unit) : Int
   ctl env_arg(Int) : String
-}
 ```
 
 Process-environment capability (`getenv`, `args_count`, `arg`).
@@ -302,6 +319,30 @@ instance ordChar : Ord(Char)
 
 ```prism,def,h-471e28f84d6452f51e8879c08128b7824c041d7e3995195d0697155b7d961316
 instance ordFloat : Ord(Float)
+```
+
+### `eqPair`
+
+```prism,def,h-73482baa3810f91e83617e5b2336e9250cd4190219333cc7a14ace9b0d0b03e4
+instance eqPair : Eq((a, b))
+```
+
+### `ordPair`
+
+```prism,def,h-31ff6b90f08057367e337a1ba57cb627c0d639a9e7779f308f01a26a7a278d01
+instance ordPair : Ord((a, b))
+```
+
+### `eqTriple`
+
+```prism,def,h-c4db0444c79ff96fbaa8f3b377a8d953f86e64ae5ba66aca5c5d0afe5ea431ca
+instance eqTriple : Eq((a, b, c))
+```
+
+### `ordTriple`
+
+```prism,def,h-20349236eea39e50e073f419a61ab0593d217f8ee31e9c8fb1840e5063fb0a2a
+instance ordTriple : Ord((a, b, c))
 ```
 
 ### `showInt`
@@ -410,7 +451,7 @@ instance hashUnit : Hash(Unit)
 
 ### `powInt`
 
-```prism,def,h-0b5e86a48eac7a2c77f61f6d200ffad3e9d7978cc3a63ade83e2fa27dc918081
+```prism,def,h-30655d4f0bbf8d7c17d5fd3d56cca8cff63bc9bc866fbbdaf65165c3d5ffd047
 instance powInt : Pow(Int)
 ```
 
@@ -420,63 +461,111 @@ instance powInt : Pow(Int)
 instance powFloat : Pow(Float)
 ```
 
+### `numInt`
+
+```prism,def,h-0b7c18f824979558b31870db172f3395157fc7d7cfdd36fdc5a470fca588ad2d
+instance numInt : Num(Int)
+```
+
+### `numI64`
+
+```prism,def,h-36183c05e9470fa24c72deadc64f840bccb9c2ccadb9ca0e5e7e69d3d07989a9
+instance numI64 : Num(I64)
+```
+
+### `numU64`
+
+```prism,def,h-677852318a790919ae23d6bf69feb21299c2eca208f65072c2479d5af6967e4f
+instance numU64 : Num(U64)
+```
+
+### `numFloat`
+
+```prism,def,h-43185af17acde4f0cb512258384098af564a517f60b60fce0c4e52f424b26600
+instance numFloat : Num(Float)
+```
+
+### `divInt`
+
+```prism,def,h-fc5a2a079b4941fff8e48fa40a70bb13faa1865aef24b3406de8c458badc06cc
+instance divInt : Div(Int)
+```
+
+### `divI64`
+
+```prism,def,h-2cc4177c7c47cd970f49d033d0a99998b9079cacbaeb03ae72c30073fdec05ca
+instance divI64 : Div(I64)
+```
+
+### `divU64`
+
+```prism,def,h-af5e40a1db2b5cbf1578a447da00b4301d437c01f354e7f6d0b12aa573c69878
+instance divU64 : Div(U64)
+```
+
+### `divFloat`
+
+```prism,def,h-2be1a0b5a2542288b43e46f0f95dcd381ee84baa945edb7e69841c970f749f0c
+instance divFloat : Div(Float)
+```
+
 ### `functorList`
 
-```prism,def,h-bcb11ca1b7c60928979c365d6729ab16adcb50d691db069dbef53263719cb65d
+```prism,def,h-aac8d8a2473b9745c456a0a46977a3c3cfb3549b654280536c3163c21cf7eb3f
 instance functorList : Functor(List)
 ```
 
 ### `functorOption`
 
-```prism,def,h-466389106e43628451bec0c07dcae4f085e45c27d9993e3af3e0c4092b1ad41f
+```prism,def,h-7d775ca0a86b1d749a8bab63d3f5d42c7ed5295dac97b7e1e6927b155f499c5f
 instance functorOption : Functor(Option)
 ```
 
 ### `foldableList`
 
-```prism,def,h-3c888879bcc0530b36ddc82b73b771ba9ec1e7d40c33c2ee0c7899d898997614
+```prism,def,h-ae53a74bb3a036e0c99dd76a53b234711702c7d0b2da8d1c55188b9656477ec3
 instance foldableList : Foldable(List)
 ```
 
 ### `foldableOption`
 
-```prism,def,h-cafdd41ed944cce50024b85812ab4986e84b339948262db4d27758abdb5a81c7
+```prism,def,h-ee8049be17b8f873ec4f3f7dfa5d9d5e8c3f77c881d6bc3b21786d09397c589b
 instance foldableOption : Foldable(Option)
 ```
 
 ### `applicativeList`
 
-```prism,def,h-6a8800486bc82d446e8d3bb47edaa7cd3ca2f0266e294d6ee8faffe77dea9efe
+```prism,def,h-155ea22e1fc5e6b454dcacfee1a5c79a515f5cf64e45bc74c1eaf0b0ea910681
 instance applicativeList : Applicative(List)
 ```
 
 ### `applicativeOption`
 
-```prism,def,h-7c688a41ba9b9119c35ee614d71bc7931dfd7bfd8cbeb36af7d228e7b9a571d6
+```prism,def,h-d4934c2ad5ec31cdec035eb116a929dead6b19e7a94045d03558d573f3f57738
 instance applicativeOption : Applicative(Option)
 ```
 
 ### `monadList`
 
-```prism,def,h-5398f1bcbaadf508cf64e5b99b95d74a488b22777be1e76f6661b8d07325098b
+```prism,def,h-f3d92e5818a615fe5afcf4ad6abdd899527c7c2561dd8862f50ea33c87955b00
 instance monadList : Monad(List)
 ```
 
 ### `monadOption`
 
-```prism,def,h-face914ed8521a4e6752fed16c74bf85c5dc4fc042da5d8e4ff1e0c661286b56
+```prism,def,h-9f3610c16c4637212fd4aeb6b2bdb8851bfaedde0e033526559e8b875b817b2f
 instance monadOption : Monad(Option)
 ```
 
 ### `traversableList`
 
-```prism,def,h-9d7351df275aaedeb4e1927e5cd0ac9b67073b5fdafd6c5c2d667f7afc47cb87
+```prism,def,h-2165c6b126e305e6d50ba11adf812b490fdf52928d1034bbc3205f7578a9092b
 instance traversableList : Traversable(List)
 ```
 
 ### `traversableOption`
 
-```prism,def,h-2505a1b74133d946aef68fdea21e85425993b92cc37f56a8356e77c73d1de86c
+```prism,def,h-a149b9fb0642595142c114071357faaa73f3f5eb09e3402da8293bcf98b4bc4e
 instance traversableOption : Traversable(Option)
 ```
 
@@ -500,16 +589,16 @@ The constant function: returns `x`, ignoring `y`.
 
 ### `compose`
 
-```prism,sig,h-a921a0f992bc9b495b80c7b3e1e4a802377469b5e55092161f36bd99a2608f92
-compose : forall a b c e0. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0}
+```prism,sig,h-b5ba12b39d792a0ee68753f6aaf8d7fc5e445df9fc368460431386eedc34b48f
+compose : forall e0 a b c. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0}
 ```
 
 Function composition: `compose(f, g, x)` is `f(g(x))`.
 
 ### `flip`
 
-```prism,sig,h-133bd449050d0dbb14ab022cdf0ad7b9dcf5c78ca69f13edd59e19648de72a69
-flip : forall a b c e0. ((b, c) -> a ! {e0}, c, b) -> a ! {e0}
+```prism,sig,h-ed792dcbddee613e7c9645825c13ccd19aeda7382deca933110be6b96ce65782
+flip : forall e0 a b c. ((b, c) -> a ! {e0}, c, b) -> a ! {e0}
 ```
 
 `f` with its first two arguments swapped.
@@ -626,13 +715,19 @@ lcm : (Int, Int) -> Int
 
 The least common multiple.
 
+### `int_pow_go`
+
+```prism,sig,h-df1e3b7a73dd36be37383a21a288e9580d8e3fc16956516e2a3730693f87170f
+int_pow_go : (Int, Int, Int) -> Int
+```
+
 ### `int_pow`
 
-```prism,sig,h-7732057145b6869131e7550b92da9fafbd973bf2aa1ba614abdb4103df00641b
+```prism,sig,h-54e927f46a3ef5d1dfa6ee443a3a946a812f227b27f9edd1b08aa61e23dfd320
 int_pow : (Int, Int) -> Int
 ```
 
-Integer exponentiation, the `Pow(Int)` instance: bignum-correct because `*` promotes past 63 bits. `a ^ b` over ints lowers here through the `Pow` class.
+Integer exponentiation, the `Pow(Int)` instance: bignum-correct because `*` promotes past 63 bits, and tail recursive so a large exponent folds in constant stack. `a ^ b` over ints lowers here through the `Pow` class. A negative exponent is defined as `1 / a ^ (-b)` under the language's one truncating division rule: `0` whenever the magnitude of the base exceeds 1, the exact reciprocal for a base of `1` or `-1`, and the division-by-zero fault for a base of `0` (which is exactly what `0 ^ -1` is).
 
 ### `factorial`
 
@@ -656,7 +751,7 @@ The nth Fibonacci number (naive, exponential).
 pi : Float
 ```
 
-Pi. The transcendental builtins (`sin`, `cos`, `exp`, `ln`, `sqrt`, `pow_float`) lower to FP intrinsics; the constants and `tan`/`log10`/`log2` below are defined here.
+Pi. The transcendental functions (`sin`, `cos`, `tan`, the inverse and hyperbolic families, `exp`, `ln`, `log2`, `log10`, `pow`, `cbrt`, ...) are owned builtins routing through the vendored libm, identical on every backend; only the named constants live here.
 
 ### `e`
 
@@ -673,30 +768,6 @@ tau : Float
 ```
 
 Tau, `2 * pi`.
-
-### `tan`
-
-```prism,sig,h-4a6bca340716e006dbab5becae0d79bebb29ee9c129d9da12781840da15863e5
-tan : (Float) -> Float
-```
-
-Tangent.
-
-### `log10`
-
-```prism,sig,h-95bcfc11deb909759d601795fb07a53969bbf56d8fde1e30b8ca7f2f7aa1ba68
-log10 : (Float) -> Float
-```
-
-Base-10 logarithm.
-
-### `log2`
-
-```prism,sig,h-ccd7d1055fe0c180f7cf285c138775ad25c3e866c587695dc146381ef0c0ddc8
-log2 : (Float) -> Float
-```
-
-Base-2 logarithm.
 
 ### `rand_below`
 
@@ -756,8 +827,8 @@ A pair with its two components swapped.
 
 ### `pair_map`
 
-```prism,sig,h-7e9cf298ac2fd037540fe26e096fb6204b1b6a5d8085c557324a64794913700d
-pair_map : forall a b c d e0. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, c) ! {e0}
+```prism,sig,h-1a7099b89b21f057323de747e3c9dc465ee5f62b18ae5f157b02c2fae9de88b0
+pair_map : forall e0 a b c d. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, c) ! {e0}
 ```
 
 Apply `f` to the first component and `g` to the second.
@@ -772,24 +843,24 @@ guard : (Bool) -> Unit ! {Fail}
 
 ### `optional`
 
-```prism,sig,h-ec056f965fbd70aa3523fce7aed1e15757dcb6385eb265d1655dc7b3fc25d026
-optional : forall a e0. (() -> a ! {e0}) -> Option(a) ! {e0}
+```prism,sig,h-bb8e4c4b2d216238f4e4731d3f402758d47e0524ad1814a00d00081970d50dcf
+optional : forall e0 a. (() -> a ! {e0}) -> Option(a) ! {e0}
 ```
 
 Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 
 ### `succeeds`
 
-```prism,sig,h-d930d491fc953d21ecc918a697820b136c2e18b884e9f214dd5a384dc3f4839e
-succeeds : forall a e0. (() -> a ! {e0}) -> Bool ! {e0}
+```prism,sig,h-9e9526cfd50e0fde4329ab6001850ef9bed2581ff37a7dc347e4dd4c390cbaba
+succeeds : forall e0 a. (() -> a ! {e0}) -> Bool ! {e0}
 ```
 
 True when `thunk` runs to completion without calling `fail()`.
 
 ### `default`
 
-```prism,sig,h-99e7ed9996fa24ba2aa62bbb363ca84ae47151ac9ed2b423799ba8648fbb1348
-default : forall a e0. (() -> a ! {e0}, a) -> a ! {e0}
+```prism,sig,h-ef3a9515fd11f4e327fc0d5e65a6b246840330aa2fb23c8abbce5ba35008de55
+default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
 ```
 
 Run `thunk`, returning its result or the default `d` if it calls `fail()`.
@@ -804,8 +875,8 @@ The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so `xs.at_
 
 ### `at_map`
 
-```prism,sig,h-76855ce6315e841035aa49859369ab4cda017bc868050508571912b12425bda8
-at_map : forall a b. (Map(a, b), a) -> b ! {Fail}
+```prism,sig,h-d1a05662076d61102fb2e9a11a5847c30cf2b6f9857c587f282ff92c3e078716
+at_map : forall a b c. (Map(b, c, a), b) -> c ! {Fail}
 ```
 
 The value bound to `key`, or `fail()` if absent. Backs `m[k]`.
@@ -852,7 +923,7 @@ A new list with element `i` replaced by `v` (out of range: unchanged). Backs `xs
 
 ### `sort`
 
-```prism,sig,h-4d04ab8a006aae40993650c6a1fec9ebdca917a2318bb8483f90939d863a70ff
+```prism,sig,h-4ad2e2c91996ae6744936305417515c2c973ed0dd9b5ad38d3c9ff7da3af3a2e
 sort : forall a. (List(a)) -> List(a)
 ```
 
@@ -860,40 +931,40 @@ Sort a list in ascending order, a stable O(n log n) merge sort. Primitive elemen
 
 ### `while_loop`
 
-```prism,sig,h-4b4531c21a8d01749dcfdfb2954d6f63a5f86a6a17ff0a70a3651046d22459a0
-while_loop : forall a e0. ((a) -> Bool ! {e0}, (a) -> a ! {e0}, a) -> a ! {e0}
+```prism,sig,h-28d75a59a9b850e97e8af0c391ecb0409c30de49234db7d6139175bdfc23013d
+while_loop : forall e0 a. ((a) -> Bool ! {e0}, (a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
 Iterate `body` from state `s` while `cond(s)` holds, returning the final state. Tail-recursive (constant stack).
 
 ### `for_range`
 
-```prism,sig,h-df20d5adb7a6c1e239be969617bbcf091dee12564da9aa7c12771b2ffe8d34c8
-for_range : forall a e0. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0}
+```prism,sig,h-d6caf9ce5c71c6b6865ee538d7c205b531124fa48fab77faaf44c5d6d52901dd
+for_range : forall e0 a. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
 Fold `f(i, s)` over `i` in `[lo, hi)`, threading the state `s`.
 
 ### `repeat_while`
 
-```prism,sig,h-4c5d04c7167cf7c814381ff8af344f021585536b2587c15c756a92ccec3bb20c
-repeat_while : forall a e0. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
+```prism,sig,h-62f265c62d154dc6e77fb074a5d09ea4916253cd2f527eda45eb78c86c04f137
+repeat_while : forall e0 a. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
 ```
 
 The driver `while c do body` (and `loop body` with `break`) desugars to. Condition and body are thunks re-run each iteration, closing over the ambient `var` state; tail-recursive, so it runs in constant stack.
 
 ### `forever`
 
-```prism,sig,h-59942a38b2b646d5859579eec968f26949f3a80755fcb787f4de541af7d03adb
-forever : forall a b e0. (() -> b ! {e0}) -> a ! {e0}
+```prism,sig,h-d09966402b26f7d65719c21b0f8abffcd6434db10f0082b5610c241e7aa159ba
+forever : forall e0 a b. (() -> b ! {e0}) -> a ! {e0}
 ```
 
 The driver an unconditional `loop body` (no `break`) desugars to: it never returns, so its result type is fully polymorphic. Tail-recursive.
 
 ### `repeat`
 
-```prism,sig,h-3acb6861f29abc630de80dad61e7346a612d1af5b067ff873fc0bc93e2894cea
-repeat : forall a e0. (Int, () -> a ! {e0}) -> Unit ! {e0}
+```prism,sig,h-43314a24eb3997d7ff80b68be600d3acd76b1fabb897c4655c9b74e8bc9c1cc7
+repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 ```
 
 Run `body` `n` times for its effects.
@@ -921,6 +992,14 @@ read_file : (String) -> String ! {FileSystem}
 ```
 
 Read the contents of the file at path `p`.
+
+### `read_file_bytes`
+
+```prism,sig,h-d66f2d98321bd6a7bcba115f5f3900d5d0f341d0175df316da159b54206a1fd6
+read_file_bytes : (String) -> Buf ! {FileSystem}
+```
+
+Read the raw bytes of the file at path `p` as a byte buffer, with no UTF-8 interpretation. `Data.Bytes.read_bytes` wraps this as the `Bytes`-typed API.
 
 ### `file_exists`
 
@@ -964,8 +1043,8 @@ The `i`th command-line argument.
 
 ### `run_io`
 
-```prism,sig,h-644a915b665f0b42ef3f65972b76cde4e7ebe814596d91616f5eee170f797017
-run_io : forall a e0. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0}
+```prism,sig,h-84eae80a7caf6f8185f1e4495ee982970bd9ecadebf6e49933f0c3aaa1ce3a93
+run_io : forall e0 a. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0}
 ```
 
 The default world handler the entry point is wrapped in. Each capability effect is discharged by a tail-resumptive handler that resumes with the matching `prim_*` builtin, so the chain fuses to direct calls (no effect-op allocation), leaving only `{IO | e}`.
@@ -1028,80 +1107,80 @@ The list from `a`, stepping by `b - a`, up to `hi`. Backs the `[a,b..z]` list sy
 
 ### `smap_go`
 
-```prism,sig,h-ef6616d84eaaf93b2cb2361c5e53629073d10d2b8f8608cf86d3be9625a04b6f
-smap_go : forall a b c e0. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0}
+```prism,sig,h-abb2e6c879536452cbac87dbfb53ce859ee7e876e474247d3f90629c8df71723
+smap_go : forall e0 a b c. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0}
 ```
 
 Helper for `smap`.
 
 ### `smap`
 
-```prism,sig,h-c3697218f43e8311fc4f9438f4135dfb4dfa55125181e5befd1e960c916c2cfc
-smap : forall a b c d e0. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> (d) -> a ! {Emit(b), e0}
+```prism,sig,h-b7e97df661799716effe794b6bcab59aa1bf44b5d05ebc293d81d276b01f2939
+smap : forall e1 a b c d. ((Unit) -> a ! {Emit(b), e1}, (c) -> b ! {Emit(b), e1}) -> (d) -> a ! {Emit(b), e1}
 ```
 
 Map `f` over every element of a stream, fusing (no intermediate list).
 
 ### `skeep_go`
 
-```prism,sig,h-0a812359a7515bf2c1d39d4fe6becfa5376d7ea126287639de9fada6d5813678
-skeep_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0}
+```prism,sig,h-b0487ef5f5f7651b5c6ef98d8b671b3c5b70833cc8709e4fc7f05ad5bde11749
+skeep_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0}
 ```
 
 Helper for `skeep`.
 
 ### `skeep`
 
-```prism,sig,h-2ce69b33a6a0e0ef8f5572be6fc0e229b3ff445c73bb8f06e09458104a05cbc5
-skeep : forall a b c e0. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> (c) -> a ! {Emit(b), e0}
+```prism,sig,h-2fec25291f3da92d938ecdd7800e0eb4d3aa182f67ad28f702fd27f198bbac85
+skeep : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> Bool ! {Emit(b), e1}) -> (c) -> a ! {Emit(b), e1}
 ```
 
 Keep only the stream elements satisfying `p`, fusing.
 
 ### `stake_go`
 
-```prism,sig,h-07225ad2a4c8b6d1a342714e81cc7c80c9c8797d9aed492a0a203871e00b03a0
-stake_go : forall a b e0. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0}
+```prism,sig,h-eb8c744426e538937b1598d2805cb38c8395c918a6a43c1840e69f2ecc8f5ac4
+stake_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0}
 ```
 
 Helper for `stake`.
 
 ### `stake`
 
-```prism,sig,h-0ead9b905fcb7d7011a99b57d159c06f5d49258d4fc84eb48fdb0a84907c9181
-stake : forall a b c e0. ((Unit) -> b ! {Emit(a), e0}, Int) -> (c) -> Unit ! {Emit(a), e0}
+```prism,sig,h-91ee7f6e1eec2f6d3c6076a2b4a39afca204ae4997f822a0076d1272e0a38051
+stake : forall e1 a b c. ((Unit) -> b ! {Emit(a), e1}, Int) -> (c) -> Unit ! {Emit(a), e1}
 ```
 
 The first `n` elements of a stream, stopping the producer early.
 
 ### `sfold`
 
-```prism,sig,h-7ca53b2a63ea0784b23ba6cce6c65ce47f3fcfa96ec9b77094b470953201b667
-sfold : forall a b c e0. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
+```prism,sig,h-32090cf4ae12fe945d6dcae114c21f02e32675fab7dd641a7d8548011260dcaf
+sfold : forall e0 a b c. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 ```
 
 Left-fold a stream with `f` from the initial accumulator `z`, fusing.
 
 ### `ssum`
 
-```prism,sig,h-0ad0398030a2022549aa7f8479140dab780858305ca894f57945036ffe924c6e
-ssum : forall a e0. ((Unit) -> a ! {e0}) -> Int ! {e0}
+```prism,sig,h-0976621cf2fe495ee83abc38c422f9b363c20c0ed61d139a44aeecce18aa2413
+ssum : forall e0 a. ((Unit) -> a ! {e0}) -> Int ! {e0}
 ```
 
 Sum a stream of numbers.
 
 ### `scollect`
 
-```prism,sig,h-2a0f9ffdeaebbe820edbca69e1b46e22b958d64b7469c5232b87e330ad44cf34
-scollect : forall a b e0. ((Unit) -> a ! {e0}) -> List(b) ! {e0}
+```prism,sig,h-68b1f0f3cb81ff73ee06009d11cb210589d32a00c3b489e44b1a2ec5f756a7f1
+scollect : forall e0 a b. ((Unit) -> a ! {e0}) -> List(b) ! {e0}
 ```
 
 Collect a stream into a list, in emission order.
 
 ### `concat_map`
 
-```prism,sig,h-8c655a99914bc9d943f88690e251dcaad961b8371e24a64322f9713cd22c9129
-concat_map : forall a b e0. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
+```prism,sig,h-475a38a499fe5b201a0ad252d2606eaa059d76d9b9e1b39e2888d4b4e9f9c878
+concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
 Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude (as well as `Data.List`) because optic-path desugaring synthesizes calls to it by bare name.
@@ -1324,24 +1403,24 @@ Build a hash map from `(key, value)` pairs (later pairs win).
 
 ### `hm_adjust`
 
-```prism,sig,h-17c1da6d2421fc7cba4451b0e87c023c012d48ed00b5365942094cb755f82b57
-hm_adjust : forall a e0. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0}
+```prism,sig,h-2ab8abce3c23afa802f9f67588b376db0b5fee64c0a9fa29cc4820ec6868eb40
+hm_adjust : forall e0 a. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0}
 ```
 
 Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
 
 ### `array_foldl_go`
 
-```prism,sig,h-2fe08571564c66a00018da9e582ac0229fe49c2f4a48154cc9cad9405703e5ba
-array_foldl_go : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b), Int) -> a ! {e0}
+```prism,sig,h-33b27ba8225890ec7937cb59b86188a6b69e6ea48e3e886da9fe5c1fe101c067
+array_foldl_go : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b), Int) -> a ! {e0}
 ```
 
 Helper for `array_foldl`.
 
 ### `array_foldl`
 
-```prism,sig,h-9fb1342fca7dd5f0c966510bc772540a9d30b619f1e5c8050c7e7f9ffbe86d21
-array_foldl : forall a b e0. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0}
+```prism,sig,h-9f224df5305d8401674e9bb951be9574a088f9eb9e78222086ee65ba8f119689
+array_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0}
 ```
 
 Left-fold `f` over the elements of an array from `acc`.
@@ -1430,7 +1509,7 @@ Stable merge of two already-sorted lists. The recursive `Cons` becomes a loop by
 
 ### `sort_by_ord`
 
-```prism,sig,h-9ac2ab09f35d0ef56d082f990e9ac952fcc2f6491c6600c1ee8a659790376b30
+```prism,sig,h-3d30ab528b13f69efe36b1f7b6a20cc8aac889f1495146565cc33f504de1573f
 sort_by_ord : forall a. (List(a)) -> List(a)
 ```
 

@@ -1,9 +1,8 @@
 -- A `var` block nested inside the handled region of a user effect handler:
 -- the var's closed parameter-passing handler is open w.r.t. tick, so its
 -- resume escapes into the state closure and lowering must go whole-program.
-effect Tick {
+effect Tick
   ctl tick(Unit) : Unit
-}
 
 fn body() : Int =
   var c := 0

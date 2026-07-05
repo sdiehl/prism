@@ -45,18 +45,17 @@ The outcome of `try_await`: a fiber that completed with a value, or one that was
 ### `Async`
 
 ```prism,def,h-44d80903615983accc74634b484b5925eec4f7a18af1266b9c19adddfa890971
-effect Async(a) {
-  ctl fork(() -> a ! {Async(a) | e}) : Fiber,
-  ctl poll_yield(Unit) : Signal,
-  ctl poll_await(Fiber) : Wake(a),
-  ctl cancel(Fiber) : Unit,
-  ctl channel(Unit) : Chan,
-  ctl bounded(Int) : Chan,
-  ctl poll_send(Chan, a) : Signal,
-  ctl poll_recv(Chan) : Wake(a),
-  ctl kill(Unit) : b,
+effect Async(a)
+  ctl fork(() -> a ! {Async(a) | e}) : Fiber
+  ctl poll_yield(Unit) : Signal
+  ctl poll_await(Fiber) : Wake(a)
+  ctl cancel(Fiber) : Unit
+  ctl channel(Unit) : Chan
+  ctl bounded(Int) : Chan
+  ctl poll_send(Chan, a) : Signal
+  ctl poll_recv(Chan) : Wake(a)
+  ctl kill(Unit) : b
   ctl vanished(Unit) : b
-}
 ```
 
 The async/await effect. `fork` spawns a fiber and returns its handle, `yield` reschedules, `await` blocks on a fiber's result, and `cancel` requests a cooperative cancellation; `channel`/`send`/`recv` are a buffered FIFO channel for fiber-to-fiber messages. Discharge it with `run_async`.
@@ -65,14 +64,15 @@ The public `yield`/`await`/`send`/`recv` are thin wrappers (below) over the raw 
 
 ### `Clock`
 
-```prism,def,h-2af60066d8cb3c49bb84281b423b28ee4e7fe306e256007160c2de09bedd67a2
-effect Clock {
-  ctl now(Unit) : Int,
+```prism,def,h-2dcc886599a310bc851dcdfc4c1cf94bca232fd0cf597a963f96391127df4e62
+effect Clock
+  ctl now(Unit) : Int
   ctl sleep(Int) : Unit
-}
+  ctl wall_now(Unit) : Int
+  ctl mono_now(Unit) : Int
 ```
 
-A logical-time capability: `now` reads the current tick and `sleep` advances it. Discharged by `run_clock`, which threads a pure counter, so time is virtual and deterministic: advance it in a test and behaviour is a function of it, with no real clock and no time primitive. A fiber may perform `Clock`; since the scheduler does not handle it, it flows out of `run_async` to an enclosing `run_clock` like any other capability.
+A logical-time capability: `now` reads the current tick and `sleep` advances it. Discharged by `run_clock`, which threads a pure counter, so time is virtual and deterministic: advance it in a test and behaviour is a function of it, with no real clock and no time primitive. A fiber may perform `Clock`; since the scheduler does not handle it, it flows out of `run_async` to an enclosing `run_clock` like any other capability. `now`/`sleep` are the logical scheduler clock (virtual ticks). `wall_now` and `mono_now` are the real-time reads (nanoseconds): the system wall clock (Unix epoch, UTC) and a monotonic counter. All four share the one `Clock` capability; which reading you get is a property of the installed handler, not the call. `run_clock` serves every op from the virtual counter (deterministic tests); `Time.run_clock_real` serves `wall_now`/`mono_now` from the recorded OS clock.
 
 ## Functions and Values
 
@@ -110,8 +110,8 @@ Receive a value from channel `c`, parking until one is available. A cancellation
 
 ### `on_cancel`
 
-```prism,sig,h-2af42fead640f6491f34cdd4e08523352d254f19a46bbd96663637264350490b
-on_cancel : forall a b e0. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
+```prism,sig,h-ca45ba048c8fb9a3c7e198134e0dfba26bd0f891feb3b94f77c184b33b83099a
+on_cancel : forall e0 a b. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
 ```
 
 Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once before the cancellation propagates outward. This is a forwarding handler: every `Async` operation `body` performs is relayed unchanged to the enclosing `run_async`, so the finalizer is transparent except on the cancel path. Nest these for stacked resources; each `cleanup` runs exactly once, innermost first.
@@ -126,40 +126,40 @@ Await fiber `f`, observing cancellation as a value instead of a signal: `Complet
 
 ### `run_async`
 
-```prism,sig,h-1762dfa9634dd6d7f28daf78bd658b8b69fe925e1d52a0ba89e858bce450e06c
-run_async : forall a e0. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
+```prism,sig,h-09f56184e912a949ddd1a60491635d0f4df12e924ee6a2ab35a4c3efae0f3394
+run_async : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
 Run `main` and its fibers cooperatively under the FIFO (round-robin) policy, returning `main`'s result. The fibers' effects `e` flow out unchanged, so the caller still handles them.
 
 ### `run_cooperative`
 
-```prism,sig,h-21909ee7197a6c445bc10443d0366634cec2cc7d42a8518fc6362c4eb5405bf5
-run_cooperative : forall a e0. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
+```prism,sig,h-3c211c7f4a99b6293290909722e4ead7dfbd59113ff9930e1509e3034fe2ac13
+run_cooperative : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
 The policy-neutral entry point: run `main` under the deployment's default cooperative scheduler. It is `run_async` (FIFO) by default, and the `--scheduler` flag (or `PRISM_SCHEDULER`) retargets it to another shipped policy such as `run_lifo` with no source change, because the scheduler is only a handler for `Async` and swapping it never touches the fibers. Call this when you want the configured default; call `run_async` or `run_lifo` directly to pin a policy.
 
 ### `run_lifo`
 
-```prism,sig,h-c01b65e6e63d047dd5bccad15ac955b64b71d89ae209c5468691e4815855e335
-run_lifo : forall a e0. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
+```prism,sig,h-b888c9c6467472f477e83c6971e20d1b9f514e963f724cee9d15f095470a2c9c
+run_lifo : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
 A second scheduling policy over the same `Async` effect: LIFO (depth-first), which runs the most-recently-forked or most-recently-woken fiber next by pushing it to the front of the run queue. It discharges `fork`/`yield`/`await`/channels exactly as `run_async` does and returns the same result for a determinate computation; only the interleaving (and so the order of observable effects like prints) differs. This is the concrete proof that policy is a handler: the fibers are unchanged, only the run function is swapped.
 
 ### `scope`
 
-```prism,sig,h-6b64525f46687e25891acfb99c1f004a9f27844da2a4ca6a634a436182c04111
-scope : forall a e0. (List(() -> a ! {Concurrent.Async(a), Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
+```prism,sig,h-de612853dbe70ab39c37bdfaadf6917cdc5b24fd220d78956c4b8e99567cd96f
+scope : forall e0 a. (List(() -> a ! {Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
 ```
 
 Structured nursery: run `tasks` concurrently and join them all, returning the results in order. Every task completes before `scope` returns, so no fiber escapes the call. The nursery is fail-fast: if one task fails (an unhandled `fail()`), its siblings are cancelled (their `on_cancel` finalizers run) and the failure is re-raised at the scope boundary.
 
 ### `run_clock`
 
-```prism,sig,h-3369cdeea31933085e58b7a049a17da5936cd1a4908a9d4881daae163e80f654
-run_clock : forall a e0. (() -> a ! {Concurrent.Clock, e0}) -> a ! {e0}
+```prism,sig,h-99878178f96584d69508eeb2120acdc936a5052ff1229c33a7e3db769f3d93a2
+run_clock : forall e0 a. (() -> a ! {Concurrent.Clock, e0}) -> a ! {e0}
 ```
 
 Run `action` against a logical clock starting at 0, returning its result. `now()` reads the current time; `sleep(d)` advances it by `d`. Time is a pure threaded counter (the parameter-passing answer `Int -> a`), so the run is deterministic and reproducible under `Replay`.

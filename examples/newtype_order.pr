@@ -8,14 +8,16 @@
 
 newtype Down = Down(Int) deriving (Show)
 
-instance eqDown : Eq(Down) {
-  fn eq(a, b) = match (a, b) of { (Down(x), Down(y)) => x == y }
-}
+instance eqDown : Eq(Down)
+  fn eq(a, b) =
+    match (a, b) of
+      (Down(x), Down(y)) => x == y
 
 -- Reverse the base ordering: a larger inner Int sorts first.
-instance ordDown : Ord(Down) {
-  fn cmp(a, b) = match (a, b) of { (Down(x), Down(y)) => int_cmp(y, x) }
-}
+instance ordDown : Ord(Down)
+  fn cmp(a, b) =
+    match (a, b) of
+      (Down(x), Down(y)) => int_cmp(y, x)
 
 fn main() : !{IO} Unit =
   let xs = [3, 1, 2]

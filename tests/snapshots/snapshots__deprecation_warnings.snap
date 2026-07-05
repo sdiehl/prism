@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: "msgs.join(\"\\n\")"
+---
+`i64_mul` is deprecated; use `*` instead
+`old_add` is deprecated: use `+` on Float
+`u64_add` is deprecated; use `+` instead
+the `*.` operator is deprecated; use `*` instead
+the `+.` operator is deprecated; use `+` instead

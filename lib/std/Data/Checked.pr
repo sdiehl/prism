@@ -1,0 +1,229 @@
+-- | Safe arithmetic families over the machine-integer lanes.
+--
+-- The raw operators (`+`/`-`/`*` on `I64`/`U64`, and integer `/`/`%`) keep their
+-- pinned defaults: fixed-width addition, subtraction, and multiplication wrap
+-- two's-complement, negating `I64` min wraps back to `I64` min, division
+-- truncates toward zero with the remainder taking the dividend's sign, and both
+-- fault on a zero divisor. This module layers the four Rust-style safe families
+-- on top of those defaults, through the one `Checked` class:
+--
+--   * `checked_*` return `Option`, `None` exactly on overflow or a zero divisor;
+--   * `saturating_*` clamp to the lane bound the overflow crossed;
+--   * `wrapping_*` name the wrap semantics the raw operators already have;
+--   * `overflowing_*` return the wrapped result paired with an overflow flag.
+--
+-- `Checked` sits beside the numeric tower (`Num`/`Div`), not above or below it:
+-- it takes no superclass and defines no raw arithmetic of its own. The anchoring
+-- law is that `wrapping_add`/`wrapping_sub`/`wrapping_mul`/`wrapping_neg` agree
+-- exactly with the fixed-width lane's raw `+`/`-`/`*` and unary `-`, so once the
+-- `Num` instances land they and these `wrapping_*` are the same function by
+-- construction. `wrapping_neg` on `U64` is wrapping two's-complement, matching
+-- the other `U64` operations (`wrapping_neg(0)` is `0`, `wrapping_neg(x)` is
+-- `U64_MAX - x + 1` otherwise).
+--
+-- Overflow is detected exactly: each fixed-width operand is widened to the
+-- unbounded `Int` lane (`int_of_i64`/`int_of_u64`), the operation runs there
+-- without loss, and the exact result is range-checked against the lane bounds
+-- before being narrowed back (`to_i64`/`to_u64`, which wrap to the low 64 bits).
+-- The three families that share an operation are all derived from that one exact
+-- `Int` result, so they agree by construction. The `Int` instance is the
+-- degenerate case: unbounded, so wrap and saturate are the identity, checked
+-- arithmetic is total except for a zero divisor, and overflow never fires.
+--
+-- Laws, tested on both backends over the lane boundaries:
+--
+--   * `checked_op(x, y) == Some(wrapping_op(x, y))` when no overflow occurred,
+--     and `None` otherwise;
+--   * `overflowing_op(x, y) == (wrapping_op(x, y), flag)` with `flag` true iff
+--     `checked_op(x, y)` is `None`;
+--   * `saturating_op(x, y)` equals the wrapped result when no overflow occurred,
+--     and otherwise the bound that was crossed (`I64` min/max, `0`, `U64` max).
+
+-- The lane bounds, as exact `Int` values. Written with `^` rather than as raw
+-- 20-digit literals so they read as the powers they are and cannot be mistyped.
+let bound_i64_max : Int = 2 ^ 63 - 1
+
+let bound_i64_min : Int = 0 - 2 ^ 63
+
+let bound_u64_max : Int = 2 ^ 64 - 1
+
+-- | Safe arithmetic over a fixed- or arbitrary-width integer lane. Every method
+-- is total: the `checked_*` family reports overflow as `None`, `saturating_*`
+-- clamps, `wrapping_*` wraps, and `overflowing_*` pairs the wrapped result with
+-- an overflow flag. See the module header for the laws relating the families.
+class Checked(a)
+  checked_add : (a, a) -> Option(a)
+  checked_sub : (a, a) -> Option(a)
+  checked_mul : (a, a) -> Option(a)
+  checked_neg : (a) -> Option(a)
+  checked_div : (a, a) -> Option(a)
+  checked_mod : (a, a) -> Option(a)
+  saturating_add : (a, a) -> a
+  saturating_sub : (a, a) -> a
+  saturating_mul : (a, a) -> a
+  wrapping_add : (a, a) -> a
+  wrapping_sub : (a, a) -> a
+  wrapping_mul : (a, a) -> a
+  wrapping_neg : (a) -> a
+  overflowing_add : (a, a) -> (a, Bool)
+  overflowing_sub : (a, a) -> (a, Bool)
+  overflowing_mul : (a, a) -> (a, Bool)
+
+-- The I64 lane. Every family for a given operation flows from the one exact
+-- `Int` result, so `checked`/`saturating`/`overflowing` agree by construction.
+
+let i64_max_val : I64 = to_i64(bound_i64_max)
+
+let i64_min_val : I64 = to_i64(bound_i64_min)
+
+let i64_neg_one : I64 = to_i64(0 - 1)
+
+-- | True when the exact `Int` result fits the `I64` lane.
+fn i64_in_range(exact : Int) : Bool =
+  exact <= bound_i64_max && exact >= bound_i64_min
+
+-- | Narrow an exact result to `I64`, or `None` when it overflows the lane.
+fn i64_check(exact : Int) : Option(I64) =
+  if i64_in_range(exact) then
+    Some(to_i64(exact))
+  else
+    None
+
+-- | Narrow an exact result to `I64`, clamping to the bound it crossed.
+fn i64_clamp(exact : Int) : I64 =
+  if exact > bound_i64_max then
+    i64_max_val
+  elif exact < bound_i64_min then
+    i64_min_val
+  else
+    to_i64(exact)
+
+-- | Wrap an exact result to `I64`, paired with its overflow flag.
+fn i64_pair(exact : Int) : (I64, Bool) =
+  (to_i64(exact), not(i64_in_range(exact)))
+
+-- | True when `I64` division `x / y` is defined (nonzero divisor, and not the
+-- `min / -1` case whose quotient overflows the lane).
+fn i64_div_ok(x : I64, y : I64) : Bool =
+  not(y == to_i64(0)) && not(x == i64_min_val && y == i64_neg_one)
+
+instance checkedI64 : Checked(I64)
+  fn checked_add(x, y) = i64_check(int_of_i64(x) + int_of_i64(y))
+  fn checked_sub(x, y) = i64_check(int_of_i64(x) - int_of_i64(y))
+  fn checked_mul(x, y) = i64_check(int_of_i64(x) * int_of_i64(y))
+  fn checked_neg(x) = i64_check(0 - int_of_i64(x))
+  fn checked_div(x, y) =
+    if i64_div_ok(x, y) then
+      Some(i64_div(x, y))
+    else
+      None
+  fn checked_mod(x, y) =
+    if i64_div_ok(x, y) then
+      Some(i64_rem(x, y))
+    else
+      None
+  fn saturating_add(x, y) = i64_clamp(int_of_i64(x) + int_of_i64(y))
+  fn saturating_sub(x, y) = i64_clamp(int_of_i64(x) - int_of_i64(y))
+  fn saturating_mul(x, y) = i64_clamp(int_of_i64(x) * int_of_i64(y))
+  fn wrapping_add(x, y) = i64_add(x, y)
+  fn wrapping_sub(x, y) = i64_sub(x, y)
+  fn wrapping_mul(x, y) = i64_mul(x, y)
+  fn wrapping_neg(x) = i64_sub(to_i64(0), x)
+  fn overflowing_add(x, y) = i64_pair(int_of_i64(x) + int_of_i64(y))
+  fn overflowing_sub(x, y) = i64_pair(int_of_i64(x) - int_of_i64(y))
+  fn overflowing_mul(x, y) = i64_pair(int_of_i64(x) * int_of_i64(y))
+
+-- The U64 lane. Unsigned, so the only negation without overflow is of zero, and
+-- the lower bound the subtraction can cross is `0`.
+
+let u64_max_val : U64 = to_u64(bound_u64_max)
+
+-- | True when the exact `Int` result fits the `U64` lane.
+fn u64_in_range(exact : Int) : Bool = exact <= bound_u64_max && exact >= 0
+
+-- | Narrow an exact result to `U64`, or `None` when it overflows the lane.
+fn u64_check(exact : Int) : Option(U64) =
+  if u64_in_range(exact) then
+    Some(to_u64(exact))
+  else
+    None
+
+-- | Narrow an exact result to `U64`, clamping to the bound it crossed.
+fn u64_clamp(exact : Int) : U64 =
+  if exact > bound_u64_max then
+    u64_max_val
+  elif exact < 0 then
+    to_u64(0)
+  else
+    to_u64(exact)
+
+-- | Wrap an exact result to `U64`, paired with its overflow flag.
+fn u64_pair(exact : Int) : (U64, Bool) =
+  (to_u64(exact), not(u64_in_range(exact)))
+
+instance checkedU64 : Checked(U64)
+  fn checked_add(x, y) = u64_check(int_of_u64(x) + int_of_u64(y))
+  fn checked_sub(x, y) = u64_check(int_of_u64(x) - int_of_u64(y))
+  fn checked_mul(x, y) = u64_check(int_of_u64(x) * int_of_u64(y))
+  fn checked_neg(x) =
+    if x == to_u64(0) then
+      Some(to_u64(0))
+    else
+      None
+  fn checked_div(x, y) =
+    if y == to_u64(0) then
+      None
+    else
+      Some(u64_div(x, y))
+  fn checked_mod(x, y) =
+    if y == to_u64(0) then
+      None
+    else
+      Some(u64_rem(x, y))
+  fn saturating_add(x, y) = u64_clamp(int_of_u64(x) + int_of_u64(y))
+  fn saturating_sub(x, y) = u64_clamp(int_of_u64(x) - int_of_u64(y))
+  fn saturating_mul(x, y) = u64_clamp(int_of_u64(x) * int_of_u64(y))
+  fn wrapping_add(x, y) = u64_add(x, y)
+  fn wrapping_sub(x, y) = u64_sub(x, y)
+  fn wrapping_mul(x, y) = u64_mul(x, y)
+  fn wrapping_neg(x) = u64_sub(to_u64(0), x)
+  fn overflowing_add(x, y) = u64_pair(int_of_u64(x) + int_of_u64(y))
+  fn overflowing_sub(x, y) = u64_pair(int_of_u64(x) - int_of_u64(y))
+  fn overflowing_mul(x, y) = u64_pair(int_of_u64(x) * int_of_u64(y))
+
+-- The Int lane is unbounded: wrap and saturate are the identity, checked
+-- arithmetic is total except division by zero, and overflow never fires.
+
+instance checkedInt : Checked(Int)
+  fn checked_add(x, y) = Some(x + y)
+  fn checked_sub(x, y) = Some(x - y)
+  fn checked_mul(x, y) = Some(x * y)
+  fn checked_neg(x) = Some(0 - x)
+  fn checked_div(x, y) =
+    if y == 0 then
+      None
+    else
+      Some(x / y)
+  fn checked_mod(x, y) =
+    if y == 0 then
+      None
+    else
+      Some(x % y)
+  fn saturating_add(x, y) = x + y
+  fn saturating_sub(x, y) = x - y
+  fn saturating_mul(x, y) = x * y
+  fn wrapping_add(x, y) = x + y
+  fn wrapping_sub(x, y) = x - y
+  fn wrapping_mul(x, y) = x * y
+  fn wrapping_neg(x) = 0 - x
+  fn overflowing_add(x, y) = (x + y, false)
+  fn overflowing_sub(x, y) = (x - y, false)
+  fn overflowing_mul(x, y) = (x * y, false)
+
+-- | Narrow an unbounded `Int` to `I64`, or `None` when it falls outside the
+-- `I64` range. The inverse widening is the builtin `int_of_i64`, which is total.
+pub fn int_to_i64(n : Int) : Option(I64) = i64_check(n)
+
+-- | Narrow an unbounded `Int` to `U64`, or `None` when it falls outside the
+-- `U64` range. The inverse widening is the builtin `int_of_u64`, which is total.
+pub fn int_to_u64(n : Int) : Option(U64) = u64_check(n)

@@ -14,7 +14,13 @@ import Incr (..)
 -- The derivation under test: a total and a descending ranking of names over a
 -- score map. Written once, run both incrementally and from scratch.
 fn edits() : List(List((String, Int))) =
-  [[("a", 1), ("b", 2), ("c", 3)], [("a", 5), ("b", 2), ("c", 3)], [("a", 5), ("b", 2), ("c", 3)], [("a", 5), ("b", 9), ("c", 3)], [("a", 5), ("b", 9), ("c", 0)]]
+  [
+      [("a", 1), ("b", 2), ("c", 3)],
+      [("a", 5), ("b", 2), ("c", 3)],
+      [("a", 5), ("b", 2), ("c", 3)],
+      [("a", 5), ("b", 9), ("c", 3)],
+      [("a", 5), ("b", 9), ("c", 0)],
+    ]
 
 fn ins_desc(p : (String, Int), xs : List((String, Int))) : List((String, Int)) =
   match xs of

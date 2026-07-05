@@ -11,29 +11,23 @@ fn open(b : Box(a)) : a =
   match b of
     Box(x) => x
 
-class FunctorB(f) {
+class FunctorB(f)
   fmap_ : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
-}
 
-class ApplicativeB(f) given FunctorB(f) {
+class ApplicativeB(f) given FunctorB(f)
   pure_ : (a) -> f(a)
-}
 
-class MonadB(f) given ApplicativeB(f) {
+class MonadB(f) given ApplicativeB(f)
   bind_ : (f(a), (a) -> f(b) ! {| e}) -> f(b) ! {| e}
-}
 
-instance functorBox : FunctorB(Box) {
+instance functorBox : FunctorB(Box)
   fn fmap_(g, b) = Box(g(open(b)))
-}
 
-instance applicativeBox : ApplicativeB(Box) {
+instance applicativeBox : ApplicativeB(Box)
   fn pure_(x) = Box(x)
-}
 
-instance monadBox : MonadB(Box) {
+instance monadBox : MonadB(Box)
   fn bind_(b, g) = g(open(b))
-}
 
 fn main() : !{IO} Unit =
   println(open(pure_(7)))  -- Applicative: lift a value in

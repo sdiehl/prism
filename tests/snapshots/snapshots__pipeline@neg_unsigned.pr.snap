@@ -1,0 +1,89 @@
+---
+source: tests/snapshots.rs
+assertion_line: 14
+expression: "prism::report(&src)"
+input_file: tests/cases/neg_unsigned.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq VOpen Let Ident("x") Eq Minus Int(IntLit { value: 5, suffix: U64 }) VSemi Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "x",
+                    Spanned {
+                        node: Neg(
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 5,
+                                        suffix: U64,
+                                    },
+                                ),
+                                span: 162..166,
+                            },
+                        ),
+                        span: 161..166,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 169..176,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 177..178,
+                                },
+                            ],
+                        ),
+                        span: 169..179,
+                    },
+                ),
+                span: 153..179,
+            },
+            wheres: [],
+            span: 126..179,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: cannot negate an unsigned `U64` value; unary minus is defined on `Int`, `I64`, and `Float`
+   ╭─[ <source>:4:11 ]
+   │
+ 4 │   let x = -5u64
+   │           ──┬──  
+   │             ╰──── in `main`: cannot negate an unsigned `U64` value; unary minus is defined on `Int`, `I64`, and `Float`
+───╯

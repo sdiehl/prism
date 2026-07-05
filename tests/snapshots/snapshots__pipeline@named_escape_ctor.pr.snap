@@ -1,0 +1,185 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/named_escape_ctor.pr
+---
+== tokens ==
+VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Colon LParen KwUnit Comma LParen KwUnit RParen Arrow KwInt RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi LParen LParen RParen Comma Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Ask",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ask",
+                    params: [],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 155..183,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "leak",
+            params: [],
+            ret: Some(
+                Tuple(
+                    [
+                        Unit,
+                        Fun(
+                            [
+                                Unit,
+                            ],
+                            Empty,
+                            Int,
+                        ),
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    NamedHandle(
+                        "f",
+                        Spanned {
+                            node: Tuple(
+                                [
+                                    Spanned {
+                                        node: Unit,
+                                        span: 281..283,
+                                    },
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "u",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "ask",
+                                                        ),
+                                                        span: 293..293,
+                                                        synth: true,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Var(
+                                                                "f",
+                                                            ),
+                                                            span: 293..294,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 293..300,
+                                            },
+                                        ),
+                                        span: 285..300,
+                                    },
+                                ],
+                            ),
+                            span: 280..301,
+                        },
+                        [
+                            Op(
+                                "ask",
+                                [],
+                                "k",
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "k",
+                                            ),
+                                            span: 255..256,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 5,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 257..258,
+                                            },
+                                        ],
+                                    ),
+                                    span: 255..259,
+                                },
+                            ),
+                            Return(
+                                "r",
+                                Spanned {
+                                    node: Var(
+                                        "r",
+                                    ),
+                                    span: 276..277,
+                                },
+                            ),
+                        ],
+                    ),
+                ),
+                span: 223..301,
+            },
+            wheres: [],
+            span: 185..301,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 315..322,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 323..324,
+                        },
+                    ],
+                ),
+                span: 315..325,
+            },
+            wheres: [],
+            span: 303..325,
+        },
+    ],
+}
+
+== types ==
+Type Error: handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
+    ╭─[ <source>:10:8 ]
+    │
+ 10 │   ((), \(u) -> f.ask())
+    │        ───────┬───────  
+    │               ╰───────── handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
+────╯

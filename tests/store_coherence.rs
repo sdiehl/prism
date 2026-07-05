@@ -59,8 +59,8 @@ fn cfg_at(root: PathBuf) -> Config {
 // with different bodies produce different instance identities.
 fn rank_program(body: &str) -> String {
     with_prelude(&format!(
-        "class Rank(a) {{ rankOf : (a) -> Int }}\n\
-         instance rankInt : Rank(Int) {{ fn rankOf(x) = {body} }}\n"
+        "class Rank(a)\n  rankOf : (a) -> Int\n\
+         instance rankInt : Rank(Int)\n  fn rankOf(x) = {body}\n"
     ))
 }
 
@@ -193,9 +193,12 @@ fn in_program_undesignated_overlap_is_a_hard_error() {
     // at definition (the file-world coherence rule the store lifts across
     // programs), rendered with a caret.
     let src = "\
-class Ord(a) { cmp : (a, a) -> Int }
-instance ordA : Ord(Int) { fn cmp(x, y) = 0 }
-instance ordB : Ord(Int) { fn cmp(x, y) = 1 }
+class Ord(a)
+  cmp : (a, a) -> Int
+instance ordA : Ord(Int)
+  fn cmp(x, y) = 0
+instance ordB : Ord(Int)
+  fn cmp(x, y) = 1
 fn main() = cmp(1, 2)
 ";
     let out = report(src);
@@ -215,9 +218,12 @@ fn explicit_dictionary_escape_hatch_still_typechecks() {
     // is reachable only through an explicit `using` override. This is the escape
     // hatch the store's coherence must not break.
     let src = "\
-class Ord(a) { cmp : (a, a) -> Int }
-instance ordA : Ord(Int) { fn cmp(x, y) = 0 }
-instance ordB : Ord(Int) { fn cmp(x, y) = 1 }
+class Ord(a)
+  cmp : (a, a) -> Int
+instance ordA : Ord(Int)
+  fn cmp(x, y) = 0
+instance ordB : Ord(Int)
+  fn cmp(x, y) = 1
 canonical Ord(Int) = ordA
 fn pick(x : a, y : a) : Int given Ord(a) = cmp(x, y)
 fn main() : Int = pick(1, 2, using ordB)

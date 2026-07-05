@@ -1,7 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::Write as _;
+use std::path::Path;
 use std::rc::Rc;
+use std::sync::OnceLock;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs, io, mem};
 
 use num_bigint::{BigInt, Sign};
@@ -9,12 +13,20 @@ use num_bigint::{BigInt, Sign};
 use crate::core::builtins::{Builtin, FloatOp};
 // Short aliases for the two builtin-op enums, used to keep their `match` arms
 // readable in `float_builtin`/`str_builtin`.
-use crate::core::{Comp, Core, CoreFn, CoreOp, CorePat, IoOp, Value};
+use crate::core::{Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
 use crate::names::ENTRY_POINT;
+use crate::store::bridge;
 use crate::sym::Sym;
 use crate::types::{CONS, NIL};
 use Builtin as B;
 use FloatOp as F;
+
+/// The `kont`-kind wire codec.
+///
+/// Serializes a live interpreter continuation (the frame stack, the lowered node
+/// graph, and the runtime values it holds) as a portable envelope, and reads one
+/// back.
+pub mod kont;
 
 /// One recorded observation on a program's execution: the result of a
 /// capability read (an integer, a string, or a boolean) or an output boundary.
@@ -57,6 +69,41 @@ enum ObsKind {
     Int,
     Str,
     Bool,
+    // A raw byte read (`read_bytes`). It has no valid-UTF-8 `Str` form, so it
+    // rides the trace as a `Str` frame carrying lowercase hex, which keeps the
+    // frame format (and the `Replay.pr` agreement) unchanged while still
+    // round-tripping arbitrary bytes.
+    Bytes,
+}
+
+// Lowercase hex, one frame's worth of bytes. Must stay byte-identical to
+// `Data.Bytes.hex_encode`/`hex_decode`, since a byte read recorded by the
+// interpreter and one recorded by `Replay.pr` are the same trace.
+fn hex_encode_bytes(v: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(v.len() * 2);
+    for &b in v {
+        s.push(DIGITS[(b >> 4) as usize] as char);
+        s.push(DIGITS[(b & 0xf) as usize] as char);
+    }
+    s
+}
+
+fn hex_decode_bytes(s: &str) -> Result<Vec<u8>, String> {
+    let b = s.as_bytes();
+    if !b.len().is_multiple_of(2) {
+        return Err(format!("replay: odd-length hex byte frame {s:?}"));
+    }
+    let nib = |c: u8| -> Result<u8, String> {
+        match c {
+            b'0'..=b'9' => Ok(c - b'0'),
+            b'a'..=b'f' => Ok(c - b'a' + 10),
+            _ => Err(format!("replay: non-hex byte frame {s:?}")),
+        }
+    };
+    (0..b.len() / 2)
+        .map(|i| Ok((nib(b[2 * i])? << 4) | nib(b[2 * i + 1])?))
+        .collect()
 }
 
 // Log a real read's result as the matching observation frame.
@@ -65,6 +112,7 @@ fn obs_of_rv(kind: ObsKind, v: &Rv) -> Result<Obs, String> {
         (ObsKind::Int, Rv::Int(n)) => Ok(Obs::Int(*n)),
         (ObsKind::Str, Rv::Str(s)) => Ok(Obs::Str(s.clone())),
         (ObsKind::Bool, Rv::Bool(b)) => Ok(Obs::Bool(*b)),
+        (ObsKind::Bytes, Rv::Buf(v)) => Ok(Obs::Str(hex_encode_bytes(v))),
         _ => Err(format!(
             "record: capability read produced {v:?}, not a {kind:?}"
         )),
@@ -78,6 +126,7 @@ fn rv_of_obs(kind: ObsKind, frame: &Obs) -> Result<Rv, String> {
         (ObsKind::Int, Obs::Int(n)) => Ok(Rv::Int(*n)),
         (ObsKind::Str, Obs::Str(s)) => Ok(Rv::Str(s.clone())),
         (ObsKind::Bool, Obs::Bool(b)) => Ok(Rv::Bool(*b)),
+        (ObsKind::Bytes, Obs::Str(s)) => Ok(Rv::Buf(Rc::new(hex_decode_bytes(s)?))),
         _ => Err(format!(
             "replay: trace does not match program (expected a {kind:?})"
         )),
@@ -89,8 +138,9 @@ fn rv_of_obs(kind: ObsKind, frame: &Obs) -> Result<Rv, String> {
 const fn capability_kind(b: Builtin) -> Option<ObsKind> {
     match b {
         Builtin::ReadFile | Builtin::Getenv | Builtin::Arg => Some(ObsKind::Str),
+        Builtin::ReadBytesFile => Some(ObsKind::Bytes),
         Builtin::FileExists => Some(ObsKind::Bool),
-        Builtin::ArgsCount => Some(ObsKind::Int),
+        Builtin::ArgsCount | Builtin::WallNow | Builtin::MonoNow => Some(ObsKind::Int),
         _ => None,
     }
 }
@@ -118,6 +168,11 @@ pub enum Rv {
     Data(Sym, Fields),
     Tuple(Fields),
     Array(Fields),
+    // An unboxed byte buffer, the storage under `Bytes`. Held as raw bytes (not
+    // boxed `Rv`s) so it threads byte-for-byte identically to the native buffer
+    // cell; shared via `Rc` for O(1) clone, copied on write for value semantics,
+    // mirroring the runtime's rc==1 in-place / shared-copy discipline.
+    Buf(Rc<Vec<u8>>),
     Resume(Rc<[Frame]>),
 }
 
@@ -184,6 +239,7 @@ pub enum Node {
     Error(Atom),
     Case(Atom, Vec<(CorePat, Cmp)>),
     FloatBuiltin(FloatOp, Atom),
+    Neg(NegLane, Atom),
     Do(Sym, Vec<Atom>),
     Handle(Rc<HandleInfo>),
     Mask(Rc<[Sym]>, Cmp),
@@ -231,6 +287,14 @@ enum State {
     Ret(Rv),
 }
 
+// How a run of the machine loop ended: with a final value, or paused at a step
+// budget with its whole pending state (the frame stack and the next transition)
+// still live, ready to be snapshotted into a `kont` envelope or resumed in place.
+enum Outcome {
+    Done(Rv),
+    Suspended { stack: Vec<Frame>, state: State },
+}
+
 fn lower(c: &Comp) -> Cmp {
     let mut binds = Vec::new();
     let mut cur = c;
@@ -269,6 +333,7 @@ fn node(c: &Comp) -> Node {
             arms.iter().map(|(p, b)| (p.clone(), lower(b))).collect(),
         ),
         Comp::FloatBuiltin(n, v) => Node::FloatBuiltin(*n, atom_of(v)),
+        Comp::Neg(l, v) => Node::Neg(*l, atom_of(v)),
         Comp::Do(op, args) => Node::Do(*op, args.iter().map(atom_of).collect()),
         Comp::Handle {
             body,
@@ -339,6 +404,7 @@ impl Rv {
             Self::Data(..) => "Data",
             Self::Tuple(_) => "Tuple",
             Self::Array(_) => "Array",
+            Self::Buf(_) => "Buf",
             Self::Resume(_) => "Resume",
         }
     }
@@ -393,6 +459,17 @@ impl Rv {
                 let es: Vec<_> = es.iter().map(Self::show).collect();
                 format!("[|{}|]", es.join(", "))
             }
+            // A raw buffer has no surface literal; render its bytes as lowercase
+            // hex for debugging. Normal programs print a `Bytes` through its
+            // stdlib `Show`, never a bare buffer through this path.
+            Self::Buf(bytes) => {
+                let mut s = String::from("buf\"");
+                for b in bytes.iter() {
+                    let _ = write!(s, "{b:02x}");
+                }
+                s.push('"');
+                s
+            }
         }
     }
 
@@ -435,6 +512,12 @@ pub struct Machine<'a> {
     // stack without special-casing every frame.
     observed: usize,
     halted: bool,
+    // Suspension: `step_budget` pauses the loop after that many machine steps (a
+    // whole-program checkpoint), `steps` counts them. `None` is the ordinary
+    // unbounded run. Steps are pure state transitions, so a given budget stops the
+    // machine at a deterministic point, the basis of the `kont` snapshot.
+    step_budget: Option<usize>,
+    steps: usize,
 }
 
 // The borrowed `dyn Write`/`dyn BufRead` handles are not `Debug`; show only the
@@ -503,6 +586,8 @@ impl<'a> Machine<'a> {
             tape: Tape::Live,
             observed: 0,
             halted: false,
+            step_budget: None,
+            steps: 0,
         }
     }
 
@@ -609,21 +694,41 @@ impl<'a> Machine<'a> {
     }
 
     fn exec(&mut self, root: Cmp, env: Env) -> Result<Rv, String> {
-        let mut stack: Vec<Frame> = Vec::new();
-        let mut state = State::Eval(root, env);
+        match self.run_loop(Vec::new(), State::Eval(root, env))? {
+            Outcome::Done(v) => Ok(v),
+            // A bare `exec` never sets a step budget, so it cannot suspend; the
+            // suspend/resume drivers use `run_loop` directly.
+            Outcome::Suspended { .. } => Err("evaluation suspended without a resume driver".into()),
+        }
+    }
+
+    // The machine loop, started from an arbitrary pending state so a resumed
+    // continuation picks up exactly where a suspend left off. It ends either with a
+    // final value or, if a step budget is set and reached, paused with its whole
+    // live state handed back for snapshotting.
+    fn run_loop(&mut self, mut stack: Vec<Frame>, mut state: State) -> Result<Outcome, String> {
         loop {
             // `exit` short-circuits the whole program: stop unwinding and hand
             // the last value back so the host can act on `self.exit`. A replay
             // budget halt unwinds the same way (replay-to-N stops here).
             if self.exit.is_some() || self.halted {
                 if let State::Ret(v) = state {
-                    return Ok(v);
+                    return Ok(Outcome::Done(v));
                 }
             }
+            // A step budget pauses the machine with its state intact. Checked before
+            // the transition so the resumed run re-performs exactly the step the
+            // suspend stopped short of, never skipping or repeating one.
+            if let Some(budget) = self.step_budget {
+                if self.steps >= budget {
+                    return Ok(Outcome::Suspended { stack, state });
+                }
+            }
+            self.steps += 1;
             state = match state {
                 State::Eval(c, env) => self.step(&mut stack, &c, env)?,
                 State::Ret(v) => match stack.pop() {
-                    None => return Ok(v),
+                    None => return Ok(Outcome::Done(v)),
                     Some(frame) => self.cont(&mut stack, frame, v)?,
                 },
             };
@@ -765,6 +870,7 @@ impl<'a> Machine<'a> {
                 return Err(format!("no matching pattern in `{}`", self.fn_name));
             }
             Node::FloatBuiltin(name, a) => State::Ret(float_builtin(*name, atom(&env, a)?)?),
+            Node::Neg(lane, a) => State::Ret(neg_rv(*lane, &atom(&env, a)?)?),
             Node::StrBuiltin(name, args) => {
                 let vals = atoms(&env, args)?;
                 // `exit(n)` is a host action, not a value: record the code and
@@ -977,20 +1083,151 @@ fn atoms(env: &Env, args: &[Atom]) -> Result<Vec<Rv>, String> {
 
 // Truncating/widening conversions are the language semantics of these builtins.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn float_builtin(op: FloatOp, rv: Rv) -> Result<Rv, String> {
-    match (op, rv) {
-        (F::ToFloat, Rv::Int(n)) => Ok(Rv::Float(n as f64)),
-        (F::Truncate, Rv::Float(f)) => Ok(Rv::Int(f as i64)),
-        (F::FloorToInt, Rv::Float(f)) => Ok(Rv::Int(f.floor() as i64)),
-        (F::CeilToInt, Rv::Float(f)) => Ok(Rv::Int(f.ceil() as i64)),
-        (F::AbsFloat, Rv::Float(f)) => Ok(Rv::Float(f.abs())),
-        (F::Sqrt, Rv::Float(f)) => Ok(Rv::Float(f.sqrt())),
-        (F::Sin, Rv::Float(f)) => Ok(Rv::Float(f.sin())),
-        (F::Cos, Rv::Float(f)) => Ok(Rv::Float(f.cos())),
-        (F::Exp, Rv::Float(f)) => Ok(Rv::Float(f.exp())),
-        (F::Ln, Rv::Float(f)) => Ok(Rv::Float(f.ln())),
-        (o, _) => Err(format!("float builtin {}: wrong argument type", o.name())),
+// Genuine unary negation per lane. Int reuses the exact `0 - x` subtract path
+// (immediate/bignum promotion included) so the result is identical to the old
+// lowering; I64 is the wrapping fixed-width subtract from zero; Float is a real
+// sign-bit flip (`-f`, not `-0.0 - f`) so it preserves signed zero and matches
+// the native `fneg` bit for bit.
+fn neg_rv(lane: NegLane, v: &Rv) -> Result<Rv, String> {
+    match lane {
+        NegLane::Int => prim(CoreOp::Sub, &Rv::Int(0), v),
+        NegLane::I64 => fixed2(&Rv::I64(0), v, u64::wrapping_sub),
+        NegLane::Float => match v {
+            Rv::Float(f) => Ok(Rv::Float(-f)),
+            _ => Err("negation on non-float value".into()),
+        },
     }
+}
+
+// The owned math surface for the interpreter. On native it FFIs the vendored
+// `prism_m_*` C symbols (linked into this binary), the identical implementation
+// native codegen calls, so interpreter and native agree bit for bit. On wasm,
+// where there is no C to link, it falls back to the pure-Rust `libm` crate, a
+// documented ~1 ULP browser-only divergence from native (there is no native
+// backend in the browser to diverge from).
+// `pub` (doc-hidden) so the conformance gate (`tests/float_math_conformance.rs`)
+// can diff this interpreter path against the native runtime bit for bit.
+#[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
+pub mod owned_math {
+    // SAFETY (whole module): every `prism_m_*` is a pure `extern "C"` function
+    // taking and returning plain `f64`, defined in runtime/prism_libm.c and linked
+    // into this binary. The calls touch no memory and cannot fault, so each is
+    // sound. This is the crate's one audited FFI (see Cargo.toml `unsafe_code`).
+    #![allow(unsafe_code)]
+    extern "C" {
+        fn prism_m_sin(x: f64) -> f64;
+        fn prism_m_cos(x: f64) -> f64;
+        fn prism_m_tan(x: f64) -> f64;
+        fn prism_m_asin(x: f64) -> f64;
+        fn prism_m_acos(x: f64) -> f64;
+        fn prism_m_atan(x: f64) -> f64;
+        fn prism_m_sinh(x: f64) -> f64;
+        fn prism_m_cosh(x: f64) -> f64;
+        fn prism_m_tanh(x: f64) -> f64;
+        fn prism_m_exp(x: f64) -> f64;
+        fn prism_m_exp2(x: f64) -> f64;
+        fn prism_m_expm1(x: f64) -> f64;
+        fn prism_m_log(x: f64) -> f64;
+        fn prism_m_log2(x: f64) -> f64;
+        fn prism_m_log10(x: f64) -> f64;
+        fn prism_m_log1p(x: f64) -> f64;
+        fn prism_m_cbrt(x: f64) -> f64;
+        fn prism_m_pow(x: f64, y: f64) -> f64;
+        fn prism_m_atan2(y: f64, x: f64) -> f64;
+        fn prism_m_hypot(x: f64, y: f64) -> f64;
+        fn prism_m_fmod(x: f64, y: f64) -> f64;
+    }
+    macro_rules! unary {
+        ($($name:ident => $ffi:ident),* $(,)?) => {
+            $(#[must_use] pub fn $name(x: f64) -> f64 { unsafe { $ffi(x) } })*
+        };
+    }
+    macro_rules! binary {
+        ($($name:ident => $ffi:ident),* $(,)?) => {
+            $(#[must_use] pub fn $name(x: f64, y: f64) -> f64 { unsafe { $ffi(x, y) } })*
+        };
+    }
+    unary! {
+        sin => prism_m_sin, cos => prism_m_cos, tan => prism_m_tan,
+        asin => prism_m_asin, acos => prism_m_acos, atan => prism_m_atan,
+        sinh => prism_m_sinh, cosh => prism_m_cosh, tanh => prism_m_tanh,
+        exp => prism_m_exp, exp2 => prism_m_exp2, expm1 => prism_m_expm1,
+        log => prism_m_log, log2 => prism_m_log2, log10 => prism_m_log10,
+        log1p => prism_m_log1p, cbrt => prism_m_cbrt,
+    }
+    binary! {
+        pow => prism_m_pow, atan2 => prism_m_atan2,
+        hypot => prism_m_hypot, fmod => prism_m_fmod,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod owned_math {
+    pub(super) use libm::{
+        acos, asin, atan, atan2, cbrt, cos, cosh, exp, exp2, expm1, fmod, hypot, log, log10, log1p,
+        log2, pow, sin, sinh, tan, tanh,
+    };
+}
+
+// The int/float conversion casts are the conversion semantics, not accidents:
+// `Int -> Float` rounds to nearest (the IEEE double nearest to the integer),
+// and the float-to-int forms truncate/floor/ceil saturate into the i64 lane,
+// mirroring the native `llvm.fptosi.sat` lowering and pinned by the parity
+// corpus and the conformance gate.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn float_builtin(op: FloatOp, rv: Rv) -> Result<Rv, String> {
+    let Rv::Float(f) = rv else {
+        // The one non-float input is the int->float conversion.
+        return match (op, rv) {
+            (F::ToFloat, Rv::Int(n)) => Ok(Rv::Float(n as f64)),
+            (o, _) => Err(format!("float builtin {}: wrong argument type", o.name())),
+        };
+    };
+    Ok(match op {
+        // int<->float conversions. `f as i64` truncates toward zero and saturates
+        // (NaN -> 0), the pinned rounding; native codegen matches it with
+        // `llvm.fptosi.sat`, so the two backends agree on out-of-range inputs.
+        F::Truncate => Rv::Int(f as i64),
+        F::FloorToInt => Rv::Int(owned_floor(f) as i64),
+        F::CeilToInt => Rv::Int(owned_ceil(f) as i64),
+        // Exact float->float: correctly rounded / exact on every IEEE-754
+        // platform, so Rust std matches the hardware intrinsic codegen emits.
+        F::AbsFloat => Rv::Float(f.abs()),
+        F::Sqrt => Rv::Float(f.sqrt()),
+        F::Floor => Rv::Float(owned_floor(f)),
+        F::Ceil => Rv::Float(owned_ceil(f)),
+        F::Round => Rv::Float(f.round()),
+        F::Trunc => Rv::Float(f.trunc()),
+        // Transcendentals: the owned vendored libm, identical to native.
+        F::Sin => Rv::Float(owned_math::sin(f)),
+        F::Cos => Rv::Float(owned_math::cos(f)),
+        F::Tan => Rv::Float(owned_math::tan(f)),
+        F::Asin => Rv::Float(owned_math::asin(f)),
+        F::Acos => Rv::Float(owned_math::acos(f)),
+        F::Atan => Rv::Float(owned_math::atan(f)),
+        F::Sinh => Rv::Float(owned_math::sinh(f)),
+        F::Cosh => Rv::Float(owned_math::cosh(f)),
+        F::Tanh => Rv::Float(owned_math::tanh(f)),
+        F::Exp => Rv::Float(owned_math::exp(f)),
+        F::Exp2 => Rv::Float(owned_math::exp2(f)),
+        F::Expm1 => Rv::Float(owned_math::expm1(f)),
+        F::Ln => Rv::Float(owned_math::log(f)),
+        F::Log2 => Rv::Float(owned_math::log2(f)),
+        F::Log10 => Rv::Float(owned_math::log10(f)),
+        F::Log1p => Rv::Float(owned_math::log1p(f)),
+        F::Cbrt => Rv::Float(owned_math::cbrt(f)),
+        F::ToFloat => return Err(format!("float builtin {}: wrong argument type", op.name())),
+    })
+}
+
+// `floor`/`ceil` are exact and share their result with the codegen intrinsic;
+// factored out so the float->float and float->int forms cannot drift.
+const fn owned_floor(f: f64) -> f64 {
+    f.floor()
+}
+const fn owned_ceil(f: f64) -> f64 {
+    f.ceil()
 }
 
 fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
@@ -1014,7 +1251,10 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             s.truncate(RT_FLOAT_PREC_MAX_CHARS);
             Ok(Rv::Str(s))
         }
-        (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(a.powf(*b))),
+        (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::pow(*a, *b))),
+        (B::Atan2, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::atan2(*a, *b))),
+        (B::Hypot, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::hypot(*a, *b))),
+        (B::Fmod, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::fmod(*a, *b))),
         // Strict full-consume parse: trailing garbage and hex yield 0.0, matching
         // `prism_parse_float` in the runtime (see its note on the strtod divergence).
         (B::ParseFloat, [Rv::Str(s)]) => Ok(Rv::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
@@ -1049,6 +1289,13 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             Ok(s) => Ok(Rv::Str(s)),
             Err(e) => Err(format!("read_file: {e}: {p}")),
         },
+        // Raw bytes, no UTF-8 constraint: a byte buffer holds an arbitrary file
+        // faithfully where `Rv::Str` (a Rust `String`) could not.
+        (B::ReadBytesFile, [Rv::Str(p)]) => match fs::read(p) {
+            Ok(v) => Ok(Rv::Buf(Rc::new(v))),
+            Err(e) => Err(format!("read_bytes: {e}: {p}")),
+        },
+        (B::WriteBytesFile, [Rv::Str(p), Rv::Buf(v)]) => Ok(file_result(fs::write(p, &v[..]))),
         (B::WriteFile, [Rv::Str(p), Rv::Str(c)]) => Ok(file_result(fs::write(p, c))),
         (B::FileExists, [Rv::Str(p)]) => Ok(Rv::Bool(std::path::Path::new(p).exists())),
         (B::AppendFile, [Rv::Str(p), Rv::Str(c)]) => {
@@ -1062,6 +1309,23 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         (B::RemoveFile, [Rv::Str(p)]) => {
             let _ = fs::remove_file(p);
             Ok(Rv::Unit)
+        }
+        // The content-addressed store bridge. Reads are best-effort cache reads:
+        // a missing, dangling, or corrupt blob returns empty/false so the caller
+        // cold-starts, exactly as a missing snapshot file does. A write failure is
+        // swallowed too, since the store is only a cache.
+        (B::StoreGet, [Rv::Str(root), Rv::Str(key)]) => Ok(Rv::Str(
+            bridge::get(Path::new(root), key)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        )),
+        (B::StorePut, [Rv::Str(root), Rv::Str(key), Rv::Str(content)]) => {
+            let _ = bridge::put(Path::new(root), key, content);
+            Ok(Rv::Unit)
+        }
+        (B::StoreHas, [Rv::Str(root), Rv::Str(key)]) => {
+            Ok(Rv::Bool(bridge::has(Path::new(root), key)))
         }
         // `exit` is intercepted in `step` (it sets the machine's exit status
         // and unwinds), so it never reaches the value-returning builtin path.
@@ -1083,6 +1347,22 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             Ok(Rv::Unit)
         }
         (B::ArgsCount, []) => Ok(Rv::Int(i64::try_from(env::args().count()).unwrap_or(0))),
+        // Clock reads, in nanoseconds, matching the C runtime. Both are recorded
+        // capability observations (see `capability_kind`), so the live value here
+        // is only read on the first (recording) run; replay serves the trace. The
+        // monotonic origin is this process's first read, so only differences are
+        // meaningful, exactly as the native `CLOCK_MONOTONIC` origin is arbitrary.
+        (B::WallNow, []) => {
+            let ns = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            Ok(Rv::Int(i64::try_from(ns).unwrap_or(i64::MAX)))
+        }
+        (B::MonoNow, []) => {
+            static MONO_BASE: OnceLock<Instant> = OnceLock::new();
+            let ns = MONO_BASE.get_or_init(Instant::now).elapsed().as_nanos();
+            Ok(Rv::Int(i64::try_from(ns).unwrap_or(i64::MAX)))
+        }
         (B::Arg, [Rv::Int(i)]) => Ok(Rv::Str(
             usize::try_from(*i)
                 .ok()
@@ -1163,6 +1443,62 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             next[k] = x.clone();
             Ok(Rv::Array(next.into()))
         }
+        // The unboxed byte buffer under `Bytes`. Bytes are masked into 0..255 on
+        // the way in and every op is value-semantic (copy on write), mirroring the
+        // C runtime's rc==1 in-place / shared-copy discipline bit-for-bit.
+        (B::BufEmpty, []) => Ok(Rv::Buf(Rc::new(Vec::new()))),
+        (B::BufNew, [Rv::Int(n), Rv::Int(init)]) => {
+            let k = usize::try_from(*n).map_err(|_| "buf_new: negative length".to_string())?;
+            #[expect(clippy::cast_sign_loss)]
+            let byte = (*init & 0xFF) as u8;
+            Ok(Rv::Buf(Rc::new(vec![byte; k])))
+        }
+        (B::BufLen, [Rv::Buf(v)]) => Ok(Rv::Int(i64::try_from(v.len()).unwrap_or(0))),
+        (B::BufGet, [Rv::Buf(v), Rv::Int(i)]) => usize::try_from(*i)
+            .ok()
+            .and_then(|k| v.get(k))
+            .map(|b| Rv::Int(i64::from(*b)))
+            .ok_or_else(|| "buffer index out of bounds".to_string()),
+        (B::BufSet, [Rv::Buf(v), Rv::Int(i), Rv::Int(x)]) => {
+            let k = usize::try_from(*i).map_err(|_| "buffer index out of bounds".to_string())?;
+            if k >= v.len() {
+                return Err("buffer index out of bounds".to_string());
+            }
+            let mut next = v.to_vec();
+            #[expect(clippy::cast_sign_loss)]
+            {
+                next[k] = (*x & 0xFF) as u8;
+            }
+            Ok(Rv::Buf(Rc::new(next)))
+        }
+        (B::BufPush, [Rv::Buf(v), Rv::Int(x)]) => {
+            let mut next = v.to_vec();
+            #[expect(clippy::cast_sign_loss)]
+            next.push((*x & 0xFF) as u8);
+            Ok(Rv::Buf(Rc::new(next)))
+        }
+        (B::BufSlice, [Rv::Buf(v), Rv::Int(start), Rv::Int(len)]) => {
+            let n = v.len();
+            let s = usize::try_from(*start).unwrap_or(0).min(n);
+            let take = usize::try_from(*len).unwrap_or(0);
+            let e = s.saturating_add(take).min(n);
+            Ok(Rv::Buf(Rc::new(v[s..e].to_vec())))
+        }
+        (B::BufCat, [Rv::Buf(a), Rv::Buf(b)]) => {
+            let mut next = a.to_vec();
+            next.extend_from_slice(b);
+            Ok(Rv::Buf(Rc::new(next)))
+        }
+        (B::BufEq, [Rv::Buf(a), Rv::Buf(b)]) => Ok(Rv::Bool(a == b)),
+        (B::BufCmp, [Rv::Buf(a), Rv::Buf(b)]) => Ok(ord(a.as_slice().cmp(b.as_slice()))),
+        // blake3 of the raw bytes, byte-identical to a string's `blake3` over the
+        // same bytes and to the native `prism_buf_hash`.
+        (B::BufHash, [Rv::Buf(v)]) => Ok(Rv::Str(blake3::hash(v).to_hex().to_string())),
+        (B::BufOfString, [Rv::Str(s)]) => Ok(Rv::Buf(Rc::new(s.as_bytes().to_vec()))),
+        // The total lossy decode (the boundary wrapper validates first, so on
+        // valid input this is lossless); matches `prism_string_of_buf`.
+        (B::StringOfBuf, [Rv::Buf(v)]) => Ok(Rv::Str(String::from_utf8_lossy(v).into_owned())),
+        (B::BufUtf8Valid, [Rv::Buf(v)]) => Ok(Rv::Bool(std::str::from_utf8(v).is_ok())),
         (B::I64And | B::U64And, [a, b]) => fixed2(a, b, |x, y| x & y),
         (B::I64Or | B::U64Or, [a, b]) => fixed2(a, b, |x, y| x | y),
         (B::I64Xor | B::U64Xor, [a, b]) => fixed2(a, b, |x, y| x ^ y),
@@ -1553,8 +1889,137 @@ pub fn run_traced(
     })
 }
 
+/// The result of a suspendable run: either the program ran to completion, or it
+/// paused at the step budget with its whole state captured as a [`kont::Kont`].
+#[derive(Debug)]
+pub enum Checkpoint {
+    /// The program finished before the budget; there was nothing to suspend.
+    Done(Run),
+    /// The program paused; the continuation is the whole suspended machine. The
+    /// prefix output has already streamed to the caller's sink.
+    Suspended(kont::Kont),
+}
+
+// Snapshot the machine's scalar registers and the loop's live state into a
+// `Kont`. The prefix trace rides along when the run was recording, so the snapshot
+// is a complete replayable record (a whole suspended program), not only a
+// continuation; a live run carries no trace.
+fn snapshot(m: Machine<'_>, bundle: String, stack: Vec<Frame>, state: State) -> kont::Kont {
+    let state = match state {
+        State::Eval(c, env) => kont::KontState::Eval(c, env),
+        State::Ret(v) => kont::KontState::Ret(v),
+    };
+    let trace = match m.tape {
+        Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
+        Tape::Live => Vec::new(),
+    };
+    kont::Kont {
+        bundle,
+        stack,
+        state,
+        rng: m.rng,
+        fn_name: m.fn_name,
+        observed: m.observed,
+        exit: m.exit,
+        trace,
+    }
+}
+
+/// Run `core`, pausing after `budget` machine steps.
+///
+/// The whole live continuation is captured as a [`kont::Kont`] tagged with
+/// `bundle` (the program's code-identity digest, checked when it is later resumed).
+/// Output streams to `out_sink` up to the pause exactly as an ordinary run would;
+/// a `budget` past the program's length simply runs to completion ([`Checkpoint::Done`]).
+///
+/// # Errors
+/// Fails when `main` is missing or evaluation faults before the budget.
+pub fn run_suspending(
+    core: &Core,
+    bundle: String,
+    budget: usize,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+) -> Result<Checkpoint, String> {
+    run_suspending_in(&globals(core), bundle, budget, out_sink, input)
+}
+
+/// Like [`run_suspending`] but over an already-built global table.
+///
+/// Building the table deep-clones every function body, so a caller that runs the
+/// same program under many budgets (mapping line boundaries) builds it once and
+/// reuses it here rather than paying that clone per budget.
+///
+/// # Errors
+/// Fails when `main` is missing or evaluation faults before the budget.
+pub fn run_suspending_in(
+    g: &BTreeMap<Sym, CoreFn>,
+    bundle: String,
+    budget: usize,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+) -> Result<Checkpoint, String> {
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let root = lower(&main.body);
+    let mut m = Machine::new(g, out_sink, input);
+    m.step_budget = Some(budget);
+    match m.run_loop(Vec::new(), State::Eval(root, Env::default()))? {
+        Outcome::Done(value) => Ok(Checkpoint::Done(Run {
+            value,
+            out: m.out,
+            term: m.term,
+            exit: m.exit,
+        })),
+        Outcome::Suspended { stack, state } => {
+            Ok(Checkpoint::Suspended(snapshot(m, bundle, stack, state)))
+        }
+    }
+}
+
+/// Resume a decoded [`kont::Kont`] against `core` and run it to completion.
+///
+/// The caller must have verified `kont.bundle` matches `core`'s code identity
+/// before calling: resume trusts that the continuation's by-name code references
+/// resolve in this program's function table. Output streams to `out_sink` from the
+/// resume point on, so a suspend-run's prefix output followed by this suffix output
+/// reproduces an uninterrupted run byte for byte.
+///
+/// # Errors
+/// Fails if evaluation faults after the resume point.
+pub fn resume_kont(
+    core: &Core,
+    kont: kont::Kont,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+) -> Result<Run, String> {
+    let g = globals(core);
+    let mut m = Machine::new(&g, out_sink, input);
+    // Restore the registers the loop threads across the cut so the resumed run
+    // continues the same random stream and observation count.
+    m.rng = kont.rng;
+    m.fn_name = kont.fn_name;
+    m.observed = kont.observed;
+    m.exit = kont.exit;
+    let state = match kont.state {
+        kont::KontState::Eval(c, env) => State::Eval(c, env),
+        kont::KontState::Ret(v) => State::Ret(v),
+    };
+    match m.run_loop(kont.stack, state)? {
+        Outcome::Done(value) => Ok(Run {
+            value,
+            out: m.out,
+            term: m.term,
+            exit: m.exit,
+        }),
+        // No step budget is set on a resume, so the loop cannot pause again.
+        Outcome::Suspended { .. } => Err("resumed continuation paused unexpectedly".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use num_bigint::BigInt;
 
     use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED, SPLITMIX_GAMMA};
@@ -1629,10 +2094,14 @@ mod tests {
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         );
-        let dir = std::env::temp_dir();
+        let dir = std::env::temp_dir().join(&stem);
+        std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join(format!("{stem}.c"));
         let bin = dir.join(&stem);
-        let rt = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/prism_rt.c");
+        // Materialize the split runtime modules from the one canonical list and
+        // compile all of them, so this oracle links the same sources the native
+        // backend does.
+        let rt_sources = crate::codegen::rt::write_runtime(&dir).unwrap();
         // The runtime owns `main` and calls `prism_main`; the harness supplies it
         // and returns a tagged immediate 0 (exit code 0).
         std::fs::write(
@@ -1651,20 +2120,18 @@ mod tests {
         let comp = Command::new(&cc)
             .args(["-O0", "-w"])
             .arg(&src)
-            .arg(&rt)
-            .arg("-lm")
+            .args(&rt_sources)
             .arg("-o")
             .arg(&bin)
             .output()
             .unwrap();
-        let _ = std::fs::remove_file(&src);
         assert!(
             comp.status.success(),
             "runtime oracle failed to compile:\n{}",
             String::from_utf8_lossy(&comp.stderr)
         );
         let run = Command::new(&bin).output().unwrap();
-        let _ = std::fs::remove_file(&bin);
+        let _ = std::fs::remove_dir_all(&dir);
         assert!(
             run.status.success(),
             "runtime oracle crashed: {:?}",
@@ -1685,7 +2152,6 @@ mod tests {
     // run `prism_show_float` as the oracle.
     #[test]
     fn prism_show_float_matches_fmt_g() {
-        use std::fmt::Write;
         let vals: &[f64] = &[
             0.0,
             -0.0,
@@ -1805,7 +2271,6 @@ mod tests {
             .collect();
         let mut body = String::new();
         for s in &inputs {
-            use std::fmt::Write;
             let _ = writeln!(
                 body,
                 "{{ const char *t = \"{esc}\"; long c = prism_str_lit(t, (long)strlen(t)); \

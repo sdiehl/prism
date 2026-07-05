@@ -72,6 +72,11 @@ pub fn option_fold_r(g, z, o) =
     None => z
     Some(x) => g(x, z)
 
+pub fn option_fold_l(g, z, o) =
+  match o of
+    None => z
+    Some(x) => g(z, x)
+
 pub fn option_bind(o, g) =
   match o of
     None => None

@@ -1,0 +1,42 @@
+-- An effectful incremental computation that survives process restarts. Unlike
+-- `incr_warm.pr`, whose memos hold no output of their own, here each memo PRINTS
+-- when it fires. The pure durable path forbade that (a warm hit skips the thunk,
+-- and skipping a print would change what you see); `run_incr_durable_replay`
+-- lifts the restriction by recording each memo's output beside its result and
+-- REPLAYING it on a durable hit. So a second run warms every memo from the
+-- snapshot, runs no thunk, yet prints byte-for-byte what the first run printed.
+--
+-- Run it twice:
+--   prism run examples/incr_trace.pr   # cold: fires each memo, records its output
+--   prism run examples/incr_trace.pr   # warm: replays the recorded output, same bytes
+--
+-- Deleting or corrupting the snapshot changes only cost, never the output: a
+-- cold start re-fires the memos and prints the very same lines.
+
+import Data.Map (..)
+
+import Data.List (..)
+
+import Incr (..)
+
+fn snap_path() = "target/incr_trace.snap"
+
+pub fn report() =
+  run_incr_durable_replay(snap_path(), "incr-trace-v1") fn
+    let scores =
+      input(map_from_list([("neo", 3), ("trinity", 7), ("morpheus", 5)]))
+    let total = memo(
+        \() -> let _ = println("  fire: total") in sum(map_values(get(scores))),
+      )
+    let count = memo(
+        \() -> let _ = println("  fire: count") in length(map_values(get(scores))),
+      )
+    let banner = memo(
+        \() -> let _ = println("  fire: banner") in concat("total ", concat(show_int(get(total)), " over three players")),
+      )
+    println(banner_line(get(banner), get(count)))
+
+fn banner_line(banner, count) =
+  concat(banner, concat(" (", concat(show_int(count), " memos)")))
+
+pub fn main() = report()

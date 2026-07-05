@@ -1,0 +1,503 @@
+-- | CLI: an applicative command-line parser as a first-class value.
+--
+-- A parser is a pure value describing what a command accepts: typed options
+-- (long/short, valued or switch, with defaults), typed positionals, and named
+-- subcommands. Parsers compose applicatively (`build2`/`build3`/`build4` over
+-- `map_p`/`ap_p`/`pure_p`) into the user's own result type, so a well-typed
+-- parser yields *exactly* that type or a rich error, never a half-filled record.
+-- The illegal state (a config with a missing required field, a subcommand
+-- without its arguments) is unrepresentable: the constructor cannot be applied
+-- until every part has parsed.
+--
+-- One description, three artifacts: the same `Command` value drives all three.
+-- It is the parser (`run_argv`), turning argv into the result type or an error.
+-- It is the help text (`help_text`), rendered from the option and argument specs
+-- the parser carries, so `--help` can never drift from what parses. And it is the
+-- errors (inside `run_argv`), which name the offending token, state the form
+-- expected, and print the usage line derived from those same specs.
+--
+-- Everything here is pure: a `Parser` reads a `Tokens` structure, and `Tokens`
+-- comes from lexing a `List(String)`. The tie to the real command line is
+-- `run_args`, which feeds `args()` (the `Env` capability) to `run_argv`. Because
+-- argv arrives through that capability, a recorded run replays its arguments from
+-- the `.replay` trace like any other observation: CLI parsing is inside the
+-- determinism contract, argv and all.
+
+import Data.List (map, filter, foldl, foldr, append, reverse, nth)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Data.String (starts_with, str_join, pad_right, index_of, contains)
+
+import Data.Char (is_digit)
+
+-- ASCII byte of `-`, the flag sigil.
+pub let dash : Int = 45
+
+-- Column the help text aligns descriptions to.
+pub let help_col : Int = 24
+
+-- | A parse failure, carrying enough to name the offending token and the form
+-- expected. Rendered to a message by `describe`.
+pub type CliError
+  = MissingFlag(String)
+  | MissingArg(String)
+  | NeedsValue(String)
+  | BadValue(String, String)
+  | UnknownFlag(String)
+  | UnknownCommand(String)
+
+-- | The static description of one option, carried by the parser for help and to
+-- tell the lexer whether the flag consumes a following value.
+pub type OptSpec = OptSpec {
+  long: String,
+  short: String,
+  meta: String,
+  help: String,
+  takes_value: Bool
+}
+
+-- | The static description of one positional argument.
+pub type ArgSpec = ArgSpec { meta: String, help: String }
+
+-- | argv after lexing: options canonicalized to their long name, and the
+-- positionals in order. `--help`/`-h` are handled before lexing (`has_help`), so
+-- they never appear here.
+pub type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
+
+-- | A parser for a value of type `a`: the option and positional specs it accepts
+-- (the description help is rendered from) and a pure reader over lexed tokens
+-- threading the positional cursor. Build these with the combinators below, never
+-- by hand.
+pub type Parser(a) = Parser {
+  opts: List(OptSpec),
+  args: List(ArgSpec),
+  run: (Tokens, Int) -> Result((a, Int), CliError)
+}
+
+-- | One named subcommand: its key on the command line, a one-line description,
+-- and the parser that runs when it is chosen.
+pub type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
+
+-- | A top-level command is either a single parser or a group of subcommands, all
+-- producing the same result type (so distinct subcommands map to distinct
+-- constructors of the user's ADT).
+pub type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
+
+-- | A complete command: a program name and one-line description for usage, plus
+-- its body.
+pub type Command(a) = Command { name: String, about: String, body: Body(a) }
+
+-- | The outcome of parsing argv: a value, a help request (carrying the rendered
+-- text), or a usage error (carrying the rendered message).
+pub type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
+
+-- Combinators -----------------------------------------------------------------
+
+-- | A parser that consumes nothing and yields `x`. The applicative unit.
+pub fn pure_p(x) = Parser { opts = Nil, args = Nil, run = \(t, i) -> Ok((x, i)) }
+
+-- | Map `f` over a parser's result, leaving what it consumes unchanged.
+pub fn map_p(f, p : Parser(b)) =
+  Parser { opts = p.opts, args = p.args, run = \(t, i) -> run_map(f, p, t, i) }
+
+fn run_map(f, p : Parser(b), t : Tokens, i : Int) =
+  match (p.run)(t, i) of
+    Ok((a, j)) => Ok((f(a), j))
+    Err(e) => Err(e)
+
+-- | Applicative application: run `pf` then `px`, threading the positional cursor
+-- left to right, and apply the function to the argument. This is what lets a
+-- curried constructor be filled field by field.
+pub fn ap_p(pf : Parser((b) -> c), px : Parser(b)) =
+  Parser {
+    opts = append(pf.opts, px.opts),
+    args = append(pf.args, px.args),
+    run = \(t, i) -> run_ap(pf, px, t, i)
+  }
+
+fn run_ap(pf : Parser((b) -> c), px : Parser(b), t : Tokens, i : Int) =
+  match (pf.run)(t, i) of
+    Err(e) => Err(e)
+    Ok((g, j)) =>
+      match (px.run)(t, j) of
+        Err(e) => Err(e)
+        Ok((b, k)) => Ok((g(b), k))
+
+-- | Apply a two-argument curried constructor to two parsers.
+pub fn build2(f, pa, pb) = ap_p(map_p(f, pa), pb)
+
+-- | Apply a three-argument curried constructor to three parsers.
+pub fn build3(f, pa, pb, pc) = ap_p(build2(f, pa, pb), pc)
+
+-- | Apply a four-argument curried constructor to four parsers.
+pub fn build4(f, pa, pb, pc, pd) = ap_p(build3(f, pa, pb, pc), pd)
+
+-- Leaf parsers ----------------------------------------------------------------
+
+fn mk_opt(long, short, meta, help, takes_value) =
+  OptSpec {
+    long = long,
+    short = short,
+    meta = meta,
+    help = help,
+    takes_value = takes_value
+  }
+
+-- | An optional string flag with a default when absent.
+pub fn opt_str(long, short, meta, help, default) =
+  Parser {
+    opts = [mk_opt(long, short, meta, help, true)],
+    args = Nil,
+    run = \(t, i) -> read_opt_str(long, default, t, i)
+  }
+
+-- | A required string flag: an error when absent.
+pub fn req_str(long, short, meta, help) =
+  Parser {
+    opts = [mk_opt(long, short, meta, help, true)],
+    args = Nil,
+    run = \(t, i) -> read_req_str(long, t, i)
+  }
+
+-- | An optional integer flag with a default; a non-integer value is an error.
+pub fn opt_int(long, short, meta, help, default) =
+  Parser {
+    opts = [mk_opt(long, short, meta, help, true)],
+    args = Nil,
+    run = \(t, i) -> read_opt_int(long, default, meta, t, i)
+  }
+
+-- | A boolean switch: true when present, false when absent, never valued.
+pub fn switch(long, short, help) =
+  Parser {
+    opts = [mk_opt(long, short, "", help, false)],
+    args = Nil,
+    run = \(t, i) -> read_switch(long, t, i)
+  }
+
+-- | A required string positional, consumed in declaration order.
+pub fn arg_str(meta, help) =
+  Parser {
+    opts = Nil,
+    args = [ArgSpec { meta = meta, help = help }],
+    run = \(t, i) -> read_arg_str(meta, t, i)
+  }
+
+-- | A required integer positional; a non-integer token is an error.
+pub fn arg_int(meta, help) =
+  Parser {
+    opts = Nil,
+    args = [ArgSpec { meta = meta, help = help }],
+    run = \(t, i) -> read_arg_int(meta, t, i)
+  }
+
+fn lookup_opt(name, opts) =
+  match opts of
+    Nil => None
+    Cons((k, v), rest) =>
+      if str_eq(k, name) then
+        Some(v)
+      else
+        lookup_opt(name, rest)
+
+fn read_opt_str(long, default, t : Tokens, i) =
+  match lookup_opt(long, t.opts) of
+    Some(v) => Ok((v, i))
+    None => Ok((default, i))
+
+fn read_req_str(long, t : Tokens, i) =
+  match lookup_opt(long, t.opts) of
+    Some(v) => Ok((v, i))
+    None => Err(MissingFlag(long))
+
+fn read_opt_int(long, default, meta, t : Tokens, i) =
+  match lookup_opt(long, t.opts) of
+    None => Ok((default, i))
+    Some(v) =>
+      match parse_int(v) of
+        Some(n) => Ok((n, i))
+        None => Err(BadValue(v, meta))
+
+fn read_switch(long, t : Tokens, i) =
+  match lookup_opt(long, t.opts) of
+    Some(_) => Ok((true, i))
+    None => Ok((false, i))
+
+fn read_arg_str(meta, t : Tokens, i) =
+  match nth(i, t.pos) of
+    Some(v) => Ok((v, i + 1))
+    None => Err(MissingArg(meta))
+
+fn read_arg_int(meta, t : Tokens, i) =
+  match nth(i, t.pos) of
+    None => Err(MissingArg(meta))
+    Some(v) =>
+      match parse_int(v) of
+        Some(n) => Ok((n, i + 1))
+        None => Err(BadValue(v, meta))
+
+-- Lexing ----------------------------------------------------------------------
+
+fn is_help_tok(tok) = str_eq(tok, "--help") || str_eq(tok, "-h")
+
+fn is_long_flag(tok) = starts_with("--", tok) && str_len(tok) > 2
+
+fn is_short_flag(tok) =
+  str_len(tok) >= 2
+    && char_at(tok, 0) == dash
+    && char_at(tok, 1) /= dash
+    && not(is_digit(char_at(tok, 1)))
+
+fn find_long(specs : List(OptSpec), name) =
+  match specs of
+    Nil => None
+    Cons(s, rest) =>
+      if str_eq(s.long, name) then
+        Some(s)
+      else
+        find_long(rest, name)
+
+fn find_short(specs : List(OptSpec), name) =
+  match specs of
+    Nil => None
+    Cons(s, rest) =>
+      if str_eq(s.short, name) then
+        Some(s)
+      else
+        find_short(rest, name)
+
+-- | Lex argv against the option specs (which say whether each flag takes a
+-- value). Options are canonicalized to their long name; anything not a flag is a
+-- positional. `--help`/`-h` are skipped here (detected earlier by `has_help`).
+pub fn lex(specs, argv) = lex_go(specs, argv, Nil, Nil)
+
+fn lex_go(specs, argv, opts_acc, pos_acc) =
+  match argv of
+    Nil => Ok(Tokens { opts = reverse(opts_acc), pos = reverse(pos_acc) })
+    Cons(tok, rest) =>
+      if is_help_tok(tok) then
+        lex_go(specs, rest, opts_acc, pos_acc)
+      elif is_long_flag(tok) then
+        lex_long(specs, tok, rest, opts_acc, pos_acc)
+      elif is_short_flag(tok) then
+        lex_short(specs, tok, rest, opts_acc, pos_acc)
+      else
+        lex_go(specs, rest, opts_acc, Cons(tok, pos_acc))
+
+fn lex_long(specs, tok, rest, opts_acc, pos_acc) =
+  let name = substring(tok, 2, str_len(tok) - 2)
+  if contains("=", name) then
+    lex_eq(specs, name, rest, opts_acc, pos_acc)
+  else
+    match find_long(specs, name) of
+      None => Err(UnknownFlag(tok))
+      Some(spec) =>
+        if spec.takes_value then
+          lex_valued(specs, name, rest, opts_acc, pos_acc, tok)
+        else
+          lex_go(specs, rest, Cons((name, "true"), opts_acc), pos_acc)
+
+fn lex_eq(specs, name, rest, opts_acc, pos_acc) =
+  let eq = index_of("=", name)
+  let k = substring(name, 0, eq)
+  let v = substring(name, eq + 1, str_len(name) - eq - 1)
+  match find_long(specs, k) of
+    None => Err(UnknownFlag(concat("--", k)))
+    Some(_) => lex_go(specs, rest, Cons((k, v), opts_acc), pos_acc)
+
+fn lex_valued(specs, name, rest, opts_acc, pos_acc, tok) =
+  match rest of
+    Nil => Err(NeedsValue(tok))
+    Cons(v, rest2) => lex_go(specs, rest2, Cons((name, v), opts_acc), pos_acc)
+
+fn lex_short(specs, tok, rest, opts_acc, pos_acc) =
+  let name = substring(tok, 1, str_len(tok) - 1)
+  match find_short(specs, name) of
+    None => Err(UnknownFlag(tok))
+    Some(spec) =>
+      if spec.takes_value then
+        lex_valued(specs, spec.long, rest, opts_acc, pos_acc, tok)
+      else
+        lex_go(specs, rest, Cons((spec.long, "true"), opts_acc), pos_acc)
+
+-- Running ---------------------------------------------------------------------
+
+fn run_leaf(p : Parser(a), argv) =
+  match lex(p.opts, argv) of
+    Err(e) => Err(e)
+    Ok(toks) => finish_leaf(p, toks)
+
+fn finish_leaf(p : Parser(a), toks) =
+  match (p.run)(toks, 0) of
+    Ok((a, _)) => Ok(a)
+    Err(e) => Err(e)
+
+fn find_sub(subs : List(SubCmd(a)), key) =
+  match subs of
+    Nil => None
+    Cons(sc, rest) =>
+      if str_eq(sc.key, key) then
+        Some(sc)
+      else
+        find_sub(rest, key)
+
+-- | Parse argv against a command, yielding a value, a help request, or a usage
+-- error. argv is the argument list only (no program name); `cmd.name` supplies
+-- the name for usage text.
+pub fn run_argv(cmd : Command(a), argv) =
+  match cmd.body of
+    Plain(p) => run_plain(cmd, p, argv)
+    Group(subs) => run_group(cmd, subs, argv)
+
+fn run_plain(cmd : Command(a), p : Parser(a), argv) =
+  if has_help(argv) then
+    ShowHelp(plain_help(cmd, p))
+  else
+    match run_leaf(p, argv) of
+      Ok(a) => Parsed(a)
+      Err(e) => BadUsage(err_with_usage(synopsis(cmd, p), e))
+
+fn run_group(cmd : Command(a), subs : List(SubCmd(a)), argv) =
+  match argv of
+    Nil => ShowHelp(group_help(cmd, subs))
+    Cons(key, rest) =>
+      if is_help_tok(key) then
+        ShowHelp(group_help(cmd, subs))
+      else
+        dispatch(cmd, subs, key, rest)
+
+fn dispatch(cmd : Command(a), subs : List(SubCmd(a)), key, rest) =
+  match find_sub(subs, key) of
+    None => BadUsage(err_with_usage(group_usage(cmd), UnknownCommand(key)))
+    Some(sc) => run_sub(cmd, sc, rest)
+
+fn run_sub(cmd : Command(a), sc : SubCmd(a), rest) =
+  if has_help(rest) then
+    ShowHelp(sub_help(cmd, sc))
+  else
+    match run_leaf(sc.sub, rest) of
+      Ok(a) => Parsed(a)
+      Err(e) => BadUsage(err_with_usage(sub_usage(cmd, sc), e))
+
+fn has_help(argv) =
+  match argv of
+    Nil => false
+    Cons(t, rest) =>
+      if is_help_tok(t) then
+        true
+      else
+        has_help(rest)
+
+-- | The rendered help for a command: dispatches to the plain or group form.
+pub fn help_text(cmd : Command(a)) =
+  match cmd.body of
+    Plain(p) => plain_help(cmd, p)
+    Group(subs) => group_help(cmd, subs)
+
+-- Help and usage rendering ----------------------------------------------------
+
+fn opt_synopsis(s : OptSpec) =
+  if s.takes_value then
+    concat_all(["[--", s.long, " ", s.meta, "]"])
+  else
+    concat_all(["[--", s.long, "]"])
+
+fn arg_synopsis(ar : ArgSpec) = concat_all(["<", ar.meta, ">"])
+
+fn synopsis(cmd : Command(a), p : Parser(a)) =
+  let opts = map(opt_synopsis, p.opts)
+  let args = map(arg_synopsis, p.args)
+  let parts = append(opts, append(args, ["[--help]"]))
+  concat_all(["Usage: ", cmd.name, " ", str_join(" ", parts)])
+
+fn group_usage(cmd : Command(a)) =
+  concat_all(["Usage: ", cmd.name, " <command> [args]"])
+
+fn sub_usage(cmd : Command(a), sc : SubCmd(a)) =
+  let name = concat_all([cmd.name, " ", sc.key])
+  synopsis(
+      Command { name = name, about = sc.about, body = Plain(sc.sub) },
+      sc.sub,
+    )
+
+fn opt_flags(s : OptSpec) =
+  if str_eq(s.short, "") then
+    concat_all(["      --", s.long])
+  else
+    concat_all(["  -", s.short, ", --", s.long])
+
+fn opt_line(s : OptSpec) =
+  let lhs =
+    if s.takes_value then
+      concat_all([opt_flags(s), " ", s.meta])
+    else
+      opt_flags(s)
+  concat_all([pad_right(lhs, help_col), s.help])
+
+fn arg_line(ar : ArgSpec) =
+  concat_all(["  ", pad_right(ar.meta, help_col - 2), ar.help])
+
+fn cmd_line(sc : SubCmd(a)) =
+  concat_all(["  ", pad_right(sc.key, help_col - 2), sc.about])
+
+-- The implicit `--help` option, rendered through the same `opt_line` as every
+-- real option so its column lines up.
+let help_spec : OptSpec =
+  OptSpec {
+    long = "help",
+    short = "h",
+    meta = "",
+    help = "show this help and exit",
+    takes_value = false
+  }
+
+-- The "Arguments:" section, or no lines at all when there are no positionals.
+fn arg_section(specs : List(ArgSpec)) : List(String) =
+  match specs of
+    Nil => Nil
+    Cons(_, _) => Cons("", Cons("Arguments:", map(arg_line, specs)))
+
+fn plain_help(cmd : Command(a), p : Parser(a)) =
+  let header = [synopsis(cmd, p), "", cmd.about]
+  let opt_sec = Cons("", Cons("Options:", append(map(opt_line, p.opts), [
+      opt_line(help_spec),
+    ])))
+  str_join("\n", append(header, append(arg_section(p.args), opt_sec)))
+
+fn group_help(cmd : Command(a), subs : List(SubCmd(a))) =
+  let header = [group_usage(cmd), "", cmd.about, "", "Commands:"]
+  let footer =
+    ["", concat_all(["Run '", cmd.name, " <command> --help' for details."])]
+  str_join("\n", append(header, append(map(cmd_line, subs), footer)))
+
+fn sub_help(cmd : Command(a), sc : SubCmd(a)) =
+  let name = concat_all([cmd.name, " ", sc.key])
+  plain_help(
+      Command { name = name, about = sc.about, body = Plain(sc.sub) },
+      sc.sub,
+    )
+
+-- | A one-line description of a parse error, naming the offending token and the
+-- form expected.
+pub fn describe(err) =
+  match err of
+    MissingFlag(f) =>
+      concat_all(["error: required flag '--", f, "' was not provided"])
+    MissingArg(m) => concat_all(["error: missing argument <", m, ">"])
+    NeedsValue(f) => concat_all(["error: flag '", f, "' expects a value"])
+    BadValue(tok, exp) =>
+      concat_all(["error: '", tok, "' is not a valid <", exp, ">"])
+    UnknownFlag(f) => concat_all(["error: unknown flag '", f, "'"])
+    UnknownCommand(c) => concat_all(["error: unknown command '", c, "'"])
+
+fn err_with_usage(usage, err) = str_join("\n", [describe(err), "", usage])
+
+-- The real command line -------------------------------------------------------
+
+-- | Parse the process arguments against `cmd`. argv arrives through the `Env`
+-- capability (`args`), so a recorded run replays its arguments from the trace:
+-- CLI parsing is inside the determinism contract.
+fn run_args(cmd) = run_argv(cmd, args())

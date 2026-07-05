@@ -15,7 +15,7 @@ use inkwell::values::{
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
-use super::emit::{emit_with, idx64, Buf, IntOp, Isa};
+use super::emit::{emit_with, idx64, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
 use crate::core::Core;
 use crate::types::CtorInfo;
@@ -38,28 +38,6 @@ struct Inkwell<'ctx> {
 
 fn nm(s: &str) -> &str {
     s.trim_start_matches('%')
-}
-
-fn ipred(p: &str) -> IntPredicate {
-    match p {
-        "eq" => IntPredicate::EQ,
-        "ne" => IntPredicate::NE,
-        "slt" => IntPredicate::SLT,
-        "sle" => IntPredicate::SLE,
-        "sgt" => IntPredicate::SGT,
-        _ => IntPredicate::SGE,
-    }
-}
-
-fn fpred(p: &str) -> FloatPredicate {
-    match p {
-        "oeq" => FloatPredicate::OEQ,
-        "une" => FloatPredicate::UNE,
-        "olt" => FloatPredicate::OLT,
-        "ole" => FloatPredicate::OLE,
-        "ogt" => FloatPredicate::OGT,
-        _ => FloatPredicate::OGE,
-    }
 }
 
 impl<'ctx> Inkwell<'ctx> {
@@ -326,30 +304,46 @@ impl Isa for Inkwell<'_> {
         self.set(dst, r.unwrap_or_else(|e| self.pint("bin", &e)).into());
     }
 
-    fn fbin(&self, _b: &mut Buf, dst: &str, op: &str, x: &str, y: &str) {
+    fn fbin(&self, _b: &mut Buf, dst: &str, op: FloatBinOp, x: &str, y: &str) {
         let (x, y) = (self.flt(x), self.flt(y));
         let bld = &self.builder;
         let r = match op {
-            "fadd" => bld.build_float_add(x, y, nm(dst)),
-            "fsub" => bld.build_float_sub(x, y, nm(dst)),
-            "fmul" => bld.build_float_mul(x, y, nm(dst)),
-            _ => bld.build_float_div(x, y, nm(dst)),
+            FloatBinOp::Fadd => bld.build_float_add(x, y, nm(dst)),
+            FloatBinOp::Fsub => bld.build_float_sub(x, y, nm(dst)),
+            FloatBinOp::Fmul => bld.build_float_mul(x, y, nm(dst)),
+            FloatBinOp::Fdiv => bld.build_float_div(x, y, nm(dst)),
         };
         self.set(dst, r.unwrap_or_else(|e| self.pflt("fbin", &e)).into());
     }
 
-    fn icmp(&self, _b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str) {
+    fn icmp(&self, _b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str) {
+        let p = match pred {
+            Cmp::Eq => IntPredicate::EQ,
+            Cmp::Ne => IntPredicate::NE,
+            Cmp::Lt => IntPredicate::SLT,
+            Cmp::Le => IntPredicate::SLE,
+            Cmp::Gt => IntPredicate::SGT,
+            Cmp::Ge => IntPredicate::SGE,
+        };
         let r = self
             .builder
-            .build_int_compare(ipred(pred), self.int(x), self.int(y), nm(dst))
+            .build_int_compare(p, self.int(x), self.int(y), nm(dst))
             .unwrap_or_else(|e| self.pint("icmp", &e));
         self.set(dst, r.into());
     }
 
-    fn fcmp(&self, _b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str) {
+    fn fcmp(&self, _b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str) {
+        let p = match pred {
+            Cmp::Eq => FloatPredicate::OEQ,
+            Cmp::Ne => FloatPredicate::UNE,
+            Cmp::Lt => FloatPredicate::OLT,
+            Cmp::Le => FloatPredicate::OLE,
+            Cmp::Gt => FloatPredicate::OGT,
+            Cmp::Ge => FloatPredicate::OGE,
+        };
         let r = self
             .builder
-            .build_float_compare(fpred(pred), self.flt(x), self.flt(y), nm(dst))
+            .build_float_compare(p, self.flt(x), self.flt(y), nm(dst))
             .unwrap_or_else(|e| self.pint("fcmp", &e));
         self.set(dst, r.into());
     }
@@ -370,12 +364,18 @@ impl Isa for Inkwell<'_> {
         self.set(dst, r.into());
     }
 
-    fn fptosi(&self, _b: &mut Buf, dst: &str, v: &str) {
-        let r = self
-            .builder
-            .build_float_to_signed_int(self.flt(v), self.i64t(), nm(dst))
-            .unwrap_or_else(|e| self.pint("fptosi", &e));
-        self.set(dst, r.into());
+    fn fptosi_sat(&self, _b: &mut Buf, dst: &str, v: &str) {
+        // `llvm.fptosi.sat` is the saturating conversion (clamp to i64::MIN/MAX,
+        // NaN -> 0), matching Rust's `f as i64` in the interpreter. inkwell has no
+        // direct builder for it, so declare and call the intrinsic.
+        let i64t = self.i64t();
+        let f64t = self.ctx.f64_type();
+        let f = self.decl(
+            "llvm.fptosi.sat.i64.f64",
+            i64t.fn_type(&[f64t.into()], false),
+        );
+        let cs = self.call_direct(f, &[self.flt(v).into()], nm(dst));
+        self.set(dst, self.cs_basic(cs));
     }
 
     fn cast_i2f(&self, _b: &mut Buf, dst: &str, v: &str) {
@@ -394,14 +394,39 @@ impl Isa for Inkwell<'_> {
         self.set(dst, r);
     }
 
-    fn f_intrinsic(&self, _b: &mut Buf, dst: &str, name: &str, a: &str) {
+    fn f_intrinsic(&self, _b: &mut Buf, dst: &str, op: FloatIntrinsic, a: &str) {
         let f64t = self.ctx.f64_type();
         let f = self.decl(
-            &format!("llvm.{name}.f64"),
+            &format!("llvm.{}.f64", op.name()),
             f64t.fn_type(&[f64t.into()], false),
         );
         let cs = self.call_direct(f, &[self.flt(a).into()], nm(dst));
         self.set(dst, self.cs_basic(cs));
+    }
+
+    fn f_call1(&self, _b: &mut Buf, dst: &str, sym: &str, a: &str) {
+        let f64t = self.ctx.f64_type();
+        let f = self.decl(sym, f64t.fn_type(&[f64t.into()], false));
+        let cs = self.call_direct(f, &[self.flt(a).into()], nm(dst));
+        self.set(dst, self.cs_basic(cs));
+    }
+
+    // inkwell declares functions on first use (in `f_call1`), so no module-level
+    // pre-declaration is needed for the LLVM backend.
+    fn declare_f(
+        &self,
+        _out: &mut String,
+        _seen: &mut std::collections::BTreeSet<String>,
+        _sym: &str,
+    ) {
+    }
+
+    fn fneg(&self, _b: &mut Buf, dst: &str, x: &str) {
+        let r = self
+            .builder
+            .build_float_neg(self.flt(x), nm(dst))
+            .unwrap_or_else(|e| self.pflt("fneg", &e));
+        self.set(dst, r.into());
     }
 
     fn inttoptr(&self, _b: &mut Buf, dst: &str, v: &str) {

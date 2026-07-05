@@ -1,7 +1,6 @@
-effect Amb {
-  ctl choose(Int) : Int,
+effect Amb
+  ctl choose(Int) : Int
   ctl reject(Unit) : Int
-}
 
 -- N-queens as pure nondeterminism, in the spirit of eff_amb.
 --

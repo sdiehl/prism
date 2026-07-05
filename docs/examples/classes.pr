@@ -17,9 +17,8 @@ fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
           else
             Some(y)
 
-instance ordDesc : Ord(Int) {
+instance ordDesc : Ord(Int)
   fn cmp(x, y) = int_cmp(y, x)
-}
 
 -- The prelude's ascending ordInt is the canonical Ord(Int); ordDesc stays the
 -- explicit yardstick. Without this, two Ord(Int) instances would be a coherence

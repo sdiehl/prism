@@ -16,7 +16,7 @@ The [`examples/`](./examples) directory contains a tour of most advanced feature
 
 ## Install
 
-### Nix (simplest)
+### Nix
 
 ```shell
 nix build github:sdiehl/prism        # binary at ./result/bin/prism
@@ -24,7 +24,7 @@ nix run  github:sdiehl/prism         # or run it directly
 nix develop                          # dev shell: prism, LLVM, cargo, just on PATH
 ```
 
-### Homebrew (Apple Silicon)
+### Homebrew
 
 ```shell
 brew install sdiehl/prism/prism
@@ -36,23 +36,23 @@ brew install sdiehl/prism/prism
 docker run ghcr.io/sdiehl/prism --help
 ```
 
-### Linux packages
+### Linux
 
 ```shell
 # Debian / Ubuntu
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.6.0/prism_0.6.0_amd64.deb
-sudo apt install ./prism_0.6.0_amd64.deb
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.7.0/prism_0.7.0_amd64.deb
+sudo apt install ./prism_0.7.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.6.0/prism-0.6.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.7.0/prism-0.7.0-1.x86_64.rpm
 
 # Arch
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.6.0/prism-0.6.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.7.0/prism-0.7.0-1-x86_64.pkg.tar.zst
 
 # Alpine
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.6.0/prism_0.6.0_x86_64.apk
-sudo apk add --allow-untrusted ./prism_0.6.0_x86_64.apk
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.7.0/prism_0.7.0_x86_64.apk
+sudo apk add --allow-untrusted ./prism_0.7.0_x86_64.apk
 ```
 
 Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:
@@ -72,15 +72,17 @@ EOF
 sudo dnf install prism
 ```
 
-### Build from source
+### From Source
+
+You need the standard Rust toolchain installed. Native codegen also needs `clang` on `PATH` (override with `PRISM_CC`).
 
 ```shell
 brew install llvm                    # macOS
 sudo apt install llvm-22-dev         # Debian/Ubuntu
+
+git clone https://github.com/sdiehl/prism.git
 LLVM_SYS_221_PREFIX=$(brew --prefix llvm) cargo install --git https://github.com/sdiehl/prism
 ```
-
-Native codegen also needs `clang` on `PATH` (override with `PRISM_CC`).
 
 ## Usage
 

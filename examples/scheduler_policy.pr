@@ -21,9 +21,8 @@
 
 import Concurrent (..)
 
-effect Trace {
+effect Trace
   ctl note(Int) : Unit
-}
 
 fn worker(n : Int) : !{Async(Int), Trace} Int =
   note(n)

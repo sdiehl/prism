@@ -26,16 +26,16 @@ True when the result is `Err`.
 
 ### `map_result`
 
-```prism,sig,h-e38ac38abe13dab8836f15eaa9361f451ed2c4e966b1990e07f51aac498c615f
-map_result : forall a b c e0. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! {e0}
+```prism,sig,h-107d5ac519c4d2d98db4f7f54d52d12b81127324f082d5f0526885bcd30d62b4
+map_result : forall e0 a b c. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! {e0}
 ```
 
 Apply `f` to the `Ok` value, leaving an `Err` untouched.
 
 ### `and_then_result`
 
-```prism,sig,h-dc432338550631f1748385002f0414546d7d8ad466a400d1dc90bc52ff5c9612
-and_then_result : forall a b c e0. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0}
+```prism,sig,h-8aa44499400773357c2d246abf5239d1c9fc5eb10b8b8112ff67883198326ccb
+and_then_result : forall e0 a b c. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0}
 ```
 
 Chain a result-returning function, short-circuiting on `Err` (monadic bind for `Result`).

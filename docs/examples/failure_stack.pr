@@ -48,13 +48,7 @@ fn config_safe(cfg) : !{NetErr} Int =
 fn main() =
   let good = [("http", "8080")]
   let bad = [("http", "oops")]
-  let full =
-    try
-      boot(good)
-    catch
-      NotFound(_k) => 0
-      Malformed(_s) => 0
-      Timeout(_ms) => 0
+  let full = try boot(good) catch { NotFound(_k) => 0, Malformed(_s) => 0, Timeout(_ms) => 0 }
   println(full)
   let fallback = try config_safe(bad) catch { Timeout(_ms) => 0 }
   println(fallback)

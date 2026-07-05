@@ -6,6 +6,9 @@ input_file: tests/cases/run/wire_laws.pr
 roundtrip product: OK
 roundtrip sum: OK
 roundtrip recursive: OK
+roundtrip pair: OK
+roundtrip triple: OK
+roundtrip list of pairs: OK
 ladder adjacent: OK
 ladder composed: OK
 envelope digest+trailing: OK

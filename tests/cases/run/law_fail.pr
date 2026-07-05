@@ -5,10 +5,9 @@
 
 import Quickcheck (..)
 
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
 fn run_state(s0, action : () -> a ! {State | e}) =
   let f =
@@ -59,5 +58,18 @@ fn prop_fail_through_state(t) =
             fst(pair) == s1 && snd(pair) == s1
 
 fn main() =
-  println(show_outcome("Fail short-circuit", quickcheck(gen_pair(gen_bool, gen_int), prop_short_circuit)))
-  println(show_outcome("Fail unwinds through State", quickcheck(gen_triple(gen_bool, gen_int, gen_int), prop_fail_through_state)))
+  println(
+      show_outcome(
+          "Fail short-circuit",
+          quickcheck(gen_pair(gen_bool, gen_int), prop_short_circuit),
+        ),
+    )
+  println(
+      show_outcome(
+          "Fail unwinds through State",
+          quickcheck(
+              gen_triple(gen_bool, gen_int, gen_int),
+              prop_fail_through_state,
+            ),
+        ),
+    )

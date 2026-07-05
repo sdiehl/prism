@@ -1,6 +1,4 @@
-class Stable(a) {
-
-}
+class Stable(a)
 
 type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)
 

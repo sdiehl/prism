@@ -1,6 +1,5 @@
-effect Exn {
+effect Exn
   ctl raise(Int) : Int
-}
 
 fn risky(x) =
   if x == 0 then

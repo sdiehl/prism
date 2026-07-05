@@ -1,6 +1,5 @@
-effect Delim {
+effect Delim
   ctl shift0(Int) : Int
-}
 
 -- Delimited continuations, the Danvy-Filinski shift/reset intuition pump.
 --

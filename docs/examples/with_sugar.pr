@@ -1,6 +1,5 @@
-effect Read {
+effect Read
   ctl read() : String
-}
 
 -- `with conf <- handler { .. }` binds a first-class handler instance;
 -- `conf.read()` dispatches to it by name.

@@ -7,21 +7,22 @@
 -- 7
 -- 3
 -- 0
-class Peek(c) {
+class Peek(c)
   peek : (c) -> Option(Int)
-}
 
 type Box = Box { v: Int }
 
 type Range = Range { lo: Int, hi: Int }
 
-instance peekBox : Peek(Box) {
+instance peekBox : Peek(Box)
   fn peek(b) = Some(b.v)
-}
 
-instance peekRange : Peek(Range) {
-  fn peek(r) = if r.lo < r.hi then Some(r.lo) else None
-}
+instance peekRange : Peek(Range)
+  fn peek(r) =
+    if r.lo < r.hi then
+      Some(r.lo)
+    else
+      None
 
 pattern First(n) for Peek =
   view peek

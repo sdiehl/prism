@@ -12,10 +12,9 @@ Wrap an instance back into a `Gen` with `arb_gen` to feed it to `quickcheck`.
 
 ### `Arbitrary`
 
-```prism,def
-class Arbitrary(a) {
+```prism,def,h-21af198c33a7f59c727c8d9cb7fbab9e29a328374bb61098939f5706be28f661
+class Arbitrary(a)
   arbitrary : (Int) -> a ! {Random | e}
-}
 ```
 
 A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends the budget on depth: at each recursive constructor it draws its fields a size smaller, and once the budget runs out it restricts to non-recursive constructors, so generation always terminates.
@@ -24,61 +23,61 @@ A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends th
 
 ### `arbitraryInt`
 
-```prism,def
+```prism,def,h-65eb9ac863bc6c3fd7adceaa95ea0065899254d2818f4a1e456db3c9f4475f43
 instance arbitraryInt : Arbitrary(Int)
 ```
 
 ### `arbitraryI64`
 
-```prism,def
+```prism,def,h-f6f5f8d3d2ba9199631ea1115d800e1a791b0eebc86a7210530efeb6ca58d01e
 instance arbitraryI64 : Arbitrary(I64)
 ```
 
 ### `arbitraryU64`
 
-```prism,def
+```prism,def,h-a1422095a0cf142fbfb26e5b09801eb21e86f37d33822668c564e9573d683636
 instance arbitraryU64 : Arbitrary(U64)
 ```
 
 ### `arbitraryBool`
 
-```prism,def
+```prism,def,h-efab9958c2428d98178d4d94003edfad3c9b3120a9f5d2560f4b884c096a3846
 instance arbitraryBool : Arbitrary(Bool)
 ```
 
 ### `arbitraryUnit`
 
-```prism,def
+```prism,def,h-3fe5ae6f8c0bd486b310fad23bcd26300be5b79db214f8db25adc8322441108c
 instance arbitraryUnit : Arbitrary(Unit)
 ```
 
 ### `arbitraryChar`
 
-```prism,def
+```prism,def,h-4eb7140ece0bd73f57ff81ab6706ae35fe001f0bbc9a1e7bbab79724a0a5b1d1
 instance arbitraryChar : Arbitrary(Char)
 ```
 
 ### `arbitraryFloat`
 
-```prism,def
+```prism,def,h-038cc0a6bbaf210a5061faf70e8f65c20a8389dbe968a64f989a3da23e545ad9
 instance arbitraryFloat : Arbitrary(Float)
 ```
 
 ### `arbitraryString`
 
-```prism,def
+```prism,def,h-7d40fa35a39b8822444862264bb75ddcf76fed2a484fdb9cda577c7b6aa48e84
 instance arbitraryString : Arbitrary(String)
 ```
 
 ### `arbitraryOption`
 
-```prism,def
+```prism,def,h-9d055b5d66cbdf46a5aac3a6f3fa7a4e8046dac625e4cf0aa4e134d4e9a97d08
 instance arbitraryOption : Arbitrary(Option(a))
 ```
 
 ### `arbitraryList`
 
-```prism,def
+```prism,def,h-6edae00dc41792b39e858a63524939158ba31efd218ef2ef28b01d3dd871fb80
 instance arbitraryList : Arbitrary(List(a))
 ```
 
@@ -86,8 +85,8 @@ instance arbitraryList : Arbitrary(List(a))
 
 ### `arb_gen`
 
-```prism,sig
-fn arb_gen()
+```prism,sig,h-305cbbce8df40cab265296a04558dc82c6dfc4f970ddcaddafb7e26e7ce5e6dc
+arb_gen : forall a. () -> Quickcheck.Gen(a)
 ```
 
 The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for `quickcheck`/`gen_at`.

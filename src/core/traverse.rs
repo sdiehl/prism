@@ -68,6 +68,7 @@ pub trait Rewrite {
                     .collect(),
             ),
             Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, self.value(v, cx)),
+            Comp::Neg(l, v) => Comp::Neg(*l, self.value(v, cx)),
             Comp::Do(n, args) => Comp::Do(*n, args.iter().map(|a| self.value(a, cx)).collect()),
             Comp::Handle {
                 body,
@@ -135,6 +136,7 @@ pub trait Visit {
             | Comp::Force(v)
             | Comp::Error(v)
             | Comp::FloatBuiltin(_, v)
+            | Comp::Neg(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
             | Comp::Reuse(_, v)

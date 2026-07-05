@@ -1,0 +1,55 @@
+-- | Generic operations over any `Foldable` container.
+--
+-- Each function is a constrained free function, not a class default method: it
+-- is written once against the `Foldable(f)` class methods and works for every
+-- instance (`List`, `Option`, and any future container) without a per-type
+-- copy. The prelude opens this module, so these names are in scope unqualified
+-- everywhere and subsume the old `List`-only `sum`/`length`/etc.
+--
+-- The folds are strict, so the short-circuiting versions (`all`, `any`, `find`,
+-- `elem`) still visit every element; for a pure predicate the result is
+-- identical to a left-to-right search. Every aggregation rides `fold_l`, which
+-- instances implement tail recursively, so a large container folds in constant
+-- stack on the native backend; only `to_list` uses `fold_r`, to build in order.
+-- Arithmetic has no `Num` class, so `sum` and `product` are fixed to `Int`,
+-- matching the operators `+` and `*`.
+
+import Data.Maybe (is_some)
+
+-- | The sum of a container of ints (`0` when empty).
+pub fn sum(t : f(Int)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + x, 0, t)
+
+-- | The product of a container of ints (`1` when empty).
+pub fn product(t : f(Int)) : Int given Foldable(f) =
+  fold_l(\(acc, x) -> acc * x, 1, t)
+
+-- | The number of elements.
+pub fn length(t : f(a)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + 1, 0, t)
+
+-- | True when the container has no elements.
+pub fn is_empty(t : f(a)) : Bool given Foldable(f) =
+  fold_l(\(acc, x) -> false, true, t)
+
+-- | True when every element satisfies `p` (vacuously true when empty).
+pub fn all(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
+  fold_l(\(acc, x) -> acc && p(x), true, t)
+
+-- | True when some element satisfies `p`.
+pub fn any(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
+  fold_l(\(acc, x) -> acc || p(x), false, t)
+
+-- | The first element satisfying `p` as `Some` (leftmost match), or `None`.
+pub fn find(p : (a) -> Bool, t : f(a)) : Option(a) given Foldable(f) =
+  fold_l(
+      \(acc, x) -> if is_some(acc) then acc elif p(x) then Some(x) else None,
+      None,
+      t,
+    )
+
+-- | True when `x` is an element (`Eq`).
+pub fn elem(x : a, t : f(a)) : Bool given Eq(a), Foldable(f) =
+  fold_l(\(acc, y) -> acc || x == y, false, t)
+
+-- | The elements as a `List`, in fold order.
+pub fn to_list(t : f(a)) : List(a) given Foldable(f) =
+  fold_r(\(x, acc) -> Cons(x, acc), Nil, t)

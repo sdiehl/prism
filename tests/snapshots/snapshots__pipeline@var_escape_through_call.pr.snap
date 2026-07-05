@@ -185,10 +185,10 @@ Program {
 }
 
 == types ==
-Type Error: in `leak`: missing effect `Var@x@0`
+Type Error: in `leak`: `var x` escapes its block: a value here still uses `x` after its scope ends
     ╭─[ <source>:12:7 ]
     │
  12 │   idf(\(n) -> x + n)
     │       ──────┬──────  
-    │             ╰──────── in `leak`: missing effect `Var@x@0`
+    │             ╰──────── in `leak`: `var x` escapes its block: a value here still uses `x` after its scope ends
 ────╯

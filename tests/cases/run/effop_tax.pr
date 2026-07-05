@@ -3,9 +3,8 @@
 -- in a closure. This is exactly what the direct-call fast path
 -- lowers without a free monad, so PRISM_EFFOP_STATS must report zero EOp cells;
 -- the gate ratchets on that, catching any regression back to the monadic path.
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
 fn sum_env(n) : !{Ask} Int =
   if n == 0 then

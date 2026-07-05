@@ -16,50 +16,39 @@ import Quickcheck (..)
 -- the budget on depth: at each recursive constructor it draws its fields a size
 -- smaller, and once the budget runs out it restricts to non-recursive
 -- constructors, so generation always terminates.
-pub class Arbitrary(a) {
+pub class Arbitrary(a)
   arbitrary : (Int) -> a ! {Random | e}
-}
 
 -- | The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for
 -- `quickcheck`/`gen_at`.
 pub fn arb_gen() : Gen(a) given Arbitrary(a) = Gen(\(size) -> arbitrary(size))
 
-instance arbitraryInt : Arbitrary(Int) {
+instance arbitraryInt : Arbitrary(Int)
   fn arbitrary(size) = gen_run(gen_int, size)
-}
 
-instance arbitraryI64 : Arbitrary(I64) {
+instance arbitraryI64 : Arbitrary(I64)
   fn arbitrary(size) = gen_run(gen_i64, size)
-}
 
-instance arbitraryU64 : Arbitrary(U64) {
+instance arbitraryU64 : Arbitrary(U64)
   fn arbitrary(size) = gen_run(gen_u64, size)
-}
 
-instance arbitraryBool : Arbitrary(Bool) {
+instance arbitraryBool : Arbitrary(Bool)
   fn arbitrary(size) = gen_run(gen_bool, size)
-}
 
-instance arbitraryUnit : Arbitrary(Unit) {
+instance arbitraryUnit : Arbitrary(Unit)
   fn arbitrary(size) = ()
-}
 
-instance arbitraryChar : Arbitrary(Char) {
+instance arbitraryChar : Arbitrary(Char)
   fn arbitrary(size) = gen_run(gen_char, size)
-}
 
-instance arbitraryFloat : Arbitrary(Float) {
+instance arbitraryFloat : Arbitrary(Float)
   fn arbitrary(size) = gen_run(gen_float, size)
-}
 
-instance arbitraryString : Arbitrary(String) {
+instance arbitraryString : Arbitrary(String)
   fn arbitrary(size) = gen_run(gen_string, size)
-}
 
-instance arbitraryOption : Arbitrary(Option(a)) given Arbitrary(a) {
+instance arbitraryOption : Arbitrary(Option(a)) given Arbitrary(a)
   fn arbitrary(size) = gen_run(gen_option(Gen(\(s) -> arbitrary(s))), size)
-}
 
-instance arbitraryList : Arbitrary(List(a)) given Arbitrary(a) {
+instance arbitraryList : Arbitrary(List(a)) given Arbitrary(a)
   fn arbitrary(size) = gen_run(gen_list(Gen(\(s) -> arbitrary(s))), size)
-}

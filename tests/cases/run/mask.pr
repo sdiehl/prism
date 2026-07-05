@@ -1,6 +1,5 @@
-effect Ask {
+effect Ask
   ctl ask() : Int
-}
 
 -- inner handler answers 2, outer answers 1: the masked ask skips the inner
 fn two_levels() =

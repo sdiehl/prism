@@ -401,6 +401,10 @@ impl Enc<'_> {
                 self.tok(&format!("{op:?}"));
                 self.val(v);
             }
+            Comp::Neg(lane, v) => {
+                self.tok(&format!("{lane:?}"));
+                self.val(v);
+            }
             Comp::Bind(m, x, n) => {
                 self.comp(m);
                 self.scoped(&[*x], |e| e.comp(n));

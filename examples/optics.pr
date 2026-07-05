@@ -89,8 +89,10 @@ fn main() : !{IO} Unit =
   println(map(\(p) -> set(lx(), p, 0), vs))
   -- Compose freely: heal every player (over hp) and zero their pos.x (a deep
   -- set) in one pass.
-  let party =
-    Cons(Player { name = "a", pos = v, hp = 2 }, Cons(Player { name = "b", pos = v, hp = 0 - 2 }, Nil))
+  let party = Cons(
+      Player { name = "a", pos = v, hp = 2 },
+      Cons(Player { name = "b", pos = v, hp = 0 - 2 }, Nil),
+    )
   let heal =
     \(p) -> over(lhp(), \(h) -> h + 10, set(compose_l(lpos(), lx()), p, 0))
   println(map(heal, party))

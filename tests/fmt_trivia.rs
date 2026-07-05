@@ -97,10 +97,9 @@ trivia_case!(
 // whole `with handler` block.
 trivia_case!(
     handler_comments,
-    "effect State {\n\
-     \x20 ctl get() : Int,\n\
+    "effect State\n\
+     \x20 ctl get() : Int\n\
      \x20 ctl put(Int) : Unit\n\
-     }\n\
      \n\
      fn run() : !{State} Int =\n\
      \x20 -- install the handler\n\
@@ -117,9 +116,8 @@ trivia_case!(
 // A named handler instance carries the same trivia surfaces.
 trivia_case!(
     named_handler_comments,
-    "effect State {\n\
+    "effect State\n\
      \x20 ctl get() : Int\n\
-     }\n\
      \n\
      fn run() : !{State} Int =\n\
      \x20 -- a named handler\n\

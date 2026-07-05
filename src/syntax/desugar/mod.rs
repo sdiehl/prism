@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::ast::{
-    BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, InstanceDecl, IntLit, NodeId,
-    Param, Pattern, Phase, Program, Spanned, Suffix, Ty, S,
+    BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
+    NodeId, Param, Pattern, Phase, Program, Spanned, Suffix, Ty, S,
 };
 use crate::error::TypeError;
 use crate::fresh::Fresh;
@@ -36,6 +36,7 @@ use synonyms::expand_synonyms;
 pub use sugar::{
     assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, interp_lit, let_pat,
     let_stmt, open_if, pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem,
+    DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT, FLIP_INSTANCE,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -82,6 +83,9 @@ fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -
             name: op_name,
             params: op_params,
             ret: Ty::Var(THROW_RET.into()),
+            // Never resumes: the poly-return restriction already forces every
+            // handler to `final ctl`, so grade Zero states the same fact.
+            grade: Grade::Zero,
         }],
         span,
     }
@@ -134,6 +138,7 @@ fn inject_return_effect(prog: &mut Program) {
             name: names::RETURN_OP.into(),
             params: vec![Ty::Var(names::RETURN_VAL.into())],
             ret: Ty::Var(THROW_RET.into()),
+            grade: Grade::Zero,
         }],
         span: Span::empty(0),
     });
@@ -487,6 +492,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         imports: prog.imports,
         exports: prog.exports,
         opaques: prog.opaques,
+        deprecated: prog.deprecated,
     };
     assign_ids(&mut out);
     Ok(out)
@@ -529,7 +535,10 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
     // imported (see `elaborate`); only then does a printing `main` need the world
     // handler to discharge the output ops. Without it, output lowers directly and
     // wrapping a reified-handler body in `run_io` would diverge on the backend.
-    let uses_replay = names::REPLAY_DRIVERS.iter().any(|f| names.contains(*f));
+    let uses_replay = names::REPLAY_DRIVERS.iter().any(|f| names.contains(*f))
+        || names::INCR_REPLAY_DRIVERS
+            .iter()
+            .any(|f| names.contains(*f));
     let reaches_output = uses_replay
         && reachable.iter().any(|n| {
             edges.get(n).is_some_and(|refs| {

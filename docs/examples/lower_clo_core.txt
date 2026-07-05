@@ -1,0 +1,2 @@
+fn adder(x) =
+  \y -> x + y            -- the lambda captures x

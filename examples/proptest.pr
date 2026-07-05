@@ -28,5 +28,8 @@ fn depth(t : Tree) : Int =
     Node(l, _, r) => 1 + max(depth(l), depth(r))
 
 fn main() =
-  report("flip twice is identity", quickcheck(arb_gen(), \(t) -> flip(flip(t)) == t))
+  report(
+      "flip twice is identity",
+      quickcheck(arb_gen(), \(t) -> flip(flip(t)) == t),
+    )
   report("depth never negative", quickcheck(arb_gen(), \(t) -> depth(t) >= 0))

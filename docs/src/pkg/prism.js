@@ -26,9 +26,98 @@ export function boids_run(steps) {
 }
 
 /**
- * The fully lowered CBPV core IR of the snippet's own functions (prelude
- * elided): effects lowered, reference counting and FBIP reuse applied. The
- * lowest-level view the browser can produce. The LLVM back-end is native only.
+ * Continue the boids swarm from an arbitrary state `state` for `steps` steps,
+ * returning the full-state trajectory (`boids_run_full`'s format) from that
+ * state.
+ *
+ * `state` is one full-state frame: a space-separated list of `x,y,vx,vy`
+ * integer boids, exactly a line of [`boids_run_full`]'s output. The branching
+ * demo forks a timeline by taking frame N of the base run, perturbing one boid,
+ * and passing the perturbed frame here. Because `run_trace_from` is a pure
+ * function of the swarm and the step count, replaying a branch with the same
+ * perturbed state is byte-identical: that is the determinism claim the two
+ * side-by-side timelines rest on. A malformed `state` returns an `error:` line.
+ * @param {string} state
+ * @param {number} steps
+ * @returns {string}
+ */
+export function boids_run_from(state, steps) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.boids_run_from(ptr0, len0, steps);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Run the boids swarm for `steps` steps and return the whole trajectory in
+ * FULL state: like [`boids_run`], but each boid is `x,y,vx,vy` (position and
+ * velocity), not just `x,y`.
+ *
+ * The velocity is what a branching timeline needs: to fork at frame N and
+ * continue the run, the frontend perturbs that frame's full state and hands it
+ * to [`boids_run_from`]. Positions alone cannot be continued (one `step` reads
+ * each boid's velocity), so the branch demo drives on this trajectory.
+ * @param {number} steps
+ * @returns {string}
+ */
+export function boids_run_full(steps) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.boids_run_full(steps);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Run one batch of `count` hostile schedules of the concurrent swarm, starting
+ * at seed index `start`, and report how many landed on the reference final
+ * state.
+ *
+ * Returns three lines: `<agreed> <count> <refhash>` (agreed is how many of the
+ * batch's schedules matched the global reference hash; it is always `count`,
+ * which is the determinism claim), then the interleaving of the batch's first
+ * two schedules as space-separated fiber ids. Each schedule is a distinct
+ * seeded-shuffle of the same fibers over the same channel, so the two
+ * interleavings differ while the hash does not. The browser calls this in
+ * growing batches to tick a progressive counter without freezing the tab: the
+ * count is what the frame budget affords, but every schedule genuinely agrees.
+ * On any error, returns the rendered diagnostic instead.
+ * @param {number} start
+ * @param {number} count
+ * @returns {string}
+ */
+export function chaos_run(start, count) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.chaos_run(start, count);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The fully lowered CBPV core IR of the snippet's own functions.
+ *
+ * Prelude elided: effects lowered, reference counting and FBIP reuse applied.
+ * The lowest-level view the browser can produce. The LLVM back-end is native
+ * only.
  * @param {string} src
  * @returns {string}
  */
@@ -115,9 +204,99 @@ export function fmt(src) {
 }
 
 /**
- * Run a snippet and return its captured `print` transcript verbatim (the exact
- * bytes emitted, the same the differential oracle compares). On any front-end
- * or runtime error, returns the rendered diagnostic instead.
+ * The snippet's own definitions as a content-addressed Merkle DAG.
+ *
+ * Returns a JSON array of `{name, hash, deps}` with the prelude elided: `hash`
+ * is the short content hash of the definition's elaborated core, and `deps`
+ * names the other user definitions it references. A definition's hash folds in
+ * its dependencies' hashes, so editing one definition moves its hash and the
+ * hash of everything that transitively depends on it, while independent code
+ * keeps its address. This is the same addressing `dump core-hash` and the
+ * on-disk store use; the browser only renders it. On a front-end error, returns
+ * `{"error": "..."}`.
+ * @param {string} src
+ * @returns {string}
+ */
+export function hash_defs(src) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(src, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.hash_defs(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * One re-demand of a fixed incremental demand graph, for the
+ * incremental-computation gallery resident.
+ *
+ * The graph is three source cells `a`, `b`, `c` feeding `total = a + b + c`,
+ * `peak = max(a, b, c)`, `scaled = total * 2`, `alert = peak * 10`, and
+ * `board = scaled + alert`. The `payload` is `{"prev": {a,b,c} | null, "next":
+ * {a,b,c}}`. With `prev` null this is the cold first demand: every derivation
+ * recomputes. Otherwise it runs the real `Incr` engine with `prev`, changes the
+ * sources to `next`, re-demands `board`, and classifies each cell: a derivation
+ * whose body re-ran is `recomputed` if its value changed and `cutoff` if the
+ * value was unchanged (so its dependents were spared), and one whose body never
+ * ran is `cached`. Returns JSON `{"nodes": [{"name","value","state"}]}` or
+ * `{"error": "..."}`.
+ * @param {string} payload
+ * @returns {string}
+ */
+export function incr_run(payload) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(payload, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.incr_run(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Run the double pendulum for `steps` frames and return the whole trajectory as
+ * text.
+ *
+ * The first line is the maximum reach (rod length + rod length), so the renderer
+ * can scale the pivot's disk to the canvas; each following line is one frame,
+ * `x1,y1,x2,y2`, the two bob centers with the pivot at the origin and y pointing
+ * down. Frame N is the symplectic integrator composed N times on the chaotic
+ * initial condition, a pure function of the index, so the scrubber positions its
+ * playhead at any frame by replaying to it. Every op is IEEE Float over the
+ * vendored libm, so the chaos is bit-identical on every backend and every replay.
+ * On any front-end or runtime error, returns the rendered diagnostic instead.
+ * @param {number} steps
+ * @returns {string}
+ */
+export function pendulum_run(steps) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.pendulum_run(steps);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Run a snippet and return its captured `print` transcript verbatim.
+ *
+ * The exact bytes emitted, the same the differential oracle compares. On any
+ * front-end or runtime error, returns the rendered diagnostic instead.
  * @param {string} src
  * @returns {string}
  */
@@ -134,6 +313,123 @@ export function run(src) {
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
+}
+
+/**
+ * The code-identity digest (namespace root) of the baked teleport program.
+ *
+ * Both tabs compute this from the same embedded source, so it is the hash the
+ * receiver checks an incoming envelope against; the demo shows it as the proof
+ * that teleport verifies code identity, not just moves bytes.
+ * @returns {string}
+ */
+export function teleport_bundle() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.teleport_bundle();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The machine-step budget to pass [`teleport_prefix`]/[`teleport_suspend`] to
+ * pause after each printed line, one entry per interior line boundary.
+ *
+ * Lets the demo's control read in lines ("pause after line 3") rather than opaque
+ * machine steps: the slider indexes this list. The last line is omitted because
+ * pausing there is a completed run with nothing to teleport.
+ * @returns {Uint32Array}
+ */
+export function teleport_cuts() {
+    const ret = wasm.teleport_cuts();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * The teleport program's output up to `steps` machine steps: what the sending tab
+ * has printed by the moment it suspends. Followed by [`teleport_resume`]'s output,
+ * this reproduces an uninterrupted run byte for byte.
+ * @param {number} steps
+ * @returns {string}
+ */
+export function teleport_prefix(steps) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.teleport_prefix(steps);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Resume a `kont` envelope in the receiving tab and return the continued output.
+ *
+ * The envelope is decoded totally (hostile bytes are rejected, not trusted) and
+ * its bundle digest is checked against this program's freshly derived code
+ * identity, so an envelope from a different program is refused by hash before a
+ * step runs. On success the returned suffix, following the sender's prefix,
+ * reproduces an uninterrupted run.
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+export function teleport_resume(bytes) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.teleport_resume(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * The baked teleport program's source, for the read-only panel beside the demo.
+ * @returns {string}
+ */
+export function teleport_source() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.teleport_source();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Suspend the teleport program after `steps` machine steps and return the whole
+ * continuation as `kont` envelope bytes: the value that flies between tabs.
+ *
+ * An empty result means the program finished before `steps` (nothing left to
+ * teleport). The bytes are the exact wire the receiver decodes; the animation
+ * shows them literally.
+ * @param {number} steps
+ * @returns {Uint8Array}
+ */
+export function teleport_suspend(steps) {
+    const ret = wasm.teleport_suspend(steps);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
 }
 
 /**
@@ -176,8 +472,26 @@ function __wbg_get_imports() {
     };
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
+}
+
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -186,6 +500,13 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
@@ -259,6 +580,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

@@ -1,20 +1,27 @@
-//! Surface lints: unused local bindings and shadowed names.
+//! Surface lints: unused local bindings, shadowed names, and deprecated uses.
 //!
 //! A read-only scope walk over the resolved surface program, run regardless of
 //! whether name canonicalization fired (it only does for multi-module builds).
-//! It warns when a local binding is never used, or shadows one already in scope.
+//! It warns when a local binding is never used, or shadows one already in scope,
+//! and when a use references a deprecated definition (a name carrying the surface
+//! `deprecated "..."` annotation, or a tower-superseded compiler builtin or float
+//! dot-operator; see `crate::deprecated`).
 //!
 //! Two filters keep the output signal: a binding whose name starts with `_` is
-//! exempt (the conventional "intentionally unused" marker), and only bindings in
-//! the user's own source are reported. The prelude is prepended, so its spans
-//! fall before `user_start` and its many internal bindings never surface as
+//! exempt (the conventional "intentionally unused" marker), and only bindings and
+//! uses in the user's own source are reported. The prelude is prepended, so its
+//! spans fall before `user_start` and its many internal bindings never surface as
 //! noise. Handler-arm binders (the continuation and op parameters, frequently
 //! and legitimately unused) are walked for their uses but not themselves linted.
 
+use std::collections::BTreeMap;
+
 use marginalia::Span;
 
+use crate::deprecated::{builtin_replacement, operator_replacement};
 use crate::syntax::ast::{
-    CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface, S,
+    BinOp, CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
+    S,
 };
 use crate::tc::Warning;
 
@@ -28,6 +35,9 @@ struct Lints {
     scope: Vec<Local>,
     warnings: Vec<Warning>,
     user_start: usize,
+    // Surface `deprecated "..."` suggestions, keyed by definition name. A use of
+    // one of these names in the user's source warns with the author's suggestion.
+    deprecated: BTreeMap<String, String>,
 }
 
 /// Collect unused-binding and shadowed-name warnings for the user's own source.
@@ -40,6 +50,7 @@ pub fn lint_bindings(prog: &Program, user_start: usize) -> Vec<Warning> {
         scope: Vec::new(),
         warnings: Vec::new(),
         user_start,
+        deprecated: prog.deprecated.clone(),
     };
     for d in &prog.fns {
         if d.span.start >= user_start {
@@ -86,6 +97,37 @@ impl Lints {
     fn use_name(&mut self, name: &str) {
         if let Some(b) = self.scope.iter_mut().rev().find(|b| b.name == name) {
             b.uses += 1;
+        }
+    }
+
+    // Warn when `name` names a deprecated definition. A local binding shadows the
+    // deprecation (it is a different definition), so only free names are checked;
+    // the annotation suggestion wins over the builtin table when both match.
+    fn dep_name(&mut self, name: &str, span: Span) {
+        if !self.in_user(span) || self.scope.iter().any(|b| b.name == name) {
+            return;
+        }
+        if let Some(msg) = self.deprecated.get(name) {
+            let msg = format!("`{name}` is deprecated: {msg}");
+            self.warnings.push(Warning { span, msg });
+        } else if let Some(repl) = builtin_replacement(name) {
+            let msg = format!("`{name}` is deprecated; use `{repl}` instead");
+            self.warnings.push(Warning { span, msg });
+        }
+    }
+
+    // Warn when `op` is a deprecated float dot-operator, naming the tower spelling.
+    fn dep_op(&mut self, op: BinOp, span: Span) {
+        if !self.in_user(span) {
+            return;
+        }
+        if let Some(repl) = operator_replacement(op) {
+            let msg = format!(
+                "the `{}` operator is deprecated; use `{}` instead",
+                op.spelling(),
+                repl.spelling()
+            );
+            self.warnings.push(Warning { span, msg });
         }
     }
 
@@ -268,7 +310,10 @@ impl Lints {
 
     fn expr(&mut self, e: &S<Expr>) {
         match &e.node {
-            Expr::Var(x) => self.use_name(x),
+            Expr::Var(x) => {
+                self.use_name(x);
+                self.dep_name(x, e.span);
+            }
             Expr::Sugar(s) => self.sugar(s, e.span),
             Expr::Let(x, v, b) => {
                 let base = self.scope.len();
@@ -296,7 +341,12 @@ impl Lints {
                     self.pop_to(base);
                 }
             }
-            Expr::Bin(_, a, b) | Expr::Pipe(a, b) => {
+            Expr::Bin(op, a, b) => {
+                self.dep_op(*op, e.span);
+                self.expr(a);
+                self.expr(b);
+            }
+            Expr::Pipe(a, b) => {
                 self.expr(a);
                 self.expr(b);
             }
@@ -316,7 +366,11 @@ impl Lints {
                     self.expr(x);
                 }
             }
-            Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => {
+            Expr::FieldAccess(b, _)
+            | Expr::Inst(b, _)
+            | Expr::Ann(b, _)
+            | Expr::Mask(_, b)
+            | Expr::Neg(b) => {
                 self.expr(b);
             }
             Expr::Index(recv, key) => {

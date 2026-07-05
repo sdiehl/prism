@@ -1,6 +1,5 @@
-effect Tick {
+effect Tick
   ctl tick(Unit) : Int
-}
 
 alias App = {Tick, Missing}
 

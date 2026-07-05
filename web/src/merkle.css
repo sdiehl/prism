@@ -1,0 +1,202 @@
+/* The content-addressed resident: an editable definition list on the left and
+   the live Merkle DAG on the right, both on the demo face; the Source face shows
+   the same program highlighted and read-only, per the house template. Palette
+   and the flip come from showcase.css / theme.css. */
+.merkle-body .resident {
+  width: min(100%, 920px);
+}
+
+.merkle-main {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(320px, 1fr);
+  gap: 1.3rem;
+  width: 100%;
+  min-width: 0;
+}
+
+/* The editor column: a title, the source textarea, and an error line under it. */
+.merkle-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.edit-title,
+.graph-title {
+  font-family: var(--ui);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.merkle-src {
+  width: 100%;
+  min-height: 300px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  padding: 0.9rem 1rem;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink);
+  tab-size: 2;
+}
+.merkle-src:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.merkle-err {
+  min-height: 1.2em;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--err);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.merkle-err.show {
+  opacity: 1;
+}
+
+/* The graph column: the DAG frame and the explanatory caption below it. */
+.merkle-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.merkle-view .caption {
+  max-width: none;
+  text-align: left;
+  margin-top: 0.2rem;
+}
+
+/* The DAG frame: nodes are absolutely positioned HTML chips, edges an SVG layer
+   painted beneath them. The height is set from script once the layout is known. */
+.dag {
+  position: relative;
+  width: 100%;
+  min-height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  transition: opacity 0.2s;
+}
+.dag.stale {
+  opacity: 0.5;
+}
+.dag-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+  transition: stroke 0.3s;
+}
+.edge--hot {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* A node chip: name over a monospace hash, centered on its layout point. */
+.node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+  white-space: nowrap;
+  z-index: 1;
+}
+.node-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.node-hash {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  transition:
+    color 0.25s,
+    background 0.25s;
+}
+.node-twin {
+  font-family: var(--ui);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.node.twin {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+
+/* The cascade highlight: a changed node lifts onto the accent, its hash chip
+   flashes, and a soft ring pulses out once. */
+.node.changed {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  animation: node-pulse 0.9s ease-out;
+}
+.node.changed .node-hash {
+  color: #fff;
+  background: var(--accent);
+}
+@keyframes node-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-wash);
+  }
+  60% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node.changed {
+    animation: none;
+  }
+}
+
+/* Phone layout: stack the editor above the graph, widen touch targets, and let
+   the whole column breathe. The DAG stays inside its frame; nodes are placed
+   from the measured width, so it never forces horizontal page scroll. */
+@media (max-width: 720px) {
+  .merkle-main {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .merkle-src {
+    min-height: 200px;
+    font-size: 13px;
+  }
+  .merkle-view .caption {
+    text-align: center;
+  }
+}

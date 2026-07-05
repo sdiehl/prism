@@ -58,6 +58,38 @@ fn rt_tree_go(x : Tree) : Bool =
 
 fn rt_tree(x : Tree) : Bool = caught(false, \() -> rt_tree_go(x))
 
+-- Tuples get their codec from the compiler's arity-keyed instances, not a derive.
+-- They have no synthesized `Eq`, so the roundtrip compares through the structural
+-- tuple `show` (which they do have). The list-of-pairs case is the shape the
+-- leaderboard example carries directly now that its parallel-list workaround retired.
+-- Typed decode wrappers pin the element types so `decode` resolves its instance,
+-- the same device `decode_tree` uses below for the hostile-input fuzzer.
+fn dec_pair(bs : Bytes) : ((Int, String), Bytes) = decode(bs)
+
+fn dec_triple(bs : Bytes) : ((Int, String, Bool), Bytes) = decode(bs)
+
+fn dec_pairs(bs : Bytes) : (List((String, Int)), Bytes) = decode(bs)
+
+fn rt_pair_go(x : (Int, String)) : Bool =
+  match dec_pair(encode(x)) of
+    (v, r) => show(v) == show(x) && wire_is_empty(r)
+
+fn rt_pair(x : (Int, String)) : Bool = caught(false, \() -> rt_pair_go(x))
+
+fn rt_triple_go(x : (Int, String, Bool)) : Bool =
+  match dec_triple(encode(x)) of
+    (v, r) => show(v) == show(x) && wire_is_empty(r)
+
+fn rt_triple(x : (Int, String, Bool)) : Bool =
+  caught(false, \() -> rt_triple_go(x))
+
+fn rt_pairs_go(x : List((String, Int))) : Bool =
+  match dec_pairs(encode(x)) of
+    (v, r) => show(v) == show(x) && wire_is_empty(r)
+
+fn rt_pairs(x : List((String, Int))) : Bool =
+  caught(false, \() -> rt_pairs_go(x))
+
 -- Three frozen rungs and their adjacent converters. A field addition upgrades by
 -- defaulting the new field and downgrades by dropping it, recording the drop as a
 -- Loss only when the field held a non-default value.
@@ -134,7 +166,12 @@ fn envelope_wrong_digest(x : Shape) : Bool =
 
 fn envelope_trailing(x : Shape) : Bool =
   caught(true) fn
-    dec_shape_at(wire_cat(wire_encode_value(good_digest, x), wire_tag(0)), good_digest) == x && false
+    dec_shape_at(
+        wire_cat(wire_encode_value(good_digest, x), wire_tag(0)),
+        good_digest,
+      )
+      == x
+      && false
 
 fn envelope_law(x : Shape) : Bool =
   envelope_ok(x) && envelope_wrong_digest(x) && envelope_trailing(x)
@@ -150,7 +187,8 @@ fn to_byte(x : Int) : Int =
 
 let gen_byte : Gen(Int) = gen_map(to_byte, gen_int)
 
-let gen_bytes : Gen(Bytes) = gen_map(\(xs) -> Bytes(xs), gen_list(gen_byte))
+let gen_bytes : Gen(Bytes) =
+  gen_map(\(xs) -> bytes_of_list(xs), gen_list(gen_byte))
 
 -- Decode a hostile byte string as a Tree, discharging Fail. The property is that
 -- this always terminates with a Bool, never hangs or panics; the value is
@@ -172,6 +210,15 @@ fn body() =
   report("roundtrip product", quickcheck(arb_gen(), rt_point))
   report("roundtrip sum", quickcheck(arb_gen(), rt_shape))
   report("roundtrip recursive", quickcheck(arb_gen(), rt_tree))
+  report("roundtrip pair", quickcheck(gen_pair(gen_int, gen_string), rt_pair))
+  report(
+      "roundtrip triple",
+      quickcheck(gen_triple(gen_int, gen_string, gen_bool), rt_triple),
+    )
+  report(
+      "roundtrip list of pairs",
+      quickcheck(gen_list(gen_pair(gen_string, gen_int)), rt_pairs),
+    )
   report("ladder adjacent", quickcheck(arb_gen(), ladder_adjacent))
   report("ladder composed", quickcheck(arb_gen(), ladder_composed))
   report("envelope digest+trailing", quickcheck(arb_gen(), envelope_law))

@@ -14,6 +14,14 @@ the free-monad lowering erases them before this core runs. The relation is
 proved deterministic (`Step.deterministic`), so a closed computation has at
 most one normal form.
 
+Type-level indices are outside this model by the same erasure discipline. The
+`Nat` kind (`type Vec(a, n : Nat)`) constrains only what type-checks; a
+dimension is erased before this Core, exactly as effects are, so it reaches
+neither `Value`/`Comp` nor the dynamics and adds no rule here. The model
+therefore needs no change for the `Nat` kind: its correctness lives entirely in
+the type checker (`src/tc`), and its runtime footprint is provably nil because
+the thing it constrains never appears in the term language the machine runs.
+
 The DESIGN s3 deconstructors and the lens answer add no new core: a record
 is a `ctor`, a nested update path is a `case` that destructures the spine and
 rebuilds it field for field (FBIP-reused via `reuse` when the spine is

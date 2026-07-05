@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/classes_unresolved.pr
 ---
 == tokens ==
-VOpen Type UIdent("Color") Eq UIdent("Red") Bar UIdent("Green") Bar UIdent("Blue") VSemi Class UIdent("Eq2") LParen Ident("a") RParen LBrace Ident("eq2") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool RBrace VSemi Instance Ident("eqInt2") Colon UIdent("Eq2") LParen KwInt RParen LBrace Fn Ident("eq2") LParen Ident("x") Comma Ident("y") RParen Eq Ident("x") EqEq Ident("y") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("eq2") LParen UIdent("Red") Comma UIdent("Blue") RParen VClose
+VOpen Type UIdent("Color") Eq UIdent("Red") Bar UIdent("Green") Bar UIdent("Blue") VSemi Class UIdent("Eq2") LParen Ident("a") RParen VOpen Ident("eq2") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool VClose VSemi Instance Ident("eqInt2") Colon UIdent("Eq2") LParen KwInt RParen VOpen Fn Ident("eq2") LParen Ident("x") Comma Ident("y") RParen Eq Ident("x") EqEq Ident("y") VClose VSemi Fn Ident("main") LParen RParen Eq Ident("eq2") LParen UIdent("Red") Comma UIdent("Blue") RParen VClose
 
 == ast ==
 Program {
@@ -60,7 +60,7 @@ Program {
                     ),
                 ),
             ],
-            span: 33..72,
+            span: 33..68,
         },
     ],
     instances: [
@@ -96,23 +96,23 @@ Program {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 120..121,
+                                span: 114..115,
                             },
                             Spanned {
                                 node: Var(
                                     "y",
                                 ),
-                                span: 125..126,
+                                span: 119..120,
                             },
                         ),
-                        span: 120..126,
+                        span: 114..120,
                     },
                     wheres: [],
-                    span: 105..126,
+                    span: 99..120,
                 },
             ],
             module: "",
-            span: 74..128,
+            span: 70..120,
         },
     ],
     fns: [
@@ -128,36 +128,36 @@ Program {
                         node: Var(
                             "eq2",
                         ),
-                        span: 142..145,
+                        span: 134..137,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "Red",
                             ),
-                            span: 146..149,
+                            span: 138..141,
                         },
                         Spanned {
                             node: Var(
                                 "Blue",
                             ),
-                            span: 151..155,
+                            span: 143..147,
                         },
                     ],
                 ),
-                span: 142..156,
+                span: 134..148,
             },
             wheres: [],
-            span: 130..156,
+            span: 122..148,
         },
     ],
 }
 
 == types ==
 Type Error: in `main`: no instance for Eq2(Color)
-    ╭─[ <source>:11:13 ]
-    │
- 11 │ fn main() = eq2(Red, Blue)
-    │             ─┬─  
-    │              ╰─── in `main`: no instance for Eq2(Color)
-────╯
+   ╭─[ <source>:9:13 ]
+   │
+ 9 │ fn main() = eq2(Red, Blue)
+   │             ─┬─  
+   │              ╰─── in `main`: no instance for Eq2(Color)
+───╯

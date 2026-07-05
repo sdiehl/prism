@@ -36,6 +36,13 @@ const SRC_PATH: &str = "path";
 const SRC_GIT: &str = "git";
 const SRC_HASH: &str = "hash";
 
+// The reserved name of the standard-library pin. Unlike a dependency row, the
+// Std pin has no `source` field: its bytes are the compiler's embedded stdlib, so
+// the pin records only the root hash the lockfile was resolved against. Written
+// as a distinguished two-field line (`std<TAB><root-hash>`) so it never collides
+// with a three-field dependency row, even one a project happened to name `std`.
+const STD_ROOT_NAME: &str = "std";
+
 /// The resolved pin of one dependency: its name, the root hash it resolved to,
 /// and the source that hash was resolved from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,14 +52,31 @@ pub struct LockEntry {
     pub source: DepSource,
 }
 
-/// A parsed `prism.lock`: the pinned dependencies, ordered by name so the file is
-/// stable across writes and diffs cleanly.
+/// A parsed `prism.lock`: the pinned standard-library root and dependencies,
+/// ordered by name so the file is stable across writes and diffs cleanly.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lock {
+    /// The standard-library root hash the lockfile is pinned against (the fold
+    /// `driver::stdlib_hash` produces). `None` when the lock predates a Std pin,
+    /// in which case the build runs against whatever stdlib the compiler embeds.
+    pub std_root: Option<String>,
     pub entries: Vec<LockEntry>,
 }
 
 impl Lock {
+    /// Pin the standard library to `root`, the fold over the embedded stdlib. A
+    /// build can then detect that its compiler ships a different Std than the one
+    /// the lock was resolved against ([`crate::pkg::std_pin_status`]).
+    pub fn pin_std(&mut self, root: String) {
+        self.std_root = Some(root);
+    }
+
+    /// The pinned standard-library root, if the lock records one.
+    #[must_use]
+    pub fn std_root(&self) -> Option<&str> {
+        self.std_root.as_deref()
+    }
+
     /// Insert or replace the pin for `entry.name`, keeping the entries sorted.
     pub fn set(&mut self, entry: LockEntry) {
         match self.entries.iter_mut().find(|e| e.name == entry.name) {
@@ -80,12 +104,22 @@ impl Lock {
                 "prism.lock: missing or unrecognized header (expected {LOCK_HEADER:?})"
             )));
         }
+        let mut std_root = None;
         let mut entries = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
+            // The Std pin is the two-field `std<TAB><hash>` line; everything else
+            // is a three-field dependency row.
+            let fields: Vec<&str> = line.splitn(3, FIELD_SEP).collect();
+            if let [name, hash] = fields.as_slice() {
+                if *name == STD_ROOT_NAME {
+                    std_root = Some((*hash).to_string());
+                    continue;
+                }
+            }
             entries.push(parse_row(line)?);
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(Self { entries })
+        Ok(Self { std_root, entries })
     }
 
     /// Render the lock to its committed text.
@@ -96,6 +130,10 @@ impl Lock {
     pub fn render(&self) -> Result<String, Error> {
         let mut out = String::from(LOCK_HEADER);
         out.push('\n');
+        if let Some(root) = &self.std_root {
+            reject_separators(root)?;
+            let _ = writeln!(out, "{STD_ROOT_NAME}{FIELD_SEP}{root}");
+        }
         for e in &self.entries {
             let source = source_field(&e.source)?;
             reject_separators(&e.name)?;
@@ -221,6 +259,26 @@ mod tests {
         });
         assert_eq!(lock.get("geo").unwrap().hash, "beef");
         assert_eq!(lock.entries.len(), 3);
+    }
+
+    #[test]
+    fn std_pin_round_trips_above_the_deps() {
+        let mut lock = sample();
+        lock.pin_std("deadbeef".to_string());
+        let text = lock.render().unwrap();
+        // The Std pin is the first line under the header, before any dependency.
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some(LOCK_HEADER));
+        assert_eq!(lines.next(), Some("std\tdeadbeef"));
+        assert_eq!(Lock::parse(&text).unwrap(), lock);
+        assert_eq!(Lock::parse(&text).unwrap().std_root(), Some("deadbeef"));
+    }
+
+    #[test]
+    fn a_lock_without_a_std_pin_is_unpinned() {
+        let text = sample().render().unwrap();
+        assert!(!text.contains("std\t"));
+        assert_eq!(Lock::parse(&text).unwrap().std_root(), None);
     }
 
     #[test]

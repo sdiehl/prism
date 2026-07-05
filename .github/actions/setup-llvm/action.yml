@@ -1,8 +1,8 @@
 name: Setup LLVM 22
 description: >
-  Add the apt.llvm.org snapshot repo and install LLVM 22, with the downloaded
-  .deb archives cached so repeat runs skip the multi-minute download. One
-  definition shared by the Test, Lean, and MLIR jobs.
+  Add the apt.llvm.org snapshot repo and install LLVM 22 (downloaded .deb
+  archives cached so repeat runs skip the multi-minute download), plus the mold
+  linker as the default. One definition shared by the compiling CI jobs.
 
 inputs:
   packages:
@@ -37,3 +37,12 @@ runs:
       with:
         packages: llvm-22-dev libpolly-22-dev clang-22 ${{ inputs.packages }}
         version: llvm22
+
+    # mold is a far faster linker than ld; the compiler links libLLVM on every
+    # build, so linking is a real chunk of wall-clock. make-default routes rustc's
+    # cc linking through mold with no RUSTFLAGS, so it adds no sccache-key churn.
+    # (Pinned to a tag like the action above; pin to a SHA to harden further.)
+    - name: Install mold linker
+      uses: rui314/setup-mold@v1
+      with:
+        make-default: true

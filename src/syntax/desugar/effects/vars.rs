@@ -9,7 +9,7 @@ use super::escape::escapes;
 use super::{rw, Binding, Vars};
 use crate::error::TypeError;
 use crate::names::{self, CONT, RET, STATE, UNIT_ARG, VAL};
-use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, HandlerArm, Ty, S};
+use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, Ty, S};
 use crate::syntax::desugar::{call, evar, lam1, sp, Cx};
 
 pub(super) fn rw_var_decl(
@@ -33,11 +33,16 @@ pub(super) fn rw_var_decl(
                 name: get.clone(),
                 params: vec![Ty::Unit],
                 ret: st.clone(),
+                // The parameter-passing State handler resumes exactly once in
+                // tail position (`get(u,k) => \s -> k(s)(s)`), so both ops are
+                // grade One.
+                grade: Grade::One,
             },
             EffOp {
                 name: put.clone(),
                 params: vec![st],
                 ret: Ty::Unit,
+                grade: Grade::One,
             },
         ],
         span,

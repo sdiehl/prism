@@ -6,14 +6,15 @@
 // identical computation re-indexed. No dependencies beyond the wasm bundle.
 import init, { boids_run, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
-import "./scrubber.css";
+import { highlight, initFaces, kernel } from "./showcase.js";
+import "./showcase.css";
 
-// The read-only source shown beside the demo: the boids program exactly as it
+// The source shown on the surface's back face: the boids program exactly as it
 // runs, sliced at the same sentinel the wasm driver uses so the terminal `main`
 // is dropped and only the honest kernel remains. Baked in at build time by
 // gen-examples (no runtime fetch); the sentinel line itself is stripped.
 const KERNEL_SPLIT = "-- @scrubber:main-below";
-const KERNEL_SRC = (examples.boids ?? "").split(KERNEL_SPLIT)[0].trimEnd();
+const KERNEL_SRC = kernel(examples.boids, KERNEL_SPLIT);
 
 // How many steps of the swarm to replay. The single upfront `boids_run` computes
 // every frame 0..STEPS; scrubbing after that is pure array indexing.
@@ -35,41 +36,10 @@ const frameEl = el<HTMLSpanElement>("frame");
 const codeEl = el<HTMLElement>("code");
 const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
 
-interface Tok {
-  s: number;
-  e: number;
-  c: string;
-}
-
-const esc = (s: string): string =>
-  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] ?? c);
-
-// Paint the source panel with the same wasm `tokens` highlighter the playground
-// uses: cut the text at every token boundary and wrap each slice in its token
-// class (`tk-<kind>`, coloured in theme.css). Read-only, no diagnostics. Falls
-// back to plain escaped text before wasm is ready.
-function renderCode(): void {
-  const text = KERNEL_SRC;
-  const toks: Tok[] = JSON.parse(tokens(text));
-  const cuts = [...new Set([0, text.length, ...toks.flatMap((t) => [t.s, t.e])])]
-    .filter((p) => p >= 0 && p <= text.length)
-    .sort((a, b) => a - b);
-  let html = "";
-  for (let i = 0; i < cuts.length - 1; i++) {
-    const a = cuts[i];
-    const b = cuts[i + 1];
-    if (b <= a) continue;
-    const tk = toks.find((t) => t.s <= a && t.e >= b);
-    const cls = tk && tk.c !== "id" ? `tk-${tk.c}` : "";
-    const seg = esc(text.slice(a, b));
-    html += cls ? `<span class="${cls}">${seg}</span>` : seg;
-  }
-  codeEl.innerHTML = html;
-}
-
-// Show the plain source immediately; boot() upgrades it to highlighted once the
-// wasm tokenizer is available.
+// Show the plain source immediately and wire the Demo/Source flip; boot()
+// upgrades the source to highlighted once the wasm tokenizer is available.
 codeEl.textContent = KERNEL_SRC;
+initFaces();
 
 const css = (name: string): string =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -235,7 +205,7 @@ window.addEventListener("resize", resize);
 async function boot(): Promise<void> {
   try {
     await init();
-    renderCode();
+    highlight(codeEl, KERNEL_SRC, tokens);
     statusEl.textContent = `Simulating ${STEPS} deterministic steps...`;
     // Yield to the event loop so the status text paints before the wasm run
     // blocks. `setTimeout` rather than `requestAnimationFrame`, so a tab loaded

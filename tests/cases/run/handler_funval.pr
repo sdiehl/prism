@@ -1,8 +1,7 @@
-effect Cfg {
-  ctl ask(Unit) : Int,
-  ctl config() : Int,
+effect Cfg
+  ctl ask(Unit) : Int
+  ctl config() : Int
   ctl tell(Int) : Unit
-}
 
 fn use_env() : !{Cfg} Int =
   tell(ask(()))

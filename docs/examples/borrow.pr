@@ -1,0 +1,26 @@
+-- `borrow` lets a function read a parameter without taking ownership of it, so
+-- the caller keeps the value live for later use. Here `xs` is borrowed by both
+-- `len` and `scale`, so `main` still owns it and can sum it afterward.
+-- Expected output:
+--
+--   4
+--   40
+--   10
+
+fn len(borrow xs) =
+  match xs of
+    Nil => 0
+    Cons(_, rest) => 1 + len(rest)
+
+fn scale(borrow xs, k) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => Cons(x * k, scale(rest, k))
+
+fn main() =
+  let xs = [1, 2, 3, 4]
+  let n = len(xs)
+  let ys = scale(xs, n)
+  println(n)
+  println(sum(ys))
+  println(sum(xs))

@@ -70,6 +70,108 @@ fn main() =
     )
 }
 
+// The store-substrate twin of `cc_program`: the same `get(a) + 40 = 42` durable
+// computation, but persisted onto the content-addressed store rooted at `root`
+// (tag `cc`) via `run_incr_store` rather than a snapshot file.
+fn store_program(root: &str) -> String {
+    format!(
+        r#"import Incr (..)
+
+fn main() =
+  let r = run_incr_store("{root}", "cc") fn
+    let a = input(2)
+    let m = memo(\() -> get(a) + 40)
+    show_int(get(m))
+  println(r)
+"#
+    )
+}
+
+// Every regular file under `dir`, recursively. Used to reach the one anonymous
+// object a pure durable run writes so a test can tamper or drop it.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(files_under(&p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+// A warm run reusing the store-backed snapshot prints byte-for-byte what the cold
+// run printed: the store bridge preserves the durable north-star property (the
+// persisted memo table changes cost, never output), and a second store commit of
+// an unchanged snapshot writes no new object.
+#[test]
+fn store_warm_output_matches_cold() {
+    let root = format!("target/incr_store_{}", std::process::id());
+    let _ = fs::remove_dir_all(&root);
+    let prog = store_program(&root);
+
+    let (cold, cold_err) = run_io(&prog);
+    assert!(!cold_err, "cold run finishes cleanly");
+    assert!(cold.contains("42"), "cold run computes 42, got {cold:?}");
+
+    let objects = Path::new(&root).join("objects");
+    let before = files_under(&objects).len();
+    assert!(before >= 1, "the cold run writes at least one store object");
+
+    let (warm, warm_err) = run_io(&prog);
+    assert!(!warm_err, "warm run finishes cleanly");
+    assert_eq!(cold, warm, "warm output is byte-identical to cold");
+    assert_eq!(
+        files_under(&objects).len(),
+        before,
+        "an unchanged snapshot re-commits to the same object, writing none"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+// A store entry that is dropped (the whole store removed) or tampered (one object
+// byte bumped, so it no longer hashes to its ref) is a silent cold start: the
+// program still computes 42, never errors, never serves a corrupted value. The
+// content-addressing is what turns tampering into a cold start.
+#[test]
+fn store_dropped_or_corrupt_entry_cold_starts() {
+    let root = format!("target/incr_store_bad_{}", std::process::id());
+    let prog = store_program(&root);
+
+    // Dropped: no store at all cold-starts to 42.
+    let _ = fs::remove_dir_all(&root);
+    let (dropped, dropped_err) = run_io(&prog);
+    assert!(
+        !dropped_err && dropped.contains("42"),
+        "missing store cold-starts to 42, got {dropped:?}"
+    );
+
+    // Populate, then tamper the single anonymous object: flip a byte so its
+    // content hash no longer matches the ref.
+    let _ = fs::remove_dir_all(&root);
+    run_io(&prog);
+    let objects = Path::new(&root).join("objects");
+    let obj = files_under(&objects)
+        .into_iter()
+        .next()
+        .expect("a store object exists after a run");
+    let mut bytes = fs::read(&obj).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] = bytes[last].wrapping_add(1);
+    fs::write(&obj, &bytes).unwrap();
+
+    let (tampered, tampered_err) = run_io(&prog);
+    assert!(
+        !tampered_err && tampered.contains("42"),
+        "tampered object cold-starts to 42, got {tampered:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn leaderboard_matches_spec_output() {
     let out = run("examples/leaderboard.pr");
@@ -108,7 +210,7 @@ fn incremental_equals_from_scratch() {
 
 // A warm run of the pure durable demo reuses every prefix memo from the snapshot,
 // yet prints byte-for-byte what the cold run printed. This is the north-star
-// property for B1's durable half: the snapshot changes cost, never output.
+// property for the durable path: the snapshot changes cost, never output.
 #[test]
 fn durable_warm_output_matches_cold() {
     let snap = Path::new("target/incr_warm.snap");
@@ -220,4 +322,137 @@ fn durable_input_dependent_creation_warm_matches_cold() {
     );
     assert!(cold.contains("111"), "expected 111, got {cold:?}");
     let _ = fs::remove_file(&snap);
+}
+
+// ---------- trace-replay-on-hit (effectful durable memos) ----------
+
+// A durable trace-replay program: a memo that PRINTS `FIRE` when it fires and
+// computes `get(a) + 40 = 42`, plus a nested memo `n` that PRINTS `NEST` and
+// doubles the result. The pure `run_incr_durable` would reject a printing memo;
+// `run_incr_durable_replay` records each memo's output and replays it on a hit,
+// so cold and warm print the same bytes. The nested memo exercises the trace
+// splice (a child's output rides its parent's trace in call order).
+fn trace_program(snap: &str) -> String {
+    format!(
+        r#"import Incr (..)
+
+fn main() =
+  run_incr_durable_replay("{snap}", "tr") fn
+    let a = input(2)
+    let base = memo() fn
+      println("FIRE")
+      get(a) + 40
+    let nested = memo() fn
+      println("NEST before")
+      let b = get(base)
+      println("NEST after")
+      b * 2
+    println(show_int(get(nested)))
+"#
+    )
+}
+
+// The cold run records every memo's output trace; the warm run replays it and
+// skips every thunk, yet prints byte-for-byte what the cold run printed,
+// INCLUDING the effects (`FIRE`, `NEST before/after`) and in the same nested
+// order. This is the north star: a durable hit re-emits the recorded effects,
+// so a warm run is observationally identical to a cold one.
+#[test]
+fn trace_replay_warm_output_matches_cold_including_effects() {
+    let snap = format!("target/incr_trace_{}.snap", std::process::id());
+    let prog = trace_program(&snap);
+    let _ = fs::remove_file(&snap);
+
+    let (cold, cold_err) = run_io(&prog);
+    assert!(!cold_err, "cold run finishes cleanly, got {cold:?}");
+    assert!(snap_exists(&snap), "the cold run writes a trace snapshot");
+    assert_eq!(
+        cold, "NEST before\nFIRE\nNEST after\n84\n",
+        "cold run fires the memos in nested call order"
+    );
+
+    let (warm, warm_err) = run_io(&prog);
+    assert!(!warm_err, "warm run finishes cleanly, got {warm:?}");
+    assert_eq!(
+        cold, warm,
+        "warm output is byte-identical to cold, effects included"
+    );
+    let _ = fs::remove_file(&snap);
+}
+
+// Exactly-once-equivalence: each recorded effect is re-emitted once on a warm
+// run, never doubled (replay AND recompute both firing) or dropped (a hit
+// staying silent). Counting the fire markers in cold and warm and asserting they
+// are equal and nonzero is the guard that would catch either fault.
+#[test]
+fn trace_replay_effects_are_exactly_once() {
+    let snap = format!("target/incr_once_{}.snap", std::process::id());
+    let prog = trace_program(&snap);
+    let _ = fs::remove_file(&snap);
+
+    let (cold, _) = run_io(&prog);
+    let (warm, _) = run_io(&prog);
+    for marker in ["FIRE", "NEST before", "NEST after"] {
+        let c = cold.matches(marker).count();
+        let w = warm.matches(marker).count();
+        assert_eq!(c, 1, "cold emits `{marker}` exactly once, got {c}");
+        assert_eq!(
+            w, c,
+            "warm re-emits `{marker}` exactly as often as cold (no double/drop)"
+        );
+    }
+    let _ = fs::remove_file(&snap);
+}
+
+// A dropped snapshot (removed) or a corrupted one (body tampered so the header
+// digest no longer matches) is a silent cold start: the memos re-fire, print the
+// same bytes, and the run never errors. The recorded trace is a cache, never a
+// source of truth.
+#[test]
+fn trace_replay_dropped_or_corrupt_cold_starts() {
+    let snap = format!("target/incr_trbad_{}.snap", std::process::id());
+    let prog = trace_program(&snap);
+
+    // Baseline cold output to compare every cold start against.
+    let _ = fs::remove_file(&snap);
+    let (baseline, base_err) = run_io(&prog);
+    assert!(!base_err, "baseline cold run is clean");
+
+    // Dropped: no snapshot at all cold-starts to the same bytes.
+    let _ = fs::remove_file(&snap);
+    let (dropped, dropped_err) = run_io(&prog);
+    assert!(!dropped_err, "missing snapshot never errors");
+    assert_eq!(
+        dropped, baseline,
+        "missing snapshot cold-starts identically"
+    );
+
+    // Corrupted: write a real snapshot, tamper its body (bump one byte value) so
+    // the header digest fails, and confirm it cold-starts rather than serving a
+    // corrupted trace.
+    let _ = fs::remove_file(&snap);
+    run_io(&prog);
+    let good = fs::read_to_string(&snap).unwrap();
+    let (head, body) = good.split_once('\n').unwrap();
+    let tampered = format!("{head}\n{body}x");
+    fs::write(&snap, tampered).unwrap();
+    let (corrupt, corrupt_err) = run_io(&prog);
+    assert!(!corrupt_err, "corrupt snapshot never errors");
+    assert_eq!(
+        corrupt, baseline,
+        "corrupt snapshot cold-starts identically"
+    );
+
+    // A foreign tag is a cold start too: the same digest-checked header carries
+    // the caller identity, so a snapshot written under another tag is ignored.
+    let _ = fs::remove_file(&snap);
+    fs::write(&snap, "prism-incr-trace-snapshot\t1\tOTHER\t00\n\n").unwrap();
+    let (foreign, foreign_err) = run_io(&prog);
+    assert!(!foreign_err, "foreign-tag snapshot never errors");
+    assert_eq!(foreign, baseline, "foreign tag cold-starts identically");
+    let _ = fs::remove_file(&snap);
+}
+
+fn snap_exists(path: &str) -> bool {
+    Path::new(path).exists()
 }

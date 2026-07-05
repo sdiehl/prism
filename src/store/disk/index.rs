@@ -41,10 +41,12 @@ use super::{atomic_write, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
 const NAMES_FILE: &str = "names";
 const DEPS_FILE: &str = "deps";
 const CANONICAL_FILE: &str = "canonical";
+const REFS_FILE: &str = "refs";
 
 const NAMES_HEADER: &str = "prism-store-names\tv1";
 const DEPS_HEADER: &str = "prism-store-deps\tv1";
 const CANONICAL_HEADER: &str = "prism-store-canonical\tv1";
+const REFS_HEADER: &str = "prism-store-refs\tv1";
 
 /// A `(class, type-head)` pair identifying a canonical instance binding. This is
 /// the on-disk key shape; coherence enforcement owns the semantics.
@@ -222,6 +224,40 @@ pub(super) fn set_canonical(
 
 pub(super) fn canonical(root: &Path, key: &CanonicalKey) -> io::Result<Option<String>> {
     Ok(load_canonical(root)?.remove(&(key.class.clone(), key.head.clone())))
+}
+
+// The `refs` index: mutable, caller-named pointers into the immutable object
+// layer (git refs). A ref names one blob by its content hash; repointing it
+// leaves the old object in place. Kept apart from `names` so a definition name
+// and a caller tag can never collide on one slot.
+fn load_refs(root: &Path) -> io::Result<BTreeMap<String, String>> {
+    let mut map = BTreeMap::new();
+    for line in read_lines(&index_dir(root).join(REFS_FILE), REFS_HEADER)? {
+        if let Some((name, hash)) = line.split_once(FIELD_SEP) {
+            map.insert(name.to_string(), hash.to_string());
+        }
+    }
+    Ok(map)
+}
+
+fn write_refs(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
+    let mut body = String::from(REFS_HEADER);
+    body.push('\n');
+    for (name, hash) in map {
+        let _ = writeln!(body, "{name}{FIELD_SEP}{hash}");
+    }
+    atomic_write(&index_dir(root).join(REFS_FILE), body.as_bytes())
+}
+
+pub(super) fn set_ref(root: &Path, name: &str, hash: &str) -> io::Result<()> {
+    let _lock = Lock::acquire(root)?;
+    let mut map = load_refs(root)?;
+    map.insert(name.to_string(), hash.to_string());
+    write_refs(root, &map)
+}
+
+pub(super) fn get_ref(root: &Path, name: &str) -> io::Result<Option<String>> {
+    Ok(load_refs(root)?.remove(name))
 }
 
 #[cfg(test)]

@@ -1,18 +1,18 @@
-effect Out {
+effect Out
   ctl out(Int) : Unit
-}
 
-class Rank(a) {
+class Rank(a)
   rank : (a) -> Int
-}
 
-instance rankInt : Rank(Int) {
+instance rankInt : Rank(Int)
   fn rank(x) = x * 10
-}
 
-instance rankBool : Rank(Bool) {
-  fn rank(b) = if b then 1 else 0
-}
+instance rankBool : Rank(Bool)
+  fn rank(b) =
+    if b then
+      1
+    else
+      0
 
 fn out_rank(x : a) : !{Out} Unit given Rank(a) = out(rank(x))
 

@@ -1,0 +1,85 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/neg_nonnumeric.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq VOpen Let Ident("x") Eq Minus StringLit("hello") VSemi Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "x",
+                    Spanned {
+                        node: Neg(
+                            Spanned {
+                                node: Str(
+                                    "hello",
+                                ),
+                                span: 114..121,
+                            },
+                        ),
+                        span: 113..121,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 124..131,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 132..133,
+                                },
+                            ],
+                        ),
+                        span: 124..134,
+                    },
+                ),
+                span: 105..134,
+            },
+            wheres: [],
+            span: 78..134,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: no instance for Num(String)
+   ╭─[ <source>:3:11 ]
+   │
+ 3 │   let x = -"hello"
+   │           ────┬───  
+   │               ╰───── in `main`: no instance for Num(String)
+───╯

@@ -1,0 +1,22 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/neg_lanes.pr
+---
+-5
+-7
+5
+5
+-1.5
+-2.5
+-0
+-inf
+inf
+-5
+-42
+-9223372036854775808
+-9223372036854775808
+-6
+-4
+5
+=> ()

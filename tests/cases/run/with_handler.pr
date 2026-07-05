@@ -1,9 +1,8 @@
 -- `with handler` installs an effect handler over the rest of the block:
 -- the statements below it become the handled expression, no extra indent.
-effect Counter {
-  ctl get(Unit) : Int,
+effect Counter
+  ctl get(Unit) : Int
   ctl bump(Unit) : Unit
-}
 
 fn counted() : Int =
   let run =

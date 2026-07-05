@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use crate::syntax::ast::{ClassDecl, Ctor, DataDecl, EffectDecl, Kind, Row, Ty};
+use crate::syntax::ast::{ClassDecl, Ctor, DataDecl, EffectDecl, Grade, Kind, Row, Ty};
 
 use super::hash::{hex, SCHEME};
 
@@ -133,6 +133,13 @@ fn encode_effect(eff: &EffectDecl) -> String {
     e.out.push('{');
     for op in ops {
         e.tok(&op.name);
+        // The declared resumption grade is part of the op's shape. Only a
+        // non-default grade is emitted, so every ungraded effect keeps its
+        // prior digest and only a graded op churns.
+        if op.grade != Grade::Many {
+            e.out.push('!');
+            e.out.push_str(&op.grade.keyword());
+        }
         e.out.push('(');
         for p in &op.params {
             e.ty(p);
@@ -263,6 +270,7 @@ impl Enc {
         match k {
             Kind::Type => self.out.push_str("kt"),
             Kind::Row => self.out.push_str("kr"),
+            Kind::Nat => self.out.push_str("kn"),
             Kind::Fun(a, b) => {
                 self.out.push_str("kf");
                 self.kind(a);
@@ -320,6 +328,10 @@ impl Enc {
             // Desugar-only; never in a surviving annotation, but encode defensively.
             Ty::State(n) => {
                 let _ = write!(self.out, "<S>{n}");
+            }
+            // A type-level natural literal in a dimension position.
+            Ty::Nat(n) => {
+                let _ = write!(self.out, "<N>{n}");
             }
         }
     }

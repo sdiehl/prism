@@ -5,7 +5,10 @@ fn safe_div(a, b) =
     Ok(a / b)
 
 fn chain(x) =
-  and_then_result(\(a) -> and_then_result(\(b) -> Ok(a + b), safe_div(x, 2)), safe_div(100, x))
+  and_then_result(
+      \(a) -> and_then_result(\(b) -> Ok(a + b), safe_div(x, 2)),
+      safe_div(100, x),
+    )
 
 fn main() =
   println(result_or(0 - 1, chain(5)))

@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 482
 expression: interp_output(path)
 input_file: tests/cases/run/incr_diff.pr
 ---

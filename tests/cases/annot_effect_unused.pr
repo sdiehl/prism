@@ -1,6 +1,5 @@
-effect State {
+effect State
   ctl get(Unit) : Int
-}
 
 fn h() : !{State} Int = 1
 

@@ -9,6 +9,11 @@ pub const FN: &str = "fn";
 pub const FIP: &str = "fip";
 pub const FBIP: &str = "fbip";
 pub const REPLAYABLE: &str = "replayable";
+// `deprecated "use X instead"`: a contextual annotation line above a declaration
+// marking it superseded. A use of the named definition compiles with a warning
+// carrying this suggestion; the definition itself is untouched. Held for one
+// release, removed the next (see the deprecation policy in the spec).
+pub const DEPRECATED: &str = "deprecated";
 // `without alloc`: a postfix signature suffix certifying that a function and its
 // whole call tree allocate no fresh heap cell (the `alloc` capability revoked
 // for the function). Same check as `fbip`, spelled as a capability.
@@ -30,9 +35,11 @@ pub const DOWNGRADE: &str = "downgrade";
 pub const DROP_LOSS: &str = "drop_loss";
 // Trailing per-rung shape-digest golden: `V1 = { .. } frozen "<digest>"`.
 pub const FROZEN: &str = "frozen";
-// Kind annotations on a type parameter (`type Cmd(a, e : Row)`). `Type` is the
-// default and prints bare; only `Row` is emitted.
+// Kind annotations on a type parameter (`type Cmd(a, e : Row)`,
+// `type Vec(a, n : Nat)`). `Type` is the default and prints bare; `Row` and
+// `Nat` are emitted.
 pub const KIND_ROW: &str = "Row";
+pub const KIND_NAT: &str = "Nat";
 pub const KIND_TYPE: &str = "Type";
 pub const OPAQUE: &str = "opaque";
 pub const EFFECT: &str = "effect";

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::kw;
 use crate::sym::Sym;
@@ -7,17 +7,46 @@ pub type Effects = BTreeSet<Sym>;
 
 // The kind (sort) of a type-level parameter. Most parameters have kind `Type`
 // (`*`); a parameter annotated `: Row` ranges over effect rows, so a data-type
-// field may reference it in a `! {..}` position (`type Cmd(a, e : Row)`). `Fun`
-// is reserved for a future higher-kinded checker: today HKT (`f(a)`) is handled
-// structurally by `App`/`Con` unification and needs no kind annotation, so an
-// unannotated parameter defaults to `Type` and the whole existing corpus is
-// unchanged.
+// field may reference it in a `! {..}` position (`type Cmd(a, e : Row)`); a
+// parameter annotated `: Nat` ranges over type-level natural literals (a
+// dimension position, `type Vec(a, n : Nat)`), inhabited by `0`, `1`, `2`, ...
+// with unification by literal equality only (no dimension arithmetic). `Fun`
+// is the kind of a type constructor once it is applied: `Vec : Type -> Nat ->
+// Type` is `Fun(Type, Fun(Nat, Type))`. HKT of a variable head (`f(a)`) is still
+// handled structurally by `App`/`Con` unification; an unannotated parameter
+// defaults to `Type` so the whole existing corpus is unchanged.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Kind {
     #[default]
     Type,
     Row,
+    Nat,
     Fun(Box<Self>, Box<Self>),
+}
+
+impl Kind {
+    // The arrow kind of a constructor whose parameters have kinds `params` and
+    // whose result is `Type`: `[Type, Nat]` becomes `Type -> Nat -> Type`. This
+    // is the sole constructor of `Kind::Fun`; the kind checker builds a
+    // constructor's kind here and checks each applied argument against the
+    // domain it peels off, so an over- or mis-applied constructor is a kind
+    // error rather than a downstream unification failure.
+    #[must_use]
+    pub fn arrow(params: &[Self]) -> Self {
+        params.iter().rev().fold(Self::Type, |acc, k| {
+            Self::Fun(Box::new(k.clone()), Box::new(acc))
+        })
+    }
+
+    #[must_use]
+    pub fn show(&self) -> String {
+        match self {
+            Self::Type => "Type".into(),
+            Self::Row => "Row".into(),
+            Self::Nat => "Nat".into(),
+            Self::Fun(a, b) => format!("{} -> {}", a.show(), b.show()),
+        }
+    }
 }
 
 // Wired-in nominal names. The prelude defines them and the compiler special-
@@ -29,6 +58,13 @@ pub const NIL: &str = "Nil";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";
+// The numerical tower (`NUM.md`): `Num` carries `+`/`-`/`*`/unary negate, `Div`
+// carries `/`/`%`. Both have `Int`/`I64`/`U64`/`Float` prelude instances. A
+// monomorphic operand keeps the direct lane primitive (byte-identical Core); only
+// a `given Num(a)`/`given Div(a)` operand dispatches through the dictionary, which
+// the specializer erases.
+pub const NUM_CLASS: &str = "Num";
+pub const DIV_CLASS: &str = "Div";
 // The content-addressed structural hash class, in the prelude beside `Eq`/`Ord`.
 pub const HASH_CLASS: &str = "Hash";
 // The opt-in wire classes, defined in `lib/std/Wire.pr` (out of the prelude), and
@@ -271,6 +307,13 @@ pub enum Type {
     // appears at a `Row`-kinded position; unification of `Row(a) ~ Row(b)`
     // defers to `unify_row`, and row-variable substitution recurses through it.
     Row(EffRow),
+    // A type-level natural literal in a dimension position (a `Nat`-kinded
+    // argument, `Vec(Int, 3)`). It is an opaque atom: unification is literal
+    // equality (`Nat(3) ~ Nat(4)` fails, naming both lengths), with no successor
+    // structure and no arithmetic, so a dimension variable solves only to a
+    // literal it is already forced to equal. Erased before Core; it never
+    // reaches codegen.
+    Nat(u64),
 }
 
 impl Type {
@@ -554,7 +597,79 @@ impl Type {
         }
     }
 
+    #[must_use]
     pub fn show(&self) -> String {
+        self.show_p(&self.phantom_rows())
+    }
+
+    // The row variables this scheme keeps open only for unification: a
+    // `RowForall`-bound variable that occurs exactly once, as one arrow's effect
+    // tail. That is a function's own latent row, quantified so a pure value fits
+    // an effectful context by solving it (`default_open_rows`); it carries no
+    // information a reader needs, so the display suppresses both its binder and
+    // its `! {..}` tail (rendering the arrow as pure, exactly as before rows were
+    // checked by unification). A variable shared across arrows (genuine effect
+    // polymorphism) or threaded through a `Row`-kinded data type (`Cmd(a, {e})`)
+    // occurs more than once, or not as a bare tail, so it is never suppressed.
+    // The structural type is untouched; only the rendering drops these.
+    fn phantom_rows(&self) -> BTreeSet<Sym> {
+        // Only the scheme's own outermost quantifier prefix carries auto-opened
+        // latent tails. An inner (rank-N) `forall e. (Int) -> Int ! {e}` the user
+        // wrote on a parameter is a real constraint (the argument must be effect
+        // polymorphic), so it is never a candidate for suppression.
+        let mut prefix = BTreeSet::new();
+        let mut cur = self;
+        loop {
+            match cur {
+                Self::RowForall(n, t) => {
+                    prefix.insert(*n);
+                    cur = t;
+                }
+                Self::Forall(_, t) => cur = t,
+                _ => break,
+            }
+        }
+        let mut total = BTreeMap::new();
+        let mut tail = BTreeMap::new();
+        self.row_var_stats(&mut total, &mut tail);
+        prefix
+            .into_iter()
+            .filter(|v| {
+                total.get(v).copied().unwrap_or(0) == 1 && tail.get(v).copied().unwrap_or(0) == 1
+            })
+            .collect()
+    }
+
+    // `total`: every appearance of each row variable. `tail`: only appearances as
+    // the trailing variable of an arrow's effect row. See `phantom_rows`.
+    fn row_var_stats(&self, total: &mut BTreeMap<Sym, usize>, tail: &mut BTreeMap<Sym, usize>) {
+        match self {
+            Self::Forall(_, t) | Self::RowForall(_, t) => t.row_var_stats(total, tail),
+            Self::Fun(ps, row, r) => {
+                for p in ps {
+                    p.row_var_stats(total, tail);
+                }
+                count_row_vars(row, total);
+                if let EffRow::Var(v) = row.tail() {
+                    *tail.entry(*v).or_default() += 1;
+                }
+                r.row_var_stats(total, tail);
+            }
+            Self::Con(_, ps) | Self::Tuple(ps) => {
+                for p in ps {
+                    p.row_var_stats(total, tail);
+                }
+            }
+            Self::App(h, a) => {
+                h.row_var_stats(total, tail);
+                a.row_var_stats(total, tail);
+            }
+            Self::Row(r) => count_row_vars(r, total),
+            _ => {}
+        }
+    }
+
+    fn show_p(&self, phantom: &BTreeSet<Sym>) -> String {
         match self {
             Self::Unit => kw::TY_UNIT.into(),
             Self::Int => kw::TY_INT.into(),
@@ -570,37 +685,84 @@ impl Type {
                 let mut vs = Vec::new();
                 let mut cur = self;
                 while let Self::Forall(n, t) | Self::RowForall(n, t) = cur {
-                    vs.push(n.as_str());
+                    if !phantom.contains(n) {
+                        vs.push(n.as_str());
+                    }
                     cur = t;
                 }
-                format!("forall {}. {}", vs.join(" "), cur.show())
+                if vs.is_empty() {
+                    cur.show_p(phantom)
+                } else {
+                    format!("forall {}. {}", vs.join(" "), cur.show_p(phantom))
+                }
             }
             Self::Fun(ps, row, r) => {
-                let ps: Vec<_> = ps.iter().map(Self::show).collect();
-                let row_s = if *row == EffRow::Empty {
-                    String::new()
-                } else {
-                    format!(" ! {}", row.show())
-                };
-                format!("({}) {} {}{}", ps.join(", "), kw::ARROW, r.show(), row_s)
+                let ps: Vec<_> = ps.iter().map(|p| p.show_p(phantom)).collect();
+                let row_s =
+                    show_row_p(row, phantom).map_or_else(String::new, |s| format!(" ! {s}"));
+                format!(
+                    "({}) {} {}{}",
+                    ps.join(", "),
+                    kw::ARROW,
+                    r.show_p(phantom),
+                    row_s
+                )
             }
             // A higher-kinded application spine prints in n-ary form `head(a, b)`.
             Self::App(..) => {
                 let (head, args) = self.spine();
-                let args: Vec<_> = args.iter().map(|a| a.show()).collect();
-                format!("{}({})", head.show(), args.join(", "))
+                let args: Vec<_> = args.iter().map(|a| a.show_p(phantom)).collect();
+                format!("{}({})", head.show_p(phantom), args.join(", "))
             }
             Self::Con(n, ps) if ps.is_empty() => n.to_string(),
             Self::Con(n, ps) => {
-                let ps: Vec<_> = ps.iter().map(Self::show).collect();
+                let ps: Vec<_> = ps.iter().map(|p| p.show_p(phantom)).collect();
                 format!("{n}({})", ps.join(", "))
             }
             Self::Tuple(ts) => {
-                let ts: Vec<_> = ts.iter().map(Self::show).collect();
+                let ts: Vec<_> = ts.iter().map(|t| t.show_p(phantom)).collect();
                 format!("({})", ts.join(", "))
             }
             Self::Row(r) => r.show(),
+            Self::Nat(n) => n.to_string(),
         }
+    }
+}
+
+// Add every row variable of `row` (its trailing variable, and any inside a
+// label's type arguments) to `total`.
+fn count_row_vars(row: &EffRow, total: &mut BTreeMap<Sym, usize>) {
+    for l in row.labels() {
+        for a in &l.args {
+            let mut t = BTreeMap::new();
+            a.row_var_stats(total, &mut t);
+        }
+    }
+    if let EffRow::Var(v) = row.tail() {
+        *total.entry(*v).or_default() += 1;
+    }
+}
+
+// Render an effect row, dropping a trailing phantom row variable. Returns `None`
+// when nothing is left to show (an empty row, or a bare phantom tail), so the
+// arrow prints with no `! {..}` annotation.
+fn show_row_p(row: &EffRow, phantom: &BTreeSet<Sym>) -> Option<String> {
+    let mut parts: Vec<String> = row.labels().into_iter().map(Label::show).collect();
+    parts.sort();
+    let tail_s = match row.tail() {
+        EffRow::Empty => String::new(),
+        EffRow::Var(v) if phantom.contains(v) => String::new(),
+        EffRow::Var(v) => v.to_string(),
+        EffRow::Exist(v) => format!("?r{v}"),
+        EffRow::Extend(..) => unreachable!(),
+    };
+    if !tail_s.is_empty() {
+        parts.push(tail_s);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("{{{}}}", parts.join(", ")))
     }
 }
 

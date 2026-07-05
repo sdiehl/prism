@@ -40,7 +40,7 @@ fn prelude_opens_stdlib_unqualified() {
 fn stdlib_module_is_importable_qualified() {
     // The same module is reachable as an explicit qualified import.
     assert_eq!(
-        out("import Data.List\nfn main() = print(Data.List.sum([4, 5, 6]))"),
+        out("import Data.Foldable\nfn main() = print(Data.Foldable.sum([4, 5, 6]))"),
         "15\n"
     );
 }
@@ -74,7 +74,10 @@ fn glob_import_opens_all_exports() {
 fn prelude_makes_stdlib_qualifier_available() {
     // The prelude opens the stdlib, so its modules are reachable qualified even
     // without the user importing them.
-    assert_eq!(out("fn main() = print(Data.List.sum([1, 2, 3]))"), "6\n");
+    assert_eq!(
+        out("fn main() = print(Data.Foldable.sum([1, 2, 3]))"),
+        "6\n"
+    );
 }
 
 #[test]

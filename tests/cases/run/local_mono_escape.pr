@@ -6,9 +6,8 @@
 -- rather than dragging it into the monadic region. Paired with
 -- `local_mono_combined.pr`, which adds an unrelated fused stream pipeline; the
 -- perf gate asserts the pipeline allocates zero extra eff-op cells.
-effect Log {
+effect Log
   ctl log(Int) : Int
-}
 
 fn weight(x) = x * 3
 

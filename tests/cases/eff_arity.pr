@@ -1,6 +1,5 @@
-effect Emit(a) {
+effect Emit(a)
   ctl emit(a) : Unit
-}
 
 fn bad() : !{Emit(Int, String)} Unit = emit(1)
 

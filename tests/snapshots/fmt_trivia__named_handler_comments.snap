@@ -1,10 +1,9 @@
 ---
 source: tests/fmt_trivia.rs
-expression: "fmt(\"effect State {\\n\\\n     \\x20 ctl get() : Int\\n\\\n     }\\n\\\n     \\n\\\n     fn run() : !{State} Int =\\n\\\n     \\x20 -- a named handler\\n\\\n     \\x20 with h <- handler\\n\\\n     \\x20   get(k) => k(7)\\n\\\n     \\x20 -- use it\\n\\\n     \\x20 h.get()\\n\")"
+expression: "fmt(\"effect State\\n\\\n     \\x20 ctl get() : Int\\n\\\n     \\n\\\n     fn run() : !{State} Int =\\n\\\n     \\x20 -- a named handler\\n\\\n     \\x20 with h <- handler\\n\\\n     \\x20   get(k) => k(7)\\n\\\n     \\x20 -- use it\\n\\\n     \\x20 h.get()\\n\")"
 ---
-effect State {
+effect State
   ctl get() : Int
-}
 
 fn run() : !{State} Int =
   -- a named handler

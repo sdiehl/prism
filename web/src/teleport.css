@@ -1,0 +1,316 @@
+/* Teleport resident: two browsing contexts (sender + receiver iframe) sitting side
+   by side. Both stay visible the whole time; the paused continuation travels in
+   place along the wire between them. Palette and chrome come from showcase.css /
+   theme.css; this file is only the teleport-specific layout. */
+
+.teleport {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* The narrative that makes the demo self-explanatory. */
+.tp-intro {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--fg, #1a1a1a);
+}
+
+/* Links to the docs anchors that define the ideas the copy names. */
+.tp-intro a,
+.tp-story a,
+.tp-proof a {
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.tp-intro a:hover,
+.tp-story a:hover,
+.tp-proof a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.tp-stage {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.tp-tab {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+  transition: box-shadow 0.25s ease;
+}
+
+.tp-tab-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.tp-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tp-dot--b {
+  background: var(--accent-strong);
+}
+
+.tp-out {
+  margin: 0;
+  padding: 0.75rem;
+  min-height: 9.5rem;
+  max-height: 14rem;
+  overflow: auto;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--fg, #1a1a1a);
+}
+
+.tp-out.err {
+  color: #b23b3b;
+}
+
+/* Controls live below the stage now, so the two tabs read as a matched pair. */
+.tp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.tp-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.tp-label b {
+  color: var(--fg, #1a1a1a);
+}
+
+.tp-controls .scrub {
+  flex: 1 1 8rem;
+  min-width: 6rem;
+}
+
+.tp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.tp-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 12.5rem;
+  border: 0;
+  background: var(--panel);
+}
+
+/* The story line under the stage: rewritten from the receiver's real line counts. */
+.tp-story {
+  margin: 0;
+  min-height: 3.2rem;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--fg, #1a1a1a);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 8px;
+}
+
+.tp-story--wait {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The wire between the two tabs, and the packet that travels it in place. */
+.tp-wire {
+  position: relative;
+  align-self: center;
+  width: 3.25rem;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 15%, transparent),
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    color-mix(in srgb, var(--accent) 15%, transparent)
+  );
+}
+
+.tp-packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: -0.35rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0;
+}
+
+.tp-packet.tp-fly {
+  animation: tp-packet-fly 0.72s cubic-bezier(0.45, 0, 0.2, 1) forwards;
+}
+
+.tp-wire--bad .tp-packet {
+  background: #c0492f;
+}
+
+@keyframes tp-packet-fly {
+  0% {
+    opacity: 0;
+    left: 0;
+    box-shadow: 0 0 0.5rem 0.1rem color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    left: 100%;
+    box-shadow: 0 0 0.9rem 0.25rem color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+/* Pulse a tab in place: Tab A at the pause, Tab B when its resume lands. */
+.tp-pulse {
+  animation: tp-pulse 0.7s ease;
+}
+
+@keyframes tp-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  40% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+/* The receiver output flashes as the resumed lines arrive. */
+.tp-arrive {
+  animation: tp-arrive 0.8s ease;
+}
+
+@keyframes tp-arrive {
+  0% {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* The receiver iframe's own body. */
+.tp-recv-body {
+  margin: 0;
+  background: var(--panel, #fff);
+}
+
+.tp-recv {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* The proof line: a small caption under the resumed output, not the headline. */
+.tp-proof {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+
+.tp-proof code {
+  font-size: 0.72rem;
+}
+
+.tp-proof--ok {
+  color: var(--muted);
+}
+
+.tp-proof--bad {
+  color: #b23b3b;
+}
+
+.tp-x::before {
+  content: "\2717\00a0";
+  font-weight: 700;
+}
+
+/* A status message hung on the demo container via data-status. */
+.teleport[data-status]::before {
+  content: attr(data-status);
+  display: block;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .tp-stage {
+    grid-template-columns: 1fr;
+  }
+  .tp-wire {
+    width: 3px;
+    height: 2.25rem;
+    justify-self: center;
+  }
+  .tp-packet.tp-fly {
+    animation-name: tp-packet-fly-v;
+  }
+  @keyframes tp-packet-fly-v {
+    0% {
+      opacity: 0;
+      top: 0;
+    }
+    15% {
+      opacity: 1;
+    }
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      top: 100%;
+    }
+  }
+}

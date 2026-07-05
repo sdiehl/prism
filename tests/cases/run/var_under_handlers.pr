@@ -1,12 +1,10 @@
 -- Two user handlers with the var handler innermost: ops of both outer
 -- effects are performed inside the var block and cross the var's handler.
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
-effect Tick {
+effect Tick
   ctl tick(Unit) : Unit
-}
 
 fn inner() : Int =
   var c := 0

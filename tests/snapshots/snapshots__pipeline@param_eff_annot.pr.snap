@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/param_eff_annot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Emit") LParen Ident("a") RParen LBrace Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit RBrace VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
 
 == ast ==
 Program {
@@ -24,9 +24,10 @@ Program {
                         ),
                     ],
                     ret: Unit,
+                    grade: Many,
                 },
             ],
-            span: 0..39,
+            span: 0..35,
         },
     ],
     errors: [],
@@ -57,7 +58,7 @@ Program {
                         node: Var(
                             "emit",
                         ),
-                        span: 75..79,
+                        span: 71..75,
                     },
                     [
                         Spanned {
@@ -67,14 +68,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 80..81,
+                            span: 76..77,
                         },
                     ],
                 ),
-                span: 75..82,
+                span: 71..78,
             },
             wheres: [],
-            span: 41..82,
+            span: 37..78,
         },
         Decl {
             name: "main",
@@ -84,19 +85,19 @@ Program {
             constraints: [],
             body: Spanned {
                 node: Unit,
-                span: 96..98,
+                span: 92..94,
             },
             wheres: [],
-            span: 84..98,
+            span: 80..94,
         },
     ],
 }
 
 == types ==
 Type Error: in `bad`: type mismatch: expected String, got Int
-   ╭─[ <source>:5:40 ]
+   ╭─[ <source>:4:40 ]
    │
- 5 │ fn bad() : !{Emit(String)} Unit = emit(1)
+ 4 │ fn bad() : !{Emit(String)} Unit = emit(1)
    │                                        ┬  
    │                                        ╰── in `bad`: type mismatch: expected String, got Int
 ───╯

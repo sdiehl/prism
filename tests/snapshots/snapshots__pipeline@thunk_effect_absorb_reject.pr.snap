@@ -1,0 +1,169 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/thunk_effect_absorb_reject.pr
+---
+== tokens ==
+VOpen Effect UIdent("Beep") VOpen Ctl Ident("beep") LParen KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("Wrap") VOpen Ctl Ident("wrap") LParen LParen RParen Arrow KwInt Bang LBrace UIdent("Wrap") Bar Ident("e") RBrace RParen Colon KwInt VClose VSemi Fn Ident("body") LParen RParen Colon Bang LBrace UIdent("Wrap") Comma UIdent("Beep") RBrace KwInt Eq VOpen Ident("beep") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Int(IntLit { value: 3, suffix: None }) VClose VSemi Fn Ident("use_wrap") LParen RParen Colon Bang LBrace UIdent("Wrap") RBrace KwInt Eq Ident("wrap") LParen Ident("body") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Beep",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "beep",
+                    params: [
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 436..470,
+        },
+        EffectDecl {
+            name: "Wrap",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "wrap",
+                    params: [
+                        Fun(
+                            [],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "Wrap",
+                                        args: [],
+                                    },
+                                ],
+                                Some(
+                                    "e",
+                                ),
+                            ),
+                            Int,
+                        ),
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 472..524,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "body",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Wrap",
+                        args: [],
+                    },
+                    EffLabel {
+                        name: "Beep",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "beep",
+                                ),
+                                span: 560..564,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 565..566,
+                                },
+                            ],
+                        ),
+                        span: 560..567,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 3,
+                                suffix: None,
+                            },
+                        ),
+                        span: 570..571,
+                    },
+                ),
+                span: 560..571,
+            },
+            wheres: [],
+            span: 526..571,
+        },
+        Decl {
+            name: "use_wrap",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Wrap",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "wrap",
+                        ),
+                        span: 603..607,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "body",
+                            ),
+                            span: 608..612,
+                        },
+                    ],
+                ),
+                span: 603..613,
+            },
+            wheres: [],
+            span: 573..613,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `use_wrap`: effect `Beep` not declared in annotation
+    ╭─[ <source>:17:31 ]
+    │
+ 17 │ fn use_wrap() : !{Wrap} Int = wrap(body)
+    │                               ─────┬────  
+    │                                    ╰────── in `use_wrap`: effect `Beep` not declared in annotation
+────╯

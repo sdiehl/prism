@@ -166,6 +166,7 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             );
         }
         Expr::Bin(op, a, b) => Expr::Bin(*op, Box::new(rw(a, env, cx)?), Box::new(rw(b, env, cx)?)),
+        Expr::Neg(a) => Expr::Neg(Box::new(rw(a, env, cx)?)),
         Expr::If(c, t, f) => Expr::If(
             Box::new(rw(c, env, cx)?),
             Box::new(rw(t, env, cx)?),
@@ -887,7 +888,11 @@ impl CtlScan {
                     self.go(x);
                 }
             }
-            Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => {
+            Expr::FieldAccess(b, _)
+            | Expr::Inst(b, _)
+            | Expr::Ann(b, _)
+            | Expr::Mask(_, b)
+            | Expr::Neg(b) => {
                 self.go(b);
             }
             Expr::Index(recv, key) => {

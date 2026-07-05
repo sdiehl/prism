@@ -1,0 +1,5 @@
+-- A type in a position that wants a dimension: `Vec`'s second parameter has kind
+-- `Nat`, so a `Bool` there is a kind mismatch.
+type Vec(a, n : Nat) = MkVec(List(a))
+
+fn demo(x : Vec(Int, Bool)) : Int = 0

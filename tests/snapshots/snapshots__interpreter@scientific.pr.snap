@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+assertion_line: 482
+expression: interp_output(path)
+input_file: tests/cases/run/scientific.pr
+---
+1000
+1000
+1500
+0.01
+0.01
+true
+-100
+2.9
+=> ()

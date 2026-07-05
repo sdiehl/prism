@@ -1,0 +1,133 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/grade_final_resume.pr
+---
+== tokens ==
+VOpen Effect UIdent("Abort") VOpen Final Ctl Ident("abort") LParen KwUnit RParen Colon KwInt VClose VSemi Fn Ident("use_it") LParen RParen Colon Bang LBrace UIdent("Abort") RBrace KwInt Eq Ident("abort") LParen LParen RParen RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("use_it") LParen RParen With VOpen Fun Ident("abort") LParen Ident("u") RParen FatArrow Int(IntLit { value: 5, suffix: None }) VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Abort",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "abort",
+                    params: [
+                        Unit,
+                    ],
+                    ret: Int,
+                    grade: Zero,
+                },
+            ],
+            span: 157..199,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "use_it",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "Abort",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "abort",
+                        ),
+                        span: 230..235,
+                    },
+                    [
+                        Spanned {
+                            node: Unit,
+                            span: 236..238,
+                        },
+                    ],
+                ),
+                span: 230..239,
+            },
+            wheres: [],
+            span: 201..239,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "use_it",
+                                ),
+                                span: 262..268,
+                            },
+                            [],
+                        ),
+                        span: 262..270,
+                    },
+                    [
+                        Sugar(
+                            Fun(
+                                "abort",
+                                [
+                                    "u",
+                                ],
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 5,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 296..297,
+                                },
+                            ),
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 314..315,
+                            },
+                        ),
+                    ],
+                ),
+                span: 255..315,
+            },
+            wheres: [],
+            span: 241..315,
+        },
+    ],
+}
+
+== types ==
+Type Error: handler clause for `abort` exceeds its declared grade `final ctl` (which never resumes): this clause resumes the continuation
+    ╭─[ <source>:10:21 ]
+    │
+ 10 │     fun abort(u) => 5
+    │                     ┬  
+    │                     ╰── handler clause for `abort` exceeds its declared grade `final ctl` (which never resumes): this clause resumes the continuation
+────╯

@@ -16,7 +16,7 @@
 
 fn main() =
   println(sort([5, 2, 8, 1, 4, 2, 0 - 9, 100000000000000000000]))
-  println(sort([3.5, 0.0 -. 1.2, 2.8, 1.2]))
+  println(sort([3.5, 0.0 - 1.2, 2.8, 1.2]))
   println(sort([to_i64(5), to_i64(0 - 2), to_i64(9), to_i64(0)]))
   println(sort(['m', 'i', 'r', 'p', 's']))
   println(sort(["pear", "apple", "quince"]))

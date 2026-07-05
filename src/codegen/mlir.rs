@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use super::emit::{emit_with, escape_str, idx64, str_builtin_decls, Buf, IntOp, Isa};
+use super::emit::{
+    emit_with, escape_str, idx64, str_builtin_decls, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp,
+    Isa,
+};
 use crate::core::Core;
 use crate::types::CtorInfo;
 
@@ -40,16 +43,22 @@ impl Isa for MlirText {
         b.line(&format!("{dst} = llvm.{} {x}, {y} : i64", op.mnemonic()));
     }
 
-    fn fbin(&self, b: &mut Buf, dst: &str, op: &str, x: &str, y: &str) {
-        b.line(&format!("{dst} = llvm.{op} {x}, {y} : f64"));
+    fn fbin(&self, b: &mut Buf, dst: &str, op: FloatBinOp, x: &str, y: &str) {
+        b.line(&format!("{dst} = llvm.{} {x}, {y} : f64", op.mnemonic()));
     }
 
-    fn icmp(&self, b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str) {
-        b.line(&format!("{dst} = llvm.icmp \"{pred}\" {x}, {y} : i64"));
+    fn icmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str) {
+        b.line(&format!(
+            "{dst} = llvm.icmp \"{}\" {x}, {y} : i64",
+            pred.icmp_pred()
+        ));
     }
 
-    fn fcmp(&self, b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str) {
-        b.line(&format!("{dst} = llvm.fcmp \"{pred}\" {x}, {y} : f64"));
+    fn fcmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str) {
+        b.line(&format!(
+            "{dst} = llvm.fcmp \"{}\" {x}, {y} : f64",
+            pred.fcmp_pred()
+        ));
     }
 
     fn zext(&self, b: &mut Buf, dst: &str, c: &str) {
@@ -60,7 +69,11 @@ impl Isa for MlirText {
         b.line(&format!("{dst} = llvm.sitofp {v} : i64 to f64"));
     }
 
-    fn fptosi(&self, b: &mut Buf, dst: &str, v: &str) {
+    fn fptosi_sat(&self, b: &mut Buf, dst: &str, v: &str) {
+        // The saturating fp->int pin is expressed with the LLVM intrinsic on the
+        // default backend. The textual MLIR path (experimental, feature-gated, not
+        // in the determinism gate) emits the plain conversion; matching the
+        // saturating semantics here is a follow-up if MLIR becomes gated.
         b.line(&format!("{dst} = llvm.fptosi {v} : f64 to i64"));
     }
 
@@ -72,8 +85,25 @@ impl Isa for MlirText {
         b.line(&format!("{dst} = llvm.bitcast {v} : f64 to i64"));
     }
 
-    fn f_intrinsic(&self, b: &mut Buf, dst: &str, name: &str, a: &str) {
-        b.line(&format!("{dst} = llvm.intr.{name}({a}) : (f64) -> f64"));
+    fn f_intrinsic(&self, b: &mut Buf, dst: &str, op: FloatIntrinsic, a: &str) {
+        b.line(&format!(
+            "{dst} = llvm.intr.{}({a}) : (f64) -> f64",
+            op.name()
+        ));
+    }
+
+    fn f_call1(&self, b: &mut Buf, dst: &str, sym: &str, a: &str) {
+        b.line(&format!("{dst} = llvm.call @{sym}({a}) : (f64) -> f64"));
+    }
+
+    fn declare_f(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str) {
+        if seen.insert(sym.to_string()) {
+            writeln!(out, "llvm.func @{sym}(f64) -> f64").unwrap();
+        }
+    }
+
+    fn fneg(&self, b: &mut Buf, dst: &str, x: &str) {
+        b.line(&format!("{dst} = llvm.fneg {x} : f64"));
     }
 
     fn inttoptr(&self, b: &mut Buf, dst: &str, v: &str) {

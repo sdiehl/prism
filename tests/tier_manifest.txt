@@ -16,9 +16,11 @@ examples/calc.pr	evidence
 examples/calkin_wilf.pr	pure
 examples/cbpv.pr	pure
 examples/channels.pr	whole-program-free-monad
+examples/chaos_swarm.pr	whole-program-free-monad
 examples/chars.pr	pure
 examples/class_pattern.pr	pure
 examples/classes.pr	pure
+examples/cli.pr	selective-free-monad
 examples/clock.pr	whole-program-free-monad
 examples/collatz.pr	pure
 examples/comprehension.pr	whole-program-free-monad
@@ -49,6 +51,7 @@ examples/fip_list.pr	pure
 examples/fip_tree.pr	pure
 examples/fip_zipper.pr	pure
 examples/fold.pr	pure
+examples/grade_isolation.pr	selective-free-monad
 examples/guards.pr	pure
 examples/handlers_funval.pr	evidence
 examples/hangman.pr	evidence
@@ -58,6 +61,7 @@ examples/hkt.pr	pure
 examples/imperative.pr	pure
 examples/indexing.pr	whole-program-free-monad
 examples/interaction.pr	state-fusion
+examples/json.pr	pure
 examples/lambda.pr	selective-free-monad
 examples/leaderboard.pr	whole-program-free-monad
 examples/lens_derive.pr	pure
@@ -77,9 +81,11 @@ examples/named_handlers.pr	selective-free-monad
 examples/newtype_order.pr	pure
 examples/optics.pr	pure
 examples/optionals.pr	selective-free-monad
+examples/ordered_witness.pr	pure
 examples/orders.pr	whole-program-free-monad
 examples/param_effects.pr	state-fusion
 examples/parse_dont_validate.pr	whole-program-free-monad
+examples/pendulum.pr	pure
 examples/pipeline.pr	whole-program-free-monad
 examples/poly.pr	pure
 examples/polynomial.pr	pure
@@ -105,6 +111,7 @@ examples/streams.pr	state-fusion
 examples/superclass.pr	pure
 examples/tagless.pr	pure
 examples/textutil.pr	pure
+examples/time.pr	whole-program-free-monad
 examples/transact.pr	selective-free-monad
 examples/tree.pr	pure
 examples/trmc.pr	pure
@@ -127,6 +134,8 @@ tests/cases/run/block_match.pr	pure
 tests/cases/run/block_stmts.pr	pure
 tests/cases/run/bool_print.pr	pure
 tests/cases/run/borrow.pr	pure
+tests/cases/run/buffer_ops.pr	pure
+tests/cases/run/bytes_codec.pr	pure
 tests/cases/run/cancel_await.pr	whole-program-free-monad
 tests/cases/run/cancel_completed.pr	whole-program-free-monad
 tests/cases/run/cancel_finalizer.pr	whole-program-free-monad
@@ -168,6 +177,7 @@ tests/cases/run/final_ctl.pr	selective-free-monad
 tests/cases/run/fip.pr	pure
 tests/cases/run/fip_inplace.pr	pure
 tests/cases/run/fixed_ints.pr	pure
+tests/cases/run/float_math.pr	pure
 tests/cases/run/float_prec.pr	pure
 tests/cases/run/floats.pr	pure
 tests/cases/run/fold.pr	pure
@@ -175,6 +185,8 @@ tests/cases/run/fold_chains.pr	state-fusion
 tests/cases/run/for_blocks.pr	evidence
 tests/cases/run/for_break.pr	whole-program-free-monad
 tests/cases/run/forward.pr	selective-free-monad
+tests/cases/run/generic_fold.pr	pure
+tests/cases/run/grade_ops.pr	selective-free-monad
 tests/cases/run/guards.pr	pure
 tests/cases/run/handler_funval.pr	evidence
 tests/cases/run/higher.pr	pure
@@ -187,6 +199,7 @@ tests/cases/run/interp_basic.pr	pure
 tests/cases/run/interp_effects.pr	evidence
 tests/cases/run/interp_show.pr	evidence
 tests/cases/run/interp_string.pr	pure
+tests/cases/run/law_checked.pr	pure
 tests/cases/run/law_fail.pr	whole-program-free-monad
 tests/cases/run/law_reader.pr	whole-program-free-monad
 tests/cases/run/law_state.pr	whole-program-free-monad
@@ -202,9 +215,14 @@ tests/cases/run/main_heap_result.pr	pure
 tests/cases/run/mask.pr	whole-program-free-monad
 tests/cases/run/mergesort.pr	pure
 tests/cases/run/named_handlers.pr	selective-free-monad
+tests/cases/run/neg_lanes.pr	pure
 tests/cases/run/nested_patterns.pr	pure
 tests/cases/run/nested_split.pr	pure
 tests/cases/run/nullary_fn.pr	pure
+tests/cases/run/num_fixed_wrap.pr	pure
+tests/cases/run/num_float_ieee.pr	pure
+tests/cases/run/num_int_div.pr	pure
+tests/cases/run/numeric_separators.pr	pure
 tests/cases/run/nursery_name_collision.pr	whole-program-free-monad
 tests/cases/run/open_nontail.pr	selective-free-monad
 tests/cases/run/opt_chain.pr	selective-free-monad
@@ -216,6 +234,7 @@ tests/cases/run/optics_read.pr	selective-free-monad
 tests/cases/run/optics_where.pr	pure
 tests/cases/run/option_chain.pr	pure
 tests/cases/run/ord_dispatch.pr	pure
+tests/cases/run/ordered_wire_stopgap.pr	whole-program-free-monad
 tests/cases/run/param_eff.pr	evidence
 tests/cases/run/parse_float.pr	pure
 tests/cases/run/pattern_views.pr	pure
@@ -228,6 +247,8 @@ tests/cases/run/reified_under_world.pr	whole-program-free-monad
 tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
 tests/cases/run/rollback.pr	selective-free-monad
+tests/cases/run/scientific.pr	pure
+tests/cases/run/sequence_pull.pr	pure
 tests/cases/run/set_ops.pr	pure
 tests/cases/run/shadow_prelude.pr	pure
 tests/cases/run/show.pr	pure
@@ -241,13 +262,17 @@ tests/cases/run/strings_lib.pr	pure
 tests/cases/run/sugar_if.pr	evidence
 tests/cases/run/sugar_letpat.pr	pure
 tests/cases/run/sugar_try.pr	pure
+tests/cases/run/thunk_effect_absorb.pr	whole-program-free-monad
 tests/cases/run/trmc.pr	pure
+tests/cases/run/tuple_eq_ord.pr	selective-free-monad
 tests/cases/run/var_basic.pr	pure
 tests/cases/run/var_effects.pr	pure
 tests/cases/run/var_in_handler.pr	selective-free-monad
 tests/cases/run/var_interp.pr	pure
 tests/cases/run/var_string.pr	pure
 tests/cases/run/var_under_handlers.pr	selective-free-monad
+tests/cases/run/vec_head.pr	whole-program-free-monad
+tests/cases/run/vec_nat.pr	pure
 tests/cases/run/visibility.pr	pure
 tests/cases/run/while_compound.pr	pure
 tests/cases/run/while_state.pr	whole-program-free-monad

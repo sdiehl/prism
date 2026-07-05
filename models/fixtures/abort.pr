@@ -1,6 +1,5 @@
-effect Abort {
+effect Abort
   ctl abort(Int) : Int
-}
 
 fn prog() : !{Abort} Int =
   let x = abort(99)

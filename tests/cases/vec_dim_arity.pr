@@ -1,0 +1,5 @@
+-- Too many arguments to `Vec`: peeling its `Kind::Fun` arrow runs out of
+-- parameters, so the over-application is caught.
+type Vec(a, n : Nat) = MkVec(List(a))
+
+fn demo(x : Vec(Int, 3, 4)) : Int = 0

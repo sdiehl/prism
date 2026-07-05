@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/derive_hash.pr
 ---
 == tokens ==
-VOpen Class UIdent("Hash") LParen Ident("a") RParen LBrace Ident("hash") Colon LParen Ident("a") RParen Arrow KwString RBrace VSemi Instance Ident("hashInt") Colon UIdent("Hash") LParen KwInt RParen LBrace Fn Ident("hash") LParen Ident("x") RParen Eq Ident("blake3") LParen Ident("concat") LParen StringLit("i") Comma Ident("show_int") LParen Ident("x") RParen RParen RParen RBrace VSemi Type UIdent("Pair") Eq UIdent("MkPair") LParen KwInt Comma KwInt RParen Deriving LParen UIdent("Hash") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("hash") LParen UIdent("MkPair") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen RParen VClose
+VOpen Class UIdent("Hash") LParen Ident("a") RParen VOpen Ident("hash") Colon LParen Ident("a") RParen Arrow KwString VClose VSemi Instance Ident("hashInt") Colon UIdent("Hash") LParen KwInt RParen VOpen Fn Ident("hash") LParen Ident("x") RParen Eq Ident("blake3") LParen Ident("concat") LParen StringLit("i") Comma Ident("show_int") LParen Ident("x") RParen RParen RParen VClose VSemi Type UIdent("Pair") Eq UIdent("MkPair") LParen KwInt Comma KwInt RParen Deriving LParen UIdent("Hash") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("hash") LParen UIdent("MkPair") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -26,11 +26,11 @@ Program {
             deriving: [
                 (
                     "Hash",
-                    163..167,
+                    155..159,
                 ),
             ],
             newtype: false,
-            span: 124..168,
+            span: 116..160,
         },
     ],
     effects: [],
@@ -55,7 +55,7 @@ Program {
                     ),
                 ),
             ],
-            span: 0..40,
+            span: 0..36,
         },
     ],
     instances: [
@@ -84,7 +84,7 @@ Program {
                                 node: Var(
                                     "blake3",
                                 ),
-                                span: 88..94,
+                                span: 82..88,
                             },
                             [
                                 Spanned {
@@ -93,14 +93,14 @@ Program {
                                             node: Var(
                                                 "concat",
                                             ),
-                                            span: 95..101,
+                                            span: 89..95,
                                         },
                                         [
                                             Spanned {
                                                 node: Str(
                                                     "i",
                                                 ),
-                                                span: 102..105,
+                                                span: 96..99,
                                             },
                                             Spanned {
                                                 node: Call(
@@ -108,33 +108,33 @@ Program {
                                                         node: Var(
                                                             "show_int",
                                                         ),
-                                                        span: 107..115,
+                                                        span: 101..109,
                                                     },
                                                     [
                                                         Spanned {
                                                             node: Var(
                                                                 "x",
                                                             ),
-                                                            span: 116..117,
+                                                            span: 110..111,
                                                         },
                                                     ],
                                                 ),
-                                                span: 107..118,
+                                                span: 101..112,
                                             },
                                         ],
                                     ),
-                                    span: 95..119,
+                                    span: 89..113,
                                 },
                             ],
                         ),
-                        span: 88..120,
+                        span: 82..114,
                     },
                     wheres: [],
-                    span: 75..120,
+                    span: 69..114,
                 },
             ],
             module: "",
-            span: 42..122,
+            span: 38..114,
         },
     ],
     fns: [
@@ -150,7 +150,7 @@ Program {
                         node: Var(
                             "hash",
                         ),
-                        span: 182..186,
+                        span: 174..178,
                     },
                     [
                         Spanned {
@@ -159,7 +159,7 @@ Program {
                                     node: Var(
                                         "MkPair",
                                     ),
-                                    span: 187..193,
+                                    span: 179..185,
                                 },
                                 [
                                     Spanned {
@@ -169,7 +169,7 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 194..195,
+                                        span: 186..187,
                                     },
                                     Spanned {
                                         node: Int(
@@ -178,18 +178,18 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 197..198,
+                                        span: 189..190,
                                     },
                                 ],
                             ),
-                            span: 187..199,
+                            span: 179..191,
                         },
                     ],
                 ),
-                span: 182..200,
+                span: 174..192,
             },
             wheres: [],
-            span: 170..200,
+            span: 162..192,
         },
     ],
 }

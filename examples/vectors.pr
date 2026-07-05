@@ -11,44 +11,40 @@ type Vec3 = V(Float, Float, Float) deriving (Show, Eq)
 
 fn add(u : Vec3, v : Vec3) : Vec3 =
   match (u, v) of
-    (V(a, b, c), V(x, y, z)) => V(a +. x, b +. y, c +. z)
+    (V(a, b, c), V(x, y, z)) => V(a + x, b + y, c + z)
 
 fn scale(s : Float, v : Vec3) : Vec3 =
   match v of
-    V(x, y, z) => V(s *. x, s *. y, s *. z)
+    V(x, y, z) => V(s * x, s * y, s * z)
 
 fn dot(u : Vec3, v : Vec3) : Float =
   match (u, v) of
-    (V(a, b, c), V(x, y, z)) => a *. x +. b *. y +. c *. z
+    (V(a, b, c), V(x, y, z)) => a * x + b * y + c * z
 
 fn cross(u : Vec3, v : Vec3) : Vec3 =
   match (u, v) of
-    (V(a, b, c), V(x, y, z)) =>
-      V(b *. z -. c *. y, c *. x -. a *. z, a *. y -. b *. x)
+    (V(a, b, c), V(x, y, z)) => V(b * z - c * y, c * x - a * z, a * y - b * x)
 
 fn absf(x : Float) : Float =
   if x <. 0.0 then
-    0.0 -. x
+    0.0 - x
   else
     x
 
 fn manhattan(v : Vec3) : Float =
   match v of
-    V(x, y, z) => absf(x) +. absf(y) +. absf(z)
+    V(x, y, z) => absf(x) + absf(y) + absf(z)
 
-class Norm(a) {
+class Norm(a)
   norm : (a) -> Float
-}
 
 -- Euclidean length: sqrt is a prelude builtin, so this is the true L2 norm.
-instance l2 : Norm(Vec3) {
+instance l2 : Norm(Vec3)
   fn norm(v) = sqrt(dot(v, v))
-}
 
 -- Manhattan length: sum of absolute components, a genuinely different yardstick.
-instance l1 : Norm(Vec3) {
+instance l1 : Norm(Vec3)
   fn norm(v) = manhattan(v)
-}
 
 -- Euclidean length is the canonical Norm, so a bare norm(u) means the L2 norm.
 canonical Norm(Vec3) = l2

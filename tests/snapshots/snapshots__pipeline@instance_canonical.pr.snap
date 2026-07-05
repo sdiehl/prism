@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/instance_canonical.pr
 ---
 == tokens ==
-VOpen Class UIdent("Ord") LParen Ident("a") RParen LBrace Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt RBrace VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 1, suffix: None }) RBrace VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen LBrace Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq If Ident("x") Lt Ident("y") Then Int(IntLit { value: 1, suffix: None }) Else Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) RBrace VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+VOpen Class UIdent("Ord") LParen Ident("a") RParen VOpen Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt VClose VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -34,7 +34,7 @@ Program {
                     ),
                 ),
             ],
-            span: 0..38,
+            span: 0..34,
         },
     ],
     instances: [
@@ -72,16 +72,16 @@ Program {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 89..90,
+                                        span: 87..88,
                                     },
                                     Spanned {
                                         node: Var(
                                             "y",
                                         ),
-                                        span: 93..94,
+                                        span: 91..92,
                                     },
                                 ),
-                                span: 89..94,
+                                span: 87..92,
                             },
                             Spanned {
                                 node: Bin(
@@ -93,7 +93,7 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 100..101,
+                                        span: 104..105,
                                     },
                                     Spanned {
                                         node: Int(
@@ -102,10 +102,10 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 104..105,
+                                        span: 108..109,
                                     },
                                 ),
-                                span: 100..105,
+                                span: 104..109,
                             },
                             Spanned {
                                 node: Int(
@@ -114,17 +114,17 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 111..112,
+                                span: 125..126,
                             },
                         ),
-                        span: 86..112,
+                        span: 84..126,
                     },
                     wheres: [],
-                    span: 71..112,
+                    span: 65..126,
                 },
             ],
             module: "",
-            span: 40..114,
+            span: 36..126,
         },
         InstanceDecl {
             name: "ordRev",
@@ -160,16 +160,16 @@ Program {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 165..166,
+                                        span: 179..180,
                                     },
                                     Spanned {
                                         node: Var(
                                             "y",
                                         ),
-                                        span: 169..170,
+                                        span: 183..184,
                                     },
                                 ),
-                                span: 165..170,
+                                span: 179..184,
                             },
                             Spanned {
                                 node: Int(
@@ -178,7 +178,7 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 176..177,
+                                span: 196..197,
                             },
                             Spanned {
                                 node: Bin(
@@ -190,7 +190,7 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 183..184,
+                                        span: 213..214,
                                     },
                                     Spanned {
                                         node: Int(
@@ -199,20 +199,20 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 187..188,
+                                        span: 217..218,
                                     },
                                 ),
-                                span: 183..188,
+                                span: 213..218,
                             },
                         ),
-                        span: 162..188,
+                        span: 176..218,
                     },
                     wheres: [],
-                    span: 147..188,
+                    span: 157..218,
                 },
             ],
             module: "",
-            span: 116..190,
+            span: 128..218,
         },
     ],
     canonicals: [
@@ -220,7 +220,7 @@ Program {
             class: "Ord",
             head: Int,
             name: "ordInt",
-            span: 192..219,
+            span: 220..247,
         },
     ],
     fns: [
@@ -236,7 +236,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 233..236,
+                        span: 261..264,
                     },
                     [
                         Spanned {
@@ -246,7 +246,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 237..238,
+                            span: 265..266,
                         },
                         Spanned {
                             node: Int(
@@ -255,14 +255,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 240..241,
+                            span: 268..269,
                         },
                     ],
                 ),
-                span: 233..242,
+                span: 261..270,
             },
             wheres: [],
-            span: 221..242,
+            span: 249..270,
         },
     ],
 }

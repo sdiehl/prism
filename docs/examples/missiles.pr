@@ -14,13 +14,11 @@
 --   winning moves: 0
 --   joshua: 0 winning moves across every future
 
-effect Missiles {
+effect Missiles
   ctl launch(Int) : Unit
-}
 
-effect Warplan {
+effect Warplan
   ctl choose(Unit) : Bool
-}
 
 fn first_strike() : !{Missiles} Int =
   launch(100)

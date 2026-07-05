@@ -1,5 +1,4 @@
-effect World {
+effect World
   ctl spew(Int) : Int
-}
 
 replayable fn leak() = spew(1)

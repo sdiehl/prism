@@ -38,8 +38,8 @@ pub(crate) fn fmt_effect(e: &EffectDecl) -> String {
         .map(|op| {
             let params: Vec<String> = op.params.iter().map(fmt_ty).collect();
             format!(
-                "  {} {}({}) : {}",
-                kw::CTL,
+                "{INDENT}{} {}({}) : {}",
+                op.grade.keyword(),
                 op.name,
                 params.join(", "),
                 fmt_ty(&op.ret)
@@ -51,13 +51,7 @@ pub(crate) fn fmt_effect(e: &EffectDecl) -> String {
     } else {
         format!("({})", e.params.join(", "))
     };
-    format!(
-        "{} {}{} {{\n{}\n}}",
-        kw::EFFECT,
-        e.name,
-        params,
-        ops.join(",\n")
-    )
+    format!("{} {}{}\n{}", kw::EFFECT, e.name, params, ops.join("\n"))
 }
 
 pub(super) fn fmt_label(l: &EffLabel) -> String {
@@ -78,7 +72,7 @@ pub(crate) fn fmt_class(c: &ClassDecl) -> String {
     let sigs: Vec<String> = c
         .methods
         .iter()
-        .map(|(n, t)| format!("  {n} : {}", fmt_ty(t)))
+        .map(|(n, t)| format!("{INDENT}{n} : {}", fmt_ty(t)))
         .collect();
     let sup = if c.supers.is_empty() {
         String::new()
@@ -90,13 +84,14 @@ pub(crate) fn fmt_class(c: &ClassDecl) -> String {
             .collect();
         format!(" {} {}", kw::GIVEN, parts.join(", "))
     };
-    format!(
-        "{} {}({}){sup} {{\n{}\n}}",
-        kw::CLASS,
-        c.name,
-        c.param,
-        sigs.join(",\n")
-    )
+    let head = format!("{} {}({}){sup}", kw::CLASS, c.name, c.param);
+    // A marker class with no methods is its bare head; anything else lays its
+    // members out on the following indented lines.
+    if sigs.is_empty() {
+        head
+    } else {
+        format!("{head}\n{}", sigs.join("\n"))
+    }
 }
 
 pub(super) fn fmt_constraints(cs: &[Constraint]) -> String {
@@ -120,9 +115,12 @@ pub(super) fn indent_block(s: &str) -> String {
         .join("\n")
 }
 
-// Render a type declaration's parameters, restoring any `Row` kind annotation
-// (`type Cmd(a, e : Row)`). An unannotated parameter has kind `Type` and prints
-// bare, so ordinary types are unchanged.
+// Render a type declaration's parameters, restoring any written kind annotation
+// (`type Cmd(a, e : Row)`, `type Vec(a, n : Nat)`). An unannotated parameter has
+// kind `Type` and prints bare, so ordinary types are unchanged. The match is
+// exhaustive over `Kind` on purpose: a silently dropped annotation is an
+// AST-identity break (it once turned `Vec(a, n : Nat)` into `Vec(a, n)`), so a
+// new kind must decide its rendering here to compile.
 fn fmt_ty_params(names: &[String], kinds: &[Kind]) -> String {
     if names.is_empty() {
         return String::new();
@@ -132,7 +130,9 @@ fn fmt_ty_params(names: &[String], kinds: &[Kind]) -> String {
         .enumerate()
         .map(|(i, n)| match kinds.get(i) {
             Some(Kind::Row) => format!("{n} : {}", kw::KIND_ROW),
-            _ => n.clone(),
+            Some(Kind::Nat) => format!("{n} : {}", kw::KIND_NAT),
+            // A higher-kinded parameter's arrow kind is inferred, never written.
+            Some(Kind::Type | Kind::Fun(..)) | None => n.clone(),
         })
         .collect();
     format!("({})", parts.join(", "))
@@ -283,6 +283,8 @@ pub(crate) fn fmt_ty(t: &Ty) -> String {
         // hole rather than fabricating identity text or aborting: a formatter
         // must never crash on or invent identity from its input.
         Ty::State(_) => "_".into(),
+        // A type-level natural literal in a dimension position (`Vec(Int, 3)`).
+        Ty::Nat(n) => n.to_string(),
     }
 }
 
@@ -310,16 +312,21 @@ impl Fmt<'_> {
         let ms: Vec<String> = i
             .methods
             .iter()
-            .map(|m| indent_block(&self.fmt_fn(m, Mode::Flat)))
+            .map(|m| indent_block(&self.fmt_fn(m, Mode::Layout)))
             .collect();
-        format!(
-            "{} {} : {}({}){wh} {{\n{}\n}}",
+        let head = format!(
+            "{} {} : {}({}){wh}",
             kw::INSTANCE,
             i.name,
             i.class,
-            fmt_ty(&i.head),
-            ms.join(",\n")
-        )
+            fmt_ty(&i.head)
+        );
+        // A marker-class instance carries no methods and is its bare head.
+        if ms.is_empty() {
+            head
+        } else {
+            format!("{head}\n{}", ms.join("\n"))
+        }
     }
 
     pub(super) fn fmt_pattern_decl(&self, p: &PatternDecl) -> String {

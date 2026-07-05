@@ -1,6 +1,5 @@
-effect Yield {
+effect Yield
   ctl yield(Int) : Bool
-}
 
 fn collect_bools() =
   handle (let a = yield(1) in

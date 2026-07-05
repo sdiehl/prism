@@ -47,9 +47,8 @@ fn quarter_or_zero(n) =
     Ok(v) => v
     Err(_) => 0
 
-effect Abort {
+effect Abort
   ctl abort(String) : Unit
-}
 
 fn grade(n) : !{Abort} String =
   if n < 0 then

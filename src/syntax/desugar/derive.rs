@@ -651,7 +651,10 @@ fn is_stable(t: &Ty, set: &BTreeSet<String>) -> bool {
         | Ty::Float
         | Ty::Char
         | Ty::Str
-        | Ty::Var(_) => true,
+        | Ty::Var(_)
+        // A dimension index is erased and carries no serialized component, so it
+        // imposes no `Stable` obligation on the enclosing type.
+        | Ty::Nat(_) => true,
         Ty::Tuple(ts) => ts.iter().all(|x| is_stable(x, set)),
         Ty::Con(n, args) => set.contains(n) && args.iter().all(|x| is_stable(x, set)),
         Ty::App(..) | Ty::Fun(..) | Ty::Forall(..) | Ty::State(_) | Ty::RowLit(_) => false,

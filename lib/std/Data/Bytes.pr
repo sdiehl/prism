@@ -1,0 +1,345 @@
+-- | Byte strings: the `String`/`Bytes` boundary, and the hex and base64 codecs.
+--
+-- The `Bytes` type and its representation seam (`wire_len`, `wire_cat`,
+-- `bytes_of_buf`, `bytes_buf`) live in `Wire`, over the unboxed buffer runtime
+-- object (`Buf`, `runtime/prism_buffer.c`); this module is the utility layer on
+-- top: the length/index/slice/push vocabulary, the UTF-8 conversion seam, the two
+-- ASCII encodings, and the byte-level filesystem seam. The utility layer is pure
+-- and total, so it threads identically on both backends and participates in the
+-- content-addressed story; the two filesystem functions are the deliberate
+-- exception (see below).
+--
+-- ## The String/Bytes boundary
+--
+-- A `String` is proof-carrying valid UTF-8, so the two directions are asymmetric.
+-- `string_to_bytes` is total: a string's bytes are always well-formed. Its inverse
+-- `bytes_to_string` must validate, and reports failure honestly as `None` on
+-- ill-formed input rather than lossily repairing it, so a round trip through
+-- `Bytes` never silently mutates a value. Both backends validate identically (the
+-- native runtime's `buf_utf8_valid` and the interpreter's UTF-8 check agree
+-- byte-for-byte), so the boundary is deterministic.
+--
+-- ## The encodings
+--
+-- Hex and base64 are written in pure Prism over the buffer builders rather than as
+-- runtime primitives: they are O(n) either way and staying in the library keeps
+-- both backends in exact agreement for free (no separate C implementation to hold
+-- byte-identical). Encoding produces a `String` of ASCII; decoding validates its
+-- input and returns `None` on any stray character, odd hex length, or malformed
+-- base64 group.
+--
+-- ## Filesystem bytes
+--
+-- `read_bytes` and `write_bytes` are the raw-byte counterparts of the prelude's
+-- text `read_file`/`write_file`, reading and writing a file's exact bytes with no
+-- UTF-8 interpretation. They stay inside the determinism contract: `read_bytes`
+-- is a `FileSystem` capability of its own (`fs_read_bytes`), so its input is
+-- captured in the replay trace exactly like a text read; `write_bytes` is an
+-- off-platform output that is not part of the trace, exactly as text writes
+-- already are. Bytes are never routed through `String` (which is proof-carrying
+-- UTF-8 and would replace an ill-formed byte with U+FFFD), so an embedded NUL or a
+-- lone `0xFF` survives a round trip verbatim.
+
+import Wire (..)
+
+-- Re-export the `Bytes` type (and its empty/concat/length vocabulary) so a caller
+-- who imports `Data.Bytes` can name the type and thread values without also
+-- reaching into `Wire`; the concrete representation stays owned by `Wire`.
+pub import Wire (Bytes)
+
+-- The inclusive-exclusive place values for splitting a byte and a base64 group,
+-- named rather than inlined so the bit-twiddling reads as what it is (this arith
+-- is written as multiply/divide/mod so it stays in `Int`, never touching a
+-- fixed-width type).
+let hex_lo_mask : Int = 16
+
+let byte_radix : Int = 256
+
+let b64_group : Int = 262144
+
+let b64_hi : Int = 4096
+
+let b64_mid : Int = 64
+
+-- ASCII code points the codecs emit and read.
+let ascii_0 : Int = 48
+
+let ascii_9 : Int = 57
+
+let ascii_upper_a : Int = 65
+
+let ascii_upper_f : Int = 70
+
+let ascii_lower_a : Int = 97
+
+let ascii_lower_f : Int = 102
+
+let ascii_eq : Int = 61
+
+-- The standard base64 alphabet; the nth character is the digit for value n.
+let b64_alphabet : String =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+-- The representation seam lives in `Wire` (the `Bytes` home): `bytes_of_buf` wraps
+-- a buffer, `bytes_buf` recovers one, `bytes_at` reads a byte from the cursor.
+-- This module threads `Bytes` only through those functions, never the constructor
+-- directly, so it composes with `Wire` the way every other consumer does.
+
+-- | The number of bytes in a `Bytes`.
+pub fn bytes_length(bs : Bytes) : Int = wire_len(bs)
+
+-- | The byte at index `i` (0-based). Out of range traps, like array indexing.
+pub fn bytes_index(bs : Bytes, i : Int) : Int = bytes_at(bs, i)
+
+-- | The empty `Bytes`.
+pub let bytes_empty : Bytes = wire_empty
+
+-- | Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded
+-- linearly this is the byte-string builder; a uniquely owned buffer is extended in
+-- place (FBIP), a shared one copied.
+pub fn bytes_push(bs : Bytes, byte : Int) : Bytes =
+  bytes_of_buf(buf_push(bytes_buf(bs), byte))
+
+-- | The `len` bytes starting at `start` (0-based), as a fresh `Bytes`. `start`
+-- and `len` are clamped to the bounds, so an over-long or out-of-range window
+-- yields the in-range remainder rather than trapping.
+pub fn bytes_slice(bs : Bytes, start : Int, len : Int) : Bytes =
+  bytes_of_buf(buf_slice(bytes_buf(bs), start, len))
+
+-- | Concatenate two byte strings.
+pub fn bytes_concat(a : Bytes, b : Bytes) : Bytes = wire_cat(a, b)
+
+-- | Structural equality of two byte strings.
+pub fn bytes_eq(a : Bytes, b : Bytes) : Bool = buf_eq(bytes_buf(a), bytes_buf(b))
+
+-- | Lexicographic comparison (`-1`/`0`/`1`) of two byte strings.
+pub fn bytes_compare(a : Bytes, b : Bytes) : Int =
+  buf_cmp(bytes_buf(a), bytes_buf(b))
+
+-- | The blake3 content hash of a byte string as lowercase hex, byte-identical to
+-- a `String`'s `blake3` over the same bytes.
+pub fn bytes_hash(bs : Bytes) : String = buf_hash(bytes_buf(bs))
+
+-- | Total: a string's raw UTF-8 bytes as a `Bytes`.
+pub fn string_to_bytes(s : String) : Bytes = bytes_of_buf(buf_of_string(s))
+
+-- | Validate the bytes as UTF-8 and, when well-formed, recover the `String`;
+-- `None` on any ill-formed sequence. The single deterministic conversion seam back
+-- from `Bytes` to `String`.
+pub fn bytes_to_string(bs : Bytes) : Option(String) =
+  let b = bytes_buf(bs)
+  if buf_utf8_valid(b) then
+    Some(string_of_buf(b))
+  else
+    None
+
+-- The ASCII code of the hex digit for a nibble `0..15`.
+fn hex_digit(n : Int) : Int =
+  if n < 10 then
+    ascii_0 + n
+  else
+    ascii_lower_a + n - 10
+
+-- The value `0..15` of a hex-digit code point, or `-1` if it is not one (upper and
+-- lower case both accepted on decode).
+fn hex_value(c : Int) : Int =
+  if c >= ascii_0 && c <= ascii_9 then
+    c - ascii_0
+  elif c >= ascii_lower_a && c <= ascii_lower_f then
+    c - ascii_lower_a + 10
+  elif c >= ascii_upper_a && c <= ascii_upper_f then
+    c - ascii_upper_a + 10
+  else
+    0 - 1
+
+-- | Lowercase hex encoding: two hex digits per byte.
+pub fn hex_encode(bs : Bytes) : String =
+  string_of_buf(hex_encode_go(buf_empty(), bs, 0, bytes_length(bs)))
+
+fn hex_encode_go(acc : Buf, bs : Bytes, i : Int, n : Int) : Buf =
+  if i >= n then
+    acc
+  else
+    let b = bytes_index(bs, i)
+    hex_encode_go(
+        buf_push(
+            buf_push(acc, hex_digit(b / hex_lo_mask)),
+            hex_digit(mod(b, hex_lo_mask)),
+          ),
+        bs,
+        i + 1,
+        n,
+      )
+
+-- | Decode a hex string to bytes, or `None` on an odd length or a non-hex
+-- character. Upper and lower case digits are both accepted.
+pub fn hex_decode(s : String) : Option(Bytes) =
+  let n = byte_len(s)
+  if not(mod(n, 2) == 0) then
+    None
+  else
+    hex_decode_go(buf_empty(), s, 0, n)
+
+fn hex_decode_go(acc : Buf, s : String, i : Int, n : Int) : Option(Bytes) =
+  if i >= n then
+    Some(bytes_of_buf(acc))
+  else
+    let hi = hex_value(byte_at(s, i))
+    let lo = hex_value(byte_at(s, i + 1))
+    if hi < 0 || lo < 0 then
+      None
+    else
+      hex_decode_go(buf_push(acc, hi * hex_lo_mask + lo), s, i + 2, n)
+
+-- The nth character of the base64 alphabet, as an ASCII code point.
+fn b64_char(n : Int) : Int = byte_at(b64_alphabet, n)
+
+-- | Standard base64 encoding with `=` padding.
+pub fn base64_encode(bs : Bytes) : String =
+  string_of_buf(base64_encode_go(buf_empty(), bs, 0, bytes_length(bs)))
+
+fn base64_encode_go(acc : Buf, bs : Bytes, i : Int, n : Int) : Buf =
+  let remain = n - i
+  if remain <= 0 then
+    acc
+  elif remain >= 3 then
+    let v = bytes_index(bs, i) * byte_radix * byte_radix
+      + bytes_index(bs, i + 1) * byte_radix
+      + bytes_index(bs, i + 2)
+    base64_encode_go(
+        buf_push(
+            buf_push(
+                buf_push(
+                    buf_push(acc, b64_char(v / b64_group)),
+                    b64_char(mod(v / b64_hi, b64_mid)),
+                  ),
+                b64_char(mod(v / b64_mid, b64_mid)),
+              ),
+            b64_char(mod(v, b64_mid)),
+          ),
+        bs,
+        i + 3,
+        n,
+      )
+  elif remain == 2 then
+    let v = bytes_index(bs, i) * byte_radix * byte_radix
+      + bytes_index(bs, i + 1) * byte_radix
+    buf_push(
+        buf_push(
+            buf_push(
+                buf_push(acc, b64_char(v / b64_group)),
+                b64_char(mod(v / b64_hi, b64_mid)),
+              ),
+            b64_char(mod(v / b64_mid, b64_mid)),
+          ),
+        ascii_eq,
+      )
+  else
+    let v = bytes_index(bs, i) * byte_radix * byte_radix
+    buf_push(
+        buf_push(
+            buf_push(
+                buf_push(acc, b64_char(v / b64_group)),
+                b64_char(mod(v / b64_hi, b64_mid)),
+              ),
+            ascii_eq,
+          ),
+        ascii_eq,
+      )
+
+-- The value `0..63` of a base64 code point, or `-1` if it is not in the alphabet.
+fn b64_value(c : Int) : Int =
+  if c >= ascii_upper_a && c <= 90 then
+    c - ascii_upper_a
+  elif c >= ascii_lower_a && c <= 122 then
+    c - ascii_lower_a + 26
+  elif c >= ascii_0 && c <= ascii_9 then
+    c - ascii_0 + 52
+  elif c == 43 then
+    62
+  elif c == 47 then
+    63
+  else
+    0 - 1
+
+-- | Decode standard base64 (with `=` padding) to bytes, or `None` on a length that
+-- is not a multiple of four, a stray character, or misplaced padding.
+pub fn base64_decode(s : String) : Option(Bytes) =
+  let n = byte_len(s)
+  if not(mod(n, 4) == 0) then
+    None
+  else
+    base64_decode_go(buf_empty(), s, 0, n)
+
+fn base64_decode_go(acc : Buf, s : String, i : Int, n : Int) : Option(Bytes) =
+  if i >= n then
+    Some(bytes_of_buf(acc))
+  else
+    let c0 = b64_value(byte_at(s, i))
+    let c1 = b64_value(byte_at(s, i + 1))
+    let p2 = byte_at(s, i + 2) == ascii_eq
+    let p3 = byte_at(s, i + 3) == ascii_eq
+    -- The two high sextets are always present; each present sextet contributes to
+    -- the 24-bit group value `v`, and the byte count follows the padding. Padding
+    -- is only legal in the final quad, and `xx=x` (a gap) is rejected.
+    if c0 < 0 || c1 < 0 then
+      None
+    elif p2 then
+      if p3 && i + 4 >= n then
+        Some(
+            bytes_of_buf(
+                buf_push(
+                    acc,
+                    (c0 * b64_group + c1 * b64_hi) / (byte_radix * byte_radix),
+                  ),
+              ),
+          )
+      else
+        None
+    else
+      let c2 = b64_value(byte_at(s, i + 2))
+      if c2 < 0 then
+        None
+      elif p3 then
+        if i + 4 >= n then
+          let v = c0 * b64_group + c1 * b64_hi + c2 * b64_mid
+          Some(
+              bytes_of_buf(
+                  buf_push(
+                      buf_push(acc, v / (byte_radix * byte_radix)),
+                      mod(v / byte_radix, byte_radix),
+                    ),
+                ),
+            )
+        else
+          None
+      else
+        let c3 = b64_value(byte_at(s, i + 3))
+        if c3 < 0 then
+          None
+        else
+          let v = c0 * b64_group + c1 * b64_hi + c2 * b64_mid + c3
+          base64_decode_go(
+              buf_push(
+                  buf_push(
+                      buf_push(acc, v / (byte_radix * byte_radix)),
+                      mod(v / byte_radix, byte_radix),
+                    ),
+                  mod(v, byte_radix),
+                ),
+              s,
+              i + 4,
+              n,
+            )
+
+-- | Read the file at `path` as raw bytes. Carries the `FileSystem` capability
+-- (the `fs_read_bytes` op the default world handler discharges, via the prelude's
+-- `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a
+-- recorded run reproduces the same bytes.
+pub fn read_bytes(path : String) : Bytes = bytes_of_buf(read_file_bytes(path))
+
+-- | Write `bs` verbatim to the file at `path`, returning `Ok(())` on success or
+-- `Err(msg)` on failure. The write is the same off-platform output as
+-- `write_file`, over the raw byte buffer so no byte is reinterpreted.
+pub fn write_bytes(path : String, bs : Bytes) : Result(Unit, String) =
+  prim_write_bytes(path, bytes_buf(bs))

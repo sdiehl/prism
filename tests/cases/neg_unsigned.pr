@@ -1,0 +1,5 @@
+-- Unary minus is defined on the signed lanes only; negating an unsigned `U64`
+-- literal is rejected with a pointed message.
+fn main() : !{IO} Unit =
+  let x = -5u64
+  println(1)

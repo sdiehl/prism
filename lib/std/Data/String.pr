@@ -83,7 +83,12 @@ pub fn map_case(s, i, arr, up) =
     arr
   else
     let c = byte_at(s, i)
-    map_case(s, i + 1, array_push(arr, if up then to_upper_c(c) else to_lower_c(c)), up)
+    map_case(
+        s,
+        i + 1,
+        array_push(arr, if up then to_upper_c(c) else to_lower_c(c)),
+        up,
+      )
 
 -- | ASCII upper-case of `s` (non-letters unchanged).
 pub fn to_upper(s : String) : String =

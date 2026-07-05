@@ -16,11 +16,17 @@ fn mean(xs) : ! Result(Int, Int) =
     safe_div(sum(xs), length(xs))
 
 fn variance(xs) : ! Result(Int, Int) =
-  and_then_result(\(m) -> let diffs = map(\(x) -> (x - m) * (x - m), xs) in safe_div(sum(diffs), length(xs)), mean(xs))
+  and_then_result(
+      \(m) -> let diffs = map(\(x) -> (x - m) * (x - m), xs) in safe_div(sum(diffs), length(xs)),
+      mean(xs),
+    )
 
 -- Count values whose squared deviation exceeds threshold * variance.
 fn count_outliers(threshold, xs) : ! Result(Int, Int) =
-  and_then_result(\(m) -> and_then_result(\(v) -> Ok(count(\(x) -> abs(x - m) * abs(x - m) > threshold * v, xs)), variance(xs)), mean(xs))
+  and_then_result(
+      \(m) -> and_then_result(\(v) -> Ok(count(\(x) -> abs(x - m) * abs(x - m) > threshold * v, xs)), variance(xs)),
+      mean(xs),
+    )
 
 -- Normalize x into [0, 100]. Err on an inverted range.
 fn normalize(lo, hi, x) : ! Result(Int, Int) =
@@ -34,7 +40,8 @@ fn lift(f, default, xs) = map(\(x) -> result_or(default, f(x)), xs)
 
 -- Pipeline: filter valid range, mean, scale.
 fn score_pipeline(lo, hi, scale, xs) : ! Result(Int, Int) =
-  Ok(filter(\(x) -> lo <= x && x <= hi, xs)) |> and_then_result(mean)
+  Ok(filter(\(x) -> lo <= x && x <= hi, xs))
+    |> and_then_result(mean)
     |> map_result(\(m) -> m * scale)
     |> and_then_result(safe_div(10000))
 
@@ -53,5 +60,9 @@ fn main() : !{IO} Unit =
   let normed = lift(normalize(0, 10), 0 - 1, data)
   report(mean(normed))
   report(score_pipeline(2, 8, 100, data))
-  report(Ok(data) |> and_then_result(mean) |> and_then_result(safe_div(1000))
-    |> map_result(\(x) -> x * 2))
+  report(
+      Ok(data)
+        |> and_then_result(mean)
+        |> and_then_result(safe_div(1000))
+        |> map_result(\(x) -> x * 2),
+    )

@@ -8,7 +8,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 // Link in the mimalloc symbols so the C runtime shim resolves mi_*; no Rust code
-// calls them directly (see runtime/prism_rt.c).
+// calls them directly (see the runtime/ C modules).
 #[cfg(feature = "mimalloc")]
 extern crate libmimalloc_sys as _;
 
@@ -16,6 +16,7 @@ extern crate libmimalloc_sys as _;
 pub mod codegen;
 pub mod core;
 pub mod debug;
+pub mod deprecated;
 pub mod docs;
 pub mod driver;
 pub mod error;
@@ -69,8 +70,9 @@ pub use driver::{
     dump, dump_at, dump_on, effect_strategy_full, effect_strategy_on, effect_warnings_full,
     example_program, interpret, interpret_at, interpret_io_at, interpret_io_on, namespace_root,
     off_platform_builtins, query_on, rc_balanced, record_on, replay_on, report, report_at,
-    report_on, shape_digests_of, source_modules, stdlib_hash, store_def_inputs, valid_backend_opt,
-    with_custom_prelude, with_prelude, Config, Scheduler, StdlibHash, BACKEND_OPT_LEVELS,
+    report_on, resume_on, shape_digests_of, source_modules, stdlib_hash, store_def_inputs,
+    suspend_line_cuts, suspend_on, valid_backend_opt, with_custom_prelude, with_prelude, Config,
+    Scheduler, StdlibHash, SuspendResult, BACKEND_OPT_LEVELS,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use flags::{DynFlags, EffectTier};

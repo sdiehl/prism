@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/num_float_ieee.pr
+---
+0.30000000000000004
+0.3333333333333333
+inf
+-inf
+nan
+-0
+-inf
+nan
+nan
+nan==nan is false
+nan/=nan is true
+0.0==-0.0 is true
+nan<1 is false
+=> ()

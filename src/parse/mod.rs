@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::{Span, TriviaTable};
 
@@ -69,12 +69,40 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let mut imports = Vec::new();
     let mut exports = BTreeSet::new();
     let mut opaques = BTreeSet::new();
+    let mut deprecated = BTreeMap::new();
+    // A `deprecated "..."` item attaches to the next declaration, so carry it
+    // across the loop step. Set once, consumed by the following named decl.
+    let mut pending_dep: Option<(Span, String)> = None;
     for (vis, item) in items {
+        if let Item::Deprecated(span, msg) = item {
+            if pending_dep.is_some() {
+                return Err(ParseError::Syntax {
+                    span,
+                    msg: "a `deprecated` annotation must be followed by a declaration".into(),
+                });
+            }
+            pending_dep = Some((span, msg));
+            continue;
+        }
+        let name = export_name(&item).map(str::to_owned);
+        if let Some((dspan, dmsg)) = pending_dep.take() {
+            match &name {
+                Some(n) => {
+                    deprecated.insert(n.clone(), dmsg);
+                }
+                None => {
+                    return Err(ParseError::Syntax {
+                        span: dspan,
+                        msg: "a `deprecated` annotation must precede a named declaration".into(),
+                    });
+                }
+            }
+        }
         if vis != Vis::Priv {
-            if let Some(name) = export_name(&item) {
-                exports.insert(name.to_owned());
+            if let Some(name) = &name {
+                exports.insert(name.clone());
                 if vis == Vis::Opaque {
-                    opaques.insert(name.to_owned());
+                    opaques.insert(name.clone());
                 }
             }
         }
@@ -96,7 +124,14 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             Item::Pattern(p) => patterns.push(p),
             Item::Fn(f) => fns.push(f),
             Item::Stable(s) => stable.push(s),
+            Item::Deprecated(..) => unreachable!("attached to the next decl above"),
         }
+    }
+    if let Some((span, _)) = pending_dep {
+        return Err(ParseError::Syntax {
+            span,
+            msg: "a `deprecated` annotation must be followed by a declaration".into(),
+        });
     }
     Ok(ParseResult {
         program: Program {
@@ -114,6 +149,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             imports,
             exports,
             opaques,
+            deprecated,
         },
         trivia,
     })
@@ -132,7 +168,7 @@ fn export_name(item: &Item) -> Option<&str> {
         Item::Pattern(p) => Some(&p.name),
         Item::Fn(f) => Some(&f.name),
         Item::Stable(s) => Some(&s.name),
-        Item::Instance(_) | Item::Canonical(_) | Item::Import(_) => None,
+        Item::Instance(_) | Item::Canonical(_) | Item::Import(_) | Item::Deprecated(..) => None,
     }
 }
 

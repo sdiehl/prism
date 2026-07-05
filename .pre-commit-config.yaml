@@ -1,4 +1,4 @@
-default_install_hook_types: [pre-commit]
+default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
 fail_fast: false
 
@@ -42,26 +42,41 @@ repos:
       # C runtime gates, mirroring the CI "Test" job. Both run on the host
       # toolchain, so they catch most findings locally; a few clang-analyzer
       # results are glibc-header-sensitive and only surface on the Linux CI.
+      # Each runtime module is checked standalone; prism_arena.c is the not-yet-wired
+      # arena substrate and is skipped until it lands.
       - id: c-runtime-warnings
         name: C runtime warnings (-Werror)
         language: system
-        entry: bash -c 'cc="$(command -v clang-22 || command -v clang)"; exec "$cc" -std=c11 -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align -Wpointer-arith -Wwrite-strings -Wfloat-equal -Wundef -Wredundant-decls -Wvla -Wdouble-promotion -Wformat=2 -fsyntax-only runtime/prism_rt.c'
-        files: ^runtime/prism_rt\.c$
+        entry: bash -c 'cc="$(command -v clang-22 || command -v clang)"; for f in runtime/*.c; do [ "$(basename "$f")" = prism_arena.c ] && continue; "$cc" -std=c11 -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align -Wpointer-arith -Wwrite-strings -Wfloat-equal -Wundef -Wredundant-decls -Wvla -Wdouble-promotion -Wformat=2 -Iruntime -fsyntax-only "$f" || exit 1; done'
+        files: ^runtime/.*\.(c|h)$
         pass_filenames: false
 
       - id: clang-tidy
         name: C runtime clang-tidy
         language: system
-        entry: bash -c 'ct="$(command -v clang-tidy-22 || command -v clang-tidy)"; exec "$ct" runtime/prism_rt.c --quiet -- -std=c11 -O2'
-        files: ^runtime/(prism_rt\.c|\.clang-tidy)$
+        entry: bash -c 'ct="$(command -v clang-tidy-22 || command -v clang-tidy)"; for f in runtime/*.c; do [ "$(basename "$f")" = prism_arena.c ] && continue; "$ct" "$f" --quiet -- -std=c11 -O2 -Iruntime || exit 1; done'
+        files: ^runtime/(.*\.(c|h)|\.clang-tidy)$
         pass_filenames: false
 
+      # Heavy correctness moved to pre-push: fast commits, but the suite and the
+      # cached parity/perf/snapshot gate still run locally before a push, catching
+      # what CI would otherwise catch 20 minutes later. Install with
+      # `pre-commit install` (hook types come from default_install_hook_types).
       - id: cargo-test
         name: cargo test
         entry: cargo test --all
         language: system
         types: [rust]
         pass_filenames: false
+        stages: [pre-push]
+
+      - id: gate
+        name: just gate-fast (parity/tier/perf/snapshots/store)
+        entry: just gate-fast
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
 
       # Whole-corpus prism format check, identical to the CI "Check prism
       # formatting" step: `prism fmt --check` with no path walks every *.pr

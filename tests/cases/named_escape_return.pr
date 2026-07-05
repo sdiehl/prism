@@ -1,0 +1,12 @@
+-- A handler instance is not a value; returning it directly is rejected at the
+-- binding, pointing at the instance and how to use it.
+effect Ask
+  ctl ask() : Int
+
+fn leak() =
+  with f <- handler
+    ask(k) => k(5)
+    return r => r
+  f
+
+fn main() = println(0)

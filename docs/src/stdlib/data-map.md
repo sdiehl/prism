@@ -12,144 +12,144 @@ Reserved (a later release): a map's identity will carry the content hash of the 
 
 ### `map_empty`
 
-```prism,sig,h-81446fde8a642c66980b17c8856c4c48393ea9350dbb9e228c95c1fcb9e26f9e
-map_empty : forall a b. Map(a, b)
+```prism,sig,h-9f8bce0f6055f44e171907fa4457895691701a774bf631bfb319d8b88ca90be9
+map_empty : forall a b c. Map(a, b, c)
 ```
 
 The empty map.
 
 ### `map_height`
 
-```prism,sig,h-41b851b3ddde2c19a7d8ea3e7cf48e471efbe246e9f1ab74ea6f9d51c7b9691a
-map_height : forall a b. (Map(a, b)) -> Int
+```prism,sig,h-f61199d110e57c849e8cbeda1cf024fb813f987dd117fa79c92b76bb9c81e690
+map_height : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 Helper: the cached height of the tree (0 for the empty map).
 
 ### `map_node`
 
-```prism,sig,h-a68206fca6478955e3ca3cf6b7c9d5a16386f85676d1e2ff7e5ff1904e106077
-map_node : forall a b. (a, b, Map(a, b), Map(a, b)) -> Map(a, b)
+```prism,sig,h-ee60490ba2233745ac26967ad8a3d3bdc564c3a15570a18c083b724cf9a44d78
+map_node : forall a b c. (a, b, Map(a, b, c), Map(a, b, c)) -> Map(a, b, c)
 ```
 
 Helper: build a `Bin` node, computing its height from its children.
 
 ### `map_bf`
 
-```prism,sig,h-57efc086e97aea0ebc8135eb3b6b4d49b07eb84795929709609182532b44d652
-map_bf : forall a b. (Map(a, b)) -> Int
+```prism,sig,h-efd2f4ced3403c83f7148adf3660135cc189a57df50e3e5da75a7a74dd41e38c
+map_bf : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 Helper: the balance factor of a node (left height minus right height).
 
 ### `map_rot_right`
 
-```prism,sig,h-1ec3cbd19535165d10351d8ed99053a75e31ac3555e3bb04ac30db48715659db
-map_rot_right : forall a b. (Map(a, b)) -> Map(a, b)
+```prism,sig,h-3d3ad3fe0cf555f89d877546dbea3f84f63158292c6192bc3b4a7f4cfd6d1806
+map_rot_right : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
 Helper: a single right AVL rotation.
 
 ### `map_rot_left`
 
-```prism,sig,h-fcc78fc93a84a7fc24dd247083443dcbe98e7d2e2e057b5a5542049d41cf220d
-map_rot_left : forall a b. (Map(a, b)) -> Map(a, b)
+```prism,sig,h-b04579a6ce508c6556e5d168f37b8362016bb5bd5eaf19dd6fca58f73d716b47
+map_rot_left : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
 Helper: a single left AVL rotation.
 
 ### `map_balance`
 
-```prism,sig,h-42bc2c24735eb63327e6184dbed8daa0ce525d6745d715d049d4d8427d005052
-map_balance : forall a b. (Map(a, b)) -> Map(a, b)
+```prism,sig,h-84a4b4c9c86d8e616defae17eb9f8938b9749071bf1dcf6585e9db5b78cd0dd5
+map_balance : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
 Helper: rebalance a node after an insert or delete unbalanced it.
 
 ### `map_insert`
 
-```prism,sig,h-f83d9dd7451b6508f365b7a9eab5fcccd2143852aa30f14d7cee06fef5da82ef
-map_insert : forall a b. (a, b, Map(a, b)) -> Map(a, b)
+```prism,sig,h-fe6f17b383f293f28ccd8d3bab023831db5f00e416f146611f51e2a3bdbe7f77
+map_insert : forall a b c. (b, c, Map(b, c, a)) -> Map(b, c, a)
 ```
 
 Insert `key` with `value`, overwriting any existing binding, and rebalance.
 
 ### `map_lookup`
 
-```prism,sig,h-a2798a7963cff253c7f37716f5a4841fa6a5699ec120bafa723dbb6660f2cd9d
-map_lookup : forall a b. (a, Map(a, b)) -> Option(b)
+```prism,sig,h-a55ad2364ff1911234d6ca9122c16142495a18962f95448704a0c24d62d0ab5a
+map_lookup : forall a b c. (b, Map(b, c, a)) -> Option(c)
 ```
 
 The value bound to `key` as `Some`, or `None` when absent.
 
 ### `map_member`
 
-```prism,sig,h-a7ee5681eee35a32a91c688115ff9c6a37512f3dae937244dc5ec7c08c3b7437
-map_member : forall a b. (a, Map(a, b)) -> Bool
+```prism,sig,h-3ede1855937e1cc25a3e139f42231c8b9a596df20463d108a1db37b6c3a38f64
+map_member : forall a b c. (b, Map(b, c, a)) -> Bool
 ```
 
 True when `key` is present in the map.
 
 ### `map_size`
 
-```prism,sig,h-8e8ed7c36ef59a893db7e1c759874660a10e1d2b9f8cc016658ae24323a31cd2
-map_size : forall a b. (Map(a, b)) -> Int
+```prism,sig,h-a19b96e705f7477e5ba8d9d2df817e695f2873a21f458debaebd3706c260d4af
+map_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 The number of entries.
 
 ### `map_min`
 
-```prism,sig,h-02aea077567794e848572f5b01a723e7888283846267d217ffb9225bf304e740
-map_min : forall a b. (Map(a, b)) -> Option((a, b))
+```prism,sig,h-16d078522a7ea6db0d36d757703116cefcb6575bc018e2d0ff841ce365462fbb
+map_min : forall a b c. (Map(a, b, c)) -> Option((a, b))
 ```
 
 The smallest key and its value as `Some`, or `None` when empty.
 
 ### `map_delete`
 
-```prism,sig,h-453477513ad070356a693e2d9e119b7d83398edbc0adb2577f4ac4a54fc2ca0d
-map_delete : forall a b. (a, Map(a, b)) -> Map(a, b)
+```prism,sig,h-37a33c6be134439b2457e7c6f0211fdc7e769329a9681f4e6988a1166564f15c
+map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a)
 ```
 
 Remove `key` (a no-op if absent), rebalancing the tree.
 
 ### `map_to_list`
 
-```prism,sig,h-794a97e5e3f31e950f5b5ddbd83b6edd4308b93e911389a968d8979c3c9b56ce
-map_to_list : forall a b. (Map(a, b)) -> List((a, b))
+```prism,sig,h-94fb0ff63529764ffb80755b424462dabfd4844a8d3e44c071065bb5911379d4
+map_to_list : forall a b c. (Map(a, b, c)) -> List((a, b))
 ```
 
 The `(key, value)` pairs in ascending key order.
 
 ### `map_keys`
 
-```prism,sig,h-e56c382e3daecd936a493c3f314848d472a7269f9d2a48da57f7b61e9c784de0
-map_keys : forall a b. (Map(a, b)) -> List(a)
+```prism,sig,h-50a569c468ef35348b6f9b06b92cd40a39d238edc02a7184f6b1c118a37d0f79
+map_keys : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
 The keys in ascending order.
 
 ### `map_values`
 
-```prism,sig,h-9b808ea81f93a5e5bb669861a62cb823d0045ec29206ff7047ca023909adda4a
-map_values : forall a b. (Map(a, b)) -> List(b)
+```prism,sig,h-939573387cae8f32a11e99374abe23dfb14f8f8432b9dfc56ea531a7fad25fd0
+map_values : forall a b c. (Map(a, b, c)) -> List(b)
 ```
 
 The values in ascending key order.
 
 ### `map_from_list`
 
-```prism,sig,h-2fe76c93d05abc43ba082a8b749ea6967df6567465ea67406192d2f7210af16e
-map_from_list : forall a b. (List((a, b))) -> Map(a, b)
+```prism,sig,h-583872e00ae5cfb3d35f34a643514f7d1877dc398b37c881ea1dfb45832ae3e7
+map_from_list : forall a b c. (List((b, c))) -> Map(b, c, a)
 ```
 
 Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key.
 
 ### `map_map_values`
 
-```prism,sig,h-99ce80c65ed74991ea299d58fa1467a60fa3ab60fdf27f58d1eee65c70d296c8
-map_map_values : forall a b c e0. ((c) -> b ! {e0}, Map(a, c)) -> Map(a, b) ! {e0}
+```prism,sig,h-e297e69176a544d301bb06f6448650e55f23a69d05abfc71e5f44e4538ec7108
+map_map_values : forall e0 a b c d e. ((e) -> d ! {e0}, Map(a, e, b)) -> Map(a, d, c) ! {e0}
 ```
 
 Apply `f` to every value, keeping keys and tree structure.

@@ -116,6 +116,7 @@ fn spends(token: Sym, c: &Comp) -> usize {
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
         | Comp::RefNew(v)

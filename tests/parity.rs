@@ -381,47 +381,93 @@ fn error_int_faults_like_interpreter() {
     );
 }
 
-// A `print`/`println` whose argument type is a free rigid variable (an enclosing
-// parameter, not a defaultable empty container) is rejected at compile time. No
-// static type could render the value, and lowering it to the raw runtime printer
-// would abort on a structural cell, so the interp/native divergence is closed at
-// the source rather than at runtime. The wrapper body is elaborated once over the
-// rigid variable, before any call-site instantiation, so both an annotated
-// (`x : a`) and an inferred wrapper reject regardless of how the call instantiates
-// it. The remedy the diagnostic names -- annotate the argument concretely, or
-// `show(x)` under a `Show` constraint -- keeps every legitimate print helper
-// compiling (the corpus was rewritten to the annotated form). The raw-printer
-// runtime trap stays in the C runtime as defense in depth but is no longer
-// reachable from compilable source.
+// A `print`/`println` whose argument type is a free rigid variable is a polymorphic
+// print: `print` carries a `Show(a)` obligation, so it compiles only where that
+// obligation is satisfied and is rejected where it is not. An annotated wrapper
+// (`x : a`) with an enclosing `given Show(a)` discharges the obligation and prints
+// through the dictionary; without the `given` the constraint has no witness and the
+// call is rejected by ordinary constraint resolution. An unannotated wrapper cannot
+// acquire a constraint at all (constrained functions must be fully annotated), so it
+// is rejected by the elaborator's own backstop naming the same remedy. Concrete,
+// monomorphic, and provably-empty-container prints stay on the type-directed
+// structural printer and need no dictionary; the raw-printer runtime trap stays in
+// the C runtime as defense in depth.
 #[test]
-fn polymorphic_print_rejected_at_compile_time() {
-    let rejects = |src: &str| {
+fn polymorphic_print_requires_show_constraint() {
+    let rejects = |src: &str, needle: &str| {
         let err = prism::interpret(&prism::with_prelude(src))
-            .expect_err("a polymorphic print must be rejected at compile time");
+            .expect_err("a polymorphic print with no Show witness must be rejected");
         assert!(
-            err.to_string().contains("polymorphic type"),
-            "expected the polymorphic-print rejection, got: {err}"
+            err.to_string().contains(needle),
+            "expected a Show-obligation rejection containing {needle:?}, got: {err}"
         );
     };
-    // Annotated wrapper: the body prints a value of rigid type `a`, at every call.
-    rejects("fn echo(x : a) : !{IO} Unit = println(x)\nfn main() : !{IO} Unit = echo(())\n");
-    // Inferred wrapper: `foo` generalizes to `forall a. (a) -> ...`, so passing a
-    // concrete tuple at the call does not monomorphize the already-elaborated body.
-    rejects("fn foo(x) = print(x)\nfn main() : !{IO} Unit = foo((1, 2))\n");
+    // Annotated wrapper, no `given`: the `Show(a)` obligation has no witness, so
+    // constraint resolution rejects it and names the fix.
+    rejects(
+        "fn echo(x : a) : !{IO} Unit = println(x)\nfn main() : !{IO} Unit = echo(())\n",
+        "given Show(a)",
+    );
+    // Inferred wrapper: `foo` generalizes to `forall a. (a) -> ...` but cannot carry
+    // a constraint (no annotation), so the elaborator's backstop rejects it.
+    rejects(
+        "fn foo(x) = print(x)\nfn main() : !{IO} Unit = foo((1, 2))\n",
+        "polymorphic type",
+    );
 
-    // The gate does not over-fire: a concretely-annotated argument (the corpus
-    // remedy), a monomorphic print, and a provably-empty polymorphic container
-    // all still compile.
+    // The obligation is satisfiable and does not over-fire: an annotated wrapper
+    // under `given Show(a)` prints through the dictionary, and a concrete,
+    // monomorphic, or provably-empty-container print stays structural.
     for ok in [
+        "fn echo(x : a) : !{IO} Unit given Show(a) = println(x)\n\
+         fn main() : !{IO} Unit = echo(())\n",
         "fn echo(x : Int) : !{IO} Unit = println(x)\nfn main() : !{IO} Unit = echo(5)\n",
         "fn main() : !{IO} Unit = print(())\n",
         "fn main() : !{IO} Unit = println([])\n",
     ] {
         assert!(
             prism::interpret(&prism::with_prelude(ok)).is_ok(),
-            "annotated / monomorphic / empty-container print must still compile: {ok:?}"
+            "a Show-constrained / concrete / monomorphic / empty-container print must compile: {ok:?}"
         );
     }
+}
+
+// The Show migration's observable payoff: inside a `given Show(a)` function a
+// polymorphic `print` dispatches through the dictionary, so `a = Bool` prints
+// `true`/`false` (never the raw tag integer the raw printer would emit), and every
+// type routes the same way on both backends. Diff native against the interpreter on
+// a wrapper exercised at several types.
+#[test]
+fn polymorphic_show_print_dispatches_through_dictionary() {
+    require_cc();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = "type Color = Red | Green | Blue deriving (Show)\n\
+               fn shout(x : a) : !{IO} Unit given Show(a) =\n  \
+                 print(\"[\")\n  \
+                 print(x)\n  \
+                 println(\"]\")\n\
+               fn main() : !{IO} Unit =\n  \
+                 shout(42)\n  \
+                 shout(true)\n  \
+                 shout(false)\n  \
+                 shout(Green)\n  \
+                 shout([1, 2, 3])\n";
+    let full = prism::with_prelude(src);
+    let mut sink = Vec::new();
+    let want = prism::interpret_io_at(&full, root, &mut sink, &mut std::io::empty())
+        .expect("interpreter run failed")
+        .term;
+    // The Bool cases must be `true`/`false`, proving the dictionary path, not `1`/`0`.
+    assert!(
+        want.contains("[true]") && want.contains("[false]"),
+        "generic print of Bool must use the Show dictionary: {want:?}"
+    );
+    let out = native_on_input("show_poly_dict", &full, "");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        want,
+        "native polymorphic Show print diverges from the interpreter"
+    );
 }
 
 // `string_of_bytes` must render ill-formed UTF-8 identically on both backends.

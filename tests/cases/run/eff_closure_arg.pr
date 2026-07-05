@@ -1,9 +1,8 @@
 -- An effectful closure passed as a function argument and applied under a
 -- handler. The do sits in a lambda body, invisible to latent analysis.
 
-effect Tell {
+effect Tell
   ctl tell(Int) : Int
-}
 
 fn apply_twice(f, x) = f(f(x))
 

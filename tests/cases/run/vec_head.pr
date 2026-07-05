@@ -1,0 +1,11 @@
+-- `vhead` accepts any length, so the empty vector is not ruled out statically
+-- (that needs successor arithmetic on the dimension, which the `Nat` kind
+-- declines). On a non-empty vector it returns the element; on an empty one it
+-- raises `Fail`, caught here by `default` to a fallback.
+import Data.Vec (..)
+
+fn main() : Unit =
+  let full = vsingle(7)
+  let empty = (vempty() : Vec(Int, 0))
+  print(default(\() -> vhead(full), 0))
+  print(default(\() -> vhead(empty), 0))

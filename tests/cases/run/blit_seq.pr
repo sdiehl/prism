@@ -1,11 +1,19 @@
 -- Exercises the unified `Blit` class on each instanced sequence type: a string
--- splice via the `substring` primitive, and an array range-copy via in-place
--- `array_set`. Both run through the one `blit` method, so the same call shape
--- overwrites a slice of the destination regardless of the underlying container.
+-- splice via the `substring` primitive, an array range-copy via in-place
+-- `array_set`, and a byte-buffer range-copy via in-place `buf_set`. All run
+-- through the one `blit` method, so the same call shape overwrites a slice of the
+-- destination regardless of the underlying container.
 
 import Blit (..)
 
+import Data.Bytes (..)
+
 fn show_ints(xs : List(Int)) : String = show(xs)
+
+fn show_bytes(bs : Bytes) : String =
+  match bytes_to_string(bs) of
+    Some(s) => s
+    None => "bad-utf8"
 
 fn main() =
   -- Overwrite "world" inside the greeting with "there": copy 5 chars from the
@@ -16,5 +24,10 @@ fn main() =
   let src = array_of_list([7, 8, 9])
   let out = blit(src, 0, 3, dst, 1)
   println(show_ints(array_to_list(out)))
+  -- Same operation over a byte buffer: copy "123" (src[3..6)) over dst[5..8) so
+  -- "helloworld" becomes "hello123ld".
+  let bdst = string_to_bytes("helloworld")
+  let bsrc = string_to_bytes("XYZ123")
+  println(show_bytes(blit(bsrc, 3, 3, bdst, 5)))
   -- A zero-length blit is the identity on the destination.
   println(blit("abc", 0, 0, "xyz", 1))

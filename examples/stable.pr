@@ -32,6 +32,8 @@ fn body() =
     (old, loss) =>
       println(concat("dropped by old client: ", show(loss_names(loss))))
       -- Walking back up restores the declared default.
-      println(concat("restored default fog: ", show(upgrade_Save_V1_V2(old).fog)))
+      println(
+          concat("restored default fog: ", show(upgrade_Save_V1_V2(old).fog)),
+        )
 
 fn main() = default(body, ())

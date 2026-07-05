@@ -10,21 +10,23 @@
 --   less
 --   greater
 
-class Eq2(a) {
+class Eq2(a)
   eq2 : (a, a) -> Bool
-}
 
-class Ord2(a) given Eq2(a) {
+class Ord2(a) given Eq2(a)
   cmp2 : (a, a) -> Int
-}
 
-instance eqInt2 : Eq2(Int) {
+instance eqInt2 : Eq2(Int)
   fn eq2(x, y) = x == y
-}
 
-instance ordInt2 : Ord2(Int) {
-  fn cmp2(x, y) = if x < y then 0 - 1 elif x > y then 1 else 0
-}
+instance ordInt2 : Ord2(Int)
+  fn cmp2(x, y) =
+    if x < y then
+      0 - 1
+    elif x > y then
+      1
+    else
+      0
 
 -- Polymorphic over any Ord2(a). It calls cmp2 (its own method, taken from the
 -- Ord2 dictionary parameter) AND eq2 (a superclass method, projected out of the
