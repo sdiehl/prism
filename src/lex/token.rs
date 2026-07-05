@@ -44,6 +44,12 @@ pub enum LexFail {
     Str {
         offset: usize,
     },
+    // A digit separator `_` not flanked by two digits (leading, trailing,
+    // doubled, or adjacent to `.`/`e`/an exponent sign). Offset is relative to
+    // the lexed slice, lifted to an absolute source offset like the others.
+    NumberSep {
+        offset: usize,
+    },
 }
 
 // The string/hole automaton, shared by the string-literal callback and the
@@ -210,28 +216,57 @@ use marginalia::{BuiltinKind, Classify, TriviaPiece};
 use crate::kw;
 use crate::syntax::ast::{IntLit, Suffix};
 
-// Logos callbacks must take `&mut Lexer` even when read-only.
-#[allow(clippy::needless_pass_by_ref_mut)]
-fn parse_float(lex: &mut Lexer<'_, Token>) -> Option<f64> {
-    lex.slice().parse().ok()
+// A digit separator `_` is admissible only flanked by two ASCII digits. Returns
+// the byte offset (within `s`) of the first misplaced separator, catching the
+// leading, trailing, doubled, and adjacent-to-`.`/`e`/sign cases in one rule.
+fn bad_separator(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    b.iter().enumerate().find_map(|(i, &c)| {
+        let flanked = c == b'_'
+            && i > 0
+            && b[i - 1].is_ascii_digit()
+            && b.get(i + 1).is_some_and(u8::is_ascii_digit);
+        (c == b'_' && !flanked).then_some(i)
+    })
+}
+
+// Drop the digit separators so the numeric value parses. Callers validate
+// placement with `bad_separator` first.
+fn strip_separators(s: &str) -> String {
+    s.chars().filter(|&c| c != '_').collect()
 }
 
 // Logos callbacks must take `&mut Lexer` even when read-only.
 #[allow(clippy::needless_pass_by_ref_mut)]
-fn parse_int(lex: &mut Lexer<'_, Token>) -> Option<IntLit> {
+fn parse_float(lex: &mut Lexer<'_, Token>) -> Result<f64, LexFail> {
+    let s = lex.slice();
+    if let Some(off) = bad_separator(s) {
+        return Err(LexFail::NumberSep {
+            offset: lex.span().start + off,
+        });
+    }
+    strip_separators(s).parse().map_err(|_| LexFail::Invalid)
+}
+
+// Logos callbacks must take `&mut Lexer` even when read-only.
+#[allow(clippy::needless_pass_by_ref_mut)]
+fn parse_int(lex: &mut Lexer<'_, Token>) -> Result<IntLit, LexFail> {
     let s = lex.slice();
     let (digits, suffix) = match (s.strip_suffix("i64"), s.strip_suffix("u64")) {
         (Some(d), _) => (d, Suffix::I64),
         (None, Some(d)) => (d, Suffix::U64),
         (None, None) => (s, Suffix::None),
     };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+    if let Some(off) = bad_separator(digits) {
+        return Err(LexFail::NumberSep {
+            offset: lex.span().start + off,
+        });
     }
-    Some(IntLit {
-        value: digits.parse().ok()?,
-        suffix,
-    })
+    // The regex guarantees `digits` is a non-empty run of digits and separators.
+    let value = strip_separators(digits)
+        .parse()
+        .map_err(|_| LexFail::Invalid)?;
+    Ok(IntLit { value, suffix })
 }
 
 #[derive(Clone, Debug, Logos, PartialEq)]
@@ -480,8 +515,14 @@ pub enum Token {
     #[token("?")]
     Question,
 
+    // A digit separator `_` may sit between digits in the mantissa and exponent.
+    // The mantissa's integer part must start with a digit (so a leading `_` stays
+    // an identifier); the fractional and exponent runs admit `_` freely and the
+    // callback rejects a misplaced one with a pointed message. Exponent notation
+    // always denotes a Float, and the exponent sign lives here in the lexer, so it
+    // never collides with the unary-minus operator.
     #[regex(
-        r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+",
+        r"[0-9][0-9_]*\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+",
         parse_float,
         priority = 4
     )]
@@ -493,7 +534,7 @@ pub enum Token {
     #[regex(r"'(\\.|[^'\\\n])'", parse_char, priority = 4)]
     CharLit(char),
 
-    #[regex(r"[0-9]+(i64|u64)?", parse_int, priority = 3)]
+    #[regex(r"[0-9][0-9_]*(i64|u64)?", parse_int, priority = 3)]
     Int(IntLit),
 
     #[regex(r"[a-z_][A-Za-z0-9_]*", |l| l.slice().to_owned(), priority = 2)]
@@ -514,6 +555,12 @@ pub enum Token {
     VOpen,
     VClose,
     VSemi,
+    // A synthetic layout-block opener spliced in by the lexer after a `class`,
+    // `instance`, or `effect` head, standing in for the `where` those forms
+    // omit. It exists only to make the following indented members a layout body;
+    // the layout pass consumes it as an opener and the lexer strips it before
+    // the parser ever sees it, so no grammar rule mentions it.
+    VHead,
     InterpStart(String),
     InterpMid(String),
     InterpEnd(String),
@@ -654,6 +701,7 @@ impl Token {
             | Self::VOpen
             | Self::VClose
             | Self::VSemi
+            | Self::VHead
             | Self::InterpStart(_)
             | Self::InterpMid(_)
             | Self::InterpEnd(_) => "",
@@ -673,7 +721,7 @@ impl std::fmt::Display for Token {
                 f.write_str("string literal")
             }
             Self::Comment(_) => f.write_str("comment"),
-            Self::VOpen => f.write_str("start of block"),
+            Self::VOpen | Self::VHead => f.write_str("start of block"),
             Self::VClose => f.write_str("end of block"),
             Self::VSemi => f.write_str("end of statement"),
             t => write!(f, "'{}'", t.text()),
@@ -716,7 +764,56 @@ impl Classify for Token {
 #[cfg(test)]
 mod tests {
     use super::Token;
+    use crate::error::LexError;
     use crate::kw;
+    use crate::syntax::ast::{BigInt, Suffix};
+
+    // Digit separators are cosmetic: they strip out to the same value in every
+    // lane, and scientific notation always lexes to a Float. The exponent sign is
+    // consumed by the lexer, so `1e-2` is one token, not `1e` minus `2`.
+    #[test]
+    fn numeric_separators_and_scientific() {
+        let int = |s: &str| {
+            let (toks, _) = crate::lex::lex_raw(s).unwrap_or_else(|e| panic!("`{s}`: {e:?}"));
+            match toks.as_slice() {
+                [(_, Token::Int(lit), _)] => lit.clone(),
+                other => panic!("`{s}` did not lex to a single Int: {other:?}"),
+            }
+        };
+        let float = |s: &str| {
+            let (toks, _) = crate::lex::lex_raw(s).unwrap_or_else(|e| panic!("`{s}`: {e:?}"));
+            match toks.as_slice() {
+                [(_, Token::Float(f), _)] => *f,
+                other => panic!("`{s}` did not lex to a single Float: {other:?}"),
+            }
+        };
+        assert_eq!(int("1_000_000").value, BigInt::from(1_000_000));
+        assert_eq!(int("1_000_000").suffix, Suffix::None);
+        assert_eq!(int("10_00i64").suffix, Suffix::I64);
+        assert_eq!(
+            int("4_294_967_296u64").value,
+            BigInt::from(4_294_967_296u64)
+        );
+        assert!((float("1_000.000_5") - 1000.0005).abs() < 1e-9);
+        assert!((float("1e-2") - 0.01).abs() < 1e-12);
+        assert!((float("1E3") - 1000.0).abs() < 1e-9);
+        assert!((float("1_2.5e1_0") - 12.5e10).abs() < 1.0);
+    }
+
+    // A separator must sit between two digits; the misplaced forms are a pointed
+    // lexer error, not a silent split into an identifier.
+    #[test]
+    fn bad_separators_rejected() {
+        for s in ["1__0", "1000_", "1_.5", "1e_5", "1.5_"] {
+            assert!(
+                matches!(
+                    crate::lex::lex_raw(s),
+                    Err(LexError::NumberSeparator { .. })
+                ),
+                "`{s}` should be a NumberSeparator error"
+            );
+        }
+    }
 
     // The reason the hole scanner is a stack automaton and not a brace count: a
     // string literal nested inside a hole carries its own `{`/`}`/`"`, none of

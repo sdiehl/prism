@@ -1,0 +1,6 @@
+case xs of
+  End        => reuse_token xs to r
+                reuse r as End
+  Link(h, t) => dup h; dup t
+                reuse_token xs to r          -- the matched cell's shell
+                reuse r as Link(h + 1, bump(t))

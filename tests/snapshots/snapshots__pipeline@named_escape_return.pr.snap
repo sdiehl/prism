@@ -1,0 +1,134 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/named_escape_return.pr
+---
+== tokens ==
+VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Ident("f") VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Ask",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ask",
+                    params: [],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 135..163,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "leak",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    NamedHandle(
+                        "f",
+                        Spanned {
+                            node: Var(
+                                "f",
+                            ),
+                            span: 236..237,
+                        },
+                        [
+                            Op(
+                                "ask",
+                                [],
+                                "k",
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "k",
+                                            ),
+                                            span: 211..212,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 5,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 213..214,
+                                            },
+                                        ],
+                                    ),
+                                    span: 211..215,
+                                },
+                            ),
+                            Return(
+                                "r",
+                                Spanned {
+                                    node: Var(
+                                        "r",
+                                    ),
+                                    span: 232..233,
+                                },
+                            ),
+                        ],
+                    ),
+                ),
+                span: 179..237,
+            },
+            wheres: [],
+            span: 165..237,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 251..258,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 259..260,
+                        },
+                    ],
+                ),
+                span: 251..261,
+            },
+            wheres: [],
+            span: 239..261,
+        },
+    ],
+}
+
+== types ==
+Type Error: handler instance `f` is not a value: call its operations as `f.op(...)`
+    ╭─[ <source>:10:3 ]
+    │
+ 10 │   f
+    │   ┬  
+    │   ╰── handler instance `f` is not a value: call its operations as `f.op(...)`
+────╯

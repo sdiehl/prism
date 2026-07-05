@@ -2,9 +2,8 @@
 -- row is `!{E}` and `main` (which neither handles nor declares `E`) is rejected.
 -- Regression: this was once inferred pure and reached an effect-reconciliation
 -- ICE at lowering.
-effect E {
+effect E
   ctl op(Int) : Int
-}
 
 fn f() =
   handle mask<E>(op(1)) with

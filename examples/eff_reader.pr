@@ -1,6 +1,5 @@
-effect Reader {
+effect Reader
   ctl ask(Unit) : Int
-}
 
 -- Reader: a read-only environment as an effect.
 --

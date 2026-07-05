@@ -47,6 +47,14 @@ def jBinOp : String → Except String BinOp
   | "gef" => .ok .gef
   | s => .error s!"unknown binop {s}"
 
+-- The lane tag is the Debug name of `NegLane` in `src/core/cbpv.rs`; both
+-- integer lanes decode to the model's unbounded `int` negation.
+def jNegLane : String → Except String NegLane
+  | "Int" => .ok .int
+  | "I64" => .ok .i64
+  | "Float" => .ok .float
+  | s => .error s!"unknown neg lane {s}"
+
 def jStrList (j : Json) : Except String (List String) := do
   (← j.getArr?).toList.mapM (·.getStr?)
 
@@ -91,6 +99,7 @@ partial def jComp (j : Json) : Except String Comp := do
     | "app" => return .app (← jComp (← j.getObjVal? "f")) (← jList jValue (← j.getObjVal? "args"))
     | "ite" => return .ite (← jValue (← j.getObjVal? "cond")) (← jComp (← j.getObjVal? "t")) (← jComp (← j.getObjVal? "e"))
     | "prim" => return .prim (← jBinOp (← jStr j "op")) (← jValue (← j.getObjVal? "a")) (← jValue (← j.getObjVal? "b"))
+    | "neg" => return .neg (← jNegLane (← jStr j "lane")) (← jValue (← j.getObjVal? "v"))
     | "call" => return .call (← jStr j "name") (← jList jValue (← j.getObjVal? "args"))
     | "case" => return .case (← jValue (← j.getObjVal? "scrut")) (← jArms (← j.getObjVal? "arms"))
     | "doOp" => return .doOp (← jStr j "name") (← jList jValue (← j.getObjVal? "args"))

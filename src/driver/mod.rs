@@ -17,7 +17,7 @@ use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Comp, Core, CorePass, DepGraph, OptLevel, PassSpec, Value,
+    run_opt_spec, Comp, Core, CorePass, DepGraph, OpGrades, OptLevel, PassSpec, Value,
 };
 use crate::debug::trace;
 use crate::error::{Error, TypeError};
@@ -266,9 +266,6 @@ impl Config {
         }
     }
 }
-#[cfg(feature = "native")]
-const RUNTIME: &str = include_str!("../../runtime/prism_rt.c");
-
 #[must_use]
 pub fn with_prelude(src: &str) -> String {
     format!("{PRELUDE}\n{src}")
@@ -575,12 +572,27 @@ pub(crate) fn namespace_root_of(hashes: &crate::core::Hashes) -> String {
     )
 }
 
-// The composed source that pulls in the entire documented standard library: the
-// always-on prelude (which glob-imports the `Data.*` modules) plus the two
-// modules it does not open, `Replay` and `Concurrent`. Docs and the stdlib hash
-// share this one definition of "the stdlib".
+// The composed source that pulls in the entire documented standard library:
+// the always-on prelude (which glob-imports the `Data.*` modules) plus every
+// module it does not open. Docs and the stdlib hash share this one definition
+// of "the stdlib", so a module missing here silently gets no hash badge in the
+// generated docs (its types and functions never reach the elaborated Core the
+// hash is taken from). Qualified-only (no `(..)`): the driver body never
+// names anything from these modules directly, and opening them all
+// unqualified collides (`Concurrent.Outcome` vs `Quickcheck.Outcome`); a
+// bare import still resolves and elaborates the module.
 pub(crate) fn stdlib_driver_src() -> String {
-    with_prelude("import Replay (..)\nimport Concurrent (..)\n")
+    with_prelude(
+        "import Data.Checked\n\
+         import Data.Vec\n\
+         import Replay\n\
+         import Concurrent\n\
+         import Blit\n\
+         import Incr\n\
+         import Quickcheck\n\
+         import Test\n\
+         import Wire\n",
+    )
 }
 
 // Elaborate a source to Core *before* the Core-to-Core optimizer runs: the one
@@ -842,7 +854,7 @@ fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(
         if !offending.is_empty() {
             let msg = format!(
                 "function `{}` is marked `replayable` but performs non-replayable {} `{}`; \
-                 a replayable function may use only Console, FileSystem, Random, Env, Output, Exn, Fail",
+                 a replayable function may use only Console, FileSystem, Random, Env, Clock, Output, Exn, Fail",
                 d.name,
                 if offending.len() == 1 {
                     "effect"
@@ -990,6 +1002,126 @@ pub fn debug_on(
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::Runtime)?;
     crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::Runtime)
+}
+
+/// The outcome of a suspendable run: the program either finished (nothing to
+/// snapshot) or paused, yielding the encoded `kont` envelope to persist.
+#[derive(Debug)]
+pub enum SuspendResult {
+    /// Ran to completion before the step budget; carries any `exit(code)`.
+    Done(Option<i32>),
+    /// Paused at the budget; carries the serialized `kont` envelope.
+    Suspended(Vec<u8>),
+}
+
+/// Run `src` under a step budget, streaming its prefix output to `out_sink` and
+/// snapshotting the whole suspended program as a `kont` envelope when it pauses.
+///
+/// The snapshot is tagged with the program's code-identity digest (its namespace
+/// root), which [`resume_on`] re-derives and checks. If a captured value cannot
+/// cross the suspend boundary (too deeply nested, the fingerprint of an
+/// unserializable capture), the refusal is raised here, at suspend time, naming
+/// the value.
+///
+/// # Errors
+/// Fails on any front-end error, an evaluation fault before the budget, or a value
+/// that cannot be serialized.
+pub fn suspend_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    budget: usize,
+    cfg: &Config,
+) -> Result<SuspendResult, Error> {
+    let bundle = namespace_root(src, roots)?;
+    let core = prepared_core(src, roots, cfg)?;
+    match crate::eval::run_suspending(&core, bundle, budget, out_sink, input)
+        .map_err(Error::Runtime)?
+    {
+        crate::eval::Checkpoint::Done(run) => Ok(SuspendResult::Done(run.exit)),
+        crate::eval::Checkpoint::Suspended(kont) => {
+            let bytes =
+                crate::eval::kont::encode_kont(&kont).map_err(|e| Error::Runtime(e.to_string()))?;
+            Ok(SuspendResult::Suspended(bytes))
+        }
+    }
+}
+
+// A hard cap on the line-cut scan so a nonterminating program cannot spin the
+// mapping forever. Any real demo program prints its lines in far fewer steps.
+const MAX_LINE_CUT_STEPS: usize = 8192;
+
+/// The machine-step budget at which each successive output line first appears.
+///
+/// Compiles `src` once, then re-runs it under growing step budgets and records,
+/// for each printed line, the smallest budget after which that line has been
+/// emitted. The `i`th entry is the budget to pass [`suspend_on`] to pause exactly
+/// after line `i + 1` has printed, so a caller can cut on a legible line boundary
+/// instead of an opaque step count. The final line's boundary is omitted: pausing
+/// there is completion, with nothing left to suspend.
+///
+/// # Errors
+/// Fails on any front-end error or an evaluation fault before the program ends.
+pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<usize>, Error> {
+    let bundle = namespace_root(src, roots)?;
+    let core = prepared_core(src, roots, cfg)?;
+    // Build the global table once: it deep-clones every function body, so rebuilding
+    // it per budget would make the scan quadratic in that clone.
+    let g = crate::eval::globals(&core);
+    let mut cuts: Vec<usize> = Vec::new();
+    for budget in 1..=MAX_LINE_CUT_STEPS {
+        let mut out: Vec<u8> = Vec::new();
+        let mut input = std::io::Cursor::new(Vec::new());
+        let checkpoint =
+            crate::eval::run_suspending_in(&g, bundle.clone(), budget, &mut out, &mut input)
+                .map_err(Error::Runtime)?;
+        let lines = out.iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
+        while cuts.len() < lines {
+            cuts.push(budget);
+        }
+        if matches!(checkpoint, crate::eval::Checkpoint::Done(_)) {
+            break;
+        }
+    }
+    // Drop the last line's boundary: a cut there is a completed run.
+    cuts.pop();
+    Ok(cuts)
+}
+
+/// Resume a `kont` envelope against `src`, running the continuation to completion
+/// and streaming its suffix output to `out_sink`.
+///
+/// The envelope is decoded totally (any malformed or hostile bytes are rejected),
+/// then its bundle digest is checked against `src`'s freshly derived code identity:
+/// a snapshot captured against a different program is refused before a single step
+/// runs. The suffix output, following the suspend run's prefix, reproduces an
+/// uninterrupted run byte for byte.
+///
+/// # Errors
+/// Fails on a front-end error, a malformed envelope, a code-identity mismatch, or
+/// an evaluation fault after the resume point.
+pub fn resume_on(
+    src: &str,
+    roots: &[Root],
+    snapshot: &[u8],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+) -> Result<Option<i32>, Error> {
+    let kont = crate::eval::kont::decode_kont(snapshot)
+        .map_err(|e| Error::Runtime(format!("resume: malformed snapshot: {e}")))?;
+    let bundle = namespace_root(src, roots)?;
+    if kont.bundle != bundle {
+        return Err(Error::Runtime(format!(
+            "resume: code-identity mismatch: this snapshot was captured against a \
+             different program (snapshot bundle {}, this program {})",
+            kont.bundle, bundle
+        )));
+    }
+    let core = prepared_core(src, roots, cfg)?;
+    let run = crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::Runtime)?;
+    Ok(run.exit)
 }
 
 // Run a freshly built native binary on empty stdin, returning its stdout bytes.
@@ -1170,7 +1302,7 @@ fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
 fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<Core, Error> {
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, _, warning) = lower_opt(&core, &checked.ctors, cfg)?;
+    let (lowered, _, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
     emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
         .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
@@ -1188,9 +1320,10 @@ type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
 fn lower_opt(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
+    grades: &OpGrades,
     cfg: &Config,
 ) -> Result<Lowered, Error> {
-    let (lowered, ctors, warning) = lower_effects(core, ctors, &cfg.flags)?;
+    let (lowered, ctors, warning) = lower_effects(core, ctors, &cfg.flags, grades)?;
     let empty = std::collections::BTreeSet::new();
     let (lowered, _stats) = cfg.passes.as_ref().map_or_else(
         || {
@@ -1215,7 +1348,7 @@ fn lowered_core(
 ) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, cfg)?;
+    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
     emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     Ok((checked, lowered, ctors, sigs))
 }
@@ -1266,6 +1399,7 @@ pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<&'sta
         &core,
         &checked.ctors,
         &cfg.flags,
+        &checked.op_grades(),
     )?)
 }
 
@@ -1280,7 +1414,7 @@ pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<&'sta
 pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Error> {
     let cfg = Config::from_env();
     let (_, checked, core) = frontend(full, &default_roots(base), &cfg)?;
-    let (_, _, warning) = lower_effects(&core, &checked.ctors, &cfg.flags)?;
+    let (_, _, warning) = lower_effects(&core, &checked.ctors, &cfg.flags, &checked.op_grades())?;
     Ok(warning.into_iter().collect())
 }
 
@@ -1367,6 +1501,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
             | Comp::Force(v)
             | Comp::Error(v)
             | Comp::FloatBuiltin(_, v)
+            | Comp::Neg(_, v)
             | Comp::Dup(v)
             | Comp::Drop(v)
             | Comp::Reuse(_, v)
@@ -1541,9 +1676,24 @@ fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
 
 #[cfg(feature = "native")]
 fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
-    let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
-    let rt = out.with_extension("prism_rt.c");
-    fs::write(&rt, RUNTIME)?;
+    // Default to the exact compiler that built the interpreter's runtime + libm
+    // (baked by build.rs), not a bare "clang": musl's transcendentals are not
+    // correctly-rounded, so native and interpreter must use the identical toolchain
+    // or their float results diverge by a ULP. `PRISM_CC` still overrides (e.g. the
+    // sanitizer job), but then it is the caller's job to match the build.
+    let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+    // Materialize the embedded runtime (the split C modules and their headers)
+    // into a per-output directory and compile every source in one clang
+    // invocation, so ThinLTO still inlines the runtime into the generated code.
+    // The directory is unique to `out`, so concurrent builds do not collide.
+    let rt_dir = out.with_extension("prism_rt.d");
+    let sources = crate::codegen::rt::write_runtime(&rt_dir)?;
+    // The vendored libm is linked as the one pre-built archive (compiled once by
+    // build.rs, the same bytes the interpreter uses), never recompiled here: the
+    // transcendentals are not correctly-rounded, so a second, differently-invoked
+    // compile diverges by a ULP and breaks parity. It links after the objects that
+    // reference it (`prism_libm.c`), so the archive resolves their `sin`/`atan`/...
+    let libm_archive = crate::codegen::rt::write_libm_archive(&rt_dir)?;
     // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
     // the corpus runs under UBSan and any new runtime UB aborts the program.
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
@@ -1560,18 +1710,27 @@ fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
     } else {
         &[]
     };
+    // FP contraction is pinned off on every native compile: letting the C
+    // compiler fuse `a*b+c` into an FMA on one platform and not another
+    // diverges the last bit of float arithmetic, and byte-for-byte parity with
+    // the interpreter (which never fuses) is the language's contract.
     let res = Command::new(&cc)
-        .args([olevel.as_str(), "-flto=thin", "-Wno-override-module"])
+        .args([
+            olevel.as_str(),
+            "-flto=thin",
+            "-ffp-contract=off",
+            "-Wno-override-module",
+        ])
         .args(rt_checks)
         .args(extra.split_whitespace())
         .arg(ir)
-        .arg(&rt)
-        .arg("-lm")
+        .args(&sources)
+        .arg(&libm_archive)
         .arg("-o")
         .arg(out)
         .output()
         .map_err(|e| Error::Codegen(format!("running {cc}: {e} (is clang installed?)")));
-    let _ = fs::remove_file(&rt);
+    let _ = fs::remove_dir_all(&rt_dir);
     let cc_out = res?;
     if cc_out.status.success() {
         if !cc_out.stderr.is_empty() {
@@ -1747,7 +1906,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     );
 
     #[cfg(feature = "native")]
-    match lower_opt(&core, &checked.ctors, cfg) {
+    match lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg) {
         Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
             Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
             Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
@@ -2025,7 +2184,12 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let (_, checked, core) = frontend(src, roots, cfg)?;
             Ok(format!(
                 "{}\n",
-                crate::core::effect_strategy(&core, &checked.ctors, &cfg.flags)?
+                crate::core::effect_strategy(
+                    &core,
+                    &checked.ctors,
+                    &cfg.flags,
+                    &checked.op_grades()
+                )?
             ))
         }
         #[cfg(feature = "native")]

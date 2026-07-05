@@ -1,6 +1,5 @@
-effect Writer {
+effect Writer
   ctl tell(Int) : Unit
-}
 
 -- Writer: accumulate output on the side.
 --

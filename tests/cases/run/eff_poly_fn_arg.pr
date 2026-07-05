@@ -5,9 +5,8 @@
 -- later truncation stranded ("solve_row: ^N not in context"). It must now type
 -- check and run.
 
-effect Tag {
+effect Tag
   ctl fresh(Unit) : Int
-}
 
 -- Polymorphic in `a`, effectful in `Tag`: this is the shape that triggered it.
 fn tag(x) : !{Tag} (Int, a) = (fresh(()), x)
@@ -25,4 +24,6 @@ fn run_tags(action) =
   go(0)
 
 fn main() =
-  println(show(run_tags(\() -> map_eff(tag, Cons(10, Cons(20, Cons(30, Nil)))))))
+  println(
+      show(run_tags(\() -> map_eff(tag, Cons(10, Cons(20, Cons(30, Nil)))))),
+    )

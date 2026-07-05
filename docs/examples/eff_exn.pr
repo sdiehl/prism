@@ -1,6 +1,5 @@
-effect Exn {
+effect Exn
   ctl raise(Int) : Int
-}
 
 -- Exceptions as an effect: raise and catch.
 --

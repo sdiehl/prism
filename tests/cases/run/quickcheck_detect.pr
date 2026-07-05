@@ -8,8 +8,15 @@ import Quickcheck (..)
 
 fn is_true(b) = b
 
-fn is_empty(xs) = length(xs) == 0
+fn is_empty(xs : List(a)) : Bool = length(xs) == 0
 
 fn main() =
-  println(show_outcome("every Bool holds (false)", quickcheck(gen_bool, is_true)))
-  println(show_outcome("every list is empty (false)", quickcheck(gen_list(gen_bool), is_empty)))
+  println(
+      show_outcome("every Bool holds (false)", quickcheck(gen_bool, is_true)),
+    )
+  println(
+      show_outcome(
+          "every list is empty (false)",
+          quickcheck(gen_list(gen_bool), is_empty),
+        ),
+    )

@@ -23,31 +23,32 @@ fn tfold(g, z, t) =
     Leaf(x) => g(x, z)
     Branch(l, r) => tfold(g, tfold(g, z, r), l)
 
+fn tfold_l(g, z, t) =
+  match t of
+    Leaf(x) => g(z, x)
+    Branch(l, r) => tfold_l(g, tfold_l(g, z, l), r)
+
 fn twalk(g, t) =
   match t of
     Leaf(x) => Leaf(g(x))
     Branch(l, r) => Branch(twalk(g, l), twalk(g, r))
 
-instance functorTree : Functor(Tree) {
+instance functorTree : Functor(Tree)
   fn fmap(g, t) = tmap(g, t)
-}
 
-instance foldableTree : Foldable(Tree) {
+instance foldableTree : Foldable(Tree)
   fn fold_r(g, z, t) = tfold(g, z, t)
-}
+  fn fold_l(g, z, t) = tfold_l(g, z, t)
 
-instance traversableTree : Traversable(Tree) {
+instance traversableTree : Traversable(Tree)
   fn traverse(g, t) = twalk(g, t)
-}
 
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
-effect Choice {
+effect Choice
   ctl pick(Unit) : Bool
-}
 
 -- A parameter-passing State handler: the handled block becomes a state
 -- transformer, run with an initial counter. The action's row is written

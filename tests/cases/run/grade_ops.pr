@@ -1,0 +1,33 @@
+-- A `fun`-graded op handled tail-resumptively, and a `final ctl`-graded op
+-- handled by an aborting clause, both on user effects. Runs identically on the
+-- interpreter and native backends.
+effect Ask
+  fun ask(Unit) : Int
+
+effect Abort
+  final ctl abort(Unit) : Int
+
+fn asker() : !{Ask} Int =
+  let a = ask(())
+  let b = ask(())
+  a + b
+
+fn aborter(n) : !{Abort} Int =
+  if n < 0 then
+    abort(())
+  else
+    n * 2
+
+fn main() : !{IO} Unit =
+  println(handle asker() with {
+    fun ask(u) => 21,
+    return r => r
+  })
+  println(handle aborter(5) with {
+    final ctl abort(u) => 0,
+    return r => r
+  })
+  println(handle aborter(0 - 1) with {
+    final ctl abort(u) => 999,
+    return r => r
+  })

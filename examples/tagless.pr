@@ -5,23 +5,20 @@
 -- string. No intermediate tree, no tags: the interpreter is the dictionary you
 -- select.
 
-class Sym(r) {
-  lit : (Int) -> r,
-  add : (r, r) -> r,
+class Sym(r)
+  lit : (Int) -> r
+  add : (r, r) -> r
   mul : (r, r) -> r
-}
 
-instance evalSym : Sym(Int) {
-  fn lit(n) = n,
-  fn add(x, y) = x + y,
+instance evalSym : Sym(Int)
+  fn lit(n) = n
+  fn add(x, y) = x + y
   fn mul(x, y) = x * y
-}
 
-instance showSym : Sym(String) {
-  fn lit(n) = show_int(n),
-  fn add(x, y) = "({x} + {y})",
+instance showSym : Sym(String)
+  fn lit(n) = show_int(n)
+  fn add(x, y) = "({x} + {y})"
   fn mul(x, y) = "({x} * {y})"
-}
 
 -- 1 + (2 * 3), written once, carrier r left abstract.
 fn expr() : r given Sym(r) = add(lit(1), mul(lit(2), lit(3)))

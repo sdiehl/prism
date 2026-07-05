@@ -5,9 +5,8 @@
 -- that pending application: result is ask(=100) + 5 + 7 = 112. Pins the
 -- continuation handling for the Frame::Args case in `perform`.
 
-effect Reader {
+effect Reader
   ctl ask(Unit) : Int
-}
 
 fn main() =
   let bump = \(a) -> let x = ask(()) in \(b) -> x + a + b

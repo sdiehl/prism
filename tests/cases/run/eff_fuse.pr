@@ -3,9 +3,8 @@
 -- inlines every stage into direct forced-clause calls, so the producer ->
 -- transformer -> consumer chain runs as one loop with zero EOp cells, the
 -- fusion that intermediate-collection pipelines pay for. Output 10 20 30.
-effect Yield {
+effect Yield
   ctl give(Int) : Unit
-}
 
 fn produce() : !{Yield} Unit =
   give(1)

@@ -1,6 +1,5 @@
-effect Ask {
+effect Ask
   ctl ask() : Int
-}
 
 fn leak() : (Unit) -> Int =
   with f <- handler

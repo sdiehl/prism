@@ -19,9 +19,8 @@ type Term = Var(Int) | Lam(Term) | App(Term, Term)
 
 type Val = Clo(Term, List(Val))
 
-effect Scope {
+effect Scope
   ctl bad(Int) : Val
-}
 
 fn lookup(env, i) : !{Scope} Val =
   match nth(i, env) of

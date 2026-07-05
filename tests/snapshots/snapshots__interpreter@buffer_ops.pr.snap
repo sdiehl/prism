@@ -1,0 +1,21 @@
+---
+source: tests/snapshots.rs
+assertion_line: 483
+expression: interp_output(path)
+input_file: tests/cases/run/buffer_ops.pr
+---
+12
+1122
+200
+5
+472
+6
+neq
+-1
+0
+AAA
+héllo, world
+<invalid>
+ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f
+round trip
+=> ()

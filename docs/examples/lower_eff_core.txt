@@ -1,0 +1,8 @@
+fn tick() : !{State} Int =
+  let n = get(())          -- perform get
+  put(n + 1)               -- perform put
+  n
+
+handle counter() with
+  get(u, k)  => \s  -> k(s)(s)      -- k is the continuation
+  put(s2, k) => \_s -> k(())(s2)

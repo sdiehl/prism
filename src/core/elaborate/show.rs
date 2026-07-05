@@ -115,6 +115,30 @@ impl Elab<'_> {
         }
     }
 
+    // Emit a print of an already-rendered `String` computation. Mirrors the two
+    // routing modes of the concrete-type path: through the interceptable `Output`
+    // capability when a world handler is in scope, else straight to the runtime
+    // string printer. Used for the polymorphic (dictionary-rendered) print.
+    pub(super) fn print_string(&mut self, shown: Comp, newline: bool) -> Comp {
+        let s = self.fresh();
+        let tail = if self.route_output {
+            let op = if newline { "out_println" } else { "out_print" };
+            Comp::Do(op.into(), vec![Value::Var(s.clone().into())])
+        } else {
+            let put = Comp::Io(IoOp::PrintS, vec![Value::Var(s.clone().into())]);
+            if newline {
+                Comp::Bind(
+                    Box::new(put),
+                    self.fresh().into(),
+                    Box::new(Comp::Io(IoOp::PrintNl, vec![])),
+                )
+            } else {
+                put
+            }
+        };
+        Comp::Bind(Box::new(shown), s.into(), Box::new(tail))
+    }
+
     pub(super) fn show_for_type(&mut self, v: Value, ty: &Type, span: Span) -> Result<Comp, Error> {
         Ok(match ty {
             Type::Int => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),

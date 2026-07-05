@@ -1,0 +1,158 @@
+-- A double pendulum: two rods, two bobs, one pivot, and the cleanest chaos in
+-- classical mechanics. The state is (th1, th2, w1, w2), the two rod angles from
+-- straight-down and their angular velocities, and the whole trajectory is a pure
+-- function of the step index. Sensitive dependence on initial conditions makes
+-- the motion look random, but every arithmetic op here is IEEE Float and every
+-- transcendental (sin, cos) is Prism's vendored libm, identical on every backend.
+-- So the chaos is bit-reproducible: frame N replays to the same bytes on the
+-- interpreter and on native code, and scrubbing backward is just re-running from
+-- step 0. Chaos, replayed exactly.
+
+-- Physical constants. Equal masses and equal rod lengths (m1 = m2 = 1, so the
+-- mass cancels out of the accelerations below; l is kept explicit so the physics
+-- reads). g is standard gravity.
+let g = 9.81
+
+let l = 1.0
+
+-- Integrator timestep, and how many integrator substeps make up one rendered
+-- frame. A double pendulum at this energy needs a small step to stay accurate,
+-- so each frame advances the state by SUBSTEPS * dt = 0.02 s of simulated time.
+let dt = 0.004
+
+let substeps = 5
+
+-- Chaotic initial condition: both rods raised to ~137 degrees, released from
+-- rest. High potential energy, far from any stable point, so the two rods trade
+-- energy back and forth unpredictably.
+let init = (2.4, 2.4, 0.0, 0.0)
+
+-- The angular accelerations (a1, a2) at a given state. These are the
+-- Euler-Lagrange equations of motion for the same Lagrangian whose energy is
+-- reported below (equal masses, equal lengths, mass cancelled): solving the two
+-- coupled equations for the second derivatives gives a shared denominator
+-- 2 - cos^2 d. They depend on the angular velocities as well as the angles,
+-- since the rods exert velocity-dependent (centrifugal, Coriolis) forces on each
+-- other. Deriving both accelerations and energy from one Lagrangian is what makes
+-- the integrator conserve energy (checked in main): forces and invariant agree.
+fn accel(th1, th2, w1, w2) =
+  let d = th1 - th2
+  let gl = g / l
+  let den = 2.0 - cos(d) * cos(d)
+  let a1 = (-sin(d) * (w2 * w2 + w1 * w1 * cos(d))
+    - 2.0 * gl * sin(th1)
+    + gl * cos(d) * sin(th2))
+    / den
+  let a2 = (sin(d) * (2.0 * w1 * w1 + w2 * w2 * cos(d))
+    - 2.0 * gl * sin(th2)
+    + 2.0 * gl * cos(d) * sin(th1))
+    / den
+  (a1, a2)
+
+-- One integrator step of size dt: fixed-timestep velocity Verlet (Stormer-Verlet
+-- in kick-drift-kick form). Because the forces here depend on velocity, this is
+-- the standard explicit variant: the angles advance on the current acceleration,
+-- a predictor estimates the new velocity, and the velocity update averages the
+-- old and predicted accelerations. It is second-order and time-symmetric, so
+-- energy drifts by only a fraction of a percent over the demo window (checked in
+-- main below), and, being a fixed pure function, it is exactly reproducible.
+fn verlet(s) =
+  match s of
+    (th1, th2, w1, w2) =>
+      match accel(th1, th2, w1, w2) of
+        (a1, a2) =>
+          let nth1 = th1 + dt * w1 + 0.5 * dt * dt * a1
+          let nth2 = th2 + dt * w2 + 0.5 * dt * dt * a2
+          match accel(nth1, nth2, w1 + dt * a1, w2 + dt * a2) of
+            (b1, b2) =>
+              let nw1 = w1 + 0.5 * dt * (a1 + b1)
+              let nw2 = w2 + 0.5 * dt * (a2 + b2)
+              (nth1, nth2, nw1, nw2)
+
+-- Advance the state by k integrator steps (constant stack, tail-recursive).
+fn iterate(s, k) =
+  if k <= 0 then
+    s
+  else
+    iterate(verlet(s), k - 1)
+
+-- One rendered frame is SUBSTEPS integrator steps. `step` is the compiler-checked
+-- promise (`replayable`): the whole trajectory reproduces from the step index.
+replayable fn step(s) = iterate(s, substeps)
+
+-- The state at each frame 0..n: element N is `step` composed N times on the
+-- initial condition, so `frames_upto(n)` IS the replay.
+fn frames_upto(n) = scan_left(\(s, _) -> step(s), init, range(0, n))
+
+fn frame_at(n) = iterate(init, n * substeps)
+
+-- Cartesian bob positions from the angles: the pivot is the origin, y points
+-- down (the direction gravity pulls), so a rod hanging straight down is at
+-- angle 0. Returns (x1, y1, x2, y2), the two bob centers.
+fn positions(s) =
+  match s of
+    (th1, th2, _, _) =>
+      let x1 = l * sin(th1)
+      let y1 = l * cos(th1)
+      (x1, y1, x1 + l * sin(th2), y1 + l * cos(th2))
+
+-- Total mechanical energy (kinetic + potential). Conserved by the true dynamics;
+-- how nearly the integrator conserves it is the honest measure of its quality.
+fn energy(s) =
+  match s of
+    (th1, th2, w1, w2) =>
+      let d = th1 - th2
+      let ke = w1 * w1 + 0.5 * w2 * w2 + w1 * w2 * cos(d)
+      let pe = -g * (2.0 * cos(th1) + cos(th2))
+      ke * l * l + pe * l
+
+fn obs(s) =
+  match positions(s) of
+    (x1, y1, x2, y2) =>
+      str_join(",", [
+          show_float_prec(x1, 5),
+          show_float_prec(y1, 5),
+          show_float_prec(x2, 5),
+          show_float_prec(y2, 5),
+        ])
+
+-- The full trajectory as text for the browser: a header line with the maximum
+-- reach (l + l, so the renderer can scale the pivot's disk to the canvas),
+-- followed by one line per frame, each `x1,y1,x2,y2` bob positions. `replayable`
+-- again: the transcript is a pure function of the frame count.
+replayable fn run_trace(n) =
+  concat(
+      concat(show_float_prec(l + l, 5), "\n"),
+      str_join("\n", map(obs, frames_upto(n))),
+    )
+
+-- A one-line summary of the bob-2 tip position at frame n, for the terminal run.
+fn sample(n) =
+  match positions(frame_at(n)) of
+    (_, _, x2, y2) =>
+      str_join(" ", [
+          concat("step ", show(n)),
+          concat(
+              "tip=(",
+              concat(
+                  show_float_prec(x2, 4),
+                  concat(", ", concat(show_float_prec(y2, 4), ")")),
+                ),
+            ),
+          concat("E=", show_float_prec(energy(frame_at(n)), 6)),
+        ])
+
+-- @scrubber:main-below
+-- The terminal corpus run: a deterministic trajectory summary. The sampled tip
+-- positions show the chaotic motion; the energy column, near-constant across 300
+-- frames (6 s), shows the symplectic integrator holding the invariant. Native
+-- output is byte-identical to the interpreter because the libm is vendored.
+fn main() =
+  println("double pendulum: velocity Verlet, dt = 0.004, chaotic release")
+  println(sample(0))
+  println(sample(50))
+  println(sample(100))
+  println(sample(150))
+  println(sample(200))
+  println(sample(250))
+  println(sample(300))

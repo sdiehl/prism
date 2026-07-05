@@ -1,0 +1,33 @@
+-- Uniform Function Call Syntax (UFCS).
+--
+-- A method call `e.m(args)` is sugar for `m(e, args)`: the receiver becomes the
+-- first argument. Prism has no methods, only functions; the dot is notation, so
+-- any function reads as a method and calls chain left to right.
+-- Expected output:
+--
+--   10
+--   10
+--   8
+--   11
+--   7
+--   3
+
+fn double(n) = n * 2
+
+fn add(a, b) = a + b
+
+type Vec = Vec { x: Int, y: Int }
+
+fn main() =
+  -- `e.m(args)` is exactly `m(e, args)`: these two lines are the same call.
+  println(double(5))
+  println(5.double())
+  -- Extra arguments follow the receiver: `a.add(b)` is `add(a, b)`.
+  println(5.add(3))
+  -- Chaining reads left to right, each result feeding the next call:
+  --   5.double().add(1)  ==  add(double(5), 1)
+  println(5.double().add(1))
+  -- Field access is `e.field`.
+  let v = Vec { x = 7, y = 3 }
+  println(v.x)
+  println(v.y)

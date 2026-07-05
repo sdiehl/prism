@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+assertion_line: 482
+expression: interp_output(path)
+input_file: tests/cases/run/numeric_separators.pr
+---
+1000000
+true
+1000
+4294967296
+1000.0005
+125000000000
+=> ()

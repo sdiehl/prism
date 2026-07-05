@@ -34,10 +34,15 @@ qualid   ->  conid "." ident { "." ident }
 ident    ->  varid | conid
 idchar   ->  letter | digit | "_"
 
-integer  ->  digit { digit } [ "i64" | "u64" ]
-float    ->  digit { digit } "." digit { digit } [ exponent ]
-          |  digit { digit } exponent
-exponent ->  ( "e" | "E" ) [ "+" | "-" ] digit { digit }
+integer  ->  digits [ "i64" | "u64" ]
+float    ->  digits "." digits [ exponent ]
+          |  digits exponent
+exponent ->  ( "e" | "E" ) [ "+" | "-" ] digits
+-- A digit separator "_" is admissible only flanked by two digits, so leading,
+-- trailing, doubled, and adjacent-to-"."/"e" separators are rejected. Exponent
+-- notation always denotes a float; the exponent sign lives in the lexer and does
+-- not collide with the unary-minus operator.
+digits   ->  digit { [ "_" ] digit }
 char     ->  "'" ( graphic | escape | "\\'" ) "'"
 string   ->  "\"" { strchar | escape | interp } "\""
 interp   ->  "{" expr "}"
@@ -59,7 +64,8 @@ vsep     ->  "v;"   -- a newline at the same column (item / statement separator)
 (* ANCHOR: program *)
 program   ->  { topdecl }                       -- separated by layout
 
-topdecl   ->  [ "pub" | "opaque" ] item
+topdecl   ->  [ deprecated ] [ "pub" | "opaque" ] item
+deprecated -> "deprecated" string               -- annotation line: marks the next item superseded ("deprecated" is contextual, not reserved)
 item      ->  import | datatype | newtype | synonym | rowalias
            |  classdecl | instancedecl | canonicaldecl | effectdecl
            |  errordecl | patterndecl | stabledecl | constdecl | fundecl
@@ -76,7 +82,7 @@ rowalias  ->  "alias" conid "=" "{" [ label , ... ] "}"
 tyvars    ->  "(" varid , ... ")"
 kindedvars -> "(" tyvar , ... ")"               -- a data-type parameter may carry a kind
 tyvar     ->  varid [ ":" kind ]
-kind      ->  "Type" | "Row"                    -- "Row" ranges over an effect row
+kind      ->  "Type" | "Row" | "Nat"            -- "Row" ranges over an effect row, "Nat" over a dimension
 ctor      ->  conid [ "(" type , ... ")" ]
            |  conid "{" field , ... "}"
 field     ->  varid ":" type
@@ -96,14 +102,19 @@ wheres    ->  "where" "{" { varid "=" expr } "}"
 (* ANCHOR_END: program *)
 
 (* ANCHOR: decls *)
-classdecl    ->  "class" conid "(" varid ")" [ given ] "{" sig , ... "}"
+-- Class, instance, and effect bodies are layout blocks (no `where`, no braces):
+-- the head ends the line and the members follow on indented lines. A brace here
+-- is a parse error. A marker class or its instance has no members, so the body is
+-- absent and the declaration is its bare head.
+classdecl    ->  "class" conid "(" varid ")" [ given ] [ vopen sig { vsep sig } vclose ]
 instancedecl ->  "instance" varid ":" conid "(" type ")" [ given ]
-                   "{" fundecl , ... "}"
+                   [ vopen fundecl { vsep fundecl } vclose ]
 canonicaldecl -> "canonical" conid "(" type ")" "=" varid
 sig          ->  varid ":" type
 
-effectdecl   ->  "effect" conid [ tyvars ] "{" effop , ... "}"
-effop        ->  "ctl" varid "(" [ type , ... ] ")" ":" type
+effectdecl   ->  "effect" conid [ tyvars ] vopen effop { vsep effop } vclose
+effop        ->  grade varid "(" [ type , ... ] ")" ":" type
+grade        ->  "ctl" | "fun" | "final" "ctl"  -- resumption multiplicity: many | once | never
 errordecl    ->  "error" conid [ "(" type , ... ")" ]
 
 patterndecl  ->  "pattern" conid "(" [ varid , ... ] ")" "for" conid "="
@@ -136,6 +147,7 @@ atype   ->  scalar
          |  "(" type "," type , ... ")"           -- tuple
 typearg ->  type
          |  rowlit                                -- argument for a Row-kinded parameter
+         |  digits                                 -- dimension literal for a Nat-kinded parameter, e.g. Vec(Int, 3)
 rowlit  ->  "{" [ label , ... ] [ "|" varid ] "}" -- effect-row literal, e.g. Cmd(Int, {IO})
 scalar  ->  "Int" | "I64" | "U64" | "Bool" | "Unit" | "Float" | "Char" | "String"
 
@@ -165,6 +177,12 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
          |  opexpr
 
 opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
+         |  negexpr
+negexpr ->  "-" negexpr                              -- unary minus, "tight prefix":
+                                                     -- looser than application and
+                                                     -- projection, tighter than every
+                                                     -- binop, so `-f(x)` is `-(f(x))`
+                                                     -- and `-x * y` is `(-x) * y`
          |  appexpr
 appexpr ->  appexpr "(" [ arg , ... ] [ "using" iname , ... ] ")"
                                                      -- application; `using` selects instances
@@ -210,6 +228,8 @@ pattern  ->  conid [ "(" pattern , ... ")" ]        -- constructor
           |  varid                                    -- variable binding
           |  "_"                                      -- wildcard
           |  integer | float | char | "true" | "false"
+          |  "-" ( integer | float )                  -- negative literal
+
           |  "[" [ pattern , ... ] "]"                -- list
           |  "(" pattern "," pattern , ... ")"        -- tuple
 fieldpat ->  varid "=" pattern  |  ".."

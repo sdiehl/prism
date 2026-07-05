@@ -122,6 +122,11 @@ pub struct Program<P: Phase = Surface> {
     // Type names marked `opaque`: exported by name but with their constructors
     // hidden outside the defining module. A subset of `exports`.
     pub opaques: std::collections::BTreeSet<String>,
+    // Definitions carrying a `deprecated "suggestion"` annotation, keyed by the
+    // surface name, mapping to the author's replacement suggestion. Off the decls
+    // (like `exports`), so an AST dump of an annotation-free program is unchanged.
+    // A use of one of these names warns at compile time (see `resolve::lints`).
+    pub deprecated: std::collections::BTreeMap<String, String>,
 }
 
 // The visibility of a top-level item: private (default), `pub` (exported
@@ -176,6 +181,9 @@ impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
         if !self.opaques.is_empty() {
             d.field("opaques", &self.opaques);
         }
+        if !self.deprecated.is_empty() {
+            d.field("deprecated", &self.deprecated);
+        }
         d.finish()
     }
 }
@@ -212,6 +220,11 @@ pub enum Item {
     Pattern(PatternDecl),
     Fn(Decl),
     Stable(StableDecl),
+    // A `deprecated "suggestion"` annotation line. It is a standalone item (a
+    // layout statement of its own) that the parse-time demultiplexer attaches to
+    // the declaration that follows it, recording the suggestion in
+    // `Program::deprecated`; it never survives into a built `Program`.
+    Deprecated(Span, String),
 }
 
 // The parser only builds `Surface` items, so `Item` stays non-generic.
@@ -415,11 +428,45 @@ pub struct EffectDecl {
     pub span: Span,
 }
 
+// The resumption multiplicity an effect operation permits its handler clauses,
+// a three-point lattice ordered `Zero < One < Many` (the derived variant order,
+// so `<=` is the typing rule "clause grade at most op grade"). Declared per op;
+// the surface prefixes are `final ctl` (Zero), `fun` (One), and bare `ctl`
+// (Many). `Many` is the default so every existing declaration keeps its meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Grade {
+    // `final ctl`: the clause never resumes; the continuation is dropped.
+    Zero,
+    // `fun`: the clause resumes exactly once, in tail position (no capture).
+    One,
+    // `ctl`: the clause may capture the continuation and resume any number of
+    // times. The default and the most general grade.
+    #[default]
+    Many,
+}
+
+impl Grade {
+    // The surface keyword phrase for this grade, spelled from the canonical `kw`
+    // tokens, used by the formatter and the doc generator so the printed op
+    // declaration round-trips through the parser.
+    #[must_use]
+    pub fn keyword(self) -> String {
+        match self {
+            Self::Zero => format!("{} {}", kw::FINAL, kw::CTL),
+            Self::One => kw::FUN.to_string(),
+            Self::Many => kw::CTL.to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EffOp {
     pub name: String,
     pub params: Vec<Ty>,
     pub ret: Ty,
+    // Declared resumption multiplicity (see `Grade`); `Many` unless the op's
+    // surface prefix narrows it.
+    pub grade: Grade,
 }
 
 // Several independent surface flags (`konst`, `replayable`, `no_alloc`, and which
@@ -530,6 +577,10 @@ pub enum Ty {
     // argument for a `Row`-kinded parameter (`Cmd(Int, {IO})`). Only valid at a
     // `Row`-kinded position; the kind check rejects it anywhere a type is wanted.
     RowLit(Row),
+    // A type-level natural literal in a dimension position (`Vec(Int, 3)`), the
+    // argument for a `Nat`-kinded parameter. Only valid at a `Nat`-kinded
+    // position; the kind check rejects it anywhere a type is wanted.
+    Nat(u64),
 }
 
 impl Ty {
@@ -569,7 +620,8 @@ impl Ty {
             | Self::Char
             | Self::Str
             | Self::Var(_)
-            | Self::State(_) => {}
+            | Self::State(_)
+            | Self::Nat(_) => {}
         }
     }
 
@@ -605,7 +657,8 @@ impl Ty {
             | Self::Char
             | Self::Str
             | Self::Var(_)
-            | Self::State(_) => {}
+            | Self::State(_)
+            | Self::Nat(_) => {}
         }
     }
 
@@ -904,6 +957,12 @@ pub enum Expr<P: Phase = Surface> {
     Str(String),
     Var(String),
     Bin(BinOp, Box<S<Self>>, Box<S<Self>>),
+    // Unary minus. Binds looser than application, projection, and postfix but
+    // tighter than every binary operator, so `-f(x)` is `-(f(x))` and `-x * y`
+    // is `(-x) * y`. The numeric lane (Int/I64/Float) is resolved by the checker
+    // and recorded on this node's `NodeId`; elaboration lowers it per lane (exact
+    // bignum negation, two's-complement wrap on I64, IEEE sign flip on Float).
+    Neg(Box<S<Self>>),
     If(Box<S<Self>>, Box<S<Self>>, Box<S<Self>>),
     Let(String, Box<S<Self>>, Box<S<Self>>),
     Lam(Vec<Param<P>>, Box<S<Self>>),

@@ -4,9 +4,8 @@
 
 import Quickcheck (..)
 
-effect Reader {
+effect Reader
   ctl ask(Unit) : Int
-}
 
 fn run_reader(env, action : () -> a ! {Reader | e}) =
   handle action() with

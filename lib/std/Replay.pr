@@ -10,6 +10,14 @@ import Data.List (..)
 
 import Data.String (..)
 
+-- A raw byte read (`fs_read_bytes`) has no valid-UTF-8 string form, so it rides
+-- the trace as a `TStr` carrying lowercase hex (byte-identical to the interpreter
+-- recorder's frame). `hex_encode`/`hex_decode` and the `Buf` <-> `Bytes` seam do
+-- that conversion; no new trace tag is needed.
+import Data.Bytes (hex_encode, hex_decode)
+
+import Wire (bytes_of_buf, bytes_buf)
+
 type TraceEntry
   = TInt(Int)
   | TStr(String)
@@ -27,6 +35,9 @@ fn rec_int(k, t, x) = k(x)(Cons(TInt(x), t))
 
 fn rec_str(k, t, x) = k(x)(Cons(TStr(x), t))
 
+-- A byte read: the op resumes with the raw `Buf`, but the frame stores its hex.
+fn rec_bytes(k, t, buf) = k(buf)(Cons(TStr(hex_encode(bytes_of_buf(buf))), t))
+
 fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
 
 -- | Run `action` against the real world, logging every capability observation
@@ -38,6 +49,7 @@ pub fn record(action) =
       con_read_int(u, k) => \(t) -> rec_int(k, t, prim_read_int())
       con_read_line(u, k) => \(t) -> rec_str(k, t, prim_read_line())
       fs_read_file(p, k) => \(t) -> rec_str(k, t, prim_read_file(p))
+      fs_read_bytes(p, k) => \(t) -> rec_bytes(k, t, prim_read_bytes(p))
       fs_file_exists(p, k) => \(t) -> rec_bool(k, t, prim_file_exists(p))
       rng_rand(u, k) => \(t) -> rec_int(k, t, prim_rand())
       env_get(s, k) => \(t) -> rec_str(k, t, prim_getenv(s))
@@ -59,6 +71,18 @@ fn rep_str(k, t) =
     Cons(TStr(x), rest) => k(x)(rest)
     _ => fail()
 
+-- Decode a recorded hex frame back to the raw `Buf` the byte read resumes with; a
+-- payload that is not the hex a byte read wrote is a corrupt trace, so `fail`.
+fn buf_of_hex(s) =
+  match hex_decode(s) of
+    Some(bs) => bytes_buf(bs)
+    None => fail()
+
+fn rep_bytes(k, t) =
+  match t of
+    Cons(TStr(s), rest) => k(buf_of_hex(s))(rest)
+    _ => fail()
+
 fn rep_bool(k, t) =
   match t of
     Cons(TBool(x), rest) => k(x)(rest)
@@ -73,6 +97,7 @@ pub fn replay(trace, action) =
       con_read_int(u, k) => \(t) -> rep_int(k, t)
       con_read_line(u, k) => \(t) -> rep_str(k, t)
       fs_read_file(p, k) => \(t) -> rep_str(k, t)
+      fs_read_bytes(p, k) => \(t) -> rep_bytes(k, t)
       fs_file_exists(p, k) => \(t) -> rep_bool(k, t)
       rng_rand(u, k) => \(t) -> rep_int(k, t)
       env_get(s, k) => \(t) -> rep_str(k, t)
@@ -161,6 +186,17 @@ fn step_str(path, k, t, real) =
       persist_entry(path, TStr(x))
       k(x)(Nil)
 
+-- The byte-read counterpart of `step_str`: replay a recorded hex frame as the raw
+-- `Buf`, or perform the real read and append its hex once the trace is spent.
+fn step_bytes(path, k, t, real) =
+  match t of
+    Cons(TStr(s), rest) => k(buf_of_hex(s))(rest)
+    Cons(_, _) => fail()
+    Nil =>
+      let buf = real(())
+      persist_entry(path, TStr(hex_encode(bytes_of_buf(buf))))
+      k(buf)(Nil)
+
 fn step_bool(path, k, t, real) =
   match t of
     Cons(TBool(x), rest) => k(x)(rest)
@@ -204,6 +240,8 @@ pub fn durable(path, action) =
         \(t) -> step_str(path, k, t, \(z) -> prim_read_line())
       fs_read_file(p, k) =>
         \(t) -> step_str(path, k, t, \(z) -> prim_read_file(p))
+      fs_read_bytes(p, k) =>
+        \(t) -> step_bytes(path, k, t, \(z) -> prim_read_bytes(p))
       fs_file_exists(p, k) =>
         \(t) -> step_bool(path, k, t, \(z) -> prim_file_exists(p))
       rng_rand(u, k) => \(t) -> step_int(path, k, t, \(z) -> prim_rand())

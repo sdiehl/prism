@@ -1,0 +1,22 @@
+define i64 @prism_unwrap(i64 %o) {
+entry:
+  %cell = inttoptr i64 %o to ptr             ; the value word is a cell pointer
+  %tagp = getelementptr i8, ptr %cell, i64 8
+  %tag  = load i64, ptr %tagp                ; the tag lives at offset 8
+  switch i64 %tag, label %nomatch [
+    i64 0, label %Non
+    i64 1, label %Som
+  ]
+Non:
+  call void @prism_rc_dec(i64 %o)            ; drop the consumed scrutinee
+  ret i64 1                                  ; 0 is the immediate (0 << 1) | 1
+Som:
+  %fp = getelementptr i8, ptr %cell, i64 24
+  %n  = load i64, ptr %fp                    ; field 0 begins at offset 24
+  call void @prism_rc_inc(i64 %n)            ; retain the field that escapes
+  call void @prism_rc_dec(i64 %o)            ; drop the scrutinee
+  ret i64 %n
+nomatch:
+  call void @prism_match_error()             ; exhaustiveness backstop
+  unreachable
+}

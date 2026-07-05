@@ -131,6 +131,10 @@ pub const CORPUS_SKIPS: &[(&str, &str)] = &[
     ("examples/capabilities.pr", "off-platform: getenv"),
     ("examples/durable.pr", "off-platform: file IO + eprint"),
     (
+        "examples/incr_trace.pr",
+        "off-platform: file IO (durable trace-replay Incr snapshot)",
+    ),
+    (
         "examples/incr_warm.pr",
         "off-platform: file IO (durable Incr snapshot)",
     ),
@@ -144,6 +148,10 @@ pub const CORPUS_SKIPS: &[(&str, &str)] = &[
         "off-platform: read_file/file_exists (a handler stubs them, but detection is syntactic)",
     ),
     ("tests/cases/run/fs.pr", "off-platform: file IO"),
+    (
+        "tests/cases/run/fs_bytes.pr",
+        "off-platform: byte-level file IO",
+    ),
 ];
 
 /// Every committed `.pr` under the corpus directories, as `(dir/name.pr, path)`,
@@ -442,6 +450,14 @@ pub fn check_native_parity(
     Ok(())
 }
 
+/// Worker stack size for corpus fan-out. The in-process interpreter's recursion
+/// depth is corpus-dependent (deep non-tail folds recurse per element), and its
+/// real budget has always been the CLI main thread's 8MB, not the 2MB default of
+/// a spawned test thread. Reserve generously: the reservation is virtual and
+/// pages commit only on use, so the cost of headroom is nothing and the cost of
+/// too little is a corpus-wide abort that names no culprit.
+const CORPUS_WORKER_STACK: usize = 256 * 1024 * 1024;
+
 /// Run `check` over `cases` across cores, collecting every failure so one run
 /// reports all divergences rather than aborting at the first. Returns the
 /// failure messages; callers assert emptiness with their own summary.
@@ -456,13 +472,17 @@ pub fn parallel_check(
         .min(cases.len().max(1));
     thread::scope(|s| {
         for _ in 0..threads {
-            s.spawn(|| loop {
+            let worker = || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some(case) = cases.get(i) else { break };
                 if let Err(e) = check(case) {
                     fails.lock().unwrap().push(e);
                 }
-            });
+            };
+            thread::Builder::new()
+                .stack_size(CORPUS_WORKER_STACK)
+                .spawn_scoped(s, worker)
+                .expect("spawning corpus worker");
         }
     });
     fails.into_inner().unwrap()

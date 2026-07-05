@@ -18,34 +18,83 @@ pub enum BuiltinKind {
     Coerce,
 }
 
-/// Inline floating-point op the elaborator emits as `Comp::FloatBuiltin`;
-/// lowered to an FP intrinsic in codegen rather than a runtime call.
+/// Inline unary floating-point op the elaborator emits as `Comp::FloatBuiltin`.
+///
+/// Three lowering classes, distinguished by [`FloatOp::runtime_sym`] and the
+/// exhaustive match in codegen:
+/// - int/float conversions (`to_float`, `truncate`, `floor_to_int`,
+///   `ceil_to_int`): int<->float casts with pinned saturating rounding;
+/// - exact float->float ops (`floor`, `ceil`, `round`, `trunc`, `abs_float`,
+///   `sqrt`): correctly rounded / exact on every IEEE-754 platform, so they lower
+///   to hardware intrinsics and need no owned implementation;
+/// - transcendentals (the rest): platform libm would diverge in the last bit, so
+///   each routes through the owned vendored libm ([`FloatOp::runtime_sym`]).
+///
+/// Binary math (`pow`, `atan2`, `hypot`, `fmod`) is not here: those take two
+/// arguments and ride the boxed-float [`Builtin`] path instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatOp {
+    // int<->float conversions.
     ToFloat,
     Truncate,
     FloorToInt,
     CeilToInt,
+    // Exact float->float.
     AbsFloat,
     Sqrt,
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
+    // Transcendentals, owned by the vendored libm.
     Sin,
     Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Sinh,
+    Cosh,
+    Tanh,
     Exp,
+    Exp2,
+    Expm1,
     Ln,
+    Log2,
+    Log10,
+    Log1p,
+    Cbrt,
 }
 
 impl FloatOp {
-    const ALL: &'static [Self] = &[
+    pub(crate) const ALL: &'static [Self] = &[
         Self::ToFloat,
         Self::Truncate,
         Self::FloorToInt,
         Self::CeilToInt,
         Self::AbsFloat,
         Self::Sqrt,
+        Self::Floor,
+        Self::Ceil,
+        Self::Round,
+        Self::Trunc,
         Self::Sin,
         Self::Cos,
+        Self::Tan,
+        Self::Asin,
+        Self::Acos,
+        Self::Atan,
+        Self::Sinh,
+        Self::Cosh,
+        Self::Tanh,
         Self::Exp,
+        Self::Exp2,
+        Self::Expm1,
         Self::Ln,
+        Self::Log2,
+        Self::Log10,
+        Self::Log1p,
+        Self::Cbrt,
     ];
 
     #[must_use]
@@ -57,10 +106,66 @@ impl FloatOp {
             Self::CeilToInt => "ceil_to_int",
             Self::AbsFloat => "abs_float",
             Self::Sqrt => "sqrt",
+            Self::Floor => "floor",
+            Self::Ceil => "ceil",
+            Self::Round => "round",
+            Self::Trunc => "trunc",
             Self::Sin => "sin",
             Self::Cos => "cos",
+            Self::Tan => "tan",
+            Self::Asin => "asin",
+            Self::Acos => "acos",
+            Self::Atan => "atan",
+            Self::Sinh => "sinh",
+            Self::Cosh => "cosh",
+            Self::Tanh => "tanh",
             Self::Exp => "exp",
+            Self::Exp2 => "exp2",
+            Self::Expm1 => "expm1",
             Self::Ln => "ln",
+            Self::Log2 => "log2",
+            Self::Log10 => "log10",
+            Self::Log1p => "log1p",
+            Self::Cbrt => "cbrt",
+        }
+    }
+
+    /// The owned-libm C symbol a transcendental routes to on native and via FFI
+    /// in the interpreter, or `None` for the conversions and exact ops (which
+    /// lower to casts/intrinsics with no owned implementation). This is the one
+    /// canonical place the `prism_m_*` ABI contract for the unary ops lives, the
+    /// analogue of [`Builtin::sym`]; codegen and the interpreter both dispatch
+    /// off it, so a variant cannot be added without wiring both.
+    #[must_use]
+    pub const fn runtime_sym(self) -> Option<&'static str> {
+        match self {
+            Self::ToFloat
+            | Self::Truncate
+            | Self::FloorToInt
+            | Self::CeilToInt
+            | Self::AbsFloat
+            | Self::Sqrt
+            | Self::Floor
+            | Self::Ceil
+            | Self::Round
+            | Self::Trunc => None,
+            Self::Sin => Some("prism_m_sin"),
+            Self::Cos => Some("prism_m_cos"),
+            Self::Tan => Some("prism_m_tan"),
+            Self::Asin => Some("prism_m_asin"),
+            Self::Acos => Some("prism_m_acos"),
+            Self::Atan => Some("prism_m_atan"),
+            Self::Sinh => Some("prism_m_sinh"),
+            Self::Cosh => Some("prism_m_cosh"),
+            Self::Tanh => Some("prism_m_tanh"),
+            Self::Exp => Some("prism_m_exp"),
+            Self::Exp2 => Some("prism_m_exp2"),
+            Self::Expm1 => Some("prism_m_expm1"),
+            Self::Ln => Some("prism_m_log"),
+            Self::Log2 => Some("prism_m_log2"),
+            Self::Log10 => Some("prism_m_log10"),
+            Self::Log1p => Some("prism_m_log1p"),
+            Self::Cbrt => Some("prism_m_cbrt"),
         }
     }
 
@@ -98,19 +203,42 @@ pub enum Builtin {
     // `Integer` cell rather than an `Option`.
     BigLit,
     ParseFloat,
+    // Binary float transcendentals: boxed-float args in, boxed float out, routed
+    // through the owned vendored libm (see prism_float.c's `prism_float_binop`).
+    // The unary transcendentals ride `FloatOp` instead; these need two arguments.
     PowFloat,
+    Atan2,
+    Hypot,
+    Fmod,
     ShowFloatPrec,
     Getenv,
     ReadFile,
+    ReadBytesFile,
+    WriteBytesFile,
     WriteFile,
     FileExists,
     AppendFile,
     RemoveFile,
+    // The content-addressed store bridge: a named blob rides the real store
+    // (immutable object keyed by its content hash, plus a mutable ref keyed by a
+    // caller tag) instead of a snapshot file. `StoreGet`/`StoreHas` read, so they
+    // are input prims reached through the world handler; `StorePut` writes, so it
+    // is off-platform like `WriteFile`. Interpreter-only for now: the native path
+    // has no C runtime symbol yet (see `native_deferred`).
+    StoreGet,
+    StorePut,
+    StoreHas,
     Exit,
     System,
     Eprint,
     ArgsCount,
     Arg,
+    // Real-time clock reads (nanoseconds): `WallNow` is the system clock (Unix
+    // epoch, UTC), `MonoNow` a monotonic counter. Both are input prims reached
+    // through a `Clock` handler and recorded as trace entries, so a time-reading
+    // program replays byte-identically.
+    WallNow,
+    MonoNow,
     ShowInt,
     ShowI64,
     ShowU64,
@@ -167,6 +295,26 @@ pub enum Builtin {
     // Concatenate every string in an array into one fresh string with a single
     // allocation: the O(n) string builder that replaces a chain of `concat`.
     StringOfArray,
+    // Unboxed byte buffer, the storage under `Bytes` (`runtime/prism_buffer.c`): a
+    // contiguous refcounted u8 region, header-compatible with the cell layout, so
+    // Perceus, the leak balance, and the rc==1 in-place / shared-copy discipline
+    // apply unchanged. `buf_set`/`buf_push` mutate in place when uniquely owned
+    // (FBIP) and copy when shared, exactly like `array_set`. `string_of_buf` is the
+    // total lossy decode; `buf_utf8_valid` gates the `String`/`Bytes` boundary.
+    BufEmpty,
+    BufNew,
+    BufLen,
+    BufGet,
+    BufSet,
+    BufPush,
+    BufSlice,
+    BufCat,
+    BufEq,
+    BufCmp,
+    BufHash,
+    BufOfString,
+    StringOfBuf,
+    BufUtf8Valid,
     // Stable sort of a `List` of a primitive element, chosen at the call site
     // when a `sort`/`sort_by_ord` use resolves to a canonical primitive `Ord`
     // instance. Not surface-callable; emitted only by the elaborator. Args are
@@ -183,7 +331,7 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    const ALL: &'static [Self] = &[
+    pub(crate) const ALL: &'static [Self] = &[
         Self::Concat,
         Self::StrLen,
         Self::StrEq,
@@ -196,18 +344,28 @@ impl Builtin {
         Self::BigLit,
         Self::ParseFloat,
         Self::PowFloat,
+        Self::Atan2,
+        Self::Hypot,
+        Self::Fmod,
         Self::ShowFloatPrec,
         Self::Getenv,
         Self::ReadFile,
+        Self::ReadBytesFile,
+        Self::WriteBytesFile,
         Self::WriteFile,
         Self::FileExists,
         Self::AppendFile,
         Self::RemoveFile,
+        Self::StoreGet,
+        Self::StorePut,
+        Self::StoreHas,
         Self::Exit,
         Self::System,
         Self::Eprint,
         Self::ArgsCount,
         Self::Arg,
+        Self::WallNow,
+        Self::MonoNow,
         Self::ShowInt,
         Self::ShowI64,
         Self::ShowU64,
@@ -250,6 +408,20 @@ impl Builtin {
         Self::ArraySet,
         Self::ArrayPush,
         Self::StringOfArray,
+        Self::BufEmpty,
+        Self::BufNew,
+        Self::BufLen,
+        Self::BufGet,
+        Self::BufSet,
+        Self::BufPush,
+        Self::BufSlice,
+        Self::BufCat,
+        Self::BufEq,
+        Self::BufCmp,
+        Self::BufHash,
+        Self::BufOfString,
+        Self::StringOfBuf,
+        Self::BufUtf8Valid,
         Self::SortPrim,
         Self::TaqSnoc,
         Self::TaqConcat,
@@ -271,18 +443,28 @@ impl Builtin {
             Self::BigLit => "big_lit",
             Self::ParseFloat => "parse_float",
             Self::PowFloat => "pow_float",
+            Self::Atan2 => "atan2",
+            Self::Hypot => "hypot",
+            Self::Fmod => "fmod",
             Self::ShowFloatPrec => "show_float_prec",
             Self::Getenv => "prim_getenv",
             Self::ReadFile => "prim_read_file",
+            Self::ReadBytesFile => "prim_read_bytes",
+            Self::WriteBytesFile => "prim_write_bytes",
             Self::WriteFile => "write_file",
             Self::FileExists => "prim_file_exists",
             Self::AppendFile => "append_file",
             Self::RemoveFile => "remove_file",
+            Self::StoreGet => "prim_store_get",
+            Self::StorePut => "prim_store_put",
+            Self::StoreHas => "prim_store_has",
             Self::Exit => "exit",
             Self::System => "system",
             Self::Eprint => "eprint",
             Self::ArgsCount => "prim_args_count",
             Self::Arg => "prim_arg",
+            Self::WallNow => "prim_wall_now",
+            Self::MonoNow => "prim_mono_now",
             Self::ShowInt => "show_int",
             Self::ShowI64 => "show_i64",
             Self::ShowU64 => "show_u64",
@@ -325,6 +507,20 @@ impl Builtin {
             Self::ArraySet => "array_set",
             Self::ArrayPush => "array_push",
             Self::StringOfArray => "string_of_array",
+            Self::BufEmpty => "buf_empty",
+            Self::BufNew => "buf_new",
+            Self::BufLen => "buf_len",
+            Self::BufGet => "buf_get",
+            Self::BufSet => "buf_set",
+            Self::BufPush => "buf_push",
+            Self::BufSlice => "buf_slice",
+            Self::BufCat => "buf_cat",
+            Self::BufEq => "buf_eq",
+            Self::BufCmp => "buf_cmp",
+            Self::BufHash => "buf_hash",
+            Self::BufOfString => "buf_of_string",
+            Self::StringOfBuf => "string_of_buf",
+            Self::BufUtf8Valid => "buf_utf8_valid",
             Self::SortPrim => "sort_prim",
             Self::TaqSnoc => "taq_snoc",
             Self::TaqConcat => "taq_concat",
@@ -366,24 +562,34 @@ impl Builtin {
             | Self::StrEq
             | Self::StrCmp
             | Self::ArgsCount
+            | Self::WallNow
+            | Self::MonoNow
             | Self::I64Cmp
             | Self::U64Cmp
             | Self::FileExists
+            | Self::StoreHas
             | Self::System
             | Self::ArrayLen
-            | Self::ByteLen => (&[], &[], true),
+            | Self::ByteLen
+            | Self::BufLen
+            | Self::BufEq
+            | Self::BufCmp
+            | Self::BufUtf8Valid => (&[], &[], true),
             // Index arg raw; bare-integer (char/byte) result to retag.
-            Self::CharAt | Self::ByteAt => (&[1], &[], true),
+            Self::CharAt | Self::ByteAt | Self::BufGet => (&[1], &[], true),
             // Index arg raw; element/array result (cell or polymorphic) passes through.
-            Self::ArrayGet | Self::ArraySet => (&[1], &[], false),
+            Self::ArrayGet | Self::ArraySet | Self::BufPush => (&[1], &[], false),
             // Single immediate arg (bool/char/index/exit/capacity); raw result.
             Self::ShowBool | Self::ShowChar | Self::Arg | Self::Exit | Self::ArrayNew => {
                 (&[0], &[], false)
             }
+            // Two immediate args (length and init byte); cell result.
+            Self::BufNew => (&[0, 1], &[], false),
             Self::ShowFloat => (&[], &[0], false),
             Self::ShowFloatPrec => (&[1], &[0], false),
-            Self::PowFloat => (&[], &[0, 1], false),
-            Self::Substring => (&[1, 2], &[], false),
+            Self::PowFloat | Self::Atan2 | Self::Hypot | Self::Fmod => (&[], &[0, 1], false),
+            // Two immediate index/length args; cell result (a fresh string or buffer).
+            Self::Substring | Self::BufSet | Self::BufSlice => (&[1, 2], &[], false),
             // Default: every argument passes raw and the result is a cell or an
             // already-tagged word. String ops, fixed-width arithmetic on boxed
             // 64-bit cells, and the elaborator-only ops all sit here.
@@ -397,6 +603,8 @@ impl Builtin {
             | Self::WriteFile
             | Self::AppendFile
             | Self::RemoveFile
+            | Self::StoreGet
+            | Self::StorePut
             | Self::Eprint
             | Self::ShowInt
             | Self::ShowI64
@@ -430,6 +638,13 @@ impl Builtin {
             | Self::ArrayEmpty
             | Self::ArrayPush
             | Self::StringOfArray
+            | Self::BufEmpty
+            | Self::BufCat
+            | Self::BufHash
+            | Self::BufOfString
+            | Self::StringOfBuf
+            | Self::ReadBytesFile
+            | Self::WriteBytesFile
             | Self::SortPrim
             // Queue ops: arguments (queue cells, the Unit-typed empty, arrow
             // thunks) pass raw, result is a cell.
@@ -449,12 +664,24 @@ impl Builtin {
         matches!(
             self,
             Self::WriteFile
+                | Self::WriteBytesFile
                 | Self::AppendFile
                 | Self::RemoveFile
+                | Self::StorePut
                 | Self::Exit
                 | Self::System
                 | Self::Eprint
         )
+    }
+
+    // The store-bridge prims have a full interpreter implementation but no C
+    // runtime symbol yet, so native codegen refuses to lower them rather than
+    // emitting a call to an undefined `prism_*` symbol that would only surface as
+    // a link failure. Flip these off here once the C runtime grows the three
+    // `prism_prim_store_*` functions (see the store bridge notes).
+    #[must_use]
+    pub const fn native_deferred(self) -> bool {
+        matches!(self, Self::StoreGet | Self::StorePut | Self::StoreHas)
     }
 }
 
@@ -474,10 +701,27 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("ceil_to_int", 1, BuiltinKind::Float),
     ("abs_float", 1, BuiltinKind::Float),
     ("sqrt", 1, BuiltinKind::Float),
+    ("floor", 1, BuiltinKind::Float),
+    ("ceil", 1, BuiltinKind::Float),
+    ("round", 1, BuiltinKind::Float),
+    ("trunc", 1, BuiltinKind::Float),
     ("sin", 1, BuiltinKind::Float),
     ("cos", 1, BuiltinKind::Float),
+    ("tan", 1, BuiltinKind::Float),
+    ("asin", 1, BuiltinKind::Float),
+    ("acos", 1, BuiltinKind::Float),
+    ("atan", 1, BuiltinKind::Float),
+    ("sinh", 1, BuiltinKind::Float),
+    ("cosh", 1, BuiltinKind::Float),
+    ("tanh", 1, BuiltinKind::Float),
     ("exp", 1, BuiltinKind::Float),
+    ("exp2", 1, BuiltinKind::Float),
+    ("expm1", 1, BuiltinKind::Float),
     ("ln", 1, BuiltinKind::Float),
+    ("log2", 1, BuiltinKind::Float),
+    ("log10", 1, BuiltinKind::Float),
+    ("log1p", 1, BuiltinKind::Float),
+    ("cbrt", 1, BuiltinKind::Float),
     ("concat", 2, BuiltinKind::Str),
     ("str_len", 1, BuiltinKind::Str),
     ("str_eq", 2, BuiltinKind::Str),
@@ -489,6 +733,9 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("show_float", 1, BuiltinKind::Str),
     ("show_float_prec", 2, BuiltinKind::Str),
     ("pow_float", 2, BuiltinKind::Str),
+    ("atan2", 2, BuiltinKind::Str),
+    ("hypot", 2, BuiltinKind::Str),
+    ("fmod", 2, BuiltinKind::Str),
     ("parse_float", 1, BuiltinKind::Str),
     ("substring", 3, BuiltinKind::Str),
     ("char_at", 2, BuiltinKind::Str),
@@ -499,14 +746,21 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("parse_int", 1, BuiltinKind::Str),
     ("prim_getenv", 1, BuiltinKind::Str),
     ("prim_read_file", 1, BuiltinKind::Str),
+    ("prim_read_bytes", 1, BuiltinKind::Str),
+    ("prim_write_bytes", 2, BuiltinKind::Str),
     ("write_file", 2, BuiltinKind::Str),
     ("prim_file_exists", 1, BuiltinKind::Str),
     ("append_file", 2, BuiltinKind::Str),
     ("remove_file", 1, BuiltinKind::Str),
+    ("prim_store_get", 2, BuiltinKind::Str),
+    ("prim_store_put", 3, BuiltinKind::Str),
+    ("prim_store_has", 2, BuiltinKind::Str),
     ("exit", 1, BuiltinKind::Str),
     ("system", 1, BuiltinKind::Str),
     ("eprint", 1, BuiltinKind::Str),
     ("prim_args_count", 0, BuiltinKind::Str),
+    ("prim_wall_now", 0, BuiltinKind::Str),
+    ("prim_mono_now", 0, BuiltinKind::Str),
     ("prim_arg", 1, BuiltinKind::Str),
     ("to_i64", 1, BuiltinKind::Int),
     ("to_u64", 1, BuiltinKind::Int),
@@ -520,6 +774,20 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("array_push", 2, BuiltinKind::Str),
     ("array_pop", 1, BuiltinKind::Str),
     ("string_of_array", 1, BuiltinKind::Str),
+    ("buf_empty", 0, BuiltinKind::Str),
+    ("buf_new", 2, BuiltinKind::Str),
+    ("buf_len", 1, BuiltinKind::Str),
+    ("buf_get", 2, BuiltinKind::Str),
+    ("buf_set", 3, BuiltinKind::Str),
+    ("buf_push", 2, BuiltinKind::Str),
+    ("buf_slice", 3, BuiltinKind::Str),
+    ("buf_cat", 2, BuiltinKind::Str),
+    ("buf_eq", 2, BuiltinKind::Str),
+    ("buf_cmp", 2, BuiltinKind::Str),
+    ("buf_hash", 1, BuiltinKind::Str),
+    ("buf_of_string", 1, BuiltinKind::Str),
+    ("string_of_buf", 1, BuiltinKind::Str),
+    ("buf_utf8_valid", 1, BuiltinKind::Str),
     ("string_of_bytes", 1, BuiltinKind::Str),
     ("byte_at", 2, BuiltinKind::Str),
     ("byte_len", 1, BuiltinKind::Str),

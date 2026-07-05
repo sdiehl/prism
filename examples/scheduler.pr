@@ -1,7 +1,6 @@
-effect Coop {
-  ctl fork(Unit) : Bool,
+effect Coop
+  ctl fork(Unit) : Bool
   ctl yield(Unit) : Unit
-}
 
 -- A cooperative scheduler in one handler ("a poor man's concurrency", Claessen
 -- 1999). `fork()` returns twice, true to the child and false to the parent, so

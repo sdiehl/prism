@@ -36,6 +36,17 @@ pub(super) const fn low_prec_operand(child: &Expr) -> bool {
     )
 }
 
+// Unary minus binds tighter than every binary operator except exponentiation
+// (`^`, which binds tighter still) and looser than every application/
+// projection/postfix form, so its operand keeps its parens exactly when it is a
+// binary operator the grammar would otherwise regroup (`-(a + b)`) or a
+// low-precedence form. A `^` operand needs none: `-a ^ b` already parses as
+// `-(a ^ b)`, the mathematical convention. A tighter operand (a call, a
+// projection, an atom, or a nested negation) needs none.
+pub(super) const fn neg_operand_needs_paren(child: &Expr) -> bool {
+    matches!(child, Expr::Bin(op, ..) if !matches!(op, BinOp::Pow)) || low_prec_operand(child)
+}
+
 // Every comparison operator lives at one non-associative grammar level
 // (`Cmp: Add CmpOp Add`), so a comparison can never be a direct operand of
 // another comparison. The formatter must keep the parens on either side or the
@@ -68,6 +79,10 @@ pub(super) const fn needs_left_paren(child: &Expr, parent_op: BinOp, parent_prec
             // `a ^ (b ^ c)`.
             cp < parent_prec || (cp == parent_prec && matches!(parent_op, BinOp::Pow))
         }
+        // Unary minus binds looser than `^`, so a negated base keeps its parens
+        // (`(-2) ^ 2`); without them the print reparses as `-(2 ^ 2)`. Under any
+        // other operator a negation binds tighter and needs none.
+        Expr::Neg(..) => matches!(parent_op, BinOp::Pow),
         _ => low_prec_operand(child),
     }
 }

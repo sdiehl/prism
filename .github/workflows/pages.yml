@@ -45,8 +45,10 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      # build-site.sh drives wasm-bindgen directly (cdylib via cargo rustc, since
+      # Cargo.toml is rlib-only); the CLI version must match the wasm-bindgen crate.
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
       - name: Install mdbook + mdbook-tabs
         run: cargo install mdbook mdbook-tabs

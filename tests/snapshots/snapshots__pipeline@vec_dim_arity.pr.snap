@@ -1,0 +1,99 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/vec_dim_arity.pr
+---
+== tokens ==
+VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("demo") LParen Ident("x") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Vec",
+            params: [
+                "a",
+                "n",
+            ],
+            param_kinds: [
+                Type,
+                Nat,
+            ],
+            ctors: [
+                Ctor {
+                    name: "MkVec",
+                    args: [
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 124..161,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "demo",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Int,
+                                Nat(
+                                    3,
+                                ),
+                                Nat(
+                                    4,
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 199..200,
+            },
+            wheres: [],
+            span: 163..200,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
+   ╭─[ <source>:5:1 ]
+   │
+ 5 │ fn demo(x : Vec(Int, 3, 4)) : Int = 0
+   │ ──────────────────┬──────────────────  
+   │                   ╰──────────────────── in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
+───╯

@@ -1,0 +1,15 @@
+-- Fuses: a four-stage pipeline (map, filter, map) into a single loop.
+import Sequence as Seq
+
+fn main() : !{IO} Unit =
+  println(
+      Seq.sum(
+          Seq.map(
+              Seq.filter(
+                  Seq.map(Seq.range(1, 60), \(x) -> x + 1),
+                  \(x) -> x > 10,
+                ),
+              \(x) -> x * 2,
+            ),
+        ),
+    )

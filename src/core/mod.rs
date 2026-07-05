@@ -13,10 +13,12 @@ pub mod shape;
 pub mod tailrec;
 pub mod traverse;
 
-pub use cbpv::{reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
+pub use cbpv::{
+    reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value,
+};
 pub use effect_lower::lower as lower_effects;
 pub use effect_lower::strategy as effect_strategy;
-pub use effect_lower::EFFECT_TIERS;
+pub use effect_lower::{OpGrades, EFFECT_TIERS};
 pub use elaborate::{builtin_arities, elaborate, elaborate_expr, konst_fns};
 pub use fbip::{
     balanced, check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Fips,

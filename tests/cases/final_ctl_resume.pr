@@ -1,9 +1,8 @@
 -- A final ctl clause declares it never resumes; a free `resume` in its body
 -- is rejected at desugar with the span of the use.
 
-effect Abort {
+effect Abort
   ctl abort(Int) : Int
-}
 
 fn main() =
   let v =

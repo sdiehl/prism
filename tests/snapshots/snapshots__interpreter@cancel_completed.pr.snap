@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: out
+expression: interp_output(path)
 input_file: tests/cases/run/cancel_completed.pr
 ---
 quick: done

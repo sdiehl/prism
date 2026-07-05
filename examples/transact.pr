@@ -5,25 +5,11 @@
 fn main() =
   var balance := 100
   var stock := 5
-  let r1 =
-    transact
-      balance -= 40
-      stock -= 1
-      guard(balance >= 0)
-      1
-    else
-      0
+  let r1 = transact let _ = balance -= 40 in let _ = stock -= 1 in let _ = guard(balance >= 0) in 1 else 0
   println(balance)
   println(stock)
   println(r1)
-  let r2 =
-    transact
-      balance -= 90
-      stock -= 1
-      guard(balance >= 0)
-      1
-    else
-      0
+  let r2 = transact let _ = balance -= 90 in let _ = stock -= 1 in let _ = guard(balance >= 0) in 1 else 0
   println(balance)
   println(stock)
   println(r2)

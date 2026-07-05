@@ -9,9 +9,8 @@
 --   300
 --   13
 
-effect Ask {
+effect Ask
   ctl ask() : Int
-}
 
 -- inner answers 2, outer 10. ask() + mask<Ask>(ask()) = 2 + 10 = 12
 fn shadowed() =

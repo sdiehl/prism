@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/bytes_codec.pr
+---
+11
+776f726c64
+68656c6c6f20776f726c64
+aGVsbG8gd29ybGQ=
+Zg==
+Zm8=
+Zm9v
+ok
+ok
+none
+none
+none
+none
+=> ()

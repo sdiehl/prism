@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/mask_escapes_only_handler.pr
 ---
 == tokens ==
-VOpen Effect UIdent("E") LBrace Ctl Ident("op") LParen KwInt RParen Colon KwInt RBrace VSemi Fn Ident("f") LParen RParen Eq VOpen Handle Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq Ident("println") LParen Ident("f") LParen RParen RParen VClose
+VOpen Effect UIdent("E") VOpen Ctl Ident("op") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("f") LParen RParen Eq VOpen Handle Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq Ident("println") LParen Ident("f") LParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Int,
                     ],
                     ret: Int,
+                    grade: Many,
                 },
             ],
-            span: 262..294,
+            span: 262..290,
         },
     ],
     errors: [],
@@ -47,7 +48,7 @@ Program {
                                         node: Var(
                                             "op",
                                         ),
-                                        span: 322..324,
+                                        span: 318..320,
                                     },
                                     [
                                         Spanned {
@@ -57,14 +58,14 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 325..326,
+                                            span: 321..322,
                                         },
                                     ],
                                 ),
-                                span: 322..327,
+                                span: 318..323,
                             },
                         ),
-                        span: 314..328,
+                        span: 310..324,
                     },
                     [
                         Op(
@@ -79,18 +80,18 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 350..351,
+                                        span: 346..347,
                                     },
                                     [
                                         Spanned {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 352..353,
+                                            span: 348..349,
                                         },
                                     ],
                                 ),
-                                span: 350..354,
+                                span: 346..350,
                             },
                         ),
                         Return(
@@ -99,15 +100,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 371..372,
+                                span: 367..368,
                             },
                         ),
                     ],
                 ),
-                span: 307..372,
+                span: 303..368,
             },
             wheres: [],
-            span: 296..372,
+            span: 292..368,
         },
         Decl {
             name: "main",
@@ -130,7 +131,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 399..406,
+                        span: 395..402,
                     },
                     [
                         Spanned {
@@ -139,27 +140,27 @@ Program {
                                     node: Var(
                                         "f",
                                     ),
-                                    span: 407..408,
+                                    span: 403..404,
                                 },
                                 [],
                             ),
-                            span: 407..410,
+                            span: 403..406,
                         },
                     ],
                 ),
-                span: 399..411,
+                span: 395..407,
             },
             wheres: [],
-            span: 374..411,
+            span: 370..407,
         },
     ],
 }
 
 == types ==
 Type Error: in `main`: effect `E` not declared in annotation
-    ╭─[ <source>:14:26 ]
+    ╭─[ <source>:13:26 ]
     │
- 14 │ fn main() : !{IO} Unit = println(f())
+ 13 │ fn main() : !{IO} Unit = println(f())
     │                          ──────┬─────  
     │                                ╰─────── in `main`: effect `E` not declared in annotation
 ────╯

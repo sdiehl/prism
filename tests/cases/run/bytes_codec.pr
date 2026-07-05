@@ -1,0 +1,57 @@
+-- Exercises the Data.Bytes utility layer over the buffer runtime object: the
+-- String/Bytes UTF-8 boundary (validate-or-None back, total forward) and the hex
+-- and base64 codecs (pure Prism over the buffer builders). Runs under the parity
+-- + leak oracles: native and interpreter must print byte-identical output and the
+-- run must leak no cells.
+
+import Data.Bytes (..)
+
+fn show_opt_bool(o : Option(String), want : String) : String =
+  match o of
+    Some(s) =>
+      if s == want then
+        "ok"
+      else
+        "wrong"
+    None => "none"
+
+fn round_hex(s : String) : String =
+  match hex_decode(hex_encode(string_to_bytes(s))) of
+    Some(bs) => show_opt_bool(bytes_to_string(bs), s)
+    None => "decode-fail"
+
+fn round_b64(s : String) : String =
+  match base64_decode(base64_encode(string_to_bytes(s))) of
+    Some(bs) => show_opt_bool(bytes_to_string(bs), s)
+    None => "decode-fail"
+
+fn main() =
+  let bs = string_to_bytes("hello world")
+  println(show_int(bytes_length(bs)))
+  -- Slice out "world" (offset 6, length 5) and hex-encode it.
+  println(hex_encode(bytes_slice(bs, 6, 5)))
+  println(hex_encode(bs))
+  println(base64_encode(bs))
+  -- Base64 padding cases: 1, 2, and 3 trailing bytes.
+  println(base64_encode(string_to_bytes("f")))
+  println(base64_encode(string_to_bytes("fo")))
+  println(base64_encode(string_to_bytes("foo")))
+  -- Round trips through both codecs, including multibyte UTF-8.
+  println(round_hex("héllo"))
+  println(round_b64("héllo, world"))
+  -- Honest failures: odd hex length, non-hex char, bad base64 length.
+  println(show_opt_bool_decode(hex_decode("abc")))
+  println(show_opt_bool_decode(hex_decode("zz")))
+  println(show_opt_bool_decode(base64_decode("abc")))
+  -- Ill-formed UTF-8 (a lone continuation byte) is rejected by the boundary.
+  println(show_opt_str(bytes_to_string(bytes_push(bytes_empty, 128))))
+
+fn show_opt_bool_decode(o : Option(Bytes)) : String =
+  match o of
+    Some(_) => "some"
+    None => "none"
+
+fn show_opt_str(o : Option(String)) : String =
+  match o of
+    Some(_) => "some"
+    None => "none"

@@ -1,0 +1,178 @@
+/* The branching-timelines resident. Shares the gallery house chrome (header,
+   transport bar, code panel, token colours) with the scrubber via showcase.css,
+   and adds the two things this demo needs that a single-canvas resident does
+   not: a grid of small stages (one per branch, rendered at the shared playhead)
+   and a git-graph panel that draws the fork DAG. */
+@import "./showcase.css";
+
+/* Per-branch accent colours, cycled as timelines fork. Branch 0 (the base run)
+   is the site accent; forks take the following hues so a lane, its stage border,
+   and its swarm all read as one colour. */
+:root {
+  --br-0: #2f6f4f;
+  --br-1: #b3541e;
+  --br-2: #2660a4;
+  --br-3: #8a3fa0;
+  --br-4: #9a6a00;
+  --br-5: #a4362f;
+}
+
+/* The branch demo is wider than the square default: two columns side by side.
+   --surface widens the shared flip surface to hold them; it collapses to 100%
+   and the columns wrap on a narrow viewport. */
+body.branch-body {
+  min-height: 100%;
+  --surface: min(100%, 1088px);
+}
+
+/* Two columns inside the demo face: the branch stages and transport on the left,
+   the timeline graph on the right. They stack on a narrow viewport. */
+.branch-main {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.8rem;
+  min-height: 0;
+}
+.branch-left {
+  flex: 1 1 480px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.1rem;
+  max-width: 680px;
+  min-width: 0;
+}
+.branch-right {
+  flex: 0 1 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  max-width: 380px;
+}
+
+/* The grid of branch stages: each is a square canvas with a coloured border and
+   a caption strip. Auto-fit so one branch fills the width and four tile 2x2. */
+.branch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+}
+.mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mini-stage {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+}
+.mini-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--br);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.mini-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--muted);
+}
+.mini-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--br);
+  flex: none;
+}
+.mini-label b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.mini-diverged {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--br);
+}
+
+/* The action row under the transport: fork/verify/reset and the proof readout. */
+.branch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.play.alt {
+  background: var(--accent);
+}
+.play.ghost {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+}
+.play.ghost:hover {
+  background: var(--accent-wash);
+}
+.branch-select {
+  font-family: var(--ui);
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+.branch-proof {
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-left: auto;
+}
+.branch-proof.ok {
+  color: var(--accent);
+}
+.branch-proof.err {
+  color: var(--err);
+}
+
+/* The git-graph panel: a titled card holding the fork-DAG SVG. */
+.graph-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  padding: 0.7rem 0.8rem 0.4rem;
+}
+.graph-title {
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+.graph {
+  display: block;
+  width: 100%;
+  height: 340px;
+}
+
+@media (max-width: 720px) {
+  .branch-right {
+    max-width: 680px;
+    flex-basis: 480px;
+  }
+}

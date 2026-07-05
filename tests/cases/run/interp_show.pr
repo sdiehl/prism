@@ -1,9 +1,8 @@
 -- Holes render through show: records, lists, and effect ops under a handler.
 type Point = Point { x: Int, y: Int }
 
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
 fn main() =
   let p = Point { x = 1, y = 2 }

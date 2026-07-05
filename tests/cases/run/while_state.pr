@@ -1,7 +1,6 @@
-effect Counter {
-  ctl get(Unit) : Int,
+effect Counter
+  ctl get(Unit) : Int
   ctl bump(Unit) : Unit
-}
 
 fn count_up() : !{Counter, IO} Unit =
   while get(()) < 4 do

@@ -1,0 +1,98 @@
+-- CLI: an applicative command-line parser where illegal states are
+-- unrepresentable. One `Command` description yields three artifacts, all in
+-- lockstep: the parser (argv to the `Task` ADT), the help text, and the errors.
+--
+-- The parser is a first-class value. Each subcommand's parser is composed
+-- applicatively from typed pieces (`arg_str`, `opt_int`, `switch`, ...) with a
+-- curried constructor, so a `Task` cannot be built until every field has parsed:
+-- there is no half-filled `Add`, no `Done` without its id. The result is exactly
+-- a `Task` or a rich error naming the offending token.
+--
+-- argv here is a fixed list per call so the transcript is identical on every
+-- backend. The real command line is `run_args(cmd)`, which feeds `args()` (the
+-- `Env` capability) to the same `run_argv`, so a recorded run replays its
+-- arguments from its `.replay` trace like any other observation.
+--
+-- The three parser lines each produce exactly one `Task`:
+--   add "buy milk" priority=2 due=fri
+--   done #7
+--   list all=true
+-- followed by the derived `--help` text and, under `-- errors --`, one rich
+-- error per malformed invocation (missing positional, bad integer, unknown
+-- flag, unknown command), each naming the offending token and printing usage.
+
+import Cli (..)
+
+-- The one result type. Each subcommand constructs a distinct variant, and every
+-- field is required at the type level: the parser fills them or fails.
+type Task = Add(String, Int, String) | Done(Int) | Listing(Bool)
+
+-- add TEXT [--priority N] [--due DATE]
+fn add_parser() =
+  build3(
+      \(text) -> \(prio) -> \(due) -> Add(text, prio, due),
+      arg_str("TEXT", "the task description"),
+      opt_int("priority", "p", "N", "priority level (default 0)", 0),
+      opt_str("due", "", "DATE", "optional due date", ""),
+    )
+
+-- done ID
+fn done_parser() =
+  map_p(\(id) -> Done(id), arg_int("ID", "the task id to close"))
+
+-- list [--all]
+fn list_parser() =
+  map_p(\(all) -> Listing(all), switch("all", "a", "include finished tasks"))
+
+fn todo_cli() =
+  Command {
+    name = "todo",
+    about = "a tiny deterministic task tracker",
+    body = Group([
+        SubCmd { key = "add", about = "add a task", sub = add_parser() },
+        SubCmd {
+          key = "done",
+          about = "mark a task done",
+          sub = done_parser()
+        },
+        SubCmd { key = "list", about = "list tasks", sub = list_parser() },
+      ])
+  }
+
+fn show_task(t) =
+  match t of
+    Add(text, prio, due) =>
+      concat_all([
+          "add \"",
+          text,
+          "\" priority=",
+          show_int(prio),
+          " due=",
+          if str_eq(due, "") then "none" else due,
+        ])
+    Done(id) => concat_all(["done #", show_int(id)])
+    Listing(all) => concat_all(["list all=", if all then "true" else "false"])
+
+-- Run one fixed invocation through the full pipeline and print its outcome.
+fn report(argv) =
+  match run_argv(todo_cli(), argv) of
+    Parsed(t) => println(show_task(t))
+    ShowHelp(text) => println(text)
+    BadUsage(msg) => println(msg)
+
+fn main() =
+  -- Artifact 1: the parser. Each line produces exactly one `Task`.
+  report(["add", "buy milk", "--priority", "2", "--due", "fri"])
+  report(["done", "7"])
+  report(["list", "--all"])
+  -- Artifact 2: help, derived from the same description.
+  println("-- help --")
+  report(["--help"])
+  println("-- add --help --")
+  report(["add", "--help"])
+  -- Artifact 3: errors, each naming the offending token and printing usage.
+  println("-- errors --")
+  report(["add"])
+  report(["add", "milk", "-p", "3x"])
+  report(["list", "--colour"])
+  report(["frobnicate"])

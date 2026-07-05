@@ -58,6 +58,7 @@ inductive Stuck (Γ : Core) : Comp → Prop where
   | forceNonThunk (v : Value) : (∀ c, v ≠ .thunk c) → Stuck Γ (.force v)
   | iteNonBool (c : Value) (t e : Comp) : (∀ b, c ≠ .bool b) → Stuck Γ (.ite c t e)
   | primStuck (op : BinOp) (a b : Value) : delta op a b = none → Stuck Γ (.prim op a b)
+  | negStuck (lane : NegLane) (v : Value) : negD lane v = none → Stuck Γ (.neg lane v)
   | callMissing (name : String) (args : List Value) : lookupFn Γ name = none → Stuck Γ (.call name args)
   | caseNoMatch (s : Value) (arms : List (Pat × Comp)) : matchArms s arms = none → Stuck Γ (.case s arms)
   | err (v : Value) : Stuck Γ (.err v)
@@ -95,6 +96,11 @@ theorem stuckNoStep {Γ : Core} {c c' : Comp} (h : Stuck Γ c) : ¬Step Γ c c' 
         intro hs
         cases hs <;> exact hne _ rfl
       | primStuck op a b hd =>
+        intro hs
+        cases hs
+        rename_i hd'
+        simp [hd] at hd'
+      | negStuck lane v hd =>
         intro hs
         cases hs
         rename_i hd'
@@ -186,6 +192,11 @@ theorem primP (Γ : Core) (op : BinOp) (a b : Value) : (∃ c', Step Γ (.prim o
       | some v => exact Or.inl ⟨_, .prim h⟩
       | none => exact Or.inr (.primStuck _ _ _ h)
 
+theorem negP (Γ : Core) (lane : NegLane) (v : Value) : (∃ c', Step Γ (.neg lane v) c') ∨ Stuck Γ (.neg lane v) :=
+  by cases h : negD lane v with
+      | some w => exact Or.inl ⟨_, .neg h⟩
+      | none => exact Or.inr (.negStuck _ _ h)
+
 theorem callP (Γ : Core) (name : String) (args : List Value) : (∃ c', Step Γ (.call name args) c') ∨ Stuck Γ (.call name args) :=
   by cases h : lookupFn Γ name with
       | some f => exact Or.inl ⟨_, .call h⟩
@@ -209,6 +220,7 @@ theorem progress (Γ : Core) : (c : Comp) → Terminal c ∨ (∃ c', Step Γ c 
   | .force v => Or.inr (forceP Γ v)
   | .ite c t e => Or.inr (iteP Γ c t e)
   | .prim op a b => Or.inr (primP Γ op a b)
+  | .neg lane v => Or.inr (negP Γ lane v)
   | .call name args => Or.inr (callP Γ name args)
   | .case s arms => Or.inr (caseP Γ s arms)
   | .bind m x n =>

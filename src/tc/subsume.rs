@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::{Entry, Tc, TcErr};
+use crate::names::{self, ScopedEscape};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label, Type};
 
@@ -79,11 +80,14 @@ impl Tc<'_> {
                 }
                 let e1 = self.apply_row(eff1);
                 let e2 = self.apply_row(eff2);
-                // Effect rows are covariant on the arrow: a value may perform at
-                // most the effects the expected type permits, so a pure function
-                // is usable wherever an effectful one is wanted. (The ambient
-                // model gave this implicitly; the delimited row makes it a rule.)
-                self.sub_row(&e1, &e2)?;
+                // Effect rows are checked by scoped-label unification: the value's
+                // row must be made equal to the expected one, so a narrower row
+                // fits a wider context only by solving a row variable (its own
+                // open latent tail, or the context's), never by silent widening.
+                // A pure function still fits an effectful context because its
+                // scheme quantifies that latent tail (`default_open_rows`), so the
+                // fit is a most-general substitution rather than a subtyping step.
+                self.unify_row(&e1, &e2)?;
                 let r1 = self.apply(r1);
                 let r2 = self.apply(r2);
                 self.subtype(&r1, &r2)
@@ -119,6 +123,20 @@ impl Tc<'_> {
                 let x = self.apply_row(x);
                 let y = self.apply_row(y);
                 self.unify_row(&x, &y)
+            }
+            // Dimension literals unify by equality only: no successor structure,
+            // no arithmetic. A length clash names both dimensions plainly, the
+            // whole point of the `Nat` kind over a nominal encoding. `Keep` so the
+            // precise "expected N, got M" survives a caller's structural override
+            // (which would otherwise bury the clash inside two whole shape types).
+            (Type::Nat(x), Type::Nat(y)) => {
+                if x == y {
+                    Ok(())
+                } else {
+                    Err(TcErr::Keep(format!(
+                        "length mismatch: expected length {y}, but got length {x}"
+                    )))
+                }
             }
             (Type::Exist(x), _) if !occurs_ex(*x, b) => self.inst_l(*x, b),
             (_, Type::Exist(x)) if !occurs_ex(*x, a) => self.inst_r(a, *x),
@@ -258,8 +276,8 @@ impl Tc<'_> {
     // another row, rewrite that row to expose `l` at its head, then unify the
     // tails. A bare existential tail absorbs any missing label by extending.
     pub(super) fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
-        let a = self.apply_row(a);
-        let b = self.apply_row(b);
+        let a = dedup_row(&self.apply_row(a));
+        let b = dedup_row(&self.apply_row(b));
         match (&a, &b) {
             (EffRow::Empty, EffRow::Empty) => Ok(()),
             (EffRow::Var(x), EffRow::Var(y)) if x == y => Ok(()),
@@ -297,32 +315,14 @@ impl Tc<'_> {
                 let r2 = self.apply_row(&rest2);
                 self.unify_row(&r1, &r2)
             }
-            (EffRow::Empty | EffRow::Var(_), EffRow::Extend(l, _)) => Err(TcErr::Fail(format!(
-                "missing effect `{}`",
-                self.show_label(l)
-            ))),
+            (EffRow::Empty | EffRow::Var(_), EffRow::Extend(l, _)) => {
+                Err(TcErr::Fail(self.missing_effect(l)))
+            }
             (a, b) => Err(TcErr::Fail(format!(
                 "effect mismatch: {} is not compatible with {}",
                 a.show(),
                 b.show()
             ))),
-        }
-    }
-
-    // Covariant row subsumption `a <= b`: every effect the value may perform
-    // (`a`) must be permitted by the expected row (`b`). An empty `a` is a subrow
-    // of anything (a pure value fits any context); a flexible or rigid `a` tail
-    // links into `b` so a row variable still propagates; each concrete label of
-    // `a` must be present in `b`, recursing on the residual.
-    pub(super) fn sub_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
-        let a = self.apply_row(a);
-        match a {
-            EffRow::Empty => Ok(()),
-            EffRow::Exist(_) | EffRow::Var(_) => self.unify_row(&a, b),
-            EffRow::Extend(l, rest) => {
-                let resid = self.rewrite_row(b, &l)?;
-                self.sub_row(&rest, &resid)
-            }
         }
     }
 
@@ -370,10 +370,7 @@ impl Tc<'_> {
                 )?;
                 Ok(EffRow::Exist(beta))
             }
-            EffRow::Empty | EffRow::Var(_) => Err(TcErr::Fail(format!(
-                "missing effect `{}`",
-                self.show_label(label)
-            ))),
+            EffRow::Empty | EffRow::Var(_) => Err(TcErr::Fail(self.missing_effect(label))),
         }
     }
 
@@ -421,6 +418,24 @@ impl Tc<'_> {
         self.absorb_row(&resid)
     }
 
+    // A row is missing `label`. When `label` is a scoped effect that leaked out
+    // of its introducing scope (a named handler instance's private op, or a
+    // `var` cell), name the escape route rather than the mangled label; the
+    // unhandled-effect wall is exactly where such an escape is caught (see the
+    // named-handler op-payload and `var`-through-call escape cases).
+    fn missing_effect(&self, label: &Label) -> String {
+        match names::parse_scoped_escape(label.name.as_str()) {
+            Some(ScopedEscape::NamedInstance { effect, instance }) => format!(
+                "handler instance `{instance}` escapes its scope: a value here still performs \
+                 `{instance}`'s `{effect}` operation after its handler is gone"
+            ),
+            Some(ScopedEscape::Var { name }) => format!(
+                "`var {name}` escapes its block: a value here still uses `{name}` after its scope ends"
+            ),
+            None => format!("missing effect `{}`", self.show_label(label)),
+        }
+    }
+
     pub(super) fn show_label(&self, l: &Label) -> String {
         Label {
             name: l.name,
@@ -465,6 +480,31 @@ fn replace_tail(r: &EffRow, t: EffRow) -> EffRow {
         EffRow::Extend(l, rest) => EffRow::Extend(l.clone(), Box::new(replace_tail(rest, t))),
         _ => t,
     }
+}
+
+// Rows are sets of effect labels: an effect required twice is required once.
+// Coincident labels (same name and, after zonking, identical instantiation
+// arguments) arise mechanically when an op's own effect is both listed in its
+// parameter row and folded into the ambient tail that row's variable binds to
+// (`bind_op_rows_to_ambient` splices the just-absorbed label back in via the
+// tail), so the second copy is spurious. Drop every label whose (name, args)
+// already appeared earlier in the spine, keeping the first occurrence and the
+// tail. Assumes `r` is already zonked, so argument equality is structural: a
+// label whose args merely differ (`Async(Int)` versus an unsolved `Async(?9)`)
+// is kept, so a genuine two-instantiation reconciliation still routes through
+// `rewrite_row`.
+fn dedup_row(r: &EffRow) -> EffRow {
+    fn go(r: &EffRow, seen: &mut Vec<Label>) -> EffRow {
+        match r {
+            EffRow::Extend(l, rest) if seen.contains(l) => go(rest, seen),
+            EffRow::Extend(l, rest) => {
+                seen.push(l.clone());
+                EffRow::Extend(l.clone(), Box::new(go(rest, seen)))
+            }
+            other => other.clone(),
+        }
+    }
+    go(r, &mut Vec::new())
 }
 
 // Drop every label whose effect name is in `names`, keeping the tail. Used both
@@ -520,6 +560,7 @@ mod tests {
             cur_self: None,
             wanted: Vec::new(),
             num_default: Vec::new(),
+            neg_default: Vec::new(),
             index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
@@ -584,7 +625,9 @@ mod tests {
 
         let unwrap = |r: Result<EffRow, TcErr>| match r {
             Ok(row) => row,
-            Err(TcErr::Fail(m) | TcErr::Ice(m)) => panic!("rewrite_row failed: {m}"),
+            Err(TcErr::Fail(m) | TcErr::Keep(m) | TcErr::Ice(m)) => {
+                panic!("rewrite_row failed: {m}")
+            }
         };
         let from_front = unwrap(t.rewrite_row(&head("IO", "Emit"), &io));
         let from_back = unwrap(t.rewrite_row(&head("Emit", "IO"), &io));

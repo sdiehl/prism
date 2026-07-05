@@ -1,0 +1,21 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/num_int_div.pr
+---
+3
+-3
+-3
+3
+1
+-1
+1
+-1
+142857142857142857142
+-6
+-4
+4
+0
+1
+-1
+=> ()

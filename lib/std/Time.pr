@@ -1,0 +1,372 @@
+-- | Time: instants, wall-clock timestamps, durations, and RFC 3339.
+--
+-- Three value types keep the two kinds of clock reading from being confused:
+--
+--   - `Instant` is a monotonic reading (nanoseconds from an unspecified origin).
+--     Only differences of instants are meaningful; the origin is arbitrary. Use
+--     it to measure elapsed time, never to name a point in the calendar.
+--   - `Wall` is a system-clock reading: nanoseconds since the Unix epoch
+--     (1970-01-01T00:00:00Z), in UTC. Use it to stamp and format a moment.
+--   - `Duration` is a signed span of nanoseconds, the difference of two readings.
+--
+-- Both readings come from the one `Clock` capability (declared in `Concurrent`):
+-- `mono_clock` performs `mono_now`, `wall_clock` performs `wall_now`. Which
+-- reading a program actually gets is a property of the installed handler, not of
+-- the call site. `Concurrent.run_clock` serves every `Clock` op from a virtual
+-- counter, so a test's time is a pure function of its `sleep`s; `run_clock_real`
+-- here serves the two real reads from the OS clock. Both real reads are recorded
+-- capability observations, so a time-reading program replays byte-for-byte.
+--
+-- RFC 3339 formatting and parsing are pure, total, UTC-only string code: no
+-- locale, no time zone database (tzdb is a political data blob and belongs in a
+-- content-addressed package, not a frozen Std). Timestamps at or after the epoch
+-- (non-negative wall readings) are supported.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.String (..)
+
+import Data.Char (is_digit)
+
+import Concurrent (..)
+
+-- Unit conversions, pinned. A `Duration` is nanoseconds; these name the scale
+-- factors so no bare `1000000000` appears at a use site.
+pub fn nanos_per_sec() : Int = 1000000000
+
+pub fn nanos_per_milli() : Int = 1000000
+
+pub fn nanos_per_micro() : Int = 1000
+
+fn secs_per_day() : Int = 86400
+
+fn secs_per_hour() : Int = 3600
+
+fn secs_per_min() : Int = 60
+
+-- | A signed span of time, in nanoseconds.
+pub type Duration = Duration(Int)
+
+-- | The span in whole nanoseconds.
+pub fn dur_nanos(d : Duration) : Int =
+  match d of
+    Duration(n) => n
+
+-- | A duration of `n` nanoseconds.
+pub fn nanos(n : Int) : Duration = Duration(n)
+
+-- | A duration of `n` microseconds.
+pub fn micros(n : Int) : Duration = Duration(n * nanos_per_micro())
+
+-- | A duration of `n` milliseconds.
+pub fn millis(n : Int) : Duration = Duration(n * nanos_per_milli())
+
+-- | A duration of `n` seconds.
+pub fn seconds(n : Int) : Duration = Duration(n * nanos_per_sec())
+
+-- | A duration of `n` minutes.
+pub fn minutes(n : Int) : Duration = Duration(n * nanos_per_sec() * secs_per_min())
+
+-- | A duration of `n` hours.
+pub fn hours(n : Int) : Duration = Duration(n * nanos_per_sec() * secs_per_hour())
+
+-- | The whole-second part of a duration (truncated toward zero).
+pub fn dur_as_secs(d : Duration) : Int = dur_nanos(d) / nanos_per_sec()
+
+-- | The whole-millisecond part of a duration (truncated toward zero).
+pub fn dur_as_millis(d : Duration) : Int = dur_nanos(d) / nanos_per_milli()
+
+-- | Sum of two durations.
+pub fn dur_add(a : Duration, b : Duration) : Duration =
+  Duration(dur_nanos(a) + dur_nanos(b))
+
+-- | Difference of two durations (`a - b`).
+pub fn dur_sub(a : Duration, b : Duration) : Duration =
+  Duration(dur_nanos(a) - dur_nanos(b))
+
+-- | A duration scaled by an integer factor.
+pub fn dur_scale(a : Duration, k : Int) : Duration = Duration(dur_nanos(a) * k)
+
+-- | A duration with the sign flipped.
+pub fn dur_negate(a : Duration) : Duration = Duration(0 - dur_nanos(a))
+
+-- | Ordering of two durations (`-1`, `0`, `1`).
+pub fn dur_cmp(a : Duration, b : Duration) : Int =
+  let x = dur_nanos(a)
+  let y = dur_nanos(b)
+  if x < y then
+    0 - 1
+  elif x > y then
+    1
+  else
+    0
+
+-- | True when the two durations are equal.
+pub fn dur_eq(a : Duration, b : Duration) : Bool = dur_cmp(a, b) == 0
+
+-- | A monotonic clock reading, in nanoseconds from an unspecified origin.
+pub type Instant = Instant(Int)
+
+-- | The raw monotonic reading in nanoseconds. The absolute value is meaningless
+-- across processes; subtract two instants to get an elapsed `Duration`.
+pub fn instant_nanos(i : Instant) : Int =
+  match i of
+    Instant(n) => n
+
+-- | The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not
+-- `between`, to leave the prelude's numeric `between` range test unshadowed.
+pub fn elapsed(earlier : Instant, later : Instant) : Duration =
+  Duration(instant_nanos(later) - instant_nanos(earlier))
+
+-- | An instant advanced by a duration.
+pub fn instant_add(i : Instant, d : Duration) : Instant =
+  Instant(instant_nanos(i) + dur_nanos(d))
+
+-- | A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
+pub type Wall = Wall(Int)
+
+-- | The reading in nanoseconds since the Unix epoch (UTC).
+pub fn wall_nanos(w : Wall) : Int =
+  match w of
+    Wall(n) => n
+
+-- | A wall reading from nanoseconds since the Unix epoch.
+pub fn wall_of_nanos(n : Int) : Wall = Wall(n)
+
+-- | Whole seconds since the Unix epoch (truncated toward zero).
+pub fn wall_unix_secs(w : Wall) : Int = wall_nanos(w) / nanos_per_sec()
+
+-- | A wall reading advanced by a duration.
+pub fn wall_add(w : Wall, d : Duration) : Wall = Wall(wall_nanos(w) + dur_nanos(d))
+
+-- | The span from `earlier` to `later` wall readings (`later - earlier`).
+pub fn wall_diff(earlier : Wall, later : Wall) : Duration =
+  Duration(wall_nanos(later) - wall_nanos(earlier))
+
+-- | Ordering of two wall readings (`-1`, `0`, `1`).
+pub fn wall_cmp(a : Wall, b : Wall) : Int =
+  let x = wall_nanos(a)
+  let y = wall_nanos(b)
+  if x < y then
+    0 - 1
+  elif x > y then
+    1
+  else
+    0
+
+-- | Read the monotonic clock. Deterministic under `run_clock`, real (and
+-- recorded) under `run_clock_real`.
+pub fn mono_clock() : Instant = Instant(mono_now(()))
+
+-- | Read the wall clock. Deterministic under `run_clock`, real (and recorded)
+-- under `run_clock_real`.
+pub fn wall_clock() : Wall = Wall(wall_now(()))
+
+-- | Run `action` against the real OS clock. `now`/`sleep` still thread a virtual
+-- counter (they are the scheduler's logical time), so this is a superset of
+-- `run_clock`: `wall_now` and `mono_now` read the real clock through the `prim_*`
+-- builtins, each a recorded observation, and everything else stays virtual.
+pub fn run_clock_real(action : () -> a ! {Clock | e}) : a =
+  let g =
+    handle action() with
+      now(u, k) => \(t) -> k(t)(t)
+      sleep(d, k) => \(t) -> k(())(t + d)
+      wall_now(u, k) => \(t) -> k(prim_wall_now())(t)
+      mono_now(u, k) => \(t) -> k(prim_mono_now())(t)
+      return r => \(t) -> r
+  g(0)
+
+-- Civil-calendar conversions (Howard Hinnant's algorithms), valid for the
+-- proleptic Gregorian calendar. Every intermediate is non-negative for dates at
+-- or after the epoch, so truncating division coincides with floor division.
+
+-- Days since 1970-01-01 for the given civil date.
+fn days_from_civil(y : Int, m : Int, d : Int) : Int =
+  let yy =
+    if m <= 2 then
+      y - 1
+    else
+      y
+  let era = yy / 400
+  let yoe = yy - era * 400
+  let mp =
+    if m > 2 then
+      m - 3
+    else
+      m + 9
+  let doy = (153 * mp + 2) / 5 + d - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  era * 146097 + doe - 719468
+
+-- Civil (year, month, day) for a day count since 1970-01-01.
+fn civil_from_days(z0 : Int) : (Int, Int, Int) =
+  let z = z0 + 719468
+  let era = z / 146097
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m =
+    if mp < 10 then
+      mp + 3
+    else
+      mp - 9
+  let year =
+    if m <= 2 then
+      y + 1
+    else
+      y
+  (year, m, d)
+
+-- Zero-pad the decimal form of a non-negative `n` to at least `w` digits.
+fn pad0(n : Int, w : Int) : String =
+  let s = show_int(n)
+  concat(str_repeat("0", w - str_len(s)), s)
+
+-- | Format a wall reading as an RFC 3339 timestamp in UTC, e.g.
+-- `2026-07-04T12:34:56Z`. A nonzero sub-second part is emitted as exactly nine
+-- fractional digits (nanoseconds); an exact second emits no fraction. The output
+-- is canonical: one reading formats to one string, so timestamps are comparable
+-- and hashable as text.
+pub fn format_rfc3339(w : Wall) : String =
+  let ns = wall_nanos(w)
+  let secs = ns / nanos_per_sec()
+  let sub = ns % nanos_per_sec()
+  let days = secs / secs_per_day()
+  let tod = secs % secs_per_day()
+  let (y, mo, d) = civil_from_days(days)
+  let hh = tod / secs_per_hour()
+  let mm = tod % secs_per_hour() / secs_per_min()
+  let ss = tod % secs_per_min()
+  let date = concat(
+      pad0(y, 4),
+      concat("-", concat(pad0(mo, 2), concat("-", pad0(d, 2)))),
+    )
+  let time = concat(
+      pad0(hh, 2),
+      concat(":", concat(pad0(mm, 2), concat(":", pad0(ss, 2)))),
+    )
+  let frac =
+    if sub == 0 then
+      ""
+    else
+      concat(".", pad0(sub, 9))
+  concat(date, concat("T", concat(time, concat(frac, "Z"))))
+
+-- Read a fixed-width run of decimal digits at `[i, i+w)` as an Int, or `None` if
+-- the field runs off the end or holds a non-digit.
+fn digits(s : String, i : Int, w : Int) : Option(Int) =
+  if i + w > str_len(s) then
+    None
+  else
+    digits_go(s, i, i + w, 0)
+
+fn digits_go(s : String, i : Int, hi : Int, acc : Int) : Option(Int) =
+  if i >= hi then
+    Some(acc)
+  else
+    let c = char_at(s, i)
+    if is_digit(c) then
+      digits_go(s, i + 1, hi, acc * 10 + c - 48)
+    else
+      None
+
+-- True when `s` has char `c` at index `i`.
+fn char_is(s : String, i : Int, c : Int) : Bool =
+  i < str_len(s) && char_at(s, i) == c
+
+-- Parse the optional fractional seconds beginning at `i` (a leading '.'), padding
+-- or truncating to nanosecond precision. Returns the nanoseconds and the index
+-- just past the fraction.
+fn parse_frac(s : String, i : Int) : (Int, Int) =
+  if char_is(s, i, 46) then
+    frac_go(s, i + 1, 0, 0)
+  else
+    (0, i)
+
+fn frac_go(s : String, i : Int, seen : Int, acc : Int) : (Int, Int) =
+  if i < str_len(s) && is_digit(char_at(s, i)) then
+    let acc2 =
+      if seen < 9 then
+        acc * 10 + char_at(s, i) - 48
+      else
+        acc
+    frac_go(s, i + 1, seen + 1, acc2)
+  else
+    (scale_frac(acc, min(seen, 9)), i)
+
+-- Scale `acc` (a `d`-digit fraction) up to nine digits (nanoseconds).
+fn scale_frac(acc : Int, d : Int) : Int =
+  if d >= 9 then
+    acc
+  else
+    scale_frac(acc * 10, d + 1)
+
+-- Parse the trailing zone designator at `i`: `Z`, or `(+|-)HH:MM`. Returns the
+-- offset from UTC in seconds (to subtract), or `None` if malformed or if trailing
+-- input remains.
+fn parse_zone(s : String, i : Int) : Option(Int) =
+  if char_is(s, i, 90) && i + 1 == str_len(s) then
+    Some(0)
+  elif ((char_is(s, i, 43) || char_is(s, i, 45))
+      && i + 6 == str_len(s)
+      && char_is(s, i + 3, 58)) then
+    match (digits(s, i + 1, 2), digits(s, i + 4, 2)) of
+      (Some(oh), Some(om)) =>
+        let mag = oh * secs_per_hour() + om * secs_per_min()
+        if char_is(s, i, 43) then
+          Some(mag)
+        else
+          Some(0 - mag)
+      _ => None
+  else
+    None
+
+-- True when `lo <= x <= hi`.
+fn in_range(x : Int, lo : Int, hi : Int) : Bool = x >= lo && x <= hi
+
+-- | Parse an RFC 3339 timestamp to a wall reading in UTC, or `None` if the string
+-- is not a well-formed `YYYY-MM-DDTHH:MM:SS[.frac](Z|(+|-)HH:MM)`. The date/time
+-- separators are checked, field ranges are validated, an offset is folded into
+-- UTC, and any trailing input is rejected, so the parser is total: a malformed or
+-- overlong string is `None`, never a partial or wrapped value.
+pub fn parse_rfc3339(s : String) : Option(Wall) =
+  if str_len(s) < 20 then
+    None
+  elif (not(char_is(s, 4, 45) && char_is(s, 7, 45) && char_is(s, 10, 84))) then
+    None
+  elif not(char_is(s, 13, 58) && char_is(s, 16, 58)) then
+    None
+  else
+    match ((
+          digits(s, 0, 4),
+          digits(s, 5, 2),
+          digits(s, 8, 2),
+          digits(s, 11, 2),
+          digits(s, 14, 2),
+          digits(s, 17, 2),
+        )) of
+      (Some(y), Some(mo), Some(d), Some(hh), Some(mm), Some(ss)) =>
+        if (in_range(mo, 1, 12)
+            && in_range(d, 1, 31)
+            && in_range(hh, 0, 23)
+            && in_range(mm, 0, 59)
+            && in_range(ss, 0, 60)) then
+          let (sub, j) = parse_frac(s, 19)
+          match parse_zone(s, j) of
+            Some(offset) =>
+              let days = days_from_civil(y, mo, d)
+              let secs = days * secs_per_day()
+                + hh * secs_per_hour()
+                + mm * secs_per_min()
+                + ss
+                - offset
+              Some(Wall(secs * nanos_per_sec() + sub))
+            None => None
+        else
+          None
+      _ => None

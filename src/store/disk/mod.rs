@@ -193,6 +193,24 @@ impl Store {
         index::load_names(&self.root)
     }
 
+    /// Point the mutable ref `name` at `hash` in the `refs` index (a git-style
+    /// ref into the immutable object layer). Repointing leaves the old object in
+    /// place. Kept separate from the definition name index.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error.
+    pub fn set_ref(&self, name: &str, hash: &str) -> io::Result<()> {
+        index::set_ref(&self.root, name, hash)
+    }
+
+    /// Resolve a ref `name` to the hash it points at, if bound.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error.
+    pub fn get_ref(&self, name: &str) -> io::Result<Option<String>> {
+        index::get_ref(&self.root, name)
+    }
+
     /// Record reverse-dependency edges (each entry `hash -> hashes that directly
     /// depend on it`), merged into the existing `deps` index under the lock.
     ///

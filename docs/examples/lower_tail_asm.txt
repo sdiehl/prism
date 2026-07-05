@@ -1,0 +1,9 @@
+_prism_sumto:                ; n in x0, acc in x1
+Ltail:                       ; the musttail call is a loop header, not a callee
+    cmp     x0, #1           ; n == 0 ?
+    b.eq    Lbase
+    ; ... acc + n, n - 1 (runtime call only on bignum overflow) ...
+    b       Ltail            ; "recurse" = branch back: no bl, constant stack
+Lbase:
+    mov     x0, x1           ; return acc
+    ret

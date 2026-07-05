@@ -1,0 +1,17 @@
+-- The absorption fix, as a rejection: `wrap` is an UNPARAMETERIZED effect op
+-- taking a thunk with an open row `{Wrap | e}`. The thunk `body` performs `Beep`,
+-- so `Beep` must flow out through the perform site into `use_wrap`'s row. The
+-- annotation omits it, so this is now correctly rejected (before the fix the
+-- thunk's row was dropped on an unparameterized effect, and only a phantom type
+-- parameter forced the absorption).
+effect Beep
+  ctl beep(Int) : Unit
+
+effect Wrap
+  ctl wrap(() -> Int ! {Wrap | e}) : Int
+
+fn body() : !{Wrap, Beep} Int =
+  beep(1)
+  3
+
+fn use_wrap() : !{Wrap} Int = wrap(body)

@@ -1,11 +1,9 @@
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
-effect Exn {
+effect Exn
   ctl raise(Int) : Int
-}
 
 -- Composing two effects: State and Exn.
 --

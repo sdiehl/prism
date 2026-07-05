@@ -1,0 +1,22 @@
+-- IEEE 754 float arithmetic: division yields inf/-inf/nan with no fault, NaN
+-- propagates, signed zero is preserved, and comparisons follow the standard.
+fn main() =
+  let one = 1.0
+  let z = 0.0
+  let negz = (0.0 - 1.0) * 0.0
+  let inf = one / z
+  let ninf = (0.0 - 1.0) / z
+  let nan = z / z
+  println(0.1 + 0.2)
+  println(1.0 / 3.0)
+  println(inf)
+  println(ninf)
+  println(nan)
+  println(negz)
+  println(one / negz)
+  println(nan + one)
+  println(nan * z)
+  println(if nan ==. nan then "nan==nan is true" else "nan==nan is false")
+  println(if nan /=. nan then "nan/=nan is true" else "nan/=nan is false")
+  println(if z ==. negz then "0.0==-0.0 is true" else "0.0==-0.0 is false")
+  println(if nan <. one then "nan<1 is true" else "nan<1 is false")

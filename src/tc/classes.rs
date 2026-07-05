@@ -111,9 +111,28 @@ impl Tc<'_> {
             let t = self.apply(&t);
             match &t {
                 Type::Int => {}
-                Type::I64 | Type::U64 => {
+                // `Float` joined the arithmetic operators with the tower, so a
+                // deferred operand that resolved to it is recorded like a
+                // fixed-width lane rather than rejected.
+                Type::I64 | Type::U64 | Type::Float => {
                     self.fixed.insert(id, t);
                 }
+                other => {
+                    self.default_numeric(other, span)?;
+                }
+            }
+        }
+        // Unary-minus operands still ambiguous: negation admits `Float` (unlike
+        // the integer operators above), records `I64`/`Float` for the elaborator,
+        // rejects unsigned `U64`, and lets a leftover existential default to `Int`.
+        for (id, span, t) in std::mem::take(&mut self.neg_default) {
+            let t = self.apply(&t);
+            match &t {
+                Type::Int => {}
+                Type::I64 | Type::Float => {
+                    self.fixed.insert(id, t);
+                }
+                Type::U64 => return Err(Self::neg_unsigned(span)),
                 other => {
                     self.default_numeric(other, span)?;
                 }
@@ -345,7 +364,7 @@ impl Tc<'_> {
                     "cannot infer the type for constraint {class}(_); add a type annotation"
                 ),
                 Type::Var(v) => format!(
-                    "cannot discharge constraint {class}({v}); add `where {class}({v})` to the enclosing function"
+                    "cannot discharge constraint {class}({v}); add `given {class}({v})` to the enclosing function"
                 ),
                 other => format!("no instance for {class}({})", other.show()),
             };
@@ -375,6 +394,7 @@ const fn head_name(t: &Type) -> Option<HeadKey> {
         Type::Str => Some(HeadKey::Str),
         Type::Unit => Some(HeadKey::Unit),
         Type::Con(n, _) => Some(HeadKey::Con(*n)),
+        Type::Tuple(elems) => Some(HeadKey::Tuple(elems.len())),
         _ => None,
     }
 }
@@ -634,25 +654,33 @@ fn convert_instance_head(
         span: i.span,
         msg: "instance head must be a primitive type or a data type constructor".to_string(),
     })?;
-    let mut head_vars = BTreeSet::new();
-    if let Type::Con(n, args) = &head {
-        if !data.contains_key(n.as_str()) {
-            return Err(TypeError::Other {
-                span: i.span,
-                msg: format!("unknown type {n}"),
-            });
+    // Both a data-type head `T(a, b)` and a tuple head `(a, b)` carry argument
+    // slots that must be distinct type variables; a tuple has no nominal name to
+    // check against `data`, a `Con` does.
+    let args: &[Type] = match &head {
+        Type::Con(n, args) => {
+            if !data.contains_key(n.as_str()) {
+                return Err(TypeError::Other {
+                    span: i.span,
+                    msg: format!("unknown type {n}"),
+                });
+            }
+            args
         }
-        for a in args {
-            match a {
-                Type::Var(v) if !head_vars.contains(v) => {
-                    head_vars.insert(*v);
-                }
-                _ => {
-                    return Err(TypeError::Other {
-                        span: i.span,
-                        msg: "instance head arguments must be distinct type variables".to_string(),
-                    })
-                }
+        Type::Tuple(args) => args,
+        _ => &[],
+    };
+    let mut head_vars = BTreeSet::new();
+    for a in args {
+        match a {
+            Type::Var(v) if !head_vars.contains(v) => {
+                head_vars.insert(*v);
+            }
+            _ => {
+                return Err(TypeError::Other {
+                    span: i.span,
+                    msg: "instance head arguments must be distinct type variables".to_string(),
+                })
             }
         }
     }

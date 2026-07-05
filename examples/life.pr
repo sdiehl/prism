@@ -14,8 +14,16 @@ fn cell(grid, r, c) =
     default(\() -> at_list(at_list(grid, r), c), 0)
 
 fn neighbors(grid, r, c) =
-  let ds =
-    [(0 - 1, 0 - 1), (0 - 1, 0), (0 - 1, 1), (0, 0 - 1), (0, 1), (1, 0 - 1), (1, 0), (1, 1)]
+  let ds = [
+      (0 - 1, 0 - 1),
+      (0 - 1, 0),
+      (0 - 1, 1),
+      (0, 0 - 1),
+      (0, 1),
+      (1, 0 - 1),
+      (1, 0),
+      (1, 1),
+    ]
   sum(map(\(d) -> match d of { (dr, dc) => cell(grid, r + dr, c + dc) }, ds))
 
 fn next_cell(grid, r, c) =
@@ -30,7 +38,10 @@ fn next_cell(grid, r, c) =
 fn step(grid) =
   let rows = length(grid)
   let cols = length(at_list(grid, 0))
-  map(\(r) -> map(\(c) -> next_cell(grid, r, c), range(0, cols)), range(0, rows))
+  map(
+      \(r) -> map(\(c) -> next_cell(grid, r, c), range(0, cols)),
+      range(0, rows),
+    )
 
 fn render_row(row) = str_join("", map(\(x) -> if x == 1 then "#" else ".", row))
 
@@ -44,6 +55,11 @@ fn evolve(grid, gens) =
     evolve(step(grid), gens - 1)
 
 fn main() =
-  let seed =
-    [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 1, 1, 1, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0]]
+  let seed = [
+      [0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0],
+      [0, 1, 1, 1, 0],
+      [0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0],
+    ]
   evolve(seed, 3)

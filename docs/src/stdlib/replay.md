@@ -10,23 +10,23 @@ Record/replay handlers for the capability effects.
 
 ### `record`
 
-```prism,sig,h-3140628d7d0594e0c20ec6440321431d011ca66470270582a453a4508514df7a
-record : forall a e0. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
+```prism,sig,h-ef77246a2c8446204560c7e2de3f26822c611fd545d937827c057fb5a990d6eb
+record : forall e0 a. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
 ```
 
 Run `action` against the real world, logging every capability observation (console, file, random, and environment reads) into a trace. Returns `(result, trace)`; feed the trace to `replay` to reproduce the run without IO.
 
 ### `replay`
 
-```prism,sig,h-904aceed1ab53323d832d423d938e8cbbe625a1e5acc793ea1308e611296b8c5
-replay : forall a e0. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a ! {Fail, e0}
+```prism,sig,h-96a568061a1a455b10cba5e926587dc57875176009e9aaeb65d65ffe82196f26
+replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a ! {Fail, e0}
 ```
 
 Re-run `action` against a recorded `trace`, performing no real IO: each capability read is served from the trace and output is dropped, reproducing the original result. Fails if the trace does not match the action.
 
 ### `serialize`
 
-```prism,sig,h-79f7b44c0a1d8b19120485f9cbe3c7c55b70fa73c1b8a49ecfea78fe8e9995bc
+```prism,sig,h-f7651c100e960da3ab40f28b9c79d356bc44eb15fe376ea763f6143291ec26ee
 serialize : (List(Replay@TraceEntry)) -> String
 ```
 
@@ -42,8 +42,8 @@ Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 
 ### `durable`
 
-```prism,sig,h-10175dd4ee4f42bee89f8fee7b78b13e1f1c5a6f61681e3047ef97826e40b8c1
-durable : forall a e0. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
+```prism,sig,h-235b2ef96238f9bf43bcfcc7129ca033f4c3a9e9a002b1084731deed5c6dbb75
+durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
 ```
 
 Durable record/replay against a persisted log at `path`: replay the recorded prefix with no real IO, then perform each new observation for real, appending a frame per observation so an interrupted run resumes where it left off, exactly once at the crash boundary.

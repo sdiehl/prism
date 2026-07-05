@@ -15,9 +15,8 @@
 
 import Concurrent (..)
 
-effect Log {
+effect Log
   ctl log(String) : Unit
-}
 
 fn worker(name : String) : !{Async(Int), Log} Int =
   log("{name}: begin")

@@ -61,6 +61,34 @@ fn stat(case: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
 // Like `stat`, but builds from a source string already carrying the prelude, so a
 // test can generate sized program variants. `tag` only names the temp binary.
 fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
+    stat_build(full, tag, stat_env, suffix, |src, bin| {
+        prism::build(src, bin)
+    })
+}
+
+// Like `stat_src`, but at -O2, where stream fusion is default-on. Used by the
+// pull-Sequence fusion pin, whose zero-allocation guarantee holds at the shipped
+// release level, not at the plain -O1 default.
+fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
+    stat_build(full, tag, stat_env, suffix, |src, bin| {
+        let mut cfg = prism::Config::from_env();
+        cfg.opt = prism::OptLevel::O2;
+        prism::build_on(
+            src,
+            &prism::default_roots(std::path::Path::new(".")),
+            bin,
+            &cfg,
+        )
+    })
+}
+
+fn stat_build(
+    full: &str,
+    tag: &str,
+    stat_env: &str,
+    suffix: &str,
+    build: impl Fn(&str, &Path) -> Result<(), prism::error::Error>,
+) -> Result<i64, String> {
     let bin = env::temp_dir().join(format!(
         "prism_perf_{}_{}",
         std::process::id(),
@@ -72,7 +100,7 @@ fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, 
         }
         let _ = fs::remove_file(&bin);
     };
-    if let Err(e) = prism::build(full, &bin) {
+    if let Err(e) = build(full, &bin) {
         cleanup();
         return Err(format!("{tag}: build failed: {e}"));
     }
@@ -201,6 +229,68 @@ fn allocation_is_flat_for_constant_space_programs() {
                         "{name}: allocation scales with n ({lo} cells at n={small}, {hi} at \
                          n={big}; ~{per_iter} eff-op cells/iteration). The optimization is \
                          not firing: this reifies into the free monad instead of an O(1) loop."
+                    ));
+                }
+            }
+            (Err(e), _) | (_, Err(e)) => fails.push(e),
+        }
+    }
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+// THE S5 FUSION PIN. Drives the ACTUAL `lib/std/Sequence.pr` module through
+// `import Sequence as Seq` (the shipped shape, across the import boundary, which
+// is what the acceptance criterion covers) and pins the per-element allocation
+// slope of each pipeline at ZERO: the stream-fusion pass (default-on at -O2)
+// collapses the whole pipeline into a `%fuse$` join loop and the dead upstream
+// combinator chain is eliminated, so a curated pipeline materializes no
+// intermediates at all. History for the archaeologist: pre-fusion these rows
+// measured a flat 2 cells/element per stage (one SMore cons plus one step thunk,
+// no reuse and no inlining across the module boundary: slopes 2/4/6), and two
+// inline split-form proxy gates once stood here; they were deleted when the pass
+// landed, because they encoded a combinator shape (thin wrapper delegating to a
+// named helper) that the shipped library does not use and the recognizer
+// deliberately does not chase. A slope regression here means fusion stopped
+// firing through the import boundary; that is a release blocker, not a ratchet.
+const PULL_MODULE_BASELINE: &[(&str, &str, i64)] = &[
+    ("range|sum", "Seq.sum(Seq.range(1, {HI}))", 0),
+    (
+        "range|map|sum",
+        "Seq.sum(Seq.map(Seq.range(1, {HI}), \\(x) -> x * 2))",
+        0,
+    ),
+    (
+        "range|map|filter|sum",
+        "Seq.sum(Seq.filter(Seq.map(Seq.range(1, {HI}), \\(x) -> x * 2), \\(x) -> x > 5))",
+        0,
+    ),
+];
+
+#[test]
+fn pull_sequence_module_allocation_baseline() {
+    require_cc();
+    let (small, big) = (1000_i64, 10_000_i64);
+    let mut fails = Vec::new();
+    for (name, tmpl, slope) in PULL_MODULE_BASELINE {
+        let mk = |n: i64| {
+            prism::with_prelude(&format!(
+                "import Sequence as Seq\nfn main() : !{{IO}} Unit =\n  println({})\n",
+                tmpl.replace("{HI}", &(n + 1).to_string())
+            ))
+        };
+        // Stream fusion is default-on at -O2, which is the level this guarantee
+        // ships at, so measure there. A plain -O1 build still runs the pipeline
+        // unfused; the pin is that the shipped release level allocates nothing.
+        let lo = stat_src_o2(&mk(small), name, "PRISM_ALLOC_STATS", "cells allocated");
+        let hi = stat_src_o2(&mk(big), name, "PRISM_ALLOC_STATS", "cells allocated");
+        match (lo, hi) {
+            (Ok(lo), Ok(hi)) => {
+                let per = (hi - lo) / (big - small);
+                if per != *slope {
+                    fails.push(format!(
+                        "{name}: {per} cells/element through `import Sequence` (baseline {slope}; \
+                         {lo} at n={small}, {hi} at n={big}). If cross-module stream fusion lowered \
+                         this, ratchet the baseline down; otherwise a library combinator regressed."
                     ));
                 }
             }
@@ -383,7 +473,7 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
     require_cc();
     let n = 1_000_000;
     let src = format!(
-        "effect St {{\n  ctl rd(Unit) : Int,\n  ctl wr(Int) : Unit\n}}\n\
+        "effect St\n  ctl rd(Unit) : Int\n  ctl wr(Int) : Unit\n\
          fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
          spin(k)\n  else\n    rd(())\n\
          fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
@@ -419,7 +509,7 @@ fn driver_work_is_linear_on_deep_nontail_recursion() {
     require_cc();
     let prog = |n: i64| {
         prism::with_prelude(&format!(
-            "effect Abort {{\n  ctl abort(Int) : Int\n}}\n\
+            "effect Abort\n  ctl abort(Int) : Int\n\
              fn first(xs) =\n  match xs of\n    Nil => 0\n    Cons(x, _) => x\n\
              fn probe(n : Int, acc) : !{{Abort}} Int =\n  if n == 0 then\n    abort(length(acc))\n  \
              else\n    let cell = Cons(n, acc)\n    let r = probe(n - 1, cell)\n    r + first(cell)\n\

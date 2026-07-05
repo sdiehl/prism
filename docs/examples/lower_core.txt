@@ -1,0 +1,4 @@
+fn unwrap(o) =
+  case o of
+    Non    => return 0
+    Som(n) => return n

@@ -60,7 +60,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::core::builtins::{Builtin, FloatOp};
-use crate::core::{hash_group, Comp, CoreFn, CoreOp, CorePat, HandleOp, Hashes, IoOp, Value};
+use crate::core::{
+    hash_group, Comp, CoreFn, CoreOp, CorePat, HandleOp, Hashes, IoOp, NegLane, Value,
+};
 use crate::driver::WireKind;
 use crate::sym::Sym;
 
@@ -199,6 +201,7 @@ enum Tag {
     CRefNew,
     CRefGet,
     CRefSet,
+    CNeg,
 }
 
 const TAGS: &[Tag] = &[
@@ -236,6 +239,7 @@ const TAGS: &[Tag] = &[
     Tag::CRefNew,
     Tag::CRefGet,
     Tag::CRefSet,
+    Tag::CNeg,
 ];
 
 impl Tag {
@@ -296,7 +300,12 @@ impl PatTag {
 // truth for its wire numbering. A new enum variant must be appended here; encode
 // panics on a variant it cannot find (a codec bug on trusted input), decode
 // rejects an index it does not know.
-const CORE_OPS: &[CoreOp] = &[
+//
+// `pub(crate)` so the runtime-value kont codec (`crate::eval::kont`) numbers the
+// same operators from this one canonical home rather than re-typing the tables:
+// the two wires are distinct (Comp vs the interpreter's lowered node), but an
+// operator means the same thing in both, so its wire number lives here once.
+pub(crate) const CORE_OPS: &[CoreOp] = &[
     CoreOp::Add,
     CoreOp::Sub,
     CoreOp::Mul,
@@ -320,7 +329,7 @@ const CORE_OPS: &[CoreOp] = &[
     CoreOp::Gef,
 ];
 
-const IO_OPS: &[IoOp] = &[
+pub(crate) const IO_OPS: &[IoOp] = &[
     IoOp::Print,
     IoOp::PrintF,
     IoOp::PrintS,
@@ -331,7 +340,7 @@ const IO_OPS: &[IoOp] = &[
     IoOp::Srand,
 ];
 
-const FLOAT_OPS: &[FloatOp] = &[
+pub(crate) const FLOAT_OPS: &[FloatOp] = &[
     FloatOp::ToFloat,
     FloatOp::Truncate,
     FloatOp::FloorToInt,
@@ -342,9 +351,29 @@ const FLOAT_OPS: &[FloatOp] = &[
     FloatOp::Cos,
     FloatOp::Exp,
     FloatOp::Ln,
+    FloatOp::Floor,
+    FloatOp::Ceil,
+    FloatOp::Round,
+    FloatOp::Trunc,
+    FloatOp::Tan,
+    FloatOp::Asin,
+    FloatOp::Acos,
+    FloatOp::Atan,
+    FloatOp::Sinh,
+    FloatOp::Cosh,
+    FloatOp::Tanh,
+    FloatOp::Exp2,
+    FloatOp::Expm1,
+    FloatOp::Log2,
+    FloatOp::Log10,
+    FloatOp::Log1p,
+    FloatOp::Cbrt,
 ];
 
-const BUILTINS: &[Builtin] = &[
+// Wire order for a unary negation's lane; append-only, like the op tables above.
+pub(crate) const NEG_LANES: &[NegLane] = &[NegLane::Int, NegLane::I64, NegLane::Float];
+
+pub(crate) const BUILTINS: &[Builtin] = &[
     Builtin::Concat,
     Builtin::StrLen,
     Builtin::StrEq,
@@ -415,9 +444,33 @@ const BUILTINS: &[Builtin] = &[
     Builtin::TaqSnoc,
     Builtin::TaqConcat,
     Builtin::TaqUncons,
+    Builtin::Atan2,
+    Builtin::Hypot,
+    Builtin::Fmod,
+    Builtin::ReadBytesFile,
+    Builtin::WriteBytesFile,
+    Builtin::StoreGet,
+    Builtin::StorePut,
+    Builtin::StoreHas,
+    Builtin::BufEmpty,
+    Builtin::BufNew,
+    Builtin::BufLen,
+    Builtin::BufGet,
+    Builtin::BufSet,
+    Builtin::BufPush,
+    Builtin::BufSlice,
+    Builtin::BufCat,
+    Builtin::BufEq,
+    Builtin::BufCmp,
+    Builtin::BufHash,
+    Builtin::BufOfString,
+    Builtin::StringOfBuf,
+    Builtin::BufUtf8Valid,
+    Builtin::WallNow,
+    Builtin::MonoNow,
 ];
 
-fn op_wire<T: PartialEq + Copy>(table: &[T], op: T) -> u64 {
+pub(crate) fn op_wire<T: PartialEq + Copy>(table: &[T], op: T) -> u64 {
     table
         .iter()
         .position(|x| *x == op)
@@ -425,7 +478,7 @@ fn op_wire<T: PartialEq + Copy>(table: &[T], op: T) -> u64 {
         .expect("operator missing from codec table (append it)")
 }
 
-fn op_from_wire<T: Copy>(table: &[T], n: u64) -> Result<T, CodecError> {
+pub(crate) fn op_from_wire<T: Copy>(table: &[T], n: u64) -> Result<T, CodecError> {
     usize::try_from(n)
         .ok()
         .and_then(|i| table.get(i))
@@ -712,6 +765,12 @@ impl<'a> Encoder<'a> {
                 let vi = self.value(v);
                 put_tag(&mut out, Tag::CFloat);
                 put_uvarint(&mut out, op_wire(FLOAT_OPS, *op));
+                put_uvarint(&mut out, u64::from(vi));
+            }
+            Comp::Neg(lane, v) => {
+                let vi = self.value(v);
+                put_tag(&mut out, Tag::CNeg);
+                put_uvarint(&mut out, op_wire(NEG_LANES, *lane));
                 put_uvarint(&mut out, u64::from(vi));
             }
             Comp::Do(op, args) => {
@@ -1019,6 +1078,7 @@ enum Node {
     App(u32, Vec<u32>),
     If(u32, u32, u32),
     Prim(CoreOp, u32, u32),
+    Neg(NegLane, u32),
     Call(Ref, Vec<u32>),
     Io(IoOp, Vec<u32>),
     Error(u32),
@@ -1112,6 +1172,10 @@ fn parse_node(
         Tag::CFloat => {
             let op = op_from_wire(FLOAT_OPS, r.uvarint()?)?;
             Node::FloatOp(op, r.node_ref(index)?)
+        }
+        Tag::CNeg => {
+            let lane = op_from_wire(NEG_LANES, r.uvarint()?)?;
+            Node::Neg(lane, r.node_ref(index)?)
         }
         Tag::CDo => {
             let op = r.string()?;
@@ -1315,6 +1379,7 @@ impl Builder<'_> {
             }
             Node::Io(op, args) => Comp::Io(op, self.values(&args, binders)?),
             Node::FloatOp(op, v) => Comp::FloatBuiltin(op, self.value(v, binders)?),
+            Node::Neg(lane, v) => Comp::Neg(lane, self.value(v, binders)?),
             Node::Do(op, args) => Comp::Do(Sym::new(&op), self.values(&args, binders)?),
             Node::StrOp(b, args) => Comp::StrBuiltin(b, self.values(&args, binders)?),
             Node::Case(scrut, arms) => {
@@ -1514,4 +1579,30 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
         meta,
         node_count: nodes.len(),
     })
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::{op_wire, BUILTINS, FLOAT_OPS};
+    use crate::core::builtins::{Builtin, FloatOp};
+
+    // Every operator the compiler can put in Core must be encodable: a Builtin
+    // or FloatOp added to the enum without an entry here would otherwise panic
+    // at the first `commit_to_store` of a program that reaches it, possibly
+    // long after the variant landed. The tables are append-only (wire order is
+    // identity), so the fix for a failure here is always to APPEND, never to
+    // reorder.
+    #[test]
+    fn every_builtin_is_in_the_codec_table() {
+        for b in Builtin::ALL {
+            let _ = op_wire(BUILTINS, *b);
+        }
+    }
+
+    #[test]
+    fn every_float_op_is_in_the_codec_table() {
+        for f in FloatOp::ALL {
+            let _ = op_wire(FLOAT_OPS, *f);
+        }
+    }
 }

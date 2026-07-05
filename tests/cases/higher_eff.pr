@@ -1,6 +1,5 @@
-effect Exn {
+effect Exn
   ctl raise(Int) : Int
-}
 
 fn apply(f : (Int) -> Int ! {Exn}, x : Int) : !{Exn} Int = f(x)
 

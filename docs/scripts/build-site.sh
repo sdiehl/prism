@@ -10,8 +10,14 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 out="${1:-$root/public}"
 
-# 1. One wasm bundle, shared by the docs and the playground.
-wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
+# 1. One wasm bundle, shared by the docs and the playground. cdylib is not in
+#    Cargo.toml (rlib-only keeps the dead dylib off native builds); `cargo rustc
+#    --crate-type cdylib` asks for it only here, and wasm-bindgen (version-matched
+#    to the crate) produces the JS glue. This is `just wasm` without the just.
+cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown \
+  --release --no-default-features --features wasm
+wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm \
+  --target web --out-dir web/pkg --out-name prism
 mkdir -p docs/src/pkg
 cp -f web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 
@@ -25,21 +31,36 @@ cargo build --release --features native
 #    build if a block that should type-check does not.
 PRISM_MDBOOK_STRICT=1 mdbook build docs
 
-# 3. The web app: two self-contained pages, the playground (index.html) and the
-#    REPL (repl.html), both bundling their own wasm copy.
+# 3. The web app: the self-contained pages (playground, REPL, gallery, and the
+#    gallery's residents), each bundling its own wasm copy.
 (cd web && pnpm install --frozen-lockfile && pnpm build)
 
 # 4. Stitch into one tree: book at /, playground at /play/, REPL at /repl/, the
-#    determinism scrubber at /scrub/. The web pages share the same dist bundle;
-#    /repl/ and /scrub/ serve their own html as the directory index.
+#    gallery at /gallery/, and its residents at /scrub/ and /pendulum/. The web
+#    pages share the same dist bundle; each subdirectory serves its own html as
+#    the directory index.
 rm -rf "$out"
-mkdir -p "$out/play" "$out/repl" "$out/scrub"
+mkdir -p "$out/play" "$out/repl" "$out/gallery" "$out/scrub" "$out/pendulum" "$out/branch" "$out/chaos" "$out/teleport" "$out/merkle" "$out/incr"
 cp -R docs/book/. "$out/"
 cp -R web/dist/. "$out/play/"
 cp -R web/dist/. "$out/repl/"
+cp -R web/dist/. "$out/gallery/"
 cp -R web/dist/. "$out/scrub/"
+cp -R web/dist/. "$out/pendulum/"
+cp -R web/dist/. "$out/branch/"
+cp -R web/dist/. "$out/chaos/"
+cp -R web/dist/. "$out/teleport/"
+cp -R web/dist/. "$out/merkle/"
+cp -R web/dist/. "$out/incr/"
 cp -f web/dist/repl.html "$out/repl/index.html"
+cp -f web/dist/gallery.html "$out/gallery/index.html"
 cp -f web/dist/scrubber.html "$out/scrub/index.html"
+cp -f web/dist/pendulum.html "$out/pendulum/index.html"
+cp -f web/dist/branch.html "$out/branch/index.html"
+cp -f web/dist/chaos.html "$out/chaos/index.html"
+cp -f web/dist/teleport.html "$out/teleport/index.html"
+cp -f web/dist/merkle.html "$out/merkle/index.html"
+cp -f web/dist/incr.html "$out/incr/index.html"
 cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 
-echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/, scrubber at /scrub/)"
+echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/, gallery at /gallery/, scrubber at /scrub/, pendulum at /pendulum/, branch at /branch/, chaos at /chaos/, teleport at /teleport/, merkle at /merkle/, incr at /incr/)"

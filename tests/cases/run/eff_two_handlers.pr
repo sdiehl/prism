@@ -3,9 +3,8 @@
 -- zero EOp cells under the evidence-passing path (multi-handler),
 -- where `use_env`'s `ask` becomes a forced evidence thunk that differs between
 -- the two call sites (k(1) vs k(2)). Output 33 must match interp == native.
-effect Reader {
+effect Reader
   ctl ask(Unit) : Int
-}
 
 fn use_env(x) : !{Reader} Int = x + ask(())
 

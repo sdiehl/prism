@@ -1,0 +1,65 @@
+-- | Fixed-length vectors indexed by a `Nat` dimension.
+--
+-- `Vec(a, n)` is a list of `a` whose length `n` is a type-level natural. The
+-- `Nat` kind unifies dimensions by equality of literals and variables only:
+-- there is no successor structure and no arithmetic, and `n + m` in a dimension
+-- position is declined at the parser. This module therefore ships exactly the
+-- operations that equality-only indexing can type honestly:
+--
+--   - `vempty` and `vsingle` pin a literal length (`0`, `1`).
+--   - `vmap` preserves the length (`n` appears on both sides).
+--   - `vzip` requires equal lengths (both `n`); a length clash is a compile
+--     error that names both lengths.
+--
+-- Two operations are deliberately absent because their result length is not
+-- expressible under equality-only unification: a length-changing
+-- `vcons : (a, Vec(a, n)) -> Vec(a, n + 1)` and an append
+-- `(Vec(a, n), Vec(a, m)) -> Vec(a, n + m)`. That is the declined line; writing
+-- either `n + 1` produces a pointed rejection rather than a bare parse error.
+--
+-- `vhead` accepts any length, so it cannot statically forbid the empty vector
+-- (ruling it out needs `n = m + 1`, again arithmetic). On an empty vector it
+-- raises `Fail` rather than guarding with an `Option`; this is the head-on-empty
+-- consequence of the declined line.
+
+import Data.List (..)
+
+-- | A vector of `a` with a type-level length `n`.
+pub type Vec(a, n : Nat) = MkVec(List(a))
+
+-- | The empty vector, length `0`.
+pub fn vempty() : Vec(a, 0) = MkVec([])
+
+-- | The one-element vector, length `1`.
+pub fn vsingle(x : a) : Vec(a, 1) = MkVec([x])
+
+-- | The underlying list, forgetting the static length.
+pub fn vto_list(v : Vec(a, n)) : List(a) =
+  match v of
+    MkVec(xs) => xs
+
+-- | Apply `f` to every element, preserving the length.
+pub fn vmap(f : (a) -> b, v : Vec(a, n)) : Vec(b, n) =
+  match v of
+    MkVec(xs) => MkVec(map(f, xs))
+
+-- | Zip two vectors of the SAME length into a vector of pairs. The shared `n`
+-- forces equal lengths; a mismatch is rejected at compile time, naming both.
+--
+-- ```prism,compile_fail
+-- vzip(vsingle(1), vempty())
+-- ```
+pub fn vzip(u : Vec(a, n), v : Vec(b, n)) : Vec((a, b), n) =
+  match u of
+    MkVec(xs) =>
+      match v of
+        MkVec(ys) => MkVec(zip(xs, ys))
+
+-- | The first element. `n` is unconstrained, so the empty vector is not ruled
+-- out statically; on an empty vector this raises `Fail`.
+pub fn vhead(v : Vec(a, n)) : a =
+  match v of
+    MkVec(xs) =>
+      match xs of
+        Cons(x, _) => x
+        Nil => fail()

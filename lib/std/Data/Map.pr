@@ -150,7 +150,11 @@ pub fn map_values(m) = map(snd, map_to_list(m))
 -- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier
 -- one with the same key.
 pub fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
-  foldl(\(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) }, Tip, xs)
+  foldl(
+      \(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) },
+      Tip,
+      xs,
+    )
 
 -- | Apply `f` to every value, keeping keys and tree structure.
 pub fn map_map_values(f, m) =

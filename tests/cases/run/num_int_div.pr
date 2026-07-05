@@ -1,0 +1,20 @@
+-- Integer `/` truncates toward zero; `%` takes the dividend's sign.
+-- `Int` is arbitrary precision, so the same laws hold past the machine word.
+-- `^` binds tighter than unary minus, and a negative exponent is
+-- `1 / base ^ (-exp)` under the same truncating division.
+fn main() =
+  println(7 / 2)
+  println((0 - 7) / 2)
+  println(7 / (0 - 2))
+  println((0 - 7) / (0 - 2))
+  println(7 % 3)
+  println((0 - 7) % 3)
+  println(7 % (0 - 3))
+  println((0 - 7) % (0 - 3))
+  println(1000000000000000000000 / 7)
+  println((0 - 1000000000000000000000) % 7)
+  println(-2 ^ 2)
+  println((-2) ^ 2)
+  println(2 ^ -1)
+  println(1 ^ -5)
+  println((-1) ^ -5)

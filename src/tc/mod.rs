@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use crate::error::TypeError;
 use crate::sym::Sym;
-use crate::syntax::ast::{Core, Decl, Expr, NodeId, Program, S};
+use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
 use crate::types::ty::{EffRow, Effects, Kind, Type};
 
@@ -23,7 +23,10 @@ pub struct DataInfo {
     pub params: Vec<String>,
     // Kind of each parameter, positional and same length as `params`. Almost
     // always all `Kind::Type`; a `Kind::Row` entry marks a row-kinded parameter
-    // (`type Cmd(a, e : Row)`), which is carried in `Con` spines as `Type::Row`.
+    // (`type Cmd(a, e : Row)`), carried in `Con` spines as `Type::Row`, and a
+    // `Kind::Nat` entry a dimension parameter (`type Vec(a, n : Nat)`), carried
+    // as `Type::Nat`. These parameter kinds form the constructor's arrow, checked
+    // against its arguments at each annotation (see `env::check_annot_rows`).
     pub param_kinds: Vec<Kind>,
     pub ctors: Vec<String>,
 }
@@ -55,9 +58,27 @@ pub struct EffOpInfo {
     pub eff_params: Vec<Sym>,
     pub params: Vec<Type>,
     pub ret: Type,
+    // Declared resumption multiplicity of the op (see `ast::Grade`). Consumed by
+    // effect lowering to decide which handlers may disable var-erasure; a
+    // handler clause more general than this grade is rejected at desugar.
+    pub grade: Grade,
 }
 
 impl EffOpInfo {
+    // True when the op signature carries a free effect-row variable (a thunk
+    // parameter whose row has an open tail, e.g. `() -> a ! {Eff | e}`). Such an
+    // op must tie that variable to the ambient row at each perform site so the
+    // thunk's extra effects flow out; see `Tc::bind_op_rows_to_ambient`.
+    #[must_use]
+    pub fn has_free_row_vars(&self) -> bool {
+        let mut rows = BTreeSet::new();
+        for p in &self.params {
+            env::collect_row_vars(p, &mut rows);
+        }
+        env::collect_row_vars(&self.ret, &mut rows);
+        !rows.is_empty()
+    }
+
     // Instantiate the op's param/return types with the effect's type arguments,
     // substituting each declared effect parameter for the supplied argument.
     #[must_use]
@@ -86,6 +107,9 @@ pub enum HeadKey {
     Str,
     Unit,
     Con(Sym),
+    // A tuple has no nominal constructor, so it keys on its arity: `(a, b)` and
+    // `(a, b, c)` are distinct heads a structural instance (`Serialize`) hangs on.
+    Tuple(usize),
 }
 
 pub type InstKeys = BTreeMap<(Sym, HeadKey), Vec<Sym>>;
@@ -176,11 +200,28 @@ pub struct Checked {
     pub warnings: Vec<Warning>,
 }
 
+impl Checked {
+    /// Each effect op keyed by its symbol to its declared resumption grade, the
+    /// side table effect lowering consumes to decide which handlers may disable
+    /// var-erasure. Ops absent here (a synthetic private effect) default to the
+    /// most general grade at the consumer.
+    #[must_use]
+    pub fn op_grades(&self) -> BTreeMap<Sym, Grade> {
+        self.eff_ops
+            .iter()
+            .map(|(name, info)| (Sym::from(name), info.grade))
+            .collect()
+    }
+}
+
 // A subsumption failure. `Fail` is a plain mismatch the caller renders with its
-// own span and message. `Ice` is a broken internal invariant that must surface
-// as a diagnostic instead of a raw backtrace.
+// own span and message. `Keep` is a mismatch that already carries its final,
+// more precise message (a dimension clash naming both lengths): it survives a
+// caller's structural override, taking only the caller's span. `Ice` is a broken
+// internal invariant that must surface as a diagnostic instead of a raw backtrace.
 enum TcErr {
     Fail(String),
+    Keep(String),
     Ice(String),
 }
 
@@ -188,23 +229,31 @@ impl TcErr {
     // Attach a span: mismatches become located errors, ICEs pass through.
     fn at(self, span: Span) -> TypeError {
         match self {
-            Self::Fail(msg) => TypeError::Other { span, msg },
+            Self::Fail(msg) | Self::Keep(msg) => TypeError::Other { span, msg },
             Self::Ice(msg) => TypeError::Ice { msg },
         }
     }
 
-    // Replace a mismatch message, ICEs pass through.
+    // Replace a coarse mismatch message; a `Keep` message and ICEs pass through.
     fn or_fail(self, msg: String) -> Self {
         match self {
             Self::Fail(_) => Self::Fail(msg),
-            ice @ Self::Ice(_) => ice,
+            kept @ (Self::Keep(_) | Self::Ice(_)) => kept,
         }
     }
 
-    // Replace a mismatch with the caller's diagnostic, ICEs pass through.
+    // Replace a coarse mismatch with the caller's diagnostic. A `Keep` message is
+    // preserved but adopts the fallback's span; ICEs pass through.
     fn or(self, fallback: TypeError) -> TypeError {
         match self {
             Self::Fail(_) => fallback,
+            Self::Keep(msg) => match fallback.span() {
+                Some(&span) => TypeError::Other { span, msg },
+                None => TypeError::Other {
+                    span: Span::default(),
+                    msg,
+                },
+            },
             Self::Ice(msg) => TypeError::Ice { msg },
         }
     }
@@ -275,6 +324,12 @@ struct Tc<'a> {
     // the `fixed` record; the span blames a non-numeric operand. Symmetric in
     // the two operands.
     num_default: Vec<(NodeId, Span, Type)>,
+    // Unary-minus operands left ambiguous at synth: resolved in the same
+    // `resolve_all` pass as `num_default`, but the signed lanes differ. Negation
+    // spans `Int`/`I64`/`Float` (a leftover existential defaults to `Int`), while
+    // `U64` is rejected because it is unsigned. Kept separate from `num_default`,
+    // whose integer operators reject a `Float` operand.
+    neg_default: Vec<(NodeId, Span, Type)>,
     // Indexed reads/writes (`a[i]`, `a[i] := v`) whose receiver type was not yet
     // resolved at synth (a `var`'s state existential is solved only once its
     // initializer is checked). Each is dispatched on the receiver's head type in
@@ -483,6 +538,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             cur_self: None,
             wanted: Vec::new(),
             num_default: Vec::new(),
+            neg_default: Vec::new(),
             index_ops: Vec::new(),
             dicts: BTreeMap::new(),
             row_ctx: Vec::new(),
@@ -645,6 +701,7 @@ fn infer_expr_full(
         cur_self: None,
         wanted: Vec::new(),
         num_default: Vec::new(),
+        neg_default: Vec::new(),
         index_ops: Vec::new(),
         dicts: BTreeMap::new(),
         row_ctx: Vec::new(),

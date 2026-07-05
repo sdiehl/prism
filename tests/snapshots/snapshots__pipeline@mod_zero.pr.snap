@@ -1,0 +1,87 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/mod_zero.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq Int(IntLit { value: 10, suffix: None }) Percent Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Rem,
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 10,
+                                suffix: None,
+                            },
+                        ),
+                        span: 12..14,
+                    },
+                    Spanned {
+                        node: Int(
+                            IntLit {
+                                value: 0,
+                                suffix: None,
+                            },
+                        ),
+                        span: 17..18,
+                    },
+                ),
+                span: 12..18,
+            },
+            wheres: [],
+            span: 0..18,
+        },
+    ],
+}
+
+== types ==
+main : () -> Int
+
+== core (cbpv) ==
+fn main() =
+  return 10 to t@0; return 0 to t@1; t@0 % t@1
+
+== fbip (rc) ==
+fn main() =
+  return 10 to t@0; return 0 to t@1; t@0 % t@1
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t2 = call i64 @prism_rt_int_rem(i64 21, i64 1)
+  call void @prism_rc_dec(i64 21)
+  call void @prism_rc_dec(i64 1)
+  ret i64 %t2
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_rem(i64, i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+attributes #0 = { nounwind }
+
+== run ==
+error: division by zero

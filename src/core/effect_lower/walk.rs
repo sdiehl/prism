@@ -32,6 +32,7 @@ pub(super) fn each_value<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Value)) {
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
         // Reuse nodes only arise after this pass; keep the traversal total. The

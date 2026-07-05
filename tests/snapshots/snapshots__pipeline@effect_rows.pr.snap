@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/effect_rows.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Exn") LBrace Ctl Ident("raise") LParen KwInt RParen Colon KwInt RBrace VSemi Fn Ident("risky") LParen Ident("x") RParen Eq VOpen If Ident("x") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Ident("raise") LParen Int(IntLit { value: 99, suffix: None }) RParen VClose VSemi Else VOpen Ident("x") VClose VClose VSemi Fn Ident("safe") LParen Ident("x") RParen Eq VOpen Handle Ident("risky") LParen Ident("x") RParen With VOpen Ident("raise") LParen Ident("v") Comma Ident("k") RParen FatArrow Int(IntLit { value: 0, suffix: None }) Minus Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("safe") LParen Int(IntLit { value: 0, suffix: None }) RParen Plus Ident("safe") LParen Int(IntLit { value: 7, suffix: None }) RParen RParen VClose
+VOpen Effect UIdent("Exn") VOpen Ctl Ident("raise") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("risky") LParen Ident("x") RParen Eq VOpen If Ident("x") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Ident("raise") LParen Int(IntLit { value: 99, suffix: None }) RParen VClose VSemi Else VOpen Ident("x") VClose VClose VSemi Fn Ident("safe") LParen Ident("x") RParen Eq VOpen Handle Ident("risky") LParen Ident("x") RParen With VOpen Ident("raise") LParen Ident("v") Comma Ident("k") RParen FatArrow Int(IntLit { value: 0, suffix: None }) Minus Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("safe") LParen Int(IntLit { value: 0, suffix: None }) RParen Plus Ident("safe") LParen Int(IntLit { value: 7, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Int,
                     ],
                     ret: Int,
+                    grade: Many,
                 },
             ],
-            span: 0..37,
+            span: 0..33,
         },
     ],
     errors: [],
@@ -52,7 +53,7 @@ Program {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 58..59,
+                                span: 54..55,
                             },
                             Spanned {
                                 node: Int(
@@ -61,10 +62,10 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 63..64,
+                                span: 59..60,
                             },
                         ),
-                        span: 58..64,
+                        span: 54..60,
                     },
                     Spanned {
                         node: Call(
@@ -72,7 +73,7 @@ Program {
                                 node: Var(
                                     "raise",
                                 ),
-                                span: 74..79,
+                                span: 70..75,
                             },
                             [
                                 Spanned {
@@ -82,23 +83,23 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 80..82,
+                                    span: 76..78,
                                 },
                             ],
                         ),
-                        span: 74..83,
+                        span: 70..79,
                     },
                     Spanned {
                         node: Var(
                             "x",
                         ),
-                        span: 95..96,
+                        span: 91..92,
                     },
                 ),
-                span: 55..96,
+                span: 51..92,
             },
             wheres: [],
-            span: 39..96,
+            span: 35..92,
         },
         Decl {
             name: "safe",
@@ -121,18 +122,18 @@ Program {
                                 node: Var(
                                     "risky",
                                 ),
-                                span: 120..125,
+                                span: 116..121,
                             },
                             [
                                 Spanned {
                                     node: Var(
                                         "x",
                                     ),
-                                    span: 126..127,
+                                    span: 122..123,
                                 },
                             ],
                         ),
-                        span: 120..128,
+                        span: 116..124,
                     },
                     [
                         Op(
@@ -151,16 +152,16 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 153..154,
+                                        span: 149..150,
                                     },
                                     Spanned {
                                         node: Var(
                                             "v",
                                         ),
-                                        span: 157..158,
+                                        span: 153..154,
                                     },
                                 ),
-                                span: 153..158,
+                                span: 149..154,
                             },
                         ),
                         Return(
@@ -169,15 +170,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 175..176,
+                                span: 171..172,
                             },
                         ),
                     ],
                 ),
-                span: 113..176,
+                span: 109..172,
             },
             wheres: [],
-            span: 98..176,
+            span: 94..172,
         },
         Decl {
             name: "main",
@@ -191,7 +192,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 190..197,
+                        span: 186..193,
                     },
                     [
                         Spanned {
@@ -203,7 +204,7 @@ Program {
                                             node: Var(
                                                 "safe",
                                             ),
-                                            span: 198..202,
+                                            span: 194..198,
                                         },
                                         [
                                             Spanned {
@@ -213,11 +214,11 @@ Program {
                                                         suffix: None,
                                                     },
                                                 ),
-                                                span: 203..204,
+                                                span: 199..200,
                                             },
                                         ],
                                     ),
-                                    span: 198..205,
+                                    span: 194..201,
                                 },
                                 Spanned {
                                     node: Call(
@@ -225,7 +226,7 @@ Program {
                                             node: Var(
                                                 "safe",
                                             ),
-                                            span: 208..212,
+                                            span: 204..208,
                                         },
                                         [
                                             Spanned {
@@ -235,21 +236,21 @@ Program {
                                                         suffix: None,
                                                     },
                                                 ),
-                                                span: 213..214,
+                                                span: 209..210,
                                             },
                                         ],
                                     ),
-                                    span: 208..215,
+                                    span: 204..211,
                                 },
                             ),
-                            span: 198..215,
+                            span: 194..211,
                         },
                     ],
                 ),
-                span: 190..216,
+                span: 186..212,
             },
             wheres: [],
-            span: 178..216,
+            span: 174..212,
         },
     ],
 }

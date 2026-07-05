@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -21,8 +21,8 @@ inkwell = { version = "0.9", features = ["llvm22-1"], optional = true }
 lalrpop-util = { version = "0.23", features = ["lexer"] }
 libmimalloc-sys = { version = "0.1", optional = true }
 logos = "0.16"
-marginalia = "0.2"
-num-bigint = "0.4"
+marginalia = "0.2.1"
+num-bigint = "0.5.0"
 offsides = "0.2"
 rustyline = { version = "18.0", optional = true }
 serde_json = "1"
@@ -34,6 +34,15 @@ wasm-bindgen = { version = "0.2", optional = true }
 # for unix targets; the wasm build has no filesystem and uses a no-op fallback.
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
+
+# The wasm interpreter cannot FFI into the vendored C libm (no C toolchain in that
+# build), so it falls back to the pure-Rust `libm` crate for transcendentals. This
+# differs from the vendored copy by about 1 ULP on a few functions: a documented,
+# ungated, browser-only boundary (there is no native backend in the browser). On
+# native, the interpreter FFIs the vendored `prism_m_*` symbols instead, so this
+# dependency is never pulled for a native build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+libm = "0.2.16"
 
 [build-dependencies]
 cc = "1"
@@ -62,7 +71,11 @@ mimalloc = ["dep:libmimalloc-sys"]
 [lib]
 name = "prism"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+# Native builds and tests link the rlib; the ~23 MB `cdylib` is only the
+# wasm-bindgen output and was dead weight on every native build. The wasm recipe
+# (`just wasm`) asks for the cdylib explicitly via `cargo rustc --crate-type
+# cdylib`, so it is produced only when building for wasm.
+crate-type = ["rlib"]
 
 [[bin]]
 name = "prism"

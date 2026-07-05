@@ -12,12 +12,10 @@ use std::fmt::Write;
 use std::slice;
 
 use super::rt;
-#[cfg(feature = "mlir")]
-use crate::core::builtins::Builtin;
-use crate::core::builtins::{builtin, BuiltinKind, FloatOp};
+use crate::core::builtins::{builtin, Builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
-use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, Value};
+use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
 use crate::names::{closure_cap, closure_rem};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
@@ -26,14 +24,14 @@ use crate::types::CtorInfo;
 // (`%t3`, `%a0`, ...), the legitimate output-edge text.
 type Regs = BTreeMap<Sym, String>;
 
-// Must match the heap cell layout in runtime/prism_rt.c:
+// Must match the heap cell layout in runtime/prism_internal.h:
 // {refcount@0, tag@8, arity@16, fields@24}, cross-checked against the
 // runtime's PRISM_*_W macros by the `layout_matches_runtime` test.
 const TAG_OFF: i64 = 8;
 const HDR_BYTES: i64 = 24;
 const WORD_BYTES: i64 = 8;
 
-// Reserved heap tags, cross-checked against runtime/prism_rt.c by the
+// Reserved heap tags, cross-checked against runtime/prism_internal.h by the
 // `layout_matches_runtime` test. Ctor and lambda tags must stay below both.
 const STR_TAG: i64 = 0x5354_5200;
 const BIG_TAG: i64 = 0x4249_4700;
@@ -163,21 +161,128 @@ impl IntOp {
     }
 }
 
+// The six-way ordered comparison, backend- and lane-agnostic: the int-vs-float
+// predicate spelling (signed `slt` vs ordered `olt`) is a rendering concern the
+// backend resolves, so int and float comparisons share one enum and one
+// exhaustive match at each call site.
+#[derive(Clone, Copy)]
+pub(super) enum Cmp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl Cmp {
+    // MLIR spells the predicate as a quoted string; LLVM matches the variant
+    // into an inkwell `IntPredicate`/`FloatPredicate` directly.
+    #[cfg(feature = "mlir")]
+    pub(super) const fn icmp_pred(self) -> &'static str {
+        match self {
+            Self::Eq => "eq",
+            Self::Ne => "ne",
+            Self::Lt => "slt",
+            Self::Le => "sle",
+            Self::Gt => "sgt",
+            Self::Ge => "sge",
+        }
+    }
+
+    #[cfg(feature = "mlir")]
+    pub(super) const fn fcmp_pred(self) -> &'static str {
+        match self {
+            Self::Eq => "oeq",
+            Self::Ne => "une",
+            Self::Lt => "olt",
+            Self::Le => "ole",
+            Self::Gt => "ogt",
+            Self::Ge => "oge",
+        }
+    }
+}
+
+// The float binary machine ops a backend renders, same shape as `IntOp`.
+#[derive(Clone, Copy)]
+pub(super) enum FloatBinOp {
+    Fadd,
+    Fsub,
+    Fmul,
+    Fdiv,
+}
+
+impl FloatBinOp {
+    #[cfg(feature = "mlir")]
+    pub(super) const fn mnemonic(self) -> &'static str {
+        match self {
+            Self::Fadd => "fadd",
+            Self::Fsub => "fsub",
+            Self::Fmul => "fmul",
+            Self::Fdiv => "fdiv",
+        }
+    }
+}
+
+// The unary float intrinsics a backend renders. The base name is shared by both
+// backends (LLVM forms `llvm.{name}.f64`, MLIR forms `llvm.intr.{name}`), so it
+// is not gated on the MLIR feature. Only the exact, correctly-rounded ops live
+// here (floor/ceil/round/trunc/sqrt/fabs): every IEEE-754 platform computes them
+// identically, so they need no owned implementation. Transcendentals do not
+// appear -- platform intrinsics would call the divergent system libm, so they
+// route through the owned `prism_m_*` runtime calls instead (see the
+// `Comp::FloatBuiltin` lowering and `FloatOp::runtime_sym`).
+#[derive(Clone, Copy)]
+pub(super) enum FloatIntrinsic {
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
+    Sqrt,
+    Fabs,
+}
+
+impl FloatIntrinsic {
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Floor => "floor",
+            Self::Ceil => "ceil",
+            // LLVM `llvm.round.f64` and MLIR `llvm.intr.round` are round-half-away
+            // -from-zero, matching Rust `f64::round` in the interpreter.
+            Self::Round => "round",
+            Self::Trunc => "trunc",
+            Self::Sqrt => "sqrt",
+            Self::Fabs => "fabs",
+        }
+    }
+}
+
 pub(super) trait Isa {
     fn const_int(&self, b: &mut Buf, n: i64) -> String;
     fn const_float(&self, b: &mut Buf, f: f64) -> String;
     fn fresh_zero(&self, b: &mut Buf) -> String;
     fn str_lit(&self, b: &mut Buf, dst: &str, idx: usize, len: usize);
     fn bin(&self, b: &mut Buf, dst: &str, op: IntOp, x: &str, y: &str);
-    fn fbin(&self, b: &mut Buf, dst: &str, op: &str, x: &str, y: &str);
-    fn icmp(&self, b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str);
-    fn fcmp(&self, b: &mut Buf, dst: &str, pred: &str, x: &str, y: &str);
+    fn fbin(&self, b: &mut Buf, dst: &str, op: FloatBinOp, x: &str, y: &str);
+    fn icmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str);
+    fn fcmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str);
     fn zext(&self, b: &mut Buf, dst: &str, c: &str);
     fn sitofp(&self, b: &mut Buf, dst: &str, v: &str);
-    fn fptosi(&self, b: &mut Buf, dst: &str, v: &str);
+    // Saturating float -> signed i64 (clamps to i64::MIN/MAX, NaN -> 0). The
+    // pinned float-to-int semantics, matching the interpreter's `f as i64`; plain
+    // `fptosi` is undefined out of range and would diverge the backends.
+    fn fptosi_sat(&self, b: &mut Buf, dst: &str, v: &str);
     fn cast_i2f(&self, b: &mut Buf, dst: &str, v: &str);
     fn cast_f2i(&self, b: &mut Buf, dst: &str, v: &str);
-    fn f_intrinsic(&self, b: &mut Buf, dst: &str, name: &str, a: &str);
+    fn f_intrinsic(&self, b: &mut Buf, dst: &str, op: FloatIntrinsic, a: &str);
+    // A call into the owned vendored libm: `sym` is an `f64 -> f64` symbol
+    // (`prism_m_*`), taking and returning a native double. The MLIR backend needs
+    // the symbol declared once (`declare_f`); the LLVM backend declares on use.
+    fn f_call1(&self, b: &mut Buf, dst: &str, sym: &str, a: &str);
+    // Emit a module-level declaration for an `f64 -> f64` runtime symbol. A no-op
+    // where the backend declares functions on first use (LLVM/inkwell).
+    fn declare_f(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str);
+    fn fneg(&self, b: &mut Buf, dst: &str, x: &str);
     fn inttoptr(&self, b: &mut Buf, dst: &str, v: &str);
     fn ptrtoint(&self, b: &mut Buf, dst: &str, p: &str);
     fn alloca_word(&self, b: &mut Buf, dst: &str);
@@ -220,6 +325,10 @@ struct Cg<'a, I> {
     adapters: BTreeMap<(usize, usize), usize>,
     strs: Vec<String>,
     used_rt: BTreeMap<String, usize>,
+    // Owned-libm transcendentals actually called (the `prism_m_*` symbols). These
+    // take and return `f64` rather than the `i64` of `used_rt`, so they carry a
+    // distinct declaration (see `declare_f`).
+    used_fcall: BTreeSet<String>,
     // Arities at which `prism_apply_n` is actually called. A 0-arg `App` (and any
     // arity with no matching lambda) still needs the function emitted, or it is
     // an undefined symbol at link time.
@@ -243,6 +352,7 @@ impl<'a, I: Isa> Cg<'a, I> {
             adapters: BTreeMap::new(),
             strs: Vec::new(),
             used_rt: BTreeMap::new(),
+            used_fcall: BTreeSet::new(),
             used_apply: BTreeSet::new(),
             trmc: None,
         }
@@ -352,6 +462,14 @@ impl<'a, I: Isa> Cg<'a, I> {
 
     fn box_i64(&mut self, payload: &str) -> String {
         self.dst(|i, b, d| i.call(b, d, rt::BOX, &[payload.to_string()]))
+    }
+
+    // Canonicalize a raw i64 into an `Int` word (tagged immediate, or a bignum
+    // cell when it overflows the 63-bit tag). Used by the saturating float->int
+    // conversions, whose i64::MIN/MAX results do not fit the immediate range.
+    fn int_of_long(&mut self, raw: &str) -> String {
+        self.used_rt.insert(rt::INT_OF_LONG.into(), 1);
+        self.dst(|i, b, d| i.call(b, d, rt::INT_OF_LONG, &[raw.to_string()]))
     }
 
     fn f_in(&mut self, v: &str) -> String {
@@ -539,49 +657,90 @@ impl<'a, I: Isa> Cg<'a, I> {
             Comp::FloatBuiltin(op, v) => {
                 let a = self.value(regs, v)?;
                 let out = match op {
+                    // int -> float.
                     FloatOp::ToFloat => {
                         let ua = self.untag(&a);
                         let rf = self.dst(|i, b, d| i.sitofp(b, d, &ua));
                         self.f_out(&rf)
                     }
+                    // float -> int, saturating (NaN -> 0). `fptosi_sat` matches the
+                    // interpreter's `f as i64`, pinning identical out-of-range
+                    // behavior on both backends (plain `fptosi` is UB there). The
+                    // saturated i64 can be i64::MIN/MAX, which overflow the 63-bit
+                    // tag, so canonicalize through `prism_int_of_long` (promotes to
+                    // a bignum when needed) rather than an inline retag.
                     FloatOp::Truncate => {
                         let fa = self.f_in(&a);
-                        let r = self.dst(|i, b, d| i.fptosi(b, d, &fa));
-                        self.retag(&r)
+                        let r = self.dst(|i, b, d| i.fptosi_sat(b, d, &fa));
+                        self.int_of_long(&r)
                     }
                     FloatOp::FloorToInt | FloatOp::CeilToInt => {
                         let intr = if matches!(op, FloatOp::FloorToInt) {
-                            "floor"
+                            FloatIntrinsic::Floor
                         } else {
-                            "ceil"
+                            FloatIntrinsic::Ceil
                         };
                         let fa = self.f_in(&a);
                         let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, intr, &fa));
-                        let r = self.dst(|i, b, d| i.fptosi(b, d, &ff));
-                        self.retag(&r)
+                        let r = self.dst(|i, b, d| i.fptosi_sat(b, d, &ff));
+                        self.int_of_long(&r)
                     }
-                    FloatOp::Sqrt
-                    | FloatOp::Sin
-                    | FloatOp::Cos
-                    | FloatOp::Exp
-                    | FloatOp::Ln
-                    | FloatOp::AbsFloat => {
+                    // Exact float -> float: a hardware intrinsic, identical on
+                    // every IEEE-754 platform.
+                    FloatOp::AbsFloat
+                    | FloatOp::Sqrt
+                    | FloatOp::Floor
+                    | FloatOp::Ceil
+                    | FloatOp::Round
+                    | FloatOp::Trunc => {
                         let intr = match op {
-                            FloatOp::Sqrt => "sqrt",
-                            FloatOp::Sin => "sin",
-                            FloatOp::Cos => "cos",
-                            FloatOp::Exp => "exp",
-                            FloatOp::AbsFloat => "fabs",
-                            _ => "log",
+                            FloatOp::AbsFloat => FloatIntrinsic::Fabs,
+                            FloatOp::Sqrt => FloatIntrinsic::Sqrt,
+                            FloatOp::Floor => FloatIntrinsic::Floor,
+                            FloatOp::Ceil => FloatIntrinsic::Ceil,
+                            FloatOp::Round => FloatIntrinsic::Round,
+                            _ => FloatIntrinsic::Trunc,
                         };
                         let fa = self.f_in(&a);
                         let ff = self.dst(|i, b, d| i.f_intrinsic(b, d, intr, &fa));
+                        self.f_out(&ff)
+                    }
+                    // Transcendental: a call into the owned vendored libm, the same
+                    // `prism_m_*` symbol the interpreter FFIs, so the two agree bit
+                    // for bit. `runtime_sym` returns `Some` for exactly this class.
+                    _ => {
+                        let sym = op
+                            .runtime_sym()
+                            .expect("ICE: non-transcendental FloatOp reached the runtime-call arm");
+                        self.used_fcall.insert(sym.to_string());
+                        let fa = self.f_in(&a);
+                        let ff = self.dst(|i, b, d| i.f_call1(b, d, sym, &fa));
                         self.f_out(&ff)
                     }
                 };
                 self.rc_dec(&a);
                 Ok(out)
             }
+            // Genuine unary negation. The float lane is a real `fneg` (sign-bit
+            // flip, preserves signed zero, matches the interpreter's `-f` bit for
+            // bit). The integer lanes reuse the existing subtract-from-zero
+            // lowering: this is a machine-level detail only. The Core node stays a
+            // `Neg`, so the content hash and the `Num` negate method never see a `0 - x`.
+            Comp::Neg(NegLane::Float, v) => {
+                let a = self.value(regs, v)?;
+                let fa = self.f_in(&a);
+                let rf = self.dst(|i, b, d| i.fneg(b, d, &fa));
+                let out = self.f_out(&rf);
+                self.rc_dec(&a);
+                Ok(out)
+            }
+            Comp::Neg(NegLane::Int, v) => {
+                self.lower(regs, &Comp::Prim(CoreOp::Sub, Value::Int(0), v.clone()))
+            }
+            Comp::Neg(NegLane::I64, v) => self.lower(
+                regs,
+                &Comp::StrBuiltin(Builtin::I64Sub, vec![Value::I64(0), v.clone()]),
+            ),
             Comp::Do(op, _) => Err(format!(
                 "effect `{op}` reached codegen unlowered: it is performed outside any lexical \
                  `handle`, which the local free-monad lowering cannot translate. Perform it \
@@ -598,6 +757,13 @@ impl<'a, I: Isa> Cg<'a, I> {
                     .into(),
             ),
             Comp::StrBuiltin(b, args) => {
+                if b.native_deferred() {
+                    return Err(format!(
+                        "{}: the content-addressed store bridge is interpreter-only; \
+                         the native runtime has no C symbol for it yet",
+                        b.name()
+                    ));
+                }
                 let sym = b.sym();
                 if !matches!(builtin(b.name()), Some((_, BuiltinKind::Str))) {
                     self.used_rt.insert(sym.clone(), args.len());
@@ -826,7 +992,7 @@ impl<'a, I: Isa> Cg<'a, I> {
     ) -> Result<String, String> {
         let vc = self.value(regs, v)?;
         let one = self.isa.const_int(&mut self.b, 1);
-        let c = self.dst(|i, b, d| i.icmp(b, d, "ne", &vc, &one));
+        let c = self.dst(|i, b, d| i.icmp(b, d, Cmp::Ne, &vc, &one));
         let lt = self.b.label();
         let le = self.b.label();
         if tail {
@@ -945,34 +1111,37 @@ impl<'a, I: Isa> Cg<'a, I> {
         Ok(result)
     }
 
+    // Exhaustive over `CoreOp`: adding a primitive is a compile error here rather
+    // than a silently mis-lowered op. The int add/sub and comparison lanes share
+    // the immediate fast-path scaffold (`both_imm` then `fast`/`slow`/`merge`).
     fn prim(&mut self, op: CoreOp, a: &str, b: &str) -> String {
         match op {
             CoreOp::Addf | CoreOp::Subf | CoreOp::Mulf | CoreOp::Divf => {
                 let fa = self.f_in(a);
                 let fb = self.f_in(b);
                 let instr = match op {
-                    CoreOp::Addf => "fadd",
-                    CoreOp::Subf => "fsub",
-                    CoreOp::Mulf => "fmul",
-                    _ => "fdiv",
+                    CoreOp::Addf => FloatBinOp::Fadd,
+                    CoreOp::Subf => FloatBinOp::Fsub,
+                    CoreOp::Mulf => FloatBinOp::Fmul,
+                    _ => FloatBinOp::Fdiv,
                 };
                 let rf = self.dst(|i, bf, d| i.fbin(bf, d, instr, &fa, &fb));
-                return self.f_out(&rf);
+                self.f_out(&rf)
             }
             CoreOp::Eqf | CoreOp::Nef | CoreOp::Ltf | CoreOp::Lef | CoreOp::Gtf | CoreOp::Gef => {
                 let fa = self.f_in(a);
                 let fb = self.f_in(b);
                 let pred = match op {
-                    CoreOp::Eqf => "oeq",
-                    CoreOp::Nef => "une",
-                    CoreOp::Ltf => "olt",
-                    CoreOp::Lef => "ole",
-                    CoreOp::Gtf => "ogt",
-                    _ => "oge",
+                    CoreOp::Eqf => Cmp::Eq,
+                    CoreOp::Nef => Cmp::Ne,
+                    CoreOp::Ltf => Cmp::Lt,
+                    CoreOp::Lef => Cmp::Le,
+                    CoreOp::Gtf => Cmp::Gt,
+                    _ => Cmp::Ge,
                 };
                 let c = self.dst(|i, bf, d| i.fcmp(bf, d, pred, &fa, &fb));
                 let z = self.dst(|i, bf, d| i.zext(bf, d, &c));
-                return self.retag(&z);
+                self.retag(&z)
             }
             CoreOp::Mul | CoreOp::Div | CoreOp::Rem => {
                 let sym = match op {
@@ -982,53 +1151,64 @@ impl<'a, I: Isa> Cg<'a, I> {
                 };
                 self.used_rt.insert(sym.into(), 2);
                 let args = [a.to_string(), b.to_string()];
-                return self.dst(|i, bf, d| i.call(bf, d, sym, &args));
+                self.dst(|i, bf, d| i.call(bf, d, sym, &args))
             }
-            _ => {}
+            CoreOp::Add | CoreOp::Sub => self.prim_addsub(op, a, b),
+            CoreOp::Eq | CoreOp::Ne | CoreOp::Lt | CoreOp::Le | CoreOp::Gt | CoreOp::Ge => {
+                self.prim_icmp(op, a, b)
+            }
         }
+    }
+
+    fn prim_addsub(&mut self, op: CoreOp, a: &str, b: &str) -> String {
         let cond = self.both_imm(a, b);
         let fast = self.b.label();
         let slow = self.b.label();
         let merge = self.b.label();
-        if matches!(op, CoreOp::Add | CoreOp::Sub) {
-            let (instr, sym) = if op == CoreOp::Add {
-                (IntOp::Add, rt::INT_ADD)
-            } else {
-                (IntOp::Sub, rt::INT_SUB)
-            };
-            self.used_rt.insert(sym.into(), 2);
-            let fastok = self.b.label();
-            self.isa.cond_br(&mut self.b, &cond, &fast, &slow);
-            self.isa.open_block(&mut self.b, &fast);
-            let ua = self.untag(a);
-            let ub = self.untag(b);
-            let r = self.dst(|i, bf, d| i.bin(bf, d, instr, &ua, &ub));
-            let one = self.isa.const_int(&mut self.b, 1);
-            let s = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Shl, &r, &one));
-            let back = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Ashr, &s, &one));
-            let fit = self.dst(|i, bf, d| i.icmp(bf, d, "eq", &back, &r));
-            self.isa.cond_br(&mut self.b, &fit, &fastok, &slow);
-            self.isa.open_block(&mut self.b, &fastok);
-            let rf = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Or, &s, &one));
-            let pf = self.b.cur.clone();
-            self.isa.jump_merge(&mut self.b, &merge, &rf);
-            self.isa.open_block(&mut self.b, &slow);
-            let args = [a.to_string(), b.to_string()];
-            let rs = self.dst(|i, bf, d| i.call(bf, d, sym, &args));
-            let ps = self.b.cur.clone();
-            self.isa.jump_merge(&mut self.b, &merge, &rs);
-            let out = self.b.tmp();
-            self.isa
-                .open_merge(&mut self.b, &merge, &out, &[(rf, pf), (rs, ps)]);
-            return out;
-        }
+        let (instr, sym) = if op == CoreOp::Add {
+            (IntOp::Add, rt::INT_ADD)
+        } else {
+            (IntOp::Sub, rt::INT_SUB)
+        };
+        self.used_rt.insert(sym.into(), 2);
+        let fastok = self.b.label();
+        self.isa.cond_br(&mut self.b, &cond, &fast, &slow);
+        self.isa.open_block(&mut self.b, &fast);
+        let ua = self.untag(a);
+        let ub = self.untag(b);
+        let r = self.dst(|i, bf, d| i.bin(bf, d, instr, &ua, &ub));
+        let one = self.isa.const_int(&mut self.b, 1);
+        let s = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Shl, &r, &one));
+        let back = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Ashr, &s, &one));
+        let fit = self.dst(|i, bf, d| i.icmp(bf, d, Cmp::Eq, &back, &r));
+        self.isa.cond_br(&mut self.b, &fit, &fastok, &slow);
+        self.isa.open_block(&mut self.b, &fastok);
+        let rf = self.dst(|i, bf, d| i.bin(bf, d, IntOp::Or, &s, &one));
+        let pf = self.b.cur.clone();
+        self.isa.jump_merge(&mut self.b, &merge, &rf);
+        self.isa.open_block(&mut self.b, &slow);
+        let args = [a.to_string(), b.to_string()];
+        let rs = self.dst(|i, bf, d| i.call(bf, d, sym, &args));
+        let ps = self.b.cur.clone();
+        self.isa.jump_merge(&mut self.b, &merge, &rs);
+        let out = self.b.tmp();
+        self.isa
+            .open_merge(&mut self.b, &merge, &out, &[(rf, pf), (rs, ps)]);
+        out
+    }
+
+    fn prim_icmp(&mut self, op: CoreOp, a: &str, b: &str) -> String {
+        let cond = self.both_imm(a, b);
+        let fast = self.b.label();
+        let slow = self.b.label();
+        let merge = self.b.label();
         let pred = match op {
-            CoreOp::Eq => "eq",
-            CoreOp::Ne => "ne",
-            CoreOp::Lt => "slt",
-            CoreOp::Le => "sle",
-            CoreOp::Gt => "sgt",
-            _ => "sge",
+            CoreOp::Eq => Cmp::Eq,
+            CoreOp::Ne => Cmp::Ne,
+            CoreOp::Lt => Cmp::Lt,
+            CoreOp::Le => Cmp::Le,
+            CoreOp::Gt => Cmp::Gt,
+            _ => Cmp::Ge,
         };
         // Tagging is order-preserving, so immediates compare as tagged words.
         self.used_rt.insert(rt::INT_CMP.into(), 2);
@@ -1058,7 +1238,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         let t = self.dst(|i, bf, d| i.bin(bf, d, IntOp::And, a, b));
         let one = self.isa.const_int(&mut self.b, 1);
         let bit = self.dst(|i, bf, d| i.bin(bf, d, IntOp::And, &t, &one));
-        self.dst(|i, bf, d| i.icmp(bf, d, "eq", &bit, &one))
+        self.dst(|i, bf, d| i.icmp(bf, d, Cmp::Eq, &bit, &one))
     }
 
     // Bind each function parameter to its `%a{i}` SSA register and return the
@@ -1445,6 +1625,10 @@ pub(super) fn emit_with<I: Isa>(
     for (sym, arity) in &cg.used_rt {
         isa.declare(&mut out, &mut seen, sym, *arity);
     }
+    // The owned-libm transcendentals, declared with their `f64 -> f64` signature.
+    for sym in &cg.used_fcall {
+        isa.declare_f(&mut out, &mut seen, sym);
+    }
     for (i, s) in cg.strs.iter().enumerate() {
         isa.str_global(&mut out, i, s);
     }
@@ -1509,12 +1693,12 @@ pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
 #[cfg(test)]
 mod tests {
     fn c_def(name: &str) -> i64 {
-        let rt = include_str!("../../runtime/prism_rt.c");
         let prefix = format!("#define {name} ");
-        let line = rt
-            .lines()
+        let line = super::rt::RUNTIME_FILES
+            .iter()
+            .flat_map(|(_, body, _)| body.lines())
             .find(|l| l.starts_with(&prefix))
-            .unwrap_or_else(|| panic!("{name} not defined in prism_rt.c"));
+            .unwrap_or_else(|| panic!("{name} not defined in any runtime/ module"));
         let val = line[prefix.len()..].trim_end().trim_end_matches('L');
         val.strip_prefix("0x").map_or_else(
             || val.parse().unwrap(),

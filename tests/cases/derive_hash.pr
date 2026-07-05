@@ -1,10 +1,8 @@
-class Hash(a) {
+class Hash(a)
   hash : (a) -> String
-}
 
-instance hashInt : Hash(Int) {
+instance hashInt : Hash(Int)
   fn hash(x) = blake3(concat("i", show_int(x)))
-}
 
 type Pair = MkPair(Int, Int) deriving (Hash)
 

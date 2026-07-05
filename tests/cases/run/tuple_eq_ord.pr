@@ -1,0 +1,30 @@
+-- Canonical Eq/Ord for pairs and triples: componentwise equality and
+-- lexicographic ordering (leftmost component most significant). Exercises
+-- nested tuples, inequality at each position, equal-prefix ties, a sort over a
+-- list of pairs, and a Map keyed by pairs (which dispatches through Ord).
+
+fn main() =
+  -- equality, including a nested tuple component
+  println(show((1, "a") == (1, "a")))
+  println(show((1, "a") == (2, "a")))
+  println(show((1, "a") == (1, "b")))
+  println(show((1, (2, 3)) == (1, (2, 3))))
+  println(show((1, (2, 3)) == (1, (2, 4))))
+  println(show((1, 2, 3) == (1, 2, 3)))
+  println(show((1, 2, 3) == (1, 9, 3)))
+  -- lexicographic ordering: first component decides
+  println(show((1, 9) < (2, 0)))
+  -- tie on first, second decides
+  println(show((1, 1) < (1, 2)))
+  println(show((1, 2) <= (1, 2)))
+  println(show((2, 0) > (1, 9)))
+  -- triples, tie on first two
+  println(show((1, 2, 3) < (1, 2, 4)))
+  println(show((1, 2, 3) >= (1, 2, 3)))
+  -- sort a list of pairs lexicographically
+  println(show(sort([(2, 1), (1, 2), (1, 1), (2, 0)])))
+  -- a Map keyed by pairs resolves keys through the tuple Ord dictionary
+  let m = map_from_list([((1, 1), 10), ((1, 2), 20), ((2, 1), 30)])
+  println(force(map_lookup((1, 2), m)) ?? 0)
+  println(force(map_lookup((2, 1), m)) ?? 0)
+  println(show(map_member((3, 3), m)))

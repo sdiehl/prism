@@ -1,0 +1,31 @@
+-- Generic Foldable/Monad functions over two containers (List and Option).
+-- Drop into tests/cases/run AFTER Data.Foldable and Data.Monad are registered
+-- in src/stdlib.rs and opened by the prelude (canonical form: unqualified).
+
+fn main() =
+  -- Foldable over List
+  println(show(sum([1, 2, 3, 4])))
+  println(show(product([1, 2, 3, 4])))
+  println(show(length([9, 9, 9])))
+  println(show(all(\(x) -> x > 0, [1, 2, 3])))
+  println(show(any(\(x) -> x > 2, [1, 2, 3])))
+  println(show(find(\(x) -> x > 1, [1, 2, 3])))
+  println(show(elem(2, [1, 2, 3])))
+  println(show(to_list([4, 5])))
+  println(show(is_empty([])))
+  -- Foldable over Option
+  println(show(sum(Some(10))))
+  println(show(length(None)))
+  println(show(any(\(x) -> x > 2, Some(5))))
+  println(show(to_list(Some(7))))
+  -- Monad/Applicative over Option
+  println(show(join(Some(Some(3)))))
+  println(show(map2(\(a, b) -> a + b, Some(2), Some(40))))
+  println(show(map3(\(a, b, c) -> a + b + c, Some(1), Some(2), Some(3))))
+  println(show(sequence([Some(1), Some(2), Some(3)])))
+  println(show(sequence([Some(1), None, Some(3)])))
+  println(show(traverse_list(\(x) -> if x > 0 then Some(x) else None, [
+      1,
+      2,
+      3,
+    ])))

@@ -1,0 +1,11 @@
+-- Digit separators `_` in every lane: integer, fixed-width suffixed, and float
+-- mantissa and exponent. The separators are cosmetic, so the values match their
+-- unseparated spellings on both backends.
+
+fn main() : !{IO} Unit =
+  println(1_000_000)
+  println(1_000_000 == 1000000)
+  println(10_00i64)
+  println(4_294_967_296u64)
+  println(1_000.000_5)
+  println(1_2.5e1_0)

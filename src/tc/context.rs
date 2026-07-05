@@ -426,11 +426,17 @@ impl Tc<'_> {
             out = out.subst_row_exist(*e, &EffRow::Var(Sym::from(&name)));
             row_names.push(name);
         }
-        for name in row_names.into_iter().rev() {
-            out = Type::RowForall(Sym::from(&name), Box::new(out));
-        }
+        // Type quantifiers wrap innermost and row quantifiers outermost. When such
+        // a scheme is instantiated left to right (`subtype`/`app_synth`), the row
+        // existentials enter the context before the type-`forall` marker, so a
+        // solution that legitimately refers to one survives the marker's drop
+        // instead of being stranded (the `splice_solved_row: not in context` ICE
+        // that opening latent rows can otherwise trigger).
         for name in names.into_iter().rev() {
             out = Type::Forall(Sym::from(&name), Box::new(out));
+        }
+        for name in row_names.into_iter().rev() {
+            out = Type::RowForall(Sym::from(&name), Box::new(out));
         }
         (out, renames)
     }

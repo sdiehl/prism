@@ -28,30 +28,34 @@ import Data.Map (..)
 
 import Data.List (..)
 
+import Data.Foldable (..)
+
 import Data.String (..)
 
 import Wire (..)
 
 -- The raw, type-erased effect the engine actually handles: node handles are
 -- string keys and values are `Bytes`. The typed surface below wraps it. The memo
--- thunk may read other nodes (`IncrRaw`) and perform any replayable effect (`e`).
--- The memo thunk reaches the operation already erased to `() -> Bytes`, built by
--- the `after` combinator (a named function, not a fresh lambda at the perform
--- site: a literal lambda there severs the ambient-row tie that lets the thunk's
--- effects flow out through `run_incr`).
-pub effect IncrRaw(x) {
-  ctl incr_input(Bytes) : String,
-  ctl incr_get(String) : Bytes,
-  ctl incr_set(String, Bytes) : Unit,
-  ctl incr_memo(() -> Bytes ! {IncrRaw(x) | e}) : String
-}
+-- thunk may read other nodes (`IncrRaw`) and perform any replayable effect (`e`),
+-- and that row flows out through `run_incr` because `incr_memo`'s thunk argument
+-- carries the open row `{IncrRaw | e}`: the free row variable in the operation's
+-- signature ties the thunk's ambient effects to the caller directly, with no
+-- placeholder parameter on the effect. The memo thunk reaches the operation
+-- already erased to `() -> Bytes`, built by the `after` combinator (a named
+-- function, not a fresh lambda at the perform site: a literal lambda there severs
+-- that tie).
+pub effect IncrRaw
+  ctl incr_input(Bytes) : String
+  ctl incr_get(String) : Bytes
+  ctl incr_set(String, Bytes) : Unit
+  ctl incr_memo(() -> Bytes ! {IncrRaw | e}) : String
 
 -- Compose an encoder after a thunk, preserving the thunk's effect row so the
--- erased `() -> Bytes` still carries `{IncrRaw(Unit) | e}` out to the perform site.
+-- erased `() -> Bytes` still carries `{IncrRaw | e}` out to the perform site.
 fn after(
-  t : () -> a ! {IncrRaw(Unit) | e},
+  t : () -> a ! {IncrRaw | e},
   f : (a) -> Bytes
-) : () -> Bytes ! {IncrRaw(Unit) | e} =
+) : () -> Bytes ! {IncrRaw | e} =
   \() -> f(t())
 
 -- A node in the demand graph. `MemoN` holds its (erased) thunk, its last dep set
@@ -62,7 +66,7 @@ fn after(
 -- effect leaks into a run whose thunks did not perform it.
 type Node(e : Row)
   = InputN(Bytes, String)
-  | MemoN(() -> Bytes ! {IncrRaw(Unit) | e}, List((String, String)), Option((Bytes, String)))
+  | MemoN(() -> Bytes ! {IncrRaw | e}, List((String, String)), Option((Bytes, String)))
 
 -- A durable snapshot entry: a memo's recorded dep set and its cached result
 -- bytes, loaded from a prior run's snapshot file. The result hash is recomputed
@@ -86,10 +90,10 @@ type Warm = Warm(List((String, String)), Bytes)
 -- scratch-only: never cached, never persisted, always recomputed. That is what
 -- keeps a warm run's output byte-identical to a cold run.
 type St(e : Row) = St(
-  Map(String, Node(e)),
+  Map(String, Node(e), Canonical),
   List(String),
   Int,
-  Map(String, Warm),
+  Map(String, Warm, Canonical),
   Bool,
   List(String)
 )
@@ -146,8 +150,7 @@ fn st_persist_keys(s) =
 -- `Serialize` instances are canonical, notably `Map` over its sorted key list),
 -- so equal values share a hash and cutoff is exact.
 fn bytes_str(bs) =
-  match bs of
-    Bytes(xs) => concat_all(map(\(b) -> concat(show_int(b), ","), xs))
+  concat_all(map(\(b) -> concat(show_int(b), ","), bytes_to_list(bs)))
 
 fn vhash(bs) = blake3(bytes_str(bs))
 
@@ -198,7 +201,7 @@ fn verify(s : St(e), deps : List((String, String))) : (St(e), Bool) =
 fn recompute(
   s : St(e),
   key : String,
-  th : () -> Bytes ! {IncrRaw(Unit) | e}
+  th : () -> Bytes ! {IncrRaw | e}
 ) : (St(e), Bytes) =
   let s1 = st_put(s, key, MemoN(th, Nil, None))
   let s2 = st_push(s1, key)
@@ -225,7 +228,13 @@ fn reg_memo(s, th) =
   if st_prefix_open(s1) then
     match map_lookup(key, st_warm(s1)) of
       Some(Warm(deps, bytes)) =>
-        (st_add_persist(st_put(s1, key, MemoN(th, deps, Some((bytes, vhash(bytes))))), key), key)
+        (
+            st_add_persist(
+                st_put(s1, key, MemoN(th, deps, Some((bytes, vhash(bytes))))),
+                key,
+              ),
+            key,
+          )
       None => (st_add_persist(st_put(s1, key, MemoN(th, Nil, None)), key), key)
   else
     (st_put(s1, key, MemoN(th, Nil, None)), key)
@@ -251,7 +260,7 @@ fn do_get(s : St(e), key : String) : (St(e), Bytes) =
 -- calls this to run a memo thunk so the thunk's `get`s are caught here again. The
 -- explicit signature makes the polymorphic recursion (used at the erased memo
 -- thunk type and at the outer action type) well typed.
-fn run_thunk(s : St(e), action : () -> a ! {IncrRaw(Unit) | e}) : (St(e), a) =
+fn run_thunk(s : St(e), action : () -> a ! {IncrRaw | e}) : (St(e), a) =
   let f =
     handle action() with
       incr_input(bytes, k) =>
@@ -269,7 +278,7 @@ fn run_thunk(s : St(e), action : () -> a ! {IncrRaw(Unit) | e}) : (St(e), a) =
 -- demand graph. The node table lives only for this scope. The ambient row `e`
 -- (the replayable effects the memo thunks perform beyond reading nodes) flows out
 -- unchanged, exactly as `run_async` passes its fibers' row through.
-pub fn run_incr(action : () -> a ! {IncrRaw(Unit) | e}) : a =
+pub fn run_incr(action : () -> a ! {IncrRaw | e}) : a =
   let r = run_thunk(St(map_empty, Nil, 0, map_empty, false, Nil), action)
   snd(r)
 
@@ -316,7 +325,7 @@ pub fn set(node : Incr(a), v : a) : Unit given Serialize(a) =
 -- ```
 --
 -- A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
-pub fn memo(thunk : () -> a ! {IncrRaw(Unit) | e}) : Incr(a) given Serialize(a) =
+pub fn memo(thunk : () -> a ! {IncrRaw | e}) : Incr(a) given Serialize(a) =
   IncrRef(incr_memo(after(thunk, encode)))
 
 -- ---------- durable snapshot: warm the graph across process restarts ----------
@@ -348,7 +357,7 @@ fn snap_ints(pieces) =
         Some(n) => Cons(n, snap_ints(rest))
         None => snap_ints(rest)
 
-fn snap_parse_bytes(s) = Bytes(snap_ints(split(char_at(",", 0), s)))
+fn snap_parse_bytes(s) = bytes_of_list(snap_ints(split(char_at(",", 0), s)))
 
 -- Gather the eligible (prefix) memos that have a computed result into four
 -- parallel lists; a memo without a result yet is dropped.
@@ -360,13 +369,21 @@ fn snap_collect(s, keys) =
         Snap(ks, dks, dhs, bys) =>
           match map_lookup(key, st_tbl(s)) of
             Some(MemoN(_, deps, Some((bytes, _h)))) =>
-              Snap(Cons(key, ks), Cons(map(fst, deps), dks), Cons(map(snd, deps), dhs), Cons(bytes, bys))
+              Snap(
+                  Cons(key, ks),
+                  Cons(map(fst, deps), dks),
+                  Cons(map(snd, deps), dhs),
+                  Cons(bytes, bys),
+                )
             _ => Snap(ks, dks, dhs, bys)
 
 fn snap_encode(s) =
   match snap_collect(s, st_persist_keys(s)) of
     Snap(ks, dks, dhs, bys) =>
-      wire_cat(encode(ks), wire_cat(encode(dks), wire_cat(encode(dhs), encode(bys))))
+      wire_cat(
+          encode(ks),
+          wire_cat(encode(dks), wire_cat(encode(dhs), encode(bys))),
+        )
 
 fn snap_zip_deps(
   ks : List(String),
@@ -394,13 +411,24 @@ fn snap_build(
             Cons(dh, dhr) =>
               match bys of
                 Cons(by, byr) =>
-                  map_insert(k, Warm(snap_zip_deps(dk, dh), by), snap_build(kr, dkr, dhr, byr))
+                  map_insert(
+                      k,
+                      Warm(snap_zip_deps(dk, dh), by),
+                      snap_build(kr, dkr, dhr, byr),
+                    )
                 Nil => map_empty
             Nil => map_empty
         Nil => map_empty
 
-fn snap_len_ok(ks, dks, dhs, bys) =
-  length(ks) == length(dks) && length(dks) == length(dhs) && length(dhs) == length(bys)
+fn snap_len_ok(
+  ks : List(a),
+  dks : List(b),
+  dhs : List(c),
+  bys : List(d)
+) : Bool =
+  length(ks) == length(dks)
+    && length(dks) == length(dhs)
+    && length(dhs) == length(bys)
 
 -- Decode the four lists and rebuild the cache. A length mismatch is a corrupt
 -- snapshot and cold-starts wholesale (never a partial load). Runs under a Fail
@@ -433,7 +461,10 @@ fn snap_try(body) =
 fn snap_header_ok(header, tag, body) =
   match split(char_at(snap_sep, 0), header) of
     Cons(nm, Cons(ver, Cons(tg, Cons(dg, Nil)))) =>
-      str_eq(nm, snap_name) && str_eq(ver, snap_version) && str_eq(tg, tag) && str_eq(dg, blake3(body))
+      str_eq(nm, snap_name)
+        && str_eq(ver, snap_version)
+        && str_eq(tg, tag)
+        && str_eq(dg, blake3(body))
     _ => false
 
 fn snap_body(content, tag) =
@@ -458,11 +489,43 @@ fn snap_load(path, tag) =
     map_empty
 
 fn snap_header(tag, body) =
-  concat(snap_name, concat(snap_sep, concat(snap_version, concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))))))
+  concat(
+      snap_name,
+      concat(
+          snap_sep,
+          concat(
+              snap_version,
+              concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))),
+            ),
+        ),
+    )
 
 fn snap_save(path, tag, s) =
   let body = bytes_str(snap_encode(s))
   let _w = write_file(path, concat(snap_header(tag, body), concat("\n", body)))
+  ()
+
+-- The store substrate: the same reduced table, the same header, but the blob
+-- rides the content-addressed store at `root` keyed by `tag` (a git-style ref
+-- onto an immutable object) instead of a snapshot file. The header/body logic is
+-- shared with the file path verbatim; only exists/read/write are swapped, so a
+-- warm hit is byte-identical whichever substrate persisted it. The store already
+-- addresses the object by its content hash, so corruption reads as a cold start
+-- for free; the header digest stays as belt-and-suspenders, identical to the file
+-- form.
+fn store_load(root, tag) =
+  if prim_store_has(root, tag) then
+    snap_body(prim_store_get(root, tag), tag)
+  else
+    map_empty
+
+fn store_save(root, tag, s) =
+  let body = bytes_str(snap_encode(s))
+  let _u = prim_store_put(
+      root,
+      tag,
+      concat(snap_header(tag, body), concat("\n", body)),
+    )
   ()
 
 -- | Discharge the `Incr` effect with a durable snapshot at `path`, tagged by
@@ -472,7 +535,7 @@ fn snap_save(path, tag, s) =
 -- it; the same reduced table is what that store persists.
 --
 -- The action must be pure up to `Fail`, so its row is closed at
--- `{IncrRaw(Unit), Fail}`: a warm hit skips the memo thunk, and skipping a thunk
+-- `{IncrRaw, Fail}`: a warm hit skips the memo thunk, and skipping a thunk
 -- that printed or drew a random would change the output, so only effect-free
 -- thunks may be reused across runs. Only the creation prefix (the memos built
 -- before the first `get`/`set`) is warmed and persisted; input-dependent memos
@@ -482,9 +545,609 @@ fn snap_save(path, tag, s) =
 pub fn run_incr_durable(
   path : String,
   tag : String,
-  action : () -> a ! {IncrRaw(Unit), Fail}
+  action : () -> a ! {IncrRaw, Fail}
 ) : a =
   let warm = snap_load(path, tag)
   let (sfin, result) = run_thunk(St(map_empty, Nil, 0, warm, true, Nil), action)
   snap_save(path, tag, sfin)
+  result
+
+-- | Discharge the `Incr` effect with a durable snapshot on the content-addressed
+-- store rooted at `root`, tagged by `tag` (the caller-named program identity). The
+-- store form of `run_incr_durable`: the reduced memo table rides the real store's
+-- object layer (the blob keyed by its content hash) with a ref for `tag`, rather
+-- than a snapshot file. The file substrate stays available; a call site picks the
+-- substrate by picking the handler.
+--
+-- Every durability guarantee of the file form carries over. The action is pure up
+-- to `Fail`, so only the creation-prefix memos are warmed and persisted; a warm
+-- run's output is byte-identical to a cold run; and a missing, dangling, or
+-- corrupt store entry cold-starts, changing only cost, never the result.
+pub fn run_incr_store(
+  root : String,
+  tag : String,
+  action : () -> a ! {IncrRaw, Fail}
+) : a =
+  let warm = store_load(root, tag)
+  let (sfin, result) = run_thunk(St(map_empty, Nil, 0, warm, true, Nil), action)
+  store_save(root, tag, sfin)
+  result
+
+-- ---------- trace-replay durable: effectful memos across restarts ----------
+
+-- The plain durable path (`run_incr_durable`) skips a warmed memo's thunk, so it
+-- admits only thunks pure up to `Fail`: skipping a print would change what you
+-- see. This section lifts that. A replayable-but-effectful memo persists its
+-- OUTPUT TRACE beside its result, and a durable hit REPLAYS the trace (re-emits
+-- the recorded output in order) instead of re-running the thunk. A cold run
+-- records; a warm run replays; the console is byte-identical either way,
+-- including the effects. Node reads and effect-free work are folded into the
+-- cached result exactly as before; only the observable output rides the trace.
+--
+-- It is a self-contained engine (its own node table and state) beside the pure
+-- one: the two genuinely differ (live emit vs record/replay). The engine handler
+-- itself discharges `Output`: every print, caught mid-run, is routed by
+-- `t_capture` onto the trace of whatever node is currently being computed. A
+-- synthetic root observer sits at the bottom of the demander stack, so a print
+-- made outside any memo lands on the root's trace, and a memo's output lands on
+-- its own; the whole run's output is one trace, emitted once by `t_emit_root`
+-- after the handler returns (so no output op is performed inside the engine
+-- handler, and its inferred row and lowered effects agree, no re-raise). Output
+-- routing is off unless `run_incr_durable_replay`/`run_incr_store_replay` is
+-- present (`names::INCR_REPLAY_DRIVERS` gates it, exactly as the `Replay` drivers
+-- do), so the pure corpus keeps its direct, handler-free printing.
+--
+-- The one shape this engine does not reproduce is a memo demanded BOTH at the top
+-- of the graph AND within another memo in the same run: its output would ride two
+-- traces and replay twice. The realistic structure (top-level observers over
+-- strictly-nested helpers) never does this, and the differential oracle stays
+-- within it.
+
+-- One recorded output frame: the payload of a `print` or `println` a memo body
+-- performed, tagged by which one so the replay reproduces it exactly.
+type Frame = FPrint(String) | FPrintln(String)
+
+alias TraceLog = List(Frame)
+
+-- Self-delimiting frame codec, the Wire/Replay discipline: a tag char (`p`/`l`),
+-- the payload's decimal char-length, a `:` delimiter, then the payload. The
+-- length prefix lets a payload carry any character (newlines, `:`) and round-trip.
+fn t_enc_frame(f) =
+  match f of
+    FPrint(s) => concat("p", concat(show_int(str_len(s)), concat(":", s)))
+    FPrintln(s) => concat("l", concat(show_int(str_len(s)), concat(":", s)))
+
+fn t_trace_encode(frames) = str_join("", map(t_enc_frame, frames))
+
+fn t_un_int(o) =
+  match o of
+    Some(x) => x
+    None => 0
+
+-- Parse frames from offset `i`: one tag char, a decimal length up to `:`, then
+-- that many payload chars; advance and continue. Total over hostile input: a
+-- missing delimiter or a malformed length stops the walk rather than faulting.
+fn t_dec_go(s, i, colon) =
+  if i >= str_len(s) then
+    Nil
+  else
+    let tag = substring(s, i, 1)
+    let c = index_of_from(colon, s, i + 1)
+    if c < 0 then
+      Nil
+    else
+      let len = t_un_int(parse_int(substring(s, i + 1, c - i - 1)))
+      let payload = substring(s, c + 1, len)
+      let frame =
+        if str_eq(tag, "l") then
+          FPrintln(payload)
+        else
+          FPrint(payload)
+      Cons(frame, t_dec_go(s, c + 1 + len, colon))
+
+fn t_trace_decode(s) = t_dec_go(s, 0, char_at(":", 0))
+
+-- A traced node. `TMemo` extends the pure memo with its recorded output trace
+-- (stored newest-first, reversed) and an `emitted` flag: false for a warm-loaded
+-- or freshly recomputed memo whose output has not been replayed yet this demand,
+-- true once `t_replay` has spliced it out, so a second demand this run stays
+-- silent (matching a cold run, where a memo fires once and later reads are quiet).
+type TNode(e : Row)
+  = TInput(Bytes, String)
+  | TMemo(() -> Bytes ! {IncrRaw, Output | e}, List((String, String)), Option((Bytes, String)), TraceLog, Bool)
+
+-- A warm entry carries the pure fields plus the recorded trace to replay on a hit.
+type TWarm = TWarm(List((String, String)), Bytes, TraceLog)
+
+-- The seventh field is the root observer's output trace: output produced with no
+-- memo on the demander stack (the root action's own prints) lands here rather than
+-- on any node, so no synthetic node with an ill-typed placeholder thunk is needed.
+type TSt(e : Row) = TSt(
+  Map(String, TNode(e), Canonical),
+  List(String),
+  Int,
+  Map(String, TWarm, Canonical),
+  Bool,
+  List(String),
+  TraceLog
+)
+
+fn t_tbl(s) =
+  match s of
+    TSt(m, _, _, _, _, _, _) => m
+
+fn t_put(s, key, n) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) => TSt(map_insert(key, n, m), d, c, w, p, ps, rt)
+
+fn t_push(s, key) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) => TSt(m, Cons(key, d), c, w, p, ps, rt)
+
+fn t_pop(s) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) =>
+      match d of
+        Cons(_, r) => TSt(m, r, c, w, p, ps, rt)
+        Nil => TSt(m, Nil, c, w, p, ps, rt)
+
+fn t_fresh(s) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) => (TSt(m, d, c + 1, w, p, ps, rt), show_int(c))
+
+fn t_warm(s) =
+  match s of
+    TSt(_, _, _, w, _, _, _) => w
+
+fn t_prefix_open(s) =
+  match s of
+    TSt(_, _, _, _, p, _, _) => p
+
+fn t_close_prefix(s) =
+  match s of
+    TSt(m, d, c, w, _, ps, rt) => TSt(m, d, c, w, false, ps, rt)
+
+fn t_add_persist(s, key) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) => TSt(m, d, c, w, p, Cons(key, ps), rt)
+
+fn t_persist_keys(s) =
+  match s of
+    TSt(_, _, _, _, _, ps, _) => ps
+
+fn t_root_trace(s) =
+  match s of
+    TSt(_, _, _, _, _, _, rt) => rt
+
+fn t_root_prepend(s, frame) =
+  match s of
+    TSt(m, d, c, w, p, ps, rt) => TSt(m, d, c, w, p, ps, Cons(frame, rt))
+
+-- The node currently being computed (demander-stack head), or `None` at the top
+-- of the graph, where output lands on the root trace instead of any node.
+fn t_cur(s) =
+  match s of
+    TSt(_, d, _, _, _, _, _) =>
+      match d of
+        Cons(cur, _) => Some(cur)
+        Nil => None
+
+fn t_prepend_frame(s, cur, frame) =
+  match map_lookup(cur, t_tbl(s)) of
+    Some(TMemo(th, deps, res, tr, em)) =>
+      t_put(s, cur, TMemo(th, deps, res, Cons(frame, tr), em))
+    _ => s
+
+-- Route one output frame onto the current demander's trace, or the root trace at
+-- the top of the graph. No output op is performed here, so the engine handler
+-- stays pure of `Output`/`IO`; the frame is emitted later, once, by `t_emit_root`.
+fn t_capture(s, frame) =
+  match t_cur(s) of
+    None => t_root_prepend(s, frame)
+    Some(cur) => t_prepend_frame(s, cur, frame)
+
+fn t_record_edge(s, dep, dephash) =
+  match s of
+    TSt(m, d, _c, _w, _p, _ps, _rt) =>
+      match d of
+        Nil => s
+        Cons(cur, _) =>
+          match map_lookup(cur, m) of
+            Some(TMemo(th, deps, res, tr, em)) =>
+              t_put(s, cur, TMemo(th, Cons((dep, dephash), deps), res, tr, em))
+            _ => s
+
+-- Splice a memo's recorded output onto whatever node is now current, in call
+-- order (its trace is stored reversed), then mark it emitted. At the top of the
+-- graph the frames land on the root's trace; within a parent's recompute they
+-- land on the parent's, exactly where the live run produced them.
+fn t_replay(s : TSt(e), key : String) : TSt(e) =
+  match map_lookup(key, t_tbl(s)) of
+    Some(TMemo(_th, _deps, _res, tr, _em)) =>
+      let s1 = foldl(t_capture, s, reverse(tr))
+      t_mark_emitted(s1, key)
+    _ => s
+
+fn t_mark_emitted(s, key) =
+  match map_lookup(key, t_tbl(s)) of
+    Some(TMemo(th, deps, res, tr, _em)) =>
+      t_put(s, key, TMemo(th, deps, res, tr, true))
+    _ => s
+
+-- Demand a node. `loud` marks a top-of-graph read (from the root action or a
+-- parent thunk mid-recompute), whose output must be produced: after a recompute,
+-- or on a valid hit of a not-yet-emitted memo, it splices the recorded output.
+-- `verify` demands its deps with `loud` false, so a hash re-check never emits and
+-- a dep that recomputes captures onto its own trace without producing output.
+fn t_demand(s : TSt(e), key : String, loud : Bool) : (TSt(e), Bytes) =
+  match map_lookup(key, t_tbl(s)) of
+    None => (s, wire_empty)
+    Some(TInput(bytes, _h)) => (s, bytes)
+    Some(TMemo(th, deps, res, _tr, emitted)) =>
+      match res of
+        None =>
+          let (s1, rbytes) = t_recompute(s, key, th)
+          if loud then
+            (t_replay(s1, key), rbytes)
+          else
+            (s1, rbytes)
+        Some((rbytes, _rhash)) =>
+          let vr = t_verify(s, deps)
+          match vr of
+            (s2, false) =>
+              let (s3, rb2) = t_recompute(s2, key, th)
+              if loud then
+                (t_replay(s3, key), rb2)
+              else
+                (s3, rb2)
+            (s2, true) =>
+              if loud then
+                if emitted then
+                  (s2, rbytes)
+                else
+                  (t_replay(s2, key), rbytes)
+              else
+                (s2, rbytes)
+
+fn t_verify(s : TSt(e), deps : List((String, String))) : (TSt(e), Bool) =
+  match deps of
+    Nil => (s, true)
+    Cons((dk, dh), rest) =>
+      let (s2, dv) = t_demand(s, dk, false)
+      if str_eq(vhash(dv), dh) then
+        t_verify(s2, rest)
+      else
+        (s2, false)
+
+-- Recompute a memo: clear its deps and trace, push it as the demander so its
+-- body's reads attach as edges and its prints attach as frames, run the thunk,
+-- pop, and store the new value with the freshly captured trace (still un-emitted,
+-- so the caller's `t_replay` produces it once).
+fn t_recompute(
+  s : TSt(e),
+  key : String,
+  th : () -> Bytes ! {IncrRaw, Output | e}
+) : (TSt(e), Bytes) =
+  let s1 = t_put(s, key, TMemo(th, Nil, None, Nil, false))
+  let s2 = t_push(s1, key)
+  let (s3, rbytes) = t_run_thunk(s2, th)
+  let s4 = t_pop(s3)
+  let deps =
+    match map_lookup(key, t_tbl(s4)) of
+      Some(TMemo(_, ds, _, _, _)) => ds
+      _ => Nil
+  let tr =
+    match map_lookup(key, t_tbl(s4)) of
+      Some(TMemo(_, _, _, t, _)) => t
+      _ => Nil
+  let s5 =
+    t_put(s4, key, TMemo(th, deps, Some((rbytes, vhash(rbytes))), tr, false))
+  (s5, rbytes)
+
+-- Widen an `incr_memo` thunk's row to the traced engine's uniform
+-- `{IncrRaw, Output | e}` before it enters the node table. A named function (not
+-- a literal lambda at a store site) so the annotation drives the widening: the
+-- thunk may print, and storing it in a `TMemo` field must not unify the row shut.
+fn t_widen(th : () -> Bytes ! {IncrRaw | e}) : () -> Bytes ! {IncrRaw, Output | e} =
+  \() -> th()
+
+fn t_reg_input(s, bytes) =
+  let (s1, key) = t_fresh(s)
+  (t_put(s1, key, TInput(bytes, vhash(bytes))), key)
+
+-- Register a memo, warming it from the snapshot in the creation prefix. A warmed
+-- memo starts un-emitted (`false`): its first demand replays the recorded trace.
+fn t_reg_memo(s, th) =
+  let (s1, key) = t_fresh(s)
+  if t_prefix_open(s1) then
+    match map_lookup(key, t_warm(s1)) of
+      Some(TWarm(deps, bytes, trace)) =>
+        (
+            t_add_persist(
+                t_put(
+                    s1,
+                    key,
+                    TMemo(
+                        t_widen(th),
+                        deps,
+                        Some((bytes, vhash(bytes))),
+                        trace,
+                        false,
+                      ),
+                  ),
+                key,
+              ),
+            key,
+          )
+      None =>
+        (
+            t_add_persist(
+                t_put(s1, key, TMemo(t_widen(th), Nil, None, Nil, false)),
+                key,
+              ),
+            key,
+          )
+  else
+    (t_put(s1, key, TMemo(t_widen(th), Nil, None, Nil, false)), key)
+
+fn t_do_set(s, key, bytes) =
+  match map_lookup(key, t_tbl(s)) of
+    Some(TInput(_old, oh)) =>
+      if str_eq(vhash(bytes), oh) then
+        s
+      else
+        t_put(s, key, TInput(bytes, vhash(bytes)))
+    _ => s
+
+fn t_do_get(s : TSt(e), key : String) : (TSt(e), Bytes) =
+  let (s1, v) = t_demand(s, key, true)
+  let s2 = t_record_edge(s1, key, vhash(v))
+  (s2, v)
+
+-- The self-reinstalling engine handler, threading `TSt` as parameter-passed
+-- state. It discharges `Output` too, but its arms only fold each print onto the
+-- current node's trace (via `t_capture`); no output op is performed and no
+-- re-raise happens, so the inferred row and the lowered effects agree.
+fn t_run_thunk(
+  s : TSt(e),
+  action : () -> a ! {IncrRaw, Output | e}
+) : (TSt(e), a) =
+  let f =
+    handle action() with
+      incr_input(bytes, k) =>
+        \(st) -> let (st2, key) = t_reg_input(st, bytes) in k(key)(st2)
+      incr_memo(th, k) =>
+        \(st) -> let (st2, key) = t_reg_memo(st, th) in k(key)(st2)
+      incr_set(key, bytes, k) =>
+        \(st) -> let st2 = t_do_set(t_close_prefix(st), key, bytes) in k(())(st2)
+      incr_get(key, k) =>
+        \(st) -> let (st2, v) = t_do_get(t_close_prefix(st), key) in k(v)(st2)
+      out_println(x, k) => \(st) -> k(())(t_capture(st, FPrintln(x)))
+      out_print(x, k) => \(st) -> k(())(t_capture(st, FPrint(x)))
+      return x => \(st) -> (st, x)
+  f(s)
+
+-- Emit the whole run's recorded output once, in call order, through the ambient
+-- `Output` handler (this runs after the engine handler returns, so `out_*` here
+-- is discharged by `run_io`, not the engine). This is the single, exactly-once
+-- emit: a cold run and a warm run reach it with the same root trace.
+fn t_emit_frames(frames) =
+  match frames of
+    Nil => ()
+    Cons(FPrintln(x), rest) =>
+      prim_println(x)
+      t_emit_frames(rest)
+    Cons(FPrint(x), rest) =>
+      prim_print(x)
+      t_emit_frames(rest)
+
+fn t_emit_root(s) = t_emit_frames(reverse(t_root_trace(s)))
+
+-- The initial state: an empty graph with the creation prefix open and an empty
+-- root trace.
+-- ---------- trace-replay snapshot ----------
+
+-- The five parallel lists a traced snapshot stores: for each eligible memo, its
+-- key, its dep keys, its dep hashes, its result bytes, and its encoded output
+-- trace. The trace is the one field beyond the pure snapshot.
+type TSnap = TSnap(
+  List(String),
+  List(List(String)),
+  List(List(String)),
+  List(Bytes),
+  List(String)
+)
+
+let t_snap_name : String = "prism-incr-trace-snapshot"
+
+let t_snap_version : String = "1"
+
+-- Gather eligible memos with a computed result into the five lists. Each trace is
+-- reversed back to call order before encoding, so the snapshot stores it forward.
+fn t_snap_collect(s, keys) =
+  match keys of
+    Nil => TSnap(Nil, Nil, Nil, Nil, Nil)
+    Cons(key, rest) =>
+      match t_snap_collect(s, rest) of
+        TSnap(ks, dks, dhs, bys, trs) =>
+          match map_lookup(key, t_tbl(s)) of
+            Some(TMemo(_, deps, Some((bytes, _h)), trace, _em)) =>
+              TSnap(
+                  Cons(key, ks),
+                  Cons(map(fst, deps), dks),
+                  Cons(map(snd, deps), dhs),
+                  Cons(bytes, bys),
+                  Cons(t_trace_encode(reverse(trace)), trs),
+                )
+            _ => TSnap(ks, dks, dhs, bys, trs)
+
+fn t_snap_encode(s) =
+  match t_snap_collect(s, t_persist_keys(s)) of
+    TSnap(ks, dks, dhs, bys, trs) =>
+      wire_cat(
+          encode(ks),
+          wire_cat(
+              encode(dks),
+              wire_cat(encode(dhs), wire_cat(encode(bys), encode(trs))),
+            ),
+        )
+
+-- Rebuild the warm cache. A stored trace is decoded to call order then reversed to
+-- the engine's newest-first storage, so a warm memo's trace matches a live one.
+fn t_snap_build(
+  ks : List(String),
+  dks : List(List(String)),
+  dhs : List(List(String)),
+  bys : List(Bytes),
+  trs : List(String)
+) : Map(String, TWarm) =
+  match ks of
+    Nil => map_empty
+    Cons(k, kr) =>
+      match dks of
+        Cons(dk, dkr) =>
+          match dhs of
+            Cons(dh, dhr) =>
+              match bys of
+                Cons(by, byr) =>
+                  match trs of
+                    Cons(tr, trr) =>
+                      map_insert(
+                          k,
+                          TWarm(
+                              snap_zip_deps(dk, dh),
+                              by,
+                              reverse(t_trace_decode(tr)),
+                            ),
+                          t_snap_build(kr, dkr, dhr, byr, trr),
+                        )
+                    Nil => map_empty
+                Nil => map_empty
+            Nil => map_empty
+        Nil => map_empty
+
+fn t_snap_len_ok(
+  ks : List(a),
+  dks : List(b),
+  dhs : List(c),
+  bys : List(d),
+  trs : List(f)
+) : Bool =
+  length(ks) == length(dks)
+    && length(dks) == length(dhs)
+    && length(dhs) == length(bys)
+    && length(bys) == length(trs)
+
+fn t_snap_decode(body : String) : Map(String, TWarm) =
+  match decode(snap_parse_bytes(body)) of
+    (ks, r1) =>
+      match decode(r1) of
+        (dks, r2) =>
+          match decode(r2) of
+            (dhs, r3) =>
+              match decode(r3) of
+                (bys, r4) =>
+                  match decode(r4) of
+                    (trs, _r5) =>
+                      if t_snap_len_ok(ks, dks, dhs, bys, trs) then
+                        t_snap_build(ks, dks, dhs, bys, trs)
+                      else
+                        map_empty
+
+fn t_snap_try(body) =
+  handle t_snap_decode(body) with
+    final ctl fail() => map_empty
+    return m => m
+
+fn t_snap_header(tag, body) =
+  concat(
+      t_snap_name,
+      concat(
+          snap_sep,
+          concat(
+              t_snap_version,
+              concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))),
+            ),
+        ),
+    )
+
+fn t_snap_header_ok(header, tag, body) =
+  match split(char_at(snap_sep, 0), header) of
+    Cons(nm, Cons(ver, Cons(tg, Cons(dg, Nil)))) =>
+      str_eq(nm, t_snap_name)
+        && str_eq(ver, t_snap_version)
+        && str_eq(tg, tag)
+        && str_eq(dg, blake3(body))
+    _ => false
+
+fn t_snap_body(content, tag) =
+  let nl = index_of_from(char_at("\n", 0), content, 0)
+  if nl < 0 then
+    map_empty
+  else
+    let body = substring(content, nl + 1, str_len(content) - nl - 1)
+    if t_snap_header_ok(substring(content, 0, nl), tag, body) then
+      t_snap_try(body)
+    else
+      map_empty
+
+fn t_snap_load(path, tag) =
+  if prim_file_exists(path) then
+    t_snap_body(prim_read_file(path), tag)
+  else
+    map_empty
+
+fn t_snap_save(path, tag, s) =
+  let body = bytes_str(t_snap_encode(s))
+  let _w =
+    write_file(path, concat(t_snap_header(tag, body), concat("\n", body)))
+  ()
+
+fn t_store_load(root, tag) =
+  if prim_store_has(root, tag) then
+    t_snap_body(prim_store_get(root, tag), tag)
+  else
+    map_empty
+
+fn t_store_save(root, tag, s) =
+  let body = bytes_str(t_snap_encode(s))
+  let _u = prim_store_put(
+      root,
+      tag,
+      concat(t_snap_header(tag, body), concat("\n", body)),
+    )
+  ()
+
+-- | Discharge the `Incr` effect with a durable, trace-replay snapshot at `path`,
+-- tagged by `tag`. Unlike `run_incr_durable`, the memo thunks may perform any
+-- replayable effect: a cold run records each memo's output beside its result, and
+-- a durable warm hit REPLAYS that output instead of re-running the thunk, so a
+-- warm run's console is byte-identical to a cold run's, effects included. A
+-- missing, corrupt, foreign, or wrong-version snapshot is a silent cold start.
+pub fn run_incr_durable_replay(
+  path : String,
+  tag : String,
+  action : () -> a ! {IncrRaw, Output, Fail | e}
+) : a =
+  let warm = t_snap_load(path, tag)
+  let (sfin, result) =
+    t_run_thunk(TSt(map_empty, Nil, 0, warm, true, Nil, Nil), action)
+  let _e = t_emit_root(sfin)
+  let _s = t_snap_save(path, tag, sfin)
+  result
+
+-- | The content-addressed-store form of `run_incr_durable_replay`: the traced
+-- memo table (results and output traces) rides the real store's object layer,
+-- keyed by `tag`, rather than a snapshot file. Every guarantee of the file form
+-- carries over; a missing, dangling, or corrupt store entry cold-starts.
+pub fn run_incr_store_replay(
+  root : String,
+  tag : String,
+  action : () -> a ! {IncrRaw, Output, Fail | e}
+) : a =
+  let warm = t_store_load(root, tag)
+  let (sfin, result) =
+    t_run_thunk(TSt(map_empty, Nil, 0, warm, true, Nil, Nil), action)
+  let _e = t_emit_root(sfin)
+  let _s = t_store_save(root, tag, sfin)
   result

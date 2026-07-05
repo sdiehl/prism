@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism incremental computation</title>
+    <meta name="description" content="An incremental cell graph: change one source and only the affected cone recomputes. A derivation whose value is unchanged cuts the cascade off by content hash, so its dependents stay cached. Recomputed live in the browser." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="showcase-body incr-body">
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag">incremental computation</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../gallery/">Gallery</a>
+        <a class="ctl-link" href="../merkle/">Merkle</a>
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Docs</a>
+      </div>
+    </header>
+    <main class="showcase-main">
+      <section class="resident">
+        <div class="faces-toggle" role="group" aria-label="Show the demo or its source">
+          <button class="face-tab is-active" type="button" data-face="demo" aria-pressed="true">
+            <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z" fill="currentColor" /></svg>
+            Demo
+          </button>
+          <button class="face-tab" type="button" data-face="source" aria-pressed="false">
+            <svg class="glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4 2 8l4 4M10 4l4 4-4 4" /></svg>
+            Source
+          </button>
+        </div>
+        <div class="flip" data-flip>
+          <div class="flip-inner">
+            <div class="flip-face flip-face--demo">
+              <div class="incr-main">
+                <section class="incr-view">
+                  <div class="graph-title">the cell graph: sources at the base, derivations above, edges point to what a cell reads</div>
+                  <div id="graph" class="graph" aria-label="Incremental dependency graph"></div>
+                  <div class="incr-legend" aria-hidden="true">
+                    <span class="lg lg-recomp"><i></i>recomputed</span>
+                    <span class="lg lg-cutoff"><i></i>cut off</span>
+                    <span class="lg lg-cached"><i></i>cached</span>
+                  </div>
+                </section>
+                <section class="incr-side">
+                  <div class="incr-panel">
+                    <div class="panel-head">Last change</div>
+                    <div id="counter" class="panel-counter">0 of 5</div>
+                    <div class="panel-sub">derivations recomputed</div>
+                    <p id="story" class="panel-story">Nudge a source cell below to change it. Only the cells that depend on it recompute.</p>
+                    <div class="incr-actions">
+                      <button id="cut" class="play alt" type="button">Cutoff move</button>
+                      <button id="cascade" class="play alt" type="button">Cascade move</button>
+                      <button id="reset" class="play ghost" type="button">Reset</button>
+                    </div>
+                  </div>
+                  <p class="caption">
+                    <a class="doc-link" href="https://sdiehl.github.io/prism/spec.html#incremental-computation" target="_blank" rel="noopener">Incr</a>
+                    memoizes each derivation by the <b>hash</b> of its value. Change one source and only the
+                    affected cone recomputes. A derivation whose recomputed value is
+                    <a class="doc-link" href="https://sdiehl.github.io/prism/compiler.html#content-addressed-core" target="_blank" rel="noopener">unchanged by hash</a>
+                    <b>cuts the cascade off</b>, so its dependents stay cached. Exact content comparison, not a
+                    written equality.
+                  </p>
+                </section>
+              </div>
+            </div>
+            <div class="flip-face flip-face--source" aria-label="Prism source, read only">
+              <div class="code-scroll">
+                <pre class="code"><code id="code"></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/incr.ts"></script>
+  </body>
+</html>

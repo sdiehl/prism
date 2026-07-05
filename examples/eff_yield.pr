@@ -1,6 +1,5 @@
-effect Gen {
+effect Gen
   ctl yield(Int) : Unit
-}
 
 -- Generators from a yield effect.
 --

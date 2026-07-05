@@ -220,3 +220,42 @@ fn delete_object(root: &Path, hash: &str) {
     let path = root.join("objects").join(shard).join(rest);
     fs::remove_file(&path).expect("object present before deletion");
 }
+
+// --- the Std ring: pin the standard-library root and check a build against it --
+
+// The standard library ships as a pinned content-addressed root through the
+// store. A lockfile records that root; a later build recomputes the embedded
+// stdlib's root and compares. The three outcomes (unpinned, agree, disagree) are
+// the whole distribution story the store supports today: a disagreement is named
+// exactly, so two programs pinning different Std roots are told apart the same way
+// two dependency hashes are, rather than silently coexisting.
+#[test]
+fn std_root_pins_and_verifies() {
+    use prism::pkg::lock::Lock;
+    use prism::pkg::{std_pin_status, stdlib_root, StdPin};
+
+    let root = stdlib_root().expect("embedded stdlib elaborates");
+    // A blake3 hex digest: non-empty and stable across two computations.
+    assert!(!root.is_empty());
+    assert_eq!(root, stdlib_root().unwrap());
+
+    // Unpinned: a lock with no Std line runs against the embedded stdlib.
+    let bare = Lock::default();
+    assert_eq!(std_pin_status(&bare).unwrap(), StdPin::Unpinned);
+
+    // Pinned against this compiler's stdlib: the build is on the same Std.
+    let mut pinned = Lock::default();
+    pinned.pin_std(root.clone());
+    assert_eq!(std_pin_status(&pinned).unwrap(), StdPin::Match);
+
+    // Pinned against a different Std: the disagreement names both roots.
+    let mut stale = Lock::default();
+    stale.pin_std("0000000000000000".to_string());
+    match std_pin_status(&stale).unwrap() {
+        StdPin::Mismatch { pinned, embedded } => {
+            assert_eq!(pinned, "0000000000000000");
+            assert_eq!(embedded, root);
+        }
+        other => panic!("expected a mismatch, got {other:?}"),
+    }
+}

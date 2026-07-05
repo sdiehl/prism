@@ -17,27 +17,56 @@
 //!
 //! Soundness: a mutable cell shares state across resumptions, but pure State gives
 //! each resumption an independent copy. They agree iff the var's continuation is
-//! never resumed more than once. So erasure is skipped entirely when the program
-//! contains any handler that may be multishot: a clause whose `resume` is applied
+//! never resumed more than once. So a function's vars are erased only when no
+//! genuinely multishot op is reachable from it (performed or handled, transitively
+//! through calls and thunks); a multishot clause is one whose `resume` is applied
 //! more than once, or escapes into a nested closure, constructor, tuple, or alias
-//! (whose application count no syntactic gate can see). The var's own
-//! parameter-passing clauses apply `resume` exactly once under the answer lambda,
-//! so they are not flagged.
+//! (whose application count no syntactic gate can see), unless the op's declared
+//! grade already caps it at single-shot. The var's own parameter-passing clauses
+//! apply `resume` exactly once under the answer lambda, so they are not flagged.
+//! The decision is per function, not whole program, so a multishot handler in one
+//! component does not drag an unrelated var loop off the fast tier.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
+use crate::fixpoint::least_fixpoint;
 use crate::fresh::Fresh;
 use crate::names::{self, is_var_runner};
 use crate::sym::Sym;
+use crate::syntax::ast::Grade;
 
-/// Rewrite every closed local `var`/State handler in `core` to mutable-cell ops.
-/// A no-op (returns a clone) when the program has a multishot handler, where the
-/// shared cell would diverge from pure State.
-pub(super) fn erase_local_vars(core: &Core) -> Core {
-    if core.fns.iter().any(|f| has_multishot(&f.body)) {
-        return core.clone();
-    }
+use super::{collect_ops, OpGrades};
+
+/// Rewrite closed local `var`/State handlers in `core` to mutable-cell ops,
+/// per function.
+///
+/// A mutable cell shares state across resumptions, while pure State gives each
+/// resumption an independent copy; the two agree only when the var's
+/// continuation is never resumed more than once. So a function is erased only
+/// when no genuinely multishot op is reachable from it (performed or handled,
+/// transitively through calls and thunks): otherwise an outer or local multishot
+/// handler could re-run its var ops on the shared cell.
+///
+/// This is per function, not whole program: a multishot handler in one component
+/// no longer drags an unrelated var loop off the fast tier. `grades` sharpens
+/// which ops are multishot: an op graded at most `One` can never resume more than
+/// once, so it never counts, and the syntactic scan stays as a debug cross-check.
+pub(super) fn erase_local_vars(core: &Core, grades: &OpGrades) -> Core {
+    let multishot = multishot_ops(core, grades);
+    // No genuinely multishot handler anywhere: every var is safe to erase. This
+    // is the common path and stays byte-identical to the prior whole-program
+    // behavior (no reachability computed, no function skipped).
+    let unsafe_fns: BTreeSet<Sym> = if multishot.is_empty() {
+        BTreeSet::new()
+    } else {
+        let reach = reach_map(core);
+        core.fns
+            .iter()
+            .filter(|f| reach[&f.name].intersection(&multishot).next().is_some())
+            .map(|f| f.name)
+            .collect()
+    };
     let mut er = Eraser {
         fresh: Fresh::new(),
     };
@@ -45,14 +74,107 @@ pub(super) fn erase_local_vars(core: &Core) -> Core {
         fns: core
             .fns
             .iter()
-            .map(|f| CoreFn {
-                name: f.name,
-                params: f.params.clone(),
-                dict_arity: f.dict_arity,
-                body: er.erase(&f.body),
+            .map(|f| {
+                if unsafe_fns.contains(&f.name) {
+                    f.clone()
+                } else {
+                    CoreFn {
+                        name: f.name,
+                        params: f.params.clone(),
+                        dict_arity: f.dict_arity,
+                        body: er.erase(&f.body),
+                    }
+                }
             })
             .collect(),
     }
+}
+
+// Ops with a genuinely multishot handler somewhere in the program. A clause is
+// multishot when the syntactic scan says so and the op's declared grade permits
+// it: an op graded at most `One` can never resume more than once, so it is
+// excluded, and the two must agree (a graded op the scan calls multishot is a
+// broken invariant the desugar check should have rejected).
+fn multishot_ops(core: &Core, grades: &OpGrades) -> BTreeSet<Sym> {
+    let mut out = BTreeSet::new();
+    for f in &core.fns {
+        collect_multishot(&f.body, grades, &mut out);
+    }
+    out
+}
+
+fn collect_multishot(c: &Comp, grades: &OpGrades, out: &mut BTreeSet<Sym>) {
+    if let Comp::Handle { ops, .. } = c {
+        for op in ops {
+            let syntactic = multishot_clause(&op.body, op.resume);
+            match grades.get(&op.name) {
+                Some(g) if *g <= Grade::One => debug_assert!(
+                    !syntactic,
+                    "op `{}` declared grade {:?} but its clause scans as multishot; \
+                     the desugar grade check should have rejected it",
+                    op.name, g
+                ),
+                _ if syntactic => {
+                    out.insert(op.name);
+                }
+                _ => {}
+            }
+        }
+    }
+    each_subterm(c, &mut |sc| collect_multishot(sc, grades, out));
+}
+
+// Every op each function can perform or handle, transitively over calls and
+// thunks: the least fixpoint of `own_ops(f) union reach(callee)` over the call
+// graph. Used to decide, per function, whether a multishot op is in scope of its
+// vars. `collect_ops` already descends thunks; `deep_calls` matches it so a call
+// buried in a thunk is not missed.
+fn reach_map(core: &Core) -> BTreeMap<Sym, BTreeSet<Sym>> {
+    let own: BTreeMap<Sym, BTreeSet<Sym>> = core
+        .fns
+        .iter()
+        .map(|f| {
+            let mut ops = BTreeSet::new();
+            collect_ops(&f.body, &mut ops);
+            (f.name, ops)
+        })
+        .collect();
+    let calls: BTreeMap<Sym, BTreeSet<Sym>> = core
+        .fns
+        .iter()
+        .map(|f| {
+            let mut cs = BTreeSet::new();
+            deep_calls(&f.body, &mut cs);
+            (f.name, cs)
+        })
+        .collect();
+    let seed: BTreeMap<Sym, BTreeSet<Sym>> =
+        core.fns.iter().map(|f| (f.name, BTreeSet::new())).collect();
+    least_fixpoint(seed, |name, cur| {
+        let mut s = own[name].clone();
+        for callee in &calls[name] {
+            if let Some(r) = cur.get(callee) {
+                s.extend(r.iter().copied());
+            }
+        }
+        s
+    })
+}
+
+// Every function `Call`ed anywhere in `c`, including inside thunks (which
+// `super::all_calls` does not enter), mirroring `collect_ops`'s descent.
+fn deep_calls(c: &Comp, out: &mut BTreeSet<Sym>) {
+    if let Comp::Call(g, _) = c {
+        out.insert(*g);
+    }
+    super::each_value(c, &mut |v| {
+        let mut ts = Vec::new();
+        super::thunks_in_value(v, &mut ts);
+        for t in ts {
+            deep_calls(t, out);
+        }
+    });
+    super::each_subcomp(c, &mut |sc| deep_calls(sc, out));
 }
 
 struct Eraser {
@@ -183,30 +305,15 @@ fn erase_ops(c: &Comp, get: Sym, set: Sym, cell: Sym) -> Comp {
     }
 }
 
-// Whether a handler clause anywhere may resume more than once (a multishot
-// handler). The gate is structural, not a textual occurrence count: a `resume`
-// captured once into a closure that is later applied twice, stored in a
-// constructor and re-applied, or rebound to an alias is invoked more than once
-// while occurring exactly once, so counting occurrences alone fails open (the
-// erasure would install a shared cell where pure State demands per-resumption
-// copies). A clause is single-shot only when every occurrence of its `resume`
-// is the head of a direct `force` outside any nested thunk, and there is at
-// most one such head; any other occurrence is treated as an escape and flags
-// the handler multishot, falling back to the always-sound general lowering.
-fn has_multishot(c: &Comp) -> bool {
-    let mut found = false;
-    if let Comp::Handle { ops, .. } = c {
-        for op in ops {
-            if multishot_clause(&op.body, op.resume) {
-                found = true;
-            }
-        }
-    }
-    each_subterm(c, &mut |sc| found |= has_multishot(sc));
-    found
-}
-
-// The structural single-shot check for one clause. The parameter-passing answer
+// The structural single-shot check for one clause. The gate is not a textual
+// occurrence count: a `resume` captured once into a closure that is later applied
+// twice, stored in a constructor and re-applied, or rebound to an alias is
+// invoked more than once while occurring exactly once, so counting occurrences
+// alone fails open (the erasure would install a shared cell where pure State
+// demands per-resumption copies). A clause is single-shot only when every
+// occurrence of its `resume` is the head of a direct `force` outside any nested
+// thunk, and there is at most one such head; any other occurrence is treated as
+// an escape and flags the clause multishot. The parameter-passing answer
 // lambda a clause returns (`get(u,k) => \s -> k(s)(s)` reaches Core as
 // `Return(Thunk(Lam(..)))`) is peeled before scanning: the handler protocol
 // applies each answer function it threads exactly once, so a `resume` under

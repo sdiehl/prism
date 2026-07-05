@@ -6,7 +6,16 @@ use crate::flags::{DynFlags, EffectTier};
 use crate::fresh::Fresh;
 use crate::names::{self, ENTRY_POINT};
 use crate::sym::Sym;
+use crate::syntax::ast::Grade;
 use crate::types::CtorInfo;
+
+/// Each effect op's declared resumption grade, keyed by its symbol.
+///
+/// Built by the checker ([`crate::tc::Checked::op_grades`]) and consumed by
+/// `erase_var`: an op graded at most `One` can never resume more than once, so a
+/// handler for it never disables var-erasure. An op absent here defaults to `Many`
+/// at the consumer (a synthetic private effect keeps the prior behavior).
+pub type OpGrades = BTreeMap<Sym, Grade>;
 
 mod analysis;
 mod checks;
@@ -271,9 +280,10 @@ pub fn lower(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
+    grades: &OpGrades,
 ) -> Result<Lowered, TypeError> {
     let mut warning = None;
-    let (c, ct, _) = lower_impl(core, ctors, flags, &mut warning)?;
+    let (c, ct, _) = lower_impl(core, ctors, flags, grades, &mut warning)?;
     Ok((c, ct, warning))
 }
 
@@ -323,14 +333,16 @@ pub fn strategy(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
+    grades: &OpGrades,
 ) -> Result<&'static str, TypeError> {
-    Ok(lower_impl(core, ctors, flags, &mut None)?.2)
+    Ok(lower_impl(core, ctors, flags, grades, &mut None)?.2)
 }
 
 fn lower_impl(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
+    grades: &OpGrades,
     warning: &mut Option<String>,
 ) -> Result<(Core, BTreeMap<String, CtorInfo>, &'static str), TypeError> {
     // Dead prelude code must not flip the program into monadic mode, so only
@@ -368,7 +380,7 @@ fn lower_impl(
     let (erased, used_step) = if tier == EffectTier::FreeMonad {
         (core.clone(), false)
     } else {
-        let vars_gone = erase_var::erase_local_vars(core);
+        let vars_gone = erase_var::erase_local_vars(core, grades);
         // Erase loop-control effects (break/continue/return) to direct control
         // flow next, so a recognized loop's control ops are gone before the
         // strategy cascade classifies the residual: a pure imperative loop then
@@ -616,6 +628,7 @@ pub(super) fn map_kids<G: FnMut(&Comp) -> Comp>(c: &Comp, g: &mut G) -> Comp {
         Comp::Error(v) => Comp::Error(map_val(v, g)),
         Comp::Io(op, args) => Comp::Io(*op, vals(args, g)),
         Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, map_val(v, g)),
+        Comp::Neg(l, v) => Comp::Neg(*l, map_val(v, g)),
         Comp::Dup(v) => Comp::Dup(map_val(v, g)),
         Comp::Drop(v) => Comp::Drop(map_val(v, g)),
         Comp::Prim(op, a, b) => Comp::Prim(*op, map_val(a, g), map_val(b, g)),

@@ -99,10 +99,10 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: type mismatch: expected Int, got Bool
+Type Error: in `main`: no instance for Num(Bool)
    ╭─[ <source>:4:17 ]
    │
  4 │   println("v = {flag + 1}")
-   │                 ──┬─  
-   │                   ╰─── in `main`: type mismatch: expected Int, got Bool
+   │                 ────┬───  
+   │                     ╰───── in `main`: no instance for Num(Bool)
 ───╯

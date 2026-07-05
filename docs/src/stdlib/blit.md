@@ -6,16 +6,15 @@ Range copy over the sequence types a real primitive can back.
 
 One `blit` factored across the sequence-like types, instead of a separate copy routine per type. `blit(src, src_off, len, dst, dst_off)` returns a destination whose `len` elements starting at `dst_off` are the `len` elements of `src` starting at `src_off`, with the rest of `dst` unchanged. As with `memcpy`, the ranges `[src_off, src_off + len)` and `[dst_off, dst_off + len)` are expected to lie within the two sequences.
 
-Instanced only where a real primitive backs the copy: `String` over the `substring` slice primitive, and `Array` over the in-place `array_get` and `array_set` primitives, so a uniquely owned array destination is overwritten without a fresh allocation. `Bytes` (a `List(Int)`) and lists in general are left uninstanced on purpose: a cons list has no random access or bulk copy, so a blit would be a structural walk that rebuilds the prefix rather than a copy. Blitting bytes at primitive speed needs an array-backed buffer, which the runtime does not yet expose.
+Instanced only where a real primitive backs the copy: `String` over the `substring` slice primitive, `Array` over the in-place `array_get` and `array_set` primitives, and `Bytes` over the byte buffer's in-place `buf_set`, so a uniquely owned array or buffer destination is overwritten without a fresh allocation. Plain lists stay uninstanced on purpose: a cons list has no random access or bulk copy, so a blit would be a structural walk that rebuilds the prefix rather than a copy.
 
 ## Type Classes
 
 ### `Blit`
 
-```prism,def
-class Blit(s) {
+```prism,def,h-0482b585d072b3b438526883c6e3885b50cb4c2a886a2c76c5f0dd74c41142cf
+class Blit(s)
   blit : (s, Int, Int, s, Int) -> s
-}
 ```
 
 Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)` and return the updated destination.
@@ -24,7 +23,7 @@ Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)` a
 
 ### `blitString`
 
-```prism,def
+```prism,def,h-881a9e04656d0f0aa0b11a1251b30daa5f60d88bb2173c280222d38677b08340
 instance blitString : Blit(String)
 ```
 
@@ -32,8 +31,16 @@ Splice the source range over the destination range with the string slice primiti
 
 ### `blitArray`
 
-```prism,def
+```prism,def,h-8d2118182e85e5c24f34668e58983b2f9a363dfbd9ec088d80a23448028344d3
 instance blitArray : Blit(Array(a))
 ```
 
 Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in `0 .. len` via `array_set`, which writes in place when `dst` is uniquely owned and copies otherwise, so the observable result never depends on ownership.
+
+### `blitBytes`
+
+```prism,def,h-3542f6097ea372cec369a62e3c847d0368361c6f0ea81270a760aff498ef09cd
+instance blitBytes : Blit(Bytes)
+```
+
+Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in `0 .. len` via the buffer's `buf_set`, which writes in place when the destination buffer is uniquely owned and copies otherwise, so the observable result never depends on ownership.

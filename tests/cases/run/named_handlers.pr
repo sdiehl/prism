@@ -2,9 +2,8 @@
 -- dispatches to f's handler even when g's handler is innermost. Each
 -- instance is a fresh private effect, so resumed (and multishot)
 -- continuations thread through unrelated instances untouched.
-effect Ask {
+effect Ask
   ctl ask() : Int
-}
 
 fn main() =
   with f <- handler

@@ -18,7 +18,10 @@
 #                                    validate their input span before strto*.
 #   cert-err33-c                   - diagnostic fprintf/puts returns are
 #                                    intentionally unchecked.
-#   misc-include-cleaner           - single translation unit, no public header.
+#   misc-include-cleaner           - the modules share their system includes and
+#                                    the cell layout through prism_internal.h;
+#                                    flagging each module for not directly
+#                                    including <stdio.h> et al is noise.
 #   clang-analyzer-security.insecureAPI.* - wants C11 Annex K (_s) functions that
 #                                    are not portably available.
 #   clang-analyzer-core.* / clang-analyzer-security.ArrayBound /

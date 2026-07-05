@@ -1,0 +1,11 @@
+-- A `final ctl` operation (grade Zero) may not be resumed. Handling `abort`
+-- with a resuming `fun` clause is rejected at the clause, naming the op grade.
+effect Abort
+  final ctl abort(Unit) : Int
+
+fn use_it() : !{Abort} Int = abort(())
+
+fn main() =
+  handle use_it() with
+    fun abort(u) => 5
+    return r => r

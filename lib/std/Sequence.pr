@@ -1,0 +1,324 @@
+-- | The one lazy iteration protocol: pull-based sequences with natural names.
+--
+-- A `Sequence` is a pull producer: a thunk that, when forced with `(())`, yields
+-- one `Step` -- either `SDone` (exhausted) or `SMore(x, rest)`, the next element
+-- `x` paired with the thunk producing the remainder. Nothing is materialized up
+-- front; each `(())` advances the stream by one element. A transformer (`map`,
+-- `filter`, `take`, ...) wraps a producer in a new producer that pulls, reshapes,
+-- and re-yields; a consumer (`fold`, `sum`, `to_list`, ...) drives the producer to
+-- exhaustion and folds the elements into a value.
+--
+-- ## Type
+--
+-- ```text
+-- type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
+-- Seq(a)       = (Unit) -> Step(a)          -- read `Seq(a)` in the prose as this
+-- ```
+--
+-- The step continuation is ordinary data, not an effect, so every combinator is a
+-- total pure function over `Step`. That is the whole reason this substrate exists:
+-- an earlier push design routed elements through a shared `Emit` effect, and a
+-- single `Emit(a)` label per scope made element-type changes, heterogeneous `zip`,
+-- and mixing two element types in one function unrepresentable. On pull `Step` the
+-- element type is a plain type parameter, so `map : Seq(a) -> Seq(b)` type-changes
+-- freely, `zip : (Seq(a), Seq(b)) -> Seq((a, b))` is genuinely heterogeneous, and a
+-- consumer's per-element function may perform any ambient effect (it runs directly,
+-- with no handler closing the row over it). Every combinator below exercises one of
+-- those, and the correctness corpus in `tests/cases/run` pins them on both backends.
+--
+-- ## Effect-polymorphic consumers
+--
+-- `for_each`'s function argument runs in the ambient row: `for_each(s, \(x) ->
+-- println(x))` threads `IO` straight out with no annotation, because the driver is
+-- a plain recursion and installs no handler. This is the effectful-mapper case the
+-- push substrate could not express.
+--
+-- ## Naming and the import idiom
+--
+-- The combinators keep their natural names (`map`, `filter`, `take`, `zip`, ...),
+-- which collide with the prelude's eager `List` surface. That is why this module is
+-- opt-in and NOT opened by the prelude: the flat namespace has no shadowing, so the
+-- documented idiom is a qualified import at the use site:
+--
+-- ```text
+-- import Sequence as Seq          -- qualified: Seq.map, Seq.filter, Seq.take
+-- Seq.to_list(Seq.filter(Seq.map(Seq.range(1, 100), \(x) -> x * x), even))
+-- ```
+--
+-- A selective `import Sequence (unfold, iterate)` also works for names that do not
+-- clash with the prelude.
+--
+-- ## Fusion status (baseline: unfused)
+--
+-- A pull pipeline is correct and constant-space per stage, but on the current
+-- optimizer it is NOT yet fused: each transformer stage allocates one `SMore` cons
+-- and one step thunk per element, so a k-stage pipeline over n elements allocates
+-- ~2*k*n heap cells (`PRISM_ALLOC_STATS` counts them; the algebraic-effect `EOp`
+-- counter reads zero here because a pull sequence performs no effects). The
+-- `tests/perf_gate.rs` pull-allocation cases pin those current numbers as the
+-- baseline; a dedicated stream-fusion pass (Coutts-style stream/unstream with
+-- case-of-case) is the separate work that ratchets them toward O(1). For contrast,
+-- the eager `Data.List` surface already fuses to ~1 cell per element with FBIP
+-- reuse recycling the uniquely-owned spine, so it is the faster tier today when
+-- strict, non-incremental traversal is acceptable; pull `Sequence` earns its keep
+-- on laziness (early exit through `take`/`find`, infinite producers) rather than on
+-- allocation, until fusion lands.
+
+-- `reverse`/`tail` are the only list helpers not shadowed by a combinator name
+-- here; list append is written locally as `app_list` because `append` is the
+-- sequence combinator below. Bytes iteration rides the `Data.Bytes` vocabulary.
+import Data.List (reverse, tail)
+
+import Data.Bytes (Bytes, bytes_empty, bytes_push, bytes_length, bytes_index)
+
+-- The pull step: `SDone` ends the stream, `SMore(x, rest)` yields `x` and the thunk
+-- producing everything after it.
+pub type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
+
+-- ============================================================================
+-- Producers
+-- ============================================================================
+
+-- | The empty sequence: yields nothing.
+pub fn empty() : (Unit) -> Step(a) = \(u) -> SDone
+
+-- | The one-element sequence yielding `x`.
+pub fn singleton(x : a) : (Unit) -> Step(a) = \(u) -> SMore(x, \(v) -> SDone)
+
+-- | The ascending integers in `[lo, hi)`. Self-recursive: the continuation is the
+-- next `range`, so no element is built until pulled.
+pub fn range(lo : Int, hi : Int) : (Unit) -> Step(Int) =
+  \(u) -> if lo < hi then SMore(lo, range(lo + 1, hi)) else SDone
+
+-- | The container boundary in: the elements of list `xs`, in order.
+pub fn from_list(xs : List(a)) : (Unit) -> Step(a) =
+  \(u) -> match xs of { Nil => SDone, Cons(x, rest) => SMore(x, from_list(rest)) }
+
+-- | The infinite sequence `x, f(x), f(f(x)), ...`. Bound it with `take`.
+pub fn iterate(x : a, f : (a) -> a) : (Unit) -> Step(a) =
+  \(u) -> SMore(x, iterate(f(x), f))
+
+-- | The infinite sequence of `x` repeated. Bound it with `take`.
+pub fn repeat(x : a) : (Unit) -> Step(a) = \(u) -> SMore(x, repeat(x))
+
+-- | The generator producer: yield `x` for each `Some((x, seed'))` that `step`
+-- returns from the running seed, stopping at `None`. Every finite producer is a
+-- special case; on pull `Step` a generator is just a fold over the seed, needing no
+-- coroutine or handler.
+pub fn unfold(seed : s, step : (s) -> Option((a, s))) : (Unit) -> Step(a) =
+  \(u) -> match step(seed) of { None => SDone, Some(pair) => match pair of { (x, seed2) => SMore(x, unfold(seed2, step)) } }
+
+-- ============================================================================
+-- Transformers (each a new producer wrapping its input)
+-- ============================================================================
+
+-- | Apply `f` to every element. Type-changing: `Seq(a) -> Seq(b)`.
+pub fn map(s : (Unit) -> Step(a), f : (a) -> b) : (Unit) -> Step(b) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => SMore(f(x), map(next, f)) }
+
+-- | Keep only the elements satisfying `p`.
+pub fn filter(s : (Unit) -> Step(a), p : (a) -> Bool) : (Unit) -> Step(a) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => if p(x) then SMore(x, filter(next, p)) else filter(next, p)(()) }
+
+-- | Map and filter in one pass: yield `y` for each `f(x) == Some(y)`, dropping the
+-- `None`s.
+pub fn filter_map(s : (Unit) -> Step(a), f : (a) -> Option(b)) : (Unit) -> Step(b) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => match f(x) of { None => filter_map(next, f)(()), Some(y) => SMore(y, filter_map(next, f)) } }
+
+-- | Concatenate two sequences: all of `s`, then all of `t`.
+pub fn append(s : (Unit) -> Step(a), t : (Unit) -> Step(a)) : (Unit) -> Step(a) =
+  \(u) -> match s(()) of { SDone => t(()), SMore(x, next) => SMore(x, append(next, t)) }
+
+-- | For each element `x`, splice in the sequence `f(x)`.
+pub fn flat_map(
+  s : (Unit) -> Step(a),
+  f : (a) -> (Unit) -> Step(b)
+) : (Unit) -> Step(b) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => append(f(x), flat_map(next, f))(()) }
+
+-- | The first `n` elements, stopping the producer once the budget is spent.
+pub fn take(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(a) =
+  \(u) -> if n <= 0 then SDone else match s(()) of { SDone => SDone, SMore(x, next) => SMore(x, take(next, n - 1)) }
+
+-- | Skip the first `n` elements, yielding the rest.
+pub fn drop(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(a) =
+  \(u) -> if n <= 0 then s(()) else match s(()) of { SDone => SDone, SMore(x, next) => drop(next, n - 1)(()) }
+
+-- | The longest prefix whose elements satisfy `p`; stops at the first failure.
+pub fn take_while(s : (Unit) -> Step(a), p : (a) -> Bool) : (Unit) -> Step(a) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => if p(x) then SMore(x, take_while(next, p)) else SDone }
+
+-- | Drop the longest prefix satisfying `p`, yielding the rest.
+pub fn drop_while(s : (Unit) -> Step(a), p : (a) -> Bool) : (Unit) -> Step(a) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => if p(x) then drop_while(next, p)(()) else SMore(x, next) }
+
+-- | Drop consecutive duplicates, keeping the first of each run (needs `Eq(a)`).
+-- Left unsigned so the `Eq(a)` constraint is inferred from `==`.
+pub fn dedup(s) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => SMore(x, dedup_after(x, next)) }
+
+-- | Helper for `dedup`: drop elements equal to the just-emitted `prev`.
+fn dedup_after(prev, s) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => if x == prev then dedup_after(prev, next)(()) else SMore(x, dedup_after(x, next)) }
+
+-- | Pair each element with its zero-based index, yielding `(i, x)`.
+pub fn enumerate(s : (Unit) -> Step(a)) : (Unit) -> Step((Int, a)) =
+  enumerate_from(s, 0)
+
+-- | Helper for `enumerate`: index from `i`.
+fn enumerate_from(s, i) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => SMore((i, x), enumerate_from(next, i + 1)) }
+
+-- | The running left-fold, streamed: yield `z`, then each successive accumulator.
+pub fn scan(s : (Unit) -> Step(a), z : b, f : (b, a) -> b) : (Unit) -> Step(b) =
+  \(u) -> SMore(z, scan_go(s, z, f))
+
+-- | Helper for `scan`: yield the accumulator after each element.
+fn scan_go(s, z, f) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => let z2 = f(z, x) in SMore(z2, scan_go(next, z2, f)) }
+
+-- | Alternate elements of `s` and `t` (`s0, t0, s1, t1, ...`); when one runs out,
+-- yield the whole remainder of the other. Streamed, no materialization.
+pub fn interleave(
+  s : (Unit) -> Step(a),
+  t : (Unit) -> Step(a)
+) : (Unit) -> Step(a) =
+  \(u) -> match s(()) of { SDone => t(()), SMore(x, next) => SMore(x, interleave(t, next)) }
+
+-- ============================================================================
+-- Binary combinators (heterogeneous: the pull-substrate win over push `Emit`)
+-- ============================================================================
+
+-- | Pair two sequences element-wise, stopping at the shorter. Genuinely
+-- heterogeneous: `Seq(a)` and `Seq(b)` yield `Seq((a, b))`.
+pub fn zip(s : (Unit) -> Step(a), t : (Unit) -> Step(b)) : (Unit) -> Step((a, b)) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, sn) => match t(()) of { SDone => SDone, SMore(y, tn) => SMore((x, y), zip(sn, tn)) } }
+
+-- | Combine two sequences element-wise with `f`, stopping when either runs out.
+-- Heterogeneous in both operand types.
+pub fn zip_with(
+  s : (Unit) -> Step(a),
+  t : (Unit) -> Step(b),
+  f : (a, b) -> c
+) : (Unit) -> Step(c) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, sn) => match t(()) of { SDone => SDone, SMore(y, tn) => SMore(f(x, y), zip_with(sn, tn, f)) } }
+
+-- ============================================================================
+-- Chunking and windowing (buffer O(n) elements by nature; still streamed)
+-- ============================================================================
+
+-- | Group elements into consecutive lists of length `n` (the final chunk may be
+-- shorter). Pulls one group at a time, holding only the current group.
+pub fn chunk(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(List(a)) =
+  \(u) -> match s(()) of { SDone => SDone, SMore(x, next) => match chunk_grab(next, n - 1, Cons(x, Nil)) of { (group, rest) => SMore(group, chunk(rest, n)) } }
+
+-- | Helper for `chunk`: grab up to `n` more elements into the reversed `acc`,
+-- returning the finished (forward-order) group and the remaining sequence.
+fn chunk_grab(s, n, acc) =
+  if n <= 0 then
+    (reverse(acc), s)
+  else
+    match s(()) of
+      SDone => (reverse(acc), empty())
+      SMore(x, next) => chunk_grab(next, n - 1, Cons(x, acc))
+
+-- | Every contiguous length-`n` sliding window, in order. Fewer than `n` elements
+-- yields nothing. Holds one window (`n` elements) at a time.
+pub fn window(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(List(a)) =
+  \(u) -> match grab_n(s, n, Nil) of { None => SDone, Some(pair) => match pair of { (buf, rest) => SMore(buf, window_slide(buf, rest)) } }
+
+-- | Helper for `window`: pull exactly `n` elements, or `None` if fewer remain.
+fn grab_n(s, n, acc) =
+  if n <= 0 then
+    Some((reverse(acc), s))
+  else
+    match s(()) of
+      SDone => None
+      SMore(x, next) => grab_n(next, n - 1, Cons(x, acc))
+
+-- | Helper for `window`: slide by dropping the oldest element and appending the
+-- next one pulled from `rest`.
+fn window_slide(buf, rest) =
+  \(u) -> match rest(()) of { SDone => SDone, SMore(x, next) => let buf2 = app_list(tail(buf), Cons(x, Nil)) in SMore(buf2, window_slide(buf2, next)) }
+
+-- | Local list append (`append` names the sequence combinator above).
+fn app_list(xs, ys) =
+  match xs of
+    Nil => ys
+    Cons(x, r) => Cons(x, app_list(r, ys))
+
+-- ============================================================================
+-- Consumers (drive the producer, folding elements into a value)
+-- ============================================================================
+
+-- | Left-fold the sequence with `f` from initial accumulator `z`.
+pub fn fold(s, z, f) =
+  match s(()) of
+    SDone => z
+    SMore(x, next) => fold(next, f(z, x), f)
+
+-- | Run `f` for its effects on each element, in order. Effect-polymorphic: `f` runs
+-- in the ambient row (no handler intervenes), so `for_each(s, \(x) -> println(x))`
+-- threads `IO` out. The explicit `{| e}` row is load-bearing: unsigned, the
+-- self-recursion would infer `f` as pure and reject an effectful body.
+pub fn for_each(s : (Unit) -> Step(a), f : (a) -> Unit ! {| e}) =
+  match s(()) of
+    SDone => ()
+    SMore(x, next) =>
+      f(x)
+      for_each(next, f)
+
+-- | Sum a sequence of integers.
+pub fn sum(s) = fold(s, 0, \(acc, x) -> acc + x)
+
+-- | Product of a sequence of integers.
+pub fn product(s) = fold(s, 1, \(acc, x) -> acc * x)
+
+-- | The number of elements.
+pub fn count(s) = fold(s, 0, \(acc, x) -> acc + 1)
+
+-- | Collect the sequence into a list, in order. The container boundary out.
+pub fn to_list(s) = reverse(fold(s, Nil, \(acc, x) -> Cons(x, acc)))
+
+-- | The first element, or `None` if the sequence is empty.
+pub fn head(s) =
+  match s(()) of
+    SDone => None
+    SMore(x, next) => Some(x)
+
+-- | The first element satisfying `p`, or `None`; stops the producer at the match.
+pub fn find(s, p) =
+  match s(()) of
+    SDone => None
+    SMore(x, next) =>
+      if p(x) then
+        Some(x)
+      else
+        find(next, p)
+
+-- | True when some element satisfies `p`; short-circuits.
+pub fn any(s, p) =
+  match find(s, p) of
+    Some(u) => true
+    None => false
+
+-- | True when every element satisfies `p`; short-circuits on the first failure.
+pub fn all(s, p) =
+  match find(s, \(x) -> not(p(x))) of
+    Some(u) => false
+    None => true
+
+-- ============================================================================
+-- Bytes boundary
+-- ============================================================================
+
+-- | The bytes of `bs` as a sequence of ints in `0..255`, in order.
+pub fn from_bytes(bs : Bytes) : (Unit) -> Step(Int) = from_bytes_at(bs, 0)
+
+-- | Helper for `from_bytes`: yield from index `i`.
+fn from_bytes_at(bs, i) =
+  \(u) -> if i < bytes_length(bs) then SMore(bytes_index(bs, i), from_bytes_at(bs, i + 1)) else SDone
+
+-- | Collect a sequence of ints (each masked to a byte) into a `Bytes`. The Bytes
+-- container boundary out.
+pub fn to_bytes(s) = fold(s, bytes_empty, \(acc, x) -> bytes_push(acc, x))

@@ -1,0 +1,14 @@
+-- Scientific notation always denotes a Float. The exponent sign lives in the
+-- lexer, so `1e-25` reads as one token and never collides with unary minus.
+
+fn main() : !{IO} Unit =
+  println(1e3)
+  println(1E3)
+  println(1.5e3)
+  println(1e-2)
+  println(1E-2)
+  println(2.5e-1 == 0.25)
+  -- A leading unary minus over an exponent literal negates the float.
+  println(-1e2)
+  -- Subtraction abutting an exponent literal: `x - 1e-1` is `x` minus `0.1`.
+  println(3.0 - 1e-1)

@@ -42,16 +42,19 @@
 --
 -- ## The `Bytes` representation
 --
--- `Bytes` is a `List(Int)` of byte values in `0..255`. This is the pragmatic
--- pure-Prism choice: a `String`-of-bytes would round-trip a value differently on
--- the two backends, because the interpreter's `string_of_bytes` repairs invalid
--- UTF-8 lossily while the native runtime keeps raw bytes, so byte-for-byte parity
--- (the language's contract) would break on any non-textual byte. A `List(Int)` is
--- ordinary algebraic data that both backends thread identically. The cost is
--- space (a cons cell plus a boxed word per byte) and an O(n) `wire_cat`; a
--- byte-array builtin is the eventual performance path, but correctness and parity
--- come first. `encode` builds its body right-nested, so the concatenations are
--- linear, and `decode` consumes from the front, so a whole decode is linear.
+-- `Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read
+-- cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8
+-- with no UTF-8 interpretation, so it threads byte-for-byte identically on both
+-- backends (the parity contract a `String`-of-bytes would break, since the
+-- interpreter's `string_of_bytes` repairs invalid UTF-8 lossily). The cursor
+-- makes `decode` cheap: peeling a byte off the front advances the offset in O(1)
+-- with no copy, so a whole decode is linear. Encode accumulates into a growable
+-- buffer builder (`buf_push`, amortized O(1)), so building a container or a
+-- string body stays linear rather than paying the quadratic cost a right-nested
+-- immutable `wire_cat` would incur. The concrete representation is owned by the
+-- codec; a derived instance only ever threads a `Bytes` through the builders
+-- below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older
+-- `List(Int)` view for callers that still want it.
 --
 -- ## Totality
 --
@@ -73,6 +76,8 @@
 
 import Data.List (..)
 
+import Data.Foldable (..)
+
 import Data.Map (..)
 
 -- The varint radix (7 data bits per byte, the eighth a continuation flag) and the
@@ -93,10 +98,11 @@ let char_max : Int = 1114111
 -- a wider word into the buffer.
 let byte_mask : Int = 256
 
--- | A compact, positional byte body: a `List(Int)` of byte values in `0..255`.
--- The concrete representation is owned by the codec; a derived instance only ever
--- threads a `Bytes` through the builders below, never inspects it.
-pub type Bytes = Bytes(List(Int))
+-- | A compact, positional byte body: an unboxed byte buffer and a read cursor,
+-- `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation
+-- is owned by the codec; a derived instance only ever threads a `Bytes` through
+-- the builders below, never inspects it.
+pub type Bytes = Bytes(Buf, Int)
 
 -- | What a downgrade could not carry down: the names of the fields dropped when
 -- lowering a value to an older frozen version. A downgrade never silently
@@ -109,10 +115,9 @@ pub type Loss = Loss(List(String))
 -- declaration order. Decode is total: it fails through `Fail` on a truncated or
 -- malformed body rather than panicking, so hostile input is one ordinary failure
 -- channel.
-pub class Serialize(a) {
-  encode : (a) -> Bytes,
+pub class Serialize(a)
+  encode : (a) -> Bytes
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
-}
 
 -- | The structural witness that a type's format is frozen-serializable: a record
 -- is `Stable` when all its fields are, a sum when all its variants' arguments
@@ -120,42 +125,89 @@ pub class Serialize(a) {
 -- whole content of the proof. Persisting a type with a non-stable component
 -- (a function, an effectful thunk) fails at the `deriving (Stable)` site, at
 -- compile time, naming the offending field.
-pub class Stable(a) {
+pub class Stable(a)
 
-}
+-- Wrap a whole buffer (cursor at 0) as a body, and recover the buffer of a body's
+-- remaining bytes (compacting away a non-zero cursor with a single slice). The
+-- representation seam between the buffer and the `Bytes` view; `Data.Bytes` builds
+-- its utility layer over these three, never the `Bytes` constructor directly.
+pub fn bytes_of_buf(b : Buf) : Bytes = Bytes(b, 0)
+
+pub fn bytes_buf(bs : Bytes) : Buf =
+  match bs of
+    Bytes(b, off) =>
+      if off == 0 then
+        b
+      else
+        buf_slice(b, off, buf_len(b) - off)
+
+-- The i-th byte of a body, from the cursor. Bounds are the caller's contract (the
+-- readers check emptiness first); an out-of-range index traps.
+pub fn bytes_at(bs : Bytes, i : Int) : Int =
+  match bs of
+    Bytes(b, off) => buf_get(b, off + i)
 
 -- The empty body.
-pub let wire_empty : Bytes = Bytes(Nil)
+pub let wire_empty : Bytes = Bytes(buf_empty(), 0)
 
--- | Concatenate two byte bodies. Right-nested use keeps a whole encode linear.
+-- | Concatenate two byte bodies into a fresh buffer.
 pub fn wire_cat(a : Bytes, b : Bytes) : Bytes =
-  match a of
-    Bytes(xs) =>
-      match b of
-        Bytes(ys) => Bytes(append(xs, ys))
+  bytes_of_buf(buf_cat(bytes_buf(a), bytes_buf(b)))
 
 -- A one-byte body, the value masked into `0..255`.
-fn wire_byte(b : Int) : Bytes = Bytes(Cons(mod(b, byte_mask), Nil))
+fn wire_byte(b : Int) : Bytes =
+  bytes_of_buf(buf_push(buf_empty(), mod(b, byte_mask)))
 
 -- Peel one byte off the front, or `fail()` when the body is exhausted. This is
--- the single place a truncated input turns into a `Fail`.
+-- the single place a truncated input turns into a `Fail`. Advancing the cursor is
+-- O(1) and copy-free.
 fn wire_uncons(bs : Bytes) : (Int, Bytes) =
-  match bs of
-    Bytes(Nil) => fail()
-    Bytes(Cons(h, t)) => (h, Bytes(t))
+  if wire_is_empty(bs) then
+    fail()
+  else
+    match bs of
+      Bytes(b, off) => (buf_get(b, off), Bytes(b, off + 1))
 
 -- | True when a body has no bytes left. The reader uses it to reject trailing
 -- bytes after a value, and a peer uses it to tell a reference frame (no body)
 -- from an inline one.
-pub fn wire_is_empty(bs : Bytes) : Bool =
-  match bs of
-    Bytes(Nil) => true
-    Bytes(Cons(_h, _t)) => false
+pub fn wire_is_empty(bs : Bytes) : Bool = wire_len(bs) == 0
 
 -- | The number of bytes in a body.
 pub fn wire_len(bs : Bytes) : Int =
   match bs of
-    Bytes(xs) => length(xs)
+    Bytes(b, off) => buf_len(b) - off
+
+-- Append every byte of a body onto a growable buffer, the linear accumulation
+-- primitive the encoders fold through instead of a right-nested `wire_cat`.
+fn buf_append(acc : Buf, bs : Bytes) : Buf =
+  match bs of
+    Bytes(b, off) => buf_append_go(acc, b, off, buf_len(b))
+
+fn buf_append_go(acc : Buf, b : Buf, i : Int, n : Int) : Buf =
+  if i >= n then
+    acc
+  else
+    buf_append_go(buf_push(acc, buf_get(b, i)), b, i + 1, n)
+
+-- | Build a body from a `List(Int)` of byte values (each masked into `0..255`),
+-- and read a body back out as that list. These bridge the buffer representation
+-- to the older list view for callers that thread bytes as ordinary data.
+pub fn bytes_of_list(xs : List(Int)) : Bytes =
+  bytes_of_buf(list_to_buf(buf_empty(), xs))
+
+fn list_to_buf(acc : Buf, xs : List(Int)) : Buf =
+  match xs of
+    Nil => acc
+    Cons(h, t) => list_to_buf(buf_push(acc, mod(h, byte_mask)), t)
+
+pub fn bytes_to_list(bs : Bytes) : List(Int) = bytes_to_list_go(bs, 0, wire_len(bs))
+
+fn bytes_to_list_go(bs : Bytes, i : Int, n : Int) : List(Int) =
+  if i >= n then
+    Nil
+  else
+    Cons(bytes_at(bs, i), bytes_to_list_go(bs, i + 1, n))
 
 -- An unsigned LEB128 varint: the low seven bits per byte, the high bit set on
 -- every byte but the last. Small values cost one byte.
@@ -217,10 +269,9 @@ fn get_svarint(bs : Bytes) : (Int, Bytes) =
   match get_uvarint(bs) of
     (z, r) => (unzigzag(z), r)
 
-instance serializeInt : Serialize(Int) {
-  fn encode(x) = put_svarint(x),
+instance serializeInt : Serialize(Int)
+  fn encode(x) = put_svarint(x)
   fn decode(bs) = get_svarint(bs)
-}
 
 -- The primitive and container codecs. Each instance method is a one-liner that
 -- delegates to a top-level `enc_*`/`dec_*` function, so the readers that thread
@@ -229,19 +280,17 @@ fn dec_i64(bs : Bytes) : (I64, Bytes) =
   match get_svarint(bs) of
     (n, r) => (to_i64(n), r)
 
-instance serializeI64 : Serialize(I64) {
-  fn encode(x) = put_svarint(int_of_i64(x)),
+instance serializeI64 : Serialize(I64)
+  fn encode(x) = put_svarint(int_of_i64(x))
   fn decode(bs) = dec_i64(bs)
-}
 
 fn dec_u64(bs : Bytes) : (U64, Bytes) =
   match get_uvarint(bs) of
     (n, r) => (to_u64(n), r)
 
-instance serializeU64 : Serialize(U64) {
-  fn encode(x) = put_uvarint(int_of_u64(x)),
+instance serializeU64 : Serialize(U64)
+  fn encode(x) = put_uvarint(int_of_u64(x))
   fn decode(bs) = dec_u64(bs)
-}
 
 fn enc_bool(b : Bool) : Bytes = wire_byte(if b then 1 else 0)
 
@@ -255,15 +304,13 @@ fn dec_bool(bs : Bytes) : (Bool, Bytes) =
       else
         fail()
 
-instance serializeBool : Serialize(Bool) {
-  fn encode(b) = enc_bool(b),
+instance serializeBool : Serialize(Bool)
+  fn encode(b) = enc_bool(b)
   fn decode(bs) = dec_bool(bs)
-}
 
-instance serializeUnit : Serialize(Unit) {
-  fn encode(_u) = wire_empty,
+instance serializeUnit : Serialize(Unit)
+  fn encode(_u) = wire_empty
   fn decode(bs) = ((), bs)
-}
 
 fn dec_char(bs : Bytes) : (Char, Bytes) =
   match get_uvarint(bs) of
@@ -273,19 +320,22 @@ fn dec_char(bs : Bytes) : (Char, Bytes) =
       else
         (chr(n), r)
 
-instance serializeChar : Serialize(Char) {
-  fn encode(c) = put_uvarint(ord(c)),
+instance serializeChar : Serialize(Char)
+  fn encode(c) = put_uvarint(ord(c))
   fn decode(bs) = dec_char(bs)
-}
 
--- Append a string's raw UTF-8 bytes to a body, one byte per index. A `String` is
--- always valid UTF-8, so reconstructing it with `string_of_bytes` on decode is
--- lossless on both backends.
+-- Append a string's raw UTF-8 bytes to a body, one byte per index, accumulated
+-- left-to-right into a buffer builder so the whole body is one linear pass. A
+-- `String` is always valid UTF-8, so reconstructing it with `string_of_bytes` on
+-- decode is lossless on both backends.
 fn string_body(s : String, i : Int, n : Int) : Bytes =
+  bytes_of_buf(string_body_go(buf_empty(), s, i, n))
+
+fn string_body_go(acc : Buf, s : String, i : Int, n : Int) : Buf =
   if i >= n then
-    wire_empty
+    acc
   else
-    wire_cat(wire_byte(byte_at(s, i)), string_body(s, i + 1, n))
+    string_body_go(buf_push(acc, byte_at(s, i)), s, i + 1, n)
 
 -- Read exactly `n` bytes into an array, failing if the body runs out first.
 fn take_bytes(bs : Bytes, n : Int, arr : Array(Int)) : (Array(Int), Bytes) =
@@ -307,17 +357,20 @@ fn dec_string(bs : Bytes) : (String, Bytes) =
         match take_bytes(r, n, array_empty()) of
           (arr, rest) => (string_of_bytes(arr), rest)
 
-instance serializeString : Serialize(String) {
-  fn encode(s) = enc_string(s),
+instance serializeString : Serialize(String)
+  fn encode(s) = enc_string(s)
   fn decode(bs) = dec_string(bs)
-}
 
 -- Encode a list's elements in order, no per-element framing (the length prefix
--- fixes the count). Right-nested so the whole encode stays linear.
+-- fixes the count). Accumulated into a buffer builder so the whole encode is one
+-- linear pass rather than a chain of copying concatenations.
 fn encode_elems(xs : List(a)) : Bytes given Serialize(a) =
+  bytes_of_buf(encode_elems_go(buf_empty(), xs))
+
+fn encode_elems_go(acc : Buf, xs : List(a)) : Buf given Serialize(a) =
   match xs of
-    Nil => wire_empty
-    Cons(h, t) => wire_cat(encode(h), encode_elems(t))
+    Nil => acc
+    Cons(h, t) => encode_elems_go(buf_append(acc, encode(h)), t)
 
 -- Decode exactly `n` elements, threading the remaining bytes. Each element read
 -- consumes at least one byte, so a hostile length is bounded by the input.
@@ -341,26 +394,46 @@ fn dec_list(bs : Bytes) : (List(a), Bytes) given Serialize(a) =
       else
         decode_elems(r, n)
 
-instance serializeList : Serialize(List(a)) given Serialize(a) {
-  fn encode(xs) = enc_list(xs),
+instance serializeList : Serialize(List(a)) given Serialize(a)
+  fn encode(xs) = enc_list(xs)
   fn decode(bs) = dec_list(bs)
-}
 
--- `Bytes` is itself serializable as the length-prefixed list of its byte values,
--- so a body may carry another already-encoded body verbatim (the incremental
--- snapshot stores each memo's result bytes this way).
+-- `Bytes` is itself serializable as its length followed by one signed varint per
+-- byte value (the `Serialize(Int)` element codec), so a body may carry another
+-- already-encoded body verbatim (the incremental snapshot stores each memo's
+-- result bytes this way). This is the same frozen format the older `List(Int)`
+-- representation produced (`enc_list` over the byte list); only the storage under
+-- it changed, so the bytes on the wire are byte-for-byte identical.
 fn enc_bytes(b : Bytes) : Bytes =
-  match b of
-    Bytes(xs) => enc_list(xs)
+  wire_cat(put_uvarint(wire_len(b)), enc_bytes_body(b))
+
+fn enc_bytes_body(b : Bytes) : Bytes =
+  bytes_of_buf(enc_bytes_go(buf_empty(), b, 0, wire_len(b)))
+
+fn enc_bytes_go(acc : Buf, b : Bytes, i : Int, n : Int) : Buf =
+  if i >= n then
+    acc
+  else
+    enc_bytes_go(buf_append(acc, put_svarint(bytes_at(b, i))), b, i + 1, n)
 
 fn dec_bytes(bs : Bytes) : (Bytes, Bytes) =
-  match dec_list(bs) of
-    (xs, r) => (Bytes(xs), r)
+  match get_uvarint(bs) of
+    (n, r) =>
+      if n > wire_len_max then
+        fail()
+      else
+        dec_bytes_go(buf_empty(), r, n)
 
-instance serializeBytes : Serialize(Bytes) {
-  fn encode(b) = enc_bytes(b),
+fn dec_bytes_go(acc : Buf, bs : Bytes, n : Int) : (Bytes, Bytes) =
+  if n <= 0 then
+    (bytes_of_buf(acc), bs)
+  else
+    match get_svarint(bs) of
+      (v, r) => dec_bytes_go(buf_push(acc, v), r, n - 1)
+
+instance serializeBytes : Serialize(Bytes)
+  fn encode(b) = enc_bytes(b)
   fn decode(bs) = dec_bytes(bs)
-}
 
 fn enc_option(o : Option(a)) : Bytes given Serialize(a) =
   match o of
@@ -378,19 +451,53 @@ fn dec_option(bs : Bytes) : (Option(a), Bytes) given Serialize(a) =
       else
         fail()
 
-instance serializeOption : Serialize(Option(a)) given Serialize(a) {
-  fn encode(o) = enc_option(o),
+instance serializeOption : Serialize(Option(a)) given Serialize(a)
+  fn encode(o) = enc_option(o)
   fn decode(bs) = dec_option(bs)
-}
+
+-- Tuples are anonymous products, so their codec is positional: each component in
+-- order, no length or tag, the exact shape a derived record's body takes. A tuple
+-- has no nominal constructor to key an instance on, so the compiler keys these on
+-- the tuple's arity (`src/tc`: `HeadKey::Tuple`); the bytes are ordinary library
+-- code. Decode threads the remaining bytes through each component in turn.
+fn enc_pair(p : (a, b)) : Bytes given Serialize(a), Serialize(b) =
+  match p of
+    (x, y) => wire_cat(encode(x), encode(y))
+
+fn dec_pair(bs : Bytes) : ((a, b), Bytes) given Serialize(a), Serialize(b) =
+  match decode(bs) of
+    (x, r1) =>
+      match decode(r1) of
+        (y, r2) => ((x, y), r2)
+
+instance serializePair : Serialize((a, b)) given Serialize(a), Serialize(b)
+  fn encode(p) = enc_pair(p)
+  fn decode(bs) = dec_pair(bs)
+
+fn enc_triple(p : (a, b, c)) : Bytes given Serialize(a), Serialize(b), Serialize(c) =
+  match p of
+    (x, y, z) => wire_cat(encode(x), wire_cat(encode(y), encode(z)))
+
+fn dec_triple(bs : Bytes) : ((a, b, c), Bytes) given Serialize(a), Serialize(b), Serialize(c) =
+  match decode(bs) of
+    (x, r1) =>
+      match decode(r1) of
+        (y, r2) =>
+          match decode(r2) of
+            (z, r3) => ((x, y, z), r3)
+
+instance serializeTriple : Serialize((a, b, c)) given Serialize(a), Serialize(b), Serialize(c)
+  fn encode(p) = enc_triple(p)
+  fn decode(bs) = dec_triple(bs)
 
 -- A map serializes canonically as two parallel lists, its keys then its values,
 -- both in ascending key order. This is canonical (two maps that are equal but
 -- were built by different insertion orders serialize identically, so they hash
--- equal, which the incremental engine's early cutoff relies on) and avoids a
--- tuple codec (tuples have no nominal head to key a `Serialize` instance on; a
--- compiler-synthesized tuple instance is a later item). Decoding zips the lists
--- back and rebuilds the tree with the ambient `Ord(k)`.
-fn enc_map(m : Map(k, v)) : Bytes given Serialize(k), Serialize(v) =
+-- equal, which the incremental engine's early cutoff relies on); the parallel
+-- form is chosen for that order-independence, not for want of a tuple codec (one
+-- now exists above). Decoding zips the lists back and rebuilds the tree with the
+-- ambient `Ord(k)`.
+fn enc_map(m : Map(k, v, ord)) : Bytes given Serialize(k), Serialize(v) =
   wire_cat(encode(map_keys(m)), encode(map_values(m)))
 
 fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
@@ -401,16 +508,34 @@ fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
         Nil => Nil
         Cons(v, vr) => Cons((k, v), zip_pairs(kr, vr))
 
-fn dec_map(bs : Bytes) : (Map(k, v), Bytes) given Ord(k), Serialize(k), Serialize(v) =
+-- The stored-witness stopgap for the implicit ordering path. A map is written in
+-- its own `Ord(k)` order; the reader has no brand to check (the explicit branded
+-- path is `Data.Ordered`), so instead it checks the one fact the wire preserves:
+-- the keys must be strictly ascending under the READER's `Ord(k)`. A map built
+-- under a non-canonical ordering and read back where a different `Ord(k)` is
+-- canonical arrives out of order and faults here, deterministically and
+-- identically on both backends, rather than silently rebuilding a mis-ordered
+-- tree. Same ordering on both sides: the keys are already sorted, so the check is
+-- one linear pass the O(n) decode already affords. This closes the implicit hole
+-- dynamically where an ordered container crosses a package boundary; a later
+-- dictionary-reflection capability closes it statically.
+fn keys_strictly_ascending(ks : List(k)) : Bool given Ord(k) =
+  match ks of
+    Nil => true
+    Cons(_, Nil) => true
+    Cons(a, Cons(b, r)) => cmp(a, b) < 0 && keys_strictly_ascending(Cons(b, r))
+
+fn dec_map(bs : Bytes) : (Map(k, v, ord), Bytes) given Ord(k), Serialize(k), Serialize(v) =
   match decode(bs) of
     (ks, r1) =>
       match decode(r1) of
-        (vs, r2) => (map_from_list(zip_pairs(ks, vs)), r2)
+        (vs, r2) =>
+          guard(keys_strictly_ascending(ks))
+          (map_from_list(zip_pairs(ks, vs)), r2)
 
-instance serializeMap : Serialize(Map(k, v)) given Ord(k), Serialize(k), Serialize(v) {
-  fn encode(m) = enc_map(m),
+instance serializeMap : Serialize(Map(k, v, ord)) given Ord(k), Serialize(k), Serialize(v)
+  fn encode(m) = enc_map(m)
   fn decode(bs) = dec_map(bs)
-}
 
 -- The envelope. Every serialized thing is one frame:
 --
@@ -449,7 +574,10 @@ fn get_frame_str(bs : Bytes) : (String, Bytes) = decode(bs)
 
 -- | Build a frame around a body. `wire_ref` builds the bodyless reference form.
 pub fn wire_frame(kind : Int, digest : String, body : Bytes) : Bytes =
-  wire_cat(put_frame_str(wire_scheme_tag), wire_cat(wire_tag(kind), wire_cat(put_frame_str(digest), body)))
+  wire_cat(
+      put_frame_str(wire_scheme_tag),
+      wire_cat(wire_tag(kind), wire_cat(put_frame_str(digest), body)),
+    )
 
 -- | A pure reference: a frame that carries its contract digest and no body. Its
 -- identity is the digest; a peer resolves the body from its store or requests it.

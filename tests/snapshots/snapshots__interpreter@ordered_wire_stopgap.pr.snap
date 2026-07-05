@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/ordered_wire_stopgap.pr
+---
+ok, size 3
+FAULT: map arrived ordered by a different Ord(k)
+=> ()

@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/mask_tunnels_to_outer.pr
 ---
 == tokens ==
-VOpen Effect UIdent("E") LBrace Ctl Ident("op") LParen KwInt RParen Colon KwInt RBrace VSemi Fn Ident("f") LParen RParen Eq VOpen Handle Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq VOpen Let Ident("r") Eq VOpen Handle Ident("f") LParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") Plus Int(IntLit { value: 100, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Ident("println") LParen Ident("r") RParen VClose VClose
+VOpen Effect UIdent("E") VOpen Ctl Ident("op") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("f") LParen RParen Eq VOpen Handle Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq VOpen Let Ident("r") Eq VOpen Handle Ident("f") LParen RParen With VOpen Ident("op") LParen Ident("x") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("x") Plus Int(IntLit { value: 100, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Ident("println") LParen Ident("r") RParen VClose VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Int,
                     ],
                     ret: Int,
+                    grade: Many,
                 },
             ],
-            span: 242..274,
+            span: 242..270,
         },
     ],
     errors: [],
@@ -47,7 +48,7 @@ Program {
                                         node: Var(
                                             "op",
                                         ),
-                                        span: 302..304,
+                                        span: 298..300,
                                     },
                                     [
                                         Spanned {
@@ -57,14 +58,14 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 305..306,
+                                            span: 301..302,
                                         },
                                     ],
                                 ),
-                                span: 302..307,
+                                span: 298..303,
                             },
                         ),
-                        span: 294..308,
+                        span: 290..304,
                     },
                     [
                         Op(
@@ -79,18 +80,18 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 330..331,
+                                        span: 326..327,
                                     },
                                     [
                                         Spanned {
                                             node: Var(
                                                 "x",
                                             ),
-                                            span: 332..333,
+                                            span: 328..329,
                                         },
                                     ],
                                 ),
-                                span: 330..334,
+                                span: 326..330,
                             },
                         ),
                         Return(
@@ -99,15 +100,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 351..352,
+                                span: 347..348,
                             },
                         ),
                     ],
                 ),
-                span: 287..352,
+                span: 283..348,
             },
             wheres: [],
-            span: 276..352,
+            span: 272..348,
         },
         Decl {
             name: "main",
@@ -135,11 +136,11 @@ Program {
                                         node: Var(
                                             "f",
                                         ),
-                                        span: 400..401,
+                                        span: 396..397,
                                     },
                                     [],
                                 ),
-                                span: 400..403,
+                                span: 396..399,
                             },
                             [
                                 Op(
@@ -154,7 +155,7 @@ Program {
                                                 node: Var(
                                                     "k",
                                                 ),
-                                                span: 427..428,
+                                                span: 423..424,
                                             },
                                             [
                                                 Spanned {
@@ -164,7 +165,7 @@ Program {
                                                             node: Var(
                                                                 "x",
                                                             ),
-                                                            span: 429..430,
+                                                            span: 425..426,
                                                         },
                                                         Spanned {
                                                             node: Int(
@@ -173,14 +174,14 @@ Program {
                                                                     suffix: None,
                                                                 },
                                                             ),
-                                                            span: 433..436,
+                                                            span: 429..432,
                                                         },
                                                     ),
-                                                    span: 429..436,
+                                                    span: 425..432,
                                                 },
                                             ],
                                         ),
-                                        span: 427..437,
+                                        span: 423..433,
                                     },
                                 ),
                                 Return(
@@ -189,12 +190,12 @@ Program {
                                         node: Var(
                                             "r",
                                         ),
-                                        span: 456..457,
+                                        span: 452..453,
                                     },
                                 ),
                             ],
                         ),
-                        span: 393..457,
+                        span: 389..453,
                     },
                     Spanned {
                         node: Call(
@@ -202,24 +203,24 @@ Program {
                                 node: Var(
                                     "println",
                                 ),
-                                span: 460..467,
+                                span: 456..463,
                             },
                             [
                                 Spanned {
                                     node: Var(
                                         "r",
                                     ),
-                                    span: 468..469,
+                                    span: 464..465,
                                 },
                             ],
                         ),
-                        span: 460..470,
+                        span: 456..466,
                     },
                 ),
-                span: 381..470,
+                span: 377..466,
             },
             wheres: [],
-            span: 354..470,
+            span: 350..466,
         },
     ],
 }

@@ -1,7 +1,6 @@
-effect Memo {
-  ctl recall(Int) : Option(Int),
+effect Memo
+  ctl recall(Int) : Option(Int)
   ctl store(Int, Int) : Unit
-}
 
 -- Memoization as an effect, bolted on from the outside.
 --

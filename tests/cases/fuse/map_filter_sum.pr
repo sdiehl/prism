@@ -1,0 +1,9 @@
+-- Fuses: producer |> map |> filter |> sum collapses to one allocation-free loop.
+import Sequence as Seq
+
+fn main() : !{IO} Unit =
+  println(
+      Seq.sum(
+          Seq.filter(Seq.map(Seq.range(1, 40), \(x) -> x * 2), \(x) -> x > 5),
+        ),
+    )

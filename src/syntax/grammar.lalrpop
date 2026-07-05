@@ -1,7 +1,8 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH};
 use crate::lex::Token;
+use crate::kw::DEPRECATED;
 
 grammar;
 
@@ -193,6 +194,21 @@ Item: Item = {
     <s:StableD> => Item::Stable(s),
     <c:ConstD> => Item::Fn(c),
     <f:Fn> => Item::Fn(f),
+    <d:DeprecatedD> => d,
+};
+
+// `deprecated "use X instead"`: a contextual annotation line preceding a
+// declaration. `deprecated` is an ident, not a reserved word (so a program may
+// still bind the name), matched here and attached to the next declaration by the
+// parse-time demultiplexer. The suggestion rides in the string literal.
+DeprecatedD: Item = {
+    <l:@L> <kw:"ident"> <s:"str"> <r:@R> =>? if kw == DEPRECATED {
+        Ok(Item::Deprecated(Span::new(l, r), s))
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `{DEPRECATED}` before a string, found `{kw}`")),
+        })
+    },
 };
 
 ImportD: ImportDecl = {
@@ -316,8 +332,16 @@ DropLoss: Vec<String> = {
 };
 
 ClassD: ClassDecl = {
-    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> "{" <methods:ClassSigs> "}" <r:@R> =>
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> "v{" <methods:ClassSigs> "v}" <r:@R> =>
         ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods, span: Span::new(l, r) },
+    // A marker class with no methods is its bare head (no indented block follows).
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> <r:@R> =>
+        ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods: vec![], span: Span::new(l, r) },
+    // Flip: the retired brace form is still recognized in full so the diagnostic
+    // points at the brace and names the layout rewrite, rather than degrading to a
+    // bare "unexpected token".
+    "class" "uid" "(" "ident" ")" GivenClause? <l:@L> "{" <r:@R> ClassSigs "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_CLASS.to_string()) }),
 };
 
 ClassSigs: Vec<(String, Ty)> = {
@@ -330,8 +354,15 @@ ClassSig: (String, Ty) = {
 
 InstanceD: InstanceDecl = {
     <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?>
-        "{" <methods:InstFns> "}" <r:@R> =>
+        "v{" <methods:InstFns> "v}" <r:@R> =>
         InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, module: String::new(), span: Span::new(l, r) },
+    // The instance of a marker class carries no methods, so it is its bare head.
+    <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?> <r:@R> =>
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods: vec![], module: String::new(), span: Span::new(l, r) },
+    // Flip: the retired brace form is recognized in full so the diagnostic points
+    // at the brace and names the layout rewrite.
+    "instance" "ident" ":" "uid" "(" Type ")" GivenClause? <l:@L> "{" <r:@R> InstFns "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_INSTANCE.to_string()) }),
 };
 
 InstFns: Vec<Decl> = {
@@ -415,8 +446,9 @@ KindedTyParam: (String, crate::types::ty::Kind) = {
         let kind = match k.as_str() {
             "Row" => crate::types::ty::Kind::Row,
             "Type" => crate::types::ty::Kind::Type,
+            "Nat" => crate::types::ty::Kind::Nat,
             other => return Err(lalrpop_util::ParseError::User {
-                error: (Span::new(l, r), format!("unknown kind `{other}` (expected `Type` or `Row`)")),
+                error: (Span::new(l, r), format!("unknown kind `{other}` (expected `Type`, `Row`, or `Nat`)")),
             }),
         };
         Ok((s, kind))
@@ -444,6 +476,40 @@ CtorArgs: Vec<Ty> = { "(" <ts:Comma<TypeArg>> ")" => ts };
 TypeArg: Ty = {
     Type,
     "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Ty::RowLit(Row::Cons(ls, tl)),
+    // A type-level natural literal in a dimension position (`Vec(Int, 3)`). A
+    // suffixed literal (`3i64`) is a value-level width and has no meaning as a
+    // dimension, so it is rejected here; the value must fit `u64`.
+    <l:@L> <n:"int"> <r:@R> =>? {
+        if n.suffix != crate::syntax::ast::Suffix::None {
+            return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "a dimension is a plain natural literal; drop the width suffix".to_string()),
+            });
+        }
+        match u64::try_from(n.value.clone()) {
+            Ok(v) => Ok(Ty::Nat(v)),
+            Err(_) => Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "dimension literal is too large".to_string()),
+            }),
+        }
+    },
+    // Arithmetic on dimensions is declined: `+` in a dimension position (`Vec(a,
+    // n + 1)`) is caught here and rejected with a message naming what a dimension
+    // may be, instead of surfacing a bare "unexpected +". `+` never appears in a
+    // type otherwise, so this alternative is unambiguous.
+    <l:@L> DimTerm "+" DimTail <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), DECLINE_DIM_ARITH.to_string()),
+    }),
+};
+
+// A single dimension operand, consumed only to locate the `+` of a declined
+// arithmetic expression; the parsed shape is discarded (the rule always errors).
+DimTerm: () = {
+    "int" => (),
+    "ident" => (),
+};
+DimTail: () = {
+    DimTerm => (),
+    DimTerm "+" DimTail => (),
 };
 
 RecordField: (String, Ty) = {
@@ -474,8 +540,12 @@ ErrorD: ErrorDecl = {
 };
 
 EffDecl: EffectDecl = {
-    <l:@L> "effect" <name:"uid"> <params:TyParams?> "{" <ops:EffOpList> "}" <r:@R> =>
+    <l:@L> "effect" <name:"uid"> <params:TyParams?> "v{" <ops:EffOpList> "v}" <r:@R> =>
         EffectDecl { name, params: params.unwrap_or_default(), ops, span: Span::new(l, r) },
+    // Flip: the retired brace form is recognized in full so the diagnostic points
+    // at the brace and names the layout rewrite.
+    "effect" "uid" TyParams? <l:@L> "{" <r:@R> EffOpList "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_EFFECT.to_string()) }),
 };
 
 EffOpSep: () = { "," => (), "v;" => () };
@@ -488,9 +558,16 @@ EffOpList: Vec<EffOp> = {
     },
 };
 
+// The op-declaration prefix carries the resumption grade: bare `ctl` is `Many`
+// (the default, multishot), `fun` is `One` (tail-resumptive), and `final ctl`
+// is `Zero` (never resumes). The three reuse the existing keyword tokens.
 EffOp: EffOp = {
     "ctl" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
-        EffOp { name, params, ret },
+        EffOp { name, params, ret, grade: Grade::Many },
+    "fun" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+        EffOp { name, params, ret, grade: Grade::One },
+    "final" "ctl" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+        EffOp { name, params, ret, grade: Grade::Zero },
 };
 
 // An op parameter may carry a binder name (`v : a`); only the type is kept.
@@ -834,6 +911,12 @@ PatAtom: S<Pattern> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Int(n), span: Span::new(l, r) },
     <l:@L> <f:"float"> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Float(f), span: Span::new(l, r) },
+    // A leading minus folds into the literal: patterns have no general negation,
+    // only negative constants, so `match n { -1 => .. }` matches the value -1.
+    <l:@L> "-" <n:"int"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Int(IntLit { value: -n.value, suffix: n.suffix }), span: Span::new(l, r) },
+    <l:@L> "-" <f:"float"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Float(-f), span: Span::new(l, r) },
     <l:@L> <c:"char"> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Char(c), span: Span::new(l, r) },
     <l:@L> "true" <r:@R> =>
@@ -905,26 +988,44 @@ Add: S<Expr> = {
 };
 
 Mul: S<Expr> = {
-    <l:@L> <la:Mul> "*" <ra:Pow> <r:@R> =>
+    <l:@L> <la:Mul> "*" <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/" <ra:Pow> <r:@R> =>
+    <l:@L> <la:Mul> "/" <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "%" <ra:Pow> <r:@R> =>
+    <l:@L> <la:Mul> "%" <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "*." <ra:Pow> <r:@R> =>
+    <l:@L> <la:Mul> "*." <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/." <ra:Pow> <r:@R> =>
+    <l:@L> <la:Mul> "/." <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    Neg,
+};
+
+// Unary minus, the pinned "tight prefix": looser than application, projection,
+// and postfix (all at `Call` and below) and looser than exponentiation (`^`),
+// but tighter than every other binary operator (all at `Mul` and above). So
+// `-f(x)` is `-(f(x))`, `-x * y` is `(-x) * y`, and, following the mathematical
+// convention, `-x ^ y` is `-(x ^ y)` (`-2 ^ 2` is -4); a negative base needs
+// explicit parentheses, `(-2) ^ 2`. A leading `f -x` is the binary `f - x`
+// (there is no juxtaposition application, so `-` after a value is always
+// subtraction). Right-recursive so `- -x` (double negation) parses; the lexer
+// keeps the two minus signs separate tokens, and the formatter re-emits them
+// spaced so the output never collides with the `--` line-comment lexeme.
+Neg: S<Expr> = {
+    <l:@L> "-" <e:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Neg(Box::new(e)), span: Span::new(l, r) },
     Pow,
 };
 
-// Exponentiation binds tighter than multiplication and is right-associative, so
-// `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)`. One operator spans Int and Float (and
-// mixed, which promotes to Float); the type-directed lowering in elaboration
-// picks integer or floating power and coerces an Int operand when the result is
-// Float.
+// Exponentiation binds tighter than unary minus and multiplication, and is
+// right-associative, so `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)`. The base is a
+// postfix expression (no leading minus: `-2 ^ 2` is `-(2 ^ 2)`), but the
+// exponent admits unary minus, so `2 ^ -3` is `2 ^ (-3)`. One operator spans
+// Int and Float (and mixed, which promotes to Float); the type-directed
+// lowering in elaboration picks integer or floating power and coerces an Int
+// operand when the result is Float.
 Pow: S<Expr> = {
-    <l:@L> <base:Call> "^" <exp:Pow> <r:@R> =>
+    <l:@L> <base:Call> "^" <exp:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
     Call,
 };

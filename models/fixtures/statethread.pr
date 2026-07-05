@@ -1,7 +1,6 @@
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
 fn prog() : !{State} Int =
   let x = get(())

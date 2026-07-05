@@ -9,9 +9,8 @@
 -- the whole program monadic and the pipeline would have allocated per element.
 -- The perf gate pins that the combined program allocates exactly as many eff-op
 -- cells as the escape alone.
-effect Log {
+effect Log
   ctl log(Int) : Int
-}
 
 fn weight(x) = x * 3
 

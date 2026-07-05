@@ -93,6 +93,26 @@ header h1 b {
   border-radius: 3px;
 }
 
+/* Subtle inline links from flavour text to the documentation. They take the
+   accent colour with a faint underline that brightens on hover, so a feature
+   name reads as prose first and a link second. Opened in a new tab so the demo
+   is never navigated away from. */
+.doc-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s ease;
+}
+.doc-link:hover {
+  text-decoration-color: var(--accent);
+}
+.doc-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* Prism token colours, shared by every page that paints source with the wasm
    `tokens` highlighter (the playground editor and the scrubber's code panel).
    Class names match the token kinds the tokenizer emits (`tk-<kind>`). */

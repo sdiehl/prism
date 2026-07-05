@@ -3,7 +3,11 @@
 -- The `List(a)` type and its `Nil`/`Cons` constructors are wired into the
 -- language (list literals, deriving); this module is the function surface over
 -- them. The prelude opens it, so these names are in scope unqualified
--- everywhere; a project module reaches them with `import Data.List`.
+-- everywhere; a project module reaches them with `import Data.List`. The
+-- container-generic queries (`length`, `sum`, `all`, `find`, and friends) live
+-- in `Data.Foldable` and work on any `Foldable`, this type included.
+
+import Data.Foldable (..)
 
 -- | The one-element list `Cons(x, Nil)`.
 pub fn singleton(x) = Cons(x, Nil)
@@ -32,12 +36,6 @@ pub fn last(xs) =
     Nil => None
     Cons(x, Nil) => Some(x)
     Cons(_, rest) => last(rest)
-
--- | The number of elements.
-pub fn length(xs) =
-  match xs of
-    Nil => 0
-    Cons(x, rest) => 1 + length(rest)
 
 -- | The element at index `n` (zero-based) as `Some`, or `None` if out of range.
 pub fn nth(n, xs) =
@@ -158,40 +156,13 @@ pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
 
 -- | Split a list of pairs into a pair of lists.
 pub fn unzip(ps) =
-  (map(\(p) -> match p of { (x, _) => x }, ps), map(\(p) -> match p of { (_, y) => y }, ps))
-
--- | True when every element satisfies `p` (vacuously true for `Nil`).
-pub fn all(p, xs) =
-  match xs of
-    Nil => true
-    Cons(x, rest) =>
-      if p(x) then
-        all(p, rest)
-      else
-        false
-
--- | True when some element satisfies `p`.
-pub fn any(p, xs) =
-  match xs of
-    Nil => false
-    Cons(x, rest) =>
-      if p(x) then
-        true
-      else
-        any(p, rest)
+  (
+      map(\(p) -> match p of { (x, _) => x }, ps),
+      map(\(p) -> match p of { (_, y) => y }, ps),
+    )
 
 -- | The number of elements satisfying `p`.
 pub fn count(p, xs) = length(filter(p, xs))
-
--- | The first element satisfying `p` as `Some`, or `None`.
-pub fn find(p, xs) =
-  match xs of
-    Nil => None
-    Cons(x, rest) =>
-      if p(x) then
-        Some(x)
-      else
-        find(p, rest)
 
 -- | Helper for `position`: search from index `n`.
 pub fn position_go(p, n, xs) =
@@ -205,12 +176,6 @@ pub fn position_go(p, n, xs) =
 
 -- | The index of the first element satisfying `p` as `Some`, or `None`.
 pub fn position(p, xs) = position_go(p, 0, xs)
-
--- | The sum of a list of numbers (`0` for `Nil`).
-pub fn sum(xs) = foldl(\(a, b) -> a + b, 0, xs)
-
--- | The product of a list of numbers (`1` for `Nil`).
-pub fn product(xs) = foldl(\(a, b) -> a * b, 1, xs)
 
 -- | The greatest element as `Some`, or `None` for the empty list.
 pub fn maximum(xs) =
@@ -273,7 +238,10 @@ pub fn chunks_of(n, xs) =
 
 -- | Left scan: the running accumulators of `foldl`, starting from `z`.
 pub fn scan_left(f, z, xs) =
-  Cons(z, match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) })
+  Cons(
+      z,
+      match xs of { Nil => Nil, Cons(x, rest) => scan_left(f, f(z, x), rest) },
+    )
 
 -- | Applicative apply for lists: every function in `fs` applied to every `x`.
 pub fn list_ap(fs, xs) = concat_map(\(g) -> map(g, xs), fs)

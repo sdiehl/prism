@@ -1,0 +1,45 @@
+-- Exercises the unboxed byte buffer runtime object end to end: construction,
+-- indexing, the FBIP in-place / shared-copy set and push, slicing, concatenation,
+-- comparison, the blake3 hash, and the String boundary (validating both a valid
+-- and an invalid UTF-8 buffer). Runs under the parity + leak oracles: native and
+-- interpreter must print byte-identical output and the run must leak no cells.
+
+fn build(b : Buf, i : Int, n : Int) : Buf =
+  if i >= n then
+    b
+  else
+    build(buf_push(b, i * 17), i + 1, n)
+
+fn sum(b : Buf, i : Int, acc : Int) : Int =
+  if i >= buf_len(b) then
+    acc
+  else
+    sum(b, i + 1, acc + buf_get(b, i))
+
+fn show_valid(b : Buf) : String =
+  if buf_utf8_valid(b) then
+    string_of_buf(b)
+  else
+    "<invalid>"
+
+fn main() =
+  let a = build(buf_empty(), 0, 12)
+  let c = buf_set(a, 4, 200)
+  let d = buf_slice(c, 2, 5)
+  let e = buf_cat(d, buf_of_string("!"))
+  let f = buf_new(3, 65)
+  println(show_int(buf_len(a)))
+  println(show_int(sum(a, 0, 0)))
+  println(show_int(buf_get(c, 4)))
+  println(show_int(buf_len(d)))
+  println(show_int(sum(d, 0, 0)))
+  println(show_int(buf_len(e)))
+  println(if buf_eq(a, c) then "eq" else "neq")
+  println(show_int(buf_cmp(a, c)))
+  println(show_int(buf_cmp(a, a)))
+  println(show_valid(f))
+  println(show_valid(buf_of_string("héllo, world")))
+  -- A lone continuation byte (0x80) is not valid UTF-8.
+  println(show_valid(buf_push(buf_empty(), 128)))
+  println(buf_hash(buf_of_string("hello")))
+  println(string_of_buf(buf_of_string("round trip")))

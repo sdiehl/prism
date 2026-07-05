@@ -20,6 +20,8 @@
 
 import Data.List (..)
 
+import Data.Foldable (..)
+
 -- The SplitMix64 mixing constants (the increment gamma and the two output
 -- multipliers) and its three output shift distances, named once here so the
 -- pseudo-random stream is one canonical definition.
@@ -164,16 +166,16 @@ fn float_at(size : Int) =
   elif pick == 1 then
     1.0
   elif pick == 2 then
-    0.0 -. 1.0
+    0.0 - 1.0
   elif pick == 3 then
-    1.0 /. 0.0
+    1.0 / 0.0
   elif pick == 4 then
-    (0.0 -. 1.0) /. 0.0
+    (0.0 - 1.0) / 0.0
   elif pick == 5 then
-    0.0 /. 0.0
+    0.0 / 0.0
   else
     let m = size + 1
-    to_float(small_signed(size)) /. to_float(m)
+    to_float(small_signed(size)) / to_float(m)
 
 -- | Generator of `Float`, including the nasty values (`+/-0`, `+/-inf`, `NaN`).
 pub let gen_float : Gen(Float) = Gen(float_at)
@@ -275,4 +277,14 @@ pub fn show_outcome(name : String, o : Outcome(a)) : String given Show(a) =
   match o of
     Passed(n) => concat_all([name, ": OK, passed ", show(n), " tests."])
     Failed(x, i, sd, sz) =>
-      concat_all([name, ": FAILED after ", show(i), " tests.\n  counterexample: ", show(x), "\n  reproduce: seed ", show(sd), " size ", show(sz)])
+      concat_all([
+          name,
+          ": FAILED after ",
+          show(i),
+          " tests.\n  counterexample: ",
+          show(x),
+          "\n  reproduce: seed ",
+          show(sd),
+          " size ",
+          show(sz),
+        ])

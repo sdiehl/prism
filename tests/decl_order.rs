@@ -146,7 +146,8 @@ fn caller(z) =
 // (`forall e. (List(() -> Unit ! {E, e})) -> ...`). Scope-aware collection keeps
 // `visit` general, identical to a control that only renames the caller.
 const SHADOW_COLLIDE: &str = "\
-effect E { ctl op(Unit) : Unit }
+effect E
+  ctl op(Unit) : Unit
 
 fn visit(fs) =
   match fs of
@@ -160,7 +161,8 @@ fn fs() : !{E} Unit =
 ";
 
 const SHADOW_CONTROL: &str = "\
-effect E { ctl op(Unit) : Unit }
+effect E
+  ctl op(Unit) : Unit
 
 fn visit(fs) =
   match fs of
@@ -178,7 +180,7 @@ fn parameter_shadowing_a_top_level_name_keeps_the_callee_general() {
     assert_eq!(sig(SHADOW_COLLIDE, "visit"), sig(SHADOW_CONTROL, "visit"));
     assert_eq!(
         sig(SHADOW_COLLIDE, "visit"),
-        "forall a e0. (List(() -> a ! {e0})) -> Unit ! {e0}"
+        "forall e0 a. (List(() -> a ! {e0})) -> Unit ! {e0}"
     );
     assert_eq!(sig(SHADOW_COLLIDE, "fs"), "() -> Unit ! {E}");
 }
@@ -194,7 +196,8 @@ fn scope_caller_named_after_a_concurrent_parameter_infers_its_row() {
     let src = "\
 import Concurrent (..)
 
-effect Trace { ctl note(Int) : Unit }
+effect Trace
+  ctl note(Int) : Unit
 
 fn task(n : Int, r : Int) : !{Async(Int), Trace} Int =
   note(n)

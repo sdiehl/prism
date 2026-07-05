@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/eff_arity.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Emit") LParen Ident("a") RParen LBrace Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit RBrace VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwInt Comma KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwInt Comma KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
 
 == ast ==
 Program {
@@ -24,9 +24,10 @@ Program {
                         ),
                     ],
                     ret: Unit,
+                    grade: Many,
                 },
             ],
-            span: 0..39,
+            span: 0..35,
         },
     ],
     errors: [],
@@ -58,7 +59,7 @@ Program {
                         node: Var(
                             "emit",
                         ),
-                        span: 80..84,
+                        span: 76..80,
                     },
                     [
                         Spanned {
@@ -68,14 +69,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 85..86,
+                            span: 81..82,
                         },
                     ],
                 ),
-                span: 80..87,
+                span: 76..83,
             },
             wheres: [],
-            span: 41..87,
+            span: 37..83,
         },
         Decl {
             name: "main",
@@ -85,19 +86,19 @@ Program {
             constraints: [],
             body: Spanned {
                 node: Unit,
-                span: 101..103,
+                span: 97..99,
             },
             wheres: [],
-            span: 89..103,
+            span: 85..99,
         },
     ],
 }
 
 == types ==
 Type Error: in `bad`: effect `Emit` expects 1 type argument(s), got 2
-   ╭─[ <source>:5:1 ]
+   ╭─[ <source>:4:1 ]
    │
- 5 │ fn bad() : !{Emit(Int, String)} Unit = emit(1)
+ 4 │ fn bad() : !{Emit(Int, String)} Unit = emit(1)
    │ ───────────────────────┬──────────────────────  
    │                        ╰──────────────────────── in `bad`: effect `Emit` expects 1 type argument(s), got 2
 ───╯

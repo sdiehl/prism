@@ -21,9 +21,8 @@
 
 import Concurrent (..)
 
-effect Log {
+effect Log
   ctl log(String) : Unit
-}
 
 fn feed(c : Chan, items : List(Int)) : !{Async(Int)} Int =
   match items of
@@ -58,7 +57,10 @@ fn pipeline() : !{Async(Int), Log} Int =
   let input = channel(())
   let output = channel(())
   let f = fork(\() -> feed(input, [1, 2, 3, 4]))
-  match (scope([\() -> worker("w1", input, output, 2), \() -> worker("w2", input, output, 2)])) of
+  match (scope([
+        \() -> worker("w1", input, output, 2),
+        \() -> worker("w2", input, output, 2),
+      ])) of
     _ => collect(output, 4, 0)
 
 fn main() =

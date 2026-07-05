@@ -3,9 +3,8 @@
 -- handler. Once this silently miscompiled natively (empty output) because the
 -- partial call was lowered as a full effectful call. Eta-expansion at
 -- elaboration turns each partial application into a real closure.
-effect St {
+effect St
   ctl get() : Int
-}
 
 fn add3(a, b, c) = a + b + c + get()
 

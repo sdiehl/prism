@@ -1,0 +1,12 @@
+-- Fixed-length vectors indexed by the `Nat` kind. `vzip` requires equal lengths
+-- (both length 1 here); `vmap` preserves the length; the pair is read back off
+-- the underlying list. Runs identically on the interpreter and native backends.
+import Data.Vec (..)
+
+fn main() : Unit =
+  let xs = vsingle(10)
+  let ys = vmap(\(x) -> x + 1, xs)
+  let zs = vzip(xs, ys)
+  match head(vto_list(zs)) of
+    Some((a, b)) => print(a + b)
+    None => print(0)

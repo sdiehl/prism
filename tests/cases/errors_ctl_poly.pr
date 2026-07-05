@@ -1,6 +1,5 @@
-effect Bail {
+effect Bail
   ctl bail(String) : a
-}
 
 fn main() =
   let r =

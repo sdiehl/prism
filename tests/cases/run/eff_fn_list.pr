@@ -1,9 +1,8 @@
 -- Effectful functions stored in a list, then extracted and piped through
 -- under a handler.
 
-effect Out {
+effect Out
   ctl out(Int) : Unit
-}
 
 fn shout(x) =
   out(x)

@@ -12,80 +12,80 @@ Reserved (a later release): like `Map`, a set's identity will carry the content 
 
 ### `set_empty`
 
-```prism,sig,h-9d6f3ac8d2aa7bdead2dd212467de586dec816dfebbfee17799c41ad95cbd089
-set_empty : forall a. Map(a, Unit)
+```prism,sig,h-12128ebadf8664aede55bd225e3fb28261aa51e0da856967e269b7527d5221be
+set_empty : forall a b. Map(a, Unit, b)
 ```
 
 The empty set.
 
 ### `set_insert`
 
-```prism,sig,h-aad1016282f708a9bc1afd49096519be8e96d2b7f10bec9b9403cd09190fead6
-set_insert : forall a. (a, Map(a, Unit)) -> Map(a, Unit)
+```prism,sig,h-ba9912c5ccaccf4b5247a55bcd8e53022fbf1db0eeacf51ccaef86ec4718b109
+set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 ```
 
 Add `x` to the set (a no-op if already present).
 
 ### `set_member`
 
-```prism,sig,h-df5d6b3a658d355e86702c7939da44f0b4664b4bf1313d9d1771d371d129bd76
-set_member : forall a. (a, Map(a, Unit)) -> Bool
+```prism,sig,h-5b1eba0c532993c09103e5626da76490085e53de03c3b121afdf92dcaa512a72
+set_member : forall a b. (b, Map(b, Unit, a)) -> Bool
 ```
 
 True when `x` is a member of the set.
 
 ### `set_delete`
 
-```prism,sig,h-0f38eb70013e74e1463f27e12b42c527e91c8526c2c0cc6dd84bd270da418cdf
-set_delete : forall a. (a, Map(a, Unit)) -> Map(a, Unit)
+```prism,sig,h-705ebd5bd3e3579cd93c299891ca164eeb0a0d9ac3448a94ef8115045b44a509
+set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 ```
 
 Remove `x` from the set (a no-op if absent).
 
 ### `set_size`
 
-```prism,sig,h-f2cb9d620e0c01dff4fa48520b6341ef4609677ac02986088b7fdd448241b4aa
-set_size : forall a b. (Map(a, b)) -> Int
+```prism,sig,h-936599cb846ae1e4f079f083f64abbf06e48db1c6f247f47b6bbe2a8b90fdce1
+set_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 The number of elements.
 
 ### `set_to_list`
 
-```prism,sig,h-3413b2240735449b56307162d8edf3fabc47186c3be02d66d5232aa3bd4c1093
-set_to_list : forall a b. (Map(a, b)) -> List(a)
+```prism,sig,h-cc9fd1a3a12d78f36448bc6b203d87dafe6fde82f6b44a6ea99db2ed8b6b173c
+set_to_list : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
 The elements in ascending order.
 
 ### `set_from_list`
 
-```prism,sig,h-e0eeded4501e46b1832815203e1f2f2ce0e03b9033192192c615890b71e3a24c
-set_from_list : forall a. (List(a)) -> Map(a, Unit)
+```prism,sig,h-58fddee9b57492fc02ad1376ca3e1f6b1ccaa4ece8dfd762ec02933ecdc983a5
+set_from_list : forall a b. (List(b)) -> Map(b, Unit, a)
 ```
 
 Build a set from a list, dropping duplicates.
 
 ### `set_union`
 
-```prism,sig,h-f7b3d2e3880e6a0a1606f9a43dbc259020b6a9406f912f11db8ce413816f3dca
-set_union : forall a. (Map(a, Unit), Map(a, Unit)) -> Map(a, Unit)
+```prism,sig,h-1d11d4663e5b1df1ad76fe596fb8164f675236a67c3e3ffbe6e3a29d880166c0
+set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a)
 ```
 
 Every element in either set.
 
 ### `set_intersection`
 
-```prism,sig,h-c3969f36b976045e7823179b3ea8808a135d71dfad5726673164e7508deff7fa
-set_intersection : forall a. (Map(a, Unit), Map(a, Unit)) -> Map(a, Unit)
+```prism,sig,h-26407dde6dc74e41d07309d552079f43bd4eba1e1ff36a53158a8713fcc71f76
+set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
 ```
 
 The elements in both sets.
 
 ### `set_difference`
 
-```prism,sig,h-5f58f4f1fac8308558a1de07287c0381158e1845e2486d57d6a908fa99e97900
-set_difference : forall a. (Map(a, Unit), Map(a, Unit)) -> Map(a, Unit)
+```prism,sig,h-8201b6e6cc25879e32cdc8e7e13a9813e65554a74ec72333ffdde900edbfd9c3
+set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
 ```
 
 The elements of `s1` that are not in `s2`.

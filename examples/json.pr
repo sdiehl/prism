@@ -1,0 +1,24 @@
+-- JSON: parse a document into the dynamic `Json` tree, then re-emit it in the one
+-- canonical form. Object keys sort, whitespace vanishes, and every number prints
+-- through the owned formatter, so the output is byte-deterministic: the same value
+-- always encodes to the same bytes, on every backend. The parser is total, so a
+-- malformed input is one positioned error rather than a crash.
+--
+-- Expected output:
+--   {"active":true,"name":"Ada","scores":[90,85,100],"tags":null}
+--   [1,2,[3,4]]
+--   line 1 col 7: expected ',' or ']' in array
+
+import Json (..)
+
+fn show_result(s) =
+  match decode(s) of
+    Ok(j) => println(encode(j))
+    Err(e) => println(json_error_message(e))
+
+fn main() =
+  show_result(
+      "\{ \"name\": \"Ada\", \"active\": true, \"scores\": [90, 85, 100], \"tags\": null \}",
+    )
+  show_result("[1, 2, [3, 4]]")
+  show_result("[1, 2 3]")

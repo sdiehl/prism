@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/named_escape.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Ask") LBrace Ctl Ident("ask") LParen RParen Colon KwInt RBrace VSemi Fn Ident("leak") LParen RParen Colon LParen KwUnit RParen Arrow KwInt Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("leak") LParen RParen LParen LParen RParen RParen RParen VClose
+VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Colon LParen KwUnit RParen Arrow KwInt Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("leak") LParen RParen LParen LParen RParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -18,9 +18,10 @@ Program {
                     name: "ask",
                     params: [],
                     ret: Int,
+                    grade: Many,
                 },
             ],
-            span: 0..32,
+            span: 0..28,
         },
     ],
     errors: [],
@@ -62,7 +63,7 @@ Program {
                                             node: Var(
                                                 "ask",
                                             ),
-                                            span: 129..129,
+                                            span: 125..125,
                                             synth: true,
                                         },
                                         [
@@ -70,14 +71,14 @@ Program {
                                                 node: Var(
                                                     "f",
                                                 ),
-                                                span: 129..130,
+                                                span: 125..126,
                                             },
                                         ],
                                     ),
-                                    span: 129..136,
+                                    span: 125..132,
                                 },
                             ),
-                            span: 121..136,
+                            span: 117..132,
                         },
                         [
                             Op(
@@ -90,7 +91,7 @@ Program {
                                             node: Var(
                                                 "k",
                                             ),
-                                            span: 96..97,
+                                            span: 92..93,
                                         },
                                         [
                                             Spanned {
@@ -100,11 +101,11 @@ Program {
                                                         suffix: None,
                                                     },
                                                 ),
-                                                span: 98..99,
+                                                span: 94..95,
                                             },
                                         ],
                                     ),
-                                    span: 96..100,
+                                    span: 92..96,
                                 },
                             ),
                             Return(
@@ -113,16 +114,16 @@ Program {
                                     node: Var(
                                         "r",
                                     ),
-                                    span: 117..118,
+                                    span: 113..114,
                                 },
                             ),
                         ],
                     ),
                 ),
-                span: 64..136,
+                span: 60..132,
             },
             wheres: [],
-            span: 34..136,
+            span: 30..132,
         },
         Decl {
             name: "main",
@@ -136,7 +137,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 150..157,
+                        span: 146..153,
                     },
                     [
                         Spanned {
@@ -147,36 +148,36 @@ Program {
                                             node: Var(
                                                 "leak",
                                             ),
-                                            span: 158..162,
+                                            span: 154..158,
                                         },
                                         [],
                                     ),
-                                    span: 158..164,
+                                    span: 154..160,
                                 },
                                 [
                                     Spanned {
                                         node: Unit,
-                                        span: 165..167,
+                                        span: 161..163,
                                     },
                                 ],
                             ),
-                            span: 158..168,
+                            span: 154..164,
                         },
                     ],
                 ),
-                span: 150..169,
+                span: 146..165,
             },
             wheres: [],
-            span: 138..169,
+            span: 134..165,
         },
     ],
 }
 
 == types ==
 Type Error: handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
-   ╭─[ <source>:9:3 ]
+   ╭─[ <source>:8:3 ]
    │
- 9 │   \(u) -> f.ask()
+ 8 │   \(u) -> f.ask()
    │   ───────┬───────  
    │          ╰───────── handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
 ───╯

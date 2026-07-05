@@ -1,0 +1,38 @@
+-- A multishot handler in one component no longer blocks var-erasure in an
+-- unrelated one. `search` explores a tree by resuming `choose` many times
+-- (genuinely multishot, grade `ctl`), while `sum_evens` is a plain `var` loop
+-- that performs no `Amb` op. With per-op grades the var loop erases to a mutable
+-- cell (fast tier) even though the program also contains the multishot handler;
+-- the whole-program multishot scan used to drag it onto the free-monad path.
+effect Amb
+  ctl choose(Int) : Int
+  final ctl reject(Unit) : Int
+
+fn triple(n) : !{Amb} Int =
+  let a = choose(n)
+  let b = choose(n)
+  let c = choose(n)
+  if a > 0 && b > 0 && a <= b && a * a + b * b == c * c then
+    a * 10000 + b * 100 + c
+  else
+    reject(())
+
+fn solutions(n) =
+  handle triple(n) with
+    choose(m, k) => flatten(map(\(i) -> k(i), range(0, m)))
+    final ctl reject(u) => Nil
+    return r => Cons(r, Nil)
+
+fn sum_evens(limit : Int) : Int =
+  var total := 0
+  var i := 0
+  while i < limit do
+    i += 1
+    if i % 2 == 1 then
+      continue
+    total += i
+  total
+
+fn main() : !{IO} Unit =
+  println(length(solutions(14)))
+  println(sum_evens(10))

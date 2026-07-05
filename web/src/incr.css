@@ -1,0 +1,345 @@
+/* The incremental-computation resident: a live cell graph on the demo face, with
+   a side panel that names what the last change recomputed; the Source face shows
+   the clean Incr program. Palette and the flip come from showcase.css / theme.css.
+   State colours: recomputed rides the accent, a cutoff cell takes the warn amber,
+   a cached cell dims back into the panel. */
+.incr-body .resident {
+  width: min(100%, 960px);
+}
+
+.incr-main {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(240px, 0.7fr);
+  gap: 1.3rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.incr-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.graph-title {
+  font-family: var(--ui);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+/* The graph frame: cells are absolutely positioned HTML chips, edges an SVG layer
+   beneath them. Height is set from script once the layout is known. */
+.graph {
+  position: relative;
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+.graph-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+  transition: stroke 0.3s;
+}
+.edge--hot {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* A cell chip: a name over its value (or a stepper, for a source), centered on its
+   layout point. The state class colours the border and value. */
+.cell {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+  white-space: nowrap;
+  z-index: 1;
+  transition:
+    border-color 0.25s,
+    opacity 0.25s;
+}
+.cell-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.cell-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  padding: 1px 8px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  transition:
+    color 0.25s,
+    background 0.25s;
+}
+.cell-tag {
+  font-family: var(--ui);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+/* Recomputed: the cell just re-ran and its value changed. Accent border and chip. */
+.cell.state-recomputed {
+  border-color: var(--accent);
+}
+.cell.state-recomputed .cell-value {
+  color: #fff;
+  background: var(--accent);
+}
+/* Cutoff: the cell re-ran but its value was unchanged, so it stopped the cascade.
+   Warn amber, dashed, and a "cut off" tag; its cached dependents keep their colour. */
+.cell.state-cutoff {
+  border-color: var(--warn);
+  border-style: dashed;
+}
+.cell.state-cutoff .cell-value {
+  color: #fff;
+  background: var(--warn);
+}
+/* Cached: served from the memo table without re-running. Dimmed back. */
+.cell.state-cached {
+  opacity: 0.5;
+}
+/* The changed source is the origin of the wave: accent ring. */
+.cell.state-changed {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* The pulse a recomputed or cut-off cell fires once. Uses the current border
+   colour so a cutoff pulses amber and a recompute pulses green. */
+.cell.pulse {
+  animation: cell-pulse 0.82s ease-out;
+}
+@keyframes cell-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-wash);
+  }
+  60% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 1px currentColor;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell.pulse {
+    animation: none;
+  }
+}
+
+/* A source cell's stepper: minus, value, plus. Tappable, sized up on phones. */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.stepper-val {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 20px;
+  text-align: center;
+  color: var(--ink);
+}
+.step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.step-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.step-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.step-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The legend under the graph: three swatches naming the three states. */
+.incr-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-family: var(--ui);
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 0.15rem;
+}
+.lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.lg i {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+}
+.lg-recomp i {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lg-cutoff i {
+  background: var(--warn);
+  border-color: var(--warn);
+  border-style: dashed;
+}
+.lg-cached i {
+  background: var(--bg-soft);
+  opacity: 0.6;
+}
+
+/* The side column: the change panel over the caption. */
+.incr-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+.incr-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  padding: 1rem 1.1rem;
+}
+.panel-head {
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panel-counter {
+  font-family: var(--mono);
+  font-size: 30px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  line-height: 1.2;
+  margin-top: 0.25rem;
+}
+.panel-sub {
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--muted);
+}
+.panel-story {
+  margin: 0.7rem 0 0;
+  font-family: var(--ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-height: 3.4em;
+}
+.incr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+/* The panel buttons reuse the transport `.play` look; `.alt` is a quieter outline
+   and `.ghost` is text-only, for the secondary reset. */
+.play.alt {
+  min-width: 0;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.play.alt:hover {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+}
+.play.ghost {
+  min-width: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.play.ghost:hover {
+  color: var(--ink);
+  background: var(--bg-soft);
+}
+.incr-side .caption {
+  max-width: none;
+  text-align: left;
+  margin: 0;
+}
+
+/* Phone layout: stack the panel under the graph, widen the steppers to real touch
+   targets. The graph stays inside its frame; cells are placed from the measured
+   width, so it never forces horizontal page scroll. */
+@media (max-width: 720px) {
+  .incr-main {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .incr-side .caption {
+    text-align: center;
+  }
+  .step-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+  }
+  .stepper-val {
+    font-size: 14px;
+    min-width: 22px;
+  }
+  .cell {
+    padding: 5px 10px;
+  }
+}

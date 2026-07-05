@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/dup_effect.pr
 ---
 == tokens ==
-VOpen Effect UIdent("A") LBrace Ctl Ident("ping") LParen KwInt RParen Colon KwUnit RBrace VSemi Effect UIdent("B") LBrace Ctl Ident("ping") LParen KwInt RParen Colon KwUnit RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("ping") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+VOpen Effect UIdent("A") VOpen Ctl Ident("ping") LParen KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("B") VOpen Ctl Ident("ping") LParen KwInt RParen Colon KwUnit VClose VSemi Fn Ident("main") LParen RParen Eq Ident("ping") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -20,9 +20,10 @@ Program {
                         Int,
                     ],
                     ret: Unit,
+                    grade: Many,
                 },
             ],
-            span: 0..35,
+            span: 0..31,
         },
         EffectDecl {
             name: "B",
@@ -34,9 +35,10 @@ Program {
                         Int,
                     ],
                     ret: Unit,
+                    grade: Many,
                 },
             ],
-            span: 37..72,
+            span: 33..64,
         },
     ],
     errors: [],
@@ -56,7 +58,7 @@ Program {
                         node: Var(
                             "ping",
                         ),
-                        span: 86..90,
+                        span: 78..82,
                     },
                     [
                         Spanned {
@@ -66,25 +68,24 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 91..92,
+                            span: 83..84,
                         },
                     ],
                 ),
-                span: 86..93,
+                span: 78..85,
             },
             wheres: [],
-            span: 74..93,
+            span: 66..85,
         },
     ],
 }
 
 == types ==
 Type Error: operation `ping` is declared in both `A` and `B`
-   ╭─[ <source>:5:1 ]
+   ╭─[ <source>:4:1 ]
    │
- 5 │ ╭─▶ effect B {
-   ┆ ┆   
- 7 │ ├─▶ }
-   │ │       
-   │ ╰─────── operation `ping` is declared in both `A` and `B`
+ 4 │ ╭─▶ effect B
+ 5 │ ├─▶   ctl ping(Int) : Unit
+   │ │                            
+   │ ╰──────────────────────────── operation `ping` is declared in both `A` and `B`
 ───╯

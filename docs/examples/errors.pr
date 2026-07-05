@@ -50,11 +50,7 @@ fn describe(cfg, key) =
 fn main() =
   let cfg = [("http", "8080"), ("https", "443"), ("smtp", "oops")]
   println(describe(cfg, "http"))
-  let port =
-    try
-      try port_of(cfg, "gopher") catch { Malformed(_s) => 0 }
-    catch
-      NotFound(_k) => 80
+  let port = try try port_of(cfg, "gopher") catch { Malformed(_s) => 0 } catch { NotFound(_k) => 80 }
   println("default {show(port)}")
   println(describe(cfg, "smtp"))
   println(describe(cfg, "https"))

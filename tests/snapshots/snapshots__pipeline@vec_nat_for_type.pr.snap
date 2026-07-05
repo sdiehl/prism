@@ -1,0 +1,96 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/vec_nat_for_type.pr
+---
+== tokens ==
+VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("demo") LParen Ident("x") Colon UIdent("Vec") LParen Int(IntLit { value: 3, suffix: None }) Comma KwInt RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Vec",
+            params: [
+                "a",
+                "n",
+            ],
+            param_kinds: [
+                Type,
+                Nat,
+            ],
+            ctors: [
+                Ctor {
+                    name: "MkVec",
+                    args: [
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 241..278,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "demo",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Nat(
+                                    3,
+                                ),
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 313..314,
+            },
+            wheres: [],
+            span: 280..314,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `demo`: kind mismatch: parameter 1 of `Vec` has kind `Type`, but a `Nat` was given
+   ╭─[ <source>:6:1 ]
+   │
+ 6 │ fn demo(x : Vec(3, Int)) : Int = 0
+   │ ─────────────────┬────────────────  
+   │                  ╰────────────────── in `demo`: kind mismatch: parameter 1 of `Vec` has kind `Type`, but a `Nat` was given
+───╯

@@ -1,6 +1,5 @@
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
 fn use() : !{Ask} Int =
   let x = ask(())

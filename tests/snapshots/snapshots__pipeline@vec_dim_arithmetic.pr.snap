@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/vec_dim_arithmetic.pr
+---
+== tokens ==
+VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen LBracket Ident("a") RBracket RParen VSemi Fn Ident("vcons") LParen Ident("x") Colon Ident("a") Comma Ident("u") Colon UIdent("Vec") LParen Ident("a") Comma Ident("n") RParen RParen Colon UIdent("Vec") LParen Ident("a") Comma Ident("n") Plus Int(IntLit { value: 1, suffix: None }) RParen Eq UIdent("MkVec") LParen LBracket RBracket RParen VClose
+
+== parse ==
+Parse Error: arithmetic on dimensions is not supported: a dimension is a plain natural literal (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only
+   ╭─[ <source>:4:41 ]
+   │
+ 4 │ fn vcons(x : a, u : Vec(a, n)) : Vec(a, n + 1) = MkVec([])
+   │                                         ──┬──  
+   │                                           ╰──── here
+───╯

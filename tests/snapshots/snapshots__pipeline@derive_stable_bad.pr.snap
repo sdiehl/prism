@@ -4,7 +4,7 @@ expression: "prism::report(&src)"
 input_file: tests/cases/derive_stable_bad.pr
 ---
 == tokens ==
-VOpen Class UIdent("Stable") LParen Ident("a") RParen LBrace RBrace VSemi Type UIdent("Config") Eq UIdent("C") LBrace Ident("retry") Colon KwInt Comma Ident("on_fail") Colon LParen KwUnit RParen Arrow KwUnit RBrace Deriving LParen UIdent("Stable") RParen VSemi Fn Ident("main") LParen RParen Eq Int(IntLit { value: 0, suffix: None }) VClose
+VOpen Class UIdent("Stable") LParen Ident("a") RParen VSemi Type UIdent("Config") Eq UIdent("C") LBrace Ident("retry") Colon KwInt Comma Ident("on_fail") Colon LParen KwUnit RParen Arrow KwUnit RBrace Deriving LParen UIdent("Stable") RParen VSemi Fn Ident("main") LParen RParen Eq Int(IntLit { value: 0, suffix: None }) VClose
 
 == ast ==
 Program {
@@ -49,11 +49,11 @@ Program {
             deriving: [
                 (
                     "Stable",
-                    88..94,
+                    83..89,
                 ),
             ],
             newtype: false,
-            span: 22..95,
+            span: 17..90,
         },
     ],
     effects: [],
@@ -65,7 +65,7 @@ Program {
             param: "a",
             supers: [],
             methods: [],
-            span: 0..20,
+            span: 0..15,
         },
     ],
     instances: [],
@@ -83,19 +83,19 @@ Program {
                         suffix: None,
                     },
                 ),
-                span: 109..110,
+                span: 104..105,
             },
             wheres: [],
-            span: 97..110,
+            span: 92..105,
         },
     ],
 }
 
 == types ==
 Type Error: cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
-   ╭─[ <source>:5:67 ]
+   ╭─[ <source>:3:67 ]
    │
- 5 │ type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)
+ 3 │ type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)
    │                                                                   ───┬──  
    │                                                                      ╰──── cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
 ───╯

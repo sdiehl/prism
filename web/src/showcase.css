@@ -1,0 +1,332 @@
+@import "./theme.css";
+
+/* The gallery's house template. Every resident (the determinism scrubber, the
+   double pendulum, the branching timelines, the chaos counter, and every future
+   one) is ONE framed surface with two faces: the running demo and its read-only
+   source, joined by a 3D flip a segmented toggle drives. A resident opts in with
+   the .faces / .flip markup below and calls initFaces() in showcase.ts. Palette,
+   reset, and header chrome come from theme.css; this file positions the surface,
+   the toggle, the video-style transport bar, the caption, and the source panel.
+   Residents that need a wider stage than the square default set --surface. */
+body.showcase-body {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--ui);
+  min-height: 100%;
+}
+
+.showcase-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: 1.6rem 1.4rem 2.2rem;
+  min-height: 0;
+}
+
+/* One resident: the segmented toggle stacked above its flip surface, the whole
+   column capped to the surface width so the toggle aligns with the frame. */
+.resident {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  width: var(--surface, min(72vh, 100%, 640px));
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* The segmented Demo/Source control: two real buttons in a pill, the active one
+   lifted onto the panel colour. Keyboard-operable, focus-ringed like the
+   transport scrubber. */
+.faces-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.face-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.14s,
+    color 0.14s;
+}
+.face-tab .glyph {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.face-tab:hover {
+  color: var(--ink);
+}
+.face-tab.is-active {
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.face-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The flip surface. `perspective` lives here; the inner element carries the
+   preserve-3d and the rotation so both faces share one 3D space. The surface
+   takes its height from the demo face, which stays in normal flow; the source
+   face is an absolute overlay, so it can never be taller than the demo it mirrors
+   and its own content scrolls. */
+.flip {
+  perspective: 1800px;
+}
+.flip-inner {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.35s ease;
+}
+.flip.show-source .flip-inner {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+/* The demo face is a neutral block: each resident drops its own layout element
+   (.player, .branch-main, .chaos-main) inside, and that sizes the surface. */
+.flip-face--demo {
+  display: flex;
+  justify-content: center;
+}
+/* The source face overlays the demo, pre-rotated so it reads correctly once the
+   surface turns. It fills the frame; the code scrolls inside it. */
+.flip-face--source {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+}
+
+/* The player column: the primary demo capped to the square stage width so the
+   caption's prose cannot stretch it. */
+.player {
+  width: min(72vh, 100%, 640px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  min-width: 0;
+}
+
+/* The source card, matching the stage: read-only, no edit affordances. In the
+   source face it fills the frame and scrolls in both axes. */
+.code-scroll {
+  overflow: auto;
+  height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.code {
+  margin: 0;
+  padding: 0.9rem 1.1rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  tab-size: 2;
+  white-space: pre;
+}
+
+/* A square stage: the world is square, so the canvas is too. The status overlay
+   sits centered on it while the trajectory is still computing. */
+.stage {
+  position: relative;
+  width: min(72vh, 100%, 640px);
+  aspect-ratio: 1 / 1;
+}
+.view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.status.hidden {
+  display: none;
+}
+.status.err {
+  color: var(--err);
+  padding: 1.5rem;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+/* The video-style transport: a play toggle, the scrubbable timeline, and the
+   step readout. Sized to the stage width. It rides the demo face, so the flip
+   carries it out of sight when the source is shown. */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: min(72vh, 100%, 640px);
+}
+.play {
+  flex: none;
+  min-width: 68px;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-family: var(--ui);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.play:hover {
+  background: var(--accent-strong);
+}
+.play:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.frame {
+  flex: none;
+  min-width: 96px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A native range input, restyled to a slim track with a round accent thumb, so
+   the timeline reads like a video scrubber rather than a form control. */
+.scrub {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-strong);
+  cursor: pointer;
+}
+.scrub:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.scrub:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.scrub::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.caption {
+  max-width: min(72vh, 100%, 640px);
+  margin: 0;
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  text-align: center;
+}
+.caption b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Fallbacks: a viewer who asked for less motion, or is on a narrow screen, gets
+   a crossfade instead of the 3D flip. The demo face still holds the height; the
+   source fades in over it, the demo fades out under it, and inert (set in
+   showcase.ts) keeps whichever face is hidden non-interactive, so no control
+   ever dangles over the code. */
+@media (prefers-reduced-motion: reduce), (max-width: 720px) {
+  .flip {
+    perspective: none;
+  }
+  .flip-inner {
+    transform-style: flat;
+    transition: none;
+  }
+  .flip.show-source .flip-inner {
+    transform: none;
+  }
+  .flip-face {
+    backface-visibility: visible;
+    -webkit-backface-visibility: visible;
+    transition: opacity 0.2s ease;
+  }
+  .flip-face--source {
+    transform: none;
+    opacity: 0;
+  }
+  .flip.show-source .flip-face--demo {
+    opacity: 0;
+  }
+  .flip.show-source .flip-face--source {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  header .tag {
+    flex-basis: 100%;
+    order: 5;
+  }
+  /* Comfortable thumb targets on a phone: the toggle sits well clear of the
+     header, and each tab is a full ~44px touch zone rather than the tight
+     desktop pill. */
+  .showcase-main {
+    padding: 1.1rem 1rem 1.8rem;
+  }
+  .face-tab {
+    min-height: 44px;
+    padding: 8px 18px;
+    font-size: 14px;
+  }
+  .face-tab .glyph {
+    width: 16px;
+    height: 16px;
+  }
+}

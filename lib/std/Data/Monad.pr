@@ -1,0 +1,40 @@
+-- | Generic operations derived from the `Applicative` and `Monad` classes.
+--
+-- Like `Data.Foldable`, these are constrained free functions written once
+-- against the class methods (`pure`, `ap`, `bind`) and shared by every
+-- instance (`List`, `Option`, ...). Side effects ride Prism's effect system;
+-- this is structural sequencing over the container shape, not do-notation.
+
+-- | Collapse one level of nesting: `m(m(a))` to `m(a)`.
+pub fn join(mm : m(m(a))) : m(a) given Monad(m) = bind(mm, \(x) -> x)
+
+-- | Lift a binary function over two wrapped values (`Applicative`).
+pub fn map2(f : (a, b) -> c, ma : m(a), mb : m(b)) : m(c) given Applicative(m) =
+  ap(fmap(\(x) -> \(y) -> f(x, y), ma), mb)
+
+-- | Lift a ternary function over three wrapped values (`Applicative`).
+pub fn map3(
+  f : (a, b, c) -> d,
+  ma : m(a),
+  mb : m(b),
+  mc : m(c)
+) : m(d) given Applicative(m) =
+  ap(map2(\(x, y) -> \(z) -> f(x, y, z), ma, mb), mc)
+
+-- | Evaluate a list of wrapped values left to right, collecting the results
+-- (`Applicative`). `Option` short-circuits on `None`; `List` takes the
+-- cartesian product.
+pub fn sequence(ms : List(m(a))) : m(List(a)) given Applicative(m) =
+  match ms of
+    Nil => pure(Nil)
+    Cons(m, rest) => map2(\(x, xs) -> Cons(x, xs), m, sequence(rest))
+
+-- | Apply `f` to each element and sequence the wrapped results
+-- (`Applicative`). This is `sequence` after a plain `map`.
+pub fn traverse_list(
+  f : (a) -> m(b),
+  xs : List(a)
+) : m(List(b)) given Applicative(m) =
+  match xs of
+    Nil => pure(Nil)
+    Cons(x, rest) => map2(\(y, ys) -> Cons(y, ys), f(x), traverse_list(f, rest))

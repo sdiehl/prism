@@ -111,7 +111,11 @@ fn collect_refs<'a>(
             collect_refs(b, names, bound, out);
             bound.truncate(base);
         }
-        Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => {
+        Expr::FieldAccess(b, _)
+        | Expr::Inst(b, _)
+        | Expr::Ann(b, _)
+        | Expr::Mask(_, b)
+        | Expr::Neg(b) => {
             collect_refs(b, names, bound, out);
         }
         Expr::Call(f, args) => {

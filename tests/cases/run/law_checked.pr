@@ -1,0 +1,41 @@
+-- The safe-arithmetic families of `Data.Checked` over the lane boundaries. The
+-- raw wrap/truncate/fault semantics they build on are pinned by fixed-width
+-- integers and integer arithmetic; here every printed line is a law that must
+-- hold identically on both backends. `checked` is `None` exactly on overflow or
+-- a zero divisor, `saturating` clamps to the crossed bound, `wrapping` matches
+-- the raw operator, and `overflowing` pairs the wrapped result with that flag.
+import Data.Checked (..)
+
+fn main() =
+  let i_max = to_i64(2 ^ 63 - 1)
+  let i_min = to_i64(0 - 2 ^ 63)
+  let u_max = to_u64(2 ^ 64 - 1)
+  let one = to_i64(1)
+  -- I64: the three families agree with each other at the upper edge.
+  println(show(checked_add(i_max, one) == None))
+  println(show(saturating_add(i_max, one) == i_max))
+  println(show(snd(overflowing_add(i_max, one))))
+  println(show(fst(overflowing_add(i_max, one)) == i_min))
+  println(show(checked_add(i_max, to_i64(0)) == Some(i_max)))
+  -- I64: lower edge, negation, and the two division edges.
+  println(show(saturating_sub(i_min, one) == i_min))
+  println(show(checked_neg(i_min) == None))
+  println(show(wrapping_neg(i_min) == i_min))
+  println(show(checked_div(i_min, i64_sub(0i64, one)) == None))
+  println(show(checked_div(to_i64(7), to_i64(2)) == Some(to_i64(3))))
+  println(show(checked_mod(to_i64(0 - 7), to_i64(2)) == Some(to_i64(0 - 1))))
+  -- U64: unsigned underflow clamps to zero and wraps to the max.
+  println(show(checked_sub(to_u64(0), to_u64(1)) == None))
+  println(show(saturating_sub(to_u64(0), to_u64(1)) == to_u64(0)))
+  println(show(fst(overflowing_sub(to_u64(0), to_u64(1))) == u_max))
+  println(show(checked_add(u_max, to_u64(1)) == None))
+  println(show(checked_neg(to_u64(0)) == Some(to_u64(0))))
+  -- Int: unbounded, so checked is total except division, overflow never fires.
+  println(show(checked_add(2 ^ 100, 2 ^ 100) == Some(2 ^ 100 + 2 ^ 100)))
+  println(show(saturating_mul(2 ^ 100, 2) == 2 ^ 100 * 2))
+  println(show(not(snd(overflowing_add(2 ^ 100, 1)))))
+  println(show(checked_div(5, 0) == None))
+  -- Checked Int narrowing agrees with the lane bounds.
+  println(show(int_to_i64(2 ^ 100) == None))
+  println(show(int_to_u64(0 - 1) == None))
+  println(show(int_to_i64(42) == Some(to_i64(42))))

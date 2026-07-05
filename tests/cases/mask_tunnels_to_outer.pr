@@ -1,9 +1,8 @@
 -- `mask<E>` tunnels `op` past `f`'s own handler to the outer handler in `main`,
 -- which resumes with `x + 100`, so `f : () -> Int !{E}` and the program prints
 -- 101. Regression: the masked effect must stay in `f`'s row, not be discharged.
-effect E {
+effect E
   ctl op(Int) : Int
-}
 
 fn f() =
   handle mask<E>(op(1)) with

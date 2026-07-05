@@ -1,0 +1,26 @@
+; adder builds a closure: a cell holding only the captured free variables,
+; tagged with which lambda it is. No code pointer is stored.
+define i64 @prism_adder(i64 %x) {
+  %c   = call ptr @prism_alloc(i64 1)
+  %tp  = getelementptr i8, ptr %c, i64 8
+  store i64 0, ptr %tp                 ; tag 0 = lambda #0
+  %fp  = getelementptr i8, ptr %c, i64 24
+  store i64 %x, ptr %fp                ; the captured x
+  %v   = ptrtoint ptr %c to i64
+  ret i64 %v
+}
+
+; application goes through a generated arity-1 trampoline that recovers the
+; captured environment and dispatches on the tag to the lifted body.
+define i64 @prism_apply_1(i64 %clos, i64 %arg) {
+  %c  = inttoptr i64 %clos to ptr
+  %fp = getelementptr i8, ptr %c, i64 24
+  %x  = load i64, ptr %fp
+  %r  = call i64 @prism_lam_0(i64 %x, i64 %arg)   ; switch on tag when many
+  ret i64 %r
+}
+
+; the lambda, lifted to a top-level function of (free vars.., params..).
+define i64 @prism_lam_0(i64 %x, i64 %y) {
+  ...                                  ; x + y
+}

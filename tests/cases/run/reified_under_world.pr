@@ -6,9 +6,8 @@
 -- only on a direct call, never through a closure): lowering monadifies the whole
 -- program, matching the interpreter's uniform free monad. Guards native parity
 -- for a reifying body wrapped in the world handler.
-effect Log {
+effect Log
   ctl log(Int) : Int
-}
 
 fn weight(x) = x * 3
 

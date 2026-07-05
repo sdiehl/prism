@@ -3,25 +3,20 @@
 -- {AB, CD, E} IS {A, B, C, D, E}: omega and flat have the same type, and the
 -- grouping is documentation that leaves no trace in the semantics.
 
-effect A {
+effect A
   ctl alpha(Unit) : Unit
-}
 
-effect B {
+effect B
   ctl beta(Unit) : Unit
-}
 
-effect C {
+effect C
   ctl gamma(Unit) : Unit
-}
 
-effect D {
+effect D
   ctl delta(Unit) : Unit
-}
 
-effect E {
+effect E
   ctl epsilon(Unit) : Unit
-}
 
 alias AB = {A, B}
 

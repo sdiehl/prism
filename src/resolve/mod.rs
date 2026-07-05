@@ -407,6 +407,10 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
         root.patterns.extend(p.patterns);
         root.fns.extend(p.fns);
         root.opaques.extend(p.opaques);
+        // Carry each module's deprecation suggestions so a use of an imported
+        // deprecated definition warns. Keyed by surface name; a use-site warning
+        // fires only for the user's own source (the lint span filter).
+        root.deprecated.extend(p.deprecated);
     }
     root.imports.clear();
     root
@@ -693,7 +697,7 @@ impl<'a> Rw<'a> {
                     self.expr(x);
                 }
             }
-            Expr::FieldAccess(x, _) => self.expr(x),
+            Expr::FieldAccess(x, _) | Expr::Neg(x) => self.expr(x),
             Expr::RecordCreate(name, fields) => {
                 *name = self.value(name, span);
                 for (_, v) in fields {

@@ -17,6 +17,9 @@
 ///
 /// A digest that attests a property of another digest. The minimal certificate is
 /// a parity-passed record keyed by hash.
+/// The Incr durable-snapshot bridge: a named blob rides the store's object layer
+/// (keyed by content hash) with a ref for the caller tag; see [`bridge`].
+pub mod bridge;
 pub mod cert;
 pub mod codec;
 /// Store-level instance coherence.

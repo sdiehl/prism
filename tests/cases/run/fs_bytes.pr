@@ -1,0 +1,18 @@
+-- Byte-level filesystem round trip: `write_bytes` then `read_bytes` returns the
+-- exact bytes, including an embedded NUL and a `0xFF` byte that is not valid
+-- standalone UTF-8, proving the seam never reinterprets the payload as text.
+
+import Data.Bytes (..)
+
+fn main() =
+  let path = "/tmp/prism_fs_bytes_case.bin"
+  remove_file(path)
+  let bs = bytes_push(bytes_push(string_to_bytes("hi"), 0), 255)
+  match write_bytes(path, bs) of
+    Ok(_) => println("wrote")
+    Err(e) => println(e)
+  let back = read_bytes(path)
+  println(show(bytes_length(back)))
+  println(hex_encode(back))
+  println(show(bytes_eq(bs, back)))
+  remove_file(path)

@@ -1,0 +1,3 @@
+effect State {
+  ctl get(Unit) : Int
+}

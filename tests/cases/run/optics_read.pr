@@ -15,7 +15,10 @@ fn mk(n : String, h : Int) : Player =
   Player {
     name = n,
     hp = h,
-    bag = Cons(Item { name = "a", count = 1 }, Cons(Item { name = "b", count = 2 }, Nil))
+    bag = Cons(
+        Item { name = "a", count = 1 },
+        Cons(Item { name = "b", count = 2 }, Nil),
+      )
   }
 
 fn main() =
@@ -29,6 +32,8 @@ fn main() =
   -- nested each flattens: every item count of every player
   println(ps.[each.bag.each.count])
   -- prism preview: the radius of the circles, squares skipped
-  let shapes =
-    Cons(Circle { radius = 7 }, Cons(Square { side = 2 }, Cons(Circle { radius = 9 }, Nil)))
+  let shapes = Cons(
+      Circle { radius = 7 },
+      Cons(Square { side = 2 }, Cons(Circle { radius = 9 }, Nil)),
+    )
   println(shapes.[each.?Circle.radius])

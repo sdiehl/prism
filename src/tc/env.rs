@@ -89,35 +89,39 @@ impl Tc<'_> {
                         msg: format!("unknown type `{n}`"),
                     });
                 };
-                // Kind-check each argument against the declared parameter kind so a
-                // mismatch is a clear message here rather than a downstream row/type
-                // unification failure. A `Row`-kinded parameter takes an effect row
-                // (a row variable or a `{..}` row literal); every other takes a type.
+                // Kind-check the application against the constructor's kind. The
+                // constructor's kind is the arrow `Kind::arrow(param_kinds)` (for
+                // `Vec(a, n : Nat)`, `Type -> Nat -> Type`); each argument peels one
+                // domain off, so a mis-kinded or over-supplied argument is a clear
+                // message here rather than a downstream unification failure. A
+                // syntactically-unknown argument (a bare variable or application) is
+                // accepted at any domain: its kind is pinned by inference.
+                let mut con_kind = Kind::arrow(&info.param_kinds);
                 for (i, arg) in ts.iter().enumerate() {
-                    match info.param_kinds.get(i) {
-                        Some(Kind::Row) if !is_row_arg(arg) => {
+                    let Kind::Fun(dom, rest) = con_kind else {
+                        return Err(TypeError::Other {
+                            span,
+                            msg: format!(
+                                "`{n}` is applied to too many arguments: it takes {}, but {} were given",
+                                info.param_kinds.len(),
+                                ts.len()
+                            ),
+                        });
+                    };
+                    if let Some(actual) = syntactic_kind(arg) {
+                        if actual != *dom {
                             return Err(TypeError::Other {
                                 span,
                                 msg: format!(
-                                    "kind mismatch: parameter {} of `{n}` has kind `Row`, so its \
-                                     argument must be an effect row (a row variable or `{{..}}`), \
-                                     not a type",
-                                    i + 1
+                                    "kind mismatch: parameter {} of `{n}` has kind `{}`, but a `{}` was given",
+                                    i + 1,
+                                    dom.show(),
+                                    actual.show(),
                                 ),
                             });
                         }
-                        Some(k) if *k != Kind::Row && is_row_literal(arg) => {
-                            return Err(TypeError::Other {
-                                span,
-                                msg: format!(
-                                    "kind mismatch: parameter {} of `{n}` has kind `Type`, but an \
-                                     effect row was given",
-                                    i + 1
-                                ),
-                            });
-                        }
-                        _ => {}
                     }
+                    con_kind = *rest;
                 }
                 ts.iter().try_for_each(|x| self.check_annot_rows(x, span))
             }
@@ -242,7 +246,7 @@ impl Tc<'_> {
                 // A `Row`-kinded parameter position takes an effect row, not a
                 // type, so its argument is lowered as a row (`Cmd(a, e)`).
                 let kinds = self.data.get(n).map(|d| d.param_kinds.clone());
-                let conv = args
+                let mut conv: Vec<Type> = args
                     .iter()
                     .enumerate()
                     .map(|(i, x)| {
@@ -257,6 +261,21 @@ impl Tc<'_> {
                         }
                     })
                     .collect();
+                // Trailing phantom parameters may be left off: `Map(k, v)` names
+                // the arity-3 `Map(k, v, ord)` with a fresh brand for the omitted
+                // `ord` (so pre-brand source keeps checking). Only a partial (not
+                // empty: a bare `Map` is a higher-kinded head) application fills,
+                // each missing position a fresh existential of its declared kind.
+                if let Some(ks) = &kinds {
+                    if !conv.is_empty() && conv.len() < ks.len() {
+                        for k in &ks[conv.len()..] {
+                            conv.push(match k {
+                                Kind::Row => Type::Row(EffRow::Exist(self.push_ex_row())),
+                                _ => Type::Exist(self.push_ex()),
+                            });
+                        }
+                    }
+                }
                 Type::Con(Sym::from(n), conv)
             }
             ast::Ty::App(v, args) => {
@@ -271,6 +290,7 @@ impl Tc<'_> {
                 Type::Tuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
             }
             ast::Ty::RowLit(row) => Type::Row(self.convert_row(row, a)),
+            ast::Ty::Nat(n) => Type::Nat(*n),
         }
     }
 
@@ -348,15 +368,18 @@ fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), Type
     Ok(())
 }
 
-// A type argument acceptable at a `Row`-kinded parameter position: an effect-row
-// variable (a bare name) or a `{..}` row literal.
-const fn is_row_arg(t: &ast::Ty) -> bool {
-    matches!(t, ast::Ty::Var(_)) || is_row_literal(t)
-}
-
-// Whether a written type argument is a `{..}` effect-row literal.
-const fn is_row_literal(t: &ast::Ty) -> bool {
-    matches!(t, ast::Ty::RowLit(_))
+// The kind a written type argument commits to by its syntax alone: a `{..}` row
+// literal is `Row`, a natural literal is `Nat`, and any concrete type
+// constructor or scalar is `Type`. A bare variable or higher-kinded application
+// returns `None` (its kind is not fixed by syntax, so the kind checker defers to
+// inference and accepts it at any domain).
+const fn syntactic_kind(t: &ast::Ty) -> Option<Kind> {
+    match t {
+        ast::Ty::RowLit(_) => Some(Kind::Row),
+        ast::Ty::Nat(_) => Some(Kind::Nat),
+        ast::Ty::Var(_) | ast::Ty::App(..) | ast::Ty::State(_) => None,
+        _ => Some(Kind::Type),
+    }
 }
 
 fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
@@ -411,6 +434,46 @@ pub(super) fn convert_data(t: &ast::Ty) -> Type {
     convert_data_rp(t, &BTreeSet::new())
 }
 
+// Saturate an under-applied constructor spine: `Map(k, v)` names the arity-3
+// `Map(k, v, ord)`, filling each omitted trailing parameter with a fresh
+// variable of its declared kind. This is the exported-scheme twin of the fill in
+// `convert_annot` (which mints existentials for the body check); the fresh names
+// here are quantified into the scheme by the caller's `collect_*_vars`. Only a
+// partial application fills: a bare `Map` head is a higher-kinded operand and is
+// left untouched, and a fully applied spine is unchanged.
+fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
+    let go = |x: Type| saturate_cons(x, data);
+    match t {
+        Type::Con(n, args) => {
+            let mut conv: Vec<Type> = args.into_iter().map(go).collect();
+            if let Some(info) = data.get(n.as_str()) {
+                if !conv.is_empty() {
+                    for k in info.param_kinds.iter().skip(conv.len()) {
+                        conv.push(match k {
+                            Kind::Row => Type::Row(EffRow::Var(Sym::fresh())),
+                            _ => Type::Var(Sym::fresh()),
+                        });
+                    }
+                }
+            }
+            Type::Con(n, conv)
+        }
+        Type::Fun(ps, row, r) => Type::Fun(
+            ps.into_iter().map(go).collect(),
+            row,
+            Box::new(saturate_cons(*r, data)),
+        ),
+        Type::Tuple(xs) => Type::Tuple(xs.into_iter().map(go).collect()),
+        Type::App(h, a) => Type::App(
+            Box::new(saturate_cons(*h, data)),
+            Box::new(saturate_cons(*a, data)),
+        ),
+        Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_cons(*b, data))),
+        Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_cons(*b, data))),
+        other => other,
+    }
+}
+
 // The core of `convert_data`, aware of the current declaration's `Row`-kinded
 // parameters `rp`. A variable named in `rp` is an effect row, so it lowers to
 // `Type::Row(Var(..))` wherever it appears (notably as the argument at a
@@ -456,6 +519,7 @@ pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
         ),
         ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect()),
         ast::Ty::RowLit(row) => Type::Row(data_row_rp(row, rp)),
+        ast::Ty::Nat(v) => Type::Nat(*v),
     }
 }
 
@@ -697,9 +761,9 @@ pub(super) fn annotation_scheme(
     ann_row_var_names(ret, data, &mut row_names);
     let pt: Vec<Type> = annots
         .into_iter()
-        .map(|t| convert_data_rp(t, &row_names))
+        .map(|t| saturate_cons(convert_data_rp(t, &row_names), data))
         .collect();
-    let rt = convert_data_rp(ret, &row_names);
+    let rt = saturate_cons(convert_data_rp(ret, &row_names), data);
     let mut tvars = BTreeSet::new();
     let mut rvars = BTreeSet::new();
     for t in &pt {
@@ -722,7 +786,7 @@ pub(super) fn fn_stub(d: &Decl<Core>, data: &BTreeMap<String, super::DataInfo>) 
         return d.ret.as_ref().map_or_else(
             || Type::Var(Sym::fresh()),
             |ann| {
-                let t = convert_data(ann);
+                let t = saturate_cons(convert_data(ann), data);
                 let mut vars = BTreeSet::new();
                 collect_type_vars(&t, &mut vars);
                 wrap_forall(&vars.into_iter().collect::<Vec<_>>(), t)
@@ -757,11 +821,31 @@ const BUILTINS: &[(&str, &str)] = &[
     ("ceil_to_int", "(Float) -> Int"),
     ("abs_float", "(Float) -> Float"),
     ("sqrt", "(Float) -> Float"),
+    ("floor", "(Float) -> Float"),
+    ("ceil", "(Float) -> Float"),
+    ("round", "(Float) -> Float"),
+    ("trunc", "(Float) -> Float"),
     ("sin", "(Float) -> Float"),
     ("cos", "(Float) -> Float"),
+    ("tan", "(Float) -> Float"),
+    ("asin", "(Float) -> Float"),
+    ("acos", "(Float) -> Float"),
+    ("atan", "(Float) -> Float"),
+    ("sinh", "(Float) -> Float"),
+    ("cosh", "(Float) -> Float"),
+    ("tanh", "(Float) -> Float"),
     ("exp", "(Float) -> Float"),
+    ("exp2", "(Float) -> Float"),
+    ("expm1", "(Float) -> Float"),
     ("ln", "(Float) -> Float"),
+    ("log2", "(Float) -> Float"),
+    ("log10", "(Float) -> Float"),
+    ("log1p", "(Float) -> Float"),
+    ("cbrt", "(Float) -> Float"),
     ("pow_float", "(Float, Float) -> Float"),
+    ("atan2", "(Float, Float) -> Float"),
+    ("hypot", "(Float, Float) -> Float"),
+    ("fmod", "(Float, Float) -> Float"),
     ("parse_float", "(String) -> Float"),
     ("show_float_prec", "(Float, Int) -> String"),
     ("concat", "(String, String) -> String"),
@@ -785,6 +869,11 @@ const BUILTINS: &[(&str, &str)] = &[
     ("parse_int", "(String) -> Option(Int)"),
     ("prim_getenv", "(String) -> String ! {IO}"),
     ("prim_read_file", "(String) -> String ! {IO}"),
+    ("prim_read_bytes", "(String) -> Buf ! {IO}"),
+    (
+        "prim_write_bytes",
+        "(String, Buf) -> Result(Unit, String) ! {IO}",
+    ),
     (
         "write_file",
         "(String, String) -> Result(Unit, String) ! {IO}",
@@ -795,11 +884,16 @@ const BUILTINS: &[(&str, &str)] = &[
         "(String, String) -> Result(Unit, String) ! {IO}",
     ),
     ("remove_file", "(String) -> Unit ! {IO}"),
+    ("prim_store_get", "(String, String) -> String ! {IO}"),
+    ("prim_store_put", "(String, String, String) -> Unit ! {IO}"),
+    ("prim_store_has", "(String, String) -> Bool ! {IO}"),
     ("exit", "forall a. (Int) -> a"),
     ("system", "(String) -> Int ! {IO}"),
     ("eprint", "(String) -> Unit ! {IO}"),
     ("prim_args_count", "() -> Int ! {IO}"),
     ("prim_arg", "(Int) -> String ! {IO}"),
+    ("prim_wall_now", "() -> Int ! {IO}"),
+    ("prim_mono_now", "() -> Int ! {IO}"),
     ("to_i64", "(Int) -> I64"),
     ("to_u64", "(Int) -> U64"),
     ("int_of_i64", "(I64) -> Int"),
@@ -822,6 +916,20 @@ const BUILTINS: &[(&str, &str)] = &[
     ("array_push", "forall a. (Array(a), a) -> Array(a)"),
     ("array_pop", "forall a. (Array(a)) -> Array(a)"),
     ("string_of_array", "(Array(String)) -> String"),
+    ("buf_empty", "() -> Buf"),
+    ("buf_new", "(Int, Int) -> Buf"),
+    ("buf_len", "(Buf) -> Int"),
+    ("buf_get", "(Buf, Int) -> Int"),
+    ("buf_set", "(Buf, Int, Int) -> Buf"),
+    ("buf_push", "(Buf, Int) -> Buf"),
+    ("buf_slice", "(Buf, Int, Int) -> Buf"),
+    ("buf_cat", "(Buf, Buf) -> Buf"),
+    ("buf_eq", "(Buf, Buf) -> Bool"),
+    ("buf_cmp", "(Buf, Buf) -> Int"),
+    ("buf_hash", "(Buf) -> String"),
+    ("buf_of_string", "(String) -> Buf"),
+    ("string_of_buf", "(Buf) -> String"),
+    ("buf_utf8_valid", "(Buf) -> Bool"),
     ("string_of_bytes", "(Array(Int)) -> String"),
     ("byte_at", "(String, Int) -> Int"),
     ("byte_len", "(String) -> Int"),
@@ -884,15 +992,16 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     let mut env = base_env()?;
     // When the record/replay/durable machinery is imported, `print`/`println`
     // route through the interceptable `Output` capability instead of the ambient
-    // `IO`, so the replay handlers can drop output during a replayed prefix.
+    // `IO`, so the replay handlers can drop output during a replayed prefix (and
+    // the incremental trace engine can capture a memo's output onto its trace).
     // Without it they keep their `{IO}` row, so the rest of the corpus (and any
     // `!{IO}` annotation) is untouched and a reified-handler body is never wrapped
-    // in a world handler it cannot fuse through.
+    // in a world handler it cannot fuse through. This gate must stay in lockstep
+    // with the desugarer and elaborator, which key output routing on the same two
+    // driver families.
     if prog.fns.iter().any(|f| {
-        matches!(
-            f.name.as_str(),
-            "Replay.record" | "Replay.replay" | "Replay.durable"
-        )
+        names::REPLAY_DRIVERS.contains(&f.name.as_str())
+            || names::INCR_REPLAY_DRIVERS.contains(&f.name.as_str())
     }) {
         for n in ["print", "println"] {
             env.insert(
@@ -908,6 +1017,18 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         DataInfo {
             params: vec!["a".to_string()],
             param_kinds: vec![Kind::Type],
+            ctors: vec![],
+        },
+    );
+    // `Buf` is a built-in 0-parameter type: an unboxed byte buffer (a heap cell
+    // with a raw-u8 payload, `runtime/prism_buffer.c`) with no surface
+    // constructors, manipulated only through the `buf_*` builtins. It is the
+    // storage under the stdlib `Bytes` type.
+    data.insert(
+        "Buf".to_string(),
+        DataInfo {
+            params: vec![],
+            param_kinds: vec![],
             ctors: vec![],
         },
     );
@@ -984,6 +1105,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                     eff_params: eff_decl.params.iter().map(Sym::from).collect(),
                     params: params.clone(),
                     ret: ret.clone(),
+                    grade: op.grade,
                 },
             );
             // A var in the return type but in no parameter is instantiated fresh
@@ -1051,8 +1173,10 @@ mod tests {
             let want: &[&str] = match *name {
                 "print" | "println" | "prim_print" | "prim_println" | "prim_read_int"
                 | "prim_read_line" | "prim_rand" | "srand" | "system" | "eprint"
-                | "prim_getenv" | "prim_read_file" | "write_file" | "prim_file_exists"
-                | "append_file" | "remove_file" | "prim_args_count" | "prim_arg" => &["IO"],
+                | "prim_getenv" | "prim_read_file" | "prim_read_bytes" | "prim_write_bytes"
+                | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
+                | "prim_store_get" | "prim_store_put" | "prim_store_has" | "prim_args_count"
+                | "prim_arg" | "prim_wall_now" | "prim_mono_now" => &["IO"],
                 "error" => &["Exn"],
                 _ => &[],
             };

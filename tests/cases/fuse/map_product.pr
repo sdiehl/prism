@@ -1,0 +1,5 @@
+-- Fuses: a product consumer over a mapped range.
+import Sequence as Seq
+
+fn main() : !{IO} Unit =
+  println(Seq.product(Seq.map(Seq.range(1, 7), \(x) -> x + 1)))

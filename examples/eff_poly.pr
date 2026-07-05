@@ -1,10 +1,8 @@
-effect Tick {
+effect Tick
   ctl tick(Unit) : Int
-}
 
-effect Say {
+effect Say
   ctl say(Int) : Unit
-}
 
 -- Effect polymorphism: one higher-order function, any effect row.
 --

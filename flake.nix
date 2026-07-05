@@ -63,6 +63,8 @@
               pkgs.pre-commit
               pkgs.dprint
               pkgs.sccache
+              pkgs.cargo-insta
+              pkgs.cargo-nextest
             ];
 
             buildInputs = libInputs;
@@ -87,7 +89,8 @@
           # Crane's default filter keeps only Cargo-relevant files. The compiler
           # embeds non-.rs inputs at build time: the stdlib via include_str!, the C
           # runtime compiled by build.rs, the LALRPOP grammar processed by build.rs,
-          # and examples/boids.pr. Those paths must be unioned back in or the build
+          # and the examples/*.pr the wasm feature embeds (src/wasm.rs). Those paths
+          # must be unioned back in or the build
           # fails (grammar) or embeds stale/absent sources (stdlib). A stdlib mismatch
           # would surface as a `dump stdlib-hash` divergence from `cargo build`.
           fs = pkgs.lib.fileset;
@@ -99,6 +102,8 @@
               ./runtime
               ./rust-toolchain.toml
               ./examples/boids.pr
+              ./examples/chaos_swarm.pr
+              ./examples/pendulum.pr
               ./src/syntax/grammar.lalrpop
             ];
           };
@@ -139,6 +144,11 @@
           prism-wasm = craneWasm.buildPackage (wasmArgs // {
             cargoArtifacts = craneWasm.buildDepsOnly wasmArgs;
             nativeBuildInputs = [ wasmBindgen pkgs.binaryen ];
+            # `[lib] crate-type` is rlib-only in Cargo.toml so native builds skip
+            # the dead cdylib; ask for the wasm cdylib here with `cargo rustc
+            # --crate-type cdylib` (plain `cargo build` would only emit the rlib
+            # and postInstall would find no prism.wasm).
+            cargoBuildCommand = "cargo rustc --release --lib --crate-type cdylib";
             # buildPackage emits target/wasm32-unknown-unknown/release/prism.wasm;
             # wasm-bindgen turns it into the web-target JS + _bg.wasm pair the docs
             # and web app consume, then wasm-opt -Oz shrinks it (what wasm-pack does

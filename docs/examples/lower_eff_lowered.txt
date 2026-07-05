@@ -1,0 +1,5 @@
+fn tick(ev_get, ev_put, s) =
+  (force ev_get)((), s)  to n, s'    -- perform get  -> a call on the evidence
+  s' + 1                 to m
+  (force ev_put)(m, s')  to _, s''   -- perform put  -> a call on the evidence
+  return n, s''

@@ -151,6 +151,9 @@ fn comp(c: &Comp) -> J {
         Comp::FloatBuiltin(op, v) => {
             json!({"c": "floatBuiltin", "name": format!("{op:?}"), "v": value(v)})
         }
+        Comp::Neg(lane, v) => {
+            json!({"c": "neg", "lane": format!("{lane:?}"), "v": value(v)})
+        }
         Comp::StrBuiltin(b, args) => {
             json!({"c": "strBuiltin", "name": format!("{b:?}"), "args": values(args)})
         }

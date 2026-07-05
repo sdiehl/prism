@@ -1,0 +1,32 @@
+-- Time: durations, RFC 3339 formatting and parsing, and a virtual clock.
+--
+-- `Duration` arithmetic and RFC 3339 are pure and deterministic (UTC only, no
+-- locale, no time zone database). The wall and monotonic reads come from the one
+-- `Clock` capability; here `run_clock` serves them from a virtual counter that
+-- `sleep` advances, so the elapsed time is a pure function of the sleeps and the
+-- program prints the same thing on every run with no real clock consulted. Swap
+-- `run_clock` for `Time.run_clock_real` and the same code reads the OS clock,
+-- recorded so it still replays.
+--
+-- Expected output:
+--   1970-01-01T00:00:00Z
+--   2025-07-04T11:54:56.500000000Z
+--   90000000000
+--   elapsed 7
+
+import Time (..)
+
+import Concurrent (..)
+
+fn timed() =
+  let start = mono_clock()
+  sleep(3)
+  sleep(4)
+  let stop = mono_clock()
+  elapsed(start, stop)
+
+fn main() =
+  println(format_rfc3339(Wall(0)))
+  println(format_rfc3339(wall_add(Wall(1751630096000000000), millis(500))))
+  println(show_int(dur_nanos(dur_add(minutes(1), seconds(30)))))
+  println("elapsed {dur_nanos(run_clock(timed))}")

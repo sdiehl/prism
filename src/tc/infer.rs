@@ -9,7 +9,9 @@ use super::{
 use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, BinOp, Core, Decl, Expr, HandlerArm, NodeId, PathOp, PathStep, S};
-use crate::types::ty::{EffRow, Effects, Label, Type, EQ_CLASS, LIST, ORD_CLASS};
+use crate::types::ty::{
+    EffRow, Effects, Label, Type, DIV_CLASS, EQ_CLASS, LIST, NUM_CLASS, ORD_CLASS, SHOW_CLASS,
+};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
@@ -201,8 +203,69 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // A list literal against a known `List(T)` pushes `T` into each
+            // element, so the tower's polymorphic literals reach through the
+            // aggregate: `[1, 2, 3] : List(I64)` needs no per-element suffix, the
+            // elements adopting `I64` exactly as a bare `1` in `I64` position does.
+            (Expr::List(elems), Type::Con(head, args))
+                if head.as_str() == LIST && args.len() == 1 =>
+            {
+                let elem_ty = self.apply(&args[0]);
+                for elem in elems {
+                    self.check(env, elem, &elem_ty)?;
+                }
+                Ok(())
+            }
             (Expr::Int(lit), Type::I64 | Type::U64) if lit.suffix == ast::Suffix::None => {
                 Self::lit_range(lit, ty, span)?;
+                self.fixed.insert(id, ty.clone());
+                Ok(())
+            }
+            // A bare integer literal adopts a `Float` expected type (the tower's
+            // polymorphic literals: `let x : Float = 1` needs no `.0`). The
+            // elaborator reads the recorded lane and emits a float constant, so no
+            // runtime conversion survives. A suffixed literal stays its own lane
+            // and falls through to the mismatch below.
+            (Expr::Int(lit), Type::Float) if lit.suffix == ast::Suffix::None => {
+                self.fixed.insert(id, ty.clone());
+                Ok(())
+            }
+            // A bare integer literal at a `Num`-polymorphic type (a rigid variable
+            // carrying a `Num` constraint in scope): raise the obligation on the
+            // literal node so it elaborates through `from_int` at the resolved
+            // lane. This is what lets generic `given Num(a)` code write `x + 1`.
+            // Restricted to a variable that is actually `Num`-constrained, so a
+            // literal against an unconstrained rigid variable stays the mismatch it
+            // was (the signature promised nothing numeric about it).
+            (Expr::Int(lit), Type::Var(v))
+                if lit.suffix == ast::Suffix::None && self.num_var_in_scope(*v) =>
+            {
+                self.wanted.push(Wanted {
+                    id,
+                    span,
+                    items: vec![(NUM_CLASS.into(), ty.clone(), None)],
+                });
+                Ok(())
+            }
+            // `-5` takes a fixed-width lane from context like `5`, but only the
+            // signed one: `U64` is unsigned, and the magnitude checked is the
+            // negated value so the I64 minimum is admissible.
+            (Expr::Neg(inner), Type::I64 | Type::U64) if Self::bare_int_lit(inner).is_some() => {
+                if *ty == Type::U64 {
+                    return Err(Self::neg_unsigned(span));
+                }
+                let lit = Self::bare_int_lit(inner).expect("guarded by is_some");
+                let negated = ast::IntLit {
+                    value: -lit.value.clone(),
+                    suffix: ast::Suffix::None,
+                };
+                Self::lit_range(&negated, ty, span)?;
+                self.fixed.insert(id, ty.clone());
+                Ok(())
+            }
+            // `-1` adopts a `Float` context like `1` does; the elaborator folds the
+            // minus into the float constant it emits for the recorded lane.
+            (Expr::Neg(inner), Type::Float) if Self::bare_int_lit(inner).is_some() => {
                 self.fixed.insert(id, ty.clone());
                 Ok(())
             }
@@ -369,6 +432,7 @@ impl Tc<'_> {
             Expr::Index(recv, key) => self.synth_index(env, recv, key, span),
             Expr::IndexSet(recv, key, val) => self.synth_index_set(env, recv, key, val, span),
             Expr::Bin(op, a, b) => self.synth_bin(env, *op, a, b, id, span),
+            Expr::Neg(e2) => self.synth_neg(env, e2, id, span),
             Expr::If(c, t, e2) => {
                 self.check(env, c, &Type::Bool)?;
                 let tt = self.synth(env, t)?;
@@ -409,16 +473,39 @@ impl Tc<'_> {
             }
             Expr::Call(f, args) => {
                 if let Expr::Var(x) = &f.node {
+                    // `print`/`println` carry a `Show(a)` obligation. It is
+                    // emitted procedurally (like the Eq/Ord ladders) rather than
+                    // stored on the scheme: a concrete argument is discharged by
+                    // the elaborator's structural printer and must not pay a
+                    // dictionary (raw strings, empty containers, and un-`derived`
+                    // ADTs would otherwise fail to resolve), so only a polymorphic
+                    // argument (a rigid type var) raises the constraint. Active
+                    // only when the `Show` class is in scope (prelude present); a
+                    // prelude-free program keeps the elaborator's own rejection.
+                    if matches!(x.as_str(), "print" | "println")
+                        && args.len() == 1
+                        && self.classes.contains_key(&Sym::from(SHOW_CLASS))
+                    {
+                        return self.synth_print(env, f, &args[0], span);
+                    }
                     if let Some(info) = self.eff_ops.get(x) {
-                        if !info.eff_params.is_empty() {
+                        // A parametric op, or a non-parametric op whose signature
+                        // carries a free effect-row variable (a thunk-taking op),
+                        // instantiates its op type through `perform_ty`, which ties
+                        // those row variables to the ambient row. That is what lets
+                        // a thunk argument's extra effects flow out of the perform
+                        // site instead of being absorbed into a fresh, unconnected
+                        // row and silently dropped.
+                        if !info.eff_params.is_empty() || info.has_free_row_vars() {
                             let info = info.clone();
                             self.synth(env, f)?;
                             let fty = self.perform_ty(&info, span)?;
                             return self.app_synth(env, &fty, args, span);
                         }
-                        // A non-parametric op carries no effect args, so its row
-                        // obligation (rule 1) is a bare label; emit it, then type
-                        // the call through the ordinary env-scheme path below.
+                        // A non-parametric op with no thunk row carries no effect
+                        // args, so its row obligation (rule 1) is a bare label; emit
+                        // it, then type the call through the ordinary env-scheme
+                        // path below.
                         let eff = info.effect_name;
                         self.absorb_row(&EffRow::singleton(eff))
                             .map_err(|e| e.at(span))?;
@@ -645,7 +732,19 @@ impl Tc<'_> {
                         for (pname, pty) in params.iter().zip(op_params.iter()) {
                             env2.insert(Sym::from(pname), pty.clone());
                         }
-                        let k_ty = Type::fun(vec![op_ret], Type::Exist(ret_ex));
+                        // The continuation performs the handler body's residual
+                        // effects when resumed. That residual is an open row
+                        // variable (a fiber row `e` threaded into a `Cmd(a, e)`),
+                        // so the continuation's own row must be a fresh existential
+                        // that unifies with it: a hardcoded empty row would
+                        // `unify_row(Empty, {e})` and solve the residual `e` to
+                        // empty, severing the row variable the reified data type
+                        // carries.
+                        let k_ty = Type::fun_eff(
+                            vec![op_ret],
+                            EffRow::Exist(self.push_ex_row()),
+                            Type::Exist(ret_ex),
+                        );
                         env2.insert(Sym::from(k_var), k_ty);
                         self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
                     } else {
@@ -900,9 +999,128 @@ impl Tc<'_> {
                         Ok(())
                     }
                 }
-                NumClass::Arith => self.default_numeric(t, blame).map(|_| ()),
+                NumClass::Arith => match t {
+                    // `Float` joined the arithmetic operators with the tower;
+                    // record the lane for the elaborator like the fixed-width
+                    // lanes. Anything else here is a non-numeric operand (a
+                    // deferred existential that unified with, say, `String`), still
+                    // rejected blaming the operand.
+                    Type::Float => {
+                        self.fixed.insert(id, t.clone());
+                        Ok(())
+                    }
+                    _ => self.default_numeric(t, blame).map(|_| ()),
+                },
             },
         }
+    }
+
+    // Which tower class an arithmetic operator dispatches through: `+`/`-`/`*`
+    // carry `Num`, `/`/`%` carry `Div`. Only the arithmetic ops reach this (the
+    // comparison and boolean ops are handled on their own `synth_bin` arms).
+    const fn arith_class(op: BinOp) -> &'static str {
+        match op {
+            BinOp::Div | BinOp::Rem => DIV_CLASS,
+            _ => NUM_CLASS,
+        }
+    }
+
+    // Whether the rigid type variable `v` carries a `Num` constraint in the
+    // current declaration's `given` clause. A signature variable is stored in the
+    // constraint list verbatim (rigid, never an existential), so this is a direct
+    // match with no zonking. Gates the polymorphic-literal `check` arm so a
+    // literal only adopts a variable the signature actually promised is numeric.
+    fn num_var_in_scope(&self, v: Sym) -> bool {
+        self.cur_self.as_ref().is_some_and(|s| {
+            s.constraints
+                .iter()
+                .any(|(c, t)| c == NUM_CLASS && matches!(t, Type::Var(cv) if *cv == v))
+        })
+    }
+
+    // The signed lanes unary minus is defined on, in one place so `synth_neg`,
+    // `neg_lane`, and the `check` fast path agree.
+    pub(super) fn neg_unsigned(span: Span) -> TypeError {
+        TypeError::Other {
+            span,
+            msg: "cannot negate an unsigned `U64` value; unary minus is defined on `Int`, `I64`, and `Float`"
+                .into(),
+        }
+    }
+
+    // A bare integer literal (no width suffix), the operand shape a leading minus
+    // folds against so `-5` can take a fixed-width lane from its context exactly
+    // as `5` does.
+    fn bare_int_lit(e: &S<Expr<Core>>) -> Option<&ast::IntLit> {
+        match &e.node {
+            Expr::Int(lit) if lit.suffix == ast::Suffix::None => Some(lit),
+            _ => None,
+        }
+    }
+
+    // Classify a unary-minus whose operand type is already applied. The lane is
+    // recorded on the node for the elaborator (I64 wrap, Float sign flip); `Int`
+    // is the default and needs no record; `U64` is rejected; an unsolved operand
+    // defers to `resolve_all`.
+    fn neg_lane(&mut self, t: &Type, id: NodeId, span: Span) -> Result<Type, TypeError> {
+        match t {
+            Type::Int => Ok(Type::Int),
+            Type::I64 | Type::Float => {
+                self.fixed.insert(id, t.clone());
+                Ok(t.clone())
+            }
+            Type::U64 => Err(Self::neg_unsigned(span)),
+            Type::Exist(_) => {
+                self.neg_default.push((id, span, t.clone()));
+                Ok(t.clone())
+            }
+            // A `given Num(a)` operand dispatches unary minus through the class's
+            // `negated` method, exactly as the binary operators raise `Num`;
+            // resolution finds the dictionary, or reports "no instance" for a
+            // genuinely non-numeric operand.
+            other => {
+                self.wanted.push(Wanted {
+                    id,
+                    span,
+                    items: vec![(NUM_CLASS.into(), other.clone(), None)],
+                });
+                Ok(other.clone())
+            }
+        }
+    }
+
+    // Unary minus. Defined on the signed lanes only: `Int` (exact bignum), `I64`
+    // (two's-complement wrap), and `Float` (IEEE sign flip). A literal operand
+    // folds the minus into its magnitude, so `-9223372036854775808i64` is the
+    // I64 minimum (one past the positive max) while the bare positive literal is
+    // out of range; the negated value is what gets range-checked.
+    fn synth_neg(
+        &mut self,
+        env: &Env,
+        e: &S<Expr<Core>>,
+        id: NodeId,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        if let Expr::Int(lit) = &e.node {
+            let ty = match lit.suffix {
+                ast::Suffix::None => return Ok(Type::Int),
+                ast::Suffix::I64 => Type::I64,
+                ast::Suffix::U64 => return Err(Self::neg_unsigned(span)),
+            };
+            let negated = ast::IntLit {
+                value: -lit.value.clone(),
+                suffix: lit.suffix,
+            };
+            Self::lit_range(&negated, &ty, span)?;
+            self.fixed.insert(id, ty.clone());
+            return Ok(ty);
+        }
+        if matches!(&e.node, Expr::Float(_)) {
+            return Ok(Type::Float);
+        }
+        let t = self.synth(env, e)?;
+        let t = self.apply(&t);
+        self.neg_lane(&t, id, span)
     }
 
     fn synth_bin(
@@ -949,18 +1167,23 @@ impl Tc<'_> {
                 Ok(Type::Bool)
             }
             _ => {
+                // The tower arithmetic operators `+`/`-`/`*` (dispatched through
+                // `Num`) and `/`/`%` (through `Div`). A concrete lane drives the
+                // operator directly: a fixed-width or `Float` lane fixes both sides
+                // and keeps the direct primitive (byte-identical Core, no
+                // dictionary). An unsolved existential left operand is not
+                // defaulted to `Int` here; check the right operand against it (so
+                // the right can pin the lane), and if both stay ambiguous defer to
+                // one pass at `resolve_all` where a later use can still fix the
+                // width. This lets `y + x` with `x : I64` type when `y` was left
+                // open. Anything else (a `given Num(a)` rigid variable, or a
+                // non-numeric operand) raises the class constraint exactly as
+                // `==`/`<` raise `Eq`/`Ord`; resolution finds the dictionary or
+                // reports "no instance", the honest error for a non-numeric lane.
                 let ta = self.synth(env, a)?;
                 let ta = self.apply(&ta);
-                // A concrete or rigid left operand drives the operator: a
-                // fixed-width lane fixes both sides, and a non-numeric one is
-                // rejected at its own span (good blame). An unsolved existential
-                // left operand is not defaulted to `Int` here; check the right
-                // operand against it (so the right can pin the lane), and if both
-                // stay ambiguous defer to one pass at `resolve_all` where a later
-                // use can still fix the width. This lets `y + x` with `x : I64`
-                // type when `y` was left open.
                 let t = match &ta {
-                    Type::I64 | Type::U64 => {
+                    Type::I64 | Type::U64 | Type::Float => {
                         self.check(env, b, &ta)?;
                         self.fixed.insert(id, ta.clone());
                         ta
@@ -975,11 +1198,26 @@ impl Tc<'_> {
                         self.numeric_ladder(NumClass::Arith, &t, id, span, b.span)?;
                         t
                     }
-                    // Float belongs to the dotted operators; anything else is not
-                    // numeric. `default_numeric` rejects both, blaming the left.
-                    other => self.default_numeric(other, a.span)?,
+                    other => {
+                        // Relate the right operand to the left only for a type that
+                        // might carry an instance (a variable, or a nominal type). A
+                        // concrete non-numeric primitive (`Bool`, `String`, ...)
+                        // carries none, so raise the obligation on its own type and
+                        // skip the operand check, whose "expected Bool, got Int"
+                        // would misleadingly blame a literal right operand for the
+                        // left operand not being numeric.
+                        if matches!(other, Type::Var(_) | Type::Con(..) | Type::App(..)) {
+                            self.check(env, b, &ta)?;
+                        }
+                        self.wanted.push(Wanted {
+                            id,
+                            span,
+                            items: vec![(Self::arith_class(op).into(), ta.clone(), None)],
+                        });
+                        ta
+                    }
                 };
-                Ok(if is_cmp(op) { Type::Bool } else { t })
+                Ok(t)
             }
         }
     }
@@ -1059,6 +1297,43 @@ impl Tc<'_> {
                 msg: format!("cannot apply non-function {}", other.show()),
             }),
         }
+    }
+
+    // Type a `print`/`println` call, raising the `Show(a)` obligation only for a
+    // polymorphic argument. `print`'s scheme is `forall a. (a) -> Unit ! {row}`:
+    // instantiate the leading `forall` locally so the argument existential is in
+    // hand, type the application (which absorbs the latent row and checks the
+    // argument), then read the solved argument type back. A rigid type variable
+    // there is the polymorphic case the structural printer cannot see, so a
+    // `Show` dictionary is wanted (satisfied by an enclosing `given Show(a)`, or
+    // the call is rejected by ordinary resolution); a concrete or existential
+    // argument raises nothing and lowers through the structural printer as before.
+    fn synth_print(
+        &mut self,
+        env: &Env,
+        f: &S<Expr<Core>>,
+        arg: &S<Expr<Core>>,
+        span: Span,
+    ) -> Result<Type, TypeError> {
+        let scheme = self.synth(env, f)?;
+        let scheme = self.apply(&scheme);
+        let Type::Forall(n, body) = &scheme else {
+            return self.app_synth(env, &scheme, std::slice::from_ref(arg), span);
+        };
+        let ex = self.push_ex();
+        let fun = body.subst_var(*n, &Type::Exist(ex));
+        let res = self.app_synth(env, &fun, std::slice::from_ref(arg), span)?;
+        let at = self.apply(&Type::Exist(ex));
+        let mut vars = BTreeSet::new();
+        collect_type_vars(&at, &mut vars);
+        if !vars.is_empty() {
+            self.wanted.push(Wanted {
+                id: f.id,
+                span,
+                items: vec![(SHOW_CLASS.into(), at, None)],
+            });
+        }
+        Ok(res)
     }
 
     // Unify each instantiated label of a callee's latent row with the
@@ -1502,6 +1777,7 @@ impl Tc<'_> {
     fn clear_obligations(&mut self) {
         self.wanted.clear();
         self.num_default.clear();
+        self.neg_default.clear();
         self.index_ops.clear();
     }
 
@@ -1548,7 +1824,9 @@ impl Tc<'_> {
         seed: &DeclSeed,
     ) -> Result<Type, TypeError> {
         // Unconstrained ambient rows default to empty (pure); only rows tied to
-        // a parameter's row variable survive as effect polymorphism.
+        // a parameter's row variable survive as effect polymorphism. A function
+        // additionally keeps its own latent row open so it fits an effectful
+        // context by solving that variable under row unification.
         let self_ty = default_open_rows(&self.apply(&seed.self_ty));
         let (g, renames) = self.generalize_map(env, &self_ty);
         if !d.constraints.is_empty() {
@@ -1715,22 +1993,33 @@ impl Tc<'_> {
     }
 }
 
-// A row existential left open after checking but not reachable from any
-// parameter row is unconstrained: default it to empty (pure). Rows a parameter
-// mentions are genuine effect polymorphism, kept for generalization
-// (e.g. `apply : ((b)->a!{e}, b) ->{e} a`).
+// A row existential left open after checking but not reachable from a
+// parameter row or the function's own latent row is unconstrained: default it
+// to empty (pure). Two families survive as genuine effect polymorphism, kept
+// for generalization:
+//   - Rows a parameter mentions (`apply : ((b) -> a ! {e}, b) ->{e} a`).
+//   - The function's own latent row (the outermost arrow's `eff`): the function
+//     keeps that tail open so generalization quantifies it, and a pure function
+//     generalizes to `forall e. .. ! {| e}` and fits an effectful context by
+//     SOLVING `e` under row unification. The concrete labels the body performs
+//     stay pinned (the annotation check in `finalize_fn` reads them, not the
+//     tail), so `!{IO}` still rejects a body that also performs `Emit`; the tail
+//     only lets the value be used where more effects are permitted. `e`
+//     instantiates fresh per use and defaults to empty where unused, so the
+//     function's own lowering is unchanged.
 fn default_open_rows(ty: &Type) -> Type {
-    let Type::Fun(doms, _, _) = ty else {
+    let Type::Fun(doms, eff, _) = ty else {
         return ty.clone();
     };
-    let mut param_rows = BTreeSet::new();
+    let mut keep = BTreeSet::new();
     for p in doms {
-        p.free_exist_row(&mut param_rows);
+        p.free_exist_row(&mut keep);
     }
+    eff.free_exist_row(&mut keep);
     let mut all_rows = BTreeSet::new();
     ty.free_exist_row(&mut all_rows);
     let mut out = ty.clone();
-    for r in all_rows.difference(&param_rows) {
+    for r in all_rows.difference(&keep) {
         out = out.subst_row_exist(*r, &EffRow::Empty);
     }
     out
@@ -1755,22 +2044,4 @@ pub(super) fn index_container(ty: &Type) -> Option<(Type, Type, bool)> {
         Type::Str => Some((Type::Int, Type::Int, false)),
         _ => None,
     }
-}
-
-const fn is_cmp(op: BinOp) -> bool {
-    matches!(
-        op,
-        BinOp::Eq
-            | BinOp::Ne
-            | BinOp::Lt
-            | BinOp::Le
-            | BinOp::Gt
-            | BinOp::Ge
-            | BinOp::Eqf
-            | BinOp::Nef
-            | BinOp::Ltf
-            | BinOp::Lef
-            | BinOp::Gtf
-            | BinOp::Gef
-    )
 }

@@ -1,15 +1,12 @@
-effect Exn {
+effect Exn
   ctl raise(Int) : Int
-}
 
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
-effect State {
-  ctl get(Unit) : Int,
+effect State
+  ctl get(Unit) : Int
   ctl put(Int) : Unit
-}
 
 fn catch_exn() =
   handle raise(42) with

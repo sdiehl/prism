@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/fs_bytes.pr
+---
+wrote
+4
+686900ff
+true
+=> ()

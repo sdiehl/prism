@@ -1,0 +1,225 @@
+---
+source: tests/snapshots.rs
+expression: "prism::report(&src)"
+input_file: tests/cases/vec_zip_mismatch.pr
+---
+== tokens ==
+VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("vzip") LParen Ident("u") Colon UIdent("Vec") LParen Ident("a") Comma Ident("n") RParen Comma Ident("v") Colon UIdent("Vec") LParen Ident("b") Comma Ident("n") RParen RParen Colon UIdent("Vec") LParen LParen Ident("a") Comma Ident("b") RParen Comma Ident("n") RParen Eq UIdent("MkVec") LParen LBracket RBracket RParen VSemi Fn Ident("demo") LParen Ident("v3") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) RParen Comma Ident("v4") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon UIdent("Vec") LParen LParen KwInt Comma KwInt RParen Comma Int(IntLit { value: 3, suffix: None }) RParen Eq Ident("vzip") LParen Ident("v3") Comma Ident("v4") RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Vec",
+            params: [
+                "a",
+                "n",
+            ],
+            param_kinds: [
+                Type,
+                Nat,
+            ],
+            ctors: [
+                Ctor {
+                    name: "MkVec",
+                    args: [
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 155..192,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "vzip",
+            params: [
+                Param {
+                    name: "u",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                                Var(
+                                    "n",
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "v",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Var(
+                                    "b",
+                                ),
+                                Var(
+                                    "n",
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Vec",
+                    [
+                        Tuple(
+                            [
+                                Var(
+                                    "a",
+                                ),
+                                Var(
+                                    "b",
+                                ),
+                            ],
+                        ),
+                        Var(
+                            "n",
+                        ),
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "MkVec",
+                        ),
+                        span: 251..256,
+                    },
+                    [
+                        Spanned {
+                            node: List(
+                                [],
+                            ),
+                            span: 257..259,
+                        },
+                    ],
+                ),
+                span: 251..260,
+            },
+            wheres: [],
+            span: 194..260,
+        },
+        Decl {
+            name: "demo",
+            params: [
+                Param {
+                    name: "v3",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Int,
+                                Nat(
+                                    3,
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "v4",
+                    ty: Some(
+                        Con(
+                            "Vec",
+                            [
+                                Int,
+                                Nat(
+                                    4,
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Vec",
+                    [
+                        Tuple(
+                            [
+                                Int,
+                                Int,
+                            ],
+                        ),
+                        Nat(
+                            3,
+                        ),
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "vzip",
+                        ),
+                        span: 329..333,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "v3",
+                            ),
+                            span: 334..336,
+                        },
+                        Spanned {
+                            node: Var(
+                                "v4",
+                            ),
+                            span: 338..340,
+                        },
+                    ],
+                ),
+                span: 329..341,
+            },
+            wheres: [],
+            span: 262..341,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `demo`: length mismatch: expected length 3, but got length 4
+   ╭─[ <source>:7:77 ]
+   │
+ 7 │ fn demo(v3 : Vec(Int, 3), v4 : Vec(Int, 4)) : Vec((Int, Int), 3) = vzip(v3, v4)
+   │                                                                             ─┬  
+   │                                                                              ╰── in `demo`: length mismatch: expected length 3, but got length 4
+───╯

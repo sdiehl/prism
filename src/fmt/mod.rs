@@ -7,14 +7,17 @@ use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
     Arm, BinOp, CatchArm, ConvDir, Converter, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern,
-    Program, Qualifier, Rung, StableDecl, Sugar, SugarArm, Surface, S,
+    Program, Qualifier, Rung, Span, StableDecl, Sugar, SugarArm, Surface, S,
 };
 
 pub(crate) mod decl;
+mod exprdoc;
 mod ops;
 mod pat;
 use decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
-use ops::{binop_prec, low_prec_operand, needs_left_paren, needs_right_paren};
+use ops::{
+    binop_prec, low_prec_operand, needs_left_paren, needs_right_paren, neg_operand_needs_paren,
+};
 use pat::{fmt_pat, fmt_pat_inline};
 
 const INDENT: &str = "  ";
@@ -368,6 +371,21 @@ impl Fmt<'_> {
         self.source.get(start..end).unwrap_or_default().to_string()
     }
 
+    // Preserve the writer's numeric spelling verbatim: reprint a literal from
+    // source when it carries a digit separator or an exponent (`1_000_000`,
+    // `1e-25`, `1E3`), otherwise use the canonical rendering. Rewriting `1e3`
+    // to `1000.0` would be meaning-preserving but erases the writer's chosen
+    // notation, so scientific form is the writer's to keep. Idempotent either
+    // way, since a reparsed literal re-slices to the same text.
+    fn lit_text(&self, span: Span, canonical: impl FnOnce() -> String) -> String {
+        let src = self.source.get(span.start..span.end).unwrap_or_default();
+        if src.contains('_') || src.contains(['e', 'E']) {
+            src.to_string()
+        } else {
+            canonical()
+        }
+    }
+
     // Line comments in `[lo, hi)`, each re-emitted on its own line at the given
     // indent and newline-terminated. A blank line between two comments is kept so
     // deliberately spaced comment groups survive; leading and trailing blanks are
@@ -514,12 +532,20 @@ impl Fmt<'_> {
     fn fmt_program(&self, prog: &Program) -> String {
         let mut items: Vec<(usize, usize, String)> = Vec::new();
         // Restore the visibility marker the parser stripped into `prog.exports` /
-        // `prog.opaques` (opaque implies exported, so it is checked first).
+        // `prog.opaques` (opaque implies exported, so it is checked first), then
+        // the `deprecated "..."` annotation line the parser lifted into
+        // `prog.deprecated`. The annotation prints above the (possibly `pub`-
+        // marked) declaration, the canonical order the parser accepts.
         let pubd = |name: &str, s: String| {
-            if prog.opaques.contains(name) {
+            let s = if prog.opaques.contains(name) {
                 format!("{} {s}", kw::OPAQUE)
             } else if prog.exports.contains(name) {
                 format!("{} {s}", kw::PUB)
+            } else {
+                s
+            };
+            if let Some(msg) = prog.deprecated.get(name) {
+                format!("{} \"{}\"\n{s}", kw::DEPRECATED, escape_str(msg))
             } else {
                 s
             }
@@ -888,14 +914,28 @@ impl Fmt<'_> {
         self.fmt_expr_break(e, indent, Mode::Layout)
     }
 
+    // The `let` break ladder (FMT.md rule 5): (1) the whole binding on one line;
+    // (2) break after `=` with the value flat one indent in, when it fits there;
+    // (3) keep `let x =` on the line and let the value break internally. A value
+    // that must lay out offside (a record, a match/if, an imperative block) or
+    // that carries comments skips (3) and takes the offside block.
     fn fmt_let_line(&self, x: &str, v: &S<Expr>, indent: usize, from: usize) -> String {
         let ind = INDENT.repeat(indent);
-        if !self.has_comments(from, v.span.end) && !forces_break(v) {
+        let head = format!("{ind}{} {x} = ", kw::LET);
+        let breakable = !self.has_comments(from, v.span.end) && !forces_break(v);
+        if breakable {
             if let Some(s) = self.fmt_expr_inline(v, Mode::Layout) {
-                let line = format!("{ind}{} {x} = {s}", kw::LET);
-                if line.len() <= LINE_WIDTH {
-                    return line;
+                if head.len() + s.len() <= LINE_WIDTH {
+                    return format!("{head}{s}"); // rung 1
                 }
+                let inner = INDENT.repeat(indent + 1);
+                if inner.len() + s.len() <= LINE_WIDTH {
+                    return format!("{ind}{} {x} =\n{inner}{s}", kw::LET); // rung 2
+                }
+            }
+            // rung 3: the value breaks with its head on the `let` line.
+            if let Some(broken) = self.render_expr(v, ind.len(), head.len()) {
+                return format!("{head}{broken}");
             }
         }
         format!(
@@ -990,8 +1030,17 @@ impl Fmt<'_> {
 
     fn fmt_expr_inline(&self, e: &S<Expr>, mode: Mode) -> Option<String> {
         match &e.node {
-            Expr::Int(n) => Some(n.to_string()),
-            Expr::Float(f) => Some(fmt_float(*f)),
+            Expr::Int(n) => Some(self.lit_text(e.span, || n.to_string())),
+            Expr::Float(f) => Some(self.lit_text(e.span, || fmt_float(*f))),
+            Expr::Neg(inner) => {
+                let paren = neg_operand_needs_paren(&inner.node);
+                let s = self.fmt_expr_inline(inner, if paren { Mode::Flat } else { mode })?;
+                let s = paren_if(paren, s);
+                // A space keeps `- -x` (double negation) from colliding into the
+                // `--` line-comment lexeme on reparse.
+                let sep = if s.starts_with('-') { " " } else { "" };
+                Some(format!("-{sep}{s}"))
+            }
             Expr::Char(c) => Some(fmt_char(*c)),
             Expr::Bool(b) => Some(b.to_string()),
             Expr::Unit => Some("()".into()),
@@ -1457,13 +1506,26 @@ impl Fmt<'_> {
                 format!("({})", self.fmt_expr(e, indent + 1, Mode::Flat))
             }
             (Expr::Let(x, v, b), _) => self.fmt_let_break(x, v, b, indent, mode),
-            (Expr::Pipe(x, f), _) => self.fmt_pipe_break(x, f, indent, mode),
+            (Expr::Pipe(x, f), _) => self
+                .render_expr(e, indent * INDENT.len(), indent * INDENT.len())
+                .unwrap_or_else(|| self.fmt_pipe_break(x, f, indent, mode)),
             // A flat call drops comments sitting between its arguments; when any
             // are present, reproduce the call from source so they survive.
             (Expr::Call(f, args), _) if self.has_comments(f.span.end, e.span.end) => {
                 self.verbatim(e.span.start, e.span.end)
             }
-            (Expr::Call(f, args), _) => self.fmt_call_flat(f, args, indent),
+            (Expr::Call(f, args), _) => self
+                .render_expr(e, indent * INDENT.len(), indent * INDENT.len())
+                .unwrap_or_else(|| self.fmt_call_flat(f, args, indent)),
+            // Operator chains and collection literals break through the document
+            // engine (one operand/element per line); the inline printer's flat
+            // form is the fallback when a comment forces verbatim reprint.
+            (Expr::Bin(..) | Expr::List(..) | Expr::Tuple(..), _) => self
+                .render_expr(e, indent * INDENT.len(), indent * INDENT.len())
+                .unwrap_or_else(|| {
+                    self.fmt_expr_inline(e, Mode::Flat)
+                        .unwrap_or_else(|| self.verbatim(e.span.start, e.span.end))
+                }),
             (Expr::Handle(body, arms), Mode::Layout) => self.fmt_handle_layout(body, arms, indent),
             (Expr::Sugar(Sugar::TryCatch(body, arms)), Mode::Layout) => {
                 self.fmt_trycatch_layout(e, body, arms, indent)

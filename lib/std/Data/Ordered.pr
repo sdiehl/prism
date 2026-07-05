@@ -1,0 +1,112 @@
+-- | Explicit ordering witnesses: the branded, statically coherent path to
+-- ordered maps.
+--
+-- An unbranded `Map(k, v)` is ordered by the ambient canonical `Ord(k)`. When a
+-- program needs two orderings of the same keys at once (one map ascending, one
+-- descending), the phantom brand on `Map(k, v, brand)` keeps their values from
+-- being mixed. `with_ordering` hands its body a witness carrying a comparator;
+-- the witness's brand is a rigid, scope-local skolem, so a map built under one
+-- witness never unifies with a map built under another. Passing a map of one
+-- witness to another witness's operation is a compile error that names both
+-- brands.
+--
+-- This is the explicit half of the ordered-container coherence story, closed
+-- statically. The implicit `using ordRev` path (calling the ambient `map_insert`
+-- under a non-canonical `Ord`) is guarded at runtime this release where an
+-- ordered map crosses a package boundary: `Wire`'s map reader faults when a map
+-- arrives ordered by a different `Ord(k)` than the reader canonicalizes. Phase
+-- 3's dictionary reflection makes that path static too. No claim is made here of
+-- automatic static closure of the implicit path.
+--
+-- Opt-in: this module is not opened by the prelude, so ambient effect rows and
+-- the unbranded `Map` surface are untouched unless a program imports it.
+
+import Data.Map (..)
+
+import Data.Maybe (is_some)
+
+-- | An ordering witness: a comparator branded by the phantom `brand`. The only
+-- way to obtain one is `with_ordering`, which mints a fresh brand per call, so
+-- two witnesses always carry incompatible brands.
+pub type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
+
+-- | Run `body` with a fresh ordering witness carrying `cmp`. The witness's brand
+-- is rigid and unique to this call: a map built under it cannot be handed to a
+-- different witness's operation, and that mismatch is a compile error naming
+-- both brands. The result `a` may not mention the brand, so a branded map never
+-- escapes the block, only a summary of it (a size, a looked-up value, an encoded
+-- form).
+--
+-- The brand binder is spelled `brand` rather than a bare letter on purpose: it
+-- must not collide with the `a`, `b`, `c` a scheme's own quantifiers are
+-- canonicalized to, which would capture the result type under the inner
+-- quantifier.
+pub fn with_ordering(
+  cmp : (k, k) -> Int,
+  body : forall brand. (OrdWitness(k, brand)) -> a
+) : a =
+  body(OrdBy(cmp))
+
+-- Insert with an explicit comparator, no `Ord` dictionary: the witness carries
+-- its own comparison, so the branded operations never consult the ambient `Ord`.
+fn ins_by(
+  cmp : (k, k) -> Int,
+  key : k,
+  x : v,
+  m : Map(k, v, brand)
+) : Map(k, v, brand) =
+  match m of
+    Tip => map_node(key, x, Tip, Tip)
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        map_balance(map_node(k2, v2, ins_by(cmp, key, x, l), r))
+      elif c > 0 then
+        map_balance(map_node(k2, v2, l, ins_by(cmp, key, x, r)))
+      else
+        map_node(k2, x, l, r)
+
+fn look_by(cmp : (k, k) -> Int, key : k, m : Map(k, v, brand)) : Option(v) =
+  match m of
+    Tip => None
+    Bin(_, k2, v2, l, r) =>
+      let c = cmp(key, k2)
+      if c < 0 then
+        look_by(cmp, key, l)
+      elif c > 0 then
+        look_by(cmp, key, r)
+      else
+        Some(v2)
+
+-- | The empty map under witness `w`, carrying `w`'s brand.
+pub fn ord_empty(_w : OrdWitness(k, brand)) : Map(k, v, brand) = map_empty
+
+-- | Insert under witness `w`; the result carries `w`'s brand.
+pub fn ord_insert(
+  w : OrdWitness(k, brand),
+  key : k,
+  x : v,
+  m : Map(k, v, brand)
+) : Map(k, v, brand) =
+  match w of
+    OrdBy(cmp) => ins_by(cmp, key, x, m)
+
+-- | Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
+pub fn ord_lookup(
+  w : OrdWitness(k, brand),
+  key : k,
+  m : Map(k, v, brand)
+) : Option(v) =
+  match w of
+    OrdBy(cmp) => look_by(cmp, key, m)
+
+-- | True when `key` is present under witness `w`.
+pub fn ord_member(w : OrdWitness(k, brand), key : k, m : Map(k, v, brand)) : Bool =
+  is_some(ord_lookup(w, key, m))
+
+-- | The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
+pub fn ord_to_list(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : List((k, v)) =
+  map_to_list(m)
+
+-- | The number of entries in a `w`-branded map.
+pub fn ord_size(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : Int = map_size(m)

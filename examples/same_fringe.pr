@@ -1,6 +1,5 @@
-effect Gen {
+effect Gen
   ctl yield(Int) : Unit
-}
 
 -- Same-fringe, the classic coroutine problem: do two differently shaped trees
 -- have the same left-to-right sequence of leaves? Flattening both throws away

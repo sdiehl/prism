@@ -14,6 +14,14 @@ the free-monad lowering erases them before this core runs. The relation is
 proved deterministic (`Step.deterministic`), so a closed computation has at
 most one normal form.
 
+Type-level indices are outside this model by the same erasure discipline. The
+`Nat` kind (`type Vec(a, n : Nat)`) constrains only what type-checks; a
+dimension is erased before this Core, exactly as effects are, so it reaches
+neither `Value`/`Comp` nor the dynamics and adds no rule here. The model
+therefore needs no change for the `Nat` kind: its correctness lives entirely in
+the type checker (`src/tc`), and its runtime footprint is provably nil because
+the thing it constrains never appears in the term language the machine runs.
+
 The DESIGN s3 deconstructors and the lens answer add no new core: a record
 is a `ctor`, a nested update path is a `case` that destructures the spine and
 rebuilds it field for field (FBIP-reused via `reuse` when the spine is
@@ -49,6 +57,15 @@ inductive BinOp where
   | gtf
   | gef
 
+/-- Numeric lane of a unary negation (`Comp.neg`), mirroring `NegLane` in
+    `src/core/cbpv.rs`. `int`/`i64` negate an integer (both unbounded here, the
+    model does not distinguish widths), `float` is a real IEEE fneg. `u64` is
+    never negated (the typechecker rejects it), so no lane covers it. -/
+inductive NegLane where
+  | int
+  | i64
+  | float
+
 inductive Pat where
   | wild
   | var (x : String)
@@ -83,6 +100,7 @@ inductive Comp where
   | app (f : Comp) (args : List Value)
   | ite (c : Value) (t : Comp) (e : Comp)
   | prim (op : BinOp) (a : Value) (b : Value)
+  | neg (lane : NegLane) (v : Value)
   | call (name : String) (args : List Value)
   | print (v : Value)
   | printf (v : Value)
@@ -145,6 +163,7 @@ def substC (x : String) (w : Value) : Comp → Comp
   | .app f args => .app (substC x w f) (substVL x w args)
   | .ite c t e => .ite (substV x w c) (substC x w t) (substC x w e)
   | .prim op a b => .prim op (substV x w a) (substV x w b)
+  | .neg lane v => .neg lane (substV x w v)
   | .call n args => .call n (substVL x w args)
   | .print v => .print (substV x w v)
   | .printf v => .printf (substV x w v)
@@ -202,6 +221,14 @@ def delta : BinOp → Value → Value → Option Value
   | .or, .bool a, .bool b => some (.bool (a || b))
   | _, _, _ => none
 
+/-- Unary negation per lane, the `neg` analogue of `delta`. `int`/`i64` negate an
+    integer; like `delta`, the substitution semantics leaves floats abstract (the
+    executable machine's `negR` in `CEK.lean` reduces the float lane). -/
+def negD : NegLane → Value → Option Value
+  | .int, .int n => some (.int (-n))
+  | .i64, .int n => some (.int (-n))
+  | _, _ => none
+
 def matchPat : Pat → Value → Option (List (String × Value))
   | .wild, _ => some []
   | .var x, v => some [(x, v)]
@@ -235,6 +262,7 @@ inductive Step (Γ : Core) : Comp → Comp → Prop where
   | ifTrue : Step Γ (.ite (.bool true) t e) t
   | ifFalse : Step Γ (.ite (.bool false) t e) e
   | prim : delta op a b = some v → Step Γ (.prim op a b) (.ret v)
+  | neg : negD lane v = some w → Step Γ (.neg lane v) (.ret w)
   | call : lookupFn Γ name = some f → Step Γ (.call name args) (substMany (bindParams f.params args) f.body)
   | caseMatch : matchArms scrut arms = some c → Step Γ (.case scrut arms) c
   | dupStep : Step Γ (.dup v) (.ret .unit)
@@ -283,6 +311,10 @@ theorem Step.deterministic {Γ : Core} {a b c : Comp} (h1 : Step Γ a b) (h2 : S
           | ifFalse => rfl
       | prim h => cases h2 with
           | prim h' =>
+            rw [h] at h'
+            exact congrArg Comp.ret (Option.some.inj h')
+      | neg h => cases h2 with
+          | neg h' =>
             rw [h] at h'
             exact congrArg Comp.ret (Option.some.inj h')
       | call h => cases h2 with

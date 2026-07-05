@@ -1,0 +1,4 @@
+-- Arithmetic on a dimension (`n + 1`) is declined: dimensions unify by equality
+-- only. The natural length-changing cons is not expressible.
+type Vec(a, n : Nat) = MkVec([a])
+fn vcons(x : a, u : Vec(a, n)) : Vec(a, n + 1) = MkVec([])

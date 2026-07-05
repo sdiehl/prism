@@ -420,6 +420,7 @@ fn rc_thunks(c: &Comp, sigs: &Sigs) -> Comp {
         Comp::Error(v) => Comp::Error(rv(v)),
         Comp::Io(op, args) => Comp::Io(*op, args.iter().map(rv).collect()),
         Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, rv(v)),
+        Comp::Neg(l, v) => Comp::Neg(*l, rv(v)),
         Comp::Prim(op, a, b) => Comp::Prim(*op, rv(a), rv(b)),
         Comp::Call(n, args) => Comp::Call(*n, args.iter().map(rv).collect()),
         Comp::Do(n, args) => Comp::Do(*n, args.iter().map(rv).collect()),
@@ -473,6 +474,7 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         // A `var` cell flows as an ordinary owned value: each read/write consumes
         // a reference (the rc pass dups so each use has one), and `ref_set`
         // overwrites the cell in place. So a Ref op counts its cell and value like
@@ -687,6 +689,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         | Comp::RefNew(v)
         | Comp::RefGet(v) => use_val(v, env, sigs),
         Comp::RefSet(c, v) => {
@@ -1108,6 +1111,7 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         | Comp::Dup(v)
         | Comp::Drop(v)
         | Comp::RefNew(v)
@@ -1230,6 +1234,7 @@ fn fip_comp(
         | Comp::Force(v)
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
         | Comp::Drop(v)
         // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
         // only by `erase_local_vars` during effect lowering) is unreachable here;

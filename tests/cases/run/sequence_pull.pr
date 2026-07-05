@@ -1,0 +1,75 @@
+-- S5: the pull-based Std `Sequence` library, exercised end to end. Every
+-- combinator family runs here so the parity gate pins it byte-identical on both
+-- backends; the three cases the push `Emit` substrate could not express -- a
+-- type-changing `map`, a heterogeneous `zip`, and an effect-polymorphic `for_each`
+-- -- are called out inline.
+
+import Sequence as Seq
+
+fn main() : !{IO} Unit =
+  -- producers
+  println(Seq.to_list(Seq.range(1, 6)))
+  println(Seq.to_list(Seq.from_list([10, 20, 30])))
+  println(Seq.to_list(Seq.take(Seq.iterate(1, \(x) -> x * 2), 5)))
+  println(Seq.to_list(Seq.take(Seq.repeat(7), 3)))
+  println(Seq.to_list(Seq.singleton(99)))
+  println(Seq.to_list((Seq.empty() : (Unit) -> Seq.Step(Int))))
+  println(
+      Seq.to_list(
+          Seq.unfold(0, \(n) -> if n < 4 then Some((n * n, n + 1)) else None),
+        ),
+    )
+  -- type-changing map (Int -> String), impossible on the push substrate
+  println(Seq.to_list(Seq.map(Seq.range(1, 4), \(x) -> show(x))))
+  -- filter / filter_map / append / flat_map
+  println(Seq.to_list(Seq.filter(Seq.range(1, 11), even)))
+  println(
+      Seq.to_list(
+          Seq.filter_map(
+              Seq.range(1, 6),
+              \(x) -> if even(x) then Some(x * 10) else None,
+            ),
+        ),
+    )
+  println(Seq.to_list(Seq.append(Seq.range(1, 3), Seq.range(7, 9))))
+  println(Seq.to_list(Seq.flat_map(Seq.range(1, 4), \(x) -> Seq.range(0, x))))
+  -- take / drop / take_while / drop_while / dedup
+  println(Seq.to_list(Seq.drop(Seq.range(1, 8), 3)))
+  println(Seq.to_list(Seq.take_while(Seq.range(1, 20), \(x) -> x < 5)))
+  println(Seq.to_list(Seq.drop_while(Seq.range(1, 8), \(x) -> x < 4)))
+  println(Seq.to_list(Seq.dedup(Seq.from_list([1, 1, 2, 3, 3, 3, 1]))))
+  -- scan / enumerate / interleave
+  println(Seq.to_list(Seq.scan(Seq.range(1, 5), 0, \(a, x) -> a + x)))
+  println(Seq.to_list(Seq.enumerate(Seq.from_list(["a", "b", "c"]))))
+  println(Seq.to_list(Seq.interleave(Seq.range(1, 4), Seq.range(10, 15))))
+  -- HETEROGENEOUS zip (Int, String), impossible on the push substrate
+  println(
+      Seq.to_list(
+          Seq.zip(Seq.range(1, 4), Seq.map(Seq.range(10, 20), \(x) -> show(x))),
+        ),
+    )
+  println(
+      Seq.to_list(
+          Seq.zip_with(
+              Seq.range(1, 5),
+              Seq.from_list([100, 200, 300]),
+              \(x, y) -> x + y,
+            ),
+        ),
+    )
+  -- chunk / window
+  println(Seq.to_list(Seq.chunk(Seq.range(1, 8), 3)))
+  println(Seq.to_list(Seq.window(Seq.range(1, 6), 3)))
+  -- consumers
+  println(Seq.sum(Seq.range(1, 101)))
+  println(Seq.product(Seq.range(1, 6)))
+  println(Seq.count(Seq.range(0, 42)))
+  println(Seq.head(Seq.range(5, 9)))
+  println(Seq.find(Seq.range(1, 100), \(x) -> x > 50))
+  println(Seq.any(Seq.range(1, 10), \(x) -> x == 7))
+  println(Seq.all(Seq.range(2, 10), even))
+  -- effect-polymorphic consumer: for_each threads IO with no annotation
+  Seq.for_each(Seq.range(1, 4), \(x) -> println(x * 100))
+  -- Bytes boundary round trip
+  let bs = Seq.to_bytes(Seq.from_list([104, 105, 33]))
+  println(Seq.to_list(Seq.from_bytes(bs)))

@@ -1,0 +1,668 @@
+-- | JSON: a dynamic value tree, a total parser, a canonical encoder, and a typed
+-- layer.
+--
+-- Two layers, following the wire discipline of `lib/std/Wire.pr`:
+--
+--   - The dynamic layer is the `Json` tree and a total `decode`/`encode` pair for
+--     payloads whose shape you do not control. `decode` never partially succeeds:
+--     a malformed input is one `JsonError` carrying a message and a line/column,
+--     never a panic or a truncated value. Nesting is depth-limited, and any input
+--     left over after the top-level value is rejected.
+--   - The typed layer is the `ToJson`/`FromJson` classes with instances for the
+--     base types and the containers, so a declared type converts to and from a
+--     `Json` tree structurally. (Derivation is a manual typeclass rather than
+--     `deriving (Json)`: the derivable set is fixed, so a new derivable class is a
+--     compiler change; the class-and-instances form is pure library code.)
+--
+-- Two decisions this module pins:
+--
+--   - Number semantics are exact-or-error by default. An integer literal decodes
+--     to `JInt` (`Int` is arbitrary precision, so no integer overflows); a number
+--     decodes to `JFloat` only when its lexeme is already the canonical form the
+--     owned formatter would print (`show_int` / `show_float`). A non-canonical
+--     spelling (`1.0`, `1e3`, `0.10`) is a decode error under `decode`, and
+--     accepted, normalized, under `decode_lossy`. No silent rounding, no silent
+--     `1e999`-to-infinity.
+--   - Encoding is canonical and byte-deterministic: object keys are sorted, every
+--     number is printed by the owned formatter, strings use one fixed escaping,
+--     and there are no whitespace options. Two machines encoding equal values
+--     produce equal bytes, so a `Json` value has a well-defined hash and diff, and
+--     `decode(encode(v))` returns `v` (with the one deliberate normalization that
+--     an integer-valued `JFloat` prints as an integer and decodes back to `JInt`,
+--     since JSON does not distinguish the two).
+--
+-- Strings are validated UTF-8 by construction (the `String` type), so invalid
+-- UTF-8 is rejected at the byte boundary that builds the input, before the parser
+-- ever runs. Streaming (gigabyte, SAX-style) JSON is a package; this codec is
+-- value-oriented and total.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Data.String (..)
+
+import Data.Char (is_digit)
+
+-- | A dynamic JSON value. Numbers split into `JInt` and `JFloat` so the
+-- exact-or-error decode is a structural distinction rather than a hidden flag: an
+-- object is an association list in parse order (duplicate keys are preserved, not
+-- merged).
+pub type Json
+  = JNull
+  | JBool(Bool)
+  | JInt(Int)
+  | JFloat(Float)
+  | JStr(String)
+  | JArr(List(Json))
+  | JObj(List((String, Json)))
+
+-- | A decode failure: a human-readable message and the 1-based line and column of
+-- the offending byte.
+pub type JsonError = JsonError(String, Int, Int)
+
+-- | Render a `JsonError` as `line L col C: message`.
+pub fn json_error_message(e : JsonError) : String =
+  match e of
+    JsonError(m, l, c) => "line {l} col {c}: {m}"
+
+-- The maximum nesting depth the parser admits before rejecting, which also bounds
+-- its own recursion so a hostile deeply-nested input fails cleanly rather than
+-- exhausting the native stack.
+fn max_depth() : Int = 512
+
+-- The one-character string of a scalar value given as an `Int` code point.
+fn char_str(cp : Int) : String = str_of_char(chr(cp))
+
+-- ASCII code points used by the grammar, named where a bare number would be
+-- opaque. `is_digit` (Data.Char) covers `0`-`9`.
+fn is_ws(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
+
+-- Advance past any run of JSON whitespace starting at `i`.
+fn skip_ws(s : String, i : Int) : Int =
+  if i < str_len(s) && is_ws(char_at(s, i)) then
+    skip_ws(s, i + 1)
+  else
+    i
+
+-- The 1-based line and column of index `i`, for a positioned error.
+fn line_col_go(
+  s : String,
+  j : Int,
+  i : Int,
+  line : Int,
+  col : Int
+) : (Int, Int) =
+  if j >= i then
+    (line, col)
+  elif char_at(s, j) == 10 then
+    line_col_go(s, j + 1, i, line + 1, 1)
+  else
+    line_col_go(s, j + 1, i, line, col + 1)
+
+fn mk_err(s : String, i : Int, msg : String) : JsonError =
+  let (l, c) = line_col_go(s, 0, min(i, str_len(s)), 1, 1)
+  JsonError(msg, l, c)
+
+-- True when the literal `lit` occurs at index `i`.
+fn lit_at(s : String, i : Int, lit : String) : Bool =
+  i + str_len(lit) <= str_len(s) && str_eq(substring(s, i, str_len(lit)), lit)
+
+-- The value of a single hex digit, or `None`.
+fn hex_val(c : Int) : Option(Int) =
+  if c >= 48 && c <= 57 then
+    Some(c - 48)
+  elif c >= 97 && c <= 102 then
+    Some(c - 97 + 10)
+  elif c >= 65 && c <= 70 then
+    Some(c - 65 + 10)
+  else
+    None
+
+-- Four hex digits at `[i, i+4)` as a code point, or `None`.
+fn hex4(s : String, i : Int) : Option(Int) =
+  if i + 4 > str_len(s) then
+    None
+  else
+    match ((
+          hex_val(char_at(s, i)),
+          hex_val(char_at(s, i + 1)),
+          hex_val(char_at(s, i + 2)),
+          hex_val(char_at(s, i + 3)),
+        )) of
+      (Some(a), Some(b), Some(c), Some(d)) =>
+        Some(((a * 16 + b) * 16 + c) * 16 + d)
+      _ => None
+
+-- Parse a JSON string body starting at the opening quote `i`, returning the
+-- decoded string and the index just past the closing quote.
+fn parse_string(s : String, i : Int) : Result((String, Int), JsonError) =
+  str_chars(s, i + 1, "")
+
+fn str_chars(
+  s : String,
+  i : Int,
+  acc : String
+) : Result((String, Int), JsonError) =
+  if i >= str_len(s) then
+    Err(mk_err(s, i, "unterminated string"))
+  else
+    let c = char_at(s, i)
+    if c == 34 then
+      Ok((acc, i + 1))
+    elif c == 92 then
+      parse_escape(s, i + 1, acc)
+    elif c < 32 then
+      Err(mk_err(s, i, "unescaped control character in string"))
+    else
+      str_chars(s, i + 1, concat(acc, char_str(c)))
+
+fn parse_escape(
+  s : String,
+  i : Int,
+  acc : String
+) : Result((String, Int), JsonError) =
+  if i >= str_len(s) then
+    Err(mk_err(s, i, "unterminated escape"))
+  else
+    let c = char_at(s, i)
+    if c == 34 then
+      str_chars(s, i + 1, concat(acc, char_str(34)))
+    elif c == 92 then
+      str_chars(s, i + 1, concat(acc, char_str(92)))
+    elif c == 47 then
+      str_chars(s, i + 1, concat(acc, char_str(47)))
+    elif c == 98 then
+      str_chars(s, i + 1, concat(acc, char_str(8)))
+    elif c == 102 then
+      str_chars(s, i + 1, concat(acc, char_str(12)))
+    elif c == 110 then
+      str_chars(s, i + 1, concat(acc, char_str(10)))
+    elif c == 114 then
+      str_chars(s, i + 1, concat(acc, char_str(13)))
+    elif c == 116 then
+      str_chars(s, i + 1, concat(acc, char_str(9)))
+    elif c == 117 then
+      parse_unicode(s, i + 1, acc)
+    else
+      Err(mk_err(s, i, "invalid escape"))
+
+-- Parse a `\uXXXX` escape (the `\u` already consumed), joining a surrogate pair
+-- into one scalar. A lone or mismatched surrogate is an error, so the decoded
+-- string is always valid Unicode.
+fn parse_unicode(
+  s : String,
+  i : Int,
+  acc : String
+) : Result((String, Int), JsonError) =
+  match hex4(s, i) of
+    None => Err(mk_err(s, i, "invalid \\u escape"))
+    Some(cp) =>
+      if cp >= 55296 && cp <= 56319 then
+        if lit_at(s, i + 4, "\\u") then
+          match hex4(s, i + 6) of
+            Some(lo) =>
+              if lo >= 56320 && lo <= 57343 then
+                let scalar = 65536 + (cp - 55296) * 1024 + lo - 56320
+                str_chars(s, i + 10, concat(acc, char_str(scalar)))
+              else
+                Err(mk_err(s, i, "invalid low surrogate in \\u escape"))
+            None => Err(mk_err(s, i, "invalid \\u escape"))
+        else
+          Err(mk_err(s, i, "unpaired high surrogate in \\u escape"))
+      elif cp >= 56320 && cp <= 57343 then
+        Err(mk_err(s, i, "unpaired low surrogate in \\u escape"))
+      else
+        str_chars(s, i + 4, concat(acc, char_str(cp)))
+
+-- Number lexing: validate a JSON number's grammar and find its end. Returns the
+-- end index and whether the token has a fraction or exponent (so is a float).
+
+fn skip_digits(s : String, i : Int) : Int =
+  if i < str_len(s) && is_digit(char_at(s, i)) then
+    skip_digits(s, i + 1)
+  else
+    i
+
+-- Integer part after the optional sign: a single `0`, or `[1-9][0-9]*`.
+fn lex_int_part(s : String, i : Int) : Option(Int) =
+  if i >= str_len(s) || not(is_digit(char_at(s, i))) then
+    None
+  elif char_at(s, i) == 48 then
+    Some(i + 1)
+  else
+    Some(skip_digits(s, i))
+
+-- Optional fraction: a `.` followed by at least one digit.
+fn lex_frac(s : String, i : Int) : Option((Int, Bool)) =
+  if i < str_len(s) && char_at(s, i) == 46 then
+    let j = i + 1
+    if j < str_len(s) && is_digit(char_at(s, j)) then
+      Some((skip_digits(s, j), true))
+    else
+      None
+  else
+    Some((i, false))
+
+-- Optional exponent: `e`/`E`, an optional sign, then at least one digit.
+fn lex_exp(s : String, i : Int) : Option((Int, Bool)) =
+  if (i < str_len(s) && (char_at(s, i) == 101 || char_at(s, i) == 69)) then
+    let j =
+      if (i + 1 < str_len(s)
+          && (char_at(s, i + 1) == 43 || char_at(s, i + 1) == 45)) then
+        i + 2
+      else
+        i + 1
+    if j < str_len(s) && is_digit(char_at(s, j)) then
+      Some((skip_digits(s, j), true))
+    else
+      None
+  else
+    Some((i, false))
+
+fn lex_number(s : String, i0 : Int) : Option((Int, Bool)) =
+  let i1 =
+    if i0 < str_len(s) && char_at(s, i0) == 45 then
+      i0 + 1
+    else
+      i0
+  match lex_int_part(s, i1) of
+    None => None
+    Some(i2) =>
+      match lex_frac(s, i2) of
+        None => None
+        Some((i3, hf)) =>
+          match lex_exp(s, i3) of
+            None => None
+            Some((i4, he)) => Some((i4, hf || he))
+
+-- Apply the exact-or-error number policy to a validated lexeme.
+fn classify_number(
+  lossy : Bool,
+  lexeme : String,
+  is_dec : Bool
+) : Option(Json) =
+  if is_dec then
+    let f = parse_float(lexeme)
+    if lossy || str_eq(show_float(f), lexeme) then
+      Some(JFloat(f))
+    else
+      None
+  else
+    match parse_int(lexeme) of
+      Some(n) =>
+        if lossy || str_eq(show_int(n), lexeme) then
+          Some(JInt(n))
+        else
+          None
+      None =>
+        if lossy then
+          Some(JFloat(parse_float(lexeme)))
+        else
+          None
+
+fn parse_number(
+  lossy : Bool,
+  s : String,
+  i : Int
+) : Result((Json, Int), JsonError) =
+  match lex_number(s, i) of
+    None => Err(mk_err(s, i, "invalid number"))
+    Some((end, is_dec)) =>
+      let lexeme = substring(s, i, end - i)
+      match classify_number(lossy, lexeme, is_dec) of
+        Some(v) => Ok((v, end))
+        None =>
+          Err(
+              mk_err(
+                  s,
+                  i,
+                  "number not exactly representable (use decode_lossy)",
+                ),
+            )
+
+-- The recursive-descent core, threading the `lossy` flag and the nesting depth.
+
+fn parse_value(
+  lossy : Bool,
+  s : String,
+  i : Int,
+  d : Int
+) : Result((Json, Int), JsonError) =
+  let j = skip_ws(s, i)
+  if j >= str_len(s) then
+    Err(mk_err(s, j, "unexpected end of input"))
+  else
+    let c = char_at(s, j)
+    if c == 123 then
+      parse_object(lossy, s, j, d)
+    elif c == 91 then
+      parse_array(lossy, s, j, d)
+    elif c == 34 then
+      match parse_string(s, j) of
+        Ok((str, k)) => Ok((JStr(str), k))
+        Err(e) => Err(e)
+    elif c == 45 || is_digit(c) then
+      parse_number(lossy, s, j)
+    elif lit_at(s, j, "true") then
+      Ok((JBool(true), j + 4))
+    elif lit_at(s, j, "false") then
+      Ok((JBool(false), j + 5))
+    elif lit_at(s, j, "null") then
+      Ok((JNull, j + 4))
+    else
+      Err(mk_err(s, j, "unexpected character"))
+
+fn parse_array(
+  lossy : Bool,
+  s : String,
+  i : Int,
+  d : Int
+) : Result((Json, Int), JsonError) =
+  if d + 1 > max_depth() then
+    Err(mk_err(s, i, "maximum nesting depth exceeded"))
+  else
+    let j = skip_ws(s, i + 1)
+    if j < str_len(s) && char_at(s, j) == 93 then
+      Ok((JArr(Nil), j + 1))
+    else
+      array_elems(lossy, s, i + 1, d + 1, Nil)
+
+fn array_elems(
+  lossy : Bool,
+  s : String,
+  i : Int,
+  d : Int,
+  acc : List(Json)
+) : Result((Json, Int), JsonError) =
+  match parse_value(lossy, s, i, d) of
+    Err(e) => Err(e)
+    Ok((v, k)) =>
+      let acc2 = Cons(v, acc)
+      let j = skip_ws(s, k)
+      if j >= str_len(s) then
+        Err(mk_err(s, j, "unterminated array"))
+      else
+        let c = char_at(s, j)
+        if c == 93 then
+          Ok((JArr(reverse(acc2)), j + 1))
+        elif c == 44 then
+          array_elems(lossy, s, j + 1, d, acc2)
+        else
+          Err(mk_err(s, j, "expected ',' or ']' in array"))
+
+fn parse_object(
+  lossy : Bool,
+  s : String,
+  i : Int,
+  d : Int
+) : Result((Json, Int), JsonError) =
+  if d + 1 > max_depth() then
+    Err(mk_err(s, i, "maximum nesting depth exceeded"))
+  else
+    let j = skip_ws(s, i + 1)
+    if j < str_len(s) && char_at(s, j) == 125 then
+      Ok((JObj(Nil), j + 1))
+    else
+      object_members(lossy, s, i + 1, d + 1, Nil)
+
+fn object_members(
+  lossy : Bool,
+  s : String,
+  i : Int,
+  d : Int,
+  acc : List((String, Json))
+) : Result((Json, Int), JsonError) =
+  let j = skip_ws(s, i)
+  if j >= str_len(s) || char_at(s, j) /= 34 then
+    Err(mk_err(s, j, "expected string key in object"))
+  else
+    match parse_string(s, j) of
+      Err(e) => Err(e)
+      Ok((key, k)) =>
+        let k2 = skip_ws(s, k)
+        if k2 >= str_len(s) || char_at(s, k2) /= 58 then
+          Err(mk_err(s, k2, "expected ':' after object key"))
+        else
+          match parse_value(lossy, s, k2 + 1, d) of
+            Err(e) => Err(e)
+            Ok((v, m)) =>
+              let acc2 = Cons((key, v), acc)
+              let m2 = skip_ws(s, m)
+              if m2 >= str_len(s) then
+                Err(mk_err(s, m2, "unterminated object"))
+              else
+                let c = char_at(s, m2)
+                if c == 125 then
+                  Ok((JObj(reverse(acc2)), m2 + 1))
+                elif c == 44 then
+                  object_members(lossy, s, m2 + 1, d, acc2)
+                else
+                  Err(mk_err(s, m2, "expected ',' or '\}' in object"))
+
+fn decode_with(lossy : Bool, s : String) : Result(Json, JsonError) =
+  match parse_value(lossy, s, 0, 0) of
+    Err(e) => Err(e)
+    Ok((v, k)) =>
+      let j = skip_ws(s, k)
+      if j >= str_len(s) then
+        Ok(v)
+      else
+        Err(mk_err(s, j, "trailing input after top-level value"))
+
+-- | Decode a JSON document with exact number semantics: a number decodes only
+-- when its lexeme is already canonical, otherwise a decode error. Total: any
+-- malformed or lossy input is an `Err` with a position.
+pub fn decode(s : String) : Result(Json, JsonError) = decode_with(false, s)
+
+-- | Decode a JSON document, accepting any well-formed number and normalizing it
+-- to `JInt` (exact integer in range) or the nearest `JFloat`. Still total, and
+-- still rejects structurally malformed input.
+pub fn decode_lossy(s : String) : Result(Json, JsonError) = decode_with(true, s)
+
+-- Canonical encoding.
+
+-- Escape a string into a canonical JSON string literal: the two mandatory
+-- escapes, the five short control escapes, and `\uXXXX` for the remaining
+-- controls. Non-ASCII scalars pass through as UTF-8.
+fn encode_string(s : String) : String =
+  concat("\"", concat(esc_go(s, 0, ""), "\""))
+
+fn esc_go(s : String, i : Int, acc : String) : String =
+  if i >= str_len(s) then
+    acc
+  else
+    esc_go(s, i + 1, concat(acc, esc_char(char_at(s, i))))
+
+fn esc_char(c : Int) : String =
+  if c == 34 then
+    "\\\""
+  elif c == 92 then
+    "\\\\"
+  elif c == 8 then
+    "\\b"
+  elif c == 12 then
+    "\\f"
+  elif c == 10 then
+    "\\n"
+  elif c == 13 then
+    "\\r"
+  elif c == 9 then
+    "\\t"
+  elif c < 32 then
+    concat("\\u00", hex2(c))
+  else
+    char_str(c)
+
+-- Two lowercase hex digits of a byte-sized value, for the `\u00XX` control form.
+fn hex2(c : Int) : String = concat(hex_digit(c / 16), hex_digit(mod(c, 16)))
+
+fn hex_digit(n : Int) : String =
+  if n < 10 then
+    show_int(n)
+  else
+    char_str(97 + n - 10)
+
+-- A finite float prints via the owned formatter; a non-finite one is not
+-- representable in JSON and encodes as `null` (the JavaScript convention).
+fn is_finite(f : Float) : Bool = f == f && f - f == 0.0
+
+fn encode_float(f : Float) : String =
+  if is_finite(f) then
+    show_float(f)
+  else
+    "null"
+
+-- Merge sort object members by key, so the encoding is independent of insertion
+-- order.
+fn sort_pairs(xs : List((String, Json))) : List((String, Json)) =
+  match xs of
+    Nil => Nil
+    Cons(_, Nil) => xs
+    _ =>
+      let (l, r) = split_alt(xs)
+      merge_pairs(sort_pairs(l), sort_pairs(r))
+
+-- Split a list into two halves by alternating elements, so merge sort needs no
+-- length or indexing.
+fn split_alt(xs : List((String, Json))) : (List((String, Json)), List((String, Json))) =
+  match xs of
+    Nil => (Nil, Nil)
+    Cons(a, Nil) => (Cons(a, Nil), Nil)
+    Cons(a, Cons(b, rest)) =>
+      let (l, r) = split_alt(rest)
+      (Cons(a, l), Cons(b, r))
+
+fn merge_pairs(
+  a : List((String, Json)),
+  b : List((String, Json))
+) : List((String, Json)) =
+  match (a, b) of
+    (Nil, _) => b
+    (_, Nil) => a
+    (Cons(x, xs), Cons(y, ys)) =>
+      match (x, y) of
+        ((kx, _), (ky, _)) =>
+          if str_cmp(kx, ky) <= 0 then
+            Cons(x, merge_pairs(xs, b))
+          else
+            Cons(y, merge_pairs(a, ys))
+
+fn encode_member(kv : (String, Json)) : String =
+  match kv of
+    (k, v) => concat(encode_string(k), concat(":", encode(v)))
+
+-- | Encode a `Json` value to its canonical byte-deterministic string: object keys
+-- sorted, numbers by the owned formatter, one fixed string escaping, no optional
+-- whitespace. Equal values encode to equal bytes.
+pub fn encode(j : Json) : String =
+  match j of
+    JNull => "null"
+    JBool(b) =>
+      if b then
+        "true"
+      else
+        "false"
+    JInt(n) => show_int(n)
+    JFloat(f) => encode_float(f)
+    JStr(s) => encode_string(s)
+    JArr(xs) => concat("[", concat(str_join(",", map(encode, xs)), "]"))
+    JObj(kvs) =>
+      concat(
+          "\{",
+          concat(str_join(",", map(encode_member, sort_pairs(kvs))), "\}"),
+        )
+
+-- The typed layer: structural conversion between declared types and `Json`.
+
+-- | Convert a value to a `Json` tree.
+pub class ToJson(a)
+  to_json : (a) -> Json
+
+-- | Recover a value from a `Json` tree, failing (through `Fail`) on a structural
+-- mismatch. A decode of foreign data is one ordinary failure channel.
+pub class FromJson(a)
+  from_json : (Json) -> a ! {Fail | e}
+
+instance toJsonInt : ToJson(Int)
+  fn to_json(n) = JInt(n)
+
+instance toJsonFloat : ToJson(Float)
+  fn to_json(f) = JFloat(f)
+
+instance toJsonBool : ToJson(Bool)
+  fn to_json(b) = JBool(b)
+
+instance toJsonString : ToJson(String)
+  fn to_json(s) = JStr(s)
+
+instance toJsonList : ToJson(List(a)) given ToJson(a)
+  fn to_json(xs) = JArr(map(to_json, xs))
+
+-- `None` maps to `null`; `Some(x)` maps to the encoding of `x`.
+instance toJsonOption : ToJson(Option(a)) given ToJson(a)
+  fn to_json(o) =
+    match o of
+      None => JNull
+      Some(x) => to_json(x)
+
+instance toJsonPair : ToJson((a, b)) given ToJson(a), ToJson(b)
+  fn to_json(p) =
+    match p of
+      (x, y) => JArr(Cons(to_json(x), Cons(to_json(y), Nil)))
+
+instance fromJsonInt : FromJson(Int)
+  fn from_json(j) =
+    match j of
+      JInt(n) => n
+      _ => fail()
+
+instance fromJsonFloat : FromJson(Float)
+  fn from_json(j) =
+    match j of
+      JFloat(f) => f
+      JInt(n) => to_float(n)
+      _ => fail()
+
+instance fromJsonBool : FromJson(Bool)
+  fn from_json(j) =
+    match j of
+      JBool(b) => b
+      _ => fail()
+
+instance fromJsonString : FromJson(String)
+  fn from_json(j) =
+    match j of
+      JStr(s) => s
+      _ => fail()
+
+instance fromJsonList : FromJson(List(a)) given FromJson(a)
+  fn from_json(j) =
+    match j of
+      JArr(xs) => from_json_each(xs)
+      _ => fail()
+
+-- `null` is the empty option; anything else is `Some` of its decoding.
+instance fromJsonOption : FromJson(Option(a)) given FromJson(a)
+  fn from_json(j) =
+    match j of
+      JNull => None
+      _ => Some(from_json(j))
+
+instance fromJsonPair : FromJson((a, b)) given FromJson(a), FromJson(b)
+  fn from_json(j) =
+    match j of
+      JArr(Cons(x, Cons(y, Nil))) => (from_json(x), from_json(y))
+      _ => fail()
+
+-- Decode each element of a JSON array, threading `Fail` so one bad element fails
+-- the whole list.
+fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
+  match xs of
+    Nil => Nil
+    Cons(y, rest) => Cons(from_json(y), from_json_each(rest))
+
+-- | Encode a typed value straight to a canonical JSON string.
+pub fn to_json_string(x : a) : String given ToJson(a) = encode(to_json(x))

@@ -158,6 +158,12 @@ pub struct DynFlags {
     /// `PRISM_NO_SPECIALIZE` (default off): turn off the `Specialize` Core pass.
     /// Presence-flagged, resolved into [`Config::disabled`](crate::Config::disabled).
     pub no_specialize: bool,
+    /// `PRISM_FUSE` (default off): run the whole-program stream-fusion pass
+    /// (`core/opt/fuse`) first in the pre-lowering stage, collapsing recognized
+    /// pull-`Sequence` pipelines into allocation-free loops. Off until the ON/OFF
+    /// differential oracle and the full gate battery are green; a fused loop is a
+    /// lowering tier, so it must produce byte-identical output either way.
+    pub fuse: bool,
     /// `PRISM_SCHEDULER` (default cooperative/FIFO): which shipped cooperative
     /// scheduler `run_cooperative` binds to when the CLI does not pass
     /// `--scheduler`.
@@ -208,6 +214,7 @@ impl Default for DynFlags {
             opt_level: OptLevel::default(),
             backend_opt: DEFAULT_BACKEND_OPT.into(),
             no_specialize: false,
+            fuse: false,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
             store: false,
@@ -241,6 +248,7 @@ impl DynFlags {
                 .unwrap_or_default(),
             backend_opt: backend_opt_from_env(),
             no_specialize: env_present("PRISM_NO_SPECIALIZE"),
+            fuse: env_bool("PRISM_FUSE", false),
             scheduler: std::env::var("PRISM_SCHEDULER")
                 .ok()
                 .and_then(|s| Scheduler::parse(&s))

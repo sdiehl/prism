@@ -54,7 +54,8 @@ type Point = P(Int, Int)
 type Shape = Circle(Int) | Rect(Int, Int)
 type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
 type Range = Range { lo: Int, hi: Int }
-effect Log { ctl log(String) : Unit }
+effect Log
+  ctl log(String) : Unit
 ";
     let all = prism::shape_digests_of(&prism::with_prelude(SRC)).expect("shape digests");
     let names = ["Color", "Point", "Shape", "Tree", "Range", "Log"];
@@ -98,16 +99,43 @@ fn nontight_effect_annotation_warns() {
             .map(|w| w.msg)
             .collect()
     };
-    let loose = warns("effect Eff {\n  ctl op(Unit) : Int\n}\nfn f() : !{Eff} Int = 1\n");
+    let loose = warns("effect Eff\n  ctl op(Unit) : Int\nfn f() : !{Eff} Int = 1\n");
     assert!(
         loose.iter().any(|m| m.contains("never performed")),
         "expected a non-tight effect-annotation warning, got {loose:?}"
     );
-    let tight = warns("effect Eff {\n  ctl op(Unit) : Int\n}\nfn f() : !{Eff} Int = op(())\n");
+    let tight = warns("effect Eff\n  ctl op(Unit) : Int\nfn f() : !{Eff} Int = op(())\n");
     assert!(
         tight.iter().all(|m| !m.contains("never performed")),
         "a performed effect should not warn, got {tight:?}"
     );
+}
+
+// The deprecation lint warns at use sites: a definition marked with the surface
+// `deprecated "..."` annotation carries the author's suggestion, while the
+// tower-superseded float dot-operators and fixed-width arithmetic builtins carry
+// the compiler's canonical replacement. A warning, never an error; behavior is
+// unchanged. The messages are pinned here (task: snapshot the warning texts).
+#[test]
+fn deprecation_warnings() {
+    let src = prism::with_prelude(
+        "deprecated \"use `+` on Float\"\n\
+         fn old_add(x : Float, y : Float) : Float = plus(x, y)\n\
+         fn f_float() : Float = old_add(1.0, 2.0) +. (3.0 *. 4.0)\n\
+         fn f_i64() : I64 = i64_mul(2i64, 3i64)\n\
+         fn f_u64() : U64 = u64_add(1u64, 2u64)\n\
+         fn main() : Unit = println(show(f_float()))\n",
+    );
+    let mut msgs: Vec<String> = prism::check(&src)
+        .unwrap()
+        .warnings
+        .into_iter()
+        .map(|w| w.msg)
+        .filter(|m| m.contains("deprecated"))
+        .collect();
+    msgs.sort();
+    msgs.dedup();
+    insta::assert_snapshot!(msgs.join("\n"));
 }
 
 // Local `var` state must discharge: fib2 uses two vars yet keeps a pure row.
@@ -211,7 +239,7 @@ fn recursive_fip_examples_lower_to_loops() {
 // function value the set pass cannot see) surfaces in the caller's row.
 #[test]
 fn higher_order_effects_propagate() {
-    let src = "effect Exn { ctl raise(Int) : Int }\n\
+    let src = "effect Exn\n  ctl raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn go(n) = apply(boom, n)\n";
@@ -219,7 +247,7 @@ fn higher_order_effects_propagate() {
     let apply = checked.decls.iter().find(|d| d.name == "apply").unwrap();
     assert_eq!(
         apply.ty.show(),
-        "forall a b e0. ((b) -> a ! {e0}, b) -> a ! {e0}"
+        "forall e0 a b. ((b) -> a ! {e0}, b) -> a ! {e0}"
     );
     // The effect launders through `apply` (a function value) yet still lands in
     // `go`'s row and reported effects, which the syntactic set pass missed.
@@ -232,7 +260,7 @@ fn higher_order_effects_propagate() {
 // the effect arrived through an opaque function value.
 #[test]
 fn handler_discharges_higher_order_effect() {
-    let src = "effect Exn { ctl raise(Int) : Int }\n\
+    let src = "effect Exn\n  ctl raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn attempt(n) =\n  handle apply(boom, n) with\n    raise(c, k) => c\n    return r => r\n";
@@ -246,7 +274,7 @@ fn handler_discharges_higher_order_effect() {
 // value can no longer slip past a `borrow` parameter's purity requirement.
 #[test]
 fn borrow_rejects_laundered_effect() {
-    let src = "effect Exn { ctl raise(Int) : Int }\n\
+    let src = "effect Exn\n  ctl raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
                fn boom(n) : !{Exn} Int = raise(n)\n\
                fn use_borrow(borrow x, n) = apply(boom, n) + x\n";
@@ -262,13 +290,13 @@ fn borrow_rejects_laundered_effect() {
 #[test]
 fn mask_reports_effect_in_both_engines() {
     // The inferred row carries the masked effect.
-    let ok = "effect Ask { ctl ask() : Int }\nfn m() = mask<Ask>(5)\n";
+    let ok = "effect Ask\n  ctl ask() : Int\nfn m() = mask<Ask>(5)\n";
     let checked = prism::check(prism::with_prelude(ok).as_str()).unwrap();
     let m = checked.decls.iter().find(|d| d.name == "m").unwrap();
     assert_eq!(prism::types::show_effects(&m.effects), "{Ask}");
     // And the purity gate (which reads that row) rejects a masked effect under a
     // `borrow` parameter, just as it does an ordinary one.
-    let bad = "effect Ask { ctl ask() : Int }\nfn g(borrow x) = mask<Ask>(x)\n";
+    let bad = "effect Ask\n  ctl ask() : Int\nfn g(borrow x) = mask<Ask>(x)\n";
     let err = prism::check(prism::with_prelude(bad).as_str()).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("borrow") && msg.contains("Ask"), "got: {msg}");
@@ -425,7 +453,7 @@ fn unhandled_effect_traps_both_backends() {
     let prog = env::temp_dir().join("prism_unhandled_eff.pr");
     fs::write(
         &prog,
-        "effect Ask { ctl ask() : Int }\nfn f() = ask()\nfn main() = println(f())\n",
+        "effect Ask\n  ctl ask() : Int\nfn f() = ask()\nfn main() = println(f())\n",
     )
     .unwrap();
     let bin = env!("CARGO_BIN_EXE_prism");
@@ -788,7 +816,7 @@ fn effect_strategy_manifest() {
 #[test]
 fn free_monad_fallback_warns() {
     let src = prism::with_prelude(
-        "effect Boom {\n  ctl boom(Int) : Int\n}\n\
+        "effect Boom\n  ctl boom(Int) : Int\n\
          fn apply(f : (Int) -> Int ! {Boom}, x : Int) : !{Boom} Int = f(x)\n\
          fn risky(x) =\n  if x == 0 then boom(1) else x\n\
          fn main() =\n  handle apply(risky, 0) with\n    boom(v, k) => 0 - v\n    return r => r\n",

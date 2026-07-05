@@ -26,7 +26,11 @@ fn seg_sum(xs, i, j) = sum(take(j - i, drop(i, xs)))
 
 fn mss_spec(xs) =
   let n = length(xs)
-  foldl(\(best, i) -> foldl(\(b, j) -> max(b, seg_sum(xs, i, j)), best, range(i, n + 1)), 0, range(0, n + 1))
+  foldl(
+      \(best, i) -> foldl(\(b, j) -> max(b, seg_sum(xs, i, j)), best, range(i, n + 1)),
+      0,
+      range(0, n + 1),
+    )
 
 fn main() =
   let xs = [0 - 2, 1, 0 - 3, 4, 0 - 1, 2, 1, 0 - 5, 4]

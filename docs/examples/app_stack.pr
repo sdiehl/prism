@@ -13,13 +13,11 @@
 --   step 99
 --   0
 
-effect Ask {
+effect Ask
   ctl ask(Unit) : Int
-}
 
-effect Tell {
+effect Tell
   ctl tell(String) : Unit
-}
 
 error Invalid(Int)
 

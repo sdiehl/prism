@@ -1,7 +1,6 @@
-effect Amb {
-  ctl choose(Int) : Int,
+effect Amb
+  ctl choose(Int) : Int
   ctl reject(Unit) : Int
-}
 
 -- Nondeterminism by multishot resumption.
 --

@@ -42,6 +42,38 @@ fn right_nested_non_associative_arith_keeps_parens() {
 }
 
 #[test]
+fn unary_minus_roundtrips() {
+    // Unary minus is a tight prefix: no parens over an application or projection,
+    // parens over any binary operand, a space between two minuses so `- -x` never
+    // collides with the `--` comment lexeme, and separator grouping preserved.
+    for src in [
+        "fn f(x) = -x\n",
+        "fn f(g, x) = -g(x)\n",
+        "fn f(p) = -p.field\n",
+        "fn f(x) = - -x\n",
+        "fn f(a, b) = -(a + b)\n",
+        "fn f(x) = -x * 3\n",
+        "fn f(a, b) = a - -b\n",
+        "fn f() = -5\n",
+        "fn f() = -1.5\n",
+        "fn f() = 1_000_000\n",
+        "fn f() = 1_000.000_5\n",
+        "fn f() = 1e-25\n",
+    ] {
+        roundtrips(src);
+    }
+    // The double-minus spacing and separator grouping are exact, not just parsable.
+    assert_eq!(
+        prism::format("fn f(x) = - -x\n").unwrap(),
+        "fn f(x) = - -x\n"
+    );
+    assert_eq!(
+        prism::format("fn f() = 1_000_000\n").unwrap(),
+        "fn f() = 1_000_000\n"
+    );
+}
+
+#[test]
 fn path_update_modify_restores_tilde() {
     // The `~` modify operator, on its own and mixed with `=`, must survive
     // formatting: both sigils restored and the whole form idempotent.

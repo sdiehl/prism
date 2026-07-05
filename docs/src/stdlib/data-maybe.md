@@ -38,8 +38,8 @@ unwrap_or(0, Some(5))
 
 ### `map_option`
 
-```prism,sig,h-80a8b5c529470754b84ccb99ae67d90bf88e21f1365a15e2465007bd48377259
-map_option : forall a b e0. ((b) -> a ! {e0}, Option(b)) -> Option(a) ! {e0}
+```prism,sig,h-c9781fae043ee968467adf284af0df4fd46c7385585f1a6057d095f50eb03583
+map_option : forall e0 a b. ((b) -> a ! {e0}, Option(b)) -> Option(a) ! {e0}
 ```
 
 Apply `f` to the contained value, leaving `None` untouched.
@@ -52,16 +52,16 @@ unwrap_or(0, 5)
 
 ### `and_then`
 
-```prism,sig,h-9ec19b8e578cff898cca70ecf817048bfa89aad683b64c9e9c764b203764a5e1
-and_then : forall a b e0. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e0}
+```prism,sig,h-110cd842d1d4c3a2c99a7c2a95f86aa58979380dc05f4a36587a854793bd6162
+and_then : forall e0 a b. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e0}
 ```
 
 Chain an option-returning function, short-circuiting on `None` (monadic bind for `Option`).
 
 ### `map_or`
 
-```prism,sig,h-9da5aa368507d0ceb57c73d699cda147beaf98ceeb6bcc6109b0300f6d2739b5
-map_or : forall a b e0. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
+```prism,sig,h-96d7af859b034e8ab99ae8a0d7925b4ed1a1ef17a199d3a0ddb84c22c418e41b
+map_or : forall e0 a b. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
 ```
 
 ### `option_or`
@@ -84,18 +84,24 @@ both : forall a b. (Option(a), Option(b)) -> Option((a, b))
 
 ### `option_fold_r`
 
-```prism,sig,h-b528b675c57236dec66947700c358f96d41b0c4a84e23f8bf26d712bd3af0f33
-option_fold_r : forall a b e0. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
+```prism,sig,h-d70643c8ecc6fbdbf3ed86ca2dc6a04a75d3081e942742a1b3faf9131e2a9203
+option_fold_r : forall e0 a b. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
+```
+
+### `option_fold_l`
+
+```prism,sig,h-dc5abf48b956cbd00e45fa47c4a1491eafa39bde4eff260e41ec2d05f50c7d5d
+option_fold_l : forall e0 a b. ((a, b) -> a ! {e0}, a, Option(b)) -> a ! {e0}
 ```
 
 ### `option_bind`
 
-```prism,sig,h-8ec73c673dff2d97d483f933ba2d4c264b69d83b1c4cf2531647431c9c8c9b5b
-option_bind : forall a b e0. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0}
+```prism,sig,h-2b9511a2d3203e5000ac212b0beb1e9cedcc32ecb1f5c7d39857e24eefc14856
+option_bind : forall e0 a b. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0}
 ```
 
 ### `option_ap`
 
-```prism,sig,h-4645b90903e9dcc8806aeaac4500364f13209cd7573887549fa9a36548428131
-option_ap : forall a b e0. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0}
+```prism,sig,h-716109a50325d0315b636b06366c4d37109fe412fb367d4ee658fc97e2b75d38
+option_ap : forall e0 a b. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0}
 ```
