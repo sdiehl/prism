@@ -33,6 +33,7 @@ examples/game.pr: evidence
 examples/grade_isolation.pr: selective-free-monad
 examples/handlers_funval.pr: evidence
 examples/hangman.pr: evidence
+examples/incr_resident.pr: whole-program-free-monad
 examples/incr_trace.pr: whole-program-free-monad
 examples/incr_warm.pr: whole-program-free-monad
 examples/indexing.pr: whole-program-free-monad
