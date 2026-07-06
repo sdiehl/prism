@@ -103,6 +103,7 @@
               ./rust-toolchain.toml
               ./examples/boids.pr
               ./examples/chaos_swarm.pr
+              ./examples/incr_resident.pr
               ./examples/pendulum.pr
               ./src/syntax/grammar.lalrpop
             ];
