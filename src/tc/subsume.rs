@@ -393,8 +393,13 @@ impl Tc<'_> {
         if fv.contains(&cur_row) {
             return Ok(());
         }
-        // Labels already in the ambient's fixed prefix need not be re-added.
-        let eff = without_labels(&eff, &prefix);
+        // Labels already in the ambient's fixed prefix need not be re-added,
+        // but a parametric label's arguments must agree with the prefix's
+        // instantiation before it is dropped: skipping by name alone let a
+        // lambda body perform `Tag(String)` under an arrow annotated
+        // `! {Tag(Int) | e}` unchecked (the named-function path errors through
+        // `rewrite_row`'s argument equation; this is its prefix analogue).
+        let eff = self.strip_prefix(&eff, &prefix)?;
         let opened = if matches!(eff.tail(), EffRow::Empty) {
             let fresh = self.push_ex_row();
             replace_tail(&eff, EffRow::Exist(fresh))
@@ -403,6 +408,33 @@ impl Tc<'_> {
         };
         let amb = EffRow::Exist(cur_row);
         self.unify_row(&opened, &amb)
+    }
+
+    // Drop the labels the fixed prefix already carries, equating a dropped
+    // label's type arguments against the prefix's instantiation (first
+    // name-match wins, mirroring `rewrite_row`). Labels not in the prefix pass
+    // through for the tail unification in `absorb_row`.
+    fn strip_prefix(&mut self, r: &EffRow, prefix: &[Label]) -> Result<EffRow, TcErr> {
+        match r {
+            EffRow::Extend(l, rest) => {
+                let rest = self.strip_prefix(rest, prefix)?;
+                let Some(p) = prefix.iter().find(|p| p.name == l.name) else {
+                    return Ok(EffRow::Extend(l.clone(), Box::new(rest)));
+                };
+                for (x, y) in l.args.iter().zip(&p.args) {
+                    let (lx, ly) = (l.clone(), p.clone());
+                    self.equate(x, y).map_err(|e| {
+                        e.or_fail(format!(
+                            "effect instantiation mismatch: `{}` is not compatible with `{}`",
+                            self.show_label(&lx),
+                            self.show_label(&ly)
+                        ))
+                    })?;
+                }
+                Ok(rest)
+            }
+            other => Ok(other.clone()),
+        }
     }
 
     // After a handler body accumulated into `body_row`, fold its row minus the

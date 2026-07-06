@@ -6,7 +6,7 @@ use crate::error::TypeError;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
-use crate::types::ty::{EffRow, Effects, Kind, Type};
+use crate::types::ty::{EffRow, Effects, Kind, Label, Type};
 
 mod classes;
 mod context;
@@ -370,10 +370,13 @@ struct SelfRef {
 
 // Open row existential tail plus the concrete labels in its fixed prefix.
 // Absorbing a callee row skips the prefix labels so a direct named call does
-// not duplicate a label.
+// not duplicate a label. The prefix keeps whole labels, not bare names: the
+// skip must equate a parametric label's arguments against the prefix's
+// instantiation, or a lambda body performing `Tag(String)` under an arrow
+// annotated `! {Tag(Int) | e}` would drop the label unchecked.
 struct RowScope {
     tail: u32,
-    prefix: BTreeSet<Sym>,
+    prefix: Vec<Label>,
 }
 
 // The concrete effects a declaration performs: the labels of its inferred

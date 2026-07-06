@@ -1,0 +1,12 @@
+-- A lambda checked against an annotated arrow row must equate a parametric
+-- label's type arguments, not skip the label by name: performing `Tag(String)`
+-- under an expected `! {Tag(Int) | e}` is a type error. The named-function
+-- path always errored through `rewrite_row`'s argument equation; the fixed
+-- prefix skip in `absorb_row` used to drop the lambda form unchecked, so the
+-- mismatch only surfaced at run time inside the eventual handler.
+effect Tag(a)
+  ctl put(a) : Unit
+
+fn wants_int(s : (Unit) -> Unit ! {Tag(Int) | e}) : Int = 1
+
+fn main() = println(wants_int(\(_u) -> put("hi")))

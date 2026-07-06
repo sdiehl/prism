@@ -152,10 +152,10 @@ impl Tc<'_> {
                 // closure introduction form admits row subsumption); a closed or
                 // rigid tail is pinned afterward so the body may not exceed it.
                 let eff = self.apply_row(eff);
-                let mut prefix = BTreeSet::new();
+                let mut prefix = Vec::new();
                 let mut cursor = &eff;
                 while let EffRow::Extend(l, more) = cursor {
-                    prefix.insert(l.name);
+                    prefix.push(l.clone());
                     cursor = more;
                 }
                 let (tail, closed) = match cursor {
@@ -464,7 +464,7 @@ impl Tc<'_> {
                 let checked = self.with_row_scope(
                     RowScope {
                         tail: row,
-                        prefix: BTreeSet::new(),
+                        prefix: Vec::new(),
                     },
                     |tc| tc.check(&env2, body, &Type::Exist(ret)),
                 );
@@ -1528,7 +1528,7 @@ impl Tc<'_> {
         let prefix = self
             .cur_row
             .as_ref()
-            .map_or_else(BTreeSet::new, |s| s.prefix.clone());
+            .map_or_else(Vec::new, |s| s.prefix.clone());
         let saved_row = self.cur_row.replace(RowScope {
             tail: body_row,
             prefix,
@@ -1795,7 +1795,7 @@ impl Tc<'_> {
         env2.insert(Sym::from(&d.name), self_entry);
         let saved_row = self.cur_row.replace(RowScope {
             tail: seed.mu,
-            prefix: BTreeSet::new(),
+            prefix: Vec::new(),
         });
         let checked = self.in_row_scope(&seed.scope, |tc| {
             tc.with_self(
@@ -1880,7 +1880,7 @@ impl Tc<'_> {
         let (r, effs) = self.with_row_scope(
             RowScope {
                 tail: mu,
-                prefix: BTreeSet::new(),
+                prefix: Vec::new(),
             },
             |tc| {
                 let r = f(tc);
