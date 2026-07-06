@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::codegen::rt::{write_libm_archive, write_runtime};
+use crate::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
 use crate::error::Error;
 
 use super::{Config, NATIVE_KONT_FRAME_FLAGS};
@@ -24,10 +24,15 @@ pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
     }
 }
 
-pub(super) fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
+pub(super) fn cc_link(
+    ir: &Path,
+    out: &Path,
+    cfg: &Config,
+    runtime_profile: RuntimeProfile,
+) -> Result<(), Error> {
     let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
     let rt_dir = out.with_extension("prism_rt.d");
-    let sources = write_runtime(&rt_dir)?;
+    let sources = write_runtime_for(&rt_dir, runtime_profile)?;
     let libm_archive = write_libm_archive(&rt_dir)?;
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
     let olevel = format!("-O{}", cfg.backend_opt);

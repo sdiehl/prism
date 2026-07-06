@@ -391,8 +391,12 @@ mod tests {
         let src = dir.join(format!("{stem}.c"));
         let bin = dir.join(&stem);
         std::fs::write(&src, kont_lookup_harness()).unwrap();
-        let comp = Command::new(&cc)
-            .args(["-O0", "-w", "-DPRISM_NATIVE_KONT_FRAMES"])
+        let mut cmd = Command::new(&cc);
+        cmd.args(["-O0", "-w", "-DPRISM_NATIVE_KONT_FRAMES"]);
+        if cfg!(target_os = "linux") {
+            cmd.arg("-rdynamic");
+        }
+        let comp = cmd
             .args(extra_cflags)
             .arg(&src)
             .args(&rt_sources)
@@ -410,8 +414,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             run.status.success(),
-            "native kont runtime lookup harness exited with {:?}",
-            run.status
+            "native kont runtime lookup harness exited with {:?}\nstdout:\n{}\nstderr:\n{}",
+            run.status,
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
         );
     }
 

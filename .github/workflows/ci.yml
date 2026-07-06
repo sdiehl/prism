@@ -82,7 +82,7 @@ jobs:
           for f in runtime/*.c; do
             [ "$(basename "$f")" = prism_arena.c ] && continue
             echo "tidy $f"
-            clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -Iruntime
+            clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime
           done
 
   # The C-runtime sanitizer + structural-backstop parity re-runs, split off `test`
@@ -403,6 +403,9 @@ jobs:
         with:
           packages: libmlir-22-dev mlir-22-tools
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Build with mlir backend
         run: cargo build --features mlir
         env:
@@ -411,7 +414,7 @@ jobs:
           TABLEGEN_220_PREFIX: /usr/lib/llvm-22
 
       - name: Run mlir parity test
-        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo test --features mlir --test parity mlir_matches_interpreter
+        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo nextest run --features mlir --test parity mlir_matches_interpreter
         env:
           LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22

@@ -54,7 +54,7 @@ repos:
       - id: clang-tidy
         name: C runtime clang-tidy
         language: system
-        entry: bash -c 'ct="$(command -v clang-tidy-22 || command -v clang-tidy)"; for f in runtime/*.c; do [ "$(basename "$f")" = prism_arena.c ] && continue; "$ct" "$f" --quiet -- -std=c11 -O2 -Iruntime || exit 1; done'
+        entry: bash -c 'ct="$(command -v clang-tidy-22 || command -v clang-tidy)"; for f in runtime/*.c; do [ "$(basename "$f")" = prism_arena.c ] && continue; "$ct" "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime || exit 1; done'
         files: ^runtime/(.*\.(c|h)|\.clang-tidy)$
         pass_filenames: false
 

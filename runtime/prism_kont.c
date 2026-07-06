@@ -1,6 +1,6 @@
 /* Access to the native-symbol-to-definition-hash table embedded by codegen. */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE
+#define _GNU_SOURCE 1 /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard glibc feature-test macro for dladdr */
 #endif
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
 #define _DARWIN_C_SOURCE 1 /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */

@@ -9,6 +9,8 @@ use std::{env, fs};
 #[cfg(feature = "mlir")]
 use crate::codegen::emit_mlir;
 #[cfg(feature = "native")]
+use crate::codegen::rt::RuntimeProfile;
+#[cfg(feature = "native")]
 use crate::codegen::{
     emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table, native_kont_state_map,
     native_kont_table, NativeKontIdentityRow,
@@ -1892,7 +1894,7 @@ pub fn build_on_report(
     let bc = out.with_extension("bc");
     emit_llvm_bc_with_native_kont_table(&core, &ctors, &native_kont_table, &bc)
         .map_err(Error::Codegen)?;
-    cc_link(&bc, out, cfg)?;
+    cc_link(&bc, out, cfg, RuntimeProfile::NativeBackend)?;
     // A successful build populates the store when the knob is on. Re-elaboration
     // is cheap relative to codegen and only happens under the opt-in flag; the
     // store is a cache, so a failure here would not invalidate the build (but is
@@ -1972,7 +1974,7 @@ pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Res
     }
     fs::write(&ll_file, &translate_out.stdout)?;
 
-    let res = cc_link(&ll_file, out, cfg);
+    let res = cc_link(&ll_file, out, cfg, RuntimeProfile::HostOracle);
     let _ = fs::remove_file(&mlir_file);
     res
 }
