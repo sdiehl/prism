@@ -59,6 +59,7 @@ examples/hashmap.pr	pure
 examples/higher.pr	pure
 examples/hkt.pr	pure
 examples/imperative.pr	pure
+examples/incr_resident.pr	whole-program-free-monad
 examples/indexing.pr	whole-program-free-monad
 examples/interaction.pr	state-fusion
 examples/json.pr	pure
