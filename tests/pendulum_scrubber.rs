@@ -1,4 +1,4 @@
-//! The double pendulum the browser determinism scrubber replays (B1). These pin
+//! The double pendulum the browser determinism scrubber replays. These pin
 //! the property the scrubber's honesty rests on: frame N is a pure function of
 //! the step index, byte-identical on every run, and the symplectic integrator
 //! holds energy, so the chaos on screen is dynamics rather than integrator drift.

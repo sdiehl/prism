@@ -4,65 +4,108 @@
 // the parens these constructs require or its output stops parsing. `format`
 // reparses its own output, so a dropped-but-required paren surfaces as an Err
 // here. Each case also pins idempotence.
+use rstest::rstest;
+
 fn roundtrips(src: &str) {
     let once = prism::format(src).expect("input must parse");
     let twice = prism::format(&once).expect("formatted output must reparse");
     assert_eq!(once, twice, "formatter not idempotent: {src:?} -> {once:?}");
 }
 
-#[test]
-fn nested_comparisons_keep_parens() {
-    // Comparisons never associate; both operand positions must stay wrapped.
-    for src in [
-        "fn f(a, b, c) = a == (b == c)\n",
-        "fn f(a, b, c) = (a == b) == c\n",
-        "fn f(a, b, c) = a < (b < c)\n",
-        "fn f(a, b, c) = a == (b < c)\n",
-        "fn f(a, b, c) = (a < b) == c\n",
-        "fn f(a, b, c) = a /= (b >= c)\n",
-        "fn f(a, b, c) = a ==. (b <. c)\n",
-    ] {
-        roundtrips(src);
+#[derive(Clone, Copy, Debug)]
+enum ParensCase {
+    EqRightEq,
+    EqLeftEq,
+    LtRightLt,
+    EqRightLt,
+    LtLeftEq,
+    NeqRightGe,
+    FloatEqRightLt,
+    SubRightSub,
+    SubRightAdd,
+    DivRightDiv,
+    RemRightRem,
+    FloatMulRightAdd,
+    UnaryVariable,
+    UnaryCall,
+    UnaryProjection,
+    UnaryUnary,
+    UnaryBinaryOperand,
+    UnaryTimes,
+    BinaryMinusUnary,
+    NegativeInt,
+    NegativeFloat,
+    IntSeparators,
+    FloatSeparators,
+    ExponentSign,
+}
+
+impl ParensCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::EqRightEq => "fn f(a, b, c) = a == (b == c)\n",
+            Self::EqLeftEq => "fn f(a, b, c) = (a == b) == c\n",
+            Self::LtRightLt => "fn f(a, b, c) = a < (b < c)\n",
+            Self::EqRightLt => "fn f(a, b, c) = a == (b < c)\n",
+            Self::LtLeftEq => "fn f(a, b, c) = (a < b) == c\n",
+            Self::NeqRightGe => "fn f(a, b, c) = a /= (b >= c)\n",
+            Self::FloatEqRightLt => "fn f(a, b, c) = a ==. (b <. c)\n",
+            Self::SubRightSub => "fn f(a, b, c) = a - (b - c)\n",
+            Self::SubRightAdd => "fn f(a, b, c) = a - (b + c)\n",
+            Self::DivRightDiv => "fn f(a, b, c) = a / (b / c)\n",
+            Self::RemRightRem => "fn f(a, b, c) = a % (b % c)\n",
+            Self::FloatMulRightAdd => "fn f(a, b, c) = a *. (b +. c)\n",
+            Self::UnaryVariable => "fn f(x) = -x\n",
+            Self::UnaryCall => "fn f(g, x) = -g(x)\n",
+            Self::UnaryProjection => "fn f(p) = -p.field\n",
+            Self::UnaryUnary => "fn f(x) = - -x\n",
+            Self::UnaryBinaryOperand => "fn f(a, b) = -(a + b)\n",
+            Self::UnaryTimes => "fn f(x) = -x * 3\n",
+            Self::BinaryMinusUnary => "fn f(a, b) = a - -b\n",
+            Self::NegativeInt => "fn f() = -5\n",
+            Self::NegativeFloat => "fn f() = -1.5\n",
+            Self::IntSeparators => "fn f() = 1_000_000\n",
+            Self::FloatSeparators => "fn f() = 1_000.000_5\n",
+            Self::ExponentSign => "fn f() = 1e-25\n",
+        }
     }
 }
 
-#[test]
-fn right_nested_non_associative_arith_keeps_parens() {
-    // `-`/`/`/`%` are non-associative on the right: dropping these parens would
-    // reparse to a different (left-nested) tree.
-    for src in [
-        "fn f(a, b, c) = a - (b - c)\n",
-        "fn f(a, b, c) = a - (b + c)\n",
-        "fn f(a, b, c) = a / (b / c)\n",
-        "fn f(a, b, c) = a % (b % c)\n",
-        "fn f(a, b, c) = a *. (b +. c)\n",
-    ] {
-        roundtrips(src);
-    }
+#[rstest]
+fn parens_and_unary_cases_roundtrip(
+    #[values(
+        ParensCase::EqRightEq,
+        ParensCase::EqLeftEq,
+        ParensCase::LtRightLt,
+        ParensCase::EqRightLt,
+        ParensCase::LtLeftEq,
+        ParensCase::NeqRightGe,
+        ParensCase::FloatEqRightLt,
+        ParensCase::SubRightSub,
+        ParensCase::SubRightAdd,
+        ParensCase::DivRightDiv,
+        ParensCase::RemRightRem,
+        ParensCase::FloatMulRightAdd,
+        ParensCase::UnaryVariable,
+        ParensCase::UnaryCall,
+        ParensCase::UnaryProjection,
+        ParensCase::UnaryUnary,
+        ParensCase::UnaryBinaryOperand,
+        ParensCase::UnaryTimes,
+        ParensCase::BinaryMinusUnary,
+        ParensCase::NegativeInt,
+        ParensCase::NegativeFloat,
+        ParensCase::IntSeparators,
+        ParensCase::FloatSeparators,
+        ParensCase::ExponentSign
+    )]
+    case: ParensCase,
+) {
+    roundtrips(case.src());
 }
 
 #[test]
-fn unary_minus_roundtrips() {
-    // Unary minus is a tight prefix: no parens over an application or projection,
-    // parens over any binary operand, a space between two minuses so `- -x` never
-    // collides with the `--` comment lexeme, and separator grouping preserved.
-    for src in [
-        "fn f(x) = -x\n",
-        "fn f(g, x) = -g(x)\n",
-        "fn f(p) = -p.field\n",
-        "fn f(x) = - -x\n",
-        "fn f(a, b) = -(a + b)\n",
-        "fn f(x) = -x * 3\n",
-        "fn f(a, b) = a - -b\n",
-        "fn f() = -5\n",
-        "fn f() = -1.5\n",
-        "fn f() = 1_000_000\n",
-        "fn f() = 1_000.000_5\n",
-        "fn f() = 1e-25\n",
-    ] {
-        roundtrips(src);
-    }
-    // The double-minus spacing and separator grouping are exact, not just parsable.
+fn unary_minus_spacing_and_separator_grouping_are_exact() {
     assert_eq!(
         prism::format("fn f(x) = - -x\n").unwrap(),
         "fn f(x) = - -x\n"

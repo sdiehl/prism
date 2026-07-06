@@ -1,6 +1,6 @@
-// The S5 showcase byproducts of the content-addressed store: the behavior diff,
-// the `.replay` record/replay round trip, the durable exactly-once resume, and
-// the reverse-step debugger. Each pins the load-bearing guarantee end to end.
+// Showcase byproducts of the content-addressed store: the behavior diff, the
+// `.replay` record/replay round trip, the durable exactly-once resume, and the
+// reverse-step debugger. Each pins the core guarantee end to end.
 
 mod common;
 

@@ -26,6 +26,7 @@ long prism_prim_mono_now(void);
 long prism_prim_args_count(void);
 long prism_prim_arg(long i);
 long prism_prim_getenv(long name);
+long prism_probe_enabled(long name);
 long prism_prim_read_file(long path);
 long prism_prim_read_bytes(long path);
 long prism_prim_write_bytes(long path, long buf);

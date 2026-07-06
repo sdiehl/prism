@@ -1,18 +1,14 @@
 import CEK
 
 /-
-Differential certificates: the kernel-checked half of the oracle. For each
-curated program a `:= rfl` theorem proves the verified CEK model (`CEK.lean`)
-evaluates it to exactly the value the live Rust interpreter printed for the
-matching `models/fixtures/<name>.pr`, so every case is pinned three ways -- this
-kernel proof, the runtime Lean oracle, and the Rust interpreter
-(`diff_against_rust.sh`). The term below is the erased essence of each fixture;
-its full `prism dump core-json` is committed as `models/fixtures/<name>.json`.
+These are the kernel-checked fixture certificates. Each theorem says that the
+Lean CEK machine evaluates the Core form of a fixture to the same result the Rust
+interpreter produced.
 
-This is the load-bearing module. A passing `rfl` is a Lean *kernel* certificate
-(no `native_decide`, no extra axioms) that the proven model and the compiler
-agree on every program below. If it ever fails to compile, that is the rare red
-build that is a mathematical event rather than a typo.
+The fixtures are recorded outside this file by source, generated `core-json`,
+Core hash, and expected result. The theorem body is just `rfl`, which is the
+point. If one of these stops compiling, the model and the compiler no longer
+agree on that program.
 -/
 namespace Prism.Cert
 
@@ -63,18 +59,27 @@ def output_multishot : Conf := (.ret (.int 1), [])
 def output_abort : Conf := (.ret (.int 99), [])
 
 -- Pure core: arithmetic, a called function, constructor + case, tuples, if.
+/-- The checked `inc` example really runs to the recorded certificate output. -/
 theorem inc : run 100 incΓ (load (.call "inc" [.int 41])) = output_inc := rfl
+/-- The checked multiplication example really runs to the recorded output. -/
 theorem mul : run 100 Γ0 (load (.prim .mul (.int 6) (.int 7))) = output_mul := rfl
+/-- The checked vector-pattern example really runs to the recorded output. -/
 theorem vec : run 100 Γ0 (load (.case (.ctor "Vec2" 0 [.int 3, .int 4])
   [(.ctor "Vec2" [.var "x", .var "y"], .ret (.ctor "Vec2" 0 [.int 9, .var "y"]))])) = output_vec := rfl
+/-- The checked tuple example really runs to the recorded output. -/
 theorem tup : run 100 Γ0 (load (.ret (.tuple [.int 1, .int 2]))) = output_tup := rfl
+/-- The checked conditional example really runs to the recorded output. -/
 theorem ite : run 100 Γ0 (load (.ite (.bool true) (.ret (.int 1)) (.ret (.int 2)))) = output_ite := rfl
 
 -- Effect fragment: self-recursion, and handlers that resume once (ask), twice
 -- (multishot), or discard the continuation entirely (abort).
+/-- The checked factorial example really runs to the recorded output. -/
 theorem fact : run 500 factΓ (load (.call "fact" [.int 6])) = output_fact := rfl
+/-- The checked single-shot handler example really runs to the recorded output. -/
 theorem ask : run 500 Γ0 (load askBody) = output_ask := rfl
+/-- The checked multishot handler example really runs to the recorded output. -/
 theorem multishot : run 500 Γ0 (load multishotBody) = output_multishot := rfl
+/-- The checked aborting handler example really runs to the recorded output. -/
 theorem abort : run 500 Γ0 (load abortBody) = output_abort := rfl
 
 end Prism.Cert

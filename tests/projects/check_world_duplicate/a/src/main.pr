@@ -1,0 +1,3 @@
+fn value() : Int = 1
+
+fn main() : Int = value()

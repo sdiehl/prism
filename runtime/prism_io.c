@@ -193,6 +193,27 @@ long prism_prim_getenv(long name) {
     return prism_str_lit(v, (long)strlen(v));
 }
 
+long prism_probe_enabled(long name) {
+    const char *filter = getenv("PRISM_PROBES");
+    if (!filter) return 0;
+    const char *needle = prism_str_data(name);
+    long needle_len = prism_str_len_bytes(name);
+    const char *p = filter;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+        const char *start = p;
+        while (*p && *p != ',') p++;
+        const char *end = p;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        long len = (long)(end - start);
+        if ((len == 1 && start[0] == '*') ||
+            (len == needle_len && memcmp(start, needle, (size_t)len) == 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 long prism_prim_read_file(long path) {
     const char *name = prism_str_data(path);
     FILE *f = fopen(name, "rb");

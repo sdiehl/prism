@@ -1,0 +1,7 @@
+fn go(k : Int, acc : Int) : Int =
+  if k == 0 then
+    acc
+  else
+    go(k - 1, acc + 1)
+
+fn main() = println(go(__N__, 0))

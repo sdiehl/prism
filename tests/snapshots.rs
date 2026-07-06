@@ -115,13 +115,14 @@ fn nontight_effect_annotation_warns() {
 // `deprecated "..."` annotation carries the author's suggestion, while the
 // tower-superseded float dot-operators and fixed-width arithmetic builtins carry
 // the compiler's canonical replacement. A warning, never an error; behavior is
-// unchanged. The messages are pinned here (task: snapshot the warning texts).
+// unchanged. The snapshot pins the warning text.
 #[test]
 fn deprecation_warnings() {
     let src = prism::with_prelude(
         "deprecated \"use `+` on Float\"\n\
          fn old_add(x : Float, y : Float) : Float = plus(x, y)\n\
          fn f_float() : Float = old_add(1.0, 2.0) +. (3.0 *. 4.0)\n\
+         fn f_cmp() : Bool = 1.0 <. 2.0 && 1.0 ==. 1.0\n\
          fn f_i64() : I64 = i64_mul(2i64, 3i64)\n\
          fn f_u64() : U64 = u64_add(1u64, 2u64)\n\
          fn main() : Unit = println(show(f_float()))\n",

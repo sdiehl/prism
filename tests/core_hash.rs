@@ -1,5 +1,5 @@
 // Content-addressed Core hashing: a definition's hash names its behavior, not
-// its spelling or position. These pin the load-bearing properties end to end,
+// its spelling or position. These pin the core properties end to end,
 // over real elaborated programs: name- and format-independence, dependency
 // substitution into a Merkle DAG, propagation that touches exactly the affected
 // closure, cycle hashing for mutual recursion, and structural sharing of

@@ -5,19 +5,13 @@ import Meta
 import Json
 
 /-
-Executable demonstration + example module for the Prism core model. This is the
-ONLY module that carries `example`s and `main`; the proof libraries (`Prism`,
-`CEK`, `Dynamics`, `Meta`) stay free of ad-hoc examples and IO. It is built as a
-`lake exe oracle` that runs the CEK machine on a handful of programs and prints
-their results, so the same definitions that the `example`s certify by `rfl` are
-also runnable end to end.
+This is the runnable demo module. The library files stay focused on definitions
+and theorems; this one gets the `example`s and the `main`.
 
-The examples fall in two groups:
-* substitution small-step (`Prism.lean`): worked reductions and determinism;
-* the expanded model: CEK oracle runs that agree with the substitution answers
-  by `rfl`, the big-step spec driving the machine via `bigstep_runs`, the effect
-  metatheory deciding handled vs unhandled operations, and the `Meta` progress /
-  unique-normal-form classification on concrete terms.
+The examples are deliberately small. They check the substitution model, CEK
+execution, effects, progress facts, and a few concrete programs by `rfl`. The
+same definitions also run through `lake exe oracle`, which is useful when you
+want to see the model do something instead of just typecheck.
 -/
 namespace Prism
 
@@ -26,7 +20,14 @@ def emptyΓ : Core := ⟨[]⟩
 def incΓ : Core := ⟨[⟨"inc", ["n"], .prim .add (.var "n") (.int 1)⟩]⟩
 
 def viewΓ : Core :=
-  ⟨[⟨"view@First", ["c"], .case (.var "c") [(.ctor "Box" [.var "v"], .ret (.ctor "Some" 0 [.var "v"]))]⟩]⟩
+  ⟨[
+    ⟨
+      "view@First",
+      ["c"],
+      .case (.var "c")
+        [(.ctor "Box" [.var "v"], .ret (.ctor "Some" 0 [.var "v"]))]
+    ⟩
+  ]⟩
 
 -- Programs reused by both the `example` certificates and `main`.
 def incCall : Comp := .call "inc" [.int 41]
@@ -34,21 +35,45 @@ def incCall : Comp := .call "inc" [.int 41]
 def betaProg : Comp := .app (.lam ["x"] (.ret (.var "x"))) [.int 7]
 
 def vecProg : Comp :=
-  .case (.ctor "Vec2" 0 [.int 3, .int 4]) [(.ctor "Vec2" [.var "x", .var "y"], .ret (.ctor "Vec2" 0 [.int 9, .var "y"]))]
+  .case (.ctor "Vec2" 0 [.int 3, .int 4])
+    [(.ctor "Vec2" [.var "x", .var "y"],
+      .ret (.ctor "Vec2" 0 [.int 9, .var "y"]))]
 
 def viewProg : Comp :=
-  .bind (.call "view@First" [.ctor "Box" 0 [.int 7]]) "r" (.case (.var "r") [(.ctor "Some" [.var "n"], .ret (.var "n")), (.wild, .ret (.int 0))])
+  .bind (.call "view@First" [.ctor "Box" 0 [.int 7]]) "r"
+    (.case (.var "r")
+      [(.ctor "Some" [.var "n"], .ret (.var "n")),
+       (.wild, .ret (.int 0))])
 
 -- `handle (do ask) with { ask() => resume 5; return x => x }`
 def askProg : Comp :=
-  .handle (.doOp "ask" []) (some "x") (some (.ret (.var "x"))) [.mk "ask" [] "k" (.app (.ret (.var "k")) [.int 5])]
+  .handle
+    (.doOp "ask" [])
+    (some "x")
+    (some (.ret (.var "x")))
+    [.mk "ask" [] "k" (.app (.ret (.var "k")) [.int 5])]
 
 -- abort handler: never resumes, discards its continuation.
 def abortProg : Comp := .handle (.doOp "abort" []) none none [.mk "abort" [] "k" (.ret (.int 0))]
 
 -- multishot: `flip` resumes twice (true then false) and sums the results.
 def flipProg : Comp :=
-  .handle (.bind (.doOp "flip" []) "x" (.ite (.var "x") (.ret (.int 1)) (.ret (.int 0)))) (some "r") (some (.ret (.var "r"))) [.mk "flip" [] "k" (.bind (.app (.ret (.var "k")) [.bool true]) "a" (.bind (.app (.ret (.var "k")) [.bool false]) "b" (.prim .add (.var "a") (.var "b"))))]
+  .handle
+    (.bind
+      (.doOp "flip" [])
+      "x"
+      (.ite (.var "x") (.ret (.int 1)) (.ret (.int 0))))
+    (some "r")
+    (some (.ret (.var "r")))
+    [ .mk "flip" [] "k"
+        (.bind
+          (.app (.ret (.var "k")) [.bool true])
+          "a"
+          (.bind
+            (.app (.ret (.var "k")) [.bool false])
+            "b"
+            (.prim .add (.var "a") (.var "b"))))
+    ]
 
 /- ===== Substitution small-step semantics (Prism.lean) ===== -/
 example : delta .add (.int 1) (.int 2) = some (.int 3) := rfl
@@ -66,15 +91,25 @@ example : Steps emptyΓ betaProg (.ret (.int 7)) := .head .beta .refl
 
 example : Steps incΓ incCall (.ret (.int 42)) := .head (.call rfl) (.head (.prim rfl) .refl)
 
-example : Steps emptyΓ (.case (.ctor "Some" 0 [.int 9]) [(.ctor "Some" [.var "y"], .ret (.var "y")), (.wild, .ret (.int 0))]) (.ret (.int 9)) :=
+example :
+    Steps emptyΓ
+      (.case (.ctor "Some" 0 [.int 9])
+        [(.ctor "Some" [.var "y"], .ret (.var "y")),
+         (.wild, .ret (.int 0))])
+      (.ret (.int 9)) :=
   .head (.caseMatch rfl) .refl
 
 example : Step emptyΓ (.drop (.int 7)) (.ret .unit) := .dropStep
 
-example : Step emptyΓ (.reuse "tok" (.ctor "Cons" 0 [.int 1, .unit])) (.ret (.ctor "Cons" 0 [.int 1, .unit])) :=
+example :
+    Step emptyΓ
+      (.reuse "tok" (.ctor "Cons" 0 [.int 1, .unit]))
+      (.ret (.ctor "Cons" 0 [.int 1, .unit])) :=
   .reuseStep
 
-example {b c : Comp} (h1 : Step emptyΓ (.prim .add (.int 2) (.int 3)) b) (h2 : Step emptyΓ (.prim .add (.int 2) (.int 3)) c) : b = c :=
+example {b c : Comp}
+    (h1 : Step emptyΓ (.prim .add (.int 2) (.int 3)) b)
+    (h2 : Step emptyΓ (.prim .add (.int 2) (.int 3)) c) : b = c :=
   Step.deterministic h1 h2
 
 -- s3 lens update: destructure the record (a `ctor`) and rebuild with `x` replaced.
@@ -82,7 +117,12 @@ example : Steps emptyΓ vecProg (.ret (.ctor "Vec2" 0 [.int 9, .int 4])) :=
   .head (.caseMatch rfl) .refl
 
 -- The same rebuild under FBIP `reuse` of the matched cell.
-example : Steps emptyΓ (.case (.ctor "Vec2" 0 [.int 3, .int 4]) [(.ctor "Vec2" [.var "x", .var "y"], .reuse "tok" (.ctor "Vec2" 0 [.int 9, .var "y"]))]) (.ret (.ctor "Vec2" 0 [.int 9, .int 4])) :=
+example :
+    Steps emptyΓ
+      (.case (.ctor "Vec2" 0 [.int 3, .int 4])
+        [(.ctor "Vec2" [.var "x", .var "y"],
+          .reuse "tok" (.ctor "Vec2" 0 [.int 9, .var "y"]))])
+      (.ret (.ctor "Vec2" 0 [.int 9, .int 4])) :=
   .head (.caseMatch rfl) (.head .reuseStep .refl)
 
 -- View-pattern lowering: a `call` to the synthesized view then a `case` on its result.
@@ -121,7 +161,7 @@ example : findHandler "ask" [] 0 [] [] = none :=
     cases h) []
 
 /- ===== Substitution metatheory on concrete terms (Meta.lean) ===== -/
--- Progress pins `prim add true 1` (closed, ill-typed) as `Stuck`, not silently stuck.
+-- Progress classifies `prim add true 1` as `Stuck`, not silently stuck.
 example : Stuck emptyΓ (.prim .add (.bool true) (.int 1)) :=
   by
     rcases progress emptyΓ (.prim .add (.bool true) (.int 1)) with t | ⟨_, hs⟩ | s
@@ -131,7 +171,10 @@ example : Stuck emptyΓ (.prim .add (.bool true) (.int 1)) :=
     · exact s
 
 -- Unique normal form on a concrete redex: at most one terminal answer.
-example {m n : Comp} (hm : Steps emptyΓ (.prim .add (.int 2) (.int 3)) m) (hn : Steps emptyΓ (.prim .add (.int 2) (.int 3)) n) (tm : Terminal m) (tn : Terminal n) : m = n :=
+example {m n : Comp}
+    (hm : Steps emptyΓ (.prim .add (.int 2) (.int 3)) m)
+    (hn : Steps emptyΓ (.prim .add (.int 2) (.int 3)) n)
+    (tm : Terminal m) (tn : Terminal n) : m = n :=
   Steps.unique_normal hm hn tm tn
 
 /- ===== Rendering: match the Rust interpreter's `Rv::show` byte for byte ===== -/
@@ -182,7 +225,14 @@ def fmtG (d : Float) : String :=
       let body := if (-4 : Int) ≤ e10 ∧ e10 < 16 then
         if e10 ≥ 0 then
           let k := (e10 + 1).toNat
-          if digs.length ≤ k then String.ofList digs ++ String.ofList (List.replicate (k - digs.length) '0') else stripTrailing (String.ofList (digs.take k) ++ "." ++ String.ofList (digs.drop k))
+          if digs.length ≤ k then
+            String.ofList digs ++
+              String.ofList (List.replicate (k - digs.length) '0')
+          else
+            stripTrailing
+              (String.ofList (digs.take k) ++
+                "." ++
+                String.ofList (digs.drop k))
         else
           let zeros := String.ofList (List.replicate ((-e10).toNat - 1) '0')
           stripTrailing ("0." ++ zeros ++ String.ofList digs)
@@ -239,7 +289,14 @@ def evalCoreJson (src : String) : Except String String := Json.coreOfJson src |>
 
 /- ===== Executable entry point ===== -/
 def cases : List (String × Core × Comp) :=
-  [("inc 41", incΓ, incCall), ("(\\x. x) 7", emptyΓ, betaProg), ("Vec2 lens { x=9 }", emptyΓ, vecProg), ("view@First", viewΓ, viewProg), ("handle ask=>5", emptyΓ, askProg), ("handle abort", emptyΓ, abortProg), ("flip (multishot)", emptyΓ, flipProg)]
+  [ ("inc 41", incΓ, incCall),
+    ("(\\x. x) 7", emptyΓ, betaProg),
+    ("Vec2 lens { x=9 }", emptyΓ, vecProg),
+    ("view@First", viewΓ, viewProg),
+    ("handle ask=>5", emptyΓ, askProg),
+    ("handle abort", emptyΓ, abortProg),
+    ("flip (multishot)", emptyΓ, flipProg)
+  ]
 
 def demo : IO Unit := do
   IO.println "Prism CEK oracle"

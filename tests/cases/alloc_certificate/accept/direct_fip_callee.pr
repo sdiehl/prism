@@ -1,0 +1,3 @@
+fip fn id(x) = x
+
+fn top(x : Int) : Int without alloc = id(x)

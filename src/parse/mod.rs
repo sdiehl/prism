@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use lalrpop_util::ParseError::{
+    ExtraToken, InvalidToken, UnrecognizedEof, UnrecognizedToken, User,
+};
 use marginalia::{Span, TriviaTable};
 
 use crate::error::{LexError, ParseError, SourceMap};
@@ -208,9 +211,6 @@ fn from_lalrpop(
     src: &str,
     e: &lalrpop_util::ParseError<usize, Token, (Span, String)>,
 ) -> ParseError {
-    use lalrpop_util::ParseError::{
-        ExtraToken, InvalidToken, UnrecognizedEof, UnrecognizedToken, User,
-    };
     let map = SourceMap::new(src);
     match e {
         InvalidToken { location } => ParseError::Syntax {

@@ -1,4 +1,4 @@
-//! The boids swarm the browser determinism scrubber replays (B5). These pin the
+//! The boids swarm the browser determinism scrubber replays. These pin the
 //! property the scrubber's honesty rests on: frame N is a pure function of the
 //! step index, byte-identical on every run and independent of how it is reached.
 

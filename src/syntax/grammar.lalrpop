@@ -34,6 +34,7 @@ extern {
         "try"    => Token::Try,
         "catch"  => Token::Catch,
         "transact" => Token::Transact,
+        "probe"  => Token::Probe,
         "alias"  => Token::Alias,
         "class"  => Token::Class,
         "instance" => Token::Instance,
@@ -749,6 +750,8 @@ pub Expr: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::TryCatch(Box::new(body), arms)), span: Span::new(l, r) },
     <l:@L> "transact" <body:ExprOrBlock> ("v;")? "else" <fb:ExprOrBlock> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
+    <l:@L> "probe" <name:"str"> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Probe(name, Box::new(body))), span: Span::new(l, r) },
     <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
     <l:@L> "while" <c:Expr> "do" <body:ExprOrBlock> <r:@R> =>

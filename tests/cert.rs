@@ -18,6 +18,7 @@ use prism::store::cert::{
 };
 use prism::store::disk::{Store, Written};
 use prism::store::CodecError;
+use rstest::rstest;
 
 // A unique scratch directory removed on drop, mirroring the store test harnesses.
 struct TempDir {
@@ -59,9 +60,12 @@ const OTHER_SUBJECT: &str = "60303ae22b998861bce3b28f33eec1be758a213c";
 fn green_row(subject: &str, cert: CertStatus) -> RootAudit {
     RootAudit {
         pointer: IndexRow {
+            origin: "demo".to_string(),
             name: "demo".to_string(),
             tag: "1.0".to_string(),
             root: subject.to_string(),
+            scheme: prism::core::HASH_SCHEME.to_string(),
+            kind: prism::pkg::trust::INDEX_KIND_NAMESPACE.to_string(),
         },
         outcome: Ok(1),
         cert,
@@ -87,32 +91,51 @@ fn the_envelope_round_trips() {
     assert_eq!(decoded.backends, ("interp".to_string(), "llvm".to_string()));
 }
 
-#[test]
-fn a_foreign_scheme_is_rejected_before_the_body() {
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
-    let mut bytes = encode_cert(&cert);
-    // The scheme tag is the first length-prefixed string; change its first char to
-    // a different valid one, so the scheme mismatch (not a UTF-8 fault) is caught.
-    bytes[1] = b'X';
-    assert_eq!(decode_cert(&bytes), Err(CodecError::Scheme));
+#[derive(Clone, Copy, Debug)]
+enum DecodeFailure {
+    ForeignScheme,
+    NonCertKind,
+    TrailingBytes,
 }
 
-#[test]
-fn a_non_cert_kind_is_rejected() {
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
-    let mut bytes = encode_cert(&cert);
-    // The kind varint sits right after the scheme string (1 length byte + tag).
-    let kind_pos = 1 + HASH_SCHEME.len();
-    bytes[kind_pos] = 0; // WireKind::Value
-    assert_eq!(decode_cert(&bytes), Err(CodecError::Kind));
+impl DecodeFailure {
+    fn bytes(self) -> Vec<u8> {
+        let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+        let mut bytes = encode_cert(&cert);
+        match self {
+            Self::ForeignScheme => {
+                // The scheme tag is the first length-prefixed string; change its
+                // first char so the scheme mismatch, not UTF-8, is caught.
+                bytes[1] = b'X';
+            }
+            Self::NonCertKind => {
+                // The kind varint sits right after the scheme string.
+                bytes[1 + HASH_SCHEME.len()] = 0;
+            }
+            Self::TrailingBytes => bytes.push(0),
+        }
+        bytes
+    }
+
+    const fn want(self) -> CodecError {
+        match self {
+            Self::ForeignScheme => CodecError::Scheme,
+            Self::NonCertKind => CodecError::Kind,
+            Self::TrailingBytes => CodecError::TrailingBytes,
+        }
+    }
 }
 
-#[test]
-fn trailing_bytes_are_rejected() {
-    let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
-    let mut bytes = encode_cert(&cert);
-    bytes.push(0);
-    assert_eq!(decode_cert(&bytes), Err(CodecError::TrailingBytes));
+#[rstest]
+fn malformed_cert_envelopes_are_rejected(
+    #[values(
+        DecodeFailure::ForeignScheme,
+        DecodeFailure::NonCertKind,
+        DecodeFailure::TrailingBytes
+    )]
+    case: DecodeFailure,
+) {
+    assert_eq!(decode_cert(&case.bytes()), Err(case.want()));
 }
 
 #[test]
@@ -202,54 +225,74 @@ fn an_absent_certificate_is_not_a_failure() {
     assert!(!rep.render().contains("cert:"));
 }
 
-#[test]
-fn audit_rejects_a_corrupt_certificate_naming_the_corruption() {
-    let tmp = TempDir::new("audit-corrupt");
+#[derive(Clone, Copy, Debug)]
+enum AuditFailure {
+    CorruptBytes,
+    ForeignScheme,
+    SubjectMismatch,
+}
+
+impl AuditFailure {
+    const fn tag(self) -> &'static str {
+        match self {
+            Self::CorruptBytes => "audit-corrupt",
+            Self::ForeignScheme => "audit-foreign",
+            Self::SubjectMismatch => "audit-mismatch",
+        }
+    }
+
+    const fn needle(self) -> &'static str {
+        match self {
+            Self::CorruptBytes => "corrupt",
+            Self::ForeignScheme => "foreign scheme",
+            Self::SubjectMismatch => "does not match",
+        }
+    }
+
+    fn write(self, store: &Store) {
+        match self {
+            Self::CorruptBytes => {
+                store.put_cert(SUBJECT, b"not a certificate").unwrap();
+            }
+            Self::ForeignScheme => {
+                let foreign = Cert {
+                    scheme: "prism-core-hash-v0".to_string(),
+                    ..parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM))
+                };
+                store.put_cert(SUBJECT, &encode_cert(&foreign)).unwrap();
+            }
+            Self::SubjectMismatch => {
+                // A certificate about OTHER_SUBJECT filed under SUBJECT's key: a
+                // swap attack.
+                let mismatched = parity_cert(OTHER_SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
+                store.put_cert(SUBJECT, &encode_cert(&mismatched)).unwrap();
+            }
+        }
+    }
+}
+
+#[rstest]
+fn audit_rejects_bad_certificates(
+    #[values(
+        AuditFailure::CorruptBytes,
+        AuditFailure::ForeignScheme,
+        AuditFailure::SubjectMismatch
+    )]
+    case: AuditFailure,
+) {
+    let tmp = TempDir::new(case.tag());
     let store = tmp.store();
-    // Store bytes that are not a certificate at all under the subject's key.
-    store.put_cert(SUBJECT, b"not a certificate").unwrap();
+    case.write(&store);
 
     let status = check_cert(&store, SUBJECT);
     assert!(
-        matches!(status, CertStatus::Failed(ref m) if m.contains("corrupt")),
-        "status: {status:?}"
+        matches!(status, CertStatus::Failed(ref m) if m.contains(case.needle())),
+        "{case:?}: {status:?}"
     );
 
     let rep = report(vec![green_row(SUBJECT, status)]);
-    assert!(!rep.ok(), "a corrupt certificate must fail the audit");
+    assert!(!rep.ok(), "{case:?} must fail the audit");
     assert!(rep.render().contains("cert: FAIL"));
-}
-
-#[test]
-fn audit_rejects_a_foreign_scheme_certificate() {
-    let tmp = TempDir::new("audit-foreign");
-    let store = tmp.store();
-    let foreign = Cert {
-        scheme: "prism-core-hash-v0".to_string(),
-        ..parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM))
-    };
-    store.put_cert(SUBJECT, &encode_cert(&foreign)).unwrap();
-
-    let status = check_cert(&store, SUBJECT);
-    assert!(
-        matches!(status, CertStatus::Failed(ref m) if m.contains("foreign scheme")),
-        "status: {status:?}"
-    );
-}
-
-#[test]
-fn audit_rejects_a_certificate_whose_subject_does_not_match() {
-    let tmp = TempDir::new("audit-mismatch");
-    let store = tmp.store();
-    // A certificate about OTHER_SUBJECT filed under SUBJECT's key: a swap attack.
-    let mismatched = parity_cert(OTHER_SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
-    store.put_cert(SUBJECT, &encode_cert(&mismatched)).unwrap();
-
-    let status = check_cert(&store, SUBJECT);
-    assert!(
-        matches!(status, CertStatus::Failed(ref m) if m.contains("does not match")),
-        "status: {status:?}"
-    );
 }
 
 #[test]

@@ -12,14 +12,24 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::HASH_SCHEME;
+use prism::flags::SignMode;
+use prism::pkg::lock::{Lock, LockEntry};
+use prism::pkg::package_source_roots;
 use prism::pkg::resolve::{resolve_closure, trace, ResolveError};
-use prism::pkg::transport::DiskTransport;
+use prism::pkg::std_source::encode_source_bundle;
+use prism::pkg::transport::{DiskTransport, Transport};
+use prism::pkg::trust::{serialize_index, IndexRow, SignedArtifact, INDEX_KIND_SOURCE};
+use prism::project::{hash_pin, DepSource, Dependency};
+use prism::resolve::{SourceBundleArtifactKind, SourceBundleKind, SourceBundleOrigin};
 use prism::store::coherence::is_representation_affecting;
 use prism::store::disk::Store;
-use prism::{commit_to_store, default_roots, with_prelude, Config};
+use prism::{commit_to_store, default_roots, with_custom_prelude, with_prelude, Config, DynFlags};
+use serde_json::Value;
 
 // A multi-definition program with a deliberate dependency chain, `pkg_`-prefixed
 // to stay clear of the prelude: main -> top -> {mid, leaf}, mid -> leaf.
@@ -31,6 +41,11 @@ fn pkg_top(n : Int) : Int =
   m + pkg_leaf(n)
 fn main() = println(pkg_top(3))
 ";
+const STORE_PKG_NAME: &str = "StorePkg";
+const STORE_PKG_SOURCE: &str = "pub fn answer() : Int = 41\n";
+const STORE_PKG_ORIGIN: &str = "example.invalid/StorePkg";
+const STORE_PKG_OTHER_ORIGIN: &str = "example.invalid/OtherStorePkg";
+const STORE_PKG_TAG: &str = "v1";
 
 // --- temp store scaffolding ---------------------------------------------
 
@@ -231,7 +246,6 @@ fn delete_object(root: &Path, hash: &str) {
 // two dependency hashes are, rather than silently coexisting.
 #[test]
 fn std_root_pins_and_verifies() {
-    use prism::pkg::lock::Lock;
     use prism::pkg::{std_pin_status, stdlib_root, StdPin};
 
     let root = stdlib_root().expect("embedded stdlib elaborates");
@@ -258,4 +272,669 @@ fn std_root_pins_and_verifies() {
         }
         other => panic!("expected a mismatch, got {other:?}"),
     }
+}
+
+#[test]
+fn foreign_std_lock_scheme_is_an_error() {
+    let lock = Lock {
+        std_root: Some("deadbeef".to_string()),
+        std_scheme: Some("future-scheme".to_string()),
+        ..Lock::default()
+    };
+
+    let err = prism::pkg::std_pin_status(&lock).unwrap_err().to_string();
+    assert!(err.contains("Std root"));
+    assert!(err.contains("future-scheme"));
+}
+
+#[test]
+fn stale_std_pin_loads_source_bundle_from_store() {
+    let tmp = TempDir::new("std-source");
+    let module_src = "pub fn answer() : Int = 42\n";
+    let bundle = encode_source_bundle([("StoreOnly", module_src)]);
+    let root = blake3::hash(&bundle).to_hex().to_string();
+    let store = Store::open_or_create(tmp.root()).unwrap();
+    store.put(&root, &bundle).unwrap();
+
+    let mut lock = Lock::default();
+    lock.pin_std(root);
+    let std_root = prism::pkg::stdlib_source_root(&lock, &tmp.root()).unwrap();
+    let roots = prism::project_roots_with_std(Path::new("/no/project/src"), &[], std_root);
+    let src = with_custom_prelude("", "import StoreOnly (answer)\nfn main() = answer()\n");
+
+    let checked = prism::check_on(&src, &roots).expect("store-served std module resolves");
+    assert!(checked.decls.iter().any(|d| d.name == "main"));
+}
+
+#[test]
+fn project_check_uses_locked_std_source_bundle() {
+    let tmp = TempDir::new("std-project");
+    let project = tmp.path.join("project");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("prism.toml"),
+        "[package]\nname = \"p\"\nprelude = \"src/Prelude.pr\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+    )
+    .unwrap();
+    fs::write(project.join("src").join("Prelude.pr"), "").unwrap();
+    fs::write(
+        project.join("src").join("main.pr"),
+        "import StoreOnly (answer)\nfn main() = answer()\n",
+    )
+    .unwrap();
+
+    let module_src = "pub fn answer() : Int = 42\n";
+    let bundle = encode_source_bundle([("StoreOnly", module_src)]);
+    let root = blake3::hash(&bundle).to_hex().to_string();
+    let store = Store::open_or_create(tmp.root()).unwrap();
+    store.put(&root, &bundle).unwrap();
+    let mut lock = Lock::default();
+    lock.pin_std(root);
+    fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .output()
+        .expect("runs prism check");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("main") && stdout.contains("Int"),
+        "stdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn store_package_bundle(store_root: &Path, module: &str, src: &str) -> String {
+    let bundle = encode_source_bundle([(module, src)]);
+    let root = blake3::hash(&bundle).to_hex().to_string();
+    let store = Store::open_or_create(store_root).unwrap();
+    store.put(&root, &bundle).unwrap();
+    root
+}
+
+fn write_package_project(project: &Path, dep_source: &str) {
+    write_named_package_project(project, "app", dep_source);
+}
+
+fn write_named_package_project(project: &Path, name: &str, dep_source: &str) {
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("prism.toml"),
+        format!(
+            "[package]\nname = \"{name}\"\n\n[bin]\nentry = \"src/main.pr\"\n\n\
+             [dependencies]\nStorePkg = {dep_source}\n"
+        ),
+    )
+    .unwrap();
+    fs::copy(
+        project_fixture("store_pkg_app").join("src").join("main.pr"),
+        project.join("src").join("main.pr"),
+    )
+    .unwrap();
+}
+
+fn tzdb_package() -> &'static Path {
+    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/packages/tzdb"))
+}
+
+fn project_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("projects")
+        .join(name)
+}
+
+fn copy_dir(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).unwrap();
+    for entry in fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to);
+        } else {
+            fs::copy(&from, &to).unwrap();
+        }
+    }
+}
+
+#[test]
+fn run_uses_hash_pinned_package_source_bundle() {
+    let tmp = TempDir::new("hash-package");
+    let project = tmp.path.join("app");
+    let root = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    write_package_project(&project, &format!("{:?}", hash_pin(&root)));
+
+    let mut lock = Lock::default();
+    lock.set(LockEntry {
+        name: STORE_PKG_NAME.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        hash: root.clone(),
+        source: DepSource::Hash(root),
+    });
+    fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .output()
+        .expect("runs prism run");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("42"));
+}
+
+#[test]
+fn package_source_roots_carry_bundle_identity() {
+    let tmp = TempDir::new("package-root-identity");
+    let root = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    let dependencies = vec![Dependency {
+        name: STORE_PKG_NAME.to_string(),
+        source: DepSource::Hash(root.clone()),
+    }];
+    let mut lock = Lock::default();
+    lock.set(LockEntry {
+        name: STORE_PKG_NAME.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        hash: root.clone(),
+        source: dependencies[0].source.clone(),
+    });
+
+    let roots =
+        package_source_roots(&lock, &dependencies, &tmp.root(), &DynFlags::default()).unwrap();
+    let identity = roots[0].source_bundle_identity().unwrap();
+    assert_eq!(identity.root, root);
+    assert_eq!(identity.scheme, HASH_SCHEME);
+    assert_eq!(identity.artifact_kind, SourceBundleArtifactKind::Package);
+    assert!(matches!(
+        &identity.kind,
+        SourceBundleKind::Package { name, origin }
+            if name == STORE_PKG_NAME && origin == &SourceBundleOrigin::HashPin
+    ));
+}
+
+#[test]
+fn git_package_source_roots_carry_origin_identity() {
+    let tmp = TempDir::new("git-package-root-identity");
+    let root = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    let dependencies = vec![Dependency {
+        name: STORE_PKG_NAME.to_string(),
+        source: DepSource::Git {
+            url: STORE_PKG_ORIGIN.to_string(),
+            version: STORE_PKG_TAG.to_string(),
+        },
+    }];
+    let mut lock = Lock::default();
+    lock.set(LockEntry {
+        name: STORE_PKG_NAME.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        hash: root.clone(),
+        source: dependencies[0].source.clone(),
+    });
+    let transport = DiskTransport::open(tmp.root()).unwrap();
+    let body = serialize_index(&[IndexRow {
+        origin: STORE_PKG_ORIGIN.to_string(),
+        name: STORE_PKG_NAME.to_string(),
+        tag: STORE_PKG_TAG.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        kind: INDEX_KIND_SOURCE.to_string(),
+        root: root.clone(),
+    }]);
+    transport
+        .publish_index(&SignedArtifact { body, sig: None })
+        .unwrap();
+    let flags = DynFlags {
+        sign_mode: SignMode::Unsigned,
+        ..DynFlags::default()
+    };
+
+    let roots = package_source_roots(&lock, &dependencies, &tmp.root(), &flags).unwrap();
+    let identity = roots[0].source_bundle_identity().unwrap();
+    assert_eq!(identity.root, root);
+    assert_eq!(identity.scheme, HASH_SCHEME);
+    assert_eq!(identity.artifact_kind, SourceBundleArtifactKind::Package);
+    assert!(matches!(
+        &identity.kind,
+        SourceBundleKind::Package { name, origin }
+            if name == STORE_PKG_NAME
+                && origin == &SourceBundleOrigin::Git(STORE_PKG_ORIGIN.to_string())
+    ));
+}
+
+#[test]
+fn git_package_requires_an_authenticated_index_pointer() {
+    let tmp = TempDir::new("git-package");
+    let project = tmp.path.join("app");
+    let root = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    write_package_project(
+        &project,
+        &format!("{{ git = \"{STORE_PKG_ORIGIN}\", version = \"{STORE_PKG_TAG}\" }}"),
+    );
+
+    let source = DepSource::Git {
+        url: STORE_PKG_ORIGIN.to_string(),
+        version: STORE_PKG_TAG.to_string(),
+    };
+    let mut lock = Lock::default();
+    lock.set(LockEntry {
+        name: STORE_PKG_NAME.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        hash: root.clone(),
+        source,
+    });
+    fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
+
+    let missing_index = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .output()
+        .expect("runs prism check");
+    assert!(!missing_index.status.success());
+    assert!(String::from_utf8_lossy(&missing_index.stderr).contains("signed package index"));
+
+    let transport = DiskTransport::open(tmp.root()).unwrap();
+    let wrong_origin = serialize_index(&[IndexRow {
+        origin: STORE_PKG_OTHER_ORIGIN.to_string(),
+        name: STORE_PKG_NAME.to_string(),
+        tag: STORE_PKG_TAG.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        kind: INDEX_KIND_SOURCE.to_string(),
+        root: root.clone(),
+    }]);
+    transport
+        .publish_index(&SignedArtifact {
+            body: wrong_origin,
+            sig: None,
+        })
+        .unwrap();
+
+    let wrong_dev_index = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism run");
+    assert!(!wrong_dev_index.status.success());
+    assert!(
+        String::from_utf8_lossy(&wrong_dev_index.stderr).contains(&format!(
+            "no pointer for {STORE_PKG_ORIGIN} {STORE_PKG_NAME}@{STORE_PKG_TAG}"
+        ))
+    );
+
+    let body = serialize_index(&[IndexRow {
+        origin: STORE_PKG_ORIGIN.to_string(),
+        name: STORE_PKG_NAME.to_string(),
+        tag: STORE_PKG_TAG.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        kind: INDEX_KIND_SOURCE.to_string(),
+        root,
+    }]);
+    transport
+        .publish_index(&SignedArtifact { body, sig: None })
+        .unwrap();
+
+    let trusted_dev_index = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism run");
+    assert!(
+        trusted_dev_index.status.success(),
+        "{}",
+        String::from_utf8_lossy(&trusted_dev_index.stderr)
+    );
+    assert!(String::from_utf8_lossy(&trusted_dev_index.stdout).contains("42"));
+}
+
+#[test]
+fn package_resolution_rejects_foreign_lock_scheme() {
+    let tmp = TempDir::new("foreign-lock-scheme");
+    let root = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    let dependencies = vec![Dependency {
+        name: STORE_PKG_NAME.to_string(),
+        source: DepSource::Hash(root.clone()),
+    }];
+    let mut lock = Lock::default();
+    lock.set(LockEntry {
+        name: STORE_PKG_NAME.to_string(),
+        scheme: "future-scheme".to_string(),
+        hash: root,
+        source: dependencies[0].source.clone(),
+    });
+
+    let err = package_source_roots(&lock, &dependencies, &tmp.root(), &DynFlags::default())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains(&format!("dependency `{STORE_PKG_NAME}`")));
+    assert!(err.contains("future-scheme"));
+}
+
+#[test]
+fn why_rejects_foreign_lock_scheme_before_using_hashes() {
+    let tmp = TempDir::new("why-foreign-lock-scheme");
+    let project = tmp.path.join("app");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("prism.toml"),
+        "[package]\nname = \"app\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+    )
+    .unwrap();
+    fs::write(project.join("src").join("main.pr"), "fn main() = ()\n").unwrap();
+    fs::write(
+        project.join("prism.lock"),
+        format!("prism-lock\tv2\n{STORE_PKG_NAME}\tfuture-scheme\tdeadbeef\thash deadbeef\n"),
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("why")
+        .arg(STORE_PKG_NAME)
+        .current_dir(&project)
+        .output()
+        .expect("runs prism why");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(&format!("dependency `{STORE_PKG_NAME}`")),
+        "{stderr}"
+    );
+    assert!(stderr.contains("future-scheme"), "{stderr}");
+}
+
+#[test]
+fn signed_index_resolution_rejects_foreign_scheme() {
+    let tmp = TempDir::new("foreign-index-scheme");
+    let transport = DiskTransport::open(tmp.root()).unwrap();
+    let body = serialize_index(&[IndexRow {
+        origin: STORE_PKG_ORIGIN.to_string(),
+        name: STORE_PKG_NAME.to_string(),
+        tag: STORE_PKG_TAG.to_string(),
+        scheme: "future-scheme".to_string(),
+        kind: INDEX_KIND_SOURCE.to_string(),
+        root: "00".repeat(32),
+    }]);
+    transport
+        .publish_index(&SignedArtifact { body, sig: None })
+        .unwrap();
+    let flags = DynFlags {
+        sign_mode: SignMode::Unsigned,
+        ..DynFlags::default()
+    };
+
+    let err = prism::pkg::signed_index_pointer(
+        STORE_PKG_ORIGIN,
+        STORE_PKG_NAME,
+        STORE_PKG_TAG,
+        &tmp.root(),
+        &flags,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("foreign hash scheme"));
+    assert!(err.contains("future-scheme"));
+}
+
+#[test]
+fn publish_add_and_run_git_package_end_to_end() {
+    let tmp = TempDir::new("publish-add-run");
+    let package = tmp.path.join("StorePkg.pr");
+    fs::write(&package, "pub fn answer() : Int = 41\n").unwrap();
+
+    let publish = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("publish")
+        .arg(&package)
+        .arg("--tag")
+        .arg("v1")
+        .arg("--name")
+        .arg("StorePkg")
+        .arg("--origin")
+        .arg("example.invalid/StorePkg")
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism publish");
+    assert!(
+        publish.status.success(),
+        "{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let project = tmp.path.join("app");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(
+        project.join("prism.toml"),
+        "[package]\nname = \"app\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("src").join("main.pr"),
+        "import StorePkg (answer)\nfn main() : !{IO} Unit = println(show_int(answer() + 1))\n",
+    )
+    .unwrap();
+
+    let add = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("add")
+        .arg("example.invalid/StorePkg@v1")
+        .current_dir(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism add");
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let lock = fs::read_to_string(project.join("prism.lock")).unwrap();
+    assert!(lock.contains("StorePkg"));
+    assert!(fs::read_to_string(project.join("prism.toml"))
+        .unwrap()
+        .contains("example.invalid/StorePkg"));
+
+    let run = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism run");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&run.stdout).contains("42"));
+}
+
+#[test]
+fn repo_tzdb_package_publishes_and_runs_end_to_end() {
+    let tmp = TempDir::new("tzdb-seed");
+    let publish = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("publish")
+        .arg(tzdb_package())
+        .arg("--tag")
+        .arg("v0")
+        .arg("--name")
+        .arg("Tzdb")
+        .arg("--origin")
+        .arg("example.invalid/Tzdb")
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism publish");
+    assert!(
+        publish.status.success(),
+        "{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let project = tmp.path.join("tz-app");
+    copy_dir(&project_fixture("tzdb_app"), &project);
+
+    let add = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("add")
+        .arg("example.invalid/Tzdb@v0")
+        .current_dir(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism add");
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let run = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(&project)
+        .env("PRISM_STORE_PATH", tmp.root())
+        .env("PRISM_SIGN_MODE", "unsigned")
+        .output()
+        .expect("runs prism run");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&run.stdout).contains("1970-01-01T09:00:00Z Asia/Tokyo"));
+}
+
+#[test]
+fn check_world_reports_real_package_roots_by_digest() {
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check-world")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("packages"))
+        .arg("--json")
+        .output()
+        .expect("runs prism check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["format"], "prism-check-world-v1");
+    assert_eq!(report["validation"]["scope"], "typecheck-only");
+    assert_eq!(report["validation"]["checks"]["typecheck"], "passed");
+    assert_eq!(report["validation"]["checks"]["doctests"], "not-run");
+    assert_eq!(report["validation"]["checks"]["replay"], "not-run");
+    assert_eq!(report["validation"]["checks"]["native"], "not-run");
+    assert_eq!(report["compatibility"]["verdict"], "compatible");
+    let packages = report["packages"].as_object().unwrap();
+    let tzdb = packages
+        .values()
+        .find(|package| package["name"] == "tzdb")
+        .expect("tzdb package is reported");
+    assert_eq!(tzdb["lineage"]["inputs"]["source"]["scheme"], HASH_SCHEME);
+    assert_eq!(tzdb["lineage"]["inputs"]["stdlib"]["scheme"], HASH_SCHEME);
+    assert!(tzdb["lineage"]["compiler"]["identity"]
+        .as_str()
+        .unwrap()
+        .contains("backend=check"));
+}
+
+#[test]
+fn check_world_reports_package_identity_conflicts() {
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check-world")
+        .arg(project_fixture("check_world_duplicate"))
+        .arg("--json")
+        .output()
+        .expect("runs prism check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["compatibility"]["verdict"], "incompatible");
+    let duplicate_roots = report["compatibility"]["duplicate_packages"]["dup"]
+        .as_array()
+        .expect("duplicate package roots are reported");
+    assert_eq!(duplicate_roots.len(), 2);
+    assert!(report["compatibility"]["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|problem| problem.as_str().unwrap().contains("package name `dup`")));
+}
+
+#[test]
+fn check_world_reports_dependency_root_conflicts() {
+    let tmp = TempDir::new("check-world-dep-conflict");
+    let root_a = store_package_bundle(&tmp.root(), STORE_PKG_NAME, STORE_PKG_SOURCE);
+    let root_b = store_package_bundle(&tmp.root(), STORE_PKG_NAME, "pub fn answer() : Int = 42\n");
+    let app_a = tmp.path.join("world").join("app-a");
+    let app_b = tmp.path.join("world").join("app-b");
+    write_named_package_project(&app_a, "app-a", &format!("{:?}", hash_pin(&root_a)));
+    write_named_package_project(&app_b, "app-b", &format!("{:?}", hash_pin(&root_b)));
+
+    for (project, root) in [(&app_a, root_a), (&app_b, root_b)] {
+        let mut lock = Lock::default();
+        lock.set(LockEntry {
+            name: STORE_PKG_NAME.to_string(),
+            scheme: HASH_SCHEME.to_string(),
+            hash: root.clone(),
+            source: DepSource::Hash(root),
+        });
+        fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check-world")
+        .arg(tmp.path.join("world"))
+        .arg("--json")
+        .env("PRISM_STORE_PATH", tmp.root())
+        .output()
+        .expect("runs prism check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["compatibility"]["verdict"], "incompatible");
+    let roots = report["compatibility"]["dependency_root_conflicts"]["hash-pin/StorePkg"]
+        .as_array()
+        .expect("dependency conflict roots are reported");
+    assert_eq!(roots.len(), 2);
+}
+
+#[test]
+fn check_world_strict_fails_on_incompatible_universe() {
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check-world")
+        .arg(project_fixture("check_world_duplicate"))
+        .arg("--strict")
+        .output()
+        .expect("runs prism check-world");
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("validation: typecheck-only"), "{stdout}");
+    assert!(stdout.contains("doctests: not-run"), "{stdout}");
+    assert!(stdout.contains("compatibility: incompatible"), "{stdout}");
+    assert!(
+        stderr.contains("incompatible package universe"),
+        "stderr:\n{stderr}"
+    );
 }

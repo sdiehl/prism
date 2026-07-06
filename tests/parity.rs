@@ -381,6 +381,46 @@ fn error_int_faults_like_interpreter() {
     );
 }
 
+#[test]
+fn fatal_string_faults_like_interpreter() {
+    require_cc();
+    let src = "fn main() : !{IO, Exn} Unit =\n  \
+               println(show_int(7))\n  \
+               let _ = fatal(\"kaput\")\n  \
+               println(show_int(99))\n";
+    let full = prism::with_prelude(src);
+    let mut sink = Vec::new();
+    let res = prism::interpret_io_at(&full, Path::new("."), &mut sink, &mut std::io::empty());
+    assert!(
+        res.as_ref().is_err_and(|e| e.to_string().contains("kaput")),
+        "fatal(\"kaput\") must fault in the interpreter with its message, got: {res:?}"
+    );
+    let want_stdout = String::from_utf8_lossy(&sink).into_owned();
+
+    let bin = env::temp_dir().join(format!("prism_parity_fatal_string_{}", std::process::id()));
+    prism::build(&full, &bin).expect("native build failed");
+    let out = Command::new(&bin).output().expect("spawn failed");
+    for ext in ["bc", "ll"] {
+        let _ = fs::remove_file(bin.with_extension(ext));
+    }
+    let _ = fs::remove_file(&bin);
+
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        want_stdout,
+        "native fatal(msg) stdout diverges: output before the fault must flush identically"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "fatal(msg) must terminate with status 1"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("kaput"),
+        "fatal(msg) must report its message on stderr"
+    );
+}
+
 // A `print`/`println` whose argument type is a free rigid variable is a polymorphic
 // print: `print` carries a `Show(a)` obligation, so it compiles only where that
 // obligation is satisfied and is rejected where it is not. An annotated wrapper

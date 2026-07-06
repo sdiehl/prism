@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use super::abi::idx64;
 use super::emit::{
-    emit_with, escape_str, idx64, str_builtin_decls, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp,
-    Isa,
+    emit_with, escape_str, str_builtin_decls, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa,
 };
 use crate::core::Core;
 use crate::types::CtorInfo;

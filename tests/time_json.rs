@@ -225,7 +225,7 @@ fn main() =
     assert_eq!(run(src), "1500000000\n1750000000\n12000000\n-1\n90\n");
 }
 
-// The load-bearing Time property: a program that reads the real wall clock records
+// The important Time property: a program that reads the real wall clock records
 // each read, and replaying the trace reproduces the run byte-for-byte, times and
 // all, with no real clock consulted.
 const CLOCK_PROGRAM: &str = r"

@@ -249,11 +249,29 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
+@.kont.shadow.prism_main = private constant [11 x i8] c"prism_main\00"
+@prism_native_kont_table = constant [740 x i8] c"scheme  prism-core-hash-v1\0Abundle  42ca981a777ea31d01ae46fa990ffc634d9332f4937be2840cc68e8e28986d91\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:42ca981a777ea31d01ae46fa990ffc634d9332f4937be2840cc68e8e28986d91\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  10da5576ee687ef928fe5d5a048366dea864b12499a2651ba52cb9b77ee6c062  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [810 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  42ca981a777ea31d01ae46fa990ffc634d9332f4937be2840cc68e8e28986d91\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:42ca981a777ea31d01ae46fa990ffc634d9332f4937be2840cc68e8e28986d91\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main 10da5576ee687ef928fe5d5a048366dea864b12499a2651ba52cb9b77ee6c062 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [11 x i8] c"prism_main\00"
+@.kont_hash0 = private constant [65 x i8] c"10da5576ee687ef928fe5d5a048366dea864b12499a2651ba52cb9b77ee6c062\00"
+@.kont_name0 = private constant [5 x i8] c"main\00"
+@prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
+  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_main, i64 0)
+  call void @prism_native_kont_leave()
   ret i64 13
 }
+
+; Function Attrs: nounwind
+declare void @prism_native_kont_enter(ptr, i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_native_kont_leave() #0
 
 attributes #0 = { nounwind }
 

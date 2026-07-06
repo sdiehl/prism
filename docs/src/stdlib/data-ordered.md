@@ -6,7 +6,7 @@ Explicit ordering witnesses: the branded, statically coherent path to ordered ma
 
 An unbranded `Map(k, v)` is ordered by the ambient canonical `Ord(k)`. When a program needs two orderings of the same keys at once (one map ascending, one descending), the phantom brand on `Map(k, v, brand)` keeps their values from being mixed. `with_ordering` hands its body a witness carrying a comparator; the witness's brand is a rigid, scope-local skolem, so a map built under one witness never unifies with a map built under another. Passing a map of one witness to another witness's operation is a compile error that names both brands.
 
-This is the explicit half of the ordered-container coherence story, closed statically. The implicit `using ordRev` path (calling the ambient `map_insert` under a non-canonical `Ord`) is guarded at runtime this release where an ordered map crosses a package boundary: `Wire`'s map reader faults when a map arrives ordered by a different `Ord(k)` than the reader canonicalizes. Phase 3's dictionary reflection makes that path static too. No claim is made here of automatic static closure of the implicit path.
+This is the explicit half of the ordered-container coherence story, closed statically. The implicit `using ordRev` path (calling the ambient `map_insert` under a non-canonical `Ord`) is guarded at runtime when an ordered map crosses a package boundary: `Wire`'s map reader faults when a map arrives ordered by a different `Ord(k)` than the reader canonicalizes. No claim is made here of automatic static closure of the implicit path.
 
 Opt-in: this module is not opened by the prelude, so ambient effect rows and the unbranded `Map` surface are untouched unless a program imports it.
 

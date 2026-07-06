@@ -211,6 +211,9 @@ pub enum Builtin {
     Hypot,
     Fmod,
     ShowFloatPrec,
+    // Runtime source instrumentation gate. `probe "name" do body` lowers to an
+    // if over this builtin, so disabled probes skip the whole body.
+    ProbeEnabled,
     Getenv,
     ReadFile,
     ReadBytesFile,
@@ -348,6 +351,7 @@ impl Builtin {
         Self::Hypot,
         Self::Fmod,
         Self::ShowFloatPrec,
+        Self::ProbeEnabled,
         Self::Getenv,
         Self::ReadFile,
         Self::ReadBytesFile,
@@ -447,6 +451,7 @@ impl Builtin {
             Self::Hypot => "hypot",
             Self::Fmod => "fmod",
             Self::ShowFloatPrec => "show_float_prec",
+            Self::ProbeEnabled => "probe_enabled",
             Self::Getenv => "prim_getenv",
             Self::ReadFile => "prim_read_file",
             Self::ReadBytesFile => "prim_read_bytes",
@@ -561,6 +566,7 @@ impl Builtin {
             Self::StrLen
             | Self::StrEq
             | Self::StrCmp
+            | Self::ProbeEnabled
             | Self::ArgsCount
             | Self::WallNow
             | Self::MonoNow
@@ -693,6 +699,7 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("prim_read_int", 0, BuiltinKind::ReadInt),
     ("prim_read_line", 0, BuiltinKind::ReadLine),
     ("error", 1, BuiltinKind::Error),
+    ("fatal", 1, BuiltinKind::Error),
     ("prim_rand", 0, BuiltinKind::Rand),
     ("srand", 1, BuiltinKind::Srand),
     ("to_float", 1, BuiltinKind::Float),
@@ -737,6 +744,7 @@ pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
     ("hypot", 2, BuiltinKind::Str),
     ("fmod", 2, BuiltinKind::Str),
     ("parse_float", 1, BuiltinKind::Str),
+    ("probe_enabled", 1, BuiltinKind::Str),
     ("substring", 3, BuiltinKind::Str),
     ("char_at", 2, BuiltinKind::Str),
     ("show_char", 1, BuiltinKind::Str),

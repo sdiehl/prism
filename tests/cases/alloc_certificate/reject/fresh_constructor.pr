@@ -1,0 +1,3 @@
+type Box = Box(Int)
+
+fn fresh(x : Int) : Box without alloc = Box(x)

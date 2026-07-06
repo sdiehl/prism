@@ -6,12 +6,28 @@
 fn main() =
   var a := 1
   var b := 10
-  let r1 = transact let _ = a := a + 5 in let inner = transact let _ = a := a + 100 in fail() else 0 in let _ = b := b + 1 in a else 0 - 1
+  let r1 =
+    transact
+      a := a + 5
+      transact
+        a := a + 100
+        fail()
+      else
+        0
+      b := b + 1
+      a
+    else
+      0 - 1
   println(a)
   println(b)
   println(r1)
   let r2 =
-    transact let _ = a := a + 50 in let _ = b := b + 50 in fail() else 0 - 2
+    transact
+      a := a + 50
+      b := b + 50
+      fail()
+    else
+      0 - 2
   println(a)
   println(b)
   println(r2)

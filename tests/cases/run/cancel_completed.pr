@@ -1,4 +1,4 @@
--- S6: cancelling an already-completed fiber is a no-op.
+-- Cancelling an already-completed fiber is a no-op.
 
 import Concurrent (..)
 

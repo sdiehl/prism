@@ -24,16 +24,16 @@ fn first(xs) =
 
 -- Every frame keeps `cell` live across the recursive call, so the abandoned
 -- continuation owns the whole 20000-cell spine when abort fires at the bottom.
-fn probe(n, acc) : !{Abort} Int =
+fn final_ctl_probe(n, acc) : !{Abort} Int =
   if n == 0 then
     abort(length(acc))
   else
     let cell = Cons(n, acc)
-    let r = probe(n - 1, cell)
+    let r = final_ctl_probe(n - 1, cell)
     r + first(cell)
 
 fn deep_abort() =
-  handle probe(20000, Nil) with
+  handle final_ctl_probe(20000, Nil) with
     final ctl abort(code) => code
     return r => r
 

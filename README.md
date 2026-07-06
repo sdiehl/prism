@@ -6,7 +6,9 @@
 
 <p align="center">A small functional language with algebraic effects, multishot continuations, and native codegen.</p>
 
-Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred and extensible, combining structurally as functions call one another via row polymorphism instead of monads. They track observability rather than implementation: so an effect handled inside a function vanishes from its type, thus code that mutates locals or throws internally is analyzed, optimized, and reused as pure code. The type system also has rank-N polymorphism, typeclasses, and first-class lenses and streams integrated into the language. The core is strict and elaborates to an A-normal-form call-by-push-value calculus where evaluation order is explicit, then compiles to native code through LLVM. Memory is managed by deterministic reference counting instead of a garbage collector. The compiler itself (written in Rust until bootstrapped) also compiles to WebAssembly, so the whole language runs in the browser as a 2.5 MB bundle that compresses to under a megabyte, small enough to fit on a floppy disk. The interpreter is a CEK machine modeled in Lean and proved correct against its big-step semantics, and it serves in turn as the differential oracle every native backend must match byte-for-byte.
+Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred, extensible rows that compose through ordinary calls instead of monads, and they track observability rather than implementation: an effect handled inside a function vanishes from its type, so internally effectful code can still be analyzed, optimized, and reused as pure code. The language also has rank-N polymorphism, typeclasses, first-class lenses, fusing streams, deterministic reference counting, and native codegen through LLVM.
+
+The compiler is built around deterministic simulation testing at the language level. Prism programs elaborate to a strict A-normal-form call-by-push-value core, definitions and packages are content-addressed by hash, project builds can explain their lineage, and suspended continuations carry the code identity they may resume against. The compiler also builds to WebAssembly, so the playground, REPL, and gallery run in the browser; the interpreter is a CEK machine modeled in Lean and serves as the differential oracle every native backend must match byte-for-byte.
 
 Try it in the browser at the [Prism playground](https://sdiehl.github.io/prism/play/).
 
@@ -41,18 +43,18 @@ docker run ghcr.io/sdiehl/prism --help
 ```shell
 # Debian / Ubuntu
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.7.0/prism_0.7.0_amd64.deb
-sudo apt install ./prism_0.7.0_amd64.deb
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_amd64.deb
+sudo apt install ./prism_0.8.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.7.0/prism-0.7.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1.x86_64.rpm
 
 # Arch
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.7.0/prism-0.7.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1-x86_64.pkg.tar.zst
 
 # Alpine
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.7.0/prism_0.7.0_x86_64.apk
-sudo apk add --allow-untrusted ./prism_0.7.0_x86_64.apk
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_x86_64.apk
+sudo apk add --allow-untrusted ./prism_0.8.0_x86_64.apk
 ```
 
 Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:
@@ -96,7 +98,7 @@ prism build                          # compile the enclosing project (needs a pr
 prism clean                          # remove the project's target/ directory
 prism check program.pr               # type check only
 prism fmt program.pr                 # format source
-prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|fbip|llvm
+prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|native-kont-table|native-kont-state-map|fbip|llvm
 ```
 
 ## License

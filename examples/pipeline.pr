@@ -1,5 +1,5 @@
--- Flagship: a concurrent map-reduce pipeline that exercises the whole v0.5
--- concurrency machinery at once.
+-- Flagship: a concurrent map-reduce pipeline that exercises the cooperative
+-- concurrency machinery end to end.
 --
 --   * the effect-polymorphic scheduler (`run_async`) built on row-kinded types;
 --   * `channel`/`send`/`recv` for fiber-to-fiber data flow;
@@ -56,7 +56,7 @@ fn collect(c : Chan, n : Int, acc : Int) : !{Async(Int)} Int =
 fn pipeline() : !{Async(Int), Log} Int =
   let input = channel(())
   let output = channel(())
-  let f = fork(\() -> feed(input, [1, 2, 3, 4]))
+  fork(\() -> feed(input, [1, 2, 3, 4]))
   match (scope([
         \() -> worker("w1", input, output, 2),
         \() -> worker("w2", input, output, 2),

@@ -453,10 +453,16 @@ pub(super) struct Renames {
 
 impl Renames {
     pub(super) fn apply(&self, t: &Type) -> Type {
+        let target_names: BTreeSet<Sym> = self
+            .exists
+            .iter()
+            .map(|(_, name)| Sym::from(name))
+            .chain(self.rigids.iter().map(|(_, name)| Sym::from(name)))
+            .collect();
         // Rigid source variables move to fresh placeholders before existentials
         // claim their canonical letters, so a source that names a variable `a`
         // cannot be conflated with a generalized existential also named `a`.
-        let mut out = t.clone();
+        let mut out = avoid_forall_capture(t, &target_names);
         let mut placeholders = Vec::with_capacity(self.rigids.len());
         for (src, name) in &self.rigids {
             let ph = Sym::fresh();
@@ -470,6 +476,95 @@ impl Renames {
             out = out.subst_var(ph, &Type::Var(Sym::from(name)));
         }
         out
+    }
+}
+
+fn avoid_forall_capture(t: &Type, target_names: &BTreeSet<Sym>) -> Type {
+    match t {
+        Type::Forall(n, body) if target_names.contains(n) => {
+            let mut taken = target_names.clone();
+            collect_type_names(body, &mut taken);
+            let fresh = fresh_type_name(&taken);
+            let renamed = body.subst_var(*n, &Type::Var(fresh));
+            Type::Forall(
+                fresh,
+                Box::new(avoid_forall_capture(&renamed, target_names)),
+            )
+        }
+        Type::Forall(n, body) => {
+            Type::Forall(*n, Box::new(avoid_forall_capture(body, target_names)))
+        }
+        Type::RowForall(n, body) => {
+            Type::RowForall(*n, Box::new(avoid_forall_capture(body, target_names)))
+        }
+        Type::Fun(params, row, ret) => Type::Fun(
+            params
+                .iter()
+                .map(|param| avoid_forall_capture(param, target_names))
+                .collect(),
+            row.map_args(&|arg| avoid_forall_capture(arg, target_names)),
+            Box::new(avoid_forall_capture(ret, target_names)),
+        ),
+        Type::Con(n, params) => Type::Con(
+            *n,
+            params
+                .iter()
+                .map(|param| avoid_forall_capture(param, target_names))
+                .collect(),
+        ),
+        Type::App(head, arg) => Type::app(
+            avoid_forall_capture(head, target_names),
+            avoid_forall_capture(arg, target_names),
+        ),
+        Type::Tuple(items) => Type::Tuple(
+            items
+                .iter()
+                .map(|item| avoid_forall_capture(item, target_names))
+                .collect(),
+        ),
+        Type::Row(row) => Type::Row(row.map_args(&|arg| avoid_forall_capture(arg, target_names))),
+        other => other.clone(),
+    }
+}
+
+fn fresh_type_name(taken: &BTreeSet<Sym>) -> Sym {
+    let mut next = 0;
+    loop {
+        let cand = Sym::from(&var_name(next));
+        if !taken.contains(&cand) {
+            return cand;
+        }
+        next += 1;
+    }
+}
+
+fn collect_type_names(t: &Type, out: &mut BTreeSet<Sym>) {
+    match t {
+        Type::Var(n) | Type::Forall(n, _) => {
+            out.insert(*n);
+            if let Type::Forall(_, body) = t {
+                collect_type_names(body, out);
+            }
+        }
+        Type::RowForall(_, body) => collect_type_names(body, out),
+        Type::Fun(params, row, ret) => {
+            for param in params {
+                collect_type_names(param, out);
+            }
+            row.for_each_arg(&mut |arg| collect_type_names(arg, out));
+            collect_type_names(ret, out);
+        }
+        Type::Con(_, params) | Type::Tuple(params) => {
+            for param in params {
+                collect_type_names(param, out);
+            }
+        }
+        Type::App(head, arg) => {
+            collect_type_names(head, out);
+            collect_type_names(arg, out);
+        }
+        Type::Row(row) => row.for_each_arg(&mut |arg| collect_type_names(arg, out)),
+        _ => {}
     }
 }
 

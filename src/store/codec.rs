@@ -468,6 +468,7 @@ pub(crate) const BUILTINS: &[Builtin] = &[
     Builtin::BufUtf8Valid,
     Builtin::WallNow,
     Builtin::MonoNow,
+    Builtin::ProbeEnabled,
 ];
 
 pub(crate) fn op_wire<T: PartialEq + Copy>(table: &[T], op: T) -> u64 {

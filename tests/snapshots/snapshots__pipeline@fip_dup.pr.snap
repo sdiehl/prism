@@ -126,12 +126,12 @@ fn use_twice(xs) =
   return xs to t@0; case t@0 { Nil => return xs | Cons(h, t) => return xs }
 
 == fip ==
-Type Error: function `use_twice` is marked `fip` but is not linear (duplicates a value)
+Type Error: usage check `fip` failed for function `use_twice`: is not linear (duplicates a value)
     ╭─[ <source>:8:1 ]
     │
   8 │ ╭─▶ fip fn use_twice(xs) =
     ┆ ┆   
  11 │ ├─▶     Cons(h, t) => xs
     │ │                          
-    │ ╰────────────────────────── function `use_twice` is marked `fip` but is not linear (duplicates a value)
+    │ ╰────────────────────────── usage check `fip` failed for function `use_twice`: is not linear (duplicates a value)
 ────╯

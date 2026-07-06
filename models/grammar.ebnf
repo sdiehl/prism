@@ -171,6 +171,7 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
          |  "for" gen { "," qual } "do" expr
          |  "while" expr "do" expr                    -- while loop
          |  "loop" expr                               -- unconditional loop
+         |  "probe" string "do" expr                  -- named instrumentation; body runs only when enabled
          |  "return" expr                             -- early return
          |  varid ":=" expr                          -- assignment
          |  varid ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment

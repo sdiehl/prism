@@ -1,0 +1,3 @@
+fn tick(n : Int) : Int =
+  let base = n + 1
+  without alloc base + base

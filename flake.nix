@@ -105,6 +105,7 @@
               ./examples/chaos_swarm.pr
               ./examples/incr_resident.pr
               ./examples/pendulum.pr
+              ./examples/teleport.pr
               ./src/syntax/grammar.lalrpop
             ];
           };

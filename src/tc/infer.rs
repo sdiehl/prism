@@ -13,6 +13,14 @@ use crate::types::ty::{
     EffRow, Effects, Label, Type, DIV_CLASS, EQ_CLASS, LIST, NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
 
+mod defaulting;
+mod diagnostics;
+mod paths;
+
+use defaulting::{default_open_rows, NumClass};
+use diagnostics::{forall_ty_binders, poly_recursion_hint};
+use paths::{field_prefix, show_path};
+
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
 // open row tail (`mu`) with its fixed-label prefix, and the assembled
@@ -25,88 +33,6 @@ struct DeclSeed {
     scope: Vec<(Sym, Vec<Type>)>,
     mu: u32,
     self_ty: Type,
-}
-
-// Append the "add a type signature" remedy to a recursive-call type mismatch in
-// an unannotated function: a monomorphic recursive call that needs the callee at
-// a second type is polymorphic recursion, which only a signature can type. An
-// annotated function already checks against its signature (and so supports
-// polymorphic recursion), so its errors pass through unchanged.
-// The type variables a generalized scheme quantifies, read off its leading
-// `forall`/`RowForall` prefix (only the type binders; row binders are skipped).
-fn forall_ty_binders(t: &Type, out: &mut BTreeSet<Sym>) {
-    match t {
-        Type::Forall(n, b) => {
-            out.insert(*n);
-            forall_ty_binders(b, out);
-        }
-        Type::RowForall(_, b) => forall_ty_binders(b, out),
-        _ => {}
-    }
-}
-
-fn poly_recursion_hint(e: TypeError, d: &Decl<Core>) -> TypeError {
-    if super::env::fully_annotated(d) {
-        return e;
-    }
-    match e {
-        TypeError::Mismatch {
-            span,
-            expected,
-            found,
-        } => TypeError::Other {
-            span,
-            msg: format!(
-                "type mismatch in recursive `{name}`: expected {expected}, got {found}. \
-                 If `{name}` is called at more than one type within its recursion group that is \
-                 polymorphic recursion; add a type signature to `{name}`.",
-                name = d.name
-            ),
-        },
-        other => other,
-    }
-}
-
-// Whether the `Field`-only path `short` is a prefix of `long`. tc only ever
-// sees `Field` steps (optic steps are desugared away), so this decides overlap.
-fn field_prefix<P: crate::syntax::ast::Phase>(short: &[PathStep<P>], long: &[PathStep<P>]) -> bool {
-    short.len() <= long.len()
-        && short.iter().zip(long).all(|(a, b)| match (a, b) {
-            (PathStep::Field(x), PathStep::Field(y)) => x == y,
-            _ => false,
-        })
-}
-
-// Render an update path for diagnostics; optic steps are gone by tc, but the
-// match is kept total.
-fn show_path<P: crate::syntax::ast::Phase>(steps: &[PathStep<P>]) -> String {
-    steps
-        .iter()
-        .map(|s| match s {
-            PathStep::Field(f) => f.clone(),
-            PathStep::Each => crate::kw::EACH.into(),
-            PathStep::Case(c) => format!("{}{c}", crate::kw::QUESTION),
-            PathStep::Index(_) => "[..]".into(),
-            PathStep::Where(_) => crate::kw::WHERE.into(),
-        })
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-// Which operator family drives the shared numeric-defaulting ladder. The three
-// families agree on the core lattice (accept `Int`, pin a fixed-width lane,
-// defer an unsolved existential) and differ only in how they treat the leftover
-// operand type, which `numeric_ladder` selects on.
-#[derive(Clone, Copy)]
-enum NumClass {
-    // `==`/`!=`: every scalar with structural equality is a fixed lane; anything
-    // else dispatches through its `Eq` instance.
-    Eq,
-    // `<`/`<=`/`>`/`>=`: `Float` belongs to the dotted operators and is rejected
-    // numerically; anything non-numeric dispatches through its `Ord` instance.
-    Ord,
-    // `+`/`-`/`*`: anything not on a numeric lane is rejected numerically.
-    Arith,
 }
 
 impl Tc<'_> {
@@ -239,6 +165,20 @@ impl Tc<'_> {
             // was (the signature promised nothing numeric about it).
             (Expr::Int(lit), Type::Var(v))
                 if lit.suffix == ast::Suffix::None && self.num_var_in_scope(*v) =>
+            {
+                self.wanted.push(Wanted {
+                    id,
+                    span,
+                    items: vec![(NUM_CLASS.into(), ty.clone(), None)],
+                });
+                Ok(())
+            }
+            // The same adoption applies through unary minus: `x + -1` in
+            // `given Num(a)` code injects the exact negative `Int` literal through
+            // `from_int` at the resolved lane, rather than defaulting the literal
+            // to `Int` and failing against rigid `a`.
+            (Expr::Neg(inner), Type::Var(v))
+                if Self::bare_int_lit(inner).is_some() && self.num_var_in_scope(*v) =>
             {
                 self.wanted.push(Wanted {
                     id,
@@ -989,15 +929,15 @@ impl Tc<'_> {
                 },
                 NumClass::Ord => {
                     if matches!(t, Type::Float) {
-                        self.default_numeric(t, blame).map(|_| ())
+                        self.fixed.insert(id, t.clone());
                     } else {
                         self.wanted.push(Wanted {
                             id,
                             span,
                             items: vec![(ORD_CLASS.into(), t.clone(), None)],
                         });
-                        Ok(())
                     }
+                    Ok(())
                 }
                 NumClass::Arith => match t {
                     // `Float` joined the arithmetic operators with the tower;
@@ -1991,38 +1931,6 @@ impl Tc<'_> {
         }
         Ok(())
     }
-}
-
-// A row existential left open after checking but not reachable from a
-// parameter row or the function's own latent row is unconstrained: default it
-// to empty (pure). Two families survive as genuine effect polymorphism, kept
-// for generalization:
-//   - Rows a parameter mentions (`apply : ((b) -> a ! {e}, b) ->{e} a`).
-//   - The function's own latent row (the outermost arrow's `eff`): the function
-//     keeps that tail open so generalization quantifies it, and a pure function
-//     generalizes to `forall e. .. ! {| e}` and fits an effectful context by
-//     SOLVING `e` under row unification. The concrete labels the body performs
-//     stay pinned (the annotation check in `finalize_fn` reads them, not the
-//     tail), so `!{IO}` still rejects a body that also performs `Emit`; the tail
-//     only lets the value be used where more effects are permitted. `e`
-//     instantiates fresh per use and defaults to empty where unused, so the
-//     function's own lowering is unchanged.
-fn default_open_rows(ty: &Type) -> Type {
-    let Type::Fun(doms, eff, _) = ty else {
-        return ty.clone();
-    };
-    let mut keep = BTreeSet::new();
-    for p in doms {
-        p.free_exist_row(&mut keep);
-    }
-    eff.free_exist_row(&mut keep);
-    let mut all_rows = BTreeSet::new();
-    ty.free_exist_row(&mut all_rows);
-    let mut out = ty.clone();
-    for r in all_rows.difference(&keep) {
-        out = out.subst_row_exist(*r, &EffRow::Empty);
-    }
-    out
 }
 
 // For a known indexable container head, the (expected key type, element type,

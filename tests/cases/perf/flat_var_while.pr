@@ -1,0 +1,9 @@
+fn run(n : Int) : Int =
+  var s := 0
+  var i := 0
+  while i < n do
+    i += 1
+    s += i
+  s
+
+fn main() = println(run(__N__))

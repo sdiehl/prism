@@ -2,16 +2,13 @@ import Prism
 import Lean.Data.Json
 
 /-
-Consumer side of the differential-oracle bridge: decode the tagged JSON core IR
-emitted by `prism dump core-json` (Rust `src/core/json.rs`) into `Prism.Core`,
-so the verified CEK machine can run the exact core the compiler builds.
+This is the decoder for `prism dump core-json`. The Rust compiler emits tagged
+Core JSON, and this file turns it back into the Lean `Core` type so the CEK
+oracle can run exactly what the compiler built.
 
-The schema is tagged by `"c"` (computations), `"v"` (values), `"p"` (patterns).
-Decoders are `partial` -- they run only in the `oracle` executable, never in a
-proof. IO/builtin nodes are mapped to the model's erased forms (the model lowers
-effects away); genuinely unmodeled state (`ref` cells) is rejected, so only the
-pure + effects fragment round-trips -- exactly where the model and interpreter
-are meant to agree.
+The decoder is intentionally executable code, not proof code. It rejects Core
+features this model does not cover yet, and it keeps the pure plus effectful
+fragment honest across the Rust and Lean boundary.
 -/
 namespace Prism.Json
 
@@ -76,7 +73,11 @@ partial def jValue (j : Json) : Except String Value := do
     | "unit" => return .unit
     | "str" => return .str (← jStr j "s")
     | "thunk" => return .thunk (← jComp (← j.getObjVal? "c"))
-    | "ctor" => return .ctor (← jStr j "name") (← (← j.getObjVal? "tag").getNat?) (← jList jValue (← j.getObjVal? "args"))
+    | "ctor" =>
+      return .ctor
+        (← jStr j "name")
+        (← (← j.getObjVal? "tag").getNat?)
+        (← jList jValue (← j.getObjVal? "args"))
     | "tuple" => return .tuple (← jList jValue (← j.getObjVal? "args"))
     | t => .error s!"unknown value tag {t}"
 
@@ -97,7 +98,11 @@ partial def jComp (j : Json) : Except String Comp := do
     | "force" => return .force (← jValue (← j.getObjVal? "v"))
     | "lam" => return .lam (← jStrList (← j.getObjVal? "xs")) (← jComp (← j.getObjVal? "body"))
     | "app" => return .app (← jComp (← j.getObjVal? "f")) (← jList jValue (← j.getObjVal? "args"))
-    | "ite" => return .ite (← jValue (← j.getObjVal? "cond")) (← jComp (← j.getObjVal? "t")) (← jComp (← j.getObjVal? "e"))
+    | "ite" =>
+      return .ite
+        (← jValue (← j.getObjVal? "cond"))
+        (← jComp (← j.getObjVal? "t"))
+        (← jComp (← j.getObjVal? "e"))
     | "prim" => return .prim (← jBinOp (← jStr j "op")) (← jValue (← j.getObjVal? "a")) (← jValue (← j.getObjVal? "b"))
     | "neg" => return .neg (← jNegLane (← jStr j "lane")) (← jValue (← j.getObjVal? "v"))
     | "call" => return .call (← jStr j "name") (← jList jValue (← j.getObjVal? "args"))
@@ -123,14 +128,22 @@ partial def jComp (j : Json) : Except String Comp := do
     | "strBuiltin" => return .strBuiltin (← jStr j "name") (← jList jValue (← j.getObjVal? "args"))
     | "dup" => return .dup (← jValue (← j.getObjVal? "v"))
     | "drop" => return .drop (← jValue (← j.getObjVal? "v"))
-    | "withReuse" => return .withReuse (← jStr j "tok") (← jValue (← j.getObjVal? "freed")) (← jComp (← j.getObjVal? "body"))
+    | "withReuse" =>
+      return .withReuse
+        (← jStr j "tok")
+        (← jValue (← j.getObjVal? "freed"))
+        (← jComp (← j.getObjVal? "body"))
     | "reuse" => return .reuse (← jStr j "tok") (← jValue (← j.getObjVal? "v"))
     | "refNew" | "refGet" | "refSet" => .error "ref cells are outside the differential fragment the model covers"
     | t => .error s!"unknown comp tag {t}"
 
 -- IO / builtins erased to the model's forms (effects are lowered away here).
 partial def jHandleOp (j : Json) : Except String HandleOp := do
-  return .mk (← jStr j "name") (← jStrList (← j.getObjVal? "params")) (← jStr j "resume") (← jComp (← j.getObjVal? "body"))
+  return .mk
+    (← jStr j "name")
+    (← jStrList (← j.getObjVal? "params"))
+    (← jStr j "resume")
+    (← jComp (← j.getObjVal? "body"))
 
 partial def jArms (j : Json) : Except String (List (Pat × Comp)) := do
   let arr ← j.getArr?

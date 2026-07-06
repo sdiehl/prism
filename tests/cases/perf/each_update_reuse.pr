@@ -1,0 +1,16 @@
+type Cell = Cell { v: Int }
+
+fn bump(xs : List(Cell)) : List(Cell) = { xs | each.v ~ \(n) -> n + 1 }
+
+fn total(xs : List(Cell)) : Int =
+  match xs of
+    Nil => 0
+    Cons(c, r) => c.v + total(r)
+
+fn build(n : Int, acc : List(Cell)) : List(Cell) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(Cell { v = n }, acc))
+
+fn main() = println(total(bump(build(500, Nil))))

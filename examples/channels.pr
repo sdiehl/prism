@@ -11,7 +11,7 @@
 
 import Concurrent (..)
 
-fn producer(c : Chan, n : Int) : !{Async(Int), IO} Int =
+fn producer(c : Chan, n : Int) : !{Async(Int)} Int =
   if n == 0 then
     0
   else
@@ -29,7 +29,7 @@ fn consumer(c : Chan, count : Int, acc : Int) : !{Async(Int), IO} Int =
 
 fn scene() : !{Async(Int), IO} Int =
   let c = channel(())
-  let p = fork(\() -> producer(c, 3))
+  fork(\() -> producer(c, 3))
   consumer(c, 3, 0)
 
 fn main() = println("total {run_async(scene)}")

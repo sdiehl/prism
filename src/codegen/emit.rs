@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::slice;
 
+use super::abi::{idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
 use super::rt;
 use crate::core::builtins::{builtin, Builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
@@ -23,31 +24,6 @@ use crate::types::CtorInfo;
 // Variable identity stays `Sym` end-to-end; the value is the SSA register name
 // (`%t3`, `%a0`, ...), the legitimate output-edge text.
 type Regs = BTreeMap<Sym, String>;
-
-// Must match the heap cell layout in runtime/prism_internal.h:
-// {refcount@0, tag@8, arity@16, fields@24}, cross-checked against the
-// runtime's PRISM_*_W macros by the `layout_matches_runtime` test.
-const TAG_OFF: i64 = 8;
-const HDR_BYTES: i64 = 24;
-const WORD_BYTES: i64 = 8;
-
-// Reserved heap tags, cross-checked against runtime/prism_internal.h by the
-// `layout_matches_runtime` test. Ctor and lambda tags must stay below both.
-const STR_TAG: i64 = 0x5354_5200;
-const BIG_TAG: i64 = 0x4249_4700;
-const _: () = assert!(
-    size_of::<usize>() == 8 && size_of::<u64>() == 8,
-    "prism tagging scheme assumes LP64"
-);
-
-pub(super) fn idx64(n: usize) -> i64 {
-    // `n` is a heap tag, field index, arity, or byte length of an in-memory
-    // program. Exceeding `i64::MAX` would require an >8-exabyte input on an LP64
-    // host (unreachable in practice), and this is called from many
-    // value-returning sites that cannot thread a `Result`. Saturate rather than
-    // panic; the result stays a valid `i64`.
-    i64::try_from(n).unwrap_or(i64::MAX)
-}
 
 #[derive(Clone)]
 enum LamBody {
@@ -368,10 +344,8 @@ impl<'a, I: Isa> Cg<'a, I> {
         vs.iter().map(|v| self.value(regs, v)).collect()
     }
 
-    // Hygienic core names carry `@`, which LLVM rejects in symbols. `.` is
-    // unforgeable in source identifiers and valid unquoted in LLVM and MLIR.
     fn sym(name: &str) -> String {
-        format!("prism_{}", name.replace('@', "."))
+        super::native_symbol(name)
     }
 
     fn fn_arity(&self, name: &str) -> Result<usize, String> {
@@ -1692,6 +1666,8 @@ pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::core::builtins::{Builtin, BuiltinKind, BUILTINS};
+
     fn c_def(name: &str) -> i64 {
         let prefix = format!("#define {name} ");
         let line = super::rt::RUNTIME_FILES
@@ -1730,8 +1706,6 @@ mod tests {
     // trips here rather than mis-tagging a call at runtime.
     #[test]
     fn builtin_abi_within_arity() {
-        use crate::core::builtins::{Builtin, BuiltinKind, BUILTINS};
-
         for &(name, arity, kind) in BUILTINS {
             if kind != BuiltinKind::Str {
                 continue;

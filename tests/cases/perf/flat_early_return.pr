@@ -1,0 +1,11 @@
+fn run(n : Int) : Int =
+  var i := 0
+  var s := 0
+  while i < n do
+    i += 1
+    s += i
+    if i == n then
+      return s
+  0 - 1
+
+fn main() = println(run(__N__))

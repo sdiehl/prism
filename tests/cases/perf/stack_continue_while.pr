@@ -1,0 +1,11 @@
+fn run(k : Int) : Int =
+  var s := 0
+  var i := 0
+  while i < k do
+    i += 1
+    if i % 2 == 1 then
+      continue
+    s += i
+  s
+
+fn main() = println(run(__N__))

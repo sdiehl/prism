@@ -22,6 +22,7 @@ use crate::core::{builtin_arities, elaborate, elaborate_expr, CoreFn};
 use crate::driver::PRELUDE;
 use crate::error::Error;
 use crate::eval::{globals, Machine};
+use crate::lex::Token as K;
 use crate::lex::{lex_raw, Token};
 use crate::parse::{incomplete, parse, parse_expr, ParseResult};
 use crate::resolve::{default_roots, import_bindings, resolve_expr, resolve_modules_in};
@@ -416,7 +417,6 @@ enum Cat {
 }
 
 const fn category(t: &Token) -> Cat {
-    use Token as K;
     match t {
         K::Fn
         | K::Import

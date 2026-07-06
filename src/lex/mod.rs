@@ -1,5 +1,7 @@
 mod token;
 
+pub mod highlight;
+
 use token::LexFail;
 pub use token::Token;
 

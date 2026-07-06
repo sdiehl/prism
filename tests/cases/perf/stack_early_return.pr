@@ -1,0 +1,8 @@
+fn run(k : Int) : Int =
+  var i := 0
+  loop
+    if i >= k then
+      return i
+    i += 1
+
+fn main() = println(run(__N__))

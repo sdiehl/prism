@@ -42,7 +42,7 @@
 //!
 //! Unlike the `def` wire, a binder here keeps its interned name: the interpreter
 //! resolves variables by symbol through the environment map, not by de Bruijn
-//! distance, so the name is load-bearing. Environment and handler-op orderings are
+//! distance, so the name matters. Environment and handler-op orderings are
 //! canonicalized by name (symbol ids are process-local), which keeps the wire
 //! byte-idempotent under a decode/encode round-trip.
 //!

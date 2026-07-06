@@ -119,10 +119,12 @@ fn noalloc@0(n) =
   return n to t@1; return Box(t@1)
 
 == fip ==
-Type Error: the `without alloc` block allocates a fresh `Box` (no reuse token available)
+Type Error: allocation certificate `without alloc` failed for block: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
    ╭─[ <source>:6:26 ]
    │
  6 │ fn wrap(n : Int) : Box = without alloc Box(n)
    │                          ──────────┬─────────  
-   │                                    ╰─────────── the `without alloc` block allocates a fresh `Box` (no reuse token available)
+   │                                    ╰─────────── allocation certificate `without alloc` failed for block: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
 ───╯

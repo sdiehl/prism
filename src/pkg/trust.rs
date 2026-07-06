@@ -2,15 +2,15 @@
 //!
 //! Integrity needs no signature, because a tampered blob fails its content hash on
 //! fetch. The one thing a hash cannot self-certify is the mapping from a human
-//! name and tag to a root hash, so that mapping is the *sole* signed artifact: a
-//! tiny, human-readable `name -> tag -> root` index. Everything under it verifies
-//! itself.
+//! package identity, name, and tag to a root hash, so that mapping is the *sole*
+//! signed artifact: a tiny, human-readable `identity -> name -> tag -> root`
+//! index. Everything under it verifies itself.
 //!
 //! Beside the index, a local append-only transparency log records every
-//! `name -> root` pointer ever seen with a monotonic sequence number, so a silent
-//! repoint of a published name is detectable after the fact. This is the log's
-//! local rung: no witnessing, no gossip, just an on-disk record that is only
-//! appended to, never rewritten.
+//! pointer ever seen with a monotonic sequence number, so a silent repoint of a
+//! published identity is detectable after the fact. This is the log's local rung:
+//! no witnessing, no gossip, just an on-disk record that is only appended to,
+//! never rewritten.
 //!
 //! Signing is done by an external tool behind a narrow seam ([`sign`],
 //! [`verify_signature`]), so no cryptographic dependency enters the compiler. The
@@ -28,9 +28,11 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::core::HASH_SCHEME;
 use crate::driver::Config;
 use crate::error::Error;
 use crate::flags::{DynFlags, SignMode};
+use crate::pkg::std_source::encode_source_bundle;
 use crate::pkg::stdlib_baseline;
 use crate::pkg::transport::{pkg_dir, verify_all, DiskTransport, Transport, TransportError};
 use crate::resolve::Root;
@@ -44,21 +46,41 @@ const SIG_NAMESPACE: &str = "prism-package-index";
 
 // Line-oriented, tab-separated, header-versioned artifact formats. A row is one
 // line; hashes and git tags contain no tab, so the separator is unambiguous.
-const INDEX_HEADER: &str = "prism-pkg-index\tv1";
-const LOG_HEADER: &str = "prism-pkg-log\tv1";
+const INDEX_HEADER_V1: &str = "prism-pkg-index\tv1";
+const INDEX_HEADER_V2: &str = "prism-pkg-index\tv2";
+const INDEX_HEADER_V3: &str = "prism-pkg-index\tv3";
+const INDEX_HEADER_V4: &str = "prism-pkg-index\tv4";
+const LOG_HEADER_V1: &str = "prism-pkg-log\tv1";
+const LOG_HEADER_V2: &str = "prism-pkg-log\tv2";
+const LOG_HEADER_V3: &str = "prism-pkg-log\tv3";
+const LOG_HEADER_V4: &str = "prism-pkg-log\tv4";
 const FIELD_SEP: char = '\t';
 
-/// One signed pointer: a human `name` at a git `tag` resolves to a `root` content
-/// hash. The index is a set of these, and the whole set is what a signature
-/// covers.
+/// Signed-index kind for a whole-program namespace root.
+pub const INDEX_KIND_NAMESPACE: &str = crate::driver::NAMESPACE_ARTIFACT_KIND;
+/// Signed-index kind for a store-served source bundle.
+pub const INDEX_KIND_SOURCE: &str = "source-bundle";
+
+/// One signed pointer.
+///
+/// A package `origin` exposes a human `name` at a git `tag` that resolves to a
+/// `root` content hash under a named hash scheme. The index is a set of these,
+/// and the whole set is what a signature covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexRow {
+    /// The canonical package identity. For git dependencies this is the manifest
+    /// URL, so two repositories with the same display name cannot share a pointer.
+    pub origin: String,
     /// The package name a developer types.
     pub name: String,
     /// The opaque git tag the release was cut at (never a range).
     pub tag: String,
     /// The namespace root content hash the name and tag map to.
     pub root: String,
+    /// The hash scheme that gives `root` its meaning.
+    pub scheme: String,
+    /// The artifact kind the root names.
+    pub kind: String,
 }
 
 /// The signed index as it travels: the index body (the rows) and its detached
@@ -123,51 +145,111 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
     let mut lines = text.lines();
     // A body with the wrong header parses to no rows rather than an error: callers
     // that need the distinction check `index_artifact` for presence.
-    if lines.next() != Some(INDEX_HEADER) {
+    let header = lines.next();
+    if header != Some(INDEX_HEADER_V1)
+        && header != Some(INDEX_HEADER_V2)
+        && header != Some(INDEX_HEADER_V3)
+        && header != Some(INDEX_HEADER_V4)
+    {
         return Vec::new();
     }
     lines
         .filter_map(|line| {
-            let mut f = line.splitn(3, FIELD_SEP);
-            match (f.next(), f.next(), f.next()) {
-                (Some(name), Some(tag), Some(root)) if !name.is_empty() => Some(IndexRow {
-                    name: name.to_string(),
-                    tag: tag.to_string(),
-                    root: root.to_string(),
+            let fields: Vec<&str> = line.split(FIELD_SEP).collect();
+            match (header, fields.as_slice()) {
+                (Some(INDEX_HEADER_V1), [name, tag, root]) if !name.is_empty() => Some(IndexRow {
+                    name: (*name).to_string(),
+                    tag: (*tag).to_string(),
+                    origin: (*name).to_string(),
+                    root: (*root).to_string(),
+                    scheme: HASH_SCHEME.to_string(),
+                    kind: INDEX_KIND_NAMESPACE.to_string(),
                 }),
+                (Some(INDEX_HEADER_V2), [name, tag, scheme, root]) if !name.is_empty() => {
+                    Some(IndexRow {
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        origin: (*name).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: INDEX_KIND_NAMESPACE.to_string(),
+                        root: (*root).to_string(),
+                    })
+                }
+                (Some(INDEX_HEADER_V3), [name, tag, scheme, kind, root]) if !name.is_empty() => {
+                    Some(IndexRow {
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        origin: (*name).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: (*kind).to_string(),
+                        root: (*root).to_string(),
+                    })
+                }
+                (Some(INDEX_HEADER_V4), [origin, name, tag, scheme, kind, root])
+                    if !origin.is_empty() && !name.is_empty() =>
+                {
+                    Some(IndexRow {
+                        origin: (*origin).to_string(),
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: (*kind).to_string(),
+                        root: (*root).to_string(),
+                    })
+                }
                 _ => None,
             }
         })
         .collect()
 }
 
-/// Serialize rows into an index body, sorted by `(name, tag)` so the same set of
-/// pointers always yields byte-identical bytes (and therefore a stable signature).
+/// Serialize rows into an index body, sorted by `(origin, name, tag)` so the same
+/// set of pointers always yields byte-identical bytes and therefore a stable
+/// signature.
 #[must_use]
 pub fn serialize_index(rows: &[IndexRow]) -> Vec<u8> {
     let mut sorted: Vec<&IndexRow> = rows.iter().collect();
-    sorted.sort_by(|a, b| (&a.name, &a.tag).cmp(&(&b.name, &b.tag)));
-    let mut body = String::from(INDEX_HEADER);
+    sorted.sort_by(|a, b| (&a.origin, &a.name, &a.tag).cmp(&(&b.origin, &b.name, &b.tag)));
+    let mut body = String::from(INDEX_HEADER_V4);
     body.push('\n');
     for r in sorted {
-        let _ = writeln!(body, "{}{FIELD_SEP}{}{FIELD_SEP}{}", r.name, r.tag, r.root);
+        let _ = writeln!(
+            body,
+            "{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{}",
+            r.origin, r.name, r.tag, r.scheme, r.kind, r.root
+        );
     }
     body.into_bytes()
 }
 
-/// Upsert `(name, tag) -> root` into `rows`, returning the new row set.
+/// Upsert `(origin, name, tag) -> root` into `rows`, returning the new row set.
 ///
-/// A repoint (an existing `(name, tag)` given a new root) replaces the row; the
-/// transparency log is what makes that change visible after the fact.
+/// A repoint (an existing `(origin, name, tag)` given a new root) replaces the
+/// row; the transparency log is what makes that change visible after the fact.
 #[must_use]
 pub fn upsert(rows: &[IndexRow], row: IndexRow) -> Vec<IndexRow> {
-    let mut map: BTreeMap<(String, String), String> = rows
+    let mut map: BTreeMap<(String, String, String), (String, String, String)> = rows
         .iter()
-        .map(|r| ((r.name.clone(), r.tag.clone()), r.root.clone()))
+        .map(|r| {
+            (
+                (r.origin.clone(), r.name.clone(), r.tag.clone()),
+                (r.scheme.clone(), r.kind.clone(), r.root.clone()),
+            )
+        })
         .collect();
-    map.insert((row.name.clone(), row.tag.clone()), row.root);
+    map.insert(
+        (row.origin.clone(), row.name.clone(), row.tag.clone()),
+        (row.scheme, row.kind, row.root),
+    );
     map.into_iter()
-        .map(|((name, tag), root)| IndexRow { name, tag, root })
+        .map(|((origin, name, tag), (scheme, kind, root))| IndexRow {
+            origin,
+            name,
+            tag,
+            root,
+            scheme,
+            kind,
+        })
         .collect()
 }
 
@@ -423,8 +505,8 @@ fn write_temp(tag: &str, bytes: &[u8]) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// The local append-only transparency log: every `name -> root` pointer ever
-/// published, with a monotonic sequence, so a repoint is detectable.
+/// The local append-only transparency log: every `origin/name/tag -> root`
+/// pointer ever published, with a monotonic sequence, so a repoint is detectable.
 #[derive(Debug)]
 pub struct Log {
     path: PathBuf,
@@ -437,26 +519,43 @@ pub struct LogEntry {
     pub seq: u64,
     /// The wall-clock nanoseconds the entry was appended.
     pub time_nanos: u128,
+    /// The canonical package identity.
+    pub origin: String,
     /// The published name.
     pub name: String,
     /// The published git tag.
     pub tag: String,
+    /// The hash scheme that gives `root` its meaning.
+    pub scheme: String,
+    /// The artifact kind the root names.
+    pub kind: String,
     /// The root hash the name and tag were pointed at.
     pub root: String,
 }
 
-/// A detected repoint: a `(name, tag)` that the log shows pointed at more than one
-/// root over time. The presence of any repoint is the signal `audit` surfaces.
+/// A detected repoint: an `(origin, name, tag)` that the log shows pointed at more
+/// than one root over time. The presence of any repoint is the signal `audit`
+/// surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repoint {
+    /// The repointed package identity.
+    pub origin: String,
     /// The repointed name.
     pub name: String,
     /// The repointed tag.
     pub tag: String,
     /// The root it pointed at first.
     pub from_root: String,
+    /// The hash scheme for `from_root`.
+    pub from_scheme: String,
+    /// The artifact kind for `from_root`.
+    pub from_kind: String,
     /// The root it was later repointed to.
     pub to_root: String,
+    /// The hash scheme for `to_root`.
+    pub to_scheme: String,
+    /// The artifact kind for `to_root`.
+    pub to_kind: String,
 }
 
 impl Log {
@@ -474,7 +573,15 @@ impl Log {
     ///
     /// # Errors
     /// Fails on a filesystem error.
-    pub fn append(&self, name: &str, tag: &str, root: &str) -> io::Result<u64> {
+    pub fn append(
+        &self,
+        origin: &str,
+        name: &str,
+        tag: &str,
+        scheme: &str,
+        kind: &str,
+        root: &str,
+    ) -> io::Result<u64> {
         let existing = self.entries()?;
         let seq = existing.len() as u64;
         if let Some(parent) = self.path.parent() {
@@ -485,14 +592,14 @@ impl Log {
             .append(true)
             .open(&self.path)?;
         if existing.is_empty() {
-            writeln!(f, "{LOG_HEADER}")?;
+            writeln!(f, "{LOG_HEADER_V4}")?;
         }
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
         writeln!(
             f,
-            "{seq}{FIELD_SEP}{nanos}{FIELD_SEP}{name}{FIELD_SEP}{tag}{FIELD_SEP}{root}"
+            "{seq}{FIELD_SEP}{nanos}{FIELD_SEP}{origin}{FIELD_SEP}{name}{FIELD_SEP}{tag}{FIELD_SEP}{scheme}{FIELD_SEP}{kind}{FIELD_SEP}{root}"
         )?;
         Ok(seq)
     }
@@ -508,7 +615,12 @@ impl Log {
             Err(e) => return Err(e),
         };
         let mut lines = text.lines();
-        if lines.next() != Some(LOG_HEADER) {
+        let header = lines.next();
+        if header != Some(LOG_HEADER_V1)
+            && header != Some(LOG_HEADER_V2)
+            && header != Some(LOG_HEADER_V3)
+            && header != Some(LOG_HEADER_V4)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("malformed transparency log at {}", self.path.display()),
@@ -516,47 +628,88 @@ impl Log {
         }
         let mut out = Vec::new();
         for line in lines {
-            let mut fields = line.splitn(5, FIELD_SEP);
-            if let (Some(seq), Some(time), Some(name), Some(tag), Some(root)) = (
-                fields.next(),
-                fields.next(),
-                fields.next(),
-                fields.next(),
-                fields.next(),
-            ) {
-                out.push(LogEntry {
+            let fields: Vec<&str> = line.split(FIELD_SEP).collect();
+            match (header, fields.as_slice()) {
+                (Some(LOG_HEADER_V1), [seq, time, name, tag, root]) => out.push(LogEntry {
                     seq: seq.parse().unwrap_or_default(),
                     time_nanos: time.parse().unwrap_or_default(),
-                    name: name.to_string(),
-                    tag: tag.to_string(),
-                    root: root.to_string(),
-                });
+                    origin: (*name).to_string(),
+                    name: (*name).to_string(),
+                    tag: (*tag).to_string(),
+                    scheme: HASH_SCHEME.to_string(),
+                    kind: INDEX_KIND_NAMESPACE.to_string(),
+                    root: (*root).to_string(),
+                }),
+                (Some(LOG_HEADER_V2), [seq, time, name, tag, scheme, root]) => {
+                    out.push(LogEntry {
+                        seq: seq.parse().unwrap_or_default(),
+                        time_nanos: time.parse().unwrap_or_default(),
+                        origin: (*name).to_string(),
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: INDEX_KIND_NAMESPACE.to_string(),
+                        root: (*root).to_string(),
+                    });
+                }
+                (Some(LOG_HEADER_V3), [seq, time, name, tag, scheme, kind, root]) => {
+                    out.push(LogEntry {
+                        seq: seq.parse().unwrap_or_default(),
+                        time_nanos: time.parse().unwrap_or_default(),
+                        origin: (*name).to_string(),
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: (*kind).to_string(),
+                        root: (*root).to_string(),
+                    });
+                }
+                (Some(LOG_HEADER_V4), [seq, time, origin, name, tag, scheme, kind, root]) => {
+                    out.push(LogEntry {
+                        seq: seq.parse().unwrap_or_default(),
+                        time_nanos: time.parse().unwrap_or_default(),
+                        origin: (*origin).to_string(),
+                        name: (*name).to_string(),
+                        tag: (*tag).to_string(),
+                        scheme: (*scheme).to_string(),
+                        kind: (*kind).to_string(),
+                        root: (*root).to_string(),
+                    });
+                }
+                _ => {}
             }
         }
         Ok(out)
     }
 
-    /// The repoints the log records: each `(name, tag)` whose root changed between
-    /// two entries. An empty result means no published pointer was ever moved.
+    /// The repoints the log records: each `(origin, name, tag)` whose root changed
+    /// between two entries. An empty result means no published pointer was ever
+    /// moved.
     ///
     /// # Errors
     /// Fails on a filesystem error or a malformed log.
     pub fn repoints(&self) -> io::Result<Vec<Repoint>> {
-        let mut latest: BTreeMap<(String, String), String> = BTreeMap::new();
+        let mut latest: BTreeMap<(String, String, String), (String, String, String)> =
+            BTreeMap::new();
         let mut out = Vec::new();
         for e in self.entries()? {
-            let key = (e.name.clone(), e.tag.clone());
+            let key = (e.origin.clone(), e.name.clone(), e.tag.clone());
             if let Some(prev) = latest.get(&key) {
-                if prev != &e.root {
+                if prev != &(e.scheme.clone(), e.kind.clone(), e.root.clone()) {
                     out.push(Repoint {
+                        origin: e.origin.clone(),
                         name: e.name.clone(),
                         tag: e.tag.clone(),
-                        from_root: prev.clone(),
+                        from_scheme: prev.0.clone(),
+                        from_kind: prev.1.clone(),
+                        from_root: prev.2.clone(),
+                        to_scheme: e.scheme.clone(),
+                        to_kind: e.kind.clone(),
                         to_root: e.root.clone(),
                     });
                 }
             }
-            latest.insert(key, e.root);
+            latest.insert(key, (e.scheme, e.kind, e.root));
         }
         Ok(out)
     }
@@ -567,7 +720,7 @@ impl Log {
 /// matching tag in their own repository.
 #[derive(Debug, Clone)]
 pub struct PublishReceipt {
-    /// The `name -> tag -> root` pointer written to the signed index.
+    /// The `origin -> name -> tag -> root` pointer written to the signed index.
     pub row: IndexRow,
     /// The transparency-log sequence assigned to this pointer.
     pub seq: u64,
@@ -580,9 +733,9 @@ pub struct PublishReceipt {
     pub git_tag_cmd: String,
 }
 
-/// Publish a `name -> root` pointer: upsert it into the signed index, sign the new
-/// index, write it through the transport, and append the pointer to the local
-/// transparency log.
+/// Publish an `origin/name/tag -> root` pointer: upsert it into the signed index,
+/// sign the new index, write it through the transport, and append the pointer to
+/// the local transparency log.
 ///
 /// The objects the root closes over are assumed already published; this records
 /// only the authenticated pointer to them (tag-plus-signed-pointer).
@@ -604,7 +757,14 @@ pub fn publish<T: Transport + ?Sized>(
     let sig = sign(&body, flags)?;
     let signed = sig.is_some();
     dst.publish_index(&SignedArtifact { body, sig })?;
-    let seq = log.append(&row.name, &row.tag, &row.root)?;
+    let seq = log.append(
+        &row.origin,
+        &row.name,
+        &row.tag,
+        &row.scheme,
+        &row.kind,
+        &row.root,
+    )?;
     let git_tag_cmd = format!(
         "git tag -a {} -m 'prism {} -> {}'",
         row.tag, row.name, row.root
@@ -667,7 +827,8 @@ impl AuditReport {
                 Ok(n) => {
                     let _ = writeln!(
                         out,
-                        "ok    {}@{}  {short}  ({n} objects verified){}",
+                        "ok    {} {}@{}  {short}  ({n} objects verified){}",
+                        r.pointer.origin,
                         r.pointer.name,
                         r.pointer.tag,
                         cert_suffix(&r.cert)
@@ -676,7 +837,8 @@ impl AuditReport {
                 Err(reason) => {
                     let _ = writeln!(
                         out,
-                        "FAIL  {}@{}  {short}  {reason}{}",
+                        "FAIL  {} {}@{}  {short}  {reason}{}",
+                        r.pointer.origin,
                         r.pointer.name,
                         r.pointer.tag,
                         cert_suffix(&r.cert)
@@ -687,7 +849,8 @@ impl AuditReport {
         for rp in &self.repoints {
             let _ = writeln!(
                 out,
-                "REPOINT {}@{}: {} -> {} (transparency log records a moved pointer)",
+                "REPOINT {} {}@{}: {} -> {} (transparency log records a moved pointer)",
+                rp.origin,
                 rp.name,
                 rp.tag,
                 short_hash(&rp.from_root),
@@ -770,12 +933,36 @@ fn audit_one(
     }
     match index_rows
         .iter()
-        .find(|r| r.name == p.name && r.tag == p.tag)
+        .find(|r| r.origin == p.origin && r.name == p.name && r.tag == p.tag)
     {
-        None => return Err(format!("no signed index pointer for {}@{}", p.name, p.tag)),
+        None => {
+            return Err(format!(
+                "no signed index pointer for {} {}@{}",
+                p.origin, p.name, p.tag
+            ));
+        }
+        Some(r) if r.scheme != HASH_SCHEME => {
+            return Err(format!(
+                "signed index points {} {}@{} at foreign scheme {}; this build speaks {}",
+                p.origin, p.name, p.tag, r.scheme, HASH_SCHEME
+            ));
+        }
+        Some(r) if r.scheme != p.scheme => {
+            return Err(format!(
+                "signed index points {} {}@{} under scheme {}, lock pins scheme {}",
+                p.origin, p.name, p.tag, r.scheme, p.scheme
+            ));
+        }
+        Some(r) if r.kind != p.kind => {
+            return Err(format!(
+                "signed index points {} {}@{} at kind {}, lock pins kind {}",
+                p.origin, p.name, p.tag, r.kind, p.kind
+            ));
+        }
         Some(r) if r.root != p.root => {
             return Err(format!(
-                "signed index points {}@{} at {}, lock pins {}",
+                "signed index points {} {}@{} at {}, lock pins {}",
+                p.origin,
                 p.name,
                 p.tag,
                 short_hash(&r.root),
@@ -784,13 +971,17 @@ fn audit_one(
         }
         Some(_) => {}
     }
-    if !log_entries
-        .iter()
-        .any(|e| e.name == p.name && e.tag == p.tag && e.root == p.root)
-    {
+    if !log_entries.iter().any(|e| {
+        e.name == p.name
+            && e.tag == p.tag
+            && e.origin == p.origin
+            && e.scheme == p.scheme
+            && e.kind == p.kind
+            && e.root == p.root
+    }) {
         return Err(format!(
-            "pointer {}@{} is absent from the transparency log",
-            p.name, p.tag
+            "pointer {} {}@{} is absent from the transparency log",
+            p.origin, p.name, p.tag
         ));
     }
     integrity.clone()
@@ -851,9 +1042,9 @@ pub fn store_log(store_root: &Path) -> Log {
 /// `tag`, and return the human-facing receipt to print.
 ///
 /// Objects are committed into the store, the namespace root is derived, and the
-/// `(name, tag, root)` pointer is written to the signed index and the local log.
-/// The matching git tag is the operator's to create; its exact command is included
-/// rather than run.
+/// `(origin, name, tag, root)` pointer is written to the signed index and the
+/// local log. The matching git tag is the operator's to create; its exact command
+/// is included rather than run.
 ///
 /// # Errors
 /// A front-end error, a signing failure, or a store/filesystem error.
@@ -865,22 +1056,25 @@ pub fn publish_cmd(
     cfg: &Config,
 ) -> Result<String, Error> {
     crate::commit_to_store(full_src, roots, cfg)?;
-    let root = crate::namespace_root(full_src, roots)?;
+    let identity = crate::namespace_identity(full_src, roots)?;
     let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
     let dst = DiskTransport::open(&store_root)?;
     let log = store_log(&store_root);
     let row = IndexRow {
+        origin: name.to_string(),
         name: name.to_string(),
         tag: tag.to_string(),
-        root,
+        scheme: identity.scheme.to_string(),
+        kind: identity.kind.to_string(),
+        root: identity.root,
     };
     let receipt = publish(&dst, &log, row, &cfg.flags)?;
 
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "published {}@{} -> {}",
-        receipt.row.name, receipt.row.tag, receipt.row.root
+        "published {} {}@{} -> {}",
+        receipt.row.origin, receipt.row.name, receipt.row.tag, receipt.row.root
     );
     if receipt.signed {
         let _ = writeln!(out, "  index signed with {}", receipt.mode.label());
@@ -892,6 +1086,69 @@ pub fn publish_cmd(
             receipt.mode.label()
         );
     }
+    let _ = writeln!(out, "  transparency log sequence {}", receipt.seq);
+    let _ = writeln!(out, "next, cut the matching tag in your source repository:");
+    let _ = writeln!(out, "  {}", receipt.git_tag_cmd);
+    Ok(out)
+}
+
+/// The `prism publish` source-package command body used by the CLI.
+///
+/// This preserves the existing namespace-pointer publisher above for lower-level
+/// tests, but gives the package build path a source artifact it can actually put
+/// on the module search path: a deterministic source bundle keyed by the bundle's
+/// BLAKE3 digest and authenticated by the signed index.
+///
+/// # Errors
+/// A front-end error, a signing failure, or a store/filesystem error.
+pub fn publish_source_cmd(
+    user_src: &str,
+    full_src: &str,
+    roots: &[Root],
+    origin: &str,
+    name: &str,
+    tag: &str,
+    cfg: &Config,
+) -> Result<String, Error> {
+    crate::commit_to_store(full_src, roots, cfg)?;
+    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store = Store::open_or_create(&store_root)?;
+    let bundle = encode_source_bundle([(name, user_src)]);
+    let root = blake3::hash(&bundle).to_hex().to_string();
+    store.put(&root, &bundle)?;
+    let dst = DiskTransport::open(&store_root)?;
+    let log = store_log(&store_root);
+    let row = IndexRow {
+        origin: origin.to_string(),
+        name: name.to_string(),
+        tag: tag.to_string(),
+        scheme: HASH_SCHEME.to_string(),
+        kind: INDEX_KIND_SOURCE.to_string(),
+        root,
+    };
+    let receipt = publish(&dst, &log, row, &cfg.flags)?;
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "published {} {}@{} -> {}",
+        receipt.row.origin, receipt.row.name, receipt.row.tag, receipt.row.root
+    );
+    if receipt.signed {
+        let _ = writeln!(out, "  index signed with {}", receipt.mode.label());
+    } else {
+        let _ = writeln!(
+            out,
+            "  index is UNSIGNED ({}) -- not for distribution; `prism audit` rejects it \
+             without the unsigned override",
+            receipt.mode.label()
+        );
+    }
+    let _ = writeln!(
+        out,
+        "  source bundle stored for module {}",
+        receipt.row.name
+    );
     let _ = writeln!(out, "  transparency log sequence {}", receipt.seq);
     let _ = writeln!(out, "next, cut the matching tag in your source repository:");
     let _ = writeln!(out, "  {}", receipt.git_tag_cmd);

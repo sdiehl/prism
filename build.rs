@@ -24,6 +24,7 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_array.h",
     "prism_buffer.h",
     "prism_sort.h",
+    "prism_kont.h",
     "prism_io.h",
 ];
 const RUNTIME_SOURCES: &[&str] = &[
@@ -36,6 +37,7 @@ const RUNTIME_SOURCES: &[&str] = &[
     "prism_sort.c",
     "prism_array.c",
     "prism_buffer.c",
+    "prism_kont.c",
     "prism_io.c",
 ];
 const RUNTIME_DIR: &str = "runtime";
@@ -98,10 +100,9 @@ fn main() {
     // and the runtime oracle default to this identical compiler rather than each
     // guessing a system default. Optimization level is a second toolchain input to
     // those same functions (clang -O0 and -O2 disagree by a ULP on atan even with
-    // FP contraction off): the interpreter libm here is fixed at -O2, and the
-    // native link uses -O2 by default, so they agree on the default path. Making
-    // the libm opt level independent of the program's -O is the remaining step to
-    // close the contract fully (see cc_link).
+    // FP contraction off). The vendored libm archive is built once here at -O2 and
+    // embedded for every native link, so program `--backend-opt` never recompiles
+    // libm differently from the interpreter.
     println!("cargo:rerun-if-env-changed=PRISM_CC");
     let cc = env::var("PRISM_CC").unwrap_or_else(|_| "clang".into());
     println!("cargo:rustc-env=PRISM_BUILD_CC={cc}");

@@ -166,6 +166,7 @@ fn canonical_and_verified_reserved_layers_round_trip() {
     let rec = VerifiedRecord {
         kind: "parity".into(),
         scheme: "prism-core-hash-v1".into(),
+        identity: "compiler=unit-test;target=test;backend=llvm;".into(),
         passed: true,
     };
     store.put_verified(H1, &rec).unwrap();

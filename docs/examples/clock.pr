@@ -29,7 +29,7 @@
 
 import Concurrent (..)
 
-fn worker(name : String, d : Int) : !{Async(Int), Clock, IO} Int =
+fn worker(name : String, d : Int) : !{Clock, IO} Int =
   sleep(d)
   let t = now(())
   println("{name} woke at t={t}")

@@ -1,5 +1,5 @@
-// Expression-level line breaking (FMT.md / V07.md H5). An over-width value
-// expression breaks through the document engine into the pinned house style:
+// Expression-level line breaking. An over-width value expression breaks through
+// the document engine into the pinned house style:
 // argument lists and collection literals go one element per line with a trailing
 // comma (elements two indent units in, the closing delimiter one unit in), a
 // call whose final argument is a delimited aggregate hugs, and an operator or
@@ -7,6 +7,8 @@
 // case pins the exact layout and asserts the three invariants the reflow rests
 // on: the output reparses, formatting is idempotent, and the parsed meaning
 // (span-stripped AST) is unchanged.
+
+use rstest::rstest;
 
 // The parse AST with span offsets stripped, invariant under the whitespace
 // reflow a reformat performs (reflow shifts only spans; a structural change
@@ -45,78 +47,94 @@ fn pin(src: &str, want: &str) {
     );
 }
 
-// Rule 2: a call whose final argument is a list hugs, and hugging chains through
-// the nested sole-argument call, so the wrapper costs no indentation.
-#[test]
-fn aggregate_hug() {
-    pin(
-        "fn main() : Unit =\n  let x = input(map_from_list([(\"neo\", 3), (\"trinity\", 7), (\"morpheus\", 5), (\"cypher\", 2), (\"tank\", 9)]))\n  ()\n",
-        "fn main() : Unit =\n  let x = input(map_from_list([\n      (\"neo\", 3),\n      (\"trinity\", 7),\n      (\"morpheus\", 5),\n      (\"cypher\", 2),\n      (\"tank\", 9),\n    ]))\n  ()\n",
-    );
+#[derive(Clone, Copy, Debug)]
+enum BreakCase {
+    AggregateHug,
+    NestedCallsNoStaircase,
+    ListLiteral,
+    TupleLiteral,
+    OperatorChain,
+    PipelineColumn,
+    LowestPrecedenceChain,
+    FittingCall,
 }
 
-// Rule 1: nested calls break outermost-first; an inner call that fits at its new
-// indent stays flat (no staircase).
-#[test]
-fn nested_calls_no_staircase() {
-    pin(
-        "fn f() =\n  process_frame(update_positions(apply_forces(compute_neighbors(w, r, n), g, d), dt), fi)\n",
-        "fn f() =\n  process_frame(\n      update_positions(apply_forces(compute_neighbors(w, r, n), g, d), dt),\n      fi,\n    )\n",
-    );
+impl BreakCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::AggregateHug => {
+                "fn main() : Unit =\n  let x = input(map_from_list([(\"neo\", 3), (\"trinity\", 7), (\"morpheus\", 5), (\"cypher\", 2), (\"tank\", 9)]))\n  ()\n"
+            }
+            Self::NestedCallsNoStaircase => {
+                "fn f() =\n  process_frame(update_positions(apply_forces(compute_neighbors(w, r, n), g, d), dt), fi)\n"
+            }
+            Self::ListLiteral => {
+                "fn main() : List(Int) =\n  [alpha_one, bravo_two, charlie_three, delta_four, echo_five, foxtrot_six, golf_seven_x]\n"
+            }
+            Self::TupleLiteral => {
+                "fn f() : Bool =\n  (alpha_one_value, bravo_two_value, charlie_three_value, delta_four_value, echo_five_value)\n"
+            }
+            Self::OperatorChain => {
+                "fn f() : Int =\n  base_score(player) + bonus_for_streak(streak, multiplier) + penalty_for_time(elapsed_ms)\n"
+            }
+            Self::PipelineColumn => {
+                "fn f() : World =\n  world |> compute_neighbors(radius) |> apply_forces(gravity, damping) |> integrate(delta_t)\n"
+            }
+            Self::LowestPrecedenceChain => {
+                "fn f() : Bool =\n  length(xs) == length(ys) && length(ys) == length(zs) && length(zs) == length(final_ws)\n"
+            }
+            Self::FittingCall => "fn f() : Int = process(a, b, c)\n",
+        }
+    }
+
+    const fn want(self) -> &'static str {
+        match self {
+            Self::AggregateHug => {
+                "fn main() : Unit =\n  let x = input(map_from_list([\n      (\"neo\", 3),\n      (\"trinity\", 7),\n      (\"morpheus\", 5),\n      (\"cypher\", 2),\n      (\"tank\", 9),\n    ]))\n  ()\n"
+            }
+            Self::NestedCallsNoStaircase => {
+                "fn f() =\n  process_frame(\n      update_positions(apply_forces(compute_neighbors(w, r, n), g, d), dt),\n      fi,\n    )\n"
+            }
+            Self::ListLiteral => {
+                "fn main() : List(Int) =\n  [\n      alpha_one,\n      bravo_two,\n      charlie_three,\n      delta_four,\n      echo_five,\n      foxtrot_six,\n      golf_seven_x,\n    ]\n"
+            }
+            Self::TupleLiteral => {
+                "fn f() : Bool =\n  (\n      alpha_one_value,\n      bravo_two_value,\n      charlie_three_value,\n      delta_four_value,\n      echo_five_value,\n    )\n"
+            }
+            Self::OperatorChain => {
+                "fn f() : Int =\n  base_score(player)\n    + bonus_for_streak(streak, multiplier)\n    + penalty_for_time(elapsed_ms)\n"
+            }
+            Self::PipelineColumn => {
+                "fn f() : World =\n  world\n    |> compute_neighbors(radius)\n    |> apply_forces(gravity, damping)\n    |> integrate(delta_t)\n"
+            }
+            Self::LowestPrecedenceChain => {
+                "fn f() : Bool =\n  length(xs) == length(ys)\n    && length(ys) == length(zs)\n    && length(zs) == length(final_ws)\n"
+            }
+            Self::FittingCall => "fn f() : Int = process(a, b, c)\n",
+        }
+    }
 }
 
-// Rule 3: a list literal breaks to one element per line with a trailing comma.
-#[test]
-fn list_literal_breaks() {
-    pin(
-        "fn main() : List(Int) =\n  [alpha_one, bravo_two, charlie_three, delta_four, echo_five, foxtrot_six, golf_seven_x]\n",
-        "fn main() : List(Int) =\n  [\n      alpha_one,\n      bravo_two,\n      charlie_three,\n      delta_four,\n      echo_five,\n      foxtrot_six,\n      golf_seven_x,\n    ]\n",
-    );
+#[rstest]
+fn expression_breaking_matches_pinned_layout(
+    #[values(
+        BreakCase::AggregateHug,
+        BreakCase::NestedCallsNoStaircase,
+        BreakCase::ListLiteral,
+        BreakCase::TupleLiteral,
+        BreakCase::OperatorChain,
+        BreakCase::PipelineColumn,
+        BreakCase::LowestPrecedenceChain,
+        BreakCase::FittingCall
+    )]
+    case: BreakCase,
+) {
+    pin(case.src(), case.want());
 }
 
-// Rule 3: a tuple literal has the same broken shape.
 #[test]
-fn tuple_literal_breaks() {
-    pin(
-        "fn f() : Bool =\n  (alpha_one_value, bravo_two_value, charlie_three_value, delta_four_value, echo_five_value)\n",
-        "fn f() : Bool =\n  (\n      alpha_one_value,\n      bravo_two_value,\n      charlie_three_value,\n      delta_four_value,\n      echo_five_value,\n    )\n",
-    );
-}
-
-// Rule 4: an over-width operator chain breaks before each operator at one indent.
-#[test]
-fn operator_chain_leads() {
-    pin(
-        "fn f() : Int =\n  base_score(player) + bonus_for_streak(streak, multiplier) + penalty_for_time(elapsed_ms)\n",
-        "fn f() : Int =\n  base_score(player)\n    + bonus_for_streak(streak, multiplier)\n    + penalty_for_time(elapsed_ms)\n",
-    );
-}
-
-// Rule 4: a `|>` pipeline reads as a column of stages.
-#[test]
-fn pipeline_column() {
-    pin(
-        "fn f() : World =\n  world |> compute_neighbors(radius) |> apply_forces(gravity, damping) |> integrate(delta_t)\n",
-        "fn f() : World =\n  world\n    |> compute_neighbors(radius)\n    |> apply_forces(gravity, damping)\n    |> integrate(delta_t)\n",
-    );
-}
-
-// Rule 4: precedence-aware. Only the lowest-precedence operators break; the
-// higher-precedence comparison operands stay flat on each line.
-#[test]
-fn chain_breaks_lowest_precedence() {
-    pin(
-        "fn f() : Bool =\n  length(xs) == length(ys) && length(ys) == length(zs) && length(zs) == length(final_ws)\n",
-        "fn f() : Bool =\n  length(xs) == length(ys)\n    && length(ys) == length(zs)\n    && length(zs) == length(final_ws)\n",
-    );
-}
-
-// A call whose arguments fit stays flat: the doc path must not disturb an
-// expression that was already within budget (no churn on the common case).
-#[test]
-fn fitting_call_stays_flat() {
-    pin(
-        "fn f() : Int = process(a, b, c)\n",
-        "fn f() : Int = process(a, b, c)\n",
-    );
+fn transact_uses_layout_when_bound() {
+    let src = "fn main() =\n  let r = transact let _ = balance -= 40 in let _ = stock -= 1 in let _ = guard(balance >= 0) in 1 else 0\n  r\n";
+    let want = "fn main() =\n  let r =\n    transact\n      balance -= 40\n      stock -= 1\n      guard(balance >= 0)\n      1\n    else\n      0\n  r\n";
+    pin(src, want);
 }

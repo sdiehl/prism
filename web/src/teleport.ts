@@ -34,36 +34,79 @@ const DOC_HASH = "https://sdiehl.github.io/prism/compiler.html#content-addressed
 // role only hears the other.
 interface EnvMsg {
   kind: "env";
+  transfer: number;
   bytes: number[];
   bundle: string;
 }
 interface AckMsg {
   kind: "ack";
+  transfer: number;
+  receiver: string;
   ok: boolean;
   lines: number;
   bytes: number;
+  bundle: string;
+  reason?: "bundle-mismatch" | "resume-refused";
 }
-type Msg = EnvMsg | AckMsg;
+interface ReadyMsg {
+  kind: "ready";
+  receiver: string;
+  bundle: string;
+}
+type Msg = EnvMsg | AckMsg | ReadyMsg;
 
 // A guaranteed element (host and receiver DOMs each contain their own set), cast
 // like the other residents' `el`. `find` is the nullable form the role dispatch
 // uses to tell which DOM this module loaded into.
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const find = (id: string): HTMLElement | null => document.getElementById(id);
+const shortId = (s: string): string => s.slice(0, 8);
+const newReceiverId = (): string => {
+  if ("crypto" in globalThis && typeof globalThis.crypto.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `recv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
 
 // Count the non-empty printed lines in a transcript.
 const lineCount = (s: string): number => s.split("\n").filter((l) => l.length > 0).length;
 
 // ------------------------------- receiver ----------------------------------
 
-async function receiver(outEl: HTMLElement, proofEl: HTMLElement): Promise<void> {
+async function receiver(
+  outEl: HTMLElement,
+  proofEl: HTMLElement,
+  identityEl: HTMLElement | null,
+): Promise<void> {
   await init();
+  const receiverId = newReceiverId();
+  const mine = teleport_bundle();
+  identityEl?.replaceChildren(`receiver ${shortId(receiverId)} · code ${mine.slice(0, 12)}`);
   const chan = new BroadcastChannel(CHANNEL);
+  const announce = (): void =>
+    chan.postMessage({ kind: "ready", receiver: receiverId, bundle: mine } satisfies ReadyMsg);
+  announce();
   chan.onmessage = (ev: MessageEvent<Msg>): void => {
     if (ev.data.kind !== "env") return;
     const env = ev.data;
     const bytes = Uint8Array.from(env.bytes);
-    const mine = teleport_bundle();
+    if (env.bundle !== mine) {
+      outEl.textContent = "refused, wrong bundle";
+      outEl.classList.add("err");
+      proofEl.innerHTML = `<span class="tp-x">rejected</span> sender code <code>${env.bundle.slice(0, 12)}</code> does not match receiver code <code>${mine.slice(0, 12)}</code>`;
+      proofEl.className = "tp-proof tp-proof--bad";
+      chan.postMessage({
+        kind: "ack",
+        transfer: env.transfer,
+        receiver: receiverId,
+        ok: false,
+        lines: 0,
+        bytes: bytes.length,
+        bundle: mine,
+        reason: "bundle-mismatch",
+      } satisfies AckMsg);
+      return;
+    }
     const suffix = teleport_resume(bytes);
     if (suffix.startsWith("error:")) {
       // Totality and the hash check in one path: a corrupted or foreign envelope is
@@ -73,7 +116,16 @@ async function receiver(outEl: HTMLElement, proofEl: HTMLElement): Promise<void>
       const why = suffix.replace(/^error:\s*(runtime:\s*)?(resume:\s*)?/, "");
       proofEl.innerHTML = `<span class="tp-x">rejected</span> ${why}`;
       proofEl.className = "tp-proof tp-proof--bad";
-      chan.postMessage({ kind: "ack", ok: false, lines: 0, bytes: bytes.length } satisfies AckMsg);
+      chan.postMessage({
+        kind: "ack",
+        transfer: env.transfer,
+        receiver: receiverId,
+        ok: false,
+        lines: 0,
+        bytes: bytes.length,
+        bundle: mine,
+        reason: "resume-refused",
+      } satisfies AckMsg);
       return;
     }
     outEl.classList.remove("err");
@@ -86,12 +138,17 @@ async function receiver(outEl: HTMLElement, proofEl: HTMLElement): Promise<void>
     outEl.classList.add("tp-arrive");
     chan.postMessage({
       kind: "ack",
+      transfer: env.transfer,
+      receiver: receiverId,
       ok: true,
       lines: lineCount(suffix),
       bytes: bytes.length,
+      bundle: mine,
     } satisfies AckMsg);
   };
   outEl.textContent = "waiting for Tab A to pause";
+  window.addEventListener("focus", announce);
+  setInterval(announce, 1000);
 }
 
 // -------------------------------- sender -----------------------------------
@@ -107,6 +164,7 @@ async function sender(root: HTMLElement): Promise<void> {
   const wire = el<HTMLElement>("wire");
   const packet = el<HTMLElement>("packet");
   const story = el<HTMLElement>("story");
+  const receiverStatus = el<HTMLElement>("receiverStatus");
   const codeEl = find("code");
 
   await init();
@@ -124,9 +182,28 @@ async function sender(root: HTMLElement): Promise<void> {
   if (Number(scrub.value) > cuts.length) scrub.value = String(Math.min(3, cuts.length));
 
   const chan = new BroadcastChannel(CHANNEL);
+  const receivers = new Map<string, string>();
   // What Tab A has printed at the chosen cut, so the narrative can quote its last
   // line and the receiver's ack can be phrased against a real count.
   let prefix = "";
+  let nextTransfer = 1;
+  let activeTransfer = 0;
+
+  const renderReceivers = (): void => {
+    const count = receivers.size;
+    if (count === 0) {
+      receiverStatus.textContent = "waiting for a same-origin receiver";
+      btn.disabled = true;
+      return;
+    }
+    const hashes = new Set(receivers.values());
+    const mine = teleport_bundle();
+    const compatible = hashes.size === 1 && hashes.has(mine);
+    receiverStatus.textContent = compatible
+      ? `${count} same-origin receiver${count === 1 ? "" : "s"} ready · code ${mine.slice(0, 12)}`
+      : `${count} receiver${count === 1 ? "" : "s"} ready, but code identity differs`;
+    btn.disabled = !compatible;
+  };
 
   // Show what Tab A has printed by the chosen pause line. Recomputed on release (not
   // every drag tick) so dragging stays smooth; the wasm recompiles per call.
@@ -142,7 +219,12 @@ async function sender(root: HTMLElement): Promise<void> {
 
   // Light Tab B and rewrite the narrative once the receiver reports back.
   chan.onmessage = (ev: MessageEvent<Msg>): void => {
-    if (ev.data.kind !== "ack") return;
+    if (ev.data.kind === "ready") {
+      receivers.set(ev.data.receiver, ev.data.bundle);
+      renderReceivers();
+      return;
+    }
+    if (ev.data.kind !== "ack" || ev.data.transfer !== activeTransfer) return;
     const ack = ev.data;
     tabB.classList.remove("tp-pulse");
     void tabB.offsetWidth;
@@ -154,13 +236,18 @@ async function sender(root: HTMLElement): Promise<void> {
         .filter((l) => l.length > 0)
         .at(-1) ?? "";
     story.className = "tp-story";
-    story.innerHTML = ack.ok
-      ? `Tab A printed the first <b>${k}</b> line${k === 1 ? "" : "s"} (through &ldquo;${last}&rdquo;), then paused. Its live continuation, a <b>${ack.bytes}-byte</b> snapshot, flew to Tab B, which confirmed the <a href="${DOC_HASH}" target="_blank" rel="noopener">code hash</a> matched and resumed at line <b>${k + 1}</b>. It never re-ran those first ${k} steps.`
-      : `One byte was corrupted in flight. Tab B decoded the snapshot, found it no longer matched, and <b>refused to run a single step</b>. No crash, no partial output. A continuation resumes only if it arrives exactly intact.`;
+    if (ack.ok) {
+      story.innerHTML = `Tab A printed the first <b>${k}</b> line${k === 1 ? "" : "s"} (through &ldquo;${last}&rdquo;), then paused. Its live continuation, a <b>${ack.bytes}-byte</b> snapshot, flew over the same-origin BroadcastChannel to receiver <b>${shortId(ack.receiver)}</b>, which confirmed the <a href="${DOC_HASH}" target="_blank" rel="noopener">code hash</a> <code>${ack.bundle.slice(0, 12)}</code> matched and resumed at line <b>${k + 1}</b>. It never re-ran those first ${k} steps.`;
+    } else if (ack.reason === "bundle-mismatch") {
+      story.innerHTML = `Receiver <b>${shortId(ack.receiver)}</b> is on the same origin, but it has a different code hash <code>${ack.bundle.slice(0, 12)}</code>. Tab B refused the continuation before running any step; same-origin transport is not enough without matching content identity.`;
+    } else {
+      story.innerHTML = `One byte was corrupted in flight. Tab B decoded the snapshot, found it no longer matched, and <b>refused to run a single step</b>. No crash, no partial output. A continuation resumes only if it arrives exactly intact.`;
+    }
   };
 
   btn.addEventListener("click", () => {
     const line = Number(scrub.value);
+    activeTransfer = nextTransfer++;
     const bytes = teleport_suspend(cuts[line - 1]);
     if (bytes.length === 0) {
       root.dataset.status = "the program finished before that line, nothing to teleport";
@@ -188,14 +275,15 @@ async function sender(root: HTMLElement): Promise<void> {
 
     chan.postMessage({
       kind: "env",
+      transfer: activeTransfer,
       bytes: Array.from(wireBytes),
       bundle: teleport_bundle(),
     } satisfies EnvMsg);
   });
 
   root.removeAttribute("data-status");
-  btn.disabled = false;
   preview();
+  renderReceivers();
 }
 
 // ------------------------------- dispatch ----------------------------------
@@ -204,10 +292,11 @@ async function sender(root: HTMLElement): Promise<void> {
 // controls. One module, one of two roles by which DOM it loaded into.
 const recvOut = find("recvOut");
 const recvProof = find("recvProof");
+const recvIdentity = find("recvIdentity");
 const status = find("status");
 
 if (recvOut && recvProof) {
-  void receiver(recvOut, recvProof);
+  void receiver(recvOut, recvProof, recvIdentity);
 } else if (status) {
   void sender(status).catch((err) => {
     status.dataset.status = `error: ${err}`;

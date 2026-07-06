@@ -1,0 +1,3 @@
+fn inc(x : Int) : Int without alloc = x + 1
+
+fn top(x : Int) : Int without alloc = inc(x)

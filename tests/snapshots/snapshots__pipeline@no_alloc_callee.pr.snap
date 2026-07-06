@@ -132,10 +132,12 @@ fn top(x) =
   return x to t@1; mk(t@1)
 
 == fip ==
-Type Error: a `without alloc` function may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+Type Error: allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree
    ╭─[ <source>:8:1 ]
    │
  8 │ fn top(x : Int) : Box without alloc = mk(x)
    │ ─────────────────────┬─────────────────────  
-   │                      ╰─────────────────────── a `without alloc` function may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+   │                      ╰─────────────────────── allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree
 ───╯

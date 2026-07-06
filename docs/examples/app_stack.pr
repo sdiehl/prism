@@ -36,7 +36,7 @@ fn step(n) : !{App} Int =
   else
     limit - n
 
-fn run_app(n) =
+fn run_app(n : Int) : !{IO} Int =
   with handler
     fun ask(_u) => 10
   with handler

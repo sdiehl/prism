@@ -13,7 +13,7 @@
 //! directory recording which checks a hash has already passed.
 //!
 //! Everything is a cache. The store is derived from the source, never
-//! load-bearing for correctness: deleting it forces recomputation, nothing more.
+//! required for correctness: deleting it forces recomputation, nothing more.
 //!
 //! Durability and concurrency rest on two disciplines. Every write goes to a
 //! uniquely named temp file in the destination directory and is renamed into

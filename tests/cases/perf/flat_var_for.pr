@@ -1,0 +1,7 @@
+fn run(n : Int) : Int =
+  var t := 0
+  for i in srange(1, n + 1) do
+    t += i
+  t
+
+fn main() = println(run(__N__))

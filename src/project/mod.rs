@@ -79,9 +79,9 @@ pub enum DepSource {
     /// A local path dependency: another Prism project whose modules resolve under
     /// its own source root. `path` is relative to the depending project's root.
     Path(PathBuf),
-    /// A git-hosted release at `url`, pinned to the opaque tag `version`. The tag
-    /// is a human label the signed index maps to a root hash; it carries no range
-    /// or ordering semantics.
+    /// A git-hosted release at `url`, pinned to the opaque tag `version`. The URL
+    /// and tag are the package identity the signed index maps to a root hash; the
+    /// tag carries no range or ordering semantics.
     Git { url: String, version: String },
     /// A fully explicit content-hash pin (the hex digest under [`HASH_SCHEME`]).
     /// Terminal: the hash is the identity, so nothing about it is re-resolved.
@@ -205,6 +205,10 @@ pub struct Project {
     /// root and that dependency's own manifest (its `src_dir`). These extend the
     /// module search path, so a dependency's modules resolve under its own root.
     pub dep_src_dirs: Vec<PathBuf>,
+    /// The manifest dependencies in source order. Path dependencies are already
+    /// expanded into `dep_src_dirs`; hash and git dependencies are resolved from
+    /// the package store by the CLI build path.
+    pub dependencies: Vec<Dependency>,
 }
 
 /// Walk up from `start` looking for the nearest enclosing `prism.toml`.
@@ -287,6 +291,7 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
         prelude: manifest.prelude.map(|p| root.join(p)),
         name: manifest.name,
         dep_src_dirs,
+        dependencies: manifest.dependencies,
         root,
     })
 }

@@ -118,8 +118,8 @@ pub fn verify(hash: &str, bytes: &[u8]) -> Result<(), TransportError> {
 }
 
 /// A narrow transport surface: fetch and publish objects, and read or write the
-/// one signed name-to-root index. Everything else the package manager does is
-/// built over these.
+/// one signed package-identity-to-root index. Everything else the package
+/// manager does is built over these.
 pub trait Transport {
     /// Whether the backing store already holds `hash`. No fetch, no verify, no
     /// network: the warm-cache check a closure walk consults before asking for
@@ -143,9 +143,9 @@ pub trait Transport {
     /// a byte mismatch against an existing object.
     fn publish(&self, hash: &str, bytes: &[u8]) -> Result<Written, TransportError>;
 
-    /// The signed `name -> root` pointers published under `name` (possibly several
-    /// tags). Parsed from the index artifact; the signature is verified separately
-    /// by the trust layer, not here.
+    /// The signed package-identity pointers published under `name` (possibly
+    /// several tags and origins). Parsed from the index artifact; the signature is
+    /// verified separately by the trust layer, not here.
     ///
     /// # Errors
     /// [`TransportError::Io`] / [`TransportError::Remote`] on a backing failure.

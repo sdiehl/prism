@@ -1,0 +1,5 @@
+import Tzdb (format_in_zone, asia_tokyo)
+
+import Time (Wall)
+
+fn main() : !{IO} Unit = println(format_in_zone(Wall(0), asia_tokyo()))

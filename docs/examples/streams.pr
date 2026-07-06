@@ -16,7 +16,7 @@ fn square(n) = n * n
 fn main() =
   println(srange(1, 1000).smap(square).skeep(even).stake(5).ssum())
   for w in sof(["lo", "hi"]) do
-    println(w)
+    println((w : String))
   let xs = srange(0, 1000000).smap(\(n) -> n * 3).stake(3).scollect()
   for x in sof(xs) do
-    println(x)
+    println((x : Int))

@@ -14,7 +14,7 @@
 --     `deriving (Json)`: the derivable set is fixed, so a new derivable class is a
 --     compiler change; the class-and-instances form is pure library code.)
 --
--- Two decisions this module pins:
+-- The JSON contract is deliberately narrow:
 --
 --   - Number semantics are exact-or-error by default. An integer literal decodes
 --     to `JInt` (`Int` is arbitrary precision, so no integer overflows); a number

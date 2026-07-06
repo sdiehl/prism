@@ -102,10 +102,12 @@ fn caller(x) =
   return x to t@2; plain(t@2)
 
 == fip ==
-Type Error: a `fbip` function may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+Type Error: usage check `fbip` failed for function `caller`: may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+witness: `plain` has no zero-allocation certificate, so it may allocate inside `caller`'s call tree
    ╭─[ <source>:7:1 ]
    │
  7 │ fbip fn caller(x) = plain(x)
    │ ──────────────┬─────────────  
-   │               ╰─────────────── a `fbip` function may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+   │               ╰─────────────── usage check `fbip` failed for function `caller`: may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
+witness: `plain` has no zero-allocation certificate, so it may allocate inside `caller`'s call tree
 ───╯

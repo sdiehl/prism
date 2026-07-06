@@ -12,7 +12,10 @@ use std::path::Path;
 use prism::eval::kont::{decode_kont, encode_kont};
 use prism::eval::{resume_kont, run_suspending, Checkpoint};
 use prism::resolve::default_roots;
-use prism::{core_of, interpret_io_on, resume_on, suspend_on, with_prelude, Config, SuspendResult};
+use prism::{
+    core_of, interpret_io_on, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
+    SuspendResult,
+};
 
 fn cfg() -> Config {
     Config::from_env()
@@ -34,6 +37,8 @@ fn go(i, n) =
 
 fn main() = go(0, 8)
 ";
+
+const TELEPORT: &str = include_str!("../examples/teleport.pr");
 
 fn uninterrupted(full: &str) -> String {
     let mut out: Vec<u8> = Vec::new();
@@ -138,5 +143,64 @@ fn resume_against_a_different_program_is_refused_by_hash() {
     assert!(
         msg.contains("code-identity mismatch"),
         "the refusal names the code-identity mismatch: {msg}"
+    );
+}
+
+#[test]
+fn teleport_demo_resume_matches_uninterrupted_run_and_refuses_tamper() {
+    let full = with_prelude(TELEPORT);
+    let want = uninterrupted(&full);
+    assert!(
+        want.contains("step 10"),
+        "the teleport fixture prints the full run"
+    );
+
+    let cuts = suspend_line_cuts(&full, &roots(), &cfg()).expect("line cuts");
+    assert!(
+        cuts.len() > 2,
+        "the teleport fixture has several interior line boundaries"
+    );
+    let cut = cuts[cuts.len() / 2];
+
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let SuspendResult::Suspended(bytes) =
+        suspend_on(&full, &roots(), &mut prefix, &mut input, cut, &cfg()).expect("suspend")
+    else {
+        panic!("interior line cut suspends the teleport demo");
+    };
+
+    let mut suffix: Vec<u8> = Vec::new();
+    let mut input2 = Cursor::new(Vec::new());
+    resume_on(&full, &roots(), &bytes, &mut suffix, &mut input2, &cfg()).expect("resume");
+    let resumed = [prefix.as_slice(), suffix.as_slice()].concat();
+    assert_eq!(
+        String::from_utf8(resumed).expect("utf8"),
+        want,
+        "sender prefix followed by receiver suffix equals an uninterrupted run"
+    );
+
+    let mut tampered = bytes.clone();
+    let tampered_index = tampered.len() / 2;
+    tampered[tampered_index] ^= 0x01;
+    let mut refused_out: Vec<u8> = Vec::new();
+    let mut input3 = Cursor::new(Vec::new());
+    let err = resume_on(
+        &full,
+        &roots(),
+        &tampered,
+        &mut refused_out,
+        &mut input3,
+        &cfg(),
+    )
+    .expect_err("tampered envelope is refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("malformed snapshot") || msg.contains("kont") || msg.contains("checksum"),
+        "the refusal names the envelope problem: {msg}"
+    );
+    assert!(
+        refused_out.is_empty(),
+        "tamper is refused before any receiver output is emitted"
     );
 }

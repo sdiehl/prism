@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism schedule map</title>
+    <meta name="description" content="A navigable map of seeded scheduler choices. Each node is one hostile interleaving of the same Prism program; every path lands on the same final-state hash." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="showcase-body schedule-body">
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag">schedule map</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../gallery/">Gallery</a>
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="../repl/">REPL</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Docs</a>
+      </div>
+    </header>
+    <main class="showcase-main">
+      <div class="resident">
+        <div class="faces-toggle" role="tablist" aria-label="View">
+          <button class="face-tab is-active" type="button" data-face="demo" role="tab" aria-selected="true">Demo</button>
+          <button class="face-tab" type="button" data-face="source" role="tab" aria-selected="false">Source</button>
+        </div>
+        <div class="flip" id="flip">
+          <div class="flip-inner">
+            <section class="flip-face flip-face--demo">
+              <div class="schedule-main">
+                <section class="schedule-map">
+                  <div class="graph-title">seeded scheduler space</div>
+                  <div id="nodes" class="schedule-nodes" aria-label="Schedule nodes"></div>
+                </section>
+                <section class="schedule-side">
+                  <div class="schedule-panel">
+                    <div class="graph-title">selected interleaving</div>
+                    <div id="proof" class="schedule-proof">loading wasm...</div>
+                    <pre id="trace" class="schedule-trace"></pre>
+                    <div class="schedule-actions">
+                      <button id="prev" class="play alt" type="button" disabled>Prev</button>
+                      <button id="next" class="play alt" type="button" disabled>Next</button>
+                    </div>
+                  </div>
+                  <p class="caption">
+                    Each node runs the same fiber swarm under a different seeded scheduler path. The
+                    interleavings differ, but the final-state hash is constant, so this is a finite browsable
+                    slice of the execution space rather than a random animation.
+                  </p>
+                </section>
+              </div>
+            </section>
+            <section class="flip-face flip-face--source">
+              <div class="code-scroll"><pre id="code" class="code"></pre></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/src/schedule.ts"></script>
+  </body>
+</html>

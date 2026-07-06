@@ -199,12 +199,12 @@ fn relabel(t) =
   return t to t@0; case t@0 { Leaf => return Leaf | Node(l, x, r) => return l to t@1; relabel(t@1) to t@2; return x to t@3; return x to t@4; t@3 + t@4 to t@5; return r to t@6; relabel(t@6) to t@7; return Node(t@2, t@5, t@7) }
 
 == fip ==
-Type Error: function `relabel` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+Type Error: usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
     ╭─[ <source>:10:1 ]
     │
  10 │ ╭─▶ fip fn relabel(t) =
     ┆ ┆   
  13 │ ├─▶     Node(l, x, r) => Node(relabel(l), x + x, relabel(r))
     │ │                                                              
-    │ ╰────────────────────────────────────────────────────────────── function `relabel` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+    │ ╰────────────────────────────────────────────────────────────── usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
 ────╯

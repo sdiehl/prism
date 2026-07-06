@@ -16,6 +16,20 @@
  * Uses __attribute__((destructor)) for the leak/reuse/effop report hooks and
  * __builtin_add_overflow/sub/mul for checked arithmetic. */
 
+#if defined(__GNUC__) || defined(__clang__)
+#define PRISM_USED __attribute__((used))
+#define PRISM_WEAK_DEFINE __attribute__((weak))
+#if defined(__APPLE__)
+#define PRISM_WEAK_EXTERN __attribute__((weak_import))
+#else
+#define PRISM_WEAK_EXTERN __attribute__((weak))
+#endif
+#else
+#define PRISM_USED
+#define PRISM_WEAK_DEFINE
+#define PRISM_WEAK_EXTERN
+#endif
+
 /* getline is POSIX.1-2008; under -std=c11 glibc hides it unless a feature-test
  * macro requests it. macOS exposes it regardless, so this only bites on Linux.
  * Must precede every system header (including mimalloc's <stddef.h> below). */

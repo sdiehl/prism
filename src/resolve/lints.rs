@@ -291,6 +291,7 @@ impl Lints {
                 self.expr(a);
                 self.expr(b);
             }
+            Sugar::Probe(_, body) => self.expr(body),
             Sugar::OptChain(e, _) | Sugar::Return(e) | Sugar::WithoutAlloc(e) => self.expr(e),
             Sugar::Range(pre, hi) => {
                 for x in pre {

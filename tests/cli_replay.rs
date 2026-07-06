@@ -1,4 +1,4 @@
-// The load-bearing property behind lib/std/Cli.pr: command-line arguments reach a
+// The core property behind lib/std/Cli.pr: command-line arguments reach a
 // program through the `Env` capability (`args`/`args_count`/`arg`), so they are
 // recorded observations like a clock read or a file read. A run recorded with
 // `--record` therefore replays argv-and-all from its `.replay` trace, and CLI
@@ -9,7 +9,7 @@
 mod common;
 
 use prism::resolve::default_roots;
-use prism::{record_on, replay_on, with_prelude, Config};
+use prism::{record_on_with_args, replay_on, with_prelude, Config};
 use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
@@ -43,8 +43,15 @@ fn argv_reads_replay_byte_for_byte() {
 
     let mut rec_out: Vec<u8> = Vec::new();
     let mut rec_in = Cursor::new(Vec::new());
-    let (_exit, trace_str, n_obs) =
-        record_on(&full, &roots(), &mut rec_out, &mut rec_in, &cfg()).expect("record");
+    let (_exit, trace_str, n_obs) = record_on_with_args(
+        &full,
+        &roots(),
+        &mut rec_out,
+        &mut rec_in,
+        &cfg(),
+        vec!["alpha".into(), "--flag".into()],
+    )
+    .expect("record");
     assert!(
         n_obs >= 1,
         "the run observed at least the argument count, got {n_obs}"
@@ -77,19 +84,23 @@ fn recorded_argv_replays_when_command_line_differs() {
 
     let bin = env!("CARGO_BIN_EXE_prism");
 
-    // Record: argv here is `<bin> run <prog> --record <trace>`, so arg 1 is "run".
+    // Record: only arguments after `--` reach the Prism program; compiler words
+    // like `run` and `--record` are not visible through `args()`.
     let rec = Command::new(bin)
         .arg("run")
         .arg(&prog)
         .arg("--record")
         .arg(&trace)
+        .arg("--")
+        .arg("alpha")
+        .arg("--flag")
         .output()
         .expect("run --record");
     assert!(rec.status.success(), "record exited non-zero: {rec:?}");
     let recorded_out = String::from_utf8(rec.stdout).expect("utf8");
 
-    // Replay: argv is `<bin> replay <prog> <trace>`, so the *live* arg 1 is
-    // "replay". A program reading live argv would print "1: replay".
+    // Replay: the live argv is `<bin> replay <prog> <trace>`, but replay serves
+    // the recorded Env observations instead of reading that command line.
     let rep = Command::new(bin)
         .arg("replay")
         .arg(&prog)
@@ -99,20 +110,22 @@ fn recorded_argv_replays_when_command_line_differs() {
     assert!(rep.status.success(), "replay exited non-zero: {rep:?}");
     let replayed_out = String::from_utf8(rep.stdout).expect("utf8");
 
-    // The transcripts match despite the differing command lines, and both show the
-    // record-time "1: run": replay served argv from the trace, not from its own
-    // (absent) command-line arguments.
+    // The transcripts match despite the differing command lines, and both show
+    // the record-time program arguments: replay served argv from the trace, not
+    // from its own command line.
     assert_eq!(
         replayed_out, recorded_out,
         "replay reproduces the recorded transcript under a different command line"
     );
     assert!(
-        recorded_out.contains("1: run"),
-        "record read live argv (arg 1 was \"run\"); got:\n{recorded_out}"
+        recorded_out.contains("0: alpha") && recorded_out.contains("1: --flag"),
+        "record read only program argv after `--`; got:\n{recorded_out}"
     );
     assert!(
-        replayed_out.contains("1: run") && !replayed_out.contains("1: replay"),
-        "replay printed the recorded arg 1 (\"run\"), not its live arg 1 (\"replay\"); got:\n{replayed_out}"
+        replayed_out.contains("0: alpha")
+            && replayed_out.contains("1: --flag")
+            && !replayed_out.contains("replay"),
+        "replay printed recorded program argv, not its live argv; got:\n{replayed_out}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

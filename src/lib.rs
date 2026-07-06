@@ -27,6 +27,8 @@ pub mod fmt;
 pub mod fresh;
 pub mod kw;
 pub mod lex;
+#[cfg(feature = "native")]
+pub mod lineage;
 pub mod names;
 pub mod parse;
 // The package manager is native-only: it drives `crate::project` builds and the
@@ -62,21 +64,26 @@ pub use docs::{
     stdlib_pages, DocPage, ExpectFile, ExpectReport, Generated, ModuleSource, Report,
 };
 #[cfg(feature = "native")]
-pub use driver::{attest_on, build, build_at, build_on, emit_ir};
+pub use driver::{
+    attest_on, build, build_at, build_on, build_on_report, emit_ir, NativeBuildReport,
+};
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
 pub use driver::{
     check, check_at, check_on, commit_to_store, core_ir, core_ir_full, core_of, debug_on, diff_on,
     dump, dump_at, dump_on, effect_strategy_full, effect_strategy_on, effect_warnings_full,
-    example_program, interpret, interpret_at, interpret_io_at, interpret_io_on, namespace_root,
-    off_platform_builtins, query_on, rc_balanced, record_on, replay_on, report, report_at,
-    report_on, resume_on, shape_digests_of, source_modules, stdlib_hash, store_def_inputs,
-    suspend_line_cuts, suspend_on, valid_backend_opt, with_custom_prelude, with_prelude, Config,
+    example_program, interpret, interpret_at, interpret_io_at, interpret_io_on,
+    interpret_io_on_with_args, namespace_identity, namespace_root, off_platform_builtins, query_on,
+    rc_balanced, record_on, record_on_with_args, replay_on, report, report_at, report_on,
+    resume_on, shape_digests_of, source_modules, stdlib_hash, store_def_inputs, suspend_line_cuts,
+    suspend_on, valid_backend_opt, with_custom_prelude, with_prelude, Config, NamespaceIdentity,
     Scheduler, StdlibHash, SuspendResult, BACKEND_OPT_LEVELS,
 };
 pub use error::{Error, LexError, ParseError, TypeError};
 pub use flags::{DynFlags, EffectTier};
 pub use fmt::{format, format_check, format_wire_accept};
-pub use resolve::{default_roots, project_roots, Root};
+pub use resolve::{
+    default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std, Root,
+};
 pub use sym::Sym;
 pub use types::show_effects;

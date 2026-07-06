@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use prism::{check_at, interpret_at, with_prelude};
+use rstest::rstest;
 
 fn base() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/modules"))
@@ -25,205 +26,194 @@ fn err(src: &str) -> String {
         .to_string()
 }
 
-#[test]
-fn qualified_import() {
-    assert_eq!(
-        out("import Math\nfn main() = print(Math.square(Math.bump(3)))"),
-        "16\n"
-    );
+#[derive(Clone, Copy, Debug)]
+enum RunCase {
+    QualifiedImport,
+    SelectiveImport,
+    Alias,
+    QualifiedConstructor,
+    PrivateExportedWrapper,
+    SelectiveSynonym,
+    QualifiedSynonym,
+    QualifiedNewtype,
+    OpaqueExports,
+    DottedModulePath,
+    FullPathQualifier,
+    SharedNamesQualified,
+    RootDefinitionShadowsImport,
+    PubImportReexportsQualified,
+    PubImportSelectivelyImportable,
+    PubImportAllReexportsEverything,
+    ReexportsChain,
 }
 
-#[test]
-fn selective_import_is_unqualified() {
-    assert_eq!(
-        out("import Math (square)\nfn main() = print(square(5))"),
-        "25\n"
-    );
+impl RunCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::QualifiedImport => "import Math\nfn main() = print(Math.square(Math.bump(3)))",
+            Self::SelectiveImport => "import Math (square)\nfn main() = print(square(5))",
+            Self::Alias => "import Math as M\nfn main() = print(M.square(6))",
+            Self::QualifiedConstructor => {
+                "import Shape\nfn main() = print(Shape.area(Shape.Circle(4)))"
+            }
+            Self::PrivateExportedWrapper => "import Box\nfn main() = print(Box.make(7))",
+            Self::SelectiveSynonym => {
+                "import Pairs (Pair, mk)\n\
+                 fn snd(p : Pair(Int)) : Int = match p of { (a, b) => b }\n\
+                 fn main() = print(snd(mk(4)))"
+            }
+            Self::QualifiedSynonym => {
+                "import Pairs\nfn main() = match Pairs.mk(9) of { (a, b) => print(a) }"
+            }
+            Self::QualifiedNewtype => {
+                "import Ids\nfn main() = print(Ids.same(Ids.UserId(3), Ids.mk(3)))"
+            }
+            Self::OpaqueExports => {
+                "import Stack\n\
+                 fn main() =\n  \
+                   let s = Stack.push(5, Stack.empty())\n  \
+                   print(Stack.top(s) == Stack.top(Stack.push(5, Stack.empty())))"
+            }
+            Self::DottedModulePath => "import Geo.Util\nfn main() = print(Util.one())",
+            Self::FullPathQualifier => "import Geo.Util\nfn main() = print(Geo.Util.one())",
+            Self::SharedNamesQualified => {
+                "import Apple\nimport Banana\nfn main() = print(Apple.dup() + Banana.dup())"
+            }
+            Self::RootDefinitionShadowsImport => {
+                "import Math\nfn square(x : Int) : Int = x\nfn main() = print(square(5))"
+            }
+            Self::PubImportReexportsQualified => {
+                "import Facade\nfn main() = print(Facade.square(5))"
+            }
+            Self::PubImportSelectivelyImportable => {
+                "import Facade (square)\nfn main() = print(square(6))"
+            }
+            Self::PubImportAllReexportsEverything => {
+                "import FacadeAll\nfn main() = print(FacadeAll.bump(3))"
+            }
+            Self::ReexportsChain => "import Facade2\nfn main() = print(Facade2.square(7))",
+        }
+    }
+
+    const fn want(self) -> &'static str {
+        match self {
+            Self::QualifiedImport | Self::QualifiedConstructor => "16\n",
+            Self::SelectiveImport | Self::PubImportReexportsQualified => "25\n",
+            Self::Alias | Self::PubImportSelectivelyImportable => "36\n",
+            Self::PrivateExportedWrapper => "7\n",
+            Self::DottedModulePath | Self::FullPathQualifier => "1\n",
+            Self::SelectiveSynonym | Self::PubImportAllReexportsEverything => "4\n",
+            Self::QualifiedSynonym => "9\n",
+            Self::QualifiedNewtype | Self::OpaqueExports => "true\n",
+            Self::SharedNamesQualified => "3\n",
+            Self::RootDefinitionShadowsImport => "5\n",
+            Self::ReexportsChain => "49\n",
+        }
+    }
 }
 
-#[test]
-fn alias_renames_qualifier() {
-    assert_eq!(
-        out("import Math as M\nfn main() = print(M.square(6))"),
-        "36\n"
-    );
+#[rstest]
+fn module_programs_resolve_and_run(
+    #[values(
+        RunCase::QualifiedImport,
+        RunCase::SelectiveImport,
+        RunCase::Alias,
+        RunCase::QualifiedConstructor,
+        RunCase::PrivateExportedWrapper,
+        RunCase::SelectiveSynonym,
+        RunCase::QualifiedSynonym,
+        RunCase::QualifiedNewtype,
+        RunCase::OpaqueExports,
+        RunCase::DottedModulePath,
+        RunCase::FullPathQualifier,
+        RunCase::SharedNamesQualified,
+        RunCase::RootDefinitionShadowsImport,
+        RunCase::PubImportReexportsQualified,
+        RunCase::PubImportSelectivelyImportable,
+        RunCase::PubImportAllReexportsEverything,
+        RunCase::ReexportsChain
+    )]
+    case: RunCase,
+) {
+    assert_eq!(out(case.src()), case.want(), "{case:?}");
 }
 
-#[test]
-fn qualified_type_and_constructor() {
-    let src = "import Shape\nfn main() = print(Shape.area(Shape.Circle(4)))";
-    assert_eq!(out(src), "16\n");
+#[derive(Clone, Copy, Debug)]
+enum RejectCase {
+    PrivateSelectiveImport,
+    OpaqueConstructorHidden,
+    OpaqueConstructorUnmatchable,
+    SharedNameUnqualified,
+    SelectiveImportIsolation,
+    QualifiedPrivateName,
+    UnqualifiedAmbiguity,
+    PlainImportDoesNotReexport,
+    SelectiveImportMissingName,
+    UnknownQualifier,
+    UnimportedModule,
 }
 
-#[test]
-fn private_names_are_namespaced_not_exported() {
-    // `make` is exported and works; the module's private `Inner`/`Wrap`/`unwrap`
-    // are renamed out of the way and stay reachable from inside the module.
-    assert_eq!(out("import Box\nfn main() = print(Box.make(7))"), "7\n");
-    assert!(err("import Box (unwrap)\nfn main() = print(0)").contains("does not export `unwrap`"));
+impl RejectCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::PrivateSelectiveImport => "import Box (unwrap)\nfn main() = print(0)",
+            Self::OpaqueConstructorHidden => {
+                "import Stack\nfn main() = print(Stack.top(Stack.Push(9, Stack.empty())))"
+            }
+            Self::OpaqueConstructorUnmatchable => {
+                "import Stack\n\
+                 fn main() = match Stack.empty() of { Stack.Empty => print(0), _ => print(1) }"
+            }
+            Self::SharedNameUnqualified => "import Apple\nimport Banana\nfn main() = print(dup())",
+            Self::SelectiveImportIsolation => "import Math (square)\nfn main() = print(bump(1))",
+            Self::QualifiedPrivateName => "import Math\nfn main() = print(Math.helper(1))",
+            Self::UnqualifiedAmbiguity => {
+                "import LibA (map)\nimport LibB (map)\nfn main() = print(map(1))"
+            }
+            Self::PlainImportDoesNotReexport => {
+                "import PlainFacade\nfn main() = print(PlainFacade.square(5))"
+            }
+            Self::SelectiveImportMissingName => "import Math (nope)\nfn main() = print(0)",
+            Self::UnknownQualifier => "import Math\nfn main() = print(Nope.square(1))",
+            Self::UnimportedModule => "import Missing\nfn main() = print(0)",
+        }
+    }
+
+    const fn needle(self) -> &'static str {
+        match self {
+            Self::PrivateSelectiveImport => "does not export `unwrap`",
+            Self::OpaqueConstructorHidden => "does not export `Push`",
+            Self::OpaqueConstructorUnmatchable => "does not export `Empty`",
+            Self::SharedNameUnqualified | Self::SelectiveImportIsolation => "unbound variable",
+            Self::QualifiedPrivateName => "does not export `helper`",
+            Self::UnqualifiedAmbiguity => "`map` is ambiguous",
+            Self::PlainImportDoesNotReexport => "does not export `square`",
+            Self::SelectiveImportMissingName => "does not export `nope`",
+            Self::UnknownQualifier => "Nope",
+            Self::UnimportedModule => "Missing",
+        }
+    }
 }
 
-#[test]
-fn selective_synonym_import() {
-    let src = "import Pairs (Pair, mk)\n\
-               fn snd(p : Pair(Int)) : Int = match p of { (a, b) => b }\n\
-               fn main() = print(snd(mk(4)))";
-    assert_eq!(out(src), "4\n");
-}
-
-#[test]
-fn qualified_synonym_import() {
-    let src = "import Pairs\nfn main() = match Pairs.mk(9) of { (a, b) => print(a) }";
-    assert_eq!(out(src), "9\n");
-}
-
-#[test]
-fn qualified_newtype_import() {
-    // A `pub newtype` exports its type and constructor transparently.
-    let src = "import Ids\nfn main() = print(Ids.same(Ids.UserId(3), Ids.mk(3)))";
-    assert_eq!(out(src), "true\n");
-}
-
-#[test]
-fn opaque_type_usable_via_exports() {
-    // The type is abstract to importers, but its exported operations work, and
-    // its derived Eq instance (instances are global) crosses the boundary.
-    let src = "import Stack\n\
-               fn main() =\n  \
-                 let s = Stack.push(5, Stack.empty())\n  \
-                 print(Stack.top(s) == Stack.top(Stack.push(5, Stack.empty())))";
-    assert_eq!(out(src), "true\n");
-}
-
-#[test]
-fn opaque_constructor_is_hidden() {
-    let e = err("import Stack\nfn main() = print(Stack.top(Stack.Push(9, Stack.empty())))");
-    assert!(e.contains("does not export `Push`"), "{e}");
-}
-
-#[test]
-fn opaque_constructor_unmatchable_outside() {
-    let src = "import Stack\n\
-               fn main() = match Stack.empty() of { Stack.Empty => print(0), _ => print(1) }";
-    assert!(err(src).contains("does not export `Empty`"));
-}
-
-#[test]
-fn dotted_module_path() {
-    assert_eq!(out("import Geo.Util\nfn main() = print(Util.one())"), "1\n");
-}
-
-#[test]
-fn full_path_qualifier() {
-    // The whole module path qualifies too, not just the last component.
-    assert_eq!(
-        out("import Geo.Util\nfn main() = print(Geo.Util.one())"),
-        "1\n"
-    );
-}
-
-#[test]
-fn modules_sharing_a_name_coexist_when_qualified() {
-    // Apple and Banana both export `dup`; qualification reaches each disjointly,
-    // the case the old eager-uniqueness policy made impossible.
-    let src = "import Apple\nimport Banana\nfn main() = print(Apple.dup() + Banana.dup())";
-    assert_eq!(out(src), "3\n");
-}
-
-#[test]
-fn unqualified_use_of_a_shared_name_is_unbound() {
-    // Neither module is selectively imported, so bare `dup` reaches no symbol.
-    let e = err("import Apple\nimport Banana\nfn main() = print(dup())");
-    assert!(e.contains("unbound variable 'dup'"), "{e}");
-}
-
-#[test]
-fn root_definition_shadows_an_import() {
-    // A root binding wins over an imported name: `square` is the root's identity
-    // function (5), not Math's squaring one (25).
-    let src = "import Math\nfn square(x : Int) : Int = x\nfn main() = print(square(5))";
-    assert_eq!(out(src), "5\n");
-}
-
-#[test]
-fn selective_import_isolates_unselected_names() {
-    // `import Math (square)` brings only `square`; `bump` stays out of scope.
-    assert_eq!(
-        out("import Math (square)\nfn main() = print(square(5))"),
-        "25\n"
-    );
-    let e = err("import Math (square)\nfn main() = print(bump(1))");
-    assert!(e.contains("unbound variable 'bump'"), "{e}");
-}
-
-#[test]
-fn qualified_access_to_a_private_name_is_rejected() {
-    let e = err("import Math\nfn main() = print(Math.helper(1))");
-    assert!(e.contains("does not export `helper`"), "{e}");
-}
-
-#[test]
-fn unqualified_ambiguity_is_rejected() {
-    let e = err("import LibA (map)\nimport LibB (map)\nfn main() = print(map(1))");
-    assert!(e.contains("`map` is ambiguous"), "{e}");
-}
-
-#[test]
-fn pub_import_reexports_qualified() {
-    // Facade `pub import`s square from Math; an importer reaches Facade.square,
-    // resolving to Math's definition.
-    assert_eq!(
-        out("import Facade\nfn main() = print(Facade.square(5))"),
-        "25\n"
-    );
-}
-
-#[test]
-fn pub_import_reexport_is_selectively_importable() {
-    assert_eq!(
-        out("import Facade (square)\nfn main() = print(square(6))"),
-        "36\n"
-    );
-}
-
-#[test]
-fn pub_import_without_a_list_reexports_everything() {
-    // FacadeAll `pub import`s all of Math, so bump comes through too.
-    assert_eq!(
-        out("import FacadeAll\nfn main() = print(FacadeAll.bump(3))"),
-        "4\n"
-    );
-}
-
-#[test]
-fn plain_import_does_not_reexport() {
-    // PlainFacade imports Math without `pub`, so it re-exports nothing.
-    let e = err("import PlainFacade\nfn main() = print(PlainFacade.square(5))");
-    assert!(e.contains("does not export `square`"), "{e}");
-}
-
-#[test]
-fn reexports_chain() {
-    // Facade2 re-exports from Facade, which re-exports from Math.
-    assert_eq!(
-        out("import Facade2\nfn main() = print(Facade2.square(7))"),
-        "49\n"
-    );
-}
-
-#[test]
-fn selective_import_of_missing_name_errors() {
-    assert!(err("import Math (nope)\nfn main() = print(0)").contains("does not export `nope`"));
-}
-
-#[test]
-fn unknown_qualifier_errors() {
-    assert!(err("import Math\nfn main() = print(Nope.square(1))").contains("Nope"));
-}
-
-#[test]
-fn unimported_module_errors() {
-    assert!(err("import Missing\nfn main() = print(0)").contains("Missing"));
+#[rstest]
+fn module_programs_reject_with_expected_surface(
+    #[values(
+        RejectCase::PrivateSelectiveImport,
+        RejectCase::OpaqueConstructorHidden,
+        RejectCase::OpaqueConstructorUnmatchable,
+        RejectCase::SharedNameUnqualified,
+        RejectCase::SelectiveImportIsolation,
+        RejectCase::QualifiedPrivateName,
+        RejectCase::UnqualifiedAmbiguity,
+        RejectCase::PlainImportDoesNotReexport,
+        RejectCase::SelectiveImportMissingName,
+        RejectCase::UnknownQualifier,
+        RejectCase::UnimportedModule
+    )]
+    case: RejectCase,
+) {
+    let e = err(case.src());
+    assert!(e.contains(case.needle()), "{case:?}: {e}");
 }
 
 fn warnings(src: &str) -> Vec<String> {

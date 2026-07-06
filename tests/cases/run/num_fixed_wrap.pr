@@ -2,12 +2,12 @@
 -- bignum, and no fault on the signed-minimum edge (`I64_MIN / -1` wraps).
 fn main() =
   let maxi = 9223372036854775807i64
-  let mini = i64_sub(0i64, maxi)
-  let mn = i64_sub(mini, 1i64)
-  let neg1 = i64_sub(0i64, 1i64)
-  println(show(i64_add(maxi, 1i64)))
-  println(show(i64_mul(maxi, 2i64)))
-  println(show(i64_div(mn, neg1)))
-  println(show(i64_rem(mn, neg1)))
-  println(show(u64_add(18446744073709551615u64, 1u64)))
-  println(show(i64_rem(i64_sub(0i64, 7i64), 3i64)))
+  let mini = 0i64 - maxi
+  let mn = mini - 1i64
+  let neg1 = 0i64 - 1i64
+  println(show(maxi + 1i64))
+  println(show(maxi * 2i64))
+  println(show(mn / neg1))
+  println(show(mn % neg1))
+  println(show(18446744073709551615u64 + 1u64))
+  println(show((0i64 - 7i64) % 3i64))

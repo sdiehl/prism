@@ -1,0 +1,1 @@
+fn inc(x : Int) : Int without alloc = x + 1

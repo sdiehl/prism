@@ -1,4 +1,4 @@
--- S6: cancellation reaches a grandchild. The child forks a grandchild; both
+-- Cancellation reaches a grandchild. The child forks a grandchild; both
 -- loop at `yield`, so cancelling the child unwinds both, running both
 -- finalizers. Looping bodies keep both fibers parked so the cancel is
 -- deterministic regardless of interleaving.

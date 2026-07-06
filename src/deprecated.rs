@@ -1,11 +1,11 @@
 //! The compiler-owned deprecation registry.
 //!
-//! Two kinds of definition are superseded by the numerical tower (`Num`/`Div`)
+//! Two kinds of definition are superseded by the numerical tower (`Num`/`Div`/`Ord`)
 //! and warn at their use sites (`resolve::lints`, emitted through the typechecker
-//! warning channel): the float dot-operators (`+.` `-.` `*.` `/.`), now that the
-//! plain operators are lane-polymorphic, and the fixed-width arithmetic builtins
-//! (`i64_add`, `u64_mul`, ...) that duplicate an operator. A use of either keeps
-//! compiling; the warning names the replacement.
+//! warning channel): the float dot-operators (`+.` `-.` `*.` `/.` `<.` ...), now
+//! that the plain operators are lane-polymorphic, and the fixed-width arithmetic
+//! builtins (`i64_add`, `u64_mul`, ...) that duplicate an operator. A use of either
+//! keeps compiling; the warning names the replacement.
 //!
 //! This is the single home for the fact "X is deprecated in favor of Y". A
 //! definition marked with the surface `deprecated "..."` annotation carries its
@@ -17,7 +17,7 @@ use crate::syntax::ast::BinOp;
 
 /// The fixed-width arithmetic builtins the tower's `+ - * / %` replace.
 ///
-/// Each is paired with the operator to use instead (`NUM.md` migration section).
+/// Each is paired with the operator that now covers the same arithmetic behavior.
 /// Only the operator-duplicating names appear: the bitwise (`_and`/`_or`/`_xor`),
 /// shift (`_shl`/`_shr`), comparison (`_cmp`), and conversion builtins stay,
 /// because no operator supersedes them.
@@ -47,9 +47,8 @@ pub fn builtin_replacement(name: &str) -> Option<&'static str> {
 /// The tower operator a deprecated float dot-operator maps to, or `None` if
 /// `op` is not deprecated.
 ///
-/// The dot-operators were the Float-only spellings before
-/// the plain operators unified the lanes; the comparison dot-operators
-/// (`==.` `<.` ...) are intentionally absent, as no unified spelling exists yet.
+/// The dot-operators were the Float-only spellings before the plain operators
+/// unified the lanes.
 #[must_use]
 pub const fn operator_replacement(op: BinOp) -> Option<BinOp> {
     match op {
@@ -57,6 +56,12 @@ pub const fn operator_replacement(op: BinOp) -> Option<BinOp> {
         BinOp::Subf => Some(BinOp::Sub),
         BinOp::Mulf => Some(BinOp::Mul),
         BinOp::Divf => Some(BinOp::Div),
+        BinOp::Eqf => Some(BinOp::Eq),
+        BinOp::Nef => Some(BinOp::Ne),
+        BinOp::Ltf => Some(BinOp::Lt),
+        BinOp::Lef => Some(BinOp::Le),
+        BinOp::Gtf => Some(BinOp::Gt),
+        BinOp::Gef => Some(BinOp::Ge),
         _ => None,
     }
 }
