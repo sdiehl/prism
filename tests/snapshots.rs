@@ -11,8 +11,20 @@ use std::{env, fs};
 fn pipeline() {
     insta::glob!("cases/*.pr", |path| {
         let src = fs::read_to_string(path).unwrap();
-        insta::assert_snapshot!(prism::report(&src));
+        insta::assert_snapshot!(normalize_pipeline_report(&prism::report(&src)));
     });
+}
+
+fn normalize_pipeline_report(report: &str) -> String {
+    let mut out = String::with_capacity(report.len());
+    for line in report.lines() {
+        let line = line.replace(env!("PRISM_TARGET"), "aarch64-apple-darwin");
+        let line = line.replace("section \".prism_kont\"", "section \",.prism_kont\"");
+        let line = line.replace("section \"llvm.metadata\"", "section \",llvm.metadata\"");
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
 }
 
 // Golden shape digests for the standard library's structural surface: datatype
