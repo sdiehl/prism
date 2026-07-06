@@ -662,7 +662,7 @@ pub fn incr_run(payload: &str) -> String {
         INCR_MEMOS.iter().fold(String::new(), |mut s, m| {
             let _ = writeln!(
                 s,
-                "  let _ = println(concat(\"{tag}:{m}=\", show_int(get({m}))))"
+                "    let _ = println(concat(\"{tag}:{m}=\", show_int(get({m}))))"
             );
             s
         })
@@ -670,11 +670,11 @@ pub fn incr_run(payload: &str) -> String {
     let emit_p = emit('p');
     let emit_v = emit('v');
     let defs = "\
-  let total = memo(\\() -> let _ = println(\"f:total\") in get(a) + get(b) + get(c))\n\
-  let peak = memo(\\() -> let _ = println(\"f:peak\") in max(get(a), max(get(b), get(c))))\n\
-  let scaled = memo(\\() -> let _ = println(\"f:scaled\") in get(total) * 2)\n\
-  let alert = memo(\\() -> let _ = println(\"f:alert\") in get(peak) * 10)\n\
-  let board = memo(\\() -> let _ = println(\"f:board\") in get(scaled) + get(alert))\n";
+    let total = memo(\\() -> let _ = println(\"f:total\") in get(a) + get(b) + get(c))\n\
+    let peak = memo(\\() -> let _ = println(\"f:peak\") in max(get(a), max(get(b), get(c))))\n\
+    let scaled = memo(\\() -> let _ = println(\"f:scaled\") in get(total) * 2)\n\
+    let alert = memo(\\() -> let _ = println(\"f:alert\") in get(peak) * 10)\n\
+    let board = memo(\\() -> let _ = println(\"f:board\") in get(scaled) + get(alert))\n";
     let (pa, pb, pc, cold) = prev.map_or((na, nb, nc, true), |p| {
         (
             read(Some(p), "a"),
@@ -685,14 +685,14 @@ pub fn incr_run(payload: &str) -> String {
     });
     let body = if cold {
         format!(
-            "fn cells() =\n  let a = input({na})\n  let b = input({nb})\n  let c = input({nc})\n{defs}  let _ = get(board)\n  let _ = println(\"STEP\")\n{emit_v}  ()\n"
+            "fn cells() =\n  run_incr() fn\n    let a = input({na})\n    let b = input({nb})\n    let c = input({nc})\n{defs}    let _ = get(board)\n    let _ = println(\"STEP\")\n{emit_v}    ()\n"
         )
     } else {
         format!(
-            "fn cells() =\n  let a = input({pa})\n  let b = input({pb})\n  let c = input({pc})\n{defs}  let _ = get(board)\n{emit_p}  let _ = println(\"STEP\")\n  let _ = set(a, {na})\n  let _ = set(b, {nb})\n  let _ = set(c, {nc})\n  let _ = get(board)\n{emit_v}  ()\n"
+            "fn cells() =\n  run_incr() fn\n    let a = input({pa})\n    let b = input({pb})\n    let c = input({pc})\n{defs}    let _ = get(board)\n{emit_p}    let _ = println(\"STEP\")\n    let _ = set(a, {na})\n    let _ = set(b, {nb})\n    let _ = set(c, {nc})\n    let _ = get(board)\n{emit_v}    ()\n"
         )
     };
-    let src = format!("import Incr (..)\n{body}pub fn main() = run_incr(\\() -> cells())\n");
+    let src = format!("import Incr (..)\n{body}pub fn main() = cells()\n");
 
     let term = match interpret(&with_prelude(&src)) {
         Ok(r) => r.term,
