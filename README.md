@@ -20,7 +20,7 @@ The [`examples/`](./examples) directory contains a tour of most advanced feature
 
 ```shell
 nix build github:sdiehl/prism        # binary at ./result/bin/prism
-nix run  github:sdiehl/prism         # or run it directly
+nix run github:sdiehl/prism          # or run it directly
 nix develop                          # dev shell: prism, LLVM, cargo, just on PATH
 ```
 

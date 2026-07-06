@@ -622,6 +622,22 @@ pub fn hash_defs(src: &str) -> String {
 // them. `a`, `b`, `c` are the sources; the rest are derivations. Kept beside the
 // program the export builds so the two never drift.
 const INCR_MEMOS: &[&str] = &["total", "peak", "scaled", "alert", "board"];
+const INCR_RESIDENT_SRC: &str = include_str!("../examples/incr_resident.pr");
+
+fn incr_resident_source(pa: i64, pb: i64, pc: i64, na: i64, nb: i64, nc: i64) -> String {
+    let replacements = [
+        ("let incr_prev_a = 3", format!("let incr_prev_a = {pa}")),
+        ("let incr_prev_b = 7", format!("let incr_prev_b = {pb}")),
+        ("let incr_prev_c = 5", format!("let incr_prev_c = {pc}")),
+        ("let incr_next_a = 6", format!("let incr_next_a = {na}")),
+        ("let incr_next_b = 7", format!("let incr_next_b = {nb}")),
+        ("let incr_next_c = 5", format!("let incr_next_c = {nc}")),
+    ];
+    replacements.into_iter().fold(
+        INCR_RESIDENT_SRC.to_owned(),
+        |src, (needle, replacement)| src.replace(needle, &replacement),
+    )
+}
 
 /// One re-demand of a fixed incremental demand graph, for the
 /// incremental-computation gallery resident.
@@ -653,28 +669,6 @@ pub fn incr_run(payload: &str) -> String {
     let (na, nb, nc) = (read(next, "a"), read(next, "b"), read(next, "c"));
     let prev = doc.get("prev").filter(|v| !v.is_null());
 
-    // Build the program. Every memo body prints `f:<name>` when it runs, so the
-    // lines after the STEP marker name exactly the memos the engine re-ran on the
-    // change. `p:` lines carry the pre-change values, `v:` the post-change ones, so
-    // a re-run that produced an unchanged value is distinguishable from a real
-    // recompute.
-    let emit = |tag: char| {
-        INCR_MEMOS.iter().fold(String::new(), |mut s, m| {
-            let _ = writeln!(
-                s,
-                "    let _ = println(concat(\"{tag}:{m}=\", show_int(get({m}))))"
-            );
-            s
-        })
-    };
-    let emit_p = emit('p');
-    let emit_v = emit('v');
-    let defs = "\
-    let total = memo(\\() -> let _ = println(\"f:total\") in get(a) + get(b) + get(c))\n\
-    let peak = memo(\\() -> let _ = println(\"f:peak\") in max(get(a), max(get(b), get(c))))\n\
-    let scaled = memo(\\() -> let _ = println(\"f:scaled\") in get(total) * 2)\n\
-    let alert = memo(\\() -> let _ = println(\"f:alert\") in get(peak) * 10)\n\
-    let board = memo(\\() -> let _ = println(\"f:board\") in get(scaled) + get(alert))\n";
     let (pa, pb, pc, cold) = prev.map_or((na, nb, nc, true), |p| {
         (
             read(Some(p), "a"),
@@ -683,16 +677,7 @@ pub fn incr_run(payload: &str) -> String {
             false,
         )
     });
-    let body = if cold {
-        format!(
-            "fn cells() =\n  run_incr() fn\n    let a = input({na})\n    let b = input({nb})\n    let c = input({nc})\n{defs}    let _ = get(board)\n    let _ = println(\"STEP\")\n{emit_v}    ()\n"
-        )
-    } else {
-        format!(
-            "fn cells() =\n  run_incr() fn\n    let a = input({pa})\n    let b = input({pb})\n    let c = input({pc})\n{defs}    let _ = get(board)\n{emit_p}    let _ = println(\"STEP\")\n    let _ = set(a, {na})\n    let _ = set(b, {nb})\n    let _ = set(c, {nc})\n    let _ = get(board)\n{emit_v}    ()\n"
-        )
-    };
-    let src = format!("import Incr (..)\n{body}pub fn main() = cells()\n");
+    let src = incr_resident_source(pa, pb, pc, na, nb, nc);
 
     let term = match interpret(&with_prelude(&src)) {
         Ok(r) => r.term,
@@ -749,4 +734,22 @@ pub fn incr_run(payload: &str) -> String {
         nodes.push(serde_json::json!({ "name": m, "value": value, "state": state }));
     }
     serde_json::json!({ "nodes": nodes }).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incr_resident_source_interprets() {
+        let src = incr_resident_source(3, 7, 5, 6, 7, 5);
+        let term = interpret(&with_prelude(&src))
+            .expect("included incremental resident must parse, check, and run")
+            .term;
+
+        assert!(term.contains("STEP\n"), "{term}");
+        assert!(term.contains("v:total=18"), "{term}");
+        assert!(term.contains("v:peak=7"), "{term}");
+        assert!(term.contains("v:board=106"), "{term}");
+    }
 }
