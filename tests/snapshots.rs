@@ -19,12 +19,41 @@ fn normalize_pipeline_report(report: &str) -> String {
     let mut out = String::with_capacity(report.len());
     for line in report.lines() {
         let line = line.replace(env!("PRISM_TARGET"), "aarch64-apple-darwin");
+        let line = normalize_native_kont_global_len(&line);
         let line = line.replace("section \".prism_kont\"", "section \",.prism_kont\"");
         let line = line.replace("section \"llvm.metadata\"", "section \",llvm.metadata\"");
         out.push_str(&line);
         out.push('\n');
     }
     out
+}
+
+fn normalize_native_kont_global_len(line: &str) -> String {
+    const CANONICAL_TARGET: &str = "aarch64-apple-darwin";
+    const PREFIXES: [&str; 2] = [
+        "@prism_native_kont_table = constant [",
+        "@prism_native_kont_state_map = constant [",
+    ];
+
+    if !PREFIXES.iter().any(|prefix| line.starts_with(prefix)) {
+        return line.to_string();
+    }
+
+    let Some(start) = line.find('[').map(|index| index + 1) else {
+        return line.to_string();
+    };
+    let Some(relative_end) = line[start..].find(" x i8]") else {
+        return line.to_string();
+    };
+    let end = start + relative_end;
+    let Ok(len) = line[start..end].parse::<isize>() else {
+        return line.to_string();
+    };
+    let target_delta =
+        env!("PRISM_TARGET").len().cast_signed() - CANONICAL_TARGET.len().cast_signed();
+    let normalized = len - target_delta;
+
+    format!("{}{}{}", &line[..start], normalized, &line[end..])
 }
 
 // Golden shape digests for the standard library's structural surface: datatype
