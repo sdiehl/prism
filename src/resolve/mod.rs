@@ -25,7 +25,10 @@ use crate::syntax::ast::{
 mod lints;
 mod load;
 pub use lints::lint_bindings;
-pub use load::{load, Module, Root};
+pub use load::{
+    load, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity, SourceBundleKind,
+    SourceBundleOrigin,
+};
 
 /// The search path for a single-file or test program: the given source root,
 /// then the embedded standard library.
@@ -44,9 +47,34 @@ pub fn default_roots(base: &Path) -> Vec<Root> {
 /// under its own root; the project shadows a name it redefines.
 #[must_use]
 pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
+    project_roots_with_std(src_dir, dep_dirs, Root::Embedded(crate::stdlib::STDLIB))
+}
+
+/// The search path for a project with an explicit standard-library source root.
+///
+/// Lock-aware package builds use this to replace the compiler's embedded stdlib
+/// with a store-served source bundle when `prism.lock` pins a different Std root.
+#[must_use]
+pub fn project_roots_with_std(src_dir: &Path, dep_dirs: &[PathBuf], std_root: Root) -> Vec<Root> {
+    project_roots_with_packages_and_std(src_dir, dep_dirs, Vec::new(), std_root)
+}
+
+/// The search path for a project with store-served package roots.
+///
+/// Package roots sit after path dependencies and before Std: a project shadows a
+/// dependency, a path dependency shadows a store package, and all user packages
+/// shadow the standard library just like ordinary source roots do.
+#[must_use]
+pub fn project_roots_with_packages_and_std(
+    src_dir: &Path,
+    dep_dirs: &[PathBuf],
+    package_roots: Vec<Root>,
+    std_root: Root,
+) -> Vec<Root> {
     let mut roots = vec![Root::Dir(src_dir.to_path_buf())];
     roots.extend(dep_dirs.iter().map(|d| Root::Dir(d.clone())));
-    roots.push(Root::Embedded(crate::stdlib::STDLIB));
+    roots.extend(package_roots);
+    roots.push(std_root);
     roots
 }
 
@@ -847,8 +875,7 @@ impl<'a> Rw<'a> {
                 self.expr(body);
             }
             Sugar::Break | Sugar::Continue => {}
-            Sugar::Return(e) => self.expr(e),
-            Sugar::WithoutAlloc(body) => self.expr(body),
+            Sugar::Return(e) | Sugar::WithoutAlloc(e) | Sugar::Probe(_, e) => self.expr(e),
         }
     }
 

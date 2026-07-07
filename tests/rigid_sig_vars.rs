@@ -87,3 +87,11 @@ fn a_polymorphic_helper_still_checks_and_exports_its_scheme() {
         "forall a b. ((a) -> b, List(a)) -> List(b)"
     );
 }
+
+#[test]
+fn higher_rank_binder_does_not_capture_outer_scheme_variable() {
+    assert_eq!(
+        scheme_of("fn leak(body : forall a. (a) -> r) : r = body(0)\n", "leak"),
+        "forall a. (forall b. (b) -> a) -> a"
+    );
+}

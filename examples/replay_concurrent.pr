@@ -15,7 +15,7 @@ import Concurrent (..)
 
 import Replay (record, replay)
 
-fn worker(name : String) : !{Async(Int), Random} Int =
+fn worker(_name : String) : !{Async(Int), Random} Int =
   let r = rand_below(100)
   yield(())
   r

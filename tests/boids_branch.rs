@@ -1,4 +1,4 @@
-//! The run-from-state contract the branching-timelines demo (B5) rests on. The
+//! The run-from-state contract the branching-timelines demo rests on. The
 //! scrubber replays to N; branching continues a run FROM a (perturbed) frame N.
 //! These pin what makes the two side-by-side timelines honest: a branch is a
 //! pure function of its forked state and step count, and an unperturbed fork is

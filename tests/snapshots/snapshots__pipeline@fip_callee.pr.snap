@@ -88,10 +88,12 @@ fn helper(x) =
   return x
 
 == fip ==
-Type Error: a `fip` function may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+Type Error: usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
    ╭─[ <source>:5:1 ]
    │
  5 │ fip fn use_it(x) = helper(x)
    │ ──────────────┬─────────────  
-   │               ╰─────────────── a `fip` function may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+   │               ╰─────────────── usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
 ───╯

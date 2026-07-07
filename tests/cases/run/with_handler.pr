@@ -9,7 +9,7 @@ fn counted() : Int =
     with handler
       get(u, k) => \(s) -> k(s)(s)
       bump(u, k) => \(s) -> k(())(s + 1)
-      return r => \(s) -> r
+      return r => \(_s) -> r
     bump(())
     bump(())
     bump(())

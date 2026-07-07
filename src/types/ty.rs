@@ -58,7 +58,7 @@ pub const NIL: &str = "Nil";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";
-// The numerical tower (`NUM.md`): `Num` carries `+`/`-`/`*`/unary negate, `Div`
+// The numeric operator classes: `Num` carries `+`/`-`/`*`/unary negate, `Div`
 // carries `/`/`%`. Both have `Int`/`I64`/`U64`/`Float` prelude instances. A
 // monomorphic operand keeps the direct lane primitive (byte-identical Core); only
 // a `given Num(a)`/`given Div(a)` operand dispatches through the dictionary, which

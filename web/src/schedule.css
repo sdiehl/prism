@@ -1,0 +1,144 @@
+@import "./showcase.css";
+
+.schedule-body .resident {
+  --surface: min(92vw, 1080px);
+}
+
+.schedule-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 1rem;
+  width: 100%;
+}
+
+.schedule-map,
+.schedule-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.schedule-map {
+  min-height: 520px;
+  padding: 1rem;
+}
+
+.schedule-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.schedule-panel {
+  padding: 1rem;
+}
+
+.schedule-nodes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.schedule-node {
+  position: relative;
+  min-height: 112px;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-node::after {
+  content: "";
+  position: absolute;
+  right: -0.9rem;
+  top: 50%;
+  width: 0.9rem;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.schedule-node:nth-child(4n)::after,
+.schedule-node:last-child::after {
+  display: none;
+}
+
+.schedule-node.is-active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.schedule-seed {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.schedule-hash {
+  margin-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.schedule-prefix {
+  margin-top: 0.5rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-proof {
+  margin-top: 0.9rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.schedule-proof.ok {
+  color: var(--accent);
+}
+
+.schedule-proof.err {
+  color: var(--err);
+}
+
+.schedule-trace {
+  min-height: 210px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0.9rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 860px) {
+  .schedule-main {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-nodes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

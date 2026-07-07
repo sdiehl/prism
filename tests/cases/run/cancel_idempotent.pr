@@ -1,4 +1,4 @@
--- S6: double cancel is idempotent; the finalizer still runs exactly once.
+-- Double cancel is idempotent; the finalizer still runs exactly once.
 
 import Concurrent (..)
 

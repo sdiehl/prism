@@ -310,6 +310,8 @@ pub enum Token {
     Catch,
     #[token("transact")]
     Transact,
+    #[token("probe")]
+    Probe,
     #[token("alias")]
     Alias,
     #[token("class")]
@@ -588,6 +590,7 @@ impl Token {
             Self::Try => kw::TRY,
             Self::Catch => kw::CATCH,
             Self::Transact => kw::TRANSACT,
+            Self::Probe => kw::PROBE,
             Self::Alias => kw::ALIAS,
             Self::Class => kw::CLASS,
             Self::Instance => kw::INSTANCE,
@@ -764,6 +767,8 @@ impl Classify for Token {
 #[cfg(test)]
 mod tests {
     use super::Token;
+    use Token::{Ident, InterpEnd, InterpStart};
+
     use crate::error::LexError;
     use crate::kw;
     use crate::syntax::ast::{BigInt, Suffix};
@@ -823,7 +828,6 @@ mod tests {
     // start/end pair), with no stray brace ending the region early.
     #[test]
     fn hole_with_nested_interp_string() {
-        use Token::{Ident, InterpEnd, InterpStart};
         let (toks, _) =
             crate::lex::lex_raw(r#""a {f("b {x} c")} d""#).expect("nested interp lexes");
         let kinds: Vec<&Token> = toks.iter().map(|(_, t, _)| t).collect();
@@ -865,6 +869,7 @@ mod tests {
             (Token::Try, kw::TRY),
             (Token::Catch, kw::CATCH),
             (Token::Transact, kw::TRANSACT),
+            (Token::Probe, kw::PROBE),
             (Token::Alias, kw::ALIAS),
             (Token::Class, kw::CLASS),
             (Token::Instance, kw::INSTANCE),

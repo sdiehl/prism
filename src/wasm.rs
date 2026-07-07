@@ -10,11 +10,13 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::lex::highlight::tok_class;
 use crate::lex::Token;
 use crate::resolve::default_roots;
 use crate::{
-    check, example_program, format as fmt_src, interpret, namespace_root, off_platform_builtins,
-    resume_on, suspend_line_cuts, suspend_on, with_prelude, Config, SuspendResult,
+    check, example_program, format as fmt_src, interpret, namespace_identity,
+    off_platform_builtins, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
+    SuspendResult,
 };
 
 // The web host owns the effects. A browser can serve more of them than it might
@@ -253,15 +255,7 @@ pub fn chaos_run(start: u32, count: u32) -> String {
 // forward rather than restarting. The program is baked in so both tabs share one
 // bundle: the receiving tab re-derives its code identity and refuses an envelope
 // from any other program.
-const TELEPORT_SRC: &str = "\
-fn count(i, last) =\n\
-\x20 if i > last then\n\
-\x20   ()\n\
-\x20 else\n\
-\x20   println(\"step {i}: {i} squared is {i * i}\")\n\
-\x20   count(i + 1, last)\n\
-\n\
-fn main() = count(1, 10)\n";
+const TELEPORT_SRC: &str = include_str!("../examples/teleport.pr");
 
 fn teleport_full() -> String {
     with_prelude(TELEPORT_SRC)
@@ -286,7 +280,8 @@ fn teleport_roots() -> Vec<crate::resolve::Root> {
 #[wasm_bindgen]
 #[must_use]
 pub fn teleport_bundle() -> String {
-    namespace_root(&teleport_full(), &teleport_roots()).unwrap_or_else(|e| format!("error: {e}"))
+    namespace_identity(&teleport_full(), &teleport_roots())
+        .map_or_else(|e| format!("error: {e}"), |identity| identity.root)
 }
 
 /// The machine-step budget to pass [`teleport_prefix`]/[`teleport_suspend`] to
@@ -385,31 +380,6 @@ pub fn teleport_resume(bytes: &[u8]) -> String {
 #[must_use]
 pub fn fmt(src: &str) -> String {
     fmt_src(src).unwrap_or_else(|e| format!("error: {e}"))
-}
-
-// Coarse highlight category for one lexed token, matched in `web/index.html`.
-const fn tok_class(t: &Token) -> &'static str {
-    use Token::{
-        Alias, As, Borrow, Catch, Class, Comment, Ctl, Deriving, Do, Effect, Elif, Else, False,
-        Final, Float, Fn, For, Forall, Fun, Handle, Handler, Ident, If, Import, In, Instance, Int,
-        InterpEnd, InterpMid, InterpStart, KwBool, KwChar, KwError, KwFloat, KwI64, KwInt,
-        KwString, KwU64, KwUnit, Let, Mask, Match, Newtype, Of, Opaque, Pattern, Pub, QualName,
-        Return, StringLit, Then, Throw, True, Try, Type, UIdent, Val, Var, Where, With,
-    };
-    match t {
-        Fn | Pub | Import | As | Type | Newtype | Opaque | Effect | KwError | Throw | Try
-        | Catch | Alias | Class | Instance | Pattern | Deriving | Where | Handle | With
-        | Handler | Mask | Ctl | Final | Fun | Val | Return | Let | Var | Borrow | In | For
-        | Do | If | Then | Else | Elif | Match | Of | Forall => "kw",
-        True | False => "lit",
-        KwInt | KwBool | KwUnit | KwFloat | KwChar | KwString | KwI64 | KwU64 => "ty",
-        UIdent(_) | QualName(_) => "ctor",
-        Int(_) | Float(_) => "num",
-        Token::CharLit(_) | StringLit(_) | InterpStart(_) | InterpMid(_) | InterpEnd(_) => "str",
-        Comment(_) => "com",
-        Ident(_) => "id",
-        _ => "op",
-    }
 }
 
 /// A JSON array of `{s,e,c}` (byte start, byte end, highlight class) for every

@@ -1,6 +1,6 @@
 // The read-only face of the codebase-as-a-database: the dependency-graph queries
 // and the structural-clone finder, both computed off the same content-hash
-// substrate. These pin the load-bearing semantics (transitive closure, direction,
+// substrate. These pin the core semantics (transitive closure, direction,
 // clone detection by behavior) over the real stdlib, not a toy.
 
 use prism::resolve::default_roots;

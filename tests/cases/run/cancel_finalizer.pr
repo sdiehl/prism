@@ -1,4 +1,4 @@
--- S6: a cancelled fiber runs its `on_cancel` (`final ctl`) finalizer exactly
+-- A cancelled fiber runs its `on_cancel` (`final ctl`) finalizer exactly
 -- once. The worker parks at `yield`; the parent cancels it; on its next turn it
 -- unwinds through the finalizer, which prints once, and never runs its tail.
 

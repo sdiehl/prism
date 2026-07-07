@@ -1,1 +1,1 @@
-fn main() : Bool = 2.5 <. 3.0
+fn main() : Bool = 2.5 < 3.0

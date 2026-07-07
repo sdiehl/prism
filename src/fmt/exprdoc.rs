@@ -11,12 +11,12 @@
 //! `mod.rs`, and a nested occurrence of one of those reaches `expr_doc` as its
 //! flat inline rendering.
 //!
-//! House style (FMT.md, pinned 2026-07-03): a broken delimited sequence puts one
-//! element per line with a trailing comma, elements two indent units in from the
-//! line that opened the group and the closing delimiter one unit in; a call whose
-//! final argument is a delimited aggregate hugs (the parens do not break, the
-//! aggregate does); a broken operator chain breaks before each operator at one
-//! indent unit, at the lowest precedence present.
+//! House style: a broken delimited sequence puts one element per line with a
+//! trailing comma, elements two indent units in from the line that opened the
+//! group and the closing delimiter one unit in; a call whose final argument is a
+//! delimited aggregate hugs (the parens do not break, the aggregate does); a
+//! broken operator chain breaks before each operator at one indent unit, at the
+//! lowest precedence present.
 //!
 //! Layout threads a `base` column: the column the line that opens a group starts
 //! at, from which every nested indent is measured. Sequence elements and
@@ -85,7 +85,7 @@ fn seq_block(open: Doc, close: Doc, pad: bool, items: Vec<Doc>) -> Doc {
 }
 
 // A call whose final argument is a delimited aggregate does not break its own
-// parens; the break happens inside the aggregate (FMT.md rule 2). Hugging chains
+// parens; the break happens inside the aggregate. Hugging chains
 // through nested sole-argument calls, so a stack of wrapper functions around one
 // list costs no indentation. A record is not huggable here: it reaches
 // `expr_doc` as flat text, so it cannot supply the interior break.
@@ -344,8 +344,7 @@ impl Fmt<'_> {
     // whose own indentation is `line_cols` columns. Width is budgeted from `col`
     // (the true cursor), while broken lines indent relative to `line_cols`, so a
     // call opened after `let x = ` breaks its arguments in from the `let`, not
-    // from the parenthesis (FMT.md rule 1). `None` when the expression declines
-    // the document path.
+    // from the parenthesis. `None` when the expression declines the document path.
     pub(super) fn render_expr(&self, e: &S<Expr>, line_cols: usize, col: usize) -> Option<String> {
         let doc = self.expr_doc(e, line_cols)?;
         let shift = isize::try_from(line_cols).unwrap_or(0) - isize::try_from(col).unwrap_or(0);

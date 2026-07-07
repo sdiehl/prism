@@ -7,8 +7,7 @@
 -- tree. A map written and read under the same ordering passes untouched.
 --
 -- This is the dynamic half of the ordered-container coherence story. The static
--- half (the branded witness) is `examples/ordered_witness.pr`; Phase 3's
--- dictionary reflection makes the implicit path static too.
+-- half (the branded witness) is `examples/ordered_witness.pr`.
 --
 -- Expected output:
 --   ok, size 3

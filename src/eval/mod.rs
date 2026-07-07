@@ -27,6 +27,8 @@ use FloatOp as F;
 /// graph, and the runtime values it holds) as a portable envelope, and reads one
 /// back.
 pub mod kont;
+#[cfg(test)]
+mod runtime_oracle;
 
 /// One recorded observation on a program's execution: the result of a
 /// capability read (an integer, a string, or a boolean) or an output boundary.
@@ -501,6 +503,7 @@ pub struct Machine<'a> {
     fn_name: Sym,
     out_sink: &'a mut dyn io::Write,
     input: &'a mut dyn io::BufRead,
+    args: Rc<[String]>,
     // Set by `exit(n)`: evaluation unwinds and the host maps it to a process
     // exit (CLI) or a returned status (REPL/wasm), never a `process::exit` here.
     exit: Option<i32>,
@@ -571,6 +574,16 @@ impl<'a> Machine<'a> {
         out_sink: &'a mut dyn io::Write,
         input: &'a mut dyn io::BufRead,
     ) -> Self {
+        Self::new_with_args(globals, out_sink, input, Vec::new())
+    }
+
+    #[must_use]
+    pub fn new_with_args(
+        globals: &BTreeMap<Sym, CoreFn>,
+        out_sink: &'a mut dyn io::Write,
+        input: &'a mut dyn io::BufRead,
+        args: Vec<String>,
+    ) -> Self {
         Self {
             fns: globals
                 .iter()
@@ -582,6 +595,7 @@ impl<'a> Machine<'a> {
             fn_name: ENTRY_POINT.into(),
             out_sink,
             input,
+            args: Rc::from(args),
             exit: None,
             tape: Tape::Live,
             observed: 0,
@@ -883,10 +897,10 @@ impl<'a> Machine<'a> {
                     // A world read (file/env): route through the tape so it is
                     // recorded or served from a trace like the other capabilities.
                     let nm = *name;
-                    let v = self.observe(kind, move |_m| str_builtin(nm, &vals))?;
+                    let v = self.observe(kind, move |m| str_builtin(nm, &vals, &m.args))?;
                     State::Ret(v)
                 } else {
-                    State::Ret(str_builtin(*name, &vals)?)
+                    State::Ret(str_builtin(*name, &vals, &self.args)?)
                 }
             }
             Node::Do(op, args) => {
@@ -1113,7 +1127,8 @@ pub mod owned_math {
     // SAFETY (whole module): every `prism_m_*` is a pure `extern "C"` function
     // taking and returning plain `f64`, defined in runtime/prism_libm.c and linked
     // into this binary. The calls touch no memory and cannot fault, so each is
-    // sound. This is the crate's one audited FFI (see Cargo.toml `unsafe_code`).
+    // sound. This is one of the crate's audited `unsafe` sites (see Cargo.toml
+    // `unsafe_code`).
     #![allow(unsafe_code)]
     extern "C" {
         fn prism_m_sin(x: f64) -> f64;
@@ -1230,7 +1245,7 @@ const fn owned_ceil(f: f64) -> f64 {
     f.ceil()
 }
 
-fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
+fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv, String> {
     match (b, vals) {
         (B::Concat, [Rv::Str(a), Rv::Str(b)]) => Ok(Rv::Str(format!("{a}{b}"))),
         (B::StrLen, [Rv::Str(s)]) => Ok(Rv::Int(i64::try_from(s.chars().count()).unwrap_or(0))),
@@ -1251,6 +1266,7 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             s.truncate(RT_FLOAT_PREC_MAX_CHARS);
             Ok(Rv::Str(s))
         }
+        (B::ProbeEnabled, [Rv::Str(name)]) => Ok(Rv::Bool(probe_enabled(name))),
         (B::PowFloat, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::pow(*a, *b))),
         (B::Atan2, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::atan2(*a, *b))),
         (B::Hypot, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::hypot(*a, *b))),
@@ -1346,7 +1362,7 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
             let _ = std::io::stderr().flush();
             Ok(Rv::Unit)
         }
-        (B::ArgsCount, []) => Ok(Rv::Int(i64::try_from(env::args().count()).unwrap_or(0))),
+        (B::ArgsCount, []) => Ok(Rv::Int(i64::try_from(args.len()).unwrap_or(0))),
         // Clock reads, in nanoseconds, matching the C runtime. Both are recorded
         // capability observations (see `capability_kind`), so the live value here
         // is only read on the first (recording) run; replay serves the trace. The
@@ -1366,7 +1382,7 @@ fn str_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         (B::Arg, [Rv::Int(i)]) => Ok(Rv::Str(
             usize::try_from(*i)
                 .ok()
-                .and_then(|k| env::args().nth(k))
+                .and_then(|k| args.get(k).cloned())
                 .unwrap_or_default(),
         )),
         (B::I64Add | B::U64Add, [a, b]) => fixed2(a, b, u64::wrapping_add),
@@ -1749,6 +1765,16 @@ fn low64(v: &Rv) -> Result<u64, String> {
     }
 }
 
+fn probe_enabled(name: &str) -> bool {
+    let Ok(filter) = env::var("PRISM_PROBES") else {
+        return false;
+    };
+    filter
+        .split(',')
+        .map(str::trim)
+        .any(|pat| pat == "*" || pat == name)
+}
+
 fn fixed2(a: &Rv, b: &Rv, f: fn(u64, u64) -> u64) -> Result<Rv, String> {
     match (a, b) {
         (Rv::I64(x), Rv::I64(y)) => Ok(Rv::I64(
@@ -1824,9 +1850,23 @@ pub fn run_io(
     out_sink: &mut dyn io::Write,
     input: &mut dyn io::BufRead,
 ) -> Result<Run, String> {
+    run_io_with_args(core, out_sink, input, Vec::new())
+}
+
+/// Like [`run_io`], with explicit host-provided program arguments for
+/// `args_count`/`arg`.
+///
+/// # Errors
+/// Fails when `main` is missing or evaluation faults.
+pub fn run_io_with_args(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    args: Vec<String>,
+) -> Result<Run, String> {
     let g = globals(core);
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
-    let mut m = Machine::new(&g, out_sink, input);
+    let mut m = Machine::new_with_args(&g, out_sink, input, args);
     let value = m.comp(&Env::default(), &main.body)?;
     Ok(Run {
         value,
@@ -1871,9 +1911,24 @@ pub fn run_traced(
     input: &mut dyn io::BufRead,
     tape: Tape,
 ) -> Result<TracedRun, String> {
+    run_traced_with_args(core, out_sink, input, tape, Vec::new())
+}
+
+/// Like [`run_traced`], with explicit host-provided program arguments.
+///
+/// # Errors
+/// Fails when `main` is missing, evaluation faults, or a replayed trace does not
+/// match the program.
+pub fn run_traced_with_args(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    tape: Tape,
+    args: Vec<String>,
+) -> Result<TracedRun, String> {
     let g = globals(core);
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
-    let mut m = Machine::new(&g, out_sink, input);
+    let mut m = Machine::new_with_args(&g, out_sink, input, args);
     m.set_tape(tape);
     m.comp(&Env::default(), &main.body)?;
     let frames = match m.tape {
@@ -2019,10 +2074,13 @@ pub fn resume_kont(
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
+    use std::str::FromStr;
 
     use num_bigint::BigInt;
 
-    use super::{big_of_str, fmt_g, splitmix64, DEFAULT_SEED, SPLITMIX_GAMMA};
+    use super::{
+        big_of_str, fmt_g, runtime_oracle::rt_oracle, splitmix64, DEFAULT_SEED, SPLITMIX_GAMMA,
+    };
 
     // `fmt_g` renders the shortest decimal that round-trips back to the same
     // double: full precision, no truncation, scientific only outside [-4, 16).
@@ -2060,95 +2118,6 @@ mod tests {
         assert_eq!(fmt_g(f64::NAN), "nan");
         assert_eq!(fmt_g(f64::INFINITY), "inf");
         assert_eq!(fmt_g(f64::NEG_INFINITY), "-inf");
-    }
-
-    // Compile the C runtime with a small `prism_main` body and run it, returning
-    // the lines it prints. The C runtime is the native backend's source of truth,
-    // so executing it pins behavior here directly: a divergence fails because the
-    // streams differ, not because a magic substring went missing. That survives a
-    // behavior-preserving refactor (rename `z`, hoist a helper, regroup a
-    // constant) where a `contains(...)` grep of the source would not, and it
-    // actually proves equivalence rather than textual presence. Returns None when
-    // no C compiler is available, so the test skips like the parity corpus (CI
-    // sets PRISM_CC).
-    fn rt_oracle(body: &str) -> Option<Vec<String>> {
-        use std::process::Command;
-        use std::sync::atomic::{AtomicU64, Ordering};
-
-        // Unique per call: tests run concurrently in one process, so a pid-only
-        // path would let two oracles clobber each other's source and binary.
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-
-        // Same compiler the runtime was built with (see `cc_link`): keeps this
-        // oracle's C on the identical toolchain as the interpreter it checks.
-        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
-        if !Command::new(&cc)
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
-        {
-            eprintln!("skipping runtime oracle: C compiler `{cc}` not found (set PRISM_CC)");
-            return None;
-        }
-
-        let stem = format!(
-            "prism_oracle_{}_{}",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        );
-        let dir = std::env::temp_dir().join(&stem);
-        std::fs::create_dir_all(&dir).unwrap();
-        let src = dir.join(format!("{stem}.c"));
-        let bin = dir.join(&stem);
-        // Materialize the split runtime modules from the one canonical list and
-        // compile all of them, so this oracle links the same sources the native
-        // backend does. The vendored libm is linked as the one pre-built archive
-        // (the same bytes the interpreter and native backend use), not recompiled.
-        let rt_sources = crate::codegen::rt::write_runtime(&dir).unwrap();
-        let libm_archive = crate::codegen::rt::write_libm_archive(&dir).unwrap();
-        // The runtime owns `main` and calls `prism_main`; the harness supplies it
-        // and returns a tagged immediate 0 (exit code 0).
-        std::fs::write(
-            &src,
-            format!(
-                "#include <stdio.h>\n#include <string.h>\n\
-                 long prism_prim_rand(void);\n\
-                 long prism_str_lit(const char *, long);\n\
-                 long prism_big_of_str(long, int *);\n\
-                 long prism_big_show(long);\n\
-                 void print_str(long);\n\
-                 long prism_main(void) {{\n{body}\nreturn 1;\n}}\n"
-            ),
-        )
-        .unwrap();
-        let comp = Command::new(&cc)
-            .args(["-O0", "-w"])
-            .arg(&src)
-            .args(&rt_sources)
-            .arg(&libm_archive)
-            .arg("-o")
-            .arg(&bin)
-            .output()
-            .unwrap();
-        assert!(
-            comp.status.success(),
-            "runtime oracle failed to compile:\n{}",
-            String::from_utf8_lossy(&comp.stderr)
-        );
-        let run = Command::new(&bin).output().unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-        assert!(
-            run.status.success(),
-            "runtime oracle crashed: {:?}",
-            run.status
-        );
-        Some(
-            String::from_utf8(run.stdout)
-                .unwrap()
-                .lines()
-                .map(str::to_owned)
-                .collect(),
-        )
     }
 
     // The C runtime's float printer is the native backend's source of truth and
@@ -2242,8 +2211,6 @@ mod tests {
     // same inputs (ok=0, surfaced as "ERR") the interpreter rejects with None.
     #[test]
     fn big_of_str_matches_runtime() {
-        use std::str::FromStr;
-
         let cases = [
             ("0", "0"),
             ("  42 ", "42"),

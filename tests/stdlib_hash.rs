@@ -1,6 +1,6 @@
 // The standard-library fingerprint: one namespace root over every documented
 // definition's behavior hash and every datatype/effect's shape digest, anchored
-// in the generated docs. These pin the load-bearing properties end to end: the
+// in the generated docs. These pin the core properties end to end: the
 // root is reproducible, it is independent of the env-toggled optimizer, it covers
 // the whole library (not a reachable subset), and it reaches the committed index
 // page.

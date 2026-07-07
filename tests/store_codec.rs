@@ -55,7 +55,7 @@ fn encode_member(core: &Core, name: &str) -> (Vec<u8>, String) {
 }
 
 // Decode, re-hash (must equal the original hash), and re-encode (must be
-// byte-identical). The load-bearing per-definition check, driven off whatever a
+// byte-identical). The per-definition check, driven off whatever a
 // stored object carries.
 fn assert_roundtrip_bytes(bytes: &[u8], hash: &str) {
     let decoded = decode_def(bytes).expect("decode");

@@ -26,7 +26,7 @@ fn cross(u : Vec3, v : Vec3) : Vec3 =
     (V(a, b, c), V(x, y, z)) => V(b * z - c * y, c * x - a * z, a * y - b * x)
 
 fn absf(x : Float) : Float =
-  if x <. 0.0 then
+  if x < 0.0 then
     0.0 - x
   else
     x

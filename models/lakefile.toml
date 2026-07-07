@@ -1,10 +1,30 @@
 name = "prism"
-defaultTargets = ["Prism", "CEK", "Dynamics", "Meta", "Replay", "Certificates", "oracle"]
+builtinLint = true
+
+defaultTargets = [
+  "ModelSimp",
+  "Prism",
+  "CEK",
+  "Dynamics",
+  "Meta",
+  "Replay",
+  "Certificates",
+  "oracle",
+]
+
+[leanOptions]
+autoImplicit = false
+pp.unicode.fun = true
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "ModelSimp"
 
 # Proof libraries: theorems only, no examples, no IO.
 [[lean_lib]]
 name = "Prism"
 
+# The CEK model is the lynchpin of the Prism interpreter: if it blinks, we all blink.
 [[lean_lib]]
 name = "CEK"
 

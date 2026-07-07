@@ -8,6 +8,8 @@
 // The parse AST with span offsets stripped, so it is invariant under the
 // whitespace reflow a reformat performs. Reflow shifts only spans; a structural
 // change (the `using`-drift adds a Call node) survives the strip and shows up.
+use rstest::rstest;
+
 fn ast_no_spans(src: &str) -> String {
     prism::dump("ast", src)
         .expect("must parse")
@@ -34,54 +36,92 @@ fn preserves_meaning(src: &str) {
 // through the break path where the drift lived.
 const WIDE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[derive(Clone, Copy, Debug)]
+enum UsingCase {
+    InlineValueArg,
+    BreakValueArg,
+    InlineZeroArg,
+    BreakZeroArg,
+    SeveralArgs,
+}
+
+impl UsingCase {
+    fn src(self) -> String {
+        match self {
+            Self::InlineValueArg => {
+                "fn f(x : Int) : Int given Ord(Int) = x\nfn g() : Int = f(1, using ordInt)\n"
+                    .to_string()
+            }
+            Self::BreakValueArg => {
+                format!(
+                    "fn f(x : Int) : Int given Ord(Int) = x\nfn g() : Int = f({WIDE}, using ordInt)\n"
+                )
+            }
+            Self::InlineZeroArg => {
+                "fn f() : Int given Ord(Int) = 0\nfn g() : Int = f(using ordInt)\n".to_string()
+            }
+            Self::BreakZeroArg => {
+                format!(
+                    "fn {WIDE}() : Int given Ord(Int) = 0\nfn g() : Int = {WIDE}(using ordInt)\n"
+                )
+            }
+            Self::SeveralArgs => {
+                format!(
+                    "fn f(x : Int, y : Int) : Int given Ord(Int) = x\nfn g() : Int = f({WIDE}, 2, using ordInt)\n"
+                )
+            }
+        }
+    }
+}
+
+#[rstest]
+fn using_calls_preserve_meaning(
+    #[values(
+        UsingCase::InlineValueArg,
+        UsingCase::BreakValueArg,
+        UsingCase::InlineZeroArg,
+        UsingCase::BreakZeroArg,
+        UsingCase::SeveralArgs
+    )]
+    case: UsingCase,
+) {
+    preserves_meaning(&case.src());
+}
+
 #[test]
-fn using_call_survives_the_break_path() {
+fn using_call_break_path_keeps_value_arg_before_using_clause() {
     let src =
         format!("fn f(x : Int) : Int given Ord(Int) = x\nfn g() : Int = f({WIDE}, using ordInt)\n");
-    preserves_meaning(&src);
-    // The value argument stays inside the call, ahead of the `using` clause.
     let out = prism::format(&src).unwrap();
     let arg = out.find(WIDE).expect("value arg kept");
     let using = out.find("using").expect("using clause kept");
     assert!(arg < using, "value arg moved out of the call: {out:?}");
 }
 
-#[test]
-fn using_call_survives_inline() {
-    let src = "fn f(x : Int) : Int given Ord(Int) = x\nfn g() : Int = f(1, using ordInt)\n";
-    preserves_meaning(src);
-}
-
-#[test]
-fn zero_arg_using_call_both_paths() {
-    // Inline, and (with a long callee name) broken: the bare `f(using I)` form.
-    for src in [
-        "fn f() : Int given Ord(Int) = 0\nfn g() : Int = f(using ordInt)\n",
-        &format!("fn {WIDE}() : Int given Ord(Int) = 0\nfn g() : Int = {WIDE}(using ordInt)\n"),
-    ] {
-        preserves_meaning(src);
-    }
-}
-
-#[test]
-fn using_call_with_several_args_and_instances() {
-    let src = format!(
-        "fn f(x : Int, y : Int) : Int given Ord(Int) = x\nfn g() : Int = f({WIDE}, 2, using ordInt)\n"
-    );
-    preserves_meaning(&src);
-}
-
 // Neighboring call-head shapes the same classifier decodes: a UFCS dot call and
 // a `?`-receiver, each wide enough to break, must round-trip too.
-#[test]
-fn dot_and_try_calls_survive_the_break_path() {
-    for src in [
-        format!("fn g(xs : List(Int)) : Int = xs.foldl(0, {WIDE})\n"),
-        format!("fn g(r : Result(Int, Int)) : !{{Throw}} Int = f({WIDE}, r?)\n"),
-    ] {
-        // Reparse + idempotence; these never used the Inst arm but share the decoder.
-        let once = prism::format(&src).expect("input must parse");
-        let twice = prism::format(&once).expect("output must reparse");
-        assert_eq!(once, twice, "not idempotent: {src:?}");
+#[derive(Clone, Copy, Debug)]
+enum NeighborCallCase {
+    Dot,
+    Try,
+}
+
+impl NeighborCallCase {
+    fn src(self) -> String {
+        match self {
+            Self::Dot => format!("fn g(xs : List(Int)) : Int = xs.foldl(0, {WIDE})\n"),
+            Self::Try => format!("fn g(r : Result(Int, Int)) : !{{Throw}} Int = f({WIDE}, r?)\n"),
+        }
     }
+}
+
+#[rstest]
+fn neighboring_call_heads_survive_the_break_path(
+    #[values(NeighborCallCase::Dot, NeighborCallCase::Try)] case: NeighborCallCase,
+) {
+    let src = case.src();
+    // Reparse + idempotence; these never used the Inst arm but share the decoder.
+    let once = prism::format(&src).expect("input must parse");
+    let twice = prism::format(&once).expect("output must reparse");
+    assert_eq!(once, twice, "not idempotent: {src:?}");
 }

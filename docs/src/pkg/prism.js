@@ -353,9 +353,10 @@ export function teleport_cuts() {
 }
 
 /**
- * The teleport program's output up to `steps` machine steps: what the sending tab
- * has printed by the moment it suspends. Followed by [`teleport_resume`]'s output,
- * this reproduces an uninterrupted run byte for byte.
+ * The teleport program's output up to `steps` machine steps.
+ *
+ * This is what the sending tab has printed by the moment it suspends; followed by
+ * [`teleport_resume`]'s output, it reproduces an uninterrupted run byte for byte.
  * @param {number} steps
  * @returns {string}
  */

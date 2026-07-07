@@ -113,7 +113,7 @@ fn encode_data(d: &DataDecl) -> String {
     for k in &d.param_kinds {
         e.kind(k);
     }
-    // Constructor order is load-bearing (position is the runtime tag), so keep it.
+    // Constructor order matters (position is the runtime tag), so keep it.
     e.out.push('{');
     for c in &d.ctors {
         e.ctor(c);
@@ -347,7 +347,7 @@ impl Enc {
     fn row(&mut self, r: &Row) {
         match r {
             Row::Empty => self.out.push_str("re"),
-            // Effect labels form a set: sort by name so order is not load-bearing.
+            // Effect labels form a set: sort by name so order does not matter.
             Row::Cons(labels, tail) => {
                 self.out.push_str("rc");
                 let mut ls: Vec<&crate::syntax::ast::EffLabel> = labels.iter().collect();

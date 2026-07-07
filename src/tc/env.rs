@@ -815,6 +815,7 @@ const BUILTINS: &[(&str, &str)] = &[
     ("prim_rand", "() -> Int ! {IO}"),
     ("srand", "(Int) -> Unit ! {IO}"),
     ("error", "forall a. (Int) -> a ! {Exn}"),
+    ("fatal", "forall a. (String) -> a ! {Exn}"),
     ("to_float", "(Int) -> Float"),
     ("truncate", "(Float) -> Int"),
     ("floor_to_int", "(Float) -> Int"),
@@ -848,6 +849,7 @@ const BUILTINS: &[(&str, &str)] = &[
     ("fmod", "(Float, Float) -> Float"),
     ("parse_float", "(String) -> Float"),
     ("show_float_prec", "(Float, Int) -> String"),
+    ("probe_enabled", "(String) -> Bool"),
     ("concat", "(String, String) -> String"),
     ("str_len", "(String) -> Int"),
     ("str_eq", "(String, String) -> Bool"),
@@ -1177,7 +1179,7 @@ mod tests {
                 | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
                 | "prim_store_get" | "prim_store_put" | "prim_store_has" | "prim_args_count"
                 | "prim_arg" | "prim_wall_now" | "prim_mono_now" => &["IO"],
-                "error" => &["Exn"],
+                "error" | "fatal" => &["Exn"],
                 _ => &[],
             };
             assert_eq!(effs, want, "builtin {name} effect row drifted");

@@ -11,8 +11,49 @@ use std::{env, fs};
 fn pipeline() {
     insta::glob!("cases/*.pr", |path| {
         let src = fs::read_to_string(path).unwrap();
-        insta::assert_snapshot!(prism::report(&src));
+        insta::assert_snapshot!(normalize_pipeline_report(&prism::report(&src)));
     });
+}
+
+fn normalize_pipeline_report(report: &str) -> String {
+    let mut out = String::with_capacity(report.len());
+    for line in report.lines() {
+        let line = line.replace(env!("PRISM_TARGET"), "aarch64-apple-darwin");
+        let line = normalize_native_kont_global_len(&line);
+        let line = line.replace("section \".prism_kont\"", "section \",.prism_kont\"");
+        let line = line.replace("section \"llvm.metadata\"", "section \",llvm.metadata\"");
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+fn normalize_native_kont_global_len(line: &str) -> String {
+    const CANONICAL_TARGET: &str = "aarch64-apple-darwin";
+    const PREFIXES: [&str; 2] = [
+        "@prism_native_kont_table = constant [",
+        "@prism_native_kont_state_map = constant [",
+    ];
+
+    if !PREFIXES.iter().any(|prefix| line.starts_with(prefix)) {
+        return line.to_string();
+    }
+
+    let Some(start) = line.find('[').map(|index| index + 1) else {
+        return line.to_string();
+    };
+    let Some(relative_end) = line[start..].find(" x i8]") else {
+        return line.to_string();
+    };
+    let end = start + relative_end;
+    let Ok(len) = line[start..end].parse::<isize>() else {
+        return line.to_string();
+    };
+    let target_delta =
+        env!("PRISM_TARGET").len().cast_signed() - CANONICAL_TARGET.len().cast_signed();
+    let normalized = len - target_delta;
+
+    format!("{}{}{}", &line[..start], normalized, &line[end..])
 }
 
 // Golden shape digests for the standard library's structural surface: datatype
@@ -115,13 +156,14 @@ fn nontight_effect_annotation_warns() {
 // `deprecated "..."` annotation carries the author's suggestion, while the
 // tower-superseded float dot-operators and fixed-width arithmetic builtins carry
 // the compiler's canonical replacement. A warning, never an error; behavior is
-// unchanged. The messages are pinned here (task: snapshot the warning texts).
+// unchanged. The snapshot pins the warning text.
 #[test]
 fn deprecation_warnings() {
     let src = prism::with_prelude(
         "deprecated \"use `+` on Float\"\n\
          fn old_add(x : Float, y : Float) : Float = plus(x, y)\n\
          fn f_float() : Float = old_add(1.0, 2.0) +. (3.0 *. 4.0)\n\
+         fn f_cmp() : Bool = 1.0 <. 2.0 && 1.0 ==. 1.0\n\
          fn f_i64() : I64 = i64_mul(2i64, 3i64)\n\
          fn f_u64() : U64 = u64_add(1u64, 2u64)\n\
          fn main() : Unit = println(show(f_float()))\n",

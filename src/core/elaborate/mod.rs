@@ -305,10 +305,10 @@ impl Elab<'_> {
         Ok(Comp::StrBuiltin(b, args))
     }
 
-    // The `Float` lane of the arithmetic operators, the exact target the dotted
-    // spellings (`+.` etc.) already lower to, so a plain `+` on `Float` and a `+.`
-    // produce byte-identical Core. `%` is `fmod` (a two-argument builtin, not a
-    // `CoreOp`); the rest are the float `CoreOp`s.
+    // The `Float` lane of the arithmetic and comparison operators, the exact
+    // target the dotted spellings already lower to, so a plain operator on
+    // `Float` and the dot spelling produce byte-identical Core. `%` is `fmod` (a
+    // two-argument builtin, not a `CoreOp`); the rest are float `CoreOp`s.
     fn float_bin(op: BinOp, va: &Value, vb: &Value) -> Result<Comp, Error> {
         if op == BinOp::Rem {
             return Ok(Comp::StrBuiltin(
@@ -321,7 +321,13 @@ impl Elab<'_> {
             BinOp::Sub => CoreOp::Subf,
             BinOp::Mul => CoreOp::Mulf,
             BinOp::Div => CoreOp::Divf,
-            _ => return Err(Error::Ice(format!("`{op:?}` is not a float arithmetic op"))),
+            BinOp::Eq => CoreOp::Eqf,
+            BinOp::Ne => CoreOp::Nef,
+            BinOp::Lt => CoreOp::Ltf,
+            BinOp::Le => CoreOp::Lef,
+            BinOp::Gt => CoreOp::Gtf,
+            BinOp::Ge => CoreOp::Gef,
+            _ => return Err(Error::Ice(format!("`{op:?}` is not a float numeric op"))),
         };
         Ok(Comp::Prim(core_op, va.clone(), vb.clone()))
     }
@@ -347,6 +353,9 @@ impl Elab<'_> {
                     value: -lit.value.clone(),
                     suffix: lit.suffix,
                 };
+                if self.dicts.contains_key(&id) {
+                    return self.elab_from_int_lit(&negated, id);
+                }
                 return Ok(self.int_value(&negated, id));
             }
             Expr::Float(f) => return Ok(Comp::Return(Value::Float(-f))),

@@ -250,7 +250,7 @@ Left-fold the sequence with `f` from initial accumulator `z`.
 fn for_each(s, f)
 ```
 
-Run `f` for its effects on each element, in order. Effect-polymorphic: `f` runs in the ambient row (no handler intervenes), so `for_each(s, \(x) -> println(x))` threads `IO` out. The explicit `{| e}` row is load-bearing: unsigned, the self-recursion would infer `f` as pure and reject an effectful body.
+Run `f` for its effects on each element, in order. Effect-polymorphic: `f` runs in the ambient row (no handler intervenes), so `for_each(s, \(x) -> println(x))` threads `IO` out. The explicit `{| e}` row matters: unsigned, the self-recursion would infer `f` as pure and reject an effectful body.
 
 ### `sum`
 

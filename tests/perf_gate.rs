@@ -27,8 +27,43 @@ use std::{env, fs};
 // only two helpers this file leans on.)
 mod common;
 
+const PERF_FLAT_VAR_WHILE: &str = include_str!("cases/perf/flat_var_while.pr");
+const PERF_FLAT_VAR_FOR: &str = include_str!("cases/perf/flat_var_for.pr");
+const PERF_FLAT_EARLY_RETURN: &str = include_str!("cases/perf/flat_early_return.pr");
+const PERF_PULL_SEQUENCE_MODULE: &str = include_str!("cases/perf/pull_sequence_module.pr");
+const PERF_EACH_UPDATE_REUSE: &str = include_str!("cases/perf/each_update_reuse.pr");
+const PERF_STACK_TAIL_RECURSION: &str = include_str!("cases/perf/stack_tail_recursion.pr");
+const PERF_STACK_VAR_WHILE: &str = include_str!("cases/perf/stack_var_while.pr");
+const PERF_STACK_VAR_FOR: &str = include_str!("cases/perf/stack_var_for.pr");
+const PERF_STACK_CONTINUE_WHILE: &str = include_str!("cases/perf/stack_continue_while.pr");
+const PERF_STACK_BREAK_WHILE: &str = include_str!("cases/perf/stack_break_while.pr");
+const PERF_STACK_EARLY_RETURN: &str = include_str!("cases/perf/stack_early_return.pr");
+const PERF_PARAM_PASSING_STATE: &str = include_str!("cases/perf/param_passing_state.pr");
+const PERF_DEEP_ABORT: &str = include_str!("cases/perf/deep_abort.pr");
+const PERF_SCHEDULER_YIELD: &str = include_str!("cases/perf/scheduler_yield.pr");
+
+const N_PLACEHOLDER: &str = "__N__";
+const PIPELINE_PLACEHOLDER: &str = "__PIPELINE__";
+const RUN_STRATEGY_PLACEHOLDER: &str = "run_strategy";
+
 fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
+}
+
+fn instantiate(template: &str, replacements: &[(&str, String)]) -> String {
+    replacements
+        .iter()
+        .fold(template.to_string(), |src, (needle, value)| {
+            src.replace(needle, value)
+        })
+}
+
+fn perf_src(template: &str, replacements: &[(&str, String)]) -> String {
+    prism::with_prelude(&instantiate(template, replacements))
+}
+
+fn perf_src_n(template: &str, n: i64) -> String {
+    perf_src(template, &[(N_PLACEHOLDER, n.to_string())])
 }
 
 fn have(tool: &str) -> bool {
@@ -73,12 +108,7 @@ fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i6
     stat_build(full, tag, stat_env, suffix, |src, bin| {
         let mut cfg = prism::Config::from_env();
         cfg.opt = prism::OptLevel::O2;
-        prism::build_on(
-            src,
-            &prism::default_roots(std::path::Path::new(".")),
-            bin,
-            &cfg,
-        )
+        prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
     })
 }
 
@@ -198,26 +228,20 @@ fn allocation_is_flat_for_constant_space_programs() {
     require_cc();
     // Each program must allocate O(1) eff-op cells regardless of `{N}`.
     let flat: &[(&str, &str)] = &[
-        (
-            "var while-loop accumulator",
-            "fn run(n : Int) : Int =\n  var s := 0\n  var i := 0\n  while i < n do\n    i += 1\n    s += i\n  s\nfn main() = println(run({N}))\n",
-        ),
-        (
-            "var for-loop accumulator",
-            "fn run(n : Int) : Int =\n  var t := 0\n  for i in srange(1, n + 1) do\n    t += i\n  t\nfn main() = println(run({N}))\n",
-        ),
+        ("var while-loop accumulator", PERF_FLAT_VAR_WHILE),
+        ("var for-loop accumulator", PERF_FLAT_VAR_FOR),
         (
             // Early `return` out of a loop: the return-aware driver builds an
             // SMore(ctl) cell per iteration, which the FBIP reuse pass recycles in
             // place, so allocation stays flat and never reifies into the free monad.
             "early-return loop",
-            "fn run(n : Int) : Int =\n  var i := 0\n  var s := 0\n  while i < n do\n    i += 1\n    s += i\n    if i == n then\n      return s\n  0 - 1\nfn main() = println(run({N}))\n",
+            PERF_FLAT_EARLY_RETURN,
         ),
     ];
     let (small, big) = (1000_i64, 10_000_i64);
     let mut fails = Vec::new();
     for (name, tmpl) in flat {
-        let mk = |n: i64| prism::with_prelude(&tmpl.replace("{N}", &n.to_string()));
+        let mk = |n: i64| perf_src_n(tmpl, n);
         let lo = stat_src(&mk(small), name, "PRISM_EFFOP_STATS", "eff ops allocated");
         let hi = stat_src(&mk(big), name, "PRISM_EFFOP_STATS", "eff ops allocated");
         match (lo, hi) {
@@ -238,7 +262,7 @@ fn allocation_is_flat_for_constant_space_programs() {
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
 
-// THE S5 FUSION PIN. Drives the ACTUAL `lib/std/Sequence.pr` module through
+// THE SEQUENCE FUSION PIN. Drives the ACTUAL `lib/std/Sequence.pr` module through
 // `import Sequence as Seq` (the shipped shape, across the import boundary, which
 // is what the acceptance criterion covers) and pins the per-element allocation
 // slope of each pipeline at ZERO: the stream-fusion pass (default-on at -O2)
@@ -273,10 +297,13 @@ fn pull_sequence_module_allocation_baseline() {
     let mut fails = Vec::new();
     for (name, tmpl, slope) in PULL_MODULE_BASELINE {
         let mk = |n: i64| {
-            prism::with_prelude(&format!(
-                "import Sequence as Seq\nfn main() : !{{IO}} Unit =\n  println({})\n",
-                tmpl.replace("{HI}", &(n + 1).to_string())
-            ))
+            perf_src(
+                PERF_PULL_SEQUENCE_MODULE,
+                &[(
+                    PIPELINE_PLACEHOLDER,
+                    tmpl.replace("{HI}", &(n + 1).to_string()),
+                )],
+            )
         };
         // Stream fusion is default-on at -O2, which is the level this guarantee
         // ships at, so measure there. A plain -O1 build still runs the pipeline
@@ -307,13 +334,8 @@ fn each_update_reuses_uniquely_owned() {
     // place: `fmap` reuses the spine and the per-element rebuild reuses each
     // record, exactly as the hand-written `fmap(\c -> { c | v = .. }, xs)` would.
     // A path that lowered to anything fresher than that would show zero reuse.
-    let src = "type Cell = Cell { v: Int }\n\
-               fn bump(xs : List(Cell)) : List(Cell) = { xs | each.v ~ \\(n) -> n + 1 }\n\
-               fn total(xs : List(Cell)) : Int =\n  match xs of\n    Nil => 0\n    Cons(c, r) => c.v + total(r)\n\
-               fn build(n : Int, acc : List(Cell)) : List(Cell) =\n  if n == 0 then acc else build(n - 1, Cons(Cell { v = n }, acc))\n\
-               fn main() = println(total(bump(build(500, Nil))))\n";
     let hits = stat_src(
-        &prism::with_prelude(src),
+        &prism::with_prelude(PERF_EACH_UPDATE_REUSE),
         "each_reuse",
         "PRISM_REUSE_STATS",
         "cells reused",
@@ -385,32 +407,14 @@ fn runs_in_bounded_stack(full: &str, tag: &str, stack_kb: u32) -> Result<(), Str
 fn loops_run_in_constant_stack() {
     require_cc();
     let n = 1_000_000;
-    let cases: &[(&str, String)] = &[
-        (
-            "pure tail recursion",
-            format!(
-                "fn go(k : Int, acc : Int) : Int =\n  if k == 0 then acc else go(k - 1, acc + 1)\n\
-                 fn main() = println(go({n}, 0))\n"
-            ),
-        ),
-        (
-            "var while-loop",
-            format!(
-                "fn run(k : Int) : Int =\n  var s := 0\n  var i := 0\n  while i < k do\n    \
-                 i += 1\n    s += i\n  s\nfn main() = println(run({n}))\n"
-            ),
-        ),
-        (
-            "var for-loop",
-            format!(
-                "fn run(k : Int) : Int =\n  var t := 0\n  for i in srange(1, k + 1) do\n    \
-                 t += i\n  t\nfn main() = println(run({n}))\n"
-            ),
-        ),
+    let cases: &[(&str, &str)] = &[
+        ("pure tail recursion", PERF_STACK_TAIL_RECURSION),
+        ("var while-loop", PERF_STACK_VAR_WHILE),
+        ("var for-loop", PERF_STACK_VAR_FOR),
     ];
     let mut fails = Vec::new();
-    for (name, src) in cases {
-        if let Err(e) = runs_in_bounded_stack(&prism::with_prelude(src), name, 2048) {
+    for (name, template) in cases {
+        if let Err(e) = runs_in_bounded_stack(&perf_src_n(template, n), name, 2048) {
             fails.push(e);
         }
     }
@@ -427,34 +431,14 @@ fn loops_run_in_constant_stack() {
 fn free_monad_loops_run_in_constant_stack() {
     require_cc();
     let n = 1_000_000;
-    let cases: &[(&str, String)] = &[
-        (
-            "continue-heavy while loop",
-            format!(
-                "fn run(k : Int) : Int =\n  var s := 0\n  var i := 0\n  while i < k do\n    \
-                 i += 1\n    if i % 2 == 1 then\n      continue\n    s += i\n  s\n\
-                 fn main() = println(run({n}))\n"
-            ),
-        ),
-        (
-            "break while loop",
-            format!(
-                "fn run(k : Int) : Int =\n  var s := 0\n  var i := 0\n  while true do\n    \
-                 if i >= k then\n      break\n    i += 1\n    s += i\n  s\n\
-                 fn main() = println(run({n}))\n"
-            ),
-        ),
-        (
-            "early-return loop",
-            format!(
-                "fn run(k : Int) : Int =\n  var i := 0\n  loop\n    if i >= k then\n      \
-                 return i\n    i += 1\nfn main() = println(run({n}))\n"
-            ),
-        ),
+    let cases: &[(&str, &str)] = &[
+        ("continue-heavy while loop", PERF_STACK_CONTINUE_WHILE),
+        ("break while loop", PERF_STACK_BREAK_WHILE),
+        ("early-return loop", PERF_STACK_EARLY_RETURN),
     ];
     let mut fails = Vec::new();
-    for (name, src) in cases {
-        if let Err(e) = runs_in_bounded_stack(&prism::with_prelude(src), name, 2048) {
+    for (name, template) in cases {
+        if let Err(e) = runs_in_bounded_stack(&perf_src_n(template, n), name, 2048) {
             fails.push(e);
         }
     }
@@ -472,16 +456,7 @@ fn free_monad_loops_run_in_constant_stack() {
 fn param_passing_effect_loop_runs_in_constant_stack() {
     require_cc();
     let n = 1_000_000;
-    let src = format!(
-        "effect St\n  ctl rd(Unit) : Int\n  ctl wr(Int) : Unit\n\
-         fn spin(k : Int) : !{{St}} Int =\n  if rd(()) < k then\n    wr(rd(()) + 1)\n    \
-         spin(k)\n  else\n    rd(())\n\
-         fn run(k : Int) : Int =\n  let f =\n    handle spin(k) with\n      \
-         rd(u, r) => \\(s) -> r(s)(s)\n      wr(v, r) => \\(_s) -> r(())(v)\n      \
-         return x => \\(_s) -> x\n  f(0)\n\
-         fn main() = println(run({n}))\n"
-    );
-    let full = prism::with_prelude(&src);
+    let full = perf_src_n(PERF_PARAM_PASSING_STATE, n);
     runs_in_bounded_stack(&full, "parameter-passing state loop", 2048)
         .unwrap_or_else(|e| panic!("{e}"));
     // Tier-1: the two-op State loop fuses, allocating no `EOp` cells (it ran via
@@ -507,17 +482,7 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
 #[test]
 fn driver_work_is_linear_on_deep_nontail_recursion() {
     require_cc();
-    let prog = |n: i64| {
-        prism::with_prelude(&format!(
-            "effect Abort\n  ctl abort(Int) : Int\n\
-             fn first(xs) =\n  match xs of\n    Nil => 0\n    Cons(x, _) => x\n\
-             fn probe(n : Int, acc) : !{{Abort}} Int =\n  if n == 0 then\n    abort(length(acc))\n  \
-             else\n    let cell = Cons(n, acc)\n    let r = probe(n - 1, cell)\n    r + first(cell)\n\
-             fn deep_abort(n : Int) =\n  handle probe(n, Nil) with\n    final ctl abort(code) => code\n    \
-             return r => r\n\
-             fn main() = println(deep_abort({n}))\n"
-        ))
-    };
+    let prog = |n: i64| perf_src_n(PERF_DEEP_ABORT, n);
     let small = 2000_i64;
     let big = 4 * small;
     let steps_small = stat_src(
@@ -550,13 +515,13 @@ fn scheduler_yield_loop_runs_in_constant_stack() {
     require_cc();
     let n = 1_000_000;
     let prog = |run: &str| {
-        prism::with_prelude(&format!(
-            "import Concurrent (..)\n\
-             fn spin(k : Int) : !{{Async(Int)}} Int =\n  if k == 0 then 0 else\n    \
-             yield(())\n    spin(k - 1)\n\
-             fn app() : !{{Async(Int)}} Int = spin({n})\n\
-             fn main() = println({run}(app))\n"
-        ))
+        perf_src(
+            PERF_SCHEDULER_YIELD,
+            &[
+                (N_PLACEHOLDER, n.to_string()),
+                (RUN_STRATEGY_PLACEHOLDER, run.to_string()),
+            ],
+        )
     };
     let mut fails = Vec::new();
     for run in ["run_async", "run_lifo"] {

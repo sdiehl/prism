@@ -1,0 +1,5 @@
+[package]
+name = "tzdb"
+
+[bin]
+entry = "src/Tzdb.pr"

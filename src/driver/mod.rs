@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
-#[cfg(feature = "native")]
+#[cfg(feature = "mlir")]
 use std::process::Command;
 #[cfg(feature = "native")]
 use std::{env, fs};
@@ -9,7 +9,12 @@ use std::{env, fs};
 #[cfg(feature = "mlir")]
 use crate::codegen::emit_mlir;
 #[cfg(feature = "native")]
-use crate::codegen::{emit_llvm, emit_llvm_bc};
+use crate::codegen::rt::RuntimeProfile;
+#[cfg(feature = "native")]
+use crate::codegen::{
+    emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table, native_kont_state_map,
+    native_kont_table, NativeKontIdentityRow,
+};
 #[cfg(feature = "native")]
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
@@ -17,7 +22,7 @@ use crate::core::opt::PassStage;
 use crate::core::{
     balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
     lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Comp, Core, CorePass, DepGraph, OpGrades, OptLevel, PassSpec, Value,
+    run_opt_spec, Comp, Core, CorePass, DepGraph, OpGrades, OptLevel, PassSpec, Value, HASH_SCHEME,
 };
 use crate::debug::trace;
 use crate::error::{Error, TypeError};
@@ -31,6 +36,8 @@ use crate::parse::{parse, ParseResult};
 use crate::pkg::transport::{DiskTransport, Transport};
 #[cfg(feature = "native")]
 use crate::pkg::trust::{parse_index, verify_signature, Verdict};
+#[cfg(feature = "native")]
+use crate::resolve::SourceBundleKind;
 use crate::resolve::{default_roots, resolve_modules_in, Root};
 #[cfg(feature = "native")]
 use crate::store::cert::{emit, parity_cert, BACKEND_LLVM, CLAIM_PARITY_PASSED_NAME};
@@ -41,10 +48,22 @@ use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
 use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, show_effects, Checked, CtorInfo};
 
+mod artifact;
+#[cfg(feature = "native")]
+mod native;
+pub use artifact::ArtifactIdentity;
+#[cfg(feature = "mlir")]
+use native::ir_failure;
+#[cfg(feature = "native")]
+use native::{cc_link, run_native};
+
 pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
+
+/// Artifact kind for a whole-program namespace root.
+pub const NAMESPACE_ARTIFACT_KIND: &str = "namespace";
 
 /// Layout version of the `dump namespace` export envelope. The export records it
 /// so a reader can tell which layout it is decoding and dispatch on it; a
@@ -144,7 +163,7 @@ impl EnvelopeHeader {
     #[must_use]
     pub fn parse(doc: &serde_json::Value) -> Option<Self> {
         let env = doc.get("envelope")?;
-        if env.get("scheme")?.as_str()? != crate::core::HASH_SCHEME {
+        if env.get("scheme")?.as_str()? != HASH_SCHEME {
             return None;
         }
         Some(Self {
@@ -190,6 +209,14 @@ impl Scheduler {
             Self::Lifo => Some(crate::names::RUN_LIFO),
         }
     }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Cooperative => "cooperative",
+            Self::Lifo => "lifo",
+        }
+    }
 }
 
 /// The backend optimization levels clang accepts via `-O`: the single source of
@@ -197,6 +224,13 @@ impl Scheduler {
 pub const BACKEND_OPT_LEVELS: [&str; 6] = ["0", "1", "2", "3", "s", "z"];
 /// Backend level used when neither the flag nor the env var picks one.
 pub const DEFAULT_BACKEND_OPT: &str = "2";
+#[cfg(feature = "native")]
+const NATIVE_KONT_FRAME_FLAGS: [&str; 4] = [
+    "-DPRISM_NATIVE_KONT_FRAMES",
+    "-fno-omit-frame-pointer",
+    "-funwind-tables",
+    "-fno-optimize-sibling-calls",
+];
 
 /// Whether `s` is a backend level clang understands; both entry paths validate
 /// against this so a bad `--backend-opt` or `PRISM_BACKEND_OPT` never reaches `cc`.
@@ -264,6 +298,12 @@ impl Config {
             scheduler: flags.scheduler,
             flags,
         }
+    }
+
+    /// Structured identity for behavior-affecting compiler artifacts.
+    #[must_use]
+    pub fn artifact_identity_for(&self, backend: &str) -> ArtifactIdentity {
+        ArtifactIdentity::from_config(self, backend)
     }
 }
 #[must_use]
@@ -535,8 +575,19 @@ pub fn store_def_inputs(
     Ok((core, hashes, metas))
 }
 
-/// The namespace root of a program: the Merkle fold over its
-/// `def <name> -> content-hash` entries.
+/// Structured identity for a whole-program namespace artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceIdentity {
+    /// The hash scheme that gives `root` its meaning.
+    pub scheme: &'static str,
+    /// The artifact kind this root names.
+    pub kind: &'static str,
+    /// The Merkle fold over the namespace entries.
+    pub root: String,
+}
+
+/// The namespace identity of a program: artifact kind plus the Merkle fold over
+/// its `def <name> -> content-hash` entries.
 ///
 /// This is the single value a published package tag maps to and `prism audit`
 /// re-derives: the same digest a `dump namespace` export carries as its contract,
@@ -545,13 +596,28 @@ pub fn store_def_inputs(
 ///
 /// # Errors
 /// Fails on any front-end error.
-pub fn namespace_root(src: &str, roots: &[Root]) -> Result<String, Error> {
+pub fn namespace_identity(src: &str, roots: &[Root]) -> Result<NamespaceIdentity, Error> {
     let (program, checked, core) = elaborated(src, roots)?;
     let hashes = hash_program(
         &core,
         &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
     );
-    Ok(namespace_root_of(&hashes))
+    Ok(NamespaceIdentity {
+        scheme: HASH_SCHEME,
+        kind: NAMESPACE_ARTIFACT_KIND,
+        root: namespace_root_of(&hashes),
+    })
+}
+
+/// The namespace root of a program.
+///
+/// Prefer [`namespace_identity`] at persistence/package boundaries so the scheme
+/// and artifact kind travel with the digest.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub fn namespace_root(src: &str, roots: &[Root]) -> Result<String, Error> {
+    Ok(namespace_identity(src, roots)?.root)
 }
 
 // The namespace-root fold over an already-computed `name -> content-hash` map. The
@@ -570,6 +636,108 @@ pub(crate) fn namespace_root_of(hashes: &crate::core::Hashes) -> String {
             })
             .collect(),
     )
+}
+
+#[cfg(feature = "native")]
+fn native_kont_table_of(
+    hashes: &crate::core::Hashes,
+    roots: &[Root],
+    cfg: &Config,
+    identity_rows: NativeKontIdentityRows,
+) -> Result<String, Error> {
+    let bundle = namespace_root_of(hashes);
+    Ok(native_kont_table(
+        hashes,
+        &bundle,
+        &native_kont_identity(cfg, &bundle, roots, identity_rows)?,
+    ))
+}
+
+#[cfg(feature = "native")]
+fn native_kont_table_for(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    native_kont_table_for_with_rows(src, roots, cfg, NativeKontIdentityRows::Full)
+}
+
+#[cfg(feature = "native")]
+fn native_kont_table_for_with_rows(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    identity_rows: NativeKontIdentityRows,
+) -> Result<String, Error> {
+    let (program, checked, core) = elaborated(src, roots)?;
+    let hashes = hash_program(
+        &core,
+        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+    );
+    native_kont_table_of(&hashes, roots, cfg, identity_rows)
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeKontIdentityRows {
+    Full,
+    Portable,
+}
+
+#[cfg(feature = "native")]
+fn native_kont_identity(
+    cfg: &Config,
+    source_root: &str,
+    roots: &[Root],
+    identity_rows: NativeKontIdentityRows,
+) -> Result<Vec<NativeKontIdentityRow<'static>>, Error> {
+    let identity = artifact_identity_for_roots(cfg, "llvm", source_root, roots)?;
+    let rows = match identity_rows {
+        NativeKontIdentityRows::Full => identity.rows(),
+        NativeKontIdentityRows::Portable => identity.portable_rows(),
+    };
+    Ok(rows
+        .into_iter()
+        .filter(|(key, _)| !matches!(*key, "compiler" | "hash-scheme" | "target" | "backend"))
+        .map(|(key, value)| NativeKontIdentityRow { key, value })
+        .collect())
+}
+
+#[cfg(feature = "native")]
+fn artifact_identity_for_roots(
+    cfg: &Config,
+    backend: &str,
+    source_root: &str,
+    roots: &[Root],
+) -> Result<ArtifactIdentity, Error> {
+    let mut package_roots = Vec::new();
+    let mut stdlib_root = None;
+    let mut saw_embedded_std = false;
+    for root in roots {
+        match root {
+            Root::Embedded(_) => saw_embedded_std = true,
+            Root::Dir(_) => {}
+            Root::SourceBundle { .. } => {
+                if let Some(identity) = root.source_bundle_identity() {
+                    match &identity.kind {
+                        SourceBundleKind::Std => {
+                            stdlib_root = Some(identity.root.clone());
+                        }
+                        SourceBundleKind::Package { .. } => {
+                            package_roots.push(identity.descriptor());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if stdlib_root.is_none() && saw_embedded_std {
+        stdlib_root = Some(stdlib_hash()?.root);
+    }
+    let mut identity = cfg
+        .artifact_identity_for(backend)
+        .with_source_root(source_root.to_string())
+        .with_package_roots(package_roots);
+    if let Some(root) = stdlib_root {
+        identity = identity.with_stdlib_root(root);
+    }
+    Ok(identity)
 }
 
 // The composed source that pulls in the entire documented standard library:
@@ -690,7 +858,7 @@ pub fn stdlib_hash() -> Result<StdlibHash, Error> {
     }
     Ok(StdlibHash {
         root: crate::core::hash_root(&entries),
-        scheme: crate::core::HASH_SCHEME,
+        scheme: HASH_SCHEME,
         version: env!("CARGO_PKG_VERSION"),
         defs,
         shapes,
@@ -783,24 +951,29 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
             .find(|d| msg.contains(&format!("`{}`", d.name)));
         let span = owner.map_or_else(marginalia::Span::default, |d| d.span);
         // A `without alloc` function checks with `fbip` semantics, so the shared
-        // checker phrases its message with `fbip`. Restore the surface spelling
-        // for a function that used the `without alloc` suffix, and for a lifted
-        // `without alloc { .. }` block refer to the block rather than leak its
-        // synthetic function name (the span already points at the source block).
+        // checker phrases its message with `fbip`. Normalize the user-facing
+        // family here: `fip`/`fbip` are usage checks, while `without alloc` is an
+        // allocation certificate. Lifted `without alloc { .. }` blocks keep the
+        // source block in the message rather than leaking the synthetic function
+        // name (the span already points at the source block).
         let msg = match owner {
             Some(d) if d.no_alloc && d.fip == Fip::No => {
                 let wa = format!("{} {}", crate::kw::WITHOUT, crate::kw::ALLOC);
                 let m = msg.replace("`fbip`", &format!("`{wa}`"));
                 if crate::names::is_without_alloc_block(&d.name) {
-                    m.replace(
-                        &format!("function `{}` is marked `{wa}` but", d.name),
-                        &format!("the `{wa}` block"),
-                    )
-                    .replace(&format!("`{}`", d.name), &format!("the `{wa}` block"))
+                    let m = m
+                        .replace(
+                            &format!("function `{}` is marked `{wa}` but", d.name),
+                            &format!("the `{wa}` block"),
+                        )
+                        .replace(&format!("`{}`", d.name), &format!("the `{wa}` block"));
+                    allocation_certificate_message(&wa, None, &m)
                 } else {
-                    m
+                    allocation_certificate_message(&wa, Some(&d.name), &m)
                 }
             }
+            Some(d) if d.fip == Fip::Fip => usage_check_message("fip", &d.name, &msg),
+            Some(d) if d.fip == Fip::Fbip => usage_check_message("fbip", &d.name, &msg),
             _ => msg,
         };
         Error::Type(TypeError::Other { span, msg })
@@ -809,6 +982,37 @@ fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Re
     let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
     check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
+}
+
+fn allocation_certificate_message(kind: &str, name: Option<&str>, msg: &str) -> String {
+    let rest = name.map_or_else(
+        || {
+            msg.strip_prefix(&format!("the `{kind}` block "))
+                .unwrap_or_else(|| strip_sentence_prefix(msg))
+        },
+        |name| strip_marked_prefix(msg, name, kind),
+    );
+    name.map_or_else(
+        || format!("allocation certificate `{kind}` failed for block: {rest}"),
+        |name| format!("allocation certificate `{kind}` failed for function `{name}`: {rest}"),
+    )
+}
+
+fn usage_check_message(kind: &str, name: &str, msg: &str) -> String {
+    let rest = strip_marked_prefix(msg, name, kind);
+    format!("usage check `{kind}` failed for function `{name}`: {rest}")
+}
+
+fn strip_marked_prefix<'a>(msg: &'a str, name: &str, kind: &str) -> &'a str {
+    msg.strip_prefix(&format!("function `{name}` is marked `{kind}` but "))
+        .or_else(|| msg.strip_prefix(&format!("a `{kind}` function ")))
+        .unwrap_or_else(|| strip_sentence_prefix(msg))
+}
+
+fn strip_sentence_prefix(msg: &str) -> &str {
+    msg.strip_prefix("function ")
+        .or_else(|| msg.strip_prefix("a "))
+        .unwrap_or(msg)
 }
 
 // Check every `replayable`-annotated function. The certificate is on the inferred
@@ -929,8 +1133,24 @@ pub fn interpret_io_on(
     input: &mut dyn std::io::BufRead,
     cfg: &Config,
 ) -> Result<Run, Error> {
+    interpret_io_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
+}
+
+/// Like [`interpret_io_on`], with explicit host-provided program arguments for
+/// `args_count`/`arg`.
+///
+/// # Errors
+/// Fails on front-end errors or a runtime fault.
+pub fn interpret_io_on_with_args(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+) -> Result<Run, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    crate::eval::run_io(&core, out_sink, input).map_err(Error::Runtime)
+    crate::eval::run_io_with_args(&core, out_sink, input, args).map_err(Error::Runtime)
 }
 
 /// Run `src` against the real world, recording every capability observation.
@@ -947,9 +1167,25 @@ pub fn record_on(
     input: &mut dyn std::io::BufRead,
     cfg: &Config,
 ) -> Result<(Option<i32>, String, usize), Error> {
+    record_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
+}
+
+/// Like [`record_on`], with explicit host-provided program arguments.
+///
+/// # Errors
+/// Fails on any front-end error or an evaluation fault.
+pub fn record_on_with_args(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+) -> Result<(Option<i32>, String, usize), Error> {
     let core = prepared_core(src, roots, cfg)?;
     let run =
-        run_traced(&core, out_sink, input, Tape::Record(Vec::new())).map_err(Error::Runtime)?;
+        crate::eval::run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
+            .map_err(Error::Runtime)?;
     Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
 }
 
@@ -1034,7 +1270,8 @@ pub fn suspend_on(
     budget: usize,
     cfg: &Config,
 ) -> Result<SuspendResult, Error> {
-    let bundle = namespace_root(src, roots)?;
+    let identity = namespace_identity(src, roots)?;
+    let bundle = identity.root;
     let core = prepared_core(src, roots, cfg)?;
     match crate::eval::run_suspending(&core, bundle, budget, out_sink, input)
         .map_err(Error::Runtime)?
@@ -1064,7 +1301,8 @@ const MAX_LINE_CUT_STEPS: usize = 8192;
 /// # Errors
 /// Fails on any front-end error or an evaluation fault before the program ends.
 pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<usize>, Error> {
-    let bundle = namespace_root(src, roots)?;
+    let identity = namespace_identity(src, roots)?;
+    let bundle = identity.root;
     let core = prepared_core(src, roots, cfg)?;
     // Build the global table once: it deep-clones every function body, so rebuilding
     // it per budget would make the scan quadratic in that clone.
@@ -1111,7 +1349,8 @@ pub fn resume_on(
 ) -> Result<Option<i32>, Error> {
     let kont = crate::eval::kont::decode_kont(snapshot)
         .map_err(|e| Error::Runtime(format!("resume: malformed snapshot: {e}")))?;
-    let bundle = namespace_root(src, roots)?;
+    let identity = namespace_identity(src, roots)?;
+    let bundle = identity.root;
     if kont.bundle != bundle {
         return Err(Error::Runtime(format!(
             "resume: code-identity mismatch: this snapshot was captured against a \
@@ -1122,24 +1361,6 @@ pub fn resume_on(
     let core = prepared_core(src, roots, cfg)?;
     let run = crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::Runtime)?;
     Ok(run.exit)
-}
-
-// Run a freshly built native binary on empty stdin, returning its stdout bytes.
-#[cfg(feature = "native")]
-fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
-    let out = Command::new(bin)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(Error::Io)?;
-    if out.status.success() {
-        Ok(out.stdout)
-    } else {
-        Err(Error::Codegen(format!(
-            "attest: {} exited with {}",
-            bin.display(),
-            out.status
-        )))
-    }
 }
 
 // The interpreter transcript for `src` on empty stdin: the reference oracle a
@@ -1180,7 +1401,7 @@ fn attest_index_line(root: &str, cfg: &Config) -> String {
 // The second, independent backend for attestation: MLIR native when the feature
 // and toolchain are present, otherwise the interpreter as the second oracle with
 // the limitation named.
-// The `Result` is load-bearing under the `mlir` feature (`build_mlir_on` and the
+// The `Result` matters under the `mlir` feature (`build_mlir_on` and the
 // native run can fail); the fallback path is infallible, so clippy sees an
 // unnecessary wrap only in the default build.
 #[cfg(feature = "native")]
@@ -1237,7 +1458,8 @@ fn attest_second(
 /// backends (the attestation's whole point is that this never happens).
 #[cfg(feature = "native")]
 pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
-    let root = namespace_root(src, roots)?;
+    let identity = namespace_identity(src, roots)?;
+    let root = identity.root;
     let interp = interp_transcript(src, roots, cfg)?;
 
     let tmp = std::env::temp_dir();
@@ -1269,7 +1491,7 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
 }
 
 // Emit (or find) the parity certificate for a successfully attested root, and
-// report which. Never load-bearing: a store that cannot be opened or written
+// report which. Never required for correctness: a store that cannot be opened or written
 // simply yields no line, so a certificate failure never fails the attestation the
 // byte-identity check already established.
 #[cfg(feature = "native")]
@@ -1636,6 +1858,14 @@ fn require_main(checked: &Checked) -> Result<(), Error> {
     }
 }
 
+/// Facts reported by a successful native build.
+#[cfg(feature = "native")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeBuildReport {
+    /// Store commit statistics when `PRISM_STORE` is enabled.
+    pub store: Option<CommitStats>,
+}
+
 /// Like [`build_at`], but against an explicit module search path (a project's
 /// source root, its path dependencies, and the stdlib).
 ///
@@ -1643,111 +1873,50 @@ fn require_main(checked: &Checked) -> Result<(), Error> {
 /// Fails on front-end errors, codegen failure, or when linking with cc fails.
 #[cfg(feature = "native")]
 pub fn build_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(), Error> {
+    build_on_report(src, roots, out, cfg).map(|_| ())
+}
+
+/// Like [`build_on`], returning the cache facts the build observed.
+///
+/// # Errors
+/// Fails on front-end errors, codegen failure, store failure, or when linking
+/// with cc fails.
+#[cfg(feature = "native")]
+pub fn build_on_report(
+    src: &str,
+    roots: &[Root],
+    out: &Path,
+    cfg: &Config,
+) -> Result<NativeBuildReport, Error> {
     let (checked, core, ctors) = compiled(src, roots, cfg)?;
     require_main(&checked)?;
+    let native_kont_table = native_kont_table_for(src, roots, cfg)?;
     let bc = out.with_extension("bc");
-    emit_llvm_bc(&core, &ctors, &bc).map_err(Error::Codegen)?;
-    cc_link(&bc, out, cfg)?;
+    emit_llvm_bc_with_native_kont_table(&core, &ctors, &native_kont_table, &bc)
+        .map_err(Error::Codegen)?;
+    cc_link(&bc, out, cfg, RuntimeProfile::NativeBackend)?;
     // A successful build populates the store when the knob is on. Re-elaboration
     // is cheap relative to codegen and only happens under the opt-in flag; the
     // store is a cache, so a failure here would not invalidate the build (but is
     // surfaced rather than swallowed).
-    if cfg.flags.store {
-        commit_to_store(src, roots, cfg)?;
-    }
-    Ok(())
-}
-
-// Save the offending IR at a stable path so a clang parse error points at
-// something inspectable. The happy path stays a single clang invocation.
-#[cfg(feature = "native")]
-fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
-    let ext = ir.extension().and_then(|e| e.to_str()).unwrap_or("ll");
-    let kept = env::temp_dir().join(format!("prism_failed.{ext}"));
-    let _ = fs::copy(ir, &kept);
-    let text = String::from_utf8_lossy(stderr);
-    let head: Vec<&str> = text.lines().take(8).collect();
-    Error::Codegen(format!(
-        "{tool} rejected generated IR, kept at {}:\n{}",
-        kept.display(),
-        head.join("\n")
-    ))
-}
-
-#[cfg(feature = "native")]
-fn cc_link(ir: &Path, out: &Path, cfg: &Config) -> Result<(), Error> {
-    // Default to the exact compiler that built the interpreter's runtime + libm
-    // (baked by build.rs), not a bare "clang": musl's transcendentals are not
-    // correctly-rounded, so native and interpreter must use the identical toolchain
-    // or their float results diverge by a ULP. `PRISM_CC` still overrides (e.g. the
-    // sanitizer job), but then it is the caller's job to match the build.
-    let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
-    // Materialize the embedded runtime (the split C modules and their headers)
-    // into a per-output directory and compile every source in one clang
-    // invocation, so ThinLTO still inlines the runtime into the generated code.
-    // The directory is unique to `out`, so concurrent builds do not collide.
-    let rt_dir = out.with_extension("prism_rt.d");
-    let sources = crate::codegen::rt::write_runtime(&rt_dir)?;
-    // The vendored libm is linked as the one pre-built archive (compiled once by
-    // build.rs, the same bytes the interpreter uses), never recompiled here: the
-    // transcendentals are not correctly-rounded, so a second, differently-invoked
-    // compile diverges by a ULP and breaks parity. It links after the objects that
-    // reference it (`prism_libm.c`), so the archive resolves their `sin`/`atan`/...
-    let libm_archive = crate::codegen::rt::write_libm_archive(&rt_dir)?;
-    // Extra cc flags, whitespace-split. CI sets this to -fsanitize=undefined so
-    // the corpus runs under UBSan and any new runtime UB aborts the program.
-    let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
-    // ThinLTO stays on at every level: it is what inlines the C runtime into the
-    // generated code. The `-O` level (default `-O2`) is the one user-facing knob;
-    // a trailing `PRISM_CC_FLAGS` token still wins, since clang takes the last
-    // `-O` it sees.
-    let olevel = format!("-O{}", cfg.backend_opt);
-    // Opt-in structural backstop: compile the runtime with its cell-validity
-    // checks (`PRISM_RT_CHECKS`). Off by default so release builds and the parity
-    // oracle stay zero-overhead and byte-identical.
-    let rt_checks: &[&str] = if cfg.flags.rt_checks {
-        &["-DPRISM_RT_DEBUG"]
+    let store = if cfg.flags.store {
+        Some(commit_to_store(src, roots, cfg)?)
     } else {
-        &[]
+        None
     };
-    // FP contraction is pinned off on every native compile: letting the C
-    // compiler fuse `a*b+c` into an FMA on one platform and not another
-    // diverges the last bit of float arithmetic, and byte-for-byte parity with
-    // the interpreter (which never fuses) is the language's contract.
-    let res = Command::new(&cc)
-        .args([
-            olevel.as_str(),
-            "-flto=thin",
-            "-ffp-contract=off",
-            "-Wno-override-module",
-        ])
-        .args(rt_checks)
-        .args(extra.split_whitespace())
-        .arg(ir)
-        .args(&sources)
-        .arg(&libm_archive)
-        .arg("-o")
-        .arg(out)
-        .output()
-        .map_err(|e| Error::Codegen(format!("running {cc}: {e} (is clang installed?)")));
-    let _ = fs::remove_dir_all(&rt_dir);
-    let cc_out = res?;
-    if cc_out.status.success() {
-        if !cc_out.stderr.is_empty() {
-            eprint!("{}", String::from_utf8_lossy(&cc_out.stderr));
-        }
-        Ok(())
-    } else {
-        Err(ir_failure(&cc, ir, &cc_out.stderr))
-    }
+    Ok(NativeBuildReport { store })
 }
 
 /// # Errors
 /// Fails on front-end errors or codegen failure.
 #[cfg(feature = "native")]
 pub fn emit_ir(src: &str) -> Result<String, Error> {
-    let (_, core, ctors) = compiled(src, &default_roots(Path::new(".")), &Config::from_env())?;
-    emit_llvm(&core, &ctors).map_err(Error::Codegen)
+    let roots = default_roots(Path::new("."));
+    let cfg = Config::from_env();
+    let (_, core, ctors) = compiled(src, &roots, &cfg)?;
+    let native_kont_table =
+        native_kont_table_for_with_rows(src, &roots, &cfg, NativeKontIdentityRows::Portable)?;
+    emit_llvm_with_native_kont_table(&core, &ctors, &native_kont_table).map_err(Error::Codegen)
 }
 
 /// # Errors
@@ -1805,7 +1974,7 @@ pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Res
     }
     fs::write(&ll_file, &translate_out.stdout)?;
 
-    let res = cc_link(&ll_file, out, cfg);
+    let res = cc_link(&ll_file, out, cfg, RuntimeProfile::HostOracle);
     let _ = fs::remove_file(&mlir_file);
     res
 }
@@ -1907,10 +2076,21 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
 
     #[cfg(feature = "native")]
     match lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg) {
-        Ok((lowered, ctors, _)) => match emit_llvm(&reuse(&insert_rc(&lowered, &sigs)), &ctors) {
-            Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
-            Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
-        },
+        Ok((lowered, ctors, _)) => {
+            let hashes = hash_program(&core, &hash_meta(&checked, &sigs, &fip_annots(&program)));
+            match native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
+                .and_then(|native_kont_table| {
+                    emit_llvm_with_native_kont_table(
+                        &reuse(&insert_rc(&lowered, &sigs)),
+                        &ctors,
+                        &native_kont_table,
+                    )
+                    .map_err(Error::Codegen)
+                }) {
+                Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
+                Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
+            }
+        }
         Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
     }
 
@@ -1960,7 +2140,7 @@ pub fn shape_digests_of(src: &str) -> Result<BTreeMap<String, String>, Error> {
 
 // Out-of-Core elaboration inputs the content hash must commit to, keyed by
 // canonical symbol: the generalized type, the principal effect row, the
-// fip/fbip annotation, and the borrow mask. The last two are load-bearing for
+// fip/fbip annotation, and the borrow mask. The last two affect
 // codegen (the mask drives `insert_rc`, fip pins the loop lowering), so a change
 // to either must change the hash even when the Core body is byte-identical.
 fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, String> {
@@ -2031,6 +2211,45 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 .unwrap();
             }
             Ok(out)
+        }
+        // The native kont reverse-table precursor: the deterministic map a
+        // native suspendable build must emit so a saved native frame can name its
+        // code by definition hash rather than by a raw function pointer.
+        "native-kont-table" => {
+            #[cfg(feature = "native")]
+            {
+                let (program, checked, core) = elaborated(src, roots)?;
+                let hashes = hash_program(
+                    &core,
+                    &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+                );
+                native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                Err(Error::Codegen(
+                    "dump native-kont-table requires the native feature".to_string(),
+                ))
+            }
+        }
+        "native-kont-state-map" => {
+            #[cfg(feature = "native")]
+            {
+                let (program, checked, core) = elaborated(src, roots)?;
+                let hashes = hash_program(
+                    &core,
+                    &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+                );
+                let table =
+                    native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)?;
+                Ok(native_kont_state_map(&core, &table))
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                Err(Error::Codegen(
+                    "dump native-kont-state-map requires the native feature".to_string(),
+                ))
+            }
         }
         // Structural shape digests of the file's datatypes and effects (prelude
         // included, like `core-hash` shows prelude fns). One line per declaration.
@@ -2126,7 +2345,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let contract = namespace_root_of(&hashes);
             let doc = serde_json::json!({
                 "envelope": {
-                    "scheme": crate::core::HASH_SCHEME,
+                    "scheme": HASH_SCHEME,
                     "kind": WireKind::Def.tag(),
                     "contract": contract,
                     "format": NAMESPACE_FORMAT,
@@ -2195,7 +2414,10 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         #[cfg(feature = "native")]
         "llvm" => {
             let (_, core, ctors) = compiled(src, roots, cfg)?;
-            emit_llvm(&core, &ctors).map_err(Error::Codegen)
+            let native_kont_table =
+                native_kont_table_for_with_rows(src, roots, cfg, NativeKontIdentityRows::Portable)?;
+            emit_llvm_with_native_kont_table(&core, &ctors, &native_kont_table)
+                .map_err(Error::Codegen)
         }
         #[cfg(feature = "mlir")]
         "mlir" => {
@@ -2455,7 +2677,21 @@ fn section(out: &mut String, title: &str, body: &str) {
 
 #[cfg(test)]
 mod envelope_tests {
+    #[cfg(feature = "native")]
+    use std::collections::BTreeMap;
+
+    #[cfg(feature = "native")]
+    use crate::resolve::{Root, SourceBundleIdentity};
+
     use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+    #[cfg(feature = "native")]
+    use super::{native_kont_table_for, Config, HASH_SCHEME};
+
+    const STORE_PKG_NAME: &str = "StorePkg";
+    #[cfg(feature = "native")]
+    const STORE_PKG_SOURCE: &str = "pub fn answer() : Int = 41\n";
+    #[cfg(feature = "native")]
+    const STORE_PKG_ROOT: &str = "abc123";
 
     /// The five-kind family: textual tags are distinct, varints are the distinct
     /// contiguous discriminants the binary codec will reuse, and `parse` inverts
@@ -2487,6 +2723,149 @@ mod envelope_tests {
         assert_eq!(hdr.kind, WireKind::Def);
         assert_eq!(hdr.format, NAMESPACE_FORMAT);
         assert!(!hdr.contract.is_empty());
+    }
+
+    #[test]
+    fn artifact_identity_fingerprint_names_roots() {
+        let identity = super::Config::default()
+            .artifact_identity_for("llvm")
+            .with_source_root("source123")
+            .with_stdlib_root("std456")
+            .with_package_roots([format!("{STORE_PKG_NAME}@prism-core-hash-v1:pkg789")]);
+        let fingerprint = identity.fingerprint();
+        assert!(fingerprint.contains("source-root=prism-core-hash-v1:source123;"));
+        assert!(fingerprint.contains("stdlib-root=prism-core-hash-v1:std456;"));
+        assert!(fingerprint.contains(&format!(
+            "package-root={STORE_PKG_NAME}@prism-core-hash-v1:pkg789;"
+        )));
+    }
+
+    /// Native kont serialization needs this table as its code-identity bridge:
+    /// raw native symbols are paired with the same definition hashes used by the
+    /// interpreter kont envelope.
+    #[test]
+    fn native_kont_table_names_native_symbols_by_hash() {
+        let out = dump("native-kont-table", "fn main() = 1\n").expect("native kont table");
+        assert!(out.starts_with("scheme  prism-core-hash-v1\nbundle  "));
+        assert!(
+            out.contains(&format!("compiler  {}\n", env!("CARGO_PKG_VERSION")))
+                && out.contains(&format!("target  {}\n", env!("PRISM_TARGET")))
+                && out.contains("backend  llvm\n")
+                && out.contains("flag  scheduler  cooperative\n")
+                && out.contains("flag  backend-opt  2\n")
+                && out.contains("flag  effect-tier  auto\n"),
+            "native table includes portable artifact identity:\n{out}"
+        );
+        assert!(
+            !out.contains("native-cc-version"),
+            "dumped native table must not embed host-specific C compiler strings:\n{out}"
+        );
+        assert!(
+            out.contains("flag  source-root  prism-core-hash-v1:")
+                && out.contains("flag  stdlib-root  prism-core-hash-v1:"),
+            "native table names source and Std roots:\n{out}"
+        );
+        assert!(
+            out.lines()
+                .any(|line| line.starts_with("fn      prism_main  ") && line.ends_with("  main")),
+            "native table includes the main symbol and its definition hash:\n{out}"
+        );
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn native_kont_table_names_package_source_roots() {
+        let mut modules = BTreeMap::new();
+        modules.insert(STORE_PKG_NAME.to_string(), STORE_PKG_SOURCE.to_string());
+        let bundle_identity =
+            SourceBundleIdentity::package(STORE_PKG_NAME, HASH_SCHEME, STORE_PKG_ROOT);
+        let expected = format!("flag  package-root  {}\n", bundle_identity.descriptor());
+        let roots = vec![
+            Root::identified_source_bundle(
+                format!("<package {STORE_PKG_NAME} {STORE_PKG_ROOT}>"),
+                bundle_identity,
+                modules,
+            ),
+            Root::Embedded(crate::stdlib::STDLIB),
+        ];
+        let out = native_kont_table_for(
+            "import StorePkg (answer)\nfn main() : Int = answer() + 1\n",
+            &roots,
+            &Config::default(),
+        )
+        .expect("native kont table");
+        assert!(
+            out.contains(&expected),
+            "native table names package roots:\n{out}"
+        );
+        assert!(
+            out.contains("flag  native-cc  ")
+                && out.contains("flag  native-cc-version  ")
+                && out.contains("flag  native-cc-flags  "),
+            "native build table names native linker inputs:\n{out}"
+        );
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn native_kont_state_map_names_entry_abi_words() {
+        let out = dump(
+            "native-kont-state-map",
+            "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
+        )
+        .expect("native kont state map");
+        assert!(out.starts_with("state-map 1\nscheme  prism-core-hash-v1\nbundle  "));
+        assert!(
+            out.contains("slot-format prism-native-abi-word-v1")
+                && out.contains("backend  llvm\n")
+                && out.contains("flag  scheduler  cooperative\n")
+                && out.contains("state prism_count ")
+                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
+            "native state map includes concrete entry ABI words:\n{out}"
+        );
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn llvm_dump_embeds_native_kont_table_global() {
+        let out = dump("llvm", "fn main() = 1\n").expect("llvm dump");
+        assert!(
+            out.contains("@prism_native_kont_table = constant"),
+            "LLVM IR embeds the native kont table global:\n{out}"
+        );
+        assert!(
+            out.contains("@prism_native_kont_state_map = constant")
+                && out.contains("state-map 1")
+                && out.contains("slot-format prism-native-abi-word-v1")
+                && out.contains("slots abi-word[]"),
+            "LLVM IR embeds the native kont state-map:\n{out}"
+        );
+        let out = dump(
+            "llvm",
+            "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
+        )
+        .expect("llvm dump");
+        assert!(
+            out.contains("state prism_count ")
+                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
+            "LLVM IR embeds concrete ABI-word slots for native arguments:\n{out}"
+        );
+        assert!(
+            out.contains("call void @prism_native_kont_enter")
+                && out.contains("call void @prism_native_kont_arg")
+                && out.contains("call void @prism_native_kont_leave"),
+            "LLVM IR instruments native kont entry ABI values:\n{out}"
+        );
+        assert!(
+            out.contains("prism_main") && out.contains(" main\\0A"),
+            "LLVM IR table includes the native main symbol and Core name:\n{out}"
+        );
+        assert!(
+            out.contains("@prism_native_kont_ptrs = constant")
+                && out.contains("@prism_native_kont_ptrs_len = constant")
+                && out.contains("ptr @prism_main"),
+            "LLVM IR embeds an exact function-pointer kont lookup table:\n{out}"
+        );
     }
 
     /// A mismatched scheme is rejected on the header, before any body is decoded.

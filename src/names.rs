@@ -68,7 +68,7 @@ pub const RUN_LIFO: &str = "Concurrent.run_lifo";
 // is why it keys off the wrapper names rather than the raw capability operations:
 // a program that performs a capability directly (and installs its own handler,
 // e.g. `run_io(\() -> rng_rand(()))`) is deliberately left unwrapped. These are
-// load-bearing prelude names like `main`/`run_io`; a drift guard test asserts each
+// required prelude names like `main`/`run_io`; a drift guard test asserts each
 // resolves to a prelude function so a rename fails loudly instead of silently
 // changing codegen.
 pub const CAP_WRAPPERS: &[&str] = &[
@@ -143,7 +143,7 @@ pub const HASH_METHOD: &str = "hash";
 // signatures by the same drift guard.
 pub const FMAP_METHOD: &str = "fmap";
 pub const POW_METHOD: &str = "pow";
-// The numerical tower methods (`NUM.md`): the arithmetic operators dispatch
+// The numeric operator methods: the arithmetic operators dispatch
 // through these when an operand is `Num`/`Div`-polymorphic, and the prelude
 // instance bodies define them. Names deliberately avoid `add`/`mul`/`negate`,
 // which ordinary corpus programs define as free functions; a collision would make
@@ -638,7 +638,7 @@ mod tests {
         WIRE_TAG,
     };
 
-    // The capability wrappers and Replay drivers are load-bearing prelude names
+    // The capability wrappers and Replay drivers are required prelude names
     // the desugarer and elaborator match by string to decide the world-handler
     // wrapping and output routing. A rename in the prelude without a matching edit
     // here would silently change codegen, so pin each name to its definition: a

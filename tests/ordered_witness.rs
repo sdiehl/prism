@@ -1,4 +1,4 @@
-// The branded-witness half of S3's payoff pair. `with_ordering` hands its body a
+// The branded-witness ordering path. `with_ordering` hands its body a
 // witness whose brand is a fresh, rigid, scope-local skolem, so a map built under
 // one witness carries a brand that a second witness's brand cannot unify with.
 // Mixing two witnesses' maps is therefore a compile-time type error, and the

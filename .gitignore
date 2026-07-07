@@ -13,6 +13,7 @@
 *.prism_rt.c
 /a.out
 /models/.lake
+/models/fixtures/*.json
 /docs/src/pkg
 /public
 /result

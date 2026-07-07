@@ -9,9 +9,11 @@
 //! module path and keeps a visited set, so import cycles load each file once
 //! rather than looping.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::error::Error;
 use crate::parse::parse;
@@ -23,15 +25,166 @@ pub struct Module {
     pub prog: Program,
 }
 
+/// Content identity of a source bundle served from the package store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceBundleIdentity {
+    pub kind: SourceBundleKind,
+    pub artifact_kind: SourceBundleArtifactKind,
+    pub scheme: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceBundleArtifactKind {
+    Stdlib,
+    Package,
+}
+
+impl SourceBundleArtifactKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdlib => "stdlib-source-bundle",
+            Self::Package => "source-bundle",
+        }
+    }
+}
+
+impl fmt::Display for SourceBundleArtifactKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceBundleKind {
+    Std,
+    Package {
+        name: String,
+        origin: SourceBundleOrigin,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceBundleOrigin {
+    HashPin,
+    Git(String),
+}
+
+impl SourceBundleOrigin {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::HashPin => "hash-pin",
+            Self::Git(origin) => origin,
+        }
+    }
+}
+
+impl SourceBundleIdentity {
+    #[must_use]
+    pub fn stdlib(scheme: impl Into<String>, root: impl Into<String>) -> Self {
+        Self {
+            kind: SourceBundleKind::Std,
+            artifact_kind: SourceBundleArtifactKind::Stdlib,
+            scheme: scheme.into(),
+            root: root.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn package(
+        name: impl Into<String>,
+        scheme: impl Into<String>,
+        root: impl Into<String>,
+    ) -> Self {
+        Self::package_with_origin(name, SourceBundleOrigin::HashPin, scheme, root)
+    }
+
+    #[must_use]
+    pub fn package_with_origin(
+        name: impl Into<String>,
+        origin: SourceBundleOrigin,
+        scheme: impl Into<String>,
+        root: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: SourceBundleKind::Package {
+                name: name.into(),
+                origin,
+            },
+            artifact_kind: SourceBundleArtifactKind::Package,
+            scheme: scheme.into(),
+            root: root.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn descriptor(&self) -> String {
+        match &self.kind {
+            SourceBundleKind::Std => {
+                format!("{}@{}:{}", self.artifact_kind, self.scheme, self.root)
+            }
+            SourceBundleKind::Package { name, origin } => {
+                format!(
+                    "{}@{}@{}@{}:{}",
+                    name,
+                    origin.as_str(),
+                    self.artifact_kind,
+                    self.scheme,
+                    self.root
+                )
+            }
+        }
+    }
+}
+
 /// One entry in the module search path: a source directory on disk, or the
 /// in-binary standard library (a table of dotted module path to source text).
 #[derive(Debug, Clone)]
 pub enum Root {
     Dir(PathBuf),
     Embedded(&'static [(&'static str, &'static str)]),
+    SourceBundle {
+        label: String,
+        identity: Option<SourceBundleIdentity>,
+        modules: Arc<BTreeMap<String, String>>,
+    },
 }
 
 impl Root {
+    /// A module root backed by an already-decoded source bundle.
+    #[must_use]
+    pub fn source_bundle(label: String, modules: BTreeMap<String, String>) -> Self {
+        Self::SourceBundle {
+            label,
+            identity: None,
+            modules: Arc::new(modules),
+        }
+    }
+
+    /// A module root backed by a source bundle with explicit content identity.
+    #[must_use]
+    pub fn identified_source_bundle(
+        label: String,
+        identity: SourceBundleIdentity,
+        modules: BTreeMap<String, String>,
+    ) -> Self {
+        Self::SourceBundle {
+            label,
+            identity: Some(identity),
+            modules: Arc::new(modules),
+        }
+    }
+
+    #[must_use]
+    pub const fn source_bundle_identity(&self) -> Option<&SourceBundleIdentity> {
+        match self {
+            Self::SourceBundle { identity, .. } => identity.as_ref(),
+            Self::Dir(_) | Self::Embedded(_) => None,
+        }
+    }
+
     /// Fetch the source of module `path` from this root, or `None` if absent
     /// here (so the next root is tried). A "not found" miss falls through, as
     /// does an "unsupported" miss: a `Dir` root on a platform with no filesystem
@@ -70,6 +223,7 @@ impl Root {
                     .find(|(name, _)| *name == key)
                     .map(|(_, src)| (*src).to_string()))
             }
+            Self::SourceBundle { modules, .. } => Ok(modules.get(&path.join(".")).cloned()),
         }
     }
 }
@@ -81,6 +235,7 @@ fn searched(roots: &[Root]) -> String {
         .map(|r| match r {
             Root::Dir(p) => p.display().to_string(),
             Root::Embedded(_) => "<stdlib>".to_string(),
+            Root::SourceBundle { label, .. } => label.clone(),
         })
         .collect::<Vec<_>>()
         .join(", ")

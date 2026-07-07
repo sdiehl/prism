@@ -1,6 +1,6 @@
 // Branching timelines: pause a deterministic boids swarm at any step, poke one
 // agent, and fork. Replay-to-N shipped with the scrubber; this adds the other
-// half the v0.6 demo fenced off, the run-FROM-state export (`boids_run_from`)
+// half of the browser interaction, the run-FROM-state export (`boids_run_from`)
 // and the timeline frontend. A branch is a pure function of its forked state and
 // step count, so both branches persist AND each reproduces byte-for-byte: the
 // determinism claim, made playable. The whole trajectory (positions AND

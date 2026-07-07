@@ -1,0 +1,41 @@
+-- A tiny content-addressed timezone package seed.
+--
+-- The real IANA database is intentionally not frozen into Std. This module is a
+-- small deterministic slice that proves the package path: named zones are data,
+-- offsets apply to `Time.Wall`, and the source can travel as a package bundle.
+
+import Time (..)
+
+pub type Zone = Zone { name: String, offset_minutes: Int } deriving (Eq, Show)
+
+pub fn zone_name(z : Zone) : String = z.name
+
+pub fn zone_offset_minutes(z : Zone) : Int = z.offset_minutes
+
+pub fn utc() : Zone = Zone { name = "UTC", offset_minutes = 0 }
+
+pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 0 }
+
+pub fn america_new_york() : Zone =
+  Zone { name = "America/New_York", offset_minutes = 0 - 300 }
+
+pub fn asia_tokyo() : Zone = Zone { name = "Asia/Tokyo", offset_minutes = 540 }
+
+pub fn offset_duration(z : Zone) : Duration = minutes(zone_offset_minutes(z))
+
+pub fn wall_in_zone(w : Wall, z : Zone) : Wall = wall_add(w, offset_duration(z))
+
+pub fn format_in_zone(w : Wall, z : Zone) : String =
+  "{format_rfc3339(wall_in_zone(w, z))} {zone_name(z)}"
+
+pub fn find_zone(name : String) : Option(Zone) =
+  if name == "UTC" then
+    Some(utc())
+  elif name == "Europe/London" then
+    Some(europe_london())
+  elif name == "America/New_York" then
+    Some(america_new_york())
+  elif name == "Asia/Tokyo" then
+    Some(asia_tokyo())
+  else
+    None

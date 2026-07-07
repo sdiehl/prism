@@ -49,10 +49,10 @@ fn keep(x) =
   return x
 
 == fip ==
-Type Error: function `keep` is marked `fip` but is not linear (has a borrowed parameter)
+Type Error: usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
    ╭─[ <source>:4:1 ]
    │
  4 │ fip fn keep(borrow x) = x
    │ ────────────┬────────────  
-   │             ╰────────────── function `keep` is marked `fip` but is not linear (has a borrowed parameter)
+   │             ╰────────────── usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
 ───╯

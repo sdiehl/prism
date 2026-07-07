@@ -1,0 +1,29 @@
+---
+source: tests/alloc_certificate.rs
+assertion_line: 51
+expression: out
+---
+=== closure value ===
+allocation certificate `without alloc` failed for function `make`: allocates a fresh closure (no reuse token available)
+witness: a lambda/thunk value must be materialized as a closure cell; call a named function directly or move the lambda outside the zero-allocation region
+=== explicit fbip allocation ===
+usage check `fbip` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+=== fip calls fbip ===
+usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
+witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
+=== fresh constructor ===
+allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+=== fresh tuple ===
+allocation certificate `without alloc` failed for function `pair`: allocates a fresh `tuple` (no reuse token available)
+witness: `tuple` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+=== indirect call ===
+allocation certificate `without alloc` failed for function `apply`: calls a first-class function value
+witness: indirect calls have no callee certificate at this call site; call a named `fip`/`without alloc` function directly or move the call outside the zero-allocation region
+=== lifted block ===
+allocation certificate `without alloc` failed for block: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+=== uncertified callee ===
+allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
+witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree

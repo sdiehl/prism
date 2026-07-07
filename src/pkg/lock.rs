@@ -10,8 +10,9 @@
 //! re-fetched, or re-verified.
 //!
 //! ```text
-//! prism-lock<TAB>v1
-//! <name><TAB><root-hash><TAB><source>
+//! prism-lock<TAB>v2
+//! std<TAB><scheme><TAB><root-hash>
+//! <name><TAB><scheme><TAB><root-hash><TAB><source>
 //! ```
 //!
 //! The `<source>` field is space-tokenized, mirroring the store index's
@@ -22,13 +23,15 @@
 
 use std::fmt::Write as _;
 
+use crate::core::HASH_SCHEME;
 use crate::error::Error;
 use crate::project::DepSource;
 
 // The lock is its own format family, versioned independently of the store index
 // files it is modeled on; the separators match theirs (TAB between fields, space
 // within a field's list) but are declared here because this is a distinct file.
-const LOCK_HEADER: &str = "prism-lock\tv1";
+const LOCK_HEADER_V1: &str = "prism-lock\tv1";
+const LOCK_HEADER: &str = "prism-lock\tv2";
 const FIELD_SEP: char = '\t';
 const TOKEN_SEP: char = ' ';
 
@@ -37,10 +40,10 @@ const SRC_GIT: &str = "git";
 const SRC_HASH: &str = "hash";
 
 // The reserved name of the standard-library pin. Unlike a dependency row, the
-// Std pin has no `source` field: its bytes are the compiler's embedded stdlib, so
-// the pin records only the root hash the lockfile was resolved against. Written
-// as a distinguished two-field line (`std<TAB><root-hash>`) so it never collides
-// with a three-field dependency row, even one a project happened to name `std`.
+// Std pin has no `source` field: its bytes are the compiler's embedded stdlib,
+// so the pin records the hash scheme and root hash the lockfile was resolved
+// against. Written as a distinguished line under the reserved name `std` so it
+// never collides with a dependency row, even one a project happened to name `std`.
 const STD_ROOT_NAME: &str = "std";
 
 /// The resolved pin of one dependency: its name, the root hash it resolved to,
@@ -48,6 +51,7 @@ const STD_ROOT_NAME: &str = "std";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockEntry {
     pub name: String,
+    pub scheme: String,
     pub hash: String,
     pub source: DepSource,
 }
@@ -60,6 +64,8 @@ pub struct Lock {
     /// `driver::stdlib_hash` produces). `None` when the lock predates a Std pin,
     /// in which case the build runs against whatever stdlib the compiler embeds.
     pub std_root: Option<String>,
+    /// The hash scheme that gives `std_root` its meaning.
+    pub std_scheme: Option<String>,
     pub entries: Vec<LockEntry>,
 }
 
@@ -69,12 +75,19 @@ impl Lock {
     /// the lock was resolved against ([`crate::pkg::std_pin_status`]).
     pub fn pin_std(&mut self, root: String) {
         self.std_root = Some(root);
+        self.std_scheme = Some(HASH_SCHEME.to_string());
     }
 
     /// The pinned standard-library root, if the lock records one.
     #[must_use]
     pub fn std_root(&self) -> Option<&str> {
         self.std_root.as_deref()
+    }
+
+    /// The hash scheme of the pinned standard-library root, if present.
+    #[must_use]
+    pub fn std_scheme(&self) -> Option<&str> {
+        self.std_scheme.as_deref()
     }
 
     /// Insert or replace the pin for `entry.name`, keeping the entries sorted.
@@ -92,6 +105,41 @@ impl Lock {
         self.entries.iter().find(|e| e.name == name)
     }
 
+    /// Ensure every lockfile hash is expressed under the hash scheme this
+    /// compiler understands.
+    ///
+    /// # Errors
+    /// Fails when the Std pin or any dependency row names a foreign hash scheme.
+    pub fn validate_current_scheme(&self) -> Result<(), Error> {
+        if let Some(pinned) = self.std_root() {
+            match self.std_scheme() {
+                Some(HASH_SCHEME) => {}
+                Some(scheme) => {
+                    return Err(Error::Resolve(format!(
+                        "prism.lock pins Std root {pinned} under foreign hash scheme {scheme}; \
+                         this build speaks {HASH_SCHEME}"
+                    )));
+                }
+                None => {
+                    return Err(Error::Resolve(format!(
+                        "prism.lock pins Std root {pinned} without a hash scheme; this build \
+                         speaks {HASH_SCHEME}"
+                    )));
+                }
+            }
+        }
+        for entry in &self.entries {
+            if entry.scheme != HASH_SCHEME {
+                return Err(Error::Resolve(format!(
+                    "prism.lock pins dependency `{}` under foreign hash scheme {}; this build \
+                     speaks {HASH_SCHEME}",
+                    entry.name, entry.scheme
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Parse a `prism.lock` document.
     ///
     /// # Errors
@@ -99,27 +147,38 @@ impl Lock {
     /// source token.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let mut lines = text.lines();
-        if lines.next() != Some(LOCK_HEADER) {
+        let header = lines.next();
+        if header != Some(LOCK_HEADER_V1) && header != Some(LOCK_HEADER) {
             return Err(Error::Resolve(format!(
                 "prism.lock: missing or unrecognized header (expected {LOCK_HEADER:?})"
             )));
         }
         let mut std_root = None;
+        let mut std_scheme = None;
         let mut entries = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
-            // The Std pin is the two-field `std<TAB><hash>` line; everything else
-            // is a three-field dependency row.
-            let fields: Vec<&str> = line.splitn(3, FIELD_SEP).collect();
-            if let [name, hash] = fields.as_slice() {
-                if *name == STD_ROOT_NAME {
+            let fields: Vec<&str> = line.split(FIELD_SEP).collect();
+            match (header, fields.as_slice()) {
+                (Some(LOCK_HEADER_V1), [name, hash]) if *name == STD_ROOT_NAME => {
+                    std_scheme = Some(HASH_SCHEME.to_string());
                     std_root = Some((*hash).to_string());
                     continue;
                 }
+                (Some(LOCK_HEADER), [name, scheme, hash]) if *name == STD_ROOT_NAME => {
+                    std_scheme = Some((*scheme).to_string());
+                    std_root = Some((*hash).to_string());
+                    continue;
+                }
+                _ => {}
             }
-            entries.push(parse_row(line)?);
+            entries.push(parse_row(header, line)?);
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(Self { std_root, entries })
+        Ok(Self {
+            std_root,
+            std_scheme,
+            entries,
+        })
     }
 
     /// Render the lock to its committed text.
@@ -131,14 +190,21 @@ impl Lock {
         let mut out = String::from(LOCK_HEADER);
         out.push('\n');
         if let Some(root) = &self.std_root {
+            let scheme = self.std_scheme.as_deref().unwrap_or(HASH_SCHEME);
+            reject_separators(scheme)?;
             reject_separators(root)?;
-            let _ = writeln!(out, "{STD_ROOT_NAME}{FIELD_SEP}{root}");
+            let _ = writeln!(out, "{STD_ROOT_NAME}{FIELD_SEP}{scheme}{FIELD_SEP}{root}");
         }
         for e in &self.entries {
             let source = source_field(&e.source)?;
             reject_separators(&e.name)?;
+            reject_separators(&e.scheme)?;
             reject_separators(&e.hash)?;
-            let _ = writeln!(out, "{}{FIELD_SEP}{}{FIELD_SEP}{source}", e.name, e.hash);
+            let _ = writeln!(
+                out,
+                "{}{FIELD_SEP}{}{FIELD_SEP}{}{FIELD_SEP}{source}",
+                e.name, e.scheme, e.hash
+            );
         }
         Ok(out)
     }
@@ -162,19 +228,25 @@ fn token_field(tokens: &[&str]) -> Result<String, Error> {
     Ok(tokens.join(&TOKEN_SEP.to_string()))
 }
 
-fn parse_row(line: &str) -> Result<LockEntry, Error> {
-    let mut fields = line.splitn(3, FIELD_SEP);
-    let (Some(name), Some(hash), Some(source)) = (fields.next(), fields.next(), fields.next())
-    else {
-        return Err(Error::Resolve(format!(
-            "prism.lock: malformed row (want name{FIELD_SEP:?}hash{FIELD_SEP:?}source): {line:?}"
-        )));
-    };
-    Ok(LockEntry {
-        name: name.to_string(),
-        hash: hash.to_string(),
-        source: parse_source_field(source)?,
-    })
+fn parse_row(header: Option<&str>, line: &str) -> Result<LockEntry, Error> {
+    let fields: Vec<&str> = line.splitn(4, FIELD_SEP).collect();
+    match (header, fields.as_slice()) {
+        (Some(LOCK_HEADER_V1), [name, hash, source]) => Ok(LockEntry {
+            name: (*name).to_string(),
+            scheme: HASH_SCHEME.to_string(),
+            hash: (*hash).to_string(),
+            source: parse_source_field(source)?,
+        }),
+        (Some(LOCK_HEADER), [name, scheme, hash, source]) => Ok(LockEntry {
+            name: (*name).to_string(),
+            scheme: (*scheme).to_string(),
+            hash: (*hash).to_string(),
+            source: parse_source_field(source)?,
+        }),
+        _ => Err(Error::Resolve(format!(
+            "prism.lock: malformed row (want name{FIELD_SEP:?}scheme{FIELD_SEP:?}hash{FIELD_SEP:?}source): {line:?}"
+        ))),
+    }
 }
 
 fn parse_source_field(field: &str) -> Result<DepSource, Error> {
@@ -214,6 +286,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(LockEntry {
             name: "http".to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: "a3f9".to_string(),
             source: DepSource::Git {
                 url: "github.com/x/http".to_string(),
@@ -222,11 +295,13 @@ mod tests {
         });
         lock.set(LockEntry {
             name: "geo".to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: "7c21".to_string(),
             source: DepSource::Path(PathBuf::from("../geo")),
         });
         lock.set(LockEntry {
             name: "crypto".to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: "9f86".to_string(),
             source: DepSource::Hash("9f86".to_string()),
         });
@@ -254,6 +329,7 @@ mod tests {
         let mut lock = sample();
         lock.set(LockEntry {
             name: "geo".to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: "beef".to_string(),
             source: DepSource::Path(PathBuf::from("../geo2")),
         });
@@ -269,9 +345,11 @@ mod tests {
         // The Std pin is the first line under the header, before any dependency.
         let mut lines = text.lines();
         assert_eq!(lines.next(), Some(LOCK_HEADER));
-        assert_eq!(lines.next(), Some("std\tdeadbeef"));
+        let expected_std = format!("std\t{HASH_SCHEME}\tdeadbeef");
+        assert_eq!(lines.next(), Some(expected_std.as_str()));
         assert_eq!(Lock::parse(&text).unwrap(), lock);
         assert_eq!(Lock::parse(&text).unwrap().std_root(), Some("deadbeef"));
+        assert_eq!(Lock::parse(&text).unwrap().std_scheme(), Some(HASH_SCHEME));
     }
 
     #[test]
@@ -291,9 +369,40 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(LockEntry {
             name: "bad".to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: "00".to_string(),
             source: DepSource::Path(PathBuf::from("../a b")),
         });
         assert!(lock.render().is_err());
+    }
+
+    #[test]
+    fn legacy_v1_rows_parse_as_current_scheme() {
+        let text = "prism-lock\tv1\nstd\tdeadbeef\ngeo\t7c21\tpath ../geo\n";
+        let lock = Lock::parse(text).unwrap();
+        assert_eq!(lock.std_root(), Some("deadbeef"));
+        assert_eq!(lock.std_scheme(), Some(HASH_SCHEME));
+        let geo = lock.get("geo").unwrap();
+        assert_eq!(geo.scheme, HASH_SCHEME);
+        assert_eq!(geo.hash, "7c21");
+        lock.validate_current_scheme().unwrap();
+    }
+
+    #[test]
+    fn current_scheme_validation_rejects_foreign_std() {
+        let text = "prism-lock\tv2\nstd\tfuture-scheme\tdeadbeef\n";
+        let lock = Lock::parse(text).unwrap();
+        let err = lock.validate_current_scheme().unwrap_err().to_string();
+        assert!(err.contains("Std root"));
+        assert!(err.contains("future-scheme"));
+    }
+
+    #[test]
+    fn current_scheme_validation_rejects_foreign_dependency() {
+        let text = "prism-lock\tv2\ngeo\tfuture-scheme\t7c21\tpath ../geo\n";
+        let lock = Lock::parse(text).unwrap();
+        let err = lock.validate_current_scheme().unwrap_err().to_string();
+        assert!(err.contains("dependency `geo`"));
+        assert!(err.contains("future-scheme"));
     }
 }

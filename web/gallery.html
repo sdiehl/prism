@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/png" href="/prism.png" />
     <title>Prism gallery</title>
-    <meta name="description" content="Interactive Prism examples: deterministic simulations you can scrub backward and forward, each a pure function of its step index, replayed byte-for-byte in WebAssembly." />
+    <meta name="description" content="Interactive Prism examples and WebAssembly demos." />
     <meta name="theme-color" content="#2f6f4f" />
   </head>
   <body class="gallery-body">
@@ -24,13 +24,6 @@
     <main class="gallery-main">
       <div class="gallery-lead">
         <h2>Interactive examples</h2>
-        <p>
-          Each example is a deterministic simulation written in Prism and compiled to
-          <a class="doc-link" href="https://sdiehl.github.io/prism/compiler.html#webassembly" target="_blank" rel="noopener">WebAssembly</a>.
-          Every frame is a pure function of its step index, so you can scrub backward and forward and the
-          motion <a class="doc-link" href="https://sdiehl.github.io/prism/spec.html#record-and-replay" target="_blank" rel="noopener">replays</a>
-          <b>byte-for-byte</b>. Not an undo log, the same computation re-run.
-        </p>
       </div>
       <div class="gallery-grid">
         <a class="card" href="../scrub/">
@@ -116,6 +109,37 @@
             <p class="card-blurb">
               A fiber swarm over a channel under a seeded-shuffle scheduler. Every hostile interleaving is
               different; every final state is byte-identical. The determinism theorem, counted live.
+            </p>
+          </div>
+        </a>
+        <a class="card" href="../schedule/">
+          <div class="card-art">
+            <svg viewBox="0 0 160 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <g stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="0.55">
+                <path d="M26,28 C54,16 72,36 92,28 S124,24 140,42" />
+                <path d="M26,72 C58,56 76,78 100,62 S128,58 140,76" />
+                <path d="M44,30 L56,68" />
+                <path d="M82,30 L92,62" />
+                <path d="M120,38 L118,66" />
+              </g>
+              <g fill="currentColor">
+                <circle cx="26" cy="28" r="5" />
+                <circle cx="56" cy="68" r="5" opacity="0.72" />
+                <circle cx="82" cy="30" r="5" opacity="0.86" />
+                <circle cx="92" cy="62" r="5" opacity="0.66" />
+                <circle cx="120" cy="38" r="5" opacity="0.78" />
+                <circle cx="140" cy="76" r="5" opacity="0.58" />
+              </g>
+            </svg>
+          </div>
+          <div class="card-body">
+            <div class="card-title">
+              <h3>Schedule map</h3>
+              <span class="card-pill">world</span>
+            </div>
+            <p class="card-blurb">
+              Browse seeded scheduler paths as nodes. Each interleaving is different, every final-state hash
+              agrees, and clicking a node shows the concrete fiber trace that got there.
             </p>
           </div>
         </a>

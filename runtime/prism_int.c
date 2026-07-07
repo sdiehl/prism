@@ -255,8 +255,21 @@ long prism_big_show(long a) {
     if (!buf) abort();
     char *o = buf;
     if (big_count(a) < 0) *o++ = '-';
-    o += snprintf(o, (size_t)(buf + cap - o), "%lu", chunk[k - 1]);
-    for (long i = k - 2; i >= 0; i--) o += snprintf(o, (size_t)(buf + cap - o), "%019lu", chunk[i]);
+    char tmp[32];
+    int written = snprintf(tmp, sizeof tmp, "%lu", chunk[k - 1]);
+    if (written < 0 || (size_t)written >= sizeof tmp) abort();
+    size_t len = (size_t)written;
+    if (len > (size_t)(buf + cap - o)) abort();
+    memcpy(o, tmp, len);
+    o += len;
+    for (long i = k - 2; i >= 0; i--) {
+        written = snprintf(tmp, sizeof tmp, "%019lu", chunk[i]);
+        if (written < 0 || (size_t)written >= sizeof tmp) abort();
+        len = (size_t)written;
+        if (len > (size_t)(buf + cap - o)) abort();
+        memcpy(o, tmp, len);
+        o += len;
+    }
     long cell = prism_str_lit(buf, o - buf);
     free(t);
     free(chunk);

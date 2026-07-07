@@ -1,3 +1,5 @@
+-- prism-example: attempts=2
+--
 import Replay (..)
 
 -- Durable record/replay with output suppressed on resume. A workflow reads a
@@ -43,7 +45,7 @@ fn draw(total, stop, done, acc) =
 
 -- Reads the config (observation 1), prints a line about it, then draws `total`
 -- randoms; crashes after the `stop` step's draw when `stop >= 0`.
-fn flow(total, stop, u) =
+fn flow(total, stop, _u) =
   let cfg = read_file(cfg_path())
   println("config has {str_len(cfg)} bytes")
   draw(total, stop, 1, 0)

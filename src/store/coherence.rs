@@ -14,7 +14,7 @@
 //! `Ord(Int)` is exactly the incoherence the store exists to prevent. A
 //! same-hash re-commit is a no-op.
 //!
-//! Because the store is opt-in (a cache, never load-bearing), this fires only on
+//! Because the store is opt-in (a cache, never required for correctness), this fires only on
 //! the commit path; normal compilation is unchanged.
 
 use std::collections::BTreeMap;

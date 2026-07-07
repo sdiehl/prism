@@ -1,20 +1,17 @@
 import Prism
 
 /-
-An environment-based CEK abstract machine for the Prism core, mirroring the
-reference interpreter in `src/eval/mod.rs` (the differential-testing "oracle").
-Where `Prism.lean` gives a substitution small-step `Step`, this file gives the
-machine the compiler actually runs: explicit runtime values `Rv` carrying
-closures/thunks over an environment, a continuation `Stack` of `Frame`s, and a
-deterministic transition `step` transcribing the Rust `step`/`cont`/`perform`.
+This is the executable CEK machine for Prism Core. `Prism.lean` gives the clean
+substitution step relation; this file gives the thing that looks like the Rust
+interpreter, with environments, closures, thunks, frames, and a continuation
+stack.
 
-The machine is a *function* `step : Core -> Conf -> Option Conf` (`none` = halt or
-stuck), so it is deterministic by construction and executable: `run` reduces a
-closed program and `Sanity.lean` checks concrete oracle runs by `rfl`. Effects
-(`doOp`/`handle`/`mask`) are modeled faithfully, including the Koka-style mask
-skip count and deep (handler-included) continuation capture that makes `resume`
-multishot. Pure I/O (`print`/`readInt`/builtins) erases to a value, matching the
-model's stance that effects are lowered away before this core runs.
+`step` is an honest function from a configuration to the next configuration, or
+`none` when the machine halts or gets stuck. Effects run here too. The stack walk
+for `doOp` crosses masks and handlers the same way the Rust oracle does, and
+captured continuations carry the frames needed for multishot `resume`.
+
+Continuations gonna continue.
 -/
 namespace Prism
 
@@ -35,7 +32,11 @@ inductive Rv where
 inductive Frame where
   | bind (x : String) (n : Comp) (env : List (String × Rv))
   | args (as : List Value) (env : List (String × Rv))
-  | handle (ops : List HandleOp) (retVar : Option String) (retBody : Option Comp) (env : List (String × Rv))
+  | handle
+      (ops : List HandleOp)
+      (retVar : Option String)
+      (retBody : Option Comp)
+      (env : List (String × Rv))
   | mask (ops : List String)
 
 end
@@ -141,6 +142,7 @@ def matchArmsR (scrut : Rv) : List (Pat × Comp) → Option (Comp × List (Strin
       | none => matchArmsR scrut rest
 
 /-- Look up the handler clause for `op` in a handler's op list. -/
+@[prism_model]
 def handlerFor (op : String) : List HandleOp → Option (List String × String × Comp)
   | [] => none
   | .mk name ps r b :: rest => if op = name then some (ps, r, b) else handlerFor op rest
@@ -158,6 +160,7 @@ def extendEnv : List String → List Rv → Env → Env
 /-- Walk the stack to the nearest handler for `op` not shadowed by a matching
     mask, capturing the crossed frames (handler included: deep semantics). The
     captured slice becomes a `resume` value, reversed so replay order matches. -/
+@[prism_model]
 def findHandler (op : String) (argvs : List Rv) : Nat → List Frame → Stack → Option Conf
   | _, _, [] => none
   | skip, captured, fr :: rest =>
@@ -179,6 +182,7 @@ def findHandler (op : String) (argvs : List Rv) : Nat → List Frame → Stack �
 
 /-- One transition of the machine, transcribing `step`/`cont`/`perform`.
     `none` means a halted (`ret` on empty stack) or stuck/error configuration. -/
+@[prism_model]
 def step (Γ : Core) : Conf → Option Conf
   | (.eval c env, stk) =>
     match c with
@@ -206,7 +210,17 @@ def step (Γ : Core) : Conf → Option Conf
           | none => none
       | .call name args =>
         match lookupFn Γ name, atomEval.atomEvalL env args with
-          | some f, some avs => if avs.length < f.params.length then some (.ret (.closure (f.params.drop avs.length) f.body (extendEnv f.params avs [])), stk) else some (.eval f.body (extendEnv f.params avs []), stk)
+          | some f, some avs =>
+            if avs.length < f.params.length then
+              some
+                ( .ret
+                    (.closure
+                      (f.params.drop avs.length)
+                      f.body
+                      (extendEnv f.params avs [])),
+                  stk)
+            else
+              some (.eval f.body (extendEnv f.params avs []), stk)
           | _, _ => none
       | .case scrut arms =>
         match atomEval env scrut with
@@ -248,7 +262,17 @@ def step (Γ : Core) : Conf → Option Conf
             match atomEval.atomEvalL env args with
               | some avs =>
                 match w with
-                  | .closure ps body cenv => if avs.length < ps.length then some (.ret (.closure (ps.drop avs.length) body (extendEnv ps avs cenv)), rest) else some (.eval body (extendEnv ps avs cenv), rest)
+                  | .closure ps body cenv =>
+                    if avs.length < ps.length then
+                      some
+                        ( .ret
+                            (.closure
+                              (ps.drop avs.length)
+                              body
+                              (extendEnv ps avs cenv)),
+                          rest)
+                    else
+                      some (.eval body (extendEnv ps avs cenv), rest)
                   | .resume frames =>
                     match avs with
                       | a :: _ => some (.ret a, frames ++ rest)
@@ -257,6 +281,7 @@ def step (Γ : Core) : Conf → Option Conf
               | none => none
 
 /-- Iterate the machine for at most `fuel` steps, stopping when it halts. -/
+@[prism_model]
 def run : Nat → Core → Conf → Conf
   | 0, _, c => c
   | n + 1, Γ, c =>
@@ -265,12 +290,15 @@ def run : Nat → Core → Conf → Conf
       | none => c
 
 /-- Load a closed computation into an initial configuration. -/
+@[prism_model]
 def load (c : Comp) : Conf := (.eval c [], [])
 
 /-- The machine transition as a relation. Since `step` is a function, this is
     deterministic by construction (the oracle has at most one next state). -/
 def MStep (Γ : Core) (a b : Conf) : Prop := step Γ a = some b
 
+/-- If the machine takes one step from the same state two ways, those next
+    states are the same. -/
 theorem MStep.deterministic {Γ : Core} {a b c : Conf} (h1 : MStep Γ a b) (h2 : MStep Γ a c) : b = c :=
   by
     unfold MStep at h1 h2
@@ -279,13 +307,19 @@ theorem MStep.deterministic {Γ : Core} {a b c : Conf} (h1 : MStep Γ a b) (h2 :
 
 /-- Reflexive-transitive closure of the machine transition: a full run. -/
 inductive Runs (Γ : Core) : Conf → Conf → Prop where
-  | refl : Runs Γ a a
-  | step : step Γ a = some b → Runs Γ b c → Runs Γ a c
+  | refl {a : Conf} : Runs Γ a a
+  | step {a b c : Conf} : Prism.step Γ a = some b → Runs Γ b c → Runs Γ a c
 
+/-- Runs compose: if the machine reaches `b`, and from there reaches `c`, then
+    it reaches `c` from the start. -/
 theorem Runs.trans {Γ : Core} {a b c : Conf} (hab : Runs Γ a b) (hbc : Runs Γ b c) : Runs Γ a c :=
   by induction hab with
       | refl => exact hbc
       | step hs _ ih => exact Runs.step hs (ih hbc)
+
+/-- A single successful `step` is also a whole run of length one. -/
+theorem Runs.one {Γ : Core} {a b : Conf} (h : Prism.step Γ a = some b) : Runs Γ a b :=
+  .step h .refl
 
 /--
 Big-step environment natural semantics for the effect-free core, the
@@ -295,30 +329,97 @@ mirror the recursive intent of `src/eval/mod.rs` directly (no continuation
 stack), so they double as a readable denotation of the oracle.
 -/
 inductive BEval (Γ : Core) : Env → Comp → Rv → Prop where
-  | ret : atomEval env v = some w → BEval Γ env (.ret v) w
-  | bind : BEval Γ env m wm → BEval Γ ((x, wm) :: env) n w → BEval Γ env (.bind m x n) w
-  | forceThunk : atomEval env v = some (.thunk c e) → BEval Γ e c w → BEval Γ env (.force v) w
-  | forceVal : atomEval env v = some w → (∀ c e, w ≠ .thunk c e) → BEval Γ env (.force v) w
-  | lam : BEval Γ env (.lam xs body) (.closure xs body env)
-  | appFull : BEval Γ env f (.closure ps body cenv) → atomEval.atomEvalL env args = some avs → ¬avs.length < ps.length → BEval Γ (extendEnv ps avs cenv) body w → BEval Γ env (.app f args) w
-  | appPart : BEval Γ env f (.closure ps body cenv) → atomEval.atomEvalL env args = some avs → avs.length < ps.length → BEval Γ env (.app f args) (.closure (ps.drop avs.length) body (extendEnv ps avs cenv))
-  | iteT : atomEval env cnd = some (.bool true) → BEval Γ env t w → BEval Γ env (.ite cnd t e) w
-  | iteF : atomEval env cnd = some (.bool false) → BEval Γ env e w → BEval Γ env (.ite cnd t e) w
-  | prim : atomEval env a = some av → atomEval env b = some bv → deltaR op av bv = some w → BEval Γ env (.prim op a b) w
-  | neg : atomEval env v = some av → negR lane av = some w → BEval Γ env (.neg lane v) w
-  | callFull : lookupFn Γ name = some f → atomEval.atomEvalL env args = some avs → ¬avs.length < f.params.length → BEval Γ (extendEnv f.params avs []) f.body w → BEval Γ env (.call name args) w
-  | callPart : lookupFn Γ name = some f → atomEval.atomEvalL env args = some avs → avs.length < f.params.length → BEval Γ env (.call name args) (.closure (f.params.drop avs.length) f.body (extendEnv f.params avs []))
-  | case : atomEval env scrut = some sv → matchArmsR sv arms = some (body, binds) → BEval Γ (binds ++ env) body w → BEval Γ env (.case scrut arms) w
-  | withReuse : BEval Γ ((tok, .unit) :: env) body w → BEval Γ env (.withReuse tok freed body) w
-  | reuse : atomEval env v = some w → BEval Γ env (.reuse tok v) w
-  | dup : BEval Γ env (.dup v) .unit
-  | drop : BEval Γ env (.drop v) .unit
-  | print : BEval Γ env (.print v) .unit
-  | printf : BEval Γ env (.printf v) .unit
-  | prints : BEval Γ env (.prints v) .unit
-  | readInt : BEval Γ env .readInt (.int 0)
-  | floatBuiltin : BEval Γ env (.floatBuiltin n v) .unit
-  | strBuiltin : BEval Γ env (.strBuiltin n args) .unit
+  | ret {env : Env} {v : Value} {w : Rv} :
+      atomEval env v = some w →
+      BEval Γ env (.ret v) w
+  | bind {env : Env} {m n : Comp} {x : String} {wm w : Rv} :
+      BEval Γ env m wm →
+      BEval Γ ((x, wm) :: env) n w →
+      BEval Γ env (.bind m x n) w
+  | forceThunk {env e : Env} {v : Value} {c : Comp} {w : Rv} :
+      atomEval env v = some (.thunk c e) →
+      BEval Γ e c w →
+      BEval Γ env (.force v) w
+  | forceVal {env : Env} {v : Value} {w : Rv} :
+      atomEval env v = some w →
+      (∀ c e, w ≠ .thunk c e) →
+      BEval Γ env (.force v) w
+  | lam {env : Env} {xs : List String} {body : Comp} :
+      BEval Γ env (.lam xs body) (.closure xs body env)
+  | appFull
+      {env cenv : Env} {f body : Comp} {ps : List String}
+      {args : List Value} {avs : List Rv} {w : Rv} :
+      BEval Γ env f (.closure ps body cenv) →
+      atomEval.atomEvalL env args = some avs →
+      ¬avs.length < ps.length →
+      BEval Γ (extendEnv ps avs cenv) body w →
+      BEval Γ env (.app f args) w
+  | appPart
+      {env cenv : Env} {f body : Comp} {ps : List String}
+      {args : List Value} {avs : List Rv} :
+      BEval Γ env f (.closure ps body cenv) →
+      atomEval.atomEvalL env args = some avs →
+      avs.length < ps.length →
+      BEval Γ env (.app f args)
+        (.closure (ps.drop avs.length) body (extendEnv ps avs cenv))
+  | iteT {env : Env} {cnd : Value} {t e : Comp} {w : Rv} :
+      atomEval env cnd = some (.bool true) →
+      BEval Γ env t w →
+      BEval Γ env (.ite cnd t e) w
+  | iteF {env : Env} {cnd : Value} {t e : Comp} {w : Rv} :
+      atomEval env cnd = some (.bool false) →
+      BEval Γ env e w →
+      BEval Γ env (.ite cnd t e) w
+  | prim {env : Env} {a b : Value} {av bv w : Rv} {op : BinOp} :
+      atomEval env a = some av →
+      atomEval env b = some bv →
+      deltaR op av bv = some w →
+      BEval Γ env (.prim op a b) w
+  | neg {env : Env} {v : Value} {av w : Rv} {lane : NegLane} :
+      atomEval env v = some av →
+      negR lane av = some w →
+      BEval Γ env (.neg lane v) w
+  | callFull
+      {env : Env} {name : String} {f : CoreFn}
+      {args : List Value} {avs : List Rv} {w : Rv} :
+      lookupFn Γ name = some f →
+      atomEval.atomEvalL env args = some avs →
+      ¬avs.length < f.params.length →
+      BEval Γ (extendEnv f.params avs []) f.body w →
+      BEval Γ env (.call name args) w
+  | callPart
+      {env : Env} {name : String} {f : CoreFn}
+      {args : List Value} {avs : List Rv} :
+      lookupFn Γ name = some f →
+      atomEval.atomEvalL env args = some avs →
+      avs.length < f.params.length →
+      BEval Γ env (.call name args)
+        (.closure
+          (f.params.drop avs.length)
+          f.body
+          (extendEnv f.params avs []))
+  | case
+      {env binds : Env} {scrut : Value} {sv w : Rv}
+      {arms : List (Pat × Comp)} {body : Comp} :
+      atomEval env scrut = some sv →
+      matchArmsR sv arms = some (body, binds) →
+      BEval Γ (binds ++ env) body w →
+      BEval Γ env (.case scrut arms) w
+  | withReuse
+      {env : Env} {tok : String} {freed : Value} {body : Comp} {w : Rv} :
+      BEval Γ ((tok, .unit) :: env) body w →
+      BEval Γ env (.withReuse tok freed body) w
+  | reuse {env : Env} {tok : String} {v : Value} {w : Rv} :
+      atomEval env v = some w →
+      BEval Γ env (.reuse tok v) w
+  | dup {env : Env} {v : Value} : BEval Γ env (.dup v) .unit
+  | drop {env : Env} {v : Value} : BEval Γ env (.drop v) .unit
+  | print {env : Env} {v : Value} : BEval Γ env (.print v) .unit
+  | printf {env : Env} {v : Value} : BEval Γ env (.printf v) .unit
+  | prints {env : Env} {v : Value} : BEval Γ env (.prints v) .unit
+  | readInt {env : Env} : BEval Γ env .readInt (.int 0)
+  | floatBuiltin {env : Env} {n : String} {v : Value} : BEval Γ env (.floatBuiltin n v) .unit
+  | strBuiltin {env : Env} {n : String} {args : List Value} : BEval Γ env (.strBuiltin n args) .unit
 
 /--
 Forward simulation / oracle correctness: whatever the natural semantics
@@ -326,12 +427,13 @@ evaluates, the CEK machine computes, under any continuation stack `S`. The
 machine's stack discipline is therefore a faithful realization of the spec.
 Specialized to the empty stack this is `BEval Γ [] c w → Runs Γ (load c) (.ret w, [])`.
 -/
-theorem bigstep_runs {Γ : Core} {env : Env} {c : Comp} {w : Rv} (h : BEval Γ env c w) : ∀ S, Runs Γ (.eval c env, S) (.ret w, S) :=
+theorem bigstep_runs {Γ : Core} {env : Env} {c : Comp} {w : Rv}
+    (h : BEval Γ env c w) :
+    ∀ S, Runs Γ (.eval c env, S) (.ret w, S) :=
   by induction h with
       | ret hv =>
         intro S
-        exact Runs.step (by
-          simp [step, hv]) .refl
+        exact Runs.one (by simp [Prism.step, hv])
       | bind _ _ ihm ihn =>
         intro S
         refine Runs.step rfl ?_
@@ -340,95 +442,82 @@ theorem bigstep_runs {Γ : Core} {env : Env} {c : Comp} {w : Rv} (h : BEval Γ e
       | forceThunk hv _ ih =>
         intro S
         exact Runs.step (by
-          simp [step, hv]) (ih S)
+          simp [Prism.step, hv]) (ih S)
       | forceVal hv hne =>
         intro S
         refine Runs.step ?_ .refl
         revert hv hne
-        cases w <;> intro hv hne <;> first | exact absurd rfl (hne _ _) | simp [step, hv]
+        cases w <;> intro hv hne <;> first | exact absurd rfl (hne _ _) | simp [Prism.step, hv]
       | lam =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | appFull _ hargs hlen _ ihf ihb =>
         intro S
         refine Runs.step rfl ?_
         refine (ihf _).trans ?_
         refine Runs.step ?_ (ihb S)
-        simp [step, hargs, hlen]
+        simp [Prism.step, hargs, hlen]
       | appPart _ hargs hlen ihf =>
         intro S
         refine Runs.step rfl ?_
         refine (ihf _).trans ?_
-        refine Runs.step ?_ .refl
-        simp [step, hargs, hlen]
+        exact Runs.one (by simp [Prism.step, hargs, hlen])
       | iteT hc _ ih =>
         intro S
         exact Runs.step (by
-          simp [step, hc]) (ih S)
+          simp [Prism.step, hc]) (ih S)
       | iteF hc _ ih =>
         intro S
         exact Runs.step (by
-          simp [step, hc]) (ih S)
+          simp [Prism.step, hc]) (ih S)
       | prim ha hb hd =>
         intro S
-        exact Runs.step (by
-          simp [step, ha, hb, hd]) .refl
+        exact Runs.one (by simp [Prism.step, ha, hb, hd])
       | neg hv hd =>
         intro S
-        exact Runs.step (by
-          simp [step, hv, hd]) .refl
+        exact Runs.one (by simp [Prism.step, hv, hd])
       | callFull hf hargs hlen _ ihb =>
         intro S
         exact Runs.step (by
-          simp [step, hf, hargs, hlen]) (ihb S)
+          simp [Prism.step, hf, hargs, hlen]) (ihb S)
       | callPart hf hargs hlen =>
         intro S
-        exact Runs.step (by
-          simp [step, hf, hargs, hlen]) .refl
+        exact Runs.one (by simp [Prism.step, hf, hargs, hlen])
       | case hs hm _ ih =>
         intro S
         exact Runs.step (by
-          simp [step, hs, hm]) (ih S)
+          simp [Prism.step, hs, hm]) (ih S)
       | withReuse _ ih =>
         intro S
         exact Runs.step (by
-          simp [step]) (ih S)
+          simp [Prism.step]) (ih S)
       | reuse hv =>
         intro S
-        exact Runs.step (by
-          simp [step, hv]) .refl
+        exact Runs.one (by simp [Prism.step, hv])
       | dup =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | drop =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | print =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | printf =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | prints =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | readInt =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | floatBuiltin =>
         intro S
-        exact Runs.step (by
-          simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
       | strBuiltin =>
         intro S
-        exact Runs.step (by simp [step]) .refl
+        exact Runs.one (by simp [Prism.step])
 
 /-- Oracle adequacy on closed programs: the natural semantics and the machine
     agree on the final value. -/
@@ -438,7 +527,9 @@ theorem load_runs {Γ : Core} {c : Comp} {w : Rv} (h : BEval Γ [] c w) : Runs �
 /-- A run to a halted (non-stepping) configuration is unique: the machine being a
     deterministic function, two maximal runs from the same start coincide. This is
     `MStep.deterministic` lifted to whole runs. -/
-theorem runs_to_halt_unique {Γ : Core} {a n1 : Conf} (h1 : Runs Γ a n1) : step Γ n1 = none → ∀ {n2}, Runs Γ a n2 → step Γ n2 = none → n1 = n2 :=
+theorem runs_to_halt_unique {Γ : Core} {a n1 : Conf} (h1 : Runs Γ a n1) :
+    step Γ n1 = none →
+    ∀ {n2}, Runs Γ a n2 → step Γ n2 = none → n1 = n2 :=
   by induction h1 with
       | refl =>
         intro hn1 n2 h2 hn2
@@ -462,11 +553,17 @@ machine halts on exactly `w` (`load_runs`), and it halts on no other value
 licenses the CEK machine as the differential oracle: its observable result is
 the natural semantics' value, uniquely determined.
 -/
-theorem oracle_sound {Γ : Core} {c : Comp} {w : Rv} (h : BEval Γ [] c w) : Runs Γ (load c) (.ret w, []) ∧ ∀ {w'}, Runs Γ (load c) (.ret w', []) → w' = w :=
+theorem oracle_sound {Γ : Core} {c : Comp} {w : Rv}
+    (h : BEval Γ [] c w) :
+    Runs Γ (load c) (.ret w, []) ∧
+      ∀ {w'}, Runs Γ (load c) (.ret w', []) → w' = w :=
   by
     refine ⟨load_runs h, ?_⟩
     intro w' h'
-    have heq : ((.ret w : MState), ([] : Stack)) = ((.ret w' : MState), ([] : Stack)) := runs_to_halt_unique (load_runs h) rfl h' rfl
+    have heq :
+        ((.ret w : MState), ([] : Stack)) =
+          ((.ret w' : MState), ([] : Stack)) :=
+      runs_to_halt_unique (load_runs h) rfl h' rfl
     simp only [Prod.mk.injEq, MState.ret.injEq] at heq
     exact heq.1.symm
 

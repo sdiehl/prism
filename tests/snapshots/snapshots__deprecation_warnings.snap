@@ -7,3 +7,5 @@ expression: "msgs.join(\"\\n\")"
 `u64_add` is deprecated; use `+` instead
 the `*.` operator is deprecated; use `*` instead
 the `+.` operator is deprecated; use `+` instead
+the `<.` operator is deprecated; use `<` instead
+the `==.` operator is deprecated; use `==` instead

@@ -14,15 +14,19 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::HASH_SCHEME;
 use prism::flags::SignMode;
+use prism::pkg::export::{export, verify_manifest, EXPORT_MANIFEST_HEADER};
 use prism::pkg::transport::{
     push_closure, verify, verify_closure, DiskTransport, GitTransport, Transport, TransportError,
 };
 use prism::pkg::trust::{
-    audit, serialize_index, sign, verify_signature, IndexRow, Log, SignedArtifact, Verdict,
+    audit, parse_index, serialize_index, sign, verify_signature, IndexRow, Log, SignedArtifact,
+    Verdict, INDEX_KIND_NAMESPACE,
 };
+use prism::resolve::SourceBundleArtifactKind;
 use prism::store::disk::Store;
-use prism::{commit_to_store, default_roots, namespace_root, with_prelude, Config, DynFlags};
+use prism::{commit_to_store, default_roots, namespace_identity, with_prelude, Config, DynFlags};
 
 // A unique scratch directory removed on drop.
 struct TempDir {
@@ -220,19 +224,37 @@ fn export_is_a_source_level_fixpoint() {
     let roots = default_roots(Path::new("."));
 
     let full1 = with_prelude(PROG_PLAIN);
-    let r1 =
-        prism::pkg::export::export(PROG_PLAIN, &full1, &roots, &tmp.join("e1"), "prog").unwrap();
+    let r1 = export(PROG_PLAIN, &full1, &roots, &tmp.join("e1"), "prog").unwrap();
     let text1 = fs::read_to_string(&r1.source_path).unwrap();
 
     // Re-ingest the emitted text and export again.
     let full2 = with_prelude(&text1);
-    let r2 = prism::pkg::export::export(&text1, &full2, &roots, &tmp.join("e2"), "prog").unwrap();
+    let r2 = export(&text1, &full2, &roots, &tmp.join("e2"), "prog").unwrap();
     let text2 = fs::read_to_string(&r2.source_path).unwrap();
 
     assert_eq!(text1, text2, "export is not a text-level fixpoint");
     // A pure reformat is behavior-preserving, so the namespace root is stable here;
     // hash-stability across a full store round trip stays an open promise.
     assert_eq!(r1.root, r2.root);
+    assert_eq!(r1.scheme, HASH_SCHEME);
+    assert_eq!(r1.kind, INDEX_KIND_NAMESPACE);
+    let manifest = fs::read_to_string(&r1.manifest_path).unwrap();
+    assert!(manifest.starts_with(&format!("{EXPORT_MANIFEST_HEADER}\n")));
+    assert!(manifest.contains(&format!("scheme\t{}\n", r1.scheme)));
+    assert!(manifest.contains(&format!("kind\t{}\n", r1.kind)));
+    assert!(manifest.contains(&format!("root\t{}\n", r1.root)));
+    let identity = namespace_identity(&full1, &roots).unwrap();
+    let parsed = verify_manifest(&manifest, &identity).unwrap();
+    assert_eq!(parsed.root, r1.root);
+
+    let wrong_kind = manifest.replace(
+        &format!("kind\t{}\n", r1.kind),
+        &format!("kind\t{}\n", SourceBundleArtifactKind::Package.as_str()),
+    );
+    let err = verify_manifest(&wrong_kind, &identity)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("artifact kind"), "{err}");
 }
 
 // -- signed index: sign/verify round-trip and tamper detection ------------------
@@ -273,6 +295,46 @@ fn ssh_flags(key: &Path, allowed: &Path, identity: &str) -> DynFlags {
 }
 
 #[test]
+fn package_index_rows_name_the_hash_scheme() {
+    let row = IndexRow {
+        origin: "github.com/prism-lang/http".into(),
+        name: "http".into(),
+        tag: "2.0".into(),
+        scheme: HASH_SCHEME.into(),
+        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
+        root: "a3f9".repeat(16),
+    };
+    let body = serialize_index(std::slice::from_ref(&row));
+    let text = String::from_utf8(body.clone()).unwrap();
+    assert!(text.starts_with("prism-pkg-index\tv4\n"));
+    assert!(
+        text.contains(&format!("\t{HASH_SCHEME}\t")),
+        "index row must carry hash scheme:\n{text}"
+    );
+    assert!(
+        text.contains("github.com/prism-lang/http\thttp\t2.0"),
+        "index row must carry canonical origin before display name:\n{text}"
+    );
+    assert_eq!(parse_index(&body), vec![row]);
+}
+
+#[test]
+fn package_index_v1_rows_parse_as_current_scheme() {
+    let body = b"prism-pkg-index\tv1\nhttp\t2.0\ta3f9\n";
+    assert_eq!(
+        parse_index(body),
+        vec![IndexRow {
+            origin: "http".into(),
+            name: "http".into(),
+            tag: "2.0".into(),
+            scheme: HASH_SCHEME.into(),
+            kind: INDEX_KIND_NAMESPACE.into(),
+            root: "a3f9".into(),
+        }]
+    );
+}
+
+#[test]
 fn signed_index_round_trips_and_detects_tampering() {
     if !have("ssh-keygen") {
         eprintln!("skipping: ssh-keygen not installed");
@@ -284,8 +346,11 @@ fn signed_index_round_trips_and_detects_tampering() {
     let flags = ssh_flags(&key, &allowed, identity);
 
     let rows = vec![IndexRow {
+        origin: "github.com/prism-lang/http".into(),
         name: "http".into(),
         tag: "2.0".into(),
+        scheme: HASH_SCHEME.into(),
+        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
         root: "a3f9".repeat(16),
     }];
     let body = serialize_index(&rows);
@@ -319,8 +384,11 @@ fn unsigned_mode_produces_no_signature() {
         ..DynFlags::default()
     };
     let body = serialize_index(&[IndexRow {
+        origin: "x".into(),
         name: "x".into(),
         tag: "1".into(),
+        scheme: HASH_SCHEME.into(),
+        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
         root: "00".repeat(32),
     }]);
     assert!(sign(&body, &flags).unwrap().is_none());
@@ -335,18 +403,63 @@ fn log_is_append_only_and_detects_repoints() {
     let tmp = TempDir::new("log");
     let log = Log::at(tmp.join("log"));
 
-    assert_eq!(log.append("http", "2.0", "aaaa").unwrap(), 0);
-    assert_eq!(log.append("geo", "1.0", "bbbb").unwrap(), 1);
+    assert_eq!(
+        log.append(
+            "github.com/prism-lang/http",
+            "http",
+            "2.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "aaaa",
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        log.append(
+            "github.com/prism-lang/geo",
+            "geo",
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "bbbb",
+        )
+        .unwrap(),
+        1
+    );
     assert!(log.repoints().unwrap().is_empty());
 
     // Re-publishing the same pointer is not a repoint.
-    assert_eq!(log.append("http", "2.0", "aaaa").unwrap(), 2);
+    assert_eq!(
+        log.append(
+            "github.com/prism-lang/http",
+            "http",
+            "2.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "aaaa",
+        )
+        .unwrap(),
+        2
+    );
     assert!(log.repoints().unwrap().is_empty());
 
     // Moving http@2.0 to a new root is a repoint the log makes visible.
-    assert_eq!(log.append("http", "2.0", "cccc").unwrap(), 3);
+    assert_eq!(
+        log.append(
+            "github.com/prism-lang/http",
+            "http",
+            "2.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "cccc",
+        )
+        .unwrap(),
+        3
+    );
     let repoints = log.repoints().unwrap();
     assert_eq!(repoints.len(), 1);
+    assert_eq!(repoints[0].origin, "github.com/prism-lang/http");
     assert_eq!(repoints[0].name, "http");
     assert_eq!(repoints[0].from_root, "aaaa");
     assert_eq!(repoints[0].to_root, "cccc");
@@ -375,11 +488,14 @@ fn publish_unsigned(root: &Path, name: &str, tag: &str) -> IndexRow {
         msg.contains("git tag"),
         "publish must print the git tag command"
     );
-    let root_hash = namespace_root(&full, &roots).unwrap();
+    let identity = namespace_identity(&full, &roots).unwrap();
     IndexRow {
+        origin: name.to_string(),
         name: name.to_string(),
         tag: tag.to_string(),
-        root: root_hash,
+        scheme: identity.scheme.to_string(),
+        kind: identity.kind.to_string(),
+        root: identity.root,
     }
 }
 

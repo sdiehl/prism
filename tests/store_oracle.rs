@@ -365,7 +365,7 @@ mod cached_parity {
     use std::process::Command;
 
     use prism::store::cert::{self, BACKEND_INTERP, BACKEND_LLVM};
-    use prism::store::verify::{is_verified, record_pass, CheckKind};
+    use prism::store::verify::{is_verified, record_pass, CheckKind, VerificationIdentity};
 
     // Build `prog` native, run it on empty stdin, and diff stdout against the
     // interpreter. Increments `builds` so a caller can prove whether the native
@@ -401,11 +401,13 @@ mod cached_parity {
     // passes are recorded, so a failure always re-runs.
     fn checked(store: &Store, prog: &str, builds: &Cell<u64>) -> Result<(), String> {
         let hash = main_hash(prog);
-        if is_verified(store, &hash, CheckKind::Parity).unwrap() {
+        let artifact = Config::default().artifact_identity_for("llvm");
+        let identity = VerificationIdentity::from_artifact(&artifact);
+        if is_verified(store, &hash, CheckKind::Parity, &identity).unwrap() {
             return Ok(());
         }
         native_parity(prog, builds)?;
-        record_pass(store, &hash, CheckKind::Parity).unwrap();
+        record_pass(store, &hash, CheckKind::Parity, &identity).unwrap();
         // Alongside the verification record, emit the parity certificate the gate
         // stands behind: a `parity-passed` attestation keyed by the program's hash,
         // naming the two backends (interpreter and native LLVM) that agreed.
@@ -459,7 +461,43 @@ mod cached_parity {
         // No record is written without a pass, so a hash that never verified is
         // not treated as verified.
         let hash = main_hash(P_BASE);
-        assert!(!is_verified(&store, &hash, CheckKind::Parity).unwrap());
+        let artifact = Config::default().artifact_identity_for("llvm");
+        let identity = VerificationIdentity::from_artifact(&artifact);
+        assert!(!is_verified(&store, &hash, CheckKind::Parity, &identity).unwrap());
+    }
+
+    #[test]
+    fn a_toolchain_identity_change_retires_the_cached_verdict() {
+        let tmp = TempDir::new("verifyid");
+        let store = Store::open_or_create(tmp.root()).unwrap();
+        let hash = main_hash(P_BASE);
+        let llvm_artifact = Config::default().artifact_identity_for("llvm");
+        let mlir_artifact = Config::default().artifact_identity_for("mlir");
+        let llvm_identity = VerificationIdentity::from_artifact(&llvm_artifact);
+        let mlir_identity = VerificationIdentity::from_artifact(&mlir_artifact);
+
+        record_pass(&store, &hash, CheckKind::Parity, &llvm_identity).unwrap();
+        assert!(is_verified(&store, &hash, CheckKind::Parity, &llvm_identity).unwrap());
+        assert!(!is_verified(&store, &hash, CheckKind::Parity, &mlir_identity).unwrap());
+    }
+
+    #[test]
+    fn a_source_root_identity_change_retires_the_cached_verdict() {
+        let tmp = TempDir::new("verifyroot");
+        let store = Store::open_or_create(tmp.root()).unwrap();
+        let hash = main_hash(P_BASE);
+        let first_artifact = Config::default()
+            .artifact_identity_for("llvm")
+            .with_source_root("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let second_artifact = Config::default()
+            .artifact_identity_for("llvm")
+            .with_source_root("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let first_identity = VerificationIdentity::from_artifact(&first_artifact);
+        let second_identity = VerificationIdentity::from_artifact(&second_artifact);
+
+        record_pass(&store, &hash, CheckKind::Parity, &first_identity).unwrap();
+        assert!(is_verified(&store, &hash, CheckKind::Parity, &first_identity).unwrap());
+        assert!(!is_verified(&store, &hash, CheckKind::Parity, &second_identity).unwrap());
     }
 }
 

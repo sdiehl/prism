@@ -1,0 +1,3 @@
+import Sequence as Seq
+
+fn main() : !{IO} Unit = println(__PIPELINE__)

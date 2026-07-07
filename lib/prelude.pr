@@ -808,7 +808,7 @@ instance eqStr : Eq(String)
   fn eq(x, y) = str_eq(x, y)
 
 instance eqFloat : Eq(Float)
-  fn eq(x, y) = x ==. y
+  fn eq(x, y) = x == y
 
 instance eqChar : Eq(Char)
   fn eq(x, y) = ord(x) == ord(y)
@@ -845,9 +845,9 @@ instance ordChar : Ord(Char)
 
 instance ordFloat : Ord(Float)
   fn cmp(x, y) =
-    if x <. y then
+    if x < y then
       0 - 1
-    elif x >. y then
+    elif x > y then
       1
     else
       0

@@ -1,0 +1,1 @@
+fn pair(x : Int) : (Int, Int) without alloc = (x, x)

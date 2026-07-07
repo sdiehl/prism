@@ -14,6 +14,8 @@ pub(crate) mod decl;
 mod exprdoc;
 mod ops;
 mod pat;
+mod records;
+mod stmts;
 use decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
 use ops::{
     binop_prec, low_prec_operand, needs_left_paren, needs_right_paren, neg_operand_needs_paren,
@@ -178,7 +180,9 @@ fn forces_break(e: &S<Expr>) -> bool {
     wants_break(&e.node)
         || matches!(
             e.node,
-            Expr::Match(..) | Expr::If(..) | Expr::Sugar(Sugar::For(..) | Sugar::While(..))
+            Expr::Match(..)
+                | Expr::If(..)
+                | Expr::Sugar(Sugar::For(..) | Sugar::While(..) | Sugar::Transact(..))
         ) && !e.synth
 }
 
@@ -244,6 +248,7 @@ fn block_trailing_call(e: &S<Expr>) -> bool {
                     | Sugar::For(..)
                     | Sugar::While(..)
                     | Sugar::Transact(..)
+                    | Sugar::Probe(..)
                     | Sugar::NamedHandle(..)
             )
     )
@@ -889,62 +894,6 @@ impl Fmt<'_> {
         Some(parts.join("\n"))
     }
 
-    fn fmt_stmt(&self, e: &S<Expr>, indent: usize) -> String {
-        if let Some(s) = self.fmt_open_if(e, indent) {
-            return s;
-        }
-        // A trailing-lambda call with a simple body prints inline as `f(\x -> e)`;
-        // one with a statement-shaped body keeps the offside `f() fn(x)` block.
-        if !block_trailing_call(e)
-            && !forces_break(e)
-            && !self.has_comments(e.span.start, e.span.end)
-        {
-            if let Some(s) = self.fmt_expr_inline(e, Mode::Layout) {
-                if indent * INDENT.len() + s.len() <= LINE_WIDTH {
-                    return s;
-                }
-            }
-        }
-        if let Some(s) = self.fmt_trailing(e, indent) {
-            return s;
-        }
-        if matches!(e.node, Expr::Let(..)) {
-            return format!("({})", self.fmt_expr(e, indent + 1, Mode::Flat));
-        }
-        self.fmt_expr_break(e, indent, Mode::Layout)
-    }
-
-    // The `let` break ladder (FMT.md rule 5): (1) the whole binding on one line;
-    // (2) break after `=` with the value flat one indent in, when it fits there;
-    // (3) keep `let x =` on the line and let the value break internally. A value
-    // that must lay out offside (a record, a match/if, an imperative block) or
-    // that carries comments skips (3) and takes the offside block.
-    fn fmt_let_line(&self, x: &str, v: &S<Expr>, indent: usize, from: usize) -> String {
-        let ind = INDENT.repeat(indent);
-        let head = format!("{ind}{} {x} = ", kw::LET);
-        let breakable = !self.has_comments(from, v.span.end) && !forces_break(v);
-        if breakable {
-            if let Some(s) = self.fmt_expr_inline(v, Mode::Layout) {
-                if head.len() + s.len() <= LINE_WIDTH {
-                    return format!("{head}{s}"); // rung 1
-                }
-                let inner = INDENT.repeat(indent + 1);
-                if inner.len() + s.len() <= LINE_WIDTH {
-                    return format!("{ind}{} {x} =\n{inner}{s}", kw::LET); // rung 2
-                }
-            }
-            // rung 3: the value breaks with its head on the `let` line.
-            if let Some(broken) = self.render_expr(v, ind.len(), head.len()) {
-                return format!("{head}{broken}");
-            }
-        }
-        format!(
-            "{ind}{} {x} =\n{}",
-            kw::LET,
-            self.fmt_block(v, indent + 1, from)
-        )
-    }
-
     fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
         if !wants_break(&e.node) {
             if let Some(s) = self.fmt_expr_inline(e, mode) {
@@ -1370,6 +1319,10 @@ impl Fmt<'_> {
                 let f = self.fmt_expr_inline(fallback, Mode::Flat)?;
                 Some(format!("{} {b} {} {f}", kw::TRANSACT, kw::ELSE))
             }
+            Sugar::Probe(name, body) => {
+                let b = self.fmt_expr_inline(body, Mode::Flat)?;
+                Some(format!("{} {name:?} {} {b}", kw::PROBE, kw::DO))
+            }
             Sugar::Range(pre, hi) => {
                 let parts: Option<Vec<_>> =
                     pre.iter().map(|e| self.fmt_expr_inline(e, mode)).collect();
@@ -1536,6 +1489,12 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::Transact(body, fallback)), Mode::Layout) => {
                 self.fmt_transact_layout(e, body, fallback, indent)
             }
+            (Expr::Sugar(Sugar::Probe(name, body)), Mode::Layout) => format!(
+                "{} {name:?} {}\n{}",
+                kw::PROBE,
+                kw::DO,
+                self.fmt_block(body, indent + 1, body.span.start)
+            ),
             (Expr::Sugar(Sugar::While(cond, body)), Mode::Layout) => {
                 self.fmt_while_layout(cond.as_deref(), body, indent)
             }
@@ -1581,73 +1540,6 @@ impl Fmt<'_> {
                 .fmt_expr_inline(e, Mode::Flat)
                 .unwrap_or_else(|| self.verbatim(e.span.start, e.span.end)),
         }
-    }
-
-    // Stack a record literal's fields one per line at `indent + 1`, an optional
-    // `..base` spread first (a `RecordUpdate`), the closing `}` at `indent`. Only
-    // reached from `fmt_expr` when the inline form overflows the width budget, so
-    // a short record stays on one line and this is idempotent.
-    fn fmt_record_break(
-        &self,
-        name: &str,
-        base: Option<&S<Expr>>,
-        fields: &[(String, S<Expr>)],
-        indent: usize,
-    ) -> String {
-        let inner = INDENT.repeat(indent + 1);
-        let mut lines: Vec<String> = Vec::new();
-        if let Some(b) = base {
-            lines.push(format!(
-                "{inner}..{}",
-                self.fmt_expr(b, indent + 1, Mode::Flat)
-            ));
-        }
-        for (f, e) in fields {
-            lines.push(format!(
-                "{inner}{f} = {}",
-                self.fmt_expr(e, indent + 1, Mode::Flat)
-            ));
-        }
-        format!(
-            "{name} {{\n{}\n{}}}",
-            lines.join(",\n"),
-            INDENT.repeat(indent)
-        )
-    }
-
-    // A nested optic update stacked one clause per line, leading-delimiter style:
-    //   { base
-    //   | path op val
-    //   , path op val
-    //   }
-    // The base sits alone on the opening line; the first clause is led by `|`, the
-    // rest by `,`; the closing brace returns to the update's own column. The whole
-    // form is brace-delimited, so it reparses to the same tree (idempotent). Falls
-    // back to verbatim source if a path carries a sub-expression that cannot inline.
-    fn fmt_path_update_break(
-        &self,
-        e: &S<Expr>,
-        base: &S<Expr>,
-        ups: &[(Vec<PathStep>, PathOp)],
-        indent: usize,
-    ) -> String {
-        let ind = INDENT.repeat(indent);
-        let base_s = self.fmt_expr(base, indent + 1, Mode::Flat);
-        let mut lines = vec![format!("{{ {base_s}")];
-        for (k, (p, op)) in ups.iter().enumerate() {
-            let Some(ps) = self.fmt_path(p) else {
-                return self.verbatim(e.span.start, e.span.end);
-            };
-            let (sigil, val) = match op {
-                PathOp::Set(v) => (kw::EQ, v),
-                PathOp::Modify(v) => (kw::TILDE, v),
-            };
-            let lead = if k == 0 { "|" } else { "," };
-            let val_s = self.fmt_expr(val, indent + 1, Mode::Flat);
-            lines.push(format!("{ind}{lead} {ps} {sigil} {val_s}"));
-        }
-        lines.push(format!("{ind}}}"));
-        lines.join("\n")
     }
 
     fn fmt_match_layout(&self, scrut: &S<Expr>, arms: &[Arm], indent: usize) -> String {
@@ -1888,23 +1780,6 @@ impl Fmt<'_> {
             },
         );
         format!("{header}\n{}", self.fmt_block(body, indent + 1, from))
-    }
-
-    fn fmt_transact_layout(
-        &self,
-        e: &S<Expr>,
-        body: &S<Expr>,
-        fallback: &S<Expr>,
-        indent: usize,
-    ) -> String {
-        let ind = INDENT.repeat(indent);
-        format!(
-            "{}\n{}\n{ind}{}\n{}",
-            kw::TRANSACT,
-            self.fmt_block(body, indent + 1, e.span.start),
-            kw::ELSE,
-            self.fmt_block(fallback, indent + 1, body.span.end)
-        )
     }
 
     fn fmt_handle_flat(

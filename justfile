@@ -124,7 +124,10 @@ gate-fast:
 fmt-examples: build-release
     ./target/release/prism fmt --check
 
-ci: fmt-check clippy test fmt-examples
+package-world: build-release
+    ./target/release/prism check-world packages --strict
+
+ci: fmt-check clippy test fmt-examples package-world
 
 # Build the wasm playground bundle and sync it into the docs (docs/src/pkg), so
 # the mdbook playground always runs the current compiler (no stale-bundle drift).
@@ -207,14 +210,13 @@ dist VERSION: (pkg VERSION)
     just docker "prism:{{VERSION}}"
 
 smoke: build
-    # for f in examples/*.pr; do ./target/debug/prism run "$f" >/dev/null 2>&1 || echo "FAIL: $f"; done
-    for f in examples/*.pr; do ./target/debug/prism run "$f" || echo "FAIL: $f"; done
+    ./target/debug/prism run --examples
 
-# Regenerate the committed Lean differential-oracle certificate fixtures
-# (models/fixtures/*.json) from `prism dump core-json`. These pin the compiler
-# core that Certificates.lean's kernel proofs reference; CI's Lean job diffs the
-# regenerated output and fails on drift. Run after a change that shifts the
-# emitted core, and commit the result (the `just hash` / `docs-gen` idiom).
+# Regenerate the committed Lean differential-oracle fixture manifest. This pins
+# each source fixture, generated `core-json`, canonical Core hashes, and expected
+# result without committing line-exploding JSON. CI diffs the regenerated TSV and
+# fails on drift. Run after a change that shifts fixture source, emitted core, or
+# model output, and commit the result (the `just hash` / `docs-gen` idiom).
 fixtures: build
     cd models && ./gen_fixtures.sh
 

@@ -87,10 +87,12 @@ fn fresh(x) =
   return x to t@0; return Box(t@0)
 
 == fip ==
-Type Error: function `fresh` is marked `without alloc` but allocates a fresh `Box` (no reuse token available)
+Type Error: allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
    ╭─[ <source>:6:1 ]
    │
  6 │ fn fresh(x : Int) : Box without alloc = Box(x)
    │ ───────────────────────┬──────────────────────  
-   │                        ╰──────────────────────── function `fresh` is marked `without alloc` but allocates a fresh `Box` (no reuse token available)
+   │                        ╰──────────────────────── allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
+witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
 ───╯

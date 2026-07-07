@@ -1,0 +1,3 @@
+fip fn wrap(x) = x
+
+fbip fn relay(x) = wrap(relay(x))

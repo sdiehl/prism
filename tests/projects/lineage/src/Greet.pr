@@ -1,0 +1,1 @@
+pub fn greet(x : Int) : Int = x + 1

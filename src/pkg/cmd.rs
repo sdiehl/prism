@@ -48,16 +48,17 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
     let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
     let mut report = format!("added dependency `{name}` to {MANIFEST}");
 
-    if let Some(hash) = lockable_hash(&source, &store) {
+    if let Some(pin) = lockable_pin(&name, &source, cfg)? {
         let mut lock = load_lock(&root)?;
         lock.set(LockEntry {
             name: name.clone(),
-            hash: hash.clone(),
+            scheme: pin.scheme.clone(),
+            hash: pin.hash.clone(),
             source,
         });
         write_lock(&root, &lock)?;
-        let _ = write!(report, "\npinned `{name}` to {hash} in {LOCKFILE}");
-        if !store.has(&hash) {
+        let _ = write!(report, "\npinned `{name}` to {} in {LOCKFILE}", pin.hash);
+        if !store.has(&pin.hash) {
             report.push_str("\n  (object not in the local store yet; `prism build` will fetch it)");
         }
     } else {
@@ -83,6 +84,7 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
 pub fn why(target: &str, cfg: &Config) -> Result<String, Error> {
     let root = project_root(Path::new("."))?;
     let lock = load_lock(&root)?;
+    lock.validate_current_scheme()?;
     if lock.entries.is_empty() {
         return Err(Error::Resolve(format!(
             "{LOCKFILE} pins no dependencies; run `prism add` first"
@@ -175,12 +177,35 @@ fn git_name(url: &str) -> String {
         .to_string()
 }
 
-// The root hash a source locks to, when known without transport: a hash pin is
-// its own root hash. A git tag needs the signed index, so it locks nothing here.
-fn lockable_hash(source: &DepSource, _store: &Store) -> Option<String> {
+struct ResolvedPin {
+    scheme: String,
+    hash: String,
+}
+
+// The root hash a source locks to: a hash pin is its own root hash; a git tag
+// resolves through the signed index when the local store has one. The scheme is
+// carried with the hash so lock creation never reconstructs identity from a bare
+// digest after verification.
+fn lockable_pin(
+    name: &str,
+    source: &DepSource,
+    cfg: &Config,
+) -> Result<Option<ResolvedPin>, Error> {
     match source {
-        DepSource::Hash(hex) => Some(hex.clone()),
-        DepSource::Path(_) | DepSource::Git { .. } => None,
+        DepSource::Hash(hex) => Ok(Some(ResolvedPin {
+            scheme: crate::core::HASH_SCHEME.to_string(),
+            hash: hex.clone(),
+        })),
+        DepSource::Path(_) => Ok(None),
+        DepSource::Git { url, version } => {
+            let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+            let pointer =
+                crate::pkg::signed_index_pointer(url, name, version, &store_root, &cfg.flags)?;
+            Ok(Some(ResolvedPin {
+                scheme: pointer.scheme,
+                hash: pointer.root,
+            }))
+        }
     }
 }
 
@@ -214,7 +239,11 @@ fn short(hash: &str) -> String {
 
 fn load_lock(root: &Path) -> Result<Lock, Error> {
     match fs::read_to_string(root.join(LOCKFILE)) {
-        Ok(text) => Lock::parse(&text),
+        Ok(text) => {
+            let lock = Lock::parse(&text)?;
+            lock.validate_current_scheme()?;
+            Ok(lock)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
         Err(e) => Err(Error::Io(e)),
     }

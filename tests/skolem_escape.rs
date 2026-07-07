@@ -1,4 +1,4 @@
-// Regression coverage for the skolem-escape soundness fix (V06 H1). The mono
+// Regression coverage for the skolem-escape soundness fix. The mono
 // fast path in `inst` may solve an existential to a candidate type only when
 // every variable that type names is bound to the existential's left; a `Uni`
 // skolem introduced under an inner `forall` sits to its right, so solving an

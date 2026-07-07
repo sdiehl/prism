@@ -1,22 +1,10 @@
 //! Canonical source spellings for every fixed token.
-//!
-//! Keywords, operators, and punctuation. The lexer's `Token::text`, the
-//! formatter, and the core pretty-printer all read these, so a keyword's
-//! spelling lives in exactly one place.
 
-// Keywords
 pub const FN: &str = "fn";
 pub const FIP: &str = "fip";
 pub const FBIP: &str = "fbip";
 pub const REPLAYABLE: &str = "replayable";
-// `deprecated "use X instead"`: a contextual annotation line above a declaration
-// marking it superseded. A use of the named definition compiles with a warning
-// carrying this suggestion; the definition itself is untouched. Held for one
-// release, removed the next (see the deprecation policy in the spec).
 pub const DEPRECATED: &str = "deprecated";
-// `without alloc`: a postfix signature suffix certifying that a function and its
-// whole call tree allocate no fresh heap cell (the `alloc` capability revoked
-// for the function). Same check as `fbip`, spelled as a capability.
 pub const WITHOUT: &str = "without";
 pub const ALLOC: &str = "alloc";
 pub const PUB: &str = "pub";
@@ -24,20 +12,11 @@ pub const IMPORT: &str = "import";
 pub const AS: &str = "as";
 pub const TYPE: &str = "type";
 pub const NEWTYPE: &str = "newtype";
-// The `stable` block introducer: a type's frozen serialization history declared
-// inline as a ladder of rungs. A reserved word: the corpus never uses `stable` as
-// an identifier, so reserving it is consistent with every other declaration
-// introducer and breaks nothing. The words inside a `stable` block are contextual,
-// recognized positionally rather than reserved.
 pub const STABLE: &str = "stable";
 pub const UPGRADE: &str = "upgrade";
 pub const DOWNGRADE: &str = "downgrade";
 pub const DROP_LOSS: &str = "drop_loss";
-// Trailing per-rung shape-digest golden: `V1 = { .. } frozen "<digest>"`.
 pub const FROZEN: &str = "frozen";
-// Kind annotations on a type parameter (`type Cmd(a, e : Row)`,
-// `type Vec(a, n : Nat)`). `Type` is the default and prints bare; `Row` and
-// `Nat` are emitted.
 pub const KIND_ROW: &str = "Row";
 pub const KIND_NAT: &str = "Nat";
 pub const KIND_TYPE: &str = "Type";
@@ -48,6 +27,7 @@ pub const THROW: &str = "throw";
 pub const TRY: &str = "try";
 pub const CATCH: &str = "catch";
 pub const TRANSACT: &str = "transact";
+pub const PROBE: &str = "probe";
 pub const ALIAS: &str = "alias";
 pub const CLASS: &str = "class";
 pub const INSTANCE: &str = "instance";
@@ -87,7 +67,6 @@ pub const TRUE: &str = "true";
 pub const FALSE: &str = "false";
 pub const USING: &str = "using";
 
-// Built-in type names
 pub const TY_INT: &str = "Int";
 pub const TY_BOOL: &str = "Bool";
 pub const TY_UNIT: &str = "Unit";
@@ -97,7 +76,6 @@ pub const TY_STRING: &str = "String";
 pub const TY_I64: &str = "I64";
 pub const TY_U64: &str = "U64";
 
-// Operators and multi-character punctuation
 pub const ARROW: &str = "->";
 pub const LARROW: &str = "<-";
 pub const FAT_ARROW: &str = "=>";
@@ -145,7 +123,6 @@ pub const QUESTION_DOT: &str = "?.";
 pub const QUESTION: &str = "?";
 pub const TILDE: &str = "~";
 
-// Single-character delimiters
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";
 pub const LBRACE: &str = "{";

@@ -535,6 +535,23 @@ fn rw_sugar(
             }
             rw(&handled, env, cx)
         }
+        Sugar::Probe(name, body) => {
+            validate_probe_name(name, span)?;
+            let gate = call(
+                evar("probe_enabled", span),
+                vec![sp(Expr::Str(name.clone()), span)],
+                span,
+            );
+            let branch = sp(
+                Expr::If(
+                    Box::new(gate),
+                    Box::new((**body).clone()),
+                    Box::new(sp(Expr::Unit, span)),
+                ),
+                span,
+            );
+            rw(&branch, env, cx)
+        }
         // `a?.b` is `force(a).b`: a `None` makes `force` raise `Fail`, so the
         // access is failable and chains short-circuit to the nearest handler.
         Sugar::OptChain(a, field) => {
@@ -570,6 +587,20 @@ fn rw_sugar(
         }
         Sugar::WithoutAlloc(body) => rw_without_alloc(body, span, env, cx),
     }
+}
+
+fn validate_probe_name(name: &str, span: Span) -> Result<(), TypeError> {
+    let valid = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'));
+    if valid {
+        return Ok(());
+    }
+    Err(TypeError::Other {
+        span,
+        msg: "probe name must match [A-Za-z0-9_.:-]+".into(),
+    })
 }
 
 // `without alloc { block }` lifts the block to a synthetic top-level function
@@ -784,7 +815,7 @@ impl CtlScan {
             // `break`/`continue`/`return` inside it is caught by the enclosing loop
             // or function (its lifted body performs the control effect, which
             // tunnels back out), so scan through it to install those handlers.
-            Sugar::WithoutAlloc(body) => self.go(body),
+            Sugar::WithoutAlloc(body) | Sugar::Probe(_, body) => self.go(body),
             Sugar::While(c, b) if self.descend_loops => {
                 if let Some(c) = c {
                     self.go(c);

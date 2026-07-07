@@ -1,4 +1,4 @@
-//! The concurrent swarm behind the chaos counter (B5). These pin the headline
+//! The concurrent swarm behind the chaos counter. These pin the headline
 //! the counter renders: N hostile seeded-shuffle schedules of the same fibers
 //! over the same channel land on a byte-identical final state, while the
 //! interleavings genuinely differ. The claim (all schedules agree) is the

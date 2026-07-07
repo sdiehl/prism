@@ -52,9 +52,19 @@ impl EffectTier {
             _ => None,
         }
     }
+
+    /// Stable spelling used in artifact identity rows.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::State => "state",
+            Self::FreeMonad => "free-monad",
+        }
+    }
 }
 
-/// Which external tool signs and verifies the `name -> root` index.
+/// Which external tool signs and verifies the package-identity-to-root index.
 ///
 /// Signing is never done in-process: Prism shells to a ubiquitous system tool
 /// behind one narrow seam, so no cryptographic dependency enters the compiler.
@@ -136,6 +146,12 @@ pub struct DynFlags {
     /// zero-overhead; opt in for an always-available structural backstop where
     /// ASan/UBSan are unavailable.
     pub rt_checks: bool,
+    /// `PRISM_NATIVE_KONT_FRAMES` (default off): ask the native link step to
+    /// preserve frame pointers, unwind tables, and non-mandatory call frames for
+    /// experimental native kont frame capture. This is not native resume; it is
+    /// the build-mode backstop that makes return-PC capture less dependent on the
+    /// platform optimizer's defaults.
+    pub native_kont_frames: bool,
     /// `PRISM_DUMP_CORE` (default none): sink for the per-pass Core dump.
     /// `stdout`/`stderr` stream a banner plus the block; any other value is a base
     /// directory of one file per pass.
@@ -177,7 +193,7 @@ pub struct DynFlags {
     pub effect_tier: EffectTier,
     /// `PRISM_STORE` (default off): after a successful compile, commit the
     /// program's definitions into the on-disk content-addressed store. The store
-    /// is a cache, never load-bearing for correctness, so it is opt-in and does
+    /// is a cache, never required for correctness, so it is opt-in and does
     /// not perturb the oracles when off.
     pub store: bool,
     /// `PRISM_STORE_PATH` (default none): override the store root. Absent falls
@@ -185,7 +201,7 @@ pub struct DynFlags {
     /// [`crate::store::disk::resolve_store_path`].
     pub store_path: Option<PathBuf>,
     /// `PRISM_SIGN_MODE` (default `ssh`): which external tool signs and verifies
-    /// the `name -> root` index. See [`SignMode`].
+    /// the package-identity-to-root index. See [`SignMode`].
     pub sign_mode: SignMode,
     /// `PRISM_SIGN_KEY` (default none): the signing key handed to the signer
     /// (`ssh-keygen -Y sign -f <key>`, or `minisign -s <key>`). Required to
@@ -208,6 +224,7 @@ impl Default for DynFlags {
             cek_spike: false,
             core_lint: false,
             rt_checks: false,
+            native_kont_frames: false,
             dump_core: None,
             opt_stats: false,
             quiet: false,
@@ -239,6 +256,7 @@ impl DynFlags {
             cek_spike: cek_spike_from_env(),
             core_lint: env_present("PRISM_CORE_LINT"),
             rt_checks: env_present("PRISM_RT_CHECKS"),
+            native_kont_frames: env_present("PRISM_NATIVE_KONT_FRAMES"),
             dump_core: std::env::var_os("PRISM_DUMP_CORE"),
             opt_stats: env_present("PRISM_OPT_STATS"),
             quiet: env_present("PRISM_QUIET"),

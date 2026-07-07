@@ -1,4 +1,4 @@
--- S6: the nursery is fail-fast. When one child fails (`fail()`), its sibling is
+-- The nursery is fail-fast. When one child fails (`fail()`), its sibling is
 -- cancelled (its `on_cancel` finalizer runs) and the failure re-raises at the
 -- scope boundary, where `default` recovers it. The sibling loops at `yield`, so
 -- it is parked when the cancellation lands; `guard(true)` gives it `Fail` in its

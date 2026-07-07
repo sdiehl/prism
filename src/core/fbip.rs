@@ -775,8 +775,9 @@ pub fn fip_annots(prog: &Program<CorePhase>) -> Fips {
     prog.fns
         .iter()
         .filter_map(|d| {
-            // `without alloc` is `fbip` spelled as a revoked capability: same
-            // zero-allocation check, no linearity or bounded-stack requirement.
+            // `without alloc` is the allocation-certificate spelling of the
+            // `fbip` usage check: same zero-allocation check, no linearity or
+            // bounded-stack requirement.
             // An explicit `fip`/`fbip` keyword (the stronger discipline) wins.
             let want = match d.fip {
                 Fip::No if d.no_alloc => Fip::Fbip,
@@ -1176,9 +1177,9 @@ fn fip_comp(
     users: &BTreeSet<Sym>,
 ) -> Result<(), String> {
     let recur = |c: &Comp| fip_comp(c, want, fname, fips, users);
-    let val = |v: &Value| fip_value(v, want, fname, fips, users);
+    let val = |v: &Value| fip_value(v, want, fname);
     match c {
-        Comp::Reuse(_, v) => fip_value_under_reuse(v, want, fname, fips, users),
+        Comp::Reuse(_, v) => fip_value_under_reuse(v, want, fname),
         // Freeing the dropped cell is the allocation-free shell a `Reuse` in the
         // body then spends; check the body like any other scope.
         Comp::WithReuse { freed, body, .. } => {
@@ -1197,16 +1198,19 @@ fn fip_comp(
                 if !ok {
                     return Err(match want {
                         Fip::Fip => format!(
-                            "a `fip` function may only call `fip` functions (bounded stack), but `{fname}` calls `{g}`"
+                            "a `fip` function may only call `fip` functions (bounded stack), but `{fname}` calls `{g}`\n\
+                             witness: `{g}` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack"
                         ),
                         Fip::Fbip | Fip::No => format!(
-                            "a `fbip` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`"
+                            "a `fbip` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`\n\
+                             witness: `{g}` has no zero-allocation certificate, so it may allocate inside `{fname}`'s call tree"
                         ),
                     });
                 }
             } else if !alloc_free_prim(g.as_str()) {
                 return Err(format!(
-                    "a `{}` function may only call allocation-free primitives, but `{fname}` calls `{g}`",
+                    "a `{}` function may only call allocation-free primitives, but `{fname}` calls `{g}`\n\
+                     witness: primitive/builtin `{g}` is not in the allocation-free allow-list",
                     kw(want)
                 ));
             }
@@ -1224,7 +1228,12 @@ fn fip_comp(
         Comp::Lam(_, b) | Comp::Mask(_, b) => recur(b),
         Comp::App(fbody, args) => {
             recur(fbody)?;
-            args.iter().try_for_each(val)
+            args.iter().try_for_each(val)?;
+            Err(format!(
+                "function `{fname}` is marked `{}` but calls a first-class function value\n\
+                 witness: indirect calls have no callee certificate at this call site; call a named `fip`/`fbip` function directly or move the call outside the zero-allocation region",
+                kw(want)
+            ))
         }
         Comp::Prim(_, a, b) => {
             val(a)?;
@@ -1266,43 +1275,39 @@ fn fip_comp(
 
 // A value in any position other than directly under a reuse token: a bare
 // constructor or tuple here is a fresh allocation and fails the check. Thunks
-// carry suspended computations, so descend into them with the global maps so a
-// closure body's calls resolve like any other.
-fn fip_value(
-    v: &Value,
-    want: Fip,
-    fname: &str,
-    fips: &Fips,
-    users: &BTreeSet<Sym>,
-) -> Result<(), String> {
+// allocate closure cells, so they fail the same way constructors/tuples do.
+fn fip_value(v: &Value, want: Fip, fname: &str) -> Result<(), String> {
     match v {
         Value::Ctor(name, ..) => Err(alloc_err(want, fname, name.as_str())),
         Value::Tuple(_) => Err(alloc_err(want, fname, "tuple")),
-        Value::Thunk(c) => fip_comp(c, want, fname, fips, users),
+        Value::Thunk(_) => Err(closure_alloc_err(want, fname)),
         _ => Ok(()),
     }
 }
 
 // The constructor argument of a `Comp::Reuse`: the head reuses a dropped cell,
 // so it is allocation-free, but its fields may still hide a fresh allocation.
-fn fip_value_under_reuse(
-    v: &Value,
-    want: Fip,
-    fname: &str,
-    fips: &Fips,
-    users: &BTreeSet<Sym>,
-) -> Result<(), String> {
+fn fip_value_under_reuse(v: &Value, want: Fip, fname: &str) -> Result<(), String> {
     match v {
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs
-            .iter()
-            .try_for_each(|f| fip_value(f, want, fname, fips, users)),
-        other => fip_value(other, want, fname, fips, users),
+        Value::Ctor(_, _, fs) | Value::Tuple(fs) => {
+            fs.iter().try_for_each(|f| fip_value(f, want, fname))
+        }
+        other => fip_value(other, want, fname),
     }
 }
 
 fn alloc_err(want: Fip, fname: &str, ctor: &str) -> String {
     format!(
-        "function `{fname}` is marked `{}` but allocates a fresh `{ctor}` (no reuse token available)",
+        "function `{fname}` is marked `{}` but allocates a fresh `{ctor}` (no reuse token available)\n\
+         witness: `{ctor}` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell",
+        kw(want)
+    )
+}
+
+fn closure_alloc_err(want: Fip, fname: &str) -> String {
+    format!(
+        "function `{fname}` is marked `{}` but allocates a fresh closure (no reuse token available)\n\
+         witness: a lambda/thunk value must be materialized as a closure cell; call a named function directly or move the lambda outside the zero-allocation region",
         kw(want)
     )
 }
@@ -1490,8 +1495,32 @@ mod tests {
         std::iter::once((f.name, Fip::Fip)).collect()
     }
 
+    fn fbip_of(f: &CoreFn) -> Fips {
+        std::iter::once((f.name, Fip::Fbip)).collect()
+    }
+
     fn use_var_twice(x: &str) -> Comp {
         Comp::Prim(CoreOp::Add, Value::Var(x.into()), Value::Var(x.into()))
+    }
+
+    #[test]
+    fn zero_alloc_rejects_fresh_closure_value() {
+        let f = one(
+            "make",
+            1,
+            Comp::Return(Value::Thunk(Box::new(Comp::Prim(
+                CoreOp::Add,
+                Value::Var("p0".into()),
+                Value::Var("y".into()),
+            )))),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = check_fip(&core, &fbip_of(&f), &BTreeMap::new(), &users(&["make"]))
+            .expect_err("fbip/without-alloc must reject closure allocation");
+        assert!(err.contains("allocates a fresh closure"), "{err}");
+        assert!(err.contains("lambda/thunk value"), "{err}");
     }
 
     #[test]

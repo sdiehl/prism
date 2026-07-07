@@ -11,14 +11,25 @@ use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, Targe
 use inkwell::types::FunctionType;
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValueEnum, CallSiteValue, FloatValue, FunctionValue, GlobalValue,
-    IntValue, LLVMTailCallKind, PointerValue,
+    IntValue, LLVMTailCallKind, PointerValue, StructValue,
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
-use super::emit::{emit_with, idx64, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
+use super::abi::idx64;
+use super::emit::{emit_with, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
+use super::native_kont;
 use super::rt;
 use crate::core::Core;
 use crate::types::CtorInfo;
+
+const LLVM_USED_GLOBAL: &str = "llvm.used";
+const LLVM_METADATA_SECTION: &str = "llvm.metadata";
+
+#[derive(Clone)]
+struct NativeKontFunction {
+    symbol: String,
+    params: Vec<String>,
+}
 
 /// Inkwell interpreter of the string `Isa`: SSA names map to live values,
 /// labels to basic blocks, so the walker stays backend-neutral. Functions,
@@ -30,6 +41,8 @@ struct Inkwell<'ctx> {
     vals: RefCell<HashMap<String, BasicValueEnum<'ctx>>>,
     blocks: RefCell<HashMap<String, BasicBlock<'ctx>>>,
     func: Cell<Option<FunctionValue<'ctx>>>,
+    native_kont_func: RefCell<Option<NativeKontFunction>>,
+    pending_musttail: Cell<bool>,
     // First codegen-internal failure (a builder error or an unbound SSA name).
     // Emission continues with a poison value so one bug surfaces as a single
     // structured error at the `emit` boundary instead of aborting the process.
@@ -66,6 +79,8 @@ impl<'ctx> Inkwell<'ctx> {
             vals: RefCell::default(),
             blocks: RefCell::default(),
             func: Cell::new(None),
+            native_kont_func: RefCell::default(),
+            pending_musttail: Cell::new(false),
             err: RefCell::default(),
         }
     }
@@ -226,6 +241,16 @@ impl<'ctx> Inkwell<'ctx> {
         }
     }
 
+    fn call_void_typed(
+        &self,
+        fname: &str,
+        ty: FunctionType<'ctx>,
+        args: &[BasicMetadataValueEnum<'ctx>],
+    ) {
+        let f = self.decl(fname, ty);
+        let _ = self.call_direct(f, args, "");
+    }
+
     fn str_gl(&self, idx: usize, size: usize) -> GlobalValue<'ctx> {
         let name = format!(".str{idx}");
         self.module.get_global(&name).unwrap_or_else(|| {
@@ -247,6 +272,185 @@ impl<'ctx> Inkwell<'ctx> {
             g.set_linkage(Linkage::Private);
             g
         })
+    }
+
+    fn native_kont_symbol_ptr(&self, symbol: &str) -> PointerValue<'ctx> {
+        let global_name = format!(".kont.shadow.{symbol}");
+        self.cstr_global(&global_name, symbol.as_bytes())
+            .as_pointer_value()
+    }
+
+    fn native_kont_enter_current(&self) {
+        let Some(frame) = self.native_kont_func.borrow().clone() else {
+            return;
+        };
+        self.native_kont_enter_symbol(&frame.symbol, frame.params.len());
+        for (index, param) in frame.params.iter().enumerate() {
+            self.native_kont_arg_value(index, self.int(param));
+        }
+    }
+
+    fn native_kont_enter_symbol(&self, symbol: &str, arity: usize) {
+        let args = [
+            self.native_kont_symbol_ptr(symbol).into(),
+            self.i64t()
+                .const_int(u64::try_from(arity).unwrap_or(u64::MAX), false)
+                .into(),
+        ];
+        let ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[self.ptr_t().into(), self.i64t().into()], false);
+        self.call_void_typed(rt::NATIVE_KONT_ENTER, ty, &args);
+    }
+
+    fn native_kont_tailcall_symbol(&self, symbol: &str, arity: usize) {
+        let args = [
+            self.native_kont_symbol_ptr(symbol).into(),
+            self.i64t()
+                .const_int(u64::try_from(arity).unwrap_or(u64::MAX), false)
+                .into(),
+        ];
+        let ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[self.ptr_t().into(), self.i64t().into()], false);
+        self.call_void_typed(rt::NATIVE_KONT_TAILCALL, ty, &args);
+    }
+
+    fn native_kont_arg_value(&self, index: usize, value: IntValue<'ctx>) {
+        let args = [
+            self.i64t()
+                .const_int(u64::try_from(index).unwrap_or(u64::MAX), false)
+                .into(),
+            value.into(),
+        ];
+        let ty = self
+            .ctx
+            .void_type()
+            .fn_type(&[self.i64t().into(), self.i64t().into()], false);
+        self.call_void_typed(rt::NATIVE_KONT_ARG, ty, &args);
+    }
+
+    fn native_kont_leave_current(&self) {
+        let ty = self.ctx.void_type().fn_type(&[], false);
+        self.call_void_typed(rt::NATIVE_KONT_LEAVE, ty, &[]);
+    }
+
+    fn retain_globals(&self, globals: &[GlobalValue<'ctx>]) {
+        if globals.is_empty() {
+            return;
+        }
+        let pointers: Vec<PointerValue<'ctx>> =
+            globals.iter().map(|g| g.as_pointer_value()).collect();
+        let used = self.module.get_global(LLVM_USED_GLOBAL).unwrap_or_else(|| {
+            self.module.add_global(
+                self.ptr_t()
+                    .array_type(u32::try_from(pointers.len()).unwrap_or(u32::MAX)),
+                None,
+                LLVM_USED_GLOBAL,
+            )
+        });
+        used.set_initializer(&self.ptr_t().const_array(&pointers));
+        used.set_linkage(Linkage::Appending);
+        used.set_section(Some(LLVM_METADATA_SECTION));
+    }
+
+    fn native_kont_ptrs_global(&self, table: &str) -> Vec<GlobalValue<'ctx>> {
+        let entry_t = self.ctx.struct_type(
+            &[
+                self.ptr_t().into(),
+                self.ptr_t().into(),
+                self.ptr_t().into(),
+                self.ptr_t().into(),
+            ],
+            false,
+        );
+        let mut entries: Vec<StructValue<'ctx>> = Vec::new();
+        for (i, row) in native_kont::rows(table).enumerate() {
+            let Some(f) = self.module.get_function(row.symbol) else {
+                continue;
+            };
+            let symbol = self.cstr_global(&format!(".kont_symbol{i}"), row.symbol.as_bytes());
+            let hash = self.cstr_global(&format!(".kont_hash{i}"), row.def_hash.as_bytes());
+            let core_name = self.cstr_global(&format!(".kont_name{i}"), row.core_name.as_bytes());
+            entries.push(self.ctx.const_struct(
+                &[
+                    f.as_global_value().as_pointer_value().into(),
+                    symbol.as_pointer_value().into(),
+                    hash.as_pointer_value().into(),
+                    core_name.as_pointer_value().into(),
+                ],
+                false,
+            ));
+        }
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let init = entry_t.const_array(&entries);
+        let ptrs = self
+            .module
+            .get_global(native_kont::PTRS_GLOBAL)
+            .unwrap_or_else(|| {
+                self.module
+                    .add_global(init.get_type(), None, native_kont::PTRS_GLOBAL)
+            });
+        ptrs.set_initializer(&init);
+        ptrs.set_constant(true);
+        ptrs.set_linkage(Linkage::External);
+        ptrs.set_section(Some(native_kont::TABLE_SECTION));
+        ptrs.set_alignment(8);
+
+        let len_init = self
+            .i64t()
+            .const_int(u64::try_from(entries.len()).unwrap_or(u64::MAX), false);
+        let len = self
+            .module
+            .get_global(native_kont::PTRS_LEN_GLOBAL)
+            .unwrap_or_else(|| {
+                self.module
+                    .add_global(self.i64t(), None, native_kont::PTRS_LEN_GLOBAL)
+            });
+        len.set_initializer(&len_init);
+        len.set_constant(true);
+        len.set_linkage(Linkage::External);
+        len.set_section(Some(native_kont::TABLE_SECTION));
+        len.set_alignment(8);
+        vec![ptrs, len]
+    }
+
+    fn native_kont_table_global(&self, core: &Core, table: &str) {
+        let init = self.ctx.const_string(table.as_bytes(), true);
+        let global = self
+            .module
+            .get_global(native_kont::TABLE_GLOBAL)
+            .unwrap_or_else(|| {
+                self.module
+                    .add_global(init.get_type(), None, native_kont::TABLE_GLOBAL)
+            });
+        global.set_initializer(&init);
+        global.set_constant(true);
+        global.set_linkage(Linkage::External);
+        global.set_section(Some(native_kont::TABLE_SECTION));
+        global.set_alignment(1);
+        let state_map = native_kont::state_map(core, table);
+        let state_init = self.ctx.const_string(state_map.as_bytes(), true);
+        let state_global = self
+            .module
+            .get_global(native_kont::STATE_MAP_GLOBAL)
+            .unwrap_or_else(|| {
+                self.module
+                    .add_global(state_init.get_type(), None, native_kont::STATE_MAP_GLOBAL)
+            });
+        state_global.set_initializer(&state_init);
+        state_global.set_constant(true);
+        state_global.set_linkage(Linkage::External);
+        state_global.set_section(Some(native_kont::TABLE_SECTION));
+        state_global.set_alignment(1);
+        let mut retained = vec![global, state_global];
+        retained.extend(self.native_kont_ptrs_global(table));
+        self.retain_globals(&retained);
     }
 
     fn printf(&self, fmt_name: &str, fmt: &[u8], arg: BasicMetadataValueEnum<'ctx>) {
@@ -458,7 +662,7 @@ impl Isa for Inkwell<'_> {
     // `inbounds` guarantee, which the prior `ptrtoint`/`add`/`inttoptr` form
     // discarded (leaving alias analysis to a `-O2` instcombine fold-back).
     //
-    // This is the crate's single audited `unsafe` (see `[lints.rust]` in
+    // This is one of the crate's audited `unsafe` sites (see `[lints.rust]` in
     // Cargo.toml). inkwell marks every indexed-gep builder `unsafe` because it
     // cannot check the indices stay in bounds of the pointee, and there is no safe
     // equivalent for a dynamic byte offset (`build_struct_gep` needs a static field
@@ -517,6 +721,10 @@ impl Isa for Inkwell<'_> {
     // which `emit_bitcode` runs before lowering; a violation is a loud verifier
     // error with the offending IR kept on disk, never a runtime overflow.
     fn musttail_call(&self, _b: &mut Buf, dst: &str, f: &str, args: &[String]) {
+        self.native_kont_tailcall_symbol(f, args.len());
+        for (index, arg) in args.iter().enumerate() {
+            self.native_kont_arg_value(index, self.int(arg));
+        }
         let f = self.decl(f, self.i64_fn(args.len()));
         let margs: Vec<BasicMetadataValueEnum<'_>> =
             args.iter().map(|a| self.get(a).into()).collect();
@@ -524,6 +732,7 @@ impl Isa for Inkwell<'_> {
         if let Some(cs) = cs {
             cs.set_tail_call_kind(LLVMTailCallKind::LLVMTailCallKindMustTail);
         }
+        self.pending_musttail.set(true);
         self.set(dst, self.cs_basic(cs));
     }
 
@@ -565,6 +774,11 @@ impl Isa for Inkwell<'_> {
     }
 
     fn ret(&self, _b: &mut Buf, v: &str) {
+        if self.pending_musttail.replace(false) {
+            self.act("ret", self.builder.build_return(Some(&self.int(v))));
+            return;
+        }
+        self.native_kont_leave_current();
         self.act("ret", self.builder.build_return(Some(&self.int(v))));
     }
 
@@ -574,6 +788,7 @@ impl Isa for Inkwell<'_> {
         self.blocks.borrow_mut().insert("entry".into(), bb);
         self.builder.position_at_end(bb);
         b.cur = "entry".into();
+        self.native_kont_enter_current();
     }
 
     fn open_block(&self, b: &mut Buf, l: &str) {
@@ -606,6 +821,11 @@ impl Isa for Inkwell<'_> {
         self.func.set(Some(f));
         self.vals.borrow_mut().clear();
         self.blocks.borrow_mut().clear();
+        self.native_kont_func.replace(Some(NativeKontFunction {
+            symbol: name.to_string(),
+            params: params.to_vec(),
+        }));
+        self.pending_musttail.set(false);
         for (i, p) in params.iter().enumerate() {
             let idx = u32::try_from(i).unwrap_or(u32::MAX);
             if let Some(arg) = f.get_nth_param(idx) {
@@ -648,11 +868,15 @@ impl Isa for Inkwell<'_> {
 fn with_module<T>(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
+    native_kont_table: Option<&str>,
     f: impl FnOnce(&Module<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
     let ctx = Context::create();
     let isa = Inkwell::new(&ctx);
     emit_with(&isa, core, ctors)?;
+    if let Some(table) = native_kont_table {
+        isa.native_kont_table_global(core, table);
+    }
     // Surface the first codegen-internal failure captured during emission as a
     // structured error instead of a panic at the original site.
     if let Some(e) = isa.err.borrow_mut().take() {
@@ -664,7 +888,19 @@ fn with_module<T>(
 /// # Errors
 /// Fails when a construct reaches codegen unlowered or unsupported.
 pub fn emit(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
-    with_module(core, ctors, |m| Ok(m.print_to_string().to_string()))
+    with_module(core, ctors, None, |m| Ok(m.print_to_string().to_string()))
+}
+
+/// # Errors
+/// Fails when a construct reaches codegen unlowered or unsupported.
+pub fn emit_with_native_kont_table(
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    native_kont_table: &str,
+) -> Result<String, String> {
+    with_module(core, ctors, Some(native_kont_table), |m| {
+        Ok(m.print_to_string().to_string())
+    })
 }
 
 /// Verify the module and write LLVM bitcode to `bc`. On verifier failure the
@@ -677,7 +913,22 @@ pub fn emit_bitcode(
     ctors: &BTreeMap<String, CtorInfo>,
     bc: &Path,
 ) -> Result<(), String> {
-    with_module(core, ctors, |m| {
+    emit_bitcode_with_native_kont_table(core, ctors, "", bc)
+}
+
+/// Verify the module with a native kont metadata table and write LLVM bitcode to
+/// `bc`.
+///
+/// # Errors
+/// Fails on codegen failure, a verifier rejection, or an unwritable path.
+pub fn emit_bitcode_with_native_kont_table(
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    native_kont_table: &str,
+    bc: &Path,
+) -> Result<(), String> {
+    let table = (!native_kont_table.is_empty()).then_some(native_kont_table);
+    with_module(core, ctors, table, |m| {
         if let Err(e) = m.verify() {
             let kept = std::env::temp_dir().join("prism_failed.ll");
             let _ = std::fs::write(&kept, m.print_to_string().to_string());

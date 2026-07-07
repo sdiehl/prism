@@ -1,4 +1,4 @@
--- S5: the pull-based Std `Sequence` library, exercised end to end. Every
+-- The pull-based Std `Sequence` library, exercised end to end. Every
 -- combinator family runs here so the parity gate pins it byte-identical on both
 -- backends; the three cases the push `Emit` substrate could not express -- a
 -- type-changing `map`, a heterogeneous `zip`, and an effect-polymorphic `for_each`

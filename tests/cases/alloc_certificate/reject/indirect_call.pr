@@ -1,0 +1,1 @@
+fn apply(f : (Int) -> Int, x : Int) : Int without alloc = f(x)

@@ -1,34 +1,19 @@
+import ModelSimp
+
 /-
-A formal model of the Prism call-by-push-value core, mirroring
-`src/core/cbpv.rs`. The `Value`/`Comp` syntax tracks the Rust enums one
-variant at a time; the dynamics are a substitution-based small step over
-the computational core (force, beta, sequencing, branching, prims, named
-calls, pattern matching). The reference-counting and FBIP-reuse markers
-reduce by erasure (`dup`/`drop` are observationally unit; `withReuse tok freed
-body` binds the freed shell's token, erased to unit, over `body`; `reuse tok v`
-yields the rebuilt value), so the RC-instrumented program keeps the meaning of
-the pure one. The reuse token is a scoped binder of `withReuse` and the only
-operand `reuse` names, so it is freed once and spent at an allocation by
-construction. Effects and handlers are syntax only:
-the free-monad lowering erases them before this core runs. The relation is
-proved deterministic (`Step.deterministic`), so a closed computation has at
-most one normal form.
+This is the small-step model of Prism Core. It follows `src/core/cbpv.rs` closely
+enough that the constructors should feel familiar if you have been staring at
+the Rust enums.
 
-Type-level indices are outside this model by the same erasure discipline. The
-`Nat` kind (`type Vec(a, n : Nat)`) constrains only what type-checks; a
-dimension is erased before this Core, exactly as effects are, so it reaches
-neither `Value`/`Comp` nor the dynamics and adds no rule here. The model
-therefore needs no change for the `Nat` kind: its correctness lives entirely in
-the type checker (`src/tc`), and its runtime footprint is provably nil because
-the thing it constrains never appears in the term language the machine runs.
+The interesting move here is that a lot of surface machinery simply disappears.
+Reference-counting markers reduce to unit or rebuild the value they were already
+holding. Type-level `Nat` indices never reach this syntax. Records, optics, and
+view patterns are already ordinary constructors, cases, and calls by the time
+Core sees them.
 
-The DESIGN s3 deconstructors and the lens answer add no new core: a record
-is a `ctor`, a nested update path is a `case` that destructures the spine and
-rebuilds it field for field (FBIP-reused via `reuse` when the spine is
-uniquely owned), and view/make patterns (including class-dispatched ones)
-become a `call` to the synthesized view followed by a `case` on its `Option`
-result. The sanity examples in `Sanity.lean` discharge the whole of the
-soundness obligation they add.
+Effects are present as syntax, but this substitution model does not run them.
+The CEK machine in `CEK.lean` owns that story. This file handles the pure Core
+step relation and its basic determinism.
 -/
 namespace Prism
 
@@ -178,7 +163,9 @@ def substC (x : String) (w : Value) : Comp → Comp
   | .strBuiltin n args => .strBuiltin n (substVL x w args)
   | .dup v => .dup (substV x w v)
   | .drop v => .drop (substV x w v)
-  | .withReuse tok freed body => .withReuse tok (substV x w freed) (if x = tok then body else substC x w body)
+  | .withReuse tok freed body =>
+      .withReuse tok (substV x w freed)
+        (if x = tok then body else substC x w body)
   | .reuse tok v => .reuse tok (substV x w v)
 
 def substArms (x : String) (w : Value) : List (Pat × Comp) → List (Pat × Comp)
@@ -191,18 +178,25 @@ def substRet (x : String) (w : Value) : Option Comp → Option Comp
 
 def substOps (x : String) (w : Value) : List HandleOp → List HandleOp
   | [] => []
-  | .mk n ps r b :: rest => .mk n ps r (if ps.contains x || r = x then b else substC x w b) :: substOps x w rest
+  | .mk n ps r b :: rest =>
+      .mk n ps r
+        (if ps.contains x || r = x then b else substC x w b) ::
+      substOps x w rest
 
 end
 
+@[prism_model]
 def substMany : List (String × Value) → Comp → Comp
   | [], c => c
   | (x, w) :: rest, c => substMany rest (substC x w c)
 
+@[prism_model]
 def bindParams (xs : List String) (vs : List Value) : List (String × Value) := xs.zip vs
 
+@[prism_model]
 def lookupFn (Γ : Core) (name : String) : Option CoreFn := Γ.fns.find? (·.name == name)
 
+@[prism_model]
 def delta : BinOp → Value → Value → Option Value
   | .add, .int a, .int b => some (.int (a + b))
   | .sub, .int a, .int b => some (.int (a - b))
@@ -224,6 +218,7 @@ def delta : BinOp → Value → Value → Option Value
 /-- Unary negation per lane, the `neg` analogue of `delta`. `int`/`i64` negate an
     integer; like `delta`, the substitution semantics leaves floats abstract (the
     executable machine's `negR` in `CEK.lean` reduces the float lane). -/
+@[prism_model]
 def negD : NegLane → Value → Option Value
   | .int, .int n => some (.int (-n))
   | .i64, .int n => some (.int (-n))
@@ -246,6 +241,7 @@ where
         | _, _ => none
     | _, _ => none
 
+@[prism_model]
 def matchArms (scrut : Value) : List (Pat × Comp) → Option Comp
   | [] => none
   | (p, c) :: rest =>
@@ -254,41 +250,59 @@ def matchArms (scrut : Value) : List (Pat × Comp) → Option Comp
       | none => matchArms scrut rest
 
 inductive Step (Γ : Core) : Comp → Comp → Prop where
-  | forceThunk : Step Γ (.force (.thunk c)) c
-  | beta : Step Γ (.app (.lam xs body) args) (substMany (bindParams xs args) body)
-  | appCong : Step Γ f f' → Step Γ (.app f args) (.app f' args)
-  | bindRet : Step Γ (.bind (.ret v) x n) (substC x v n)
-  | bindCong : Step Γ m m' → Step Γ (.bind m x n) (.bind m' x n)
-  | ifTrue : Step Γ (.ite (.bool true) t e) t
-  | ifFalse : Step Γ (.ite (.bool false) t e) e
-  | prim : delta op a b = some v → Step Γ (.prim op a b) (.ret v)
-  | neg : negD lane v = some w → Step Γ (.neg lane v) (.ret w)
-  | call : lookupFn Γ name = some f → Step Γ (.call name args) (substMany (bindParams f.params args) f.body)
-  | caseMatch : matchArms scrut arms = some c → Step Γ (.case scrut arms) c
-  | dupStep : Step Γ (.dup v) (.ret .unit)
-  | dropStep : Step Γ (.drop v) (.ret .unit)
-  | withReuseStep : Step Γ (.withReuse tok freed body) (substC tok .unit body)
-  | reuseStep : Step Γ (.reuse tok v) (.ret v)
+  | forceThunk {c : Comp} : Step Γ (.force (.thunk c)) c
+  | beta {xs : List String} {body : Comp} {args : List Value} :
+      Step Γ (.app (.lam xs body) args)
+        (substMany (bindParams xs args) body)
+  | appCong {f f' : Comp} {args : List Value} : Step Γ f f' → Step Γ (.app f args) (.app f' args)
+  | bindRet {v : Value} {x : String} {n : Comp} : Step Γ (.bind (.ret v) x n) (substC x v n)
+  | bindCong {m m' n : Comp} {x : String} : Step Γ m m' → Step Γ (.bind m x n) (.bind m' x n)
+  | ifTrue {t e : Comp} : Step Γ (.ite (.bool true) t e) t
+  | ifFalse {t e : Comp} : Step Γ (.ite (.bool false) t e) e
+  | prim {op : BinOp} {a b : Value} {v : Value} :
+      delta op a b = some v →
+      Step Γ (.prim op a b) (.ret v)
+  | neg {lane : NegLane} {v : Value} {w : Value} :
+      negD lane v = some w →
+      Step Γ (.neg lane v) (.ret w)
+  | call {name : String} {f : CoreFn} {args : List Value} :
+      lookupFn Γ name = some f →
+      Step Γ (.call name args)
+        (substMany (bindParams f.params args) f.body)
+  | caseMatch {scrut : Value} {arms : List (Pat × Comp)} {c : Comp} :
+      matchArms scrut arms = some c →
+      Step Γ (.case scrut arms) c
+  | dupStep {v : Value} : Step Γ (.dup v) (.ret .unit)
+  | dropStep {v : Value} : Step Γ (.drop v) (.ret .unit)
+  | withReuseStep {tok : String} {freed : Value} {body : Comp} :
+      Step Γ (.withReuse tok freed body) (substC tok .unit body)
+  | reuseStep {tok : String} {v : Value} : Step Γ (.reuse tok v) (.ret v)
 
 inductive Steps (Γ : Core) : Comp → Comp → Prop where
-  | refl : Steps Γ c c
-  | head : Step Γ a b → Steps Γ b c → Steps Γ a c
+  | refl {c : Comp} : Steps Γ c c
+  | head {a b c : Comp} : Step Γ a b → Steps Γ b c → Steps Γ a c
 
+@[prism_model]
 def Terminal : Comp → Prop
   | .ret _ => True
   | .lam _ _ => True
   | _ => False
 
+/-- A returned value is final for the small-step relation. -/
 theorem noStepRet {Γ : Core} {v : Value} {c : Comp} : ¬Step Γ (.ret v) c :=
   by
     intro h
     cases h
 
+/-- A lambda value is final for the small-step relation. -/
 theorem noStepLam {Γ : Core} {xs : List String} {b c : Comp} : ¬Step Γ (.lam xs b) c :=
   by
     intro h
     cases h
 
+
+/-- The small-step core is deterministic: a computation cannot step to two
+    different next computations. -/
 theorem Step.deterministic {Γ : Core} {a b c : Comp} (h1 : Step Γ a b) (h2 : Step Γ a c) : b = c :=
   by induction h1 generalizing c with
       | forceThunk => cases h2 with

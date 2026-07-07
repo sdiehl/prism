@@ -50,6 +50,24 @@ const COMPILER_SOURCE_ROOTS: &[&str] = &[
 /// The backend-opt level the native build compiles at, part of the cache key so
 /// a different `-O` invalidates. Mirrors the driver default.
 const DEFAULT_BACKEND_OPT: &str = "2";
+/// Environment knobs that can change generated code, runtime behavior, or the
+/// diagnostics a gate treats as build-affecting. These are identity inputs for
+/// cached native oracle artifacts, not hidden ambient state.
+const BEHAVIOR_ENV: &[&str] = &[
+    "PRISM_NATIVE_EFFECTS",
+    "PRISM_TRAMPOLINE",
+    "PRISM_CEK_SPIKE",
+    "PRISM_CORE_LINT",
+    "PRISM_RT_CHECKS",
+    "PRISM_NATIVE_KONT_FRAMES",
+    "PRISM_OPT_LEVEL",
+    "PRISM_BACKEND_OPT",
+    "PRISM_NO_SPECIALIZE",
+    "PRISM_FUSE",
+    "PRISM_SCHEDULER",
+    "PRISM_EFFECT_TIER",
+    "PRISM_CC_FLAGS",
+];
 
 pub fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
@@ -272,15 +290,15 @@ pub fn leak_free(stderr: &str) -> bool {
 /// the frontend, codegen, or the `runtime.c` embedded via `include_str!` rebuilds
 /// it, so its hash stands in for the whole compiler), the C compiler in use and
 /// its version string, the backend-opt level, and the extra `PRISM_CC_FLAGS`
-/// handed to the linker. The last is load-bearing for CI: the ASan/UBSan and
+/// handed to the linker. The last matters for CI: the ASan/UBSan and
 /// `-DPRISM_RT_DEBUG` re-runs of the parity corpus differ from the plain run only
 /// in those flags, so without them in the key those hardening passes would share
 /// a key with the plain build and be wrongly skipped. Computed once. Because any
 /// of these moving changes the key, a stale pass can never be served after a
 /// toolchain or flag change; the cache only skips work when the exact same
 /// toolchain last passed.
-fn compiler_fingerprint() -> &'static str {
-    static FP: OnceLock<String> = OnceLock::new();
+fn compiler_fingerprint() -> &'static GateCacheIdentity {
+    static FP: OnceLock<GateCacheIdentity> = OnceLock::new();
     FP.get_or_init(|| {
         let compiler = if env::var(GATE_FINGERPRINT).as_deref() == Ok(FINGERPRINT_SOURCE) {
             source_tree_hash()
@@ -297,10 +315,88 @@ fn compiler_fingerprint() -> &'static str {
             .map_or_else(String::new, |o| {
                 String::from_utf8_lossy(&o.stdout).into_owned()
             });
-        let backend = env::var("PRISM_BACKEND_OPT").unwrap_or_else(|_| DEFAULT_BACKEND_OPT.into());
-        let cc_flags = env::var("PRISM_CC_FLAGS").unwrap_or_default();
-        format!("{}\0{compiler}\0{clang}\0{backend}\0{cc_flags}", cc())
+        GateCacheIdentity::new(format!(
+            "{}\0{compiler}\0{clang}\0{}",
+            cc(),
+            artifact_identity_context()
+        ))
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateCacheIdentity {
+    fingerprint: String,
+}
+
+impl GateCacheIdentity {
+    const fn new(fingerprint: String) -> Self {
+        Self { fingerprint }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(fingerprint: &str) -> Self {
+        Self::new(fingerprint.to_string())
+    }
+
+    fn as_str(&self) -> &str {
+        &self.fingerprint
+    }
+}
+
+pub fn artifact_identity_context() -> String {
+    let mut out = String::new();
+    out.push_str("compiler-version=");
+    out.push_str(env!("CARGO_PKG_VERSION"));
+    out.push('\0');
+    out.push_str("hash-scheme=");
+    out.push_str(prism::core::HASH_SCHEME);
+    out.push('\0');
+    out.push_str("target=");
+    out.push_str(env!("PRISM_TARGET"));
+    out.push('\0');
+    out.push_str("features=");
+    out.push_str(compiled_features());
+    out.push('\0');
+    for name in BEHAVIOR_ENV {
+        out.push_str(name);
+        out.push('=');
+        let value = match *name {
+            "PRISM_BACKEND_OPT" => {
+                env::var(name).unwrap_or_else(|_| DEFAULT_BACKEND_OPT.to_string())
+            }
+            _ => env::var(name).unwrap_or_default(),
+        };
+        out.push_str(&value);
+        out.push('\0');
+    }
+    out
+}
+
+const fn compiled_features() -> &'static str {
+    match (
+        cfg!(feature = "native"),
+        cfg!(feature = "mlir"),
+        cfg!(feature = "wasm"),
+        cfg!(feature = "cek-spike"),
+        cfg!(feature = "mimalloc"),
+    ) {
+        (true, true, _, true, true) => "native,mlir,cek-spike,mimalloc",
+        (true, true, _, true, false) => "native,mlir,cek-spike",
+        (true, true, _, false, true) => "native,mlir,mimalloc",
+        (true, true, _, false, false) => "native,mlir",
+        (true, false, _, true, true) => "native,cek-spike,mimalloc",
+        (true, false, _, true, false) => "native,cek-spike",
+        (true, false, _, false, true) => "native,mimalloc",
+        (true, false, _, false, false) => "native",
+        (false, _, true, true, true) => "wasm,cek-spike,mimalloc",
+        (false, _, true, true, false) => "wasm,cek-spike",
+        (false, _, true, false, true) => "wasm,mimalloc",
+        (false, _, true, false, false) => "wasm",
+        (false, _, false, true, true) => "cek-spike,mimalloc",
+        (false, _, false, true, false) => "cek-spike",
+        (false, _, false, false, true) => "mimalloc",
+        (false, _, false, false, false) => "",
+    }
 }
 
 /// A reproducible hash of the compiler's source inputs (`COMPILER_SOURCE_ROOTS`):
@@ -363,8 +459,12 @@ fn gate_cache_dir() -> Option<PathBuf> {
 /// oracle tag (a program passes `llvm` and `mlir` independently), and the full
 /// prelude-prepended source. Any input change moves the key.
 fn cache_key(full: &str, tag: &str) -> String {
+    cache_key_with_identity(full, tag, compiler_fingerprint())
+}
+
+pub fn cache_key_with_identity(full: &str, tag: &str, identity: &GateCacheIdentity) -> String {
     let mut h = blake3::Hasher::new();
-    h.update(compiler_fingerprint().as_bytes());
+    h.update(identity.as_str().as_bytes());
     h.update(b"\0");
     h.update(tag.as_bytes());
     h.update(b"\0");

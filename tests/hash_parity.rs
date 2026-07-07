@@ -1,4 +1,4 @@
-// The content-hash parity gate: the load-bearing invariant behind
+// The content-hash parity gate: the central invariant behind
 // content-addressed Core. A definition's hash names its pre-optimizer elaborated
 // term, and everything past that term (the deterministic Core-to-Core optimizer
 // and codegen) is a pure function of it under a fixed toolchain. So, holding the

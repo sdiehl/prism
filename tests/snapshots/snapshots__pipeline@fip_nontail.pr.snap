@@ -101,10 +101,10 @@ fn relay(x) =
   return x to t@0; relay(t@0) to t@1; wrap(t@1)
 
 == fip ==
-Type Error: function `relay` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+Type Error: usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
    ╭─[ <source>:9:1 ]
    │
  9 │ fip fn relay(x) = wrap(relay(x))
    │ ────────────────┬───────────────  
-   │                 ╰───────────────── function `relay` is marked `fip` but recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+   │                 ╰───────────────── usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
 ───╯

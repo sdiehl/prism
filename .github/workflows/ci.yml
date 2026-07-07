@@ -15,6 +15,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # sccache caches per-crate rustc output in the GHA cache, shared across jobs, so
@@ -79,7 +82,7 @@ jobs:
           for f in runtime/*.c; do
             [ "$(basename "$f")" = prism_arena.c ] && continue
             echo "tidy $f"
-            clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -Iruntime
+            clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime
           done
 
   # The C-runtime sanitizer + structural-backstop parity re-runs, split off `test`
@@ -202,7 +205,7 @@ jobs:
 
       - name: Check prism formatting
         run: |
-          cargo build --release 2>/dev/null
+          cargo build --all --release 2>/dev/null
           ./target/release/prism fmt --check
 
       # The committed Standard Library Reference is generated from the stdlib
@@ -225,20 +228,16 @@ jobs:
       - name: Book doc-blocks type-check (strict)
         run: PRISM_MDBOOK_STRICT=1 mdbook build docs
 
-      - name: Build release
-        run: cargo build --all --release
-
       # PRISM_CORE_LINT runs Core Lint between every optimization pass, so the
       # whole example corpus is the lint's gate: a pass that produces ill-formed
       # Core (an escaped binder, a reuse token spent twice) aborts the compile.
       - name: Compile every example
         env:
           PRISM_CORE_LINT: 1
-        run: |
-          for f in examples/*.pr; do
-            echo "== $f"
-            ./target/release/prism "$f" -o /tmp/example_bin
-          done
+        run: ./target/release/prism run --examples
+
+      - name: Check package world
+        run: ./target/release/prism check-world packages --strict
 
   web:
     name: Web playground
@@ -356,14 +355,14 @@ jobs:
       - name: Differential oracle vs interpreter
         run: models/diff_against_rust.sh
 
-      # The committed core-json certificate fixtures are a `just hash`-style
-      # artifact: regenerate them and fail if they drift from what the compiler now
-      # emits, so a stale certificate reference cannot ship.
+      # The committed fixture manifest is a `just hash`-style artifact:
+      # regenerate it and fail if source, core-json, Core hashes, or expected
+      # outputs drift from what the compiler now emits.
       - name: Certificate fixtures drift check
         run: |
           models/gen_fixtures.sh
-          git diff --exit-code -- models/fixtures/*.json \
-            || { echo "models/fixtures/*.json drifted; run 'just fixtures' and commit"; exit 1; }
+          git diff --exit-code -- models/fixtures/core-hashes.tsv \
+            || { echo "models/fixtures/core-hashes.tsv drifted; run 'just fixtures' and commit"; exit 1; }
 
   mlir:
     name: MLIR backend
@@ -404,6 +403,9 @@ jobs:
         with:
           packages: libmlir-22-dev mlir-22-tools
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Build with mlir backend
         run: cargo build --features mlir
         env:
@@ -412,7 +414,7 @@ jobs:
           TABLEGEN_220_PREFIX: /usr/lib/llvm-22
 
       - name: Run mlir parity test
-        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo test --features mlir --test parity
+        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo nextest run --features mlir --test parity mlir_matches_interpreter
         env:
           LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
@@ -500,10 +502,10 @@ jobs:
       - name: Build dev shell
         run: nix develop --command bash -c "rustc --version && clang --version && just --version"
 
-      # Phase 2: the reproducible `prism` binary itself. Building it here keeps the
-      # Nix build path from drifting from the cargo/setup-llvm path (loud failure on
-      # any LLVM-version or source-filter skew) and seeds the package closure into
-      # Cachix. The smoke asserts the artifact loads the embedded stdlib and runs.
+      # Build the reproducible `prism` binary itself. This keeps the Nix build path
+      # from drifting from the cargo/setup-llvm path (loud failure on any LLVM-version
+      # or source-filter skew) and seeds the package closure into Cachix. The smoke
+      # asserts the artifact loads the embedded stdlib and runs.
       - name: Build package
         run: nix build .#default --print-build-logs
 

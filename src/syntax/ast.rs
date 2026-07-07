@@ -497,7 +497,7 @@ pub struct Decl<P: Phase = Surface> {
     // The `without alloc` signature suffix: the function and its whole call tree
     // must allocate no fresh heap cell. Checked over the reuse-lowered core with
     // `fbip` semantics (no linearity or bounded-stack requirement), so this is
-    // `fbip` spelled as a revoked capability.
+    // the allocation-certificate spelling of the same usage check.
     pub no_alloc: bool,
     // Which surface spelling of that suffix the source used: `true` for the terser
     // `\ alloc`, `false` for `without alloc`. Purely a formatter fidelity hint so a
@@ -867,6 +867,10 @@ pub enum Sugar<P: Phase> {
     // `Fail` context, and on failure restore each var before yielding `fallback`,
     // so a failed attempt leaves observable state unchanged.
     Transact(Box<S<Expr<P>>>, Box<S<Expr<P>>>),
+    // `probe "name" do body`: source-level instrumentation. Desugars to an
+    // environment-gated branch, so a disabled probe evaluates neither body nor
+    // any formatting work inside it.
+    Probe(String, Box<S<Expr<P>>>),
     // `a?.b`: failable field access through an option, `force(a).b`. A `None`
     // raises `Fail`, so chains like `a?.b?.c` short-circuit and default with
     // `??`. Meaningful only inside a failure context.

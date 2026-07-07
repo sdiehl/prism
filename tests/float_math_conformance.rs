@@ -8,7 +8,7 @@
 //! agree by construction, since both call the same `prism_m_*` symbols (the
 //! interpreter FFIs them, native codegen calls them) -- but the two are compiled
 //! by different clang invocations (the `cc` crate builds the copy linked into
-//! this test binary; a fresh `write_runtime` + clang builds the copy the shim
+//! this test binary; a fresh host-oracle runtime profile builds the copy the shim
 //! links), so this pins that the same source compiled twice, with the pinned
 //! `-ffp-contract=off`, is bit-identical. A flag leak or ABI mismatch fails here.
 //!
@@ -35,6 +35,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use prism::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
 use prism::eval::owned_math as m;
 
 // The op table, shared by the C shim's switch and the Rust reference below. Order
@@ -177,11 +178,11 @@ fn build_helper() -> PathBuf {
     let stem = format!("prism_math_conf_{}", std::process::id());
     let dir = std::env::temp_dir().join(&stem);
     std::fs::create_dir_all(&dir).unwrap();
-    let rt_sources = prism::codegen::rt::write_runtime(&dir).unwrap();
+    let rt_sources = write_runtime_for(&dir, RuntimeProfile::HostOracle).unwrap();
     // The vendored libm is the one pre-built archive (the same bytes the interpreter
     // links), not a recompile: that single shared compilation is what makes the
     // interpreter and native agree bit-for-bit on the non-correctly-rounded ops.
-    let libm_archive = prism::codegen::rt::write_libm_archive(&dir).unwrap();
+    let libm_archive = write_libm_archive(&dir).unwrap();
     let shim = dir.join(format!("{stem}.c"));
     let bin = dir.join(&stem);
 

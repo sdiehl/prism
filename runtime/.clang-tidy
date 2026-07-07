@@ -2,7 +2,7 @@
 # Every enabled check is an error (WarningsAsErrors: '*'), so a new warning
 # fails CI rather than scrolling past.
 #
-# The disabled checks are not laziness: each fights a deliberate, load-bearing
+# The disabled checks are not laziness: each fights a deliberate, required
 # property of this runtime, the same way the crate carries targeted clippy
 # allows. Justifications:
 #

@@ -1,0 +1,3 @@
+import StorePkg (answer)
+
+fn main() : !{IO} Unit = println(show_int(answer() + 1))

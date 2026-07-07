@@ -22,7 +22,7 @@ fn scene() : !{Async(Int)} Int =
   let c = channel(())
   let a = fork(\() -> worker(20))
   let b = fork(\() -> worker(22))
-  let p = fork(\() -> producer(c, 3))
+  fork(\() -> producer(c, 3))
   await(a) + await(b) + consumer(c, 3, 0)
 
 fn main() : Int = run_async(scene)
