@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"

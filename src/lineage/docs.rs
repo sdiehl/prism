@@ -73,7 +73,7 @@ pub struct DocsLineageInput<'a> {
 impl DocsLineage {
     /// Gather a docs manifest from the build's identity and its rendered output.
     ///
-    /// The roots and compiler identity come from the one [`BuildIdentity`], exactly
+    /// The roots and compiler identity come from the one `BuildIdentity`, exactly
     /// as a build sidecar's do; the pages and doctests are digested here.
     ///
     /// # Errors

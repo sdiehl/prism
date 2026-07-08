@@ -81,26 +81,19 @@ impl Phase {
     }
 }
 
-/// The cache status column (field 5). A compile cache does not exist yet, so a
-/// row is always [`Cold`](Self::Cold); the whole family is spelled out here so
-/// the format is ready the day one arrives, rather than the column being widened
-/// under a reader. The non-`Cold` statuses are unconstructed until then.
-#[allow(dead_code)] // reserved future vocabulary; see the type doc
+/// The cache status column (field 5). The format reserves the spellings `cold`,
+/// `hit`, `miss`, and `write`; a compile cache does not exist yet, so `Cold` is
+/// the only constructed status and the enum grows a variant the day one arrives.
+/// The column exists now so that arrival widens a value set, never the schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CacheStatus {
     Cold,
-    Hit,
-    Miss,
-    Write,
 }
 
 impl CacheStatus {
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Cold => "cold",
-            Self::Hit => "hit",
-            Self::Miss => "miss",
-            Self::Write => "write",
         }
     }
 }

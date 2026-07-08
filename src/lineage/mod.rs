@@ -5,15 +5,15 @@
 //! can explain what produced it. One envelope serves many producers; the subsystem
 //! is split by concept:
 //!
-//! - [`graph`]: the node/edge vocabulary, digest identity, the versioned envelope,
+//! - `graph`: the node/edge vocabulary, digest identity, the versioned envelope,
 //!   the determinism seal, and the typed relations every query reads.
-//! - [`build`]: collecting and assembling a project-build sidecar (plus the v1
+//! - `build`: collecting and assembling a project-build sidecar (plus the v1
 //!   adapter and the sidecar's on-disk siting and reader).
-//! - [`run`]: collecting and assembling a recorded-run sidecar from provenance events.
-//! - [`explain`]: `why-output`, walking the graph backward to an [`explain::Explanation`].
-//! - [`diff`]: aligning two graphs by logical key into a [`diff::DiffReport`].
+//! - `run`: collecting and assembling a recorded-run sidecar from provenance events.
+//! - `explain`: `why-output`, walking the graph backward to an `explain::Explanation`.
+//! - [`diff`]: aligning two graphs by logical key into a `diff::DiffReport`.
 //! - [`verify`]: rehashing content nodes and closing the record loop by replay.
-//! - [`render`]: all human prose, consuming the answer objects the queries produce.
+//! - `render`: all human prose, consuming the answer objects the queries produce.
 
 mod build;
 mod cert;

@@ -63,7 +63,7 @@ pub struct RunLineageInput<'a> {
 impl RunLineage {
     /// Gather a run sidecar from the run's identity and its provenance events.
     ///
-    /// The roots and compiler identity come from the one [`BuildIdentity`], exactly
+    /// The roots and compiler identity come from the one `BuildIdentity`, exactly
     /// as a build sidecar's do; the run-specific nodes are folded from the events.
     ///
     /// # Errors

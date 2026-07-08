@@ -355,7 +355,7 @@ pub fn write_sidecar(artifact: &Path, lineage: &BuildLineage) -> Result<PathBuf,
 ///
 /// # Errors
 /// Fails on filesystem or decode errors. A `prism-build-lineage-v1` sidecar is
-/// lifted through [`from_v1`]; any other format is rejected.
+/// lifted through `from_v1`; any other format is rejected.
 pub fn read_lineage(file: &Path) -> Result<LineageGraph, Error> {
     let path = sidecar_of(file);
     let text = fs::read_to_string(&path).map_err(Error::Io)?;
