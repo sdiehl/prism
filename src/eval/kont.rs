@@ -66,28 +66,23 @@ use std::rc::Rc;
 
 use num_bigint::BigInt;
 
+// The byte substrate (varints, bounded blobs/strings, table numbering, the
+// hostile-input reader, and the node-table bounds) is shared with the `def` codec;
+// only the `kont` schema below is local.
+use crate::binary::{
+    from_wire, put_indices, put_str, put_svarint, put_uvarint, to_wire, Reader, MAX_EXPANSION,
+    MAX_NODES,
+};
 use crate::core::{CoreOp, CorePat};
 use crate::driver::WireKind;
-use crate::store::codec::{op_from_wire, op_wire, BUILTINS, CORE_OPS, FLOAT_OPS, NEG_LANES};
+// The op-family tables are numbered once in the `def` codec; the `kont` wire draws
+// the same numbering so an operator means one thing on both wires.
+use crate::store::codec::{BUILTINS, CORE_OPS, FLOAT_OPS, NEG_LANES};
 use crate::store::CodecError;
 use crate::sym::Sym;
+use crate::types::ty::Type;
 
 use super::{Atom, Cmp, Env, Frame, HandleInfo, Node, Obs, Rv};
-
-// Byte discipline shared with `lib/std/Wire.pr` and `store::codec`, restated here
-// as that codec restates it: a varint is capped so a hostile continuation run
-// cannot read forever, and a length prefix is bounded so a hostile count cannot
-// force unbounded work.
-const VARINT_MAX_BYTES: usize = 10;
-const VARINT_CONT: u8 = 0x80;
-const VARINT_LOW: u64 = 0x7f;
-const WIRE_LEN_MAX: u64 = 1 << 20;
-
-// The node table and the reconstructed graph are both bounded: a table larger
-// than this, or a reconstruction that expands past this many nodes, is rejected
-// rather than allowed to exhaust memory.
-const MAX_NODES: u64 = 1 << 20;
-const MAX_EXPANSION: usize = 1 << 22;
 
 // The deepest value graph a single suspend may serialize, and the deepest a
 // decode will reconstruct. Realistic continuation state (a physics vector, a
@@ -163,6 +158,34 @@ impl std::fmt::Display for SuspendError {
 }
 
 impl std::error::Error for SuspendError {}
+
+/// Whether the suspend codec has a wire encoding for every value of this ground
+/// type.
+///
+/// This is the type-level projection of the value shapes [`encode_kont`]
+/// serializes (the `value` match above, one arm per `Tag::V*` variant). Scalars,
+/// `Char`, `Str`, tuples, and algebraic data with encodable fields all round-trip,
+/// so a capture of such a type can cross a move. A function type answers `false`, not
+/// because the codec lacks a `VClosure` tag but because a closure's portability
+/// turns on its own captured environment, which a static per-closure pass does
+/// not inspect; an abstract or unresolved type is likewise undecidable here.
+/// A `false` therefore means "cannot prove portable", never "provably not".
+#[must_use]
+pub fn portable_value_type(ty: &Type) -> bool {
+    match ty {
+        Type::Unit
+        | Type::Int
+        | Type::I64
+        | Type::U64
+        | Type::Bool
+        | Type::Float
+        | Type::Char
+        | Type::Str => true,
+        Type::Tuple(fields) => fields.iter().all(portable_value_type),
+        Type::Con(_, args) => args.iter().all(portable_value_type),
+        _ => false,
+    }
+}
 
 // One discriminant for every runtime shape the table can hold, across all six
 // domains (value, node, atom, frame, environment, handler record). Encoded as a
@@ -296,10 +319,7 @@ const TAGS: &[Tag] = &[
 
 impl Tag {
     fn from_u64(n: u64) -> Result<Self, CodecError> {
-        usize::try_from(n)
-            .ok()
-            .and_then(|i| TAGS.get(i).copied())
-            .ok_or(CodecError::Malformed)
+        from_wire(TAGS, n)
     }
 }
 
@@ -319,10 +339,7 @@ const PAT_TAGS: &[PatTag] = &[PatTag::Wild, PatTag::Var, PatTag::Ctor, PatTag::T
 
 impl PatTag {
     fn from_u64(n: u64) -> Result<Self, CodecError> {
-        usize::try_from(n)
-            .ok()
-            .and_then(|i| PAT_TAGS.get(i).copied())
-            .ok_or(CodecError::Malformed)
+        from_wire(PAT_TAGS, n)
     }
 }
 
@@ -334,52 +351,12 @@ const OBS_OUT: u64 = 3;
 
 // ------------------------------- encoding ----------------------------------
 
-fn put_uvarint(out: &mut Vec<u8>, mut n: u64) {
-    loop {
-        let lo = (n & VARINT_LOW) as u8;
-        n >>= 7;
-        if n == 0 {
-            out.push(lo);
-            return;
-        }
-        out.push(lo | VARINT_CONT);
-    }
-}
-
-// Zigzag maps a signed integer to an unsigned one so small negatives stay small
-// under LEB128. The casts reinterpret the bit pattern by design.
-#[allow(clippy::cast_sign_loss)]
-const fn zigzag(x: i64) -> u64 {
-    ((x << 1) ^ (x >> 63)) as u64
-}
-
-#[allow(clippy::cast_possible_wrap)]
-const fn unzigzag(z: u64) -> i64 {
-    ((z >> 1) as i64) ^ -((z & 1) as i64)
-}
-
-fn put_svarint(out: &mut Vec<u8>, x: i64) {
-    put_uvarint(out, zigzag(x));
-}
-
-fn put_str(out: &mut Vec<u8>, s: &str) {
-    put_uvarint(out, s.len() as u64);
-    out.extend_from_slice(s.as_bytes());
-}
-
 fn put_sym(out: &mut Vec<u8>, s: Sym) {
     put_str(out, s.as_str());
 }
 
 fn put_tag(out: &mut Vec<u8>, t: Tag) {
     put_uvarint(out, t as u64);
-}
-
-fn put_indices(out: &mut Vec<u8>, idxs: &[u32]) {
-    put_uvarint(out, idxs.len() as u64);
-    for i in idxs {
-        put_uvarint(out, u64::from(*i));
-    }
 }
 
 struct Encoder {
@@ -646,7 +623,7 @@ impl Encoder {
                 let ai = self.atom(a)?;
                 let bi = self.atom(b)?;
                 put_tag(&mut out, Tag::NPrim);
-                put_uvarint(&mut out, op_wire(CORE_OPS, *op));
+                put_uvarint(&mut out, to_wire(CORE_OPS, *op));
                 put_uvarint(&mut out, u64::from(ai));
                 put_uvarint(&mut out, u64::from(bi));
             }
@@ -673,13 +650,13 @@ impl Encoder {
             Node::FloatBuiltin(op, a) => {
                 let ai = self.atom(a)?;
                 put_tag(&mut out, Tag::NFloat);
-                put_uvarint(&mut out, op_wire(FLOAT_OPS, *op));
+                put_uvarint(&mut out, to_wire(FLOAT_OPS, *op));
                 put_uvarint(&mut out, u64::from(ai));
             }
             Node::Neg(lane, a) => {
                 let ai = self.atom(a)?;
                 put_tag(&mut out, Tag::NNeg);
-                put_uvarint(&mut out, op_wire(NEG_LANES, *lane));
+                put_uvarint(&mut out, to_wire(NEG_LANES, *lane));
                 put_uvarint(&mut out, u64::from(ai));
             }
             Node::Do(op, args) => {
@@ -691,7 +668,7 @@ impl Encoder {
             Node::StrBuiltin(b, args) => {
                 let idxs = self.atoms(args)?;
                 put_tag(&mut out, Tag::NStr);
-                put_uvarint(&mut out, op_wire(BUILTINS, *b));
+                put_uvarint(&mut out, to_wire(BUILTINS, *b));
                 put_indices(&mut out, &idxs);
             }
             Node::Handle(hi) => {
@@ -917,107 +894,6 @@ pub fn encode_kont(k: &Kont) -> Result<Vec<u8>, SuspendError> {
 
 // ------------------------------- decoding ----------------------------------
 
-struct Reader<'a> {
-    buf: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Reader<'a> {
-    const fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    fn byte(&mut self) -> Result<u8, CodecError> {
-        let b = *self.buf.get(self.pos).ok_or(CodecError::Truncated)?;
-        self.pos += 1;
-        Ok(b)
-    }
-
-    fn uvarint(&mut self) -> Result<u64, CodecError> {
-        let mut acc: u64 = 0;
-        let mut shift = 0;
-        for _ in 0..VARINT_MAX_BYTES {
-            let b = self.byte()?;
-            acc |= (u64::from(b) & VARINT_LOW) << shift;
-            if b & VARINT_CONT == 0 {
-                return Ok(acc);
-            }
-            shift += 7;
-        }
-        Err(CodecError::Truncated)
-    }
-
-    fn svarint(&mut self) -> Result<i64, CodecError> {
-        Ok(unzigzag(self.uvarint()?))
-    }
-
-    fn bounded_len(&mut self) -> Result<usize, CodecError> {
-        let n = self.uvarint()?;
-        if n > WIRE_LEN_MAX {
-            return Err(CodecError::TooLarge);
-        }
-        usize::try_from(n).map_err(|_| CodecError::TooLarge)
-    }
-
-    fn bytes(&mut self, n: usize) -> Result<&'a [u8], CodecError> {
-        let end = self.pos.checked_add(n).ok_or(CodecError::Truncated)?;
-        let slice = self.buf.get(self.pos..end).ok_or(CodecError::Truncated)?;
-        self.pos = end;
-        Ok(slice)
-    }
-
-    fn blob(&mut self) -> Result<&'a [u8], CodecError> {
-        let n = self.bounded_len()?;
-        self.bytes(n)
-    }
-
-    fn string(&mut self) -> Result<String, CodecError> {
-        let slice = self.blob()?;
-        std::str::from_utf8(slice)
-            .map(str::to_string)
-            .map_err(|_| CodecError::Utf8)
-    }
-
-    fn sym(&mut self) -> Result<Sym, CodecError> {
-        Ok(Sym::new(&self.string()?))
-    }
-
-    fn float(&mut self) -> Result<f64, CodecError> {
-        let slice = self.bytes(8)?;
-        let mut bytes = [0u8; 8];
-        bytes.copy_from_slice(slice);
-        Ok(f64::from_bits(u64::from_le_bytes(bytes)))
-    }
-
-    fn bool(&mut self) -> Result<bool, CodecError> {
-        match self.byte()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(CodecError::Malformed),
-        }
-    }
-
-    // A node reference: an index into the table strictly below the node being
-    // parsed, so the graph is acyclic and decode is a forward pass. A hostile
-    // back-reference (a cycle) lands here as a `BadReference`.
-    fn node_ref(&mut self, below: u32) -> Result<u32, CodecError> {
-        let i = u32::try_from(self.uvarint()?).map_err(|_| CodecError::BadReference)?;
-        if i >= below {
-            return Err(CodecError::BadReference);
-        }
-        Ok(i)
-    }
-
-    fn node_refs(&mut self, below: u32) -> Result<Vec<u32>, CodecError> {
-        let n = self.bounded_len()?;
-        (0..n).map(|_| self.node_ref(below)).collect()
-    }
-
-    const fn at_end(&self) -> bool {
-        self.pos == self.buf.len()
-    }
-}
-
 #[derive(Clone)]
 struct RawPat {
     tag: PatTag,
@@ -1179,7 +1055,7 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
         }
         Tag::NIf => Raw::NIf(r.node_ref(index)?, r.node_ref(index)?, r.node_ref(index)?),
         Tag::NPrim => {
-            let op = op_from_wire(CORE_OPS, r.uvarint()?)?;
+            let op = from_wire(CORE_OPS, r.uvarint()?)?;
             Raw::NPrim(op, r.node_ref(index)?, r.node_ref(index)?)
         }
         Tag::NCall => {
@@ -1195,11 +1071,11 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
             Raw::NCase(scrut, arms)
         }
         Tag::NFloat => {
-            let op = op_from_wire(FLOAT_OPS, r.uvarint()?)?;
+            let op = from_wire(FLOAT_OPS, r.uvarint()?)?;
             Raw::NFloat(op, r.node_ref(index)?)
         }
         Tag::NNeg => {
-            let lane = op_from_wire(NEG_LANES, r.uvarint()?)?;
+            let lane = from_wire(NEG_LANES, r.uvarint()?)?;
             Raw::NNeg(lane, r.node_ref(index)?)
         }
         Tag::NDo => {
@@ -1207,7 +1083,7 @@ fn parse_node(r: &mut Reader<'_>, index: u32) -> Result<Raw, CodecError> {
             Raw::NDo(op, r.node_refs(index)?)
         }
         Tag::NStr => {
-            let b = op_from_wire(BUILTINS, r.uvarint()?)?;
+            let b = from_wire(BUILTINS, r.uvarint()?)?;
             Raw::NStr(b, r.node_refs(index)?)
         }
         Tag::NHandle => Raw::NHandle(r.node_ref(index)?),
@@ -1531,7 +1407,7 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
     let bundle = r.string()?;
 
     let rng = r.uvarint()?;
-    let fn_name = r.sym()?;
+    let fn_name = Sym::new(&r.string()?);
     let observed = r.bounded_len()?;
     let exit = if r.bool()? {
         Some(i32::try_from(r.svarint()?).map_err(|_| CodecError::Malformed)?)

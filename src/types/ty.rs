@@ -84,6 +84,10 @@ pub const ARBITRARY_CLASS: &str = "Arbitrary";
 pub const IDENTIFIABLE: &str = "Identifiable";
 pub const IDENTIFIABLE_BUNDLE: [&str; 4] = [EQ_CLASS, ORD_CLASS, HASH_CLASS, SHOW_CLASS];
 
+// `deriving (Lens)` is surface sugar, not a class: it synthesizes field accessor
+// functions directly.
+pub const LENS: &str = "Lens";
+
 // A row label: an effect name plus its instantiation arguments (zero for
 // non-parametric effects). `Emit(Int)` and `Emit(String)` are distinct labels
 // while `IO` stays bare. The name is an interned `Sym`, re-encoded as text only
@@ -123,13 +127,58 @@ pub enum EffRow {
 
 impl EffRow {
     pub fn singleton(l: impl Into<Sym>) -> Self {
+        // One label over the empty tail is canonical by construction.
         Self::Extend(Label::bare(l), Box::new(Self::Empty))
     }
 
     pub fn from_set(labels: &Effects) -> Self {
-        labels.iter().rev().fold(Self::Empty, |acc, l| {
-            Self::Extend(Label::bare(*l), Box::new(acc))
-        })
+        Self::canonical(labels.iter().map(|l| Label::bare(*l)), Self::Empty)
+    }
+
+    // A row's canonical form: its labels appear in strictly increasing
+    // `Label::show` order, so no label repeats, terminated by the non-`Extend`
+    // tail. This is exactly the normal form the row display (`show`/`show_row_p`)
+    // reduces every row to, and, through the shown type/row strings, the one the
+    // content hash commits to. Two set-equal rows that are both canonical are
+    // therefore structurally identical. `Var`/`Exist` carry no labels and are
+    // trivially canonical.
+    //
+    // The type checker does not keep stored rows canonical: substitution can
+    // reintroduce a duplicate label (`apply_row` on `IO | e` with `e := IO | r`)
+    // and effects are absorbed in inference order, so `unify_row` dedups and
+    // matches labels by name rather than by position, and both display paths sort
+    // on the fly. A `debug_assert` on the *input* of unify/display/hash would thus
+    // fire on legitimate intermediates; the teeth live in the constructors below,
+    // which guarantee their *output* is canonical.
+    #[must_use]
+    pub fn is_canonical(&self) -> bool {
+        self.labels().windows(2).all(|w| w[0].show() < w[1].show())
+    }
+
+    // Build a canonical row: the effects `labels` over a terminal `tail`
+    // (`Empty`, `Var`, or `Exist`), sorted by `Label::show` with duplicate labels
+    // dropped. The constructor to reach for when the intent is "the row whose
+    // effects are exactly these"; the raw `Extend` variant stays for the
+    // structure-preserving passes (substitution, unification rewrites) that must
+    // keep an existing row's shape.
+    #[must_use]
+    pub fn canonical(labels: impl IntoIterator<Item = Label>, tail: Self) -> Self {
+        debug_assert!(
+            matches!(tail, Self::Empty | Self::Var(_) | Self::Exist(_)),
+            "row tail must be terminal, got {tail:?}"
+        );
+        let mut ls: Vec<Label> = labels.into_iter().collect();
+        ls.sort_by_key(Label::show);
+        ls.dedup_by(|a, b| a.show() == b.show());
+        let row = ls
+            .into_iter()
+            .rev()
+            .fold(tail, |acc, l| Self::Extend(l, Box::new(acc)));
+        debug_assert!(
+            row.is_canonical(),
+            "canonical produced a non-canonical row: {row:?}"
+        );
+        row
     }
 
     #[must_use]
@@ -340,6 +389,9 @@ impl Type {
                 xs.push(arg);
                 Self::Con(n, xs)
             }
+            // A surviving `App` always has a flexible head (a type variable, an
+            // existential, or a further `App`): a concrete `Con` head is reduced
+            // by the arm above, so the head class is enforced structurally here.
             other => Self::App(Box::new(other), Box::new(arg)),
         }
     }

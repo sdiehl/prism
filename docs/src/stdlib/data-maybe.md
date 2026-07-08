@@ -10,7 +10,7 @@ The type is wired in; the prelude opens this module, so these are in unqualified
 
 ### `is_some`
 
-```prism,sig,h-d9b3544c6dda23ceba286dd4144437a454aa0c6682c721584446b9bb9f9a38ca
+```prism,sig,h-f919dce3d02f2ebb9f0a2fda1643e11610d8769b43cb55dfc2eda088b8638ff3
 is_some : forall a. (Option(a)) -> Bool
 ```
 
@@ -18,7 +18,7 @@ True when the option holds a value.
 
 ### `is_none`
 
-```prism,sig,h-4a7f178e7204e16b7459463e422537c354c1dbff8116e9ecb5483e21e97028e1
+```prism,sig,h-8bd9c3366852121741891bf7b35abe6c372731c38e960114a329c4b108a2cf78
 is_none : forall a. (Option(a)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True when the option is empty.
 
 ### `unwrap_or`
 
-```prism,sig,h-e9c0f920bc532c587faa040b072d1ffc9e821780230dbdf1969fab5b67075e3c
+```prism,sig,h-06ee44271bf67b6203da1f7447794b1526ff2ba2226ca702844cf6b22a422adb
 unwrap_or : forall a. (a, Option(a)) -> a
 ```
 
@@ -38,7 +38,7 @@ unwrap_or(0, Some(5))
 
 ### `map_option`
 
-```prism,sig,h-c9781fae043ee968467adf284af0df4fd46c7385585f1a6057d095f50eb03583
+```prism,sig,h-de68390a4df823a234307c8cb212e9f89fc8774574eadd05bacf40b7d6d3fb5c
 map_option : forall e0 a b. ((b) -> a ! {e0}, Option(b)) -> Option(a) ! {e0}
 ```
 
@@ -52,7 +52,7 @@ unwrap_or(0, 5)
 
 ### `and_then`
 
-```prism,sig,h-110cd842d1d4c3a2c99a7c2a95f86aa58979380dc05f4a36587a854793bd6162
+```prism,sig,h-3d5b82c828a9306b4dfae2f58223015ea26d25f654290c0de7f03dfd392c174a
 and_then : forall e0 a b. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e0}
 ```
 
@@ -60,48 +60,48 @@ Chain an option-returning function, short-circuiting on `None` (monadic bind for
 
 ### `map_or`
 
-```prism,sig,h-96d7af859b034e8ab99ae8a0d7925b4ed1a1ef17a199d3a0ddb84c22c418e41b
+```prism,sig,h-dbe0b22a2ff441cabd068950e096805b61b14357c86da80df1e18138409c8761
 map_or : forall e0 a b. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
 ```
 
 ### `option_or`
 
-```prism,sig,h-656f5c0d7eba0e3b92868015fa5462d28fd45ac00bc0e6c9eac96bc7d5031b47
+```prism,sig,h-9a71df49b613ae9aaf86bf63854b60ac0cd1e5146e140f57e8ef1073d97ff0b1
 option_or : forall a. (Option(a), Option(a)) -> Option(a)
 ```
 
 ### `option_to_list`
 
-```prism,sig,h-e1cd1076a3483475deb12027de9c1c7d846d824a87fdca0f97b8e4bfd0c6e09c
+```prism,sig,h-f773538e1b8b76a8d1048e3c0c88d18611d20f58533afdaa455cdc64febcb530
 option_to_list : forall a. (Option(a)) -> List(a)
 ```
 
 ### `both`
 
-```prism,sig,h-be4380a99d301b60bf430a9cffea6e091ddeab474ed60fc71fab83c5738ff8e5
+```prism,sig,h-3c914dc595511a05d72e6de684900ad69d74baf452047c395edb6cb9458def9b
 both : forall a b. (Option(a), Option(b)) -> Option((a, b))
 ```
 
 ### `option_fold_r`
 
-```prism,sig,h-d70643c8ecc6fbdbf3ed86ca2dc6a04a75d3081e942742a1b3faf9131e2a9203
+```prism,sig,h-eff829fdfa2f4214b1c10a58f54ea974effe5472547167d3f9176f965a7c92ba
 option_fold_r : forall e0 a b. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
 ```
 
 ### `option_fold_l`
 
-```prism,sig,h-dc5abf48b956cbd00e45fa47c4a1491eafa39bde4eff260e41ec2d05f50c7d5d
+```prism,sig,h-9b7849a0e12492ae40880827062e08f51df66ccac5c4dd7872d4b1bc06323873
 option_fold_l : forall e0 a b. ((a, b) -> a ! {e0}, a, Option(b)) -> a ! {e0}
 ```
 
 ### `option_bind`
 
-```prism,sig,h-2b9511a2d3203e5000ac212b0beb1e9cedcc32ecb1f5c7d39857e24eefc14856
+```prism,sig,h-1485e3ef93783a42857fc5d613b20fa2f0f9a84236e4b0be71e4fb319cceef60
 option_bind : forall e0 a b. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0}
 ```
 
 ### `option_ap`
 
-```prism,sig,h-716109a50325d0315b636b06366c4d37109fe412fb367d4ee658fc97e2b75d38
+```prism,sig,h-b33c70cd579d304e6df8f2d105232fd7386b4707d274b4b97e0d6e57219f807f
 option_ap : forall e0 a b. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0}
 ```

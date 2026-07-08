@@ -228,6 +228,25 @@ impl Root {
     }
 }
 
+/// The root that serves dotted module `path`, or `None` when no root can.
+///
+/// Answered under the same first-hit order module resolution uses. This is the
+/// provenance question ("whose module is this?") asked without loading: the
+/// usage summary uses it to scope its table to the program's own definitions.
+///
+/// # Errors
+/// Fails only on a hard read error from a `Dir` root; a miss falls through to
+/// the next root exactly as resolution does.
+pub fn serving_root<'r>(path: &str, roots: &'r [Root]) -> Result<Option<&'r Root>, Error> {
+    let segments: Vec<String> = path.split('.').map(str::to_string).collect();
+    for root in roots {
+        if root.fetch(&segments)?.is_some() {
+            return Ok(Some(root));
+        }
+    }
+    Ok(None)
+}
+
 // Where the search looked, for a not-found diagnostic.
 fn searched(roots: &[Root]) -> String {
     roots

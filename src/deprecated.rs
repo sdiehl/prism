@@ -1,11 +1,13 @@
 //! The compiler-owned deprecation registry.
 //!
-//! Two kinds of definition are superseded by the numerical tower (`Num`/`Div`/`Ord`)
-//! and warn at their use sites (`resolve::lints`, emitted through the typechecker
-//! warning channel): the float dot-operators (`+.` `-.` `*.` `/.` `<.` ...), now
-//! that the plain operators are lane-polymorphic, and the fixed-width arithmetic
-//! builtins (`i64_add`, `u64_mul`, ...) that duplicate an operator. A use of either
-//! keeps compiling; the warning names the replacement.
+//! Deprecated builtins warn at their use sites (`resolve::lints`, emitted through
+//! the typechecker warning channel), each paired with the replacement the warning
+//! names. Two families live here: definitions superseded by the numerical tower
+//! (`Num`/`Div`/`Ord`) - the float dot-operators (`+.` `-.` `*.` `/.` `<.` ...),
+//! now that the plain operators are lane-polymorphic, and the fixed-width
+//! arithmetic builtins (`i64_add`, `u64_mul`, ...) that duplicate an operator - and
+//! byte-seam builtins superseded by the `Data.Bytes` conversions. A use of any of
+//! them keeps compiling; the warning names the successor.
 //!
 //! This is the single home for the fact "X is deprecated in favor of Y". A
 //! definition marked with the surface `deprecated "..."` annotation carries its
@@ -15,12 +17,20 @@
 use crate::kw;
 use crate::syntax::ast::BinOp;
 
-/// The fixed-width arithmetic builtins the tower's `+ - * / %` replace.
+/// The `Data.Bytes` conversion that supersedes the lossy `string_of_bytes` builtin.
 ///
-/// Each is paired with the operator that now covers the same arithmetic behavior.
-/// Only the operator-duplicating names appear: the bitwise (`_and`/`_or`/`_xor`),
-/// shift (`_shl`/`_shr`), comparison (`_cmp`), and conversion builtins stay,
-/// because no operator supersedes them.
+/// It validates, reporting ill-formed UTF-8 honestly as `None` rather than
+/// repairing it to U+FFFD. The lossy behavior, when genuinely wanted, is still
+/// reachable as `string_of_buf` over a `Buf`.
+pub const BYTES_TO_STRING: &str = "bytes_to_string";
+
+/// The builtins superseded by a replacement the warning names, each paired with
+/// its successor.
+///
+/// The fixed-width arithmetic names map to the tower operator that now covers them
+/// (only the operator-duplicating names appear: the bitwise `_and`/`_or`/`_xor`,
+/// shift `_shl`/`_shr`, comparison `_cmp`, and conversion builtins stay, because no
+/// operator supersedes them); `string_of_bytes` maps to its `Data.Bytes` successor.
 pub const BUILTIN_DEPRECATED: &[(&str, &str)] = &[
     ("i64_add", kw::PLUS),
     ("i64_sub", kw::MINUS),
@@ -32,6 +42,7 @@ pub const BUILTIN_DEPRECATED: &[(&str, &str)] = &[
     ("u64_mul", kw::STAR),
     ("u64_div", kw::SLASH),
     ("u64_rem", kw::PERCENT),
+    ("string_of_bytes", BYTES_TO_STRING),
 ];
 
 /// The replacement operator for a deprecated arithmetic builtin, or `None` if

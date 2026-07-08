@@ -10,7 +10,7 @@ Built over the primitive UTF-8 string operations. The prelude opens this module.
 
 ### `str_join`
 
-```prism,sig,h-5e1d3dab01ec7a5730b6dec20a902d951146a4f925f548b712418a43b7b7756c
+```prism,sig,h-6f33605a447729bca8d936e38e606be71cacb582597368f622cf49818dea0e91
 str_join : (String, List(String)) -> String
 ```
 
@@ -18,7 +18,7 @@ Join a list of strings, placing `sep` between adjacent elements.
 
 ### `str_repeat`
 
-```prism,sig,h-9f0955d70e4881005330008abaaacaeecb79827f8f60bccd269d2d5d5d0cb3ee
+```prism,sig,h-4d5fbb419379aba1af0cadc8121ba2dd67a661569781d517c996ecadc0f75dea
 str_repeat : (String, Int) -> String
 ```
 
@@ -26,7 +26,7 @@ str_repeat : (String, Int) -> String
 
 ### `pad_left`
 
-```prism,sig,h-a7adc4afa5de5ce1238d25fd6fd30c14bba634f0a054be7904a65b8857d45188
+```prism,sig,h-6f5b0d10f045eaacb3bbce2256f3f31b290df42371c9c8d128b0bd98a22cb76f
 pad_left : (String, Int) -> String
 ```
 
@@ -34,7 +34,7 @@ Right-align `s` to width `w` by prepending spaces (unchanged if already wider).
 
 ### `pad_right`
 
-```prism,sig,h-5e9f3a63773b6f642220effcc64f3b4189104d58799e13d31b3c67dcf10ff5da
+```prism,sig,h-974489581eed676fee5c11ffb31af0b9c11a04635c5973482e4771462dd286ea
 pad_right : (String, Int) -> String
 ```
 
@@ -42,7 +42,7 @@ Left-align `s` to width `w` by appending spaces (unchanged if already wider).
 
 ### `lines_of`
 
-```prism,sig,h-0adea8b42caaf02ba81af4b6bb395360fbe40f9bd7533ee528fe070d92f57ea0
+```prism,sig,h-d817e4c50bb622f36a5bfdb270fa0afa9f989f3a614e6449018c19bd955daac4
 lines_of : (List(String)) -> String
 ```
 
@@ -50,7 +50,7 @@ Join a list of strings with newlines between them.
 
 ### `occurs_at`
 
-```prism,sig,h-6da23080e47104f533d99b7041a51443ee771103290692e57d5d0f16b5e32e00
+```prism,sig,h-6b775d860cf01c78ed8469044017ed0257b9457b1d2ba6ead365a97853ce50d6
 occurs_at : (String, String, Int, Int) -> Bool
 ```
 
@@ -58,7 +58,7 @@ Helper for the substring queries: whether `needle` sits at byte offset `j` in `s
 
 ### `starts_with`
 
-```prism,sig,h-f7a759e74ce45d8cf791cf51f87087348bc03ac46af2284f9c08c1444065b75d
+```prism,sig,h-5b2a7fef0aed31e87b8004329d79c7cdbdad2a3b24acce5809d69c9cb1505a93
 starts_with : (String, String) -> Bool
 ```
 
@@ -66,7 +66,7 @@ True when `s` begins with `prefix`.
 
 ### `ends_with`
 
-```prism,sig,h-a0e743545a1207812331fc85905b35e1d1f12128f7a4131a70cb46000e79a7a9
+```prism,sig,h-41c21216c603ad08418c58414254bcab2a39c63c90e626eb13f25b84dfdec1bf
 ends_with : (String, String) -> Bool
 ```
 
@@ -74,7 +74,7 @@ True when `s` ends with `suffix`.
 
 ### `index_of_go`
 
-```prism,sig,h-64a64a0b77e11635e8d375ca554191f7fa1274687df0c3c4dc46b3d64267fbc3
+```prism,sig,h-902fb781b4643ba45a85b324af5ae9f52ae28d23f610c94c86733b1f2f1170ab
 index_of_go : (String, String, Int) -> Int
 ```
 
@@ -82,7 +82,7 @@ Helper for `index_of`: search for `needle` in `s` from byte offset `j`.
 
 ### `index_of`
 
-```prism,sig,h-443f3fecfb194c15bba1a33d3276e5e94530c2f7bd0837281d6410aa4bf88b5a
+```prism,sig,h-43277cdc9a11509de279ce46e019acfce341ff072ba593cf54216370a244932a
 index_of : (String, String) -> Int
 ```
 
@@ -90,7 +90,7 @@ The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent.
 
 ### `contains`
 
-```prism,sig,h-0f95e6f427b12fa4831bed55917e454c01052013792cbba105e7b85e87dc6ddd
+```prism,sig,h-4f975f111eef69478c71eaf666624804cbefdac9f4981890e88d5bac244f077b
 contains : (String, String) -> Bool
 ```
 
@@ -98,7 +98,7 @@ True when `needle` occurs anywhere in `s`.
 
 ### `map_case`
 
-```prism,sig,h-988ec2543d25998679b5231188f424b5b220b5f0fc358e2eab7d03424b892a35
+```prism,sig,h-eb62b360e9f8eba830ef73227430dc58d4d775b88593183205278d67fc4fdbed
 map_case : (String, Int, Array(Int), Bool) -> Array(Int)
 ```
 
@@ -106,7 +106,7 @@ Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte a
 
 ### `to_upper`
 
-```prism,sig,h-9a21682d8c41335cbd67f0ce4d12d78c1eb875c8c2da4052e40961a954a47791
+```prism,sig,h-68debadff5e1f7f852cb67df889cddc7011795c91508ac3853814874b6419ce0
 to_upper : (String) -> String
 ```
 
@@ -114,7 +114,7 @@ ASCII upper-case of `s` (non-letters unchanged).
 
 ### `to_lower`
 
-```prism,sig,h-24bfac505e47a5cad0edeb6667af71b2f74314bb1ffd800a01c82f54ee1240b7
+```prism,sig,h-ce825b8c5d9f13702d20357b2df2b5c6c97a892e12adf0047a881911881f9ccd
 to_lower : (String) -> String
 ```
 
@@ -122,7 +122,7 @@ ASCII lower-case of `s` (non-letters unchanged).
 
 ### `ltrim_idx`
 
-```prism,sig,h-a361dee7e64883f01e3d6e673c87c3a71d0b139e2a6749a17cd0713cd4d50622
+```prism,sig,h-d80a1d4eabdffebf1de35798dce05d45eb6fb51852fb7332dc3e9ca5b5234f62
 ltrim_idx : (String, Int) -> Int
 ```
 
@@ -130,7 +130,7 @@ Helper for `trim`: the first non-whitespace byte index at or after `i`.
 
 ### `rtrim_idx`
 
-```prism,sig,h-13a5fc5315d5b936eb519c509fde841f419cef767723e8e5ea8e800fa6c0d494
+```prism,sig,h-0295a99a5b1d06047194b910435f5c96f19c0783831159396413d53ba0f7ed3c
 rtrim_idx : (String, Int) -> Int
 ```
 
@@ -138,7 +138,7 @@ Helper for `trim`: the index just past the last non-whitespace byte before `i`.
 
 ### `slice_bytes`
 
-```prism,sig,h-e88ac7625c358f2446c6804188503043ea10927b11a86786ea071f4244ce9f9b
+```prism,sig,h-1d203050fca561f7ce51e9717743a3602d271ffb93f6721ca32ba8e651d8b790
 slice_bytes : (String, Int, Int, Array(Int)) -> Array(Int)
 ```
 
@@ -146,7 +146,7 @@ Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `arr`.
 
 ### `trim`
 
-```prism,sig,h-eab2d7285fa4ff9fcdd16a74db78cff9625945571f11a6b50acc3573bba6ca53
+```prism,sig,h-ec0181cc19fe626edd9f4f20d49742bae02b8bb8afe6d25c42d25a4fdcf61980
 trim : (String) -> String
 ```
 
@@ -154,7 +154,7 @@ Strip leading and trailing ASCII whitespace.
 
 ### `index_of_from`
 
-```prism,sig,h-180709e140182fc9436e8cb2e99495e0398dc83f2e1ab6d6c4f0cdb8fa8ef80a
+```prism,sig,h-3cfed0914fc9310bc393e1acdc15020aaa69b992080ffdbc5f2b68b5baeb266b
 index_of_from : (Int, String, Int) -> Int
 ```
 
@@ -162,7 +162,7 @@ The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 
 ### `split_from`
 
-```prism,sig,h-f80bd840af676985f011dfaa8b28c5d75e028cb4a403f29eff19fd6397d973e2
+```prism,sig,h-84476df1c5c11ac1c3e1c30bc54a1e347003827a994352c3d7754bb3e26a3edd
 split_from : (Int, String, Int) -> List(String)
 ```
 
@@ -170,7 +170,7 @@ Helper for `split`: split `s` on `c`, starting from position `i`.
 
 ### `split`
 
-```prism,sig,h-4db52b5dc55006b037ba7970f8bb95883fdb9fc6a5882bd567b6cf500123c458
+```prism,sig,h-04ff5e963ffcc18b0a690a6aa6aae338a6ffcb91bb0abb388cd4b28d10c39b02
 split : (Int, String) -> List(String)
 ```
 
@@ -178,7 +178,7 @@ Split `s` into the pieces between each occurrence of character `c`.
 
 ### `str_of_char`
 
-```prism,sig,h-8d40fdbf556f4608c2feca92e97c6708e6f6bf58f6190a76cb5d2003715ccc28
+```prism,sig,h-22c4f68428340cf1c813774c140e5dc38f51c7068eafc5b6b4cfc2fc139fd91d
 str_of_char : (Char) -> String
 ```
 
@@ -186,7 +186,7 @@ The single-character string containing `c`.
 
 ### `chars_from`
 
-```prism,sig,h-cd40ce8d512bacb4ac31a1261ac3d13033f9aa225cd6358a2d2164a9475b955a
+```prism,sig,h-cc55653d089d42f1a3c6779e1bfeff81230a520b816300a711fd5040f9af0748
 chars_from : (String, Int) -> List(Char)
 ```
 
@@ -194,7 +194,7 @@ Helper for `chars`: the characters of `s` from position `i` onward.
 
 ### `chars`
 
-```prism,sig,h-e8062d6e038ce84115583759b88aafa006be4e303cf31b0465ead97409323552
+```prism,sig,h-1ae6cce28572ab54551625c0c0f4e543fbd70792ce56169bf77fa0cd1a0e032b
 chars : (String) -> List(Char)
 ```
 

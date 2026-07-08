@@ -23,7 +23,7 @@ Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)` a
 
 ### `blitString`
 
-```prism,def,h-881a9e04656d0f0aa0b11a1251b30daa5f60d88bb2173c280222d38677b08340
+```prism,def,h-98178a2ad2eaf7a46874b0f234a0f4753636d919e03722631ed52b666fa13431
 instance blitString : Blit(String)
 ```
 
@@ -31,7 +31,7 @@ Splice the source range over the destination range with the string slice primiti
 
 ### `blitArray`
 
-```prism,def,h-8d2118182e85e5c24f34668e58983b2f9a363dfbd9ec088d80a23448028344d3
+```prism,def,h-9a58ef39ff2a8a07ec4fee13513df79e71077afc441464792235ee583adb16ca
 instance blitArray : Blit(Array(a))
 ```
 
@@ -39,7 +39,7 @@ Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in `0 .. len` 
 
 ### `blitBytes`
 
-```prism,def,h-3542f6097ea372cec369a62e3c847d0368361c6f0ea81270a760aff498ef09cd
+```prism,def,h-b9ae6cddc04070fcde311c0309e4c15272f9c300f588bd629d3c2bba20f5e2d1
 instance blitBytes : Blit(Bytes)
 ```
 

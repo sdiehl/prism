@@ -280,10 +280,6 @@ pub enum Token {
     Fbip,
     #[token("replayable")]
     Replayable,
-    #[token("without")]
-    Without,
-    #[token("alloc")]
-    Alloc,
     #[token("pub")]
     Pub,
     #[token("import")]
@@ -506,6 +502,11 @@ pub enum Token {
     Colon,
     #[token("!")]
     Bang,
+    // The usage-row sigil: `T @ fact`, `T @ {fact, fact}`. Only ever a free
+    // token; `@` can never appear inside an identifier, which is what keeps the
+    // internal mangled names (`op@f@n`, `Var@x@0`) unforgeable from source.
+    #[token("@")]
+    At,
     #[token("..")]
     DotDot,
     #[token(".")]
@@ -575,8 +576,6 @@ impl Token {
             Self::Fip => kw::FIP,
             Self::Fbip => kw::FBIP,
             Self::Replayable => kw::REPLAYABLE,
-            Self::Without => kw::WITHOUT,
-            Self::Alloc => kw::ALLOC,
             Self::Pub => kw::PUB,
             Self::Import => kw::IMPORT,
             Self::As => kw::AS,
@@ -684,6 +683,7 @@ impl Token {
             Self::ColonEq => kw::COLON_EQ,
             Self::Colon => kw::COLON,
             Self::Bang => kw::BANG,
+            Self::At => kw::AT,
             Self::DotDot => kw::DOT_DOT,
             Self::Dot => kw::DOT,
             Self::QuestionQuestion => kw::QUESTION_QUESTION,
@@ -854,8 +854,6 @@ mod tests {
             (Token::Fip, kw::FIP),
             (Token::Fbip, kw::FBIP),
             (Token::Replayable, kw::REPLAYABLE),
-            (Token::Without, kw::WITHOUT),
-            (Token::Alloc, kw::ALLOC),
             (Token::Pub, kw::PUB),
             (Token::Import, kw::IMPORT),
             (Token::As, kw::AS),
@@ -962,6 +960,7 @@ mod tests {
             (Token::ColonEq, kw::COLON_EQ),
             (Token::Colon, kw::COLON),
             (Token::Bang, kw::BANG),
+            (Token::At, kw::AT),
             (Token::DotDot, kw::DOT_DOT),
             (Token::Dot, kw::DOT),
             (Token::QuestionQuestion, kw::QUESTION_QUESTION),

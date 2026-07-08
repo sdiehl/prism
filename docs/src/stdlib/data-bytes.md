@@ -22,7 +22,7 @@ Hex and base64 are written in pure Prism over the buffer builders rather than as
 
 ### `bytes_length`
 
-```prism,sig,h-549ff4066268c4dbfd6ab81a3b49fe7f802856dec3d9e25e9faec5ea8e7c8a24
+```prism,sig,h-91f5898604caa6281b04ec01146d39646b52221f66d28a392c75ca6dac5b226c
 bytes_length : (Wire.Bytes) -> Int
 ```
 
@@ -30,7 +30,7 @@ The number of bytes in a `Bytes`.
 
 ### `bytes_index`
 
-```prism,sig,h-2496ef463b64c4925c2c3cd2c9df49e0f58bef63ecafaff00ae1b12a950e7de3
+```prism,sig,h-b8392f569bb2d3dae57a63c64fcd37827d2b17fd0c05f40c6d64e27c59865477
 bytes_index : (Wire.Bytes, Int) -> Int
 ```
 
@@ -38,7 +38,7 @@ The byte at index `i` (0-based). Out of range traps, like array indexing.
 
 ### `bytes_empty`
 
-```prism,sig,h-ebb5493e9145dfa9a685e0c8803c4b948b63fa4a57a6c02a423bddcfbcef0c78
+```prism,sig,h-452073dbf2139781fa303bcae9a56414285965fb0a9fc52dafbc321d3beb3c13
 bytes_empty : Wire.Bytes
 ```
 
@@ -46,7 +46,7 @@ The empty `Bytes`.
 
 ### `bytes_push`
 
-```prism,sig,h-f5ac4cf484571faad9d27b7363c8847c93a5089bf2aa6545cfb104cbed60b81b
+```prism,sig,h-9fbbcad1bb741589e877857f60531c30e714f1669d9c9e7da3d39c86428109cf
 bytes_push : (Wire.Bytes, Int) -> Wire.Bytes
 ```
 
@@ -54,7 +54,7 @@ Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded linearl
 
 ### `bytes_slice`
 
-```prism,sig,h-8e56a486b487ad7584effc061b9a47e9e4ebd1e4093f416876cca11680e38152
+```prism,sig,h-b405e23d6b24ba8d72dffa247f48c7b1c5edec283c298a4bba05c91c143111fd
 bytes_slice : (Wire.Bytes, Int, Int) -> Wire.Bytes
 ```
 
@@ -62,7 +62,7 @@ The `len` bytes starting at `start` (0-based), as a fresh `Bytes`. `start` and `
 
 ### `bytes_concat`
 
-```prism,sig,h-b0afac61c0d5a91dd6b0672ad2b0705d487b5de0a1ed900cc9af43e7339ea9d1
+```prism,sig,h-afb0b2b7872689a75e7bd0eceb48648d20fa3a83a21ffb1c4f44a60e0957208a
 bytes_concat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -70,7 +70,7 @@ Concatenate two byte strings.
 
 ### `bytes_eq`
 
-```prism,sig,h-2456e98b53e2c69b7799fe17e8cd03eb1d10dc7c854835a67efeb9745630b352
+```prism,sig,h-a8ae3bad5fa552bd130d93e6a59936bf1c085e47a6a6a49200d84758b6fe4709
 bytes_eq : (Wire.Bytes, Wire.Bytes) -> Bool
 ```
 
@@ -78,7 +78,7 @@ Structural equality of two byte strings.
 
 ### `bytes_compare`
 
-```prism,sig,h-0b01d705a2cd7e39a0916209dc94904c824186f283ec538167a6b14b0a9b864f
+```prism,sig,h-81db8c1e0f8ba18dfb69d7020c252abbcca23df85eeff1f70b458688647c448b
 bytes_compare : (Wire.Bytes, Wire.Bytes) -> Int
 ```
 
@@ -86,7 +86,7 @@ Lexicographic comparison (`-1`/`0`/`1`) of two byte strings.
 
 ### `bytes_hash`
 
-```prism,sig,h-c6290a0e944082a428e1390d36b0b83af4222dd7ce274bcfe330ff882bd8231f
+```prism,sig,h-c98b4bd5bff67bf87acafa6eaebb022e35fe7935714ef71ee936af232a40898a
 bytes_hash : (Wire.Bytes) -> String
 ```
 
@@ -94,7 +94,7 @@ The blake3 content hash of a byte string as lowercase hex, byte-identical to a `
 
 ### `string_to_bytes`
 
-```prism,sig,h-932887f4b749f7441a34a714c9c3257697b7ef3d35b202d666064d3f657efed1
+```prism,sig,h-2a9da037f4a20041903a2f9c7cda49774e9c8a4ca07f74dd140ba3540bf26deb
 string_to_bytes : (String) -> Wire.Bytes
 ```
 
@@ -102,7 +102,7 @@ Total: a string's raw UTF-8 bytes as a `Bytes`.
 
 ### `bytes_to_string`
 
-```prism,sig,h-21b79c0e40d4e282ceb6fbd2bd8d32bb9c080f16c4b0d4137b295c5c12e14d11
+```prism,sig,h-774a7f4187b74a7ba1bb38e4ae9a31e10ff25afb2344c5624365d67d73252230
 bytes_to_string : (Wire.Bytes) -> Option(String)
 ```
 
@@ -110,7 +110,7 @@ Validate the bytes as UTF-8 and, when well-formed, recover the `String`; `None` 
 
 ### `hex_encode`
 
-```prism,sig,h-04a0b99bad7d78c18a6d893b99ab5376a2f23b1524b91f0b3988ef7808d15981
+```prism,sig,h-7e448f10446184996a9cdbab208bd2d3dc626bfad4e1b2064be754613b98f0d1
 hex_encode : (Wire.Bytes) -> String
 ```
 
@@ -118,7 +118,7 @@ Lowercase hex encoding: two hex digits per byte.
 
 ### `hex_decode`
 
-```prism,sig,h-21207fee7e0a42ebc168eacfc74d425c2d6bb02ac27a452f50c0730678bdeff6
+```prism,sig,h-45d3456280c481e4fbea11dc8448aeaed4d0041ef0e2f68a0ea291c8de9afabe
 hex_decode : (String) -> Option(Wire.Bytes)
 ```
 
@@ -126,7 +126,7 @@ Decode a hex string to bytes, or `None` on an odd length or a non-hex character.
 
 ### `base64_encode`
 
-```prism,sig,h-ab0ab0bf528d6c4976d94db0b265b31df97f45907b4309170401ae2110db92d0
+```prism,sig,h-e2a957adfd874c2ec48c99a2d24bebae02023ac70771a939df9ec6f6bac1a3ed
 base64_encode : (Wire.Bytes) -> String
 ```
 
@@ -134,7 +134,7 @@ Standard base64 encoding with `=` padding.
 
 ### `base64_decode`
 
-```prism,sig,h-67f48b4a57e930678c9adc92510602bdb9f5b0347689d9a4199c6e78efb1b26a
+```prism,sig,h-16e71f64164e397a4ae9dd244ad3d39cf54648903e7bfb33c67849bfdd137723
 base64_decode : (String) -> Option(Wire.Bytes)
 ```
 
@@ -142,7 +142,7 @@ Decode standard base64 (with `=` padding) to bytes, or `None` on a length that i
 
 ### `read_bytes`
 
-```prism,sig,h-bd328453f6e142be13fe677e78df3e023e82385cdd75fdc80e6ae68fc3cb7669
+```prism,sig,h-731993aded5c3182c9936cacc82fbc3ccd144c553d7bdb5a0b58e43aab11108d
 read_bytes : (String) -> Wire.Bytes ! {FileSystem}
 ```
 
@@ -150,7 +150,7 @@ Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `
 
 ### `write_bytes`
 
-```prism,sig,h-27685e6df0956991934ea9a257411b027ec24fd3faa55a3ed7b5bc5b77830911
+```prism,sig,h-56066d50a267914de29f298ce3330a9722ab4e2d342ec692e353213bdc3aa0ce
 write_bytes : (String, Wire.Bytes) -> Result(Unit, String) ! {IO}
 ```
 

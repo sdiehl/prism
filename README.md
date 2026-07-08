@@ -43,18 +43,18 @@ docker run ghcr.io/sdiehl/prism --help
 ```shell
 # Debian / Ubuntu
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_amd64.deb
-sudo apt install ./prism_0.8.0_amd64.deb
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.9.0/prism_0.9.0_amd64.deb
+sudo apt install ./prism_0.9.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.9.0/prism-0.9.0-1.x86_64.rpm
 
 # Arch
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.9.0/prism-0.9.0-1-x86_64.pkg.tar.zst
 
 # Alpine
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_x86_64.apk
-sudo apk add --allow-untrusted ./prism_0.8.0_x86_64.apk
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.9.0/prism_0.9.0_x86_64.apk
+sudo apk add --allow-untrusted ./prism_0.9.0_x86_64.apk
 ```
 
 Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:
@@ -96,7 +96,9 @@ prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml), into target/
 prism clean                          # remove the project's target/ directory
-prism check program.pr               # type check only
+prism check                          # type check the enclosing project
+prism check program.pr               # type check one source file
+prism pkg init                       # create a new package interactively
 prism fmt program.pr                 # format source
 prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|native-kont-table|native-kont-state-map|fbip|llvm
 ```

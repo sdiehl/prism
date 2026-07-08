@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/buf_shared.pr
+---
+0
+200
+6
+7
+250
+hash-eq
+invalid
+none
+a�b
+5
+=> ()

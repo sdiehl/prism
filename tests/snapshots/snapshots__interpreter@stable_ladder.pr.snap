@@ -5,4 +5,8 @@ input_file: tests/cases/run/stable_ladder.pr
 ---
 stable roundtrip: OK
 stable ladder adjacent: OK
+stable frame roundtrip: OK
+stable ladder unknown digest: OK
+stable ladder old frame defaults: OK
+stable ladder empty body: OK
 => ()

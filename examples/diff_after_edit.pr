@@ -1,0 +1,15 @@
+-- Behavior diff, real edit: the constant in `weight` changes from +1 to +2.
+-- `prism diff` against examples/diff_before.pr reports weight as the one changed
+-- definition and its callers (total, main) as the affected cone.
+
+fn weight(n : Int) : Int = 3 * n + 2
+
+fn total(upto : Int) : Int =
+  var acc := 0
+  var i := 1
+  while i <= upto do
+    acc := acc + weight(i)
+    i := i + 1
+  acc
+
+fn main() = println(total(10))

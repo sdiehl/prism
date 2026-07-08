@@ -21,10 +21,24 @@ use std::fmt::Write;
 
 use crate::syntax::ast::{ClassDecl, Ctor, DataDecl, EffectDecl, Grade, Kind, Row, Ty};
 
-use super::hash::{hex, SCHEME};
+use super::hash::{hex, HASH_PREFIX_HEX, SCHEME};
 
 /// Map from a declaration name to its structural digest (hex).
 pub type Shapes = BTreeMap<String, String>;
+
+/// The contract digest of one datatype's shape.
+///
+/// The full shape digest truncated to the committed prefix width the wire frame
+/// and the frozen `stable` goldens carry. Because a shape digest references
+/// other types by name, not by digest
+/// (see the module docstring), the single-declaration digest here is identical to
+/// the whole-program one `shape_digests` produces for the same name. This is the
+/// one home for the value a `stable` rung's generated frame and a `deriving
+/// (Stable)` instance both stamp, so the two can never disagree.
+#[must_use]
+pub fn contract_digest(data: &DataDecl) -> String {
+    shape_digests(std::slice::from_ref(data), &[])[&data.name][..HASH_PREFIX_HEX].to_string()
+}
 
 /// Shape-digest every datatype and effect declaration. Keyed by the declaration
 /// name, so the result merges directly into the namespace root alongside the
@@ -332,6 +346,16 @@ impl Enc {
             // A type-level natural literal in a dimension position.
             Ty::Nat(n) => {
                 let _ = write!(self.out, "<N>{n}");
+            }
+            // A usage row on the annotated type. Reserved rows are rejected in
+            // desugar before any digest is taken, but encode defensively; the
+            // facts are already in canonical order, so the digest is stable.
+            Ty::Coeffect(inner, row) => {
+                self.out.push_str("<U>");
+                for f in row.facts() {
+                    let _ = write!(self.out, "{f};");
+                }
+                self.ty(inner);
             }
         }
     }

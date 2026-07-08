@@ -17,6 +17,7 @@ use crate::syntax::ast::{
     Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
     Pattern, Program, Spanned, Suffix, S,
 };
+use crate::types::ty::EffRow;
 use crate::types::{
     infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
     NUM_CLASS, ORD_CLASS, SHOW_CLASS,
@@ -48,6 +49,28 @@ struct Elab<'a> {
 }
 
 type Locals = BTreeMap<String, Option<Type>>;
+
+fn row_mentions_effect(row: &EffRow, effect: &str) -> bool {
+    match row {
+        EffRow::Extend(label, rest) => {
+            label.name.as_str() == effect || row_mentions_effect(rest, effect)
+        }
+        _ => false,
+    }
+}
+
+fn checked_routes_output(checked: &Checked) -> bool {
+    let Some(mut ty) = checked.env.get(&Sym::from("print")).cloned() else {
+        return false;
+    };
+    loop {
+        match ty {
+            Type::Forall(_, body) | Type::RowForall(_, body) => ty = *body,
+            Type::Fun(_, row, _) => return row_mentions_effect(&row, names::OUTPUT_EFFECT),
+            _ => return false,
+        }
+    }
+}
 
 // A resolved update path: (ctor name, field index, arity) per segment.
 type Chain = Vec<(String, usize, usize)>;
@@ -81,7 +104,7 @@ impl Elab<'_> {
     fn field_res_fallback(&self, field: &str) -> Result<(&str, usize, usize), Error> {
         let mut hit: Option<(&str, usize, usize)> = None;
         for (ctor_name, info) in self.ctors {
-            if let Some(fi) = info.fields.iter().position(|f| f == field) {
+            if let Some(fi) = info.fields.iter().position(|f| f.as_str() == field) {
                 if hit.is_some() {
                     return Err(Error::Resolve(format!(
                         "field `{field}` is declared by more than one record; \
@@ -111,7 +134,7 @@ impl Elab<'_> {
                 self.ctors
                     .iter()
                     .find_map(|(cn, info)| {
-                        let fi = info.fields.iter().position(|f| f == seg)?;
+                        let fi = info.fields.iter().position(|f| f.as_str() == seg)?;
                         Some((cn.clone(), fi, info.args.len()))
                     })
                     .ok_or_else(|| Error::Ice(format!("no constructor has field `{seg}`")))
@@ -375,7 +398,11 @@ impl Elab<'_> {
                 .checked
                 .classes
                 .get(&Sym::from(NUM_CLASS))
-                .and_then(|c| c.methods.iter().position(|(n, _)| n == NUM_NEG_METHOD))
+                .and_then(|c| {
+                    c.methods
+                        .iter()
+                        .position(|(n, _)| n.as_str() == NUM_NEG_METHOD)
+                })
                 .ok_or_else(|| Error::Ice(format!("no `{NUM_NEG_METHOD}` method on class Num")))?;
             let call = self.method_invoke(Sym::from(NUM_CLASS), idx, d0, vec![operand])?;
             return Ok(Comp::Bind(Box::new(c), v.into(), Box::new(call)));
@@ -422,7 +449,7 @@ impl Elab<'_> {
                 .checked
                 .classes
                 .get(&Sym::from(EQ_CLASS))
-                .and_then(|c| c.methods.iter().position(|(n, _)| n == EQ_METHOD))
+                .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == EQ_METHOD))
                 .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
             let d0 = ds
                 .first()
@@ -515,7 +542,7 @@ impl Elab<'_> {
             .checked
             .classes
             .get(&Sym::from(ORD_CLASS))
-            .and_then(|c| c.methods.iter().position(|(n, _)| n == ORD_METHOD))
+            .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == ORD_METHOD))
             .ok_or_else(|| Error::Ice("no `cmp` method on class Ord".into()))?;
         let cmp = self.method_invoke(Sym::from(ORD_CLASS), idx, d0, args)?;
         let r = self.fresh();
@@ -580,7 +607,7 @@ impl Elab<'_> {
             .checked
             .classes
             .get(&Sym::from(class))
-            .and_then(|c| c.methods.iter().position(|(n, _)| n == method))
+            .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == method))
             .ok_or_else(|| Error::Ice(format!("no `{method}` method on class {class}")))?;
         let call = self.method_invoke(Sym::from(class), idx, d0, args)?;
         Ok(Comp::Bind(
@@ -609,7 +636,11 @@ impl Elab<'_> {
             .checked
             .classes
             .get(&Sym::from(NUM_CLASS))
-            .and_then(|c| c.methods.iter().position(|(n, _)| n == NUM_FROMINT_METHOD))
+            .and_then(|c| {
+                c.methods
+                    .iter()
+                    .position(|(n, _)| n.as_str() == NUM_FROMINT_METHOD)
+            })
             .ok_or_else(|| Error::Ice(format!("no `{NUM_FROMINT_METHOD}` method on class Num")))?;
         let v = self.fresh();
         let call = self.method_invoke(
@@ -812,7 +843,7 @@ impl Elab<'_> {
                     let n_fields = info.args.len();
                     let mut ordered: Vec<Option<(Comp, String)>> = vec![None; n_fields];
                     for (fname, fexpr) in field_exprs {
-                        if let Some(fi) = info.fields.iter().position(|f| f == fname) {
+                        if let Some(fi) = info.fields.iter().position(|f| f.as_str() == fname) {
                             let c = self.elab(fexpr, locals)?;
                             let v = self.fresh();
                             ordered[fi] = Some((c, v));
@@ -897,7 +928,7 @@ impl Elab<'_> {
                         extract_binds.push((extract, fv.clone()));
                     }
                     for (fname, fexpr) in field_exprs {
-                        if let Some(fi) = info.fields.iter().position(|f| f == fname) {
+                        if let Some(fi) = info.fields.iter().position(|f| f.as_str() == fname) {
                             let c = self.elab(fexpr, locals)?;
                             let v = self.fresh();
                             field_vars[fi].clone_from(&v);
@@ -923,7 +954,7 @@ impl Elab<'_> {
                     .checked
                     .eff_ops
                     .iter()
-                    .filter(|(_, i)| i.effect_name == *eff)
+                    .filter(|(_, i)| i.effect_name.as_str() == eff)
                     .map(|(n, _)| Sym::from(n))
                     .collect();
                 Comp::Mask(ops, Box::new(self.elab(body, locals)?))
@@ -953,7 +984,7 @@ impl Elab<'_> {
         if given.len() >= arity {
             return Ok(None);
         }
-        let ps: Vec<String> = (given.len()..arity).map(|i| format!("_p{i}")).collect();
+        let ps: Vec<String> = (given.len()..arity).map(names::generated_param).collect();
         let mut all = given.to_vec();
         all.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
         let body = Self::head_call(name, all)?;
@@ -1089,7 +1120,7 @@ impl Elab<'_> {
                 // function so an effectful closure lowers correctly.
                 match self.under_arity(f.id, vals.len()) {
                     Some(extra) => {
-                        let ps: Vec<String> = (0..extra).map(|i| format!("_p{i}")).collect();
+                        let ps: Vec<String> = (0..extra).map(names::generated_param).collect();
                         let mut all = vals;
                         all.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
                         let app = Comp::App(Box::new(force), all);
@@ -1310,19 +1341,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         .collect();
     builtin_arities(&mut arity);
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();
-    // Route `print`/`println` through the interceptable `Output` ops only when the
-    // record/replay/durable machinery is present (the `Replay` module is
-    // imported). Otherwise `print` lowers directly to the runtime printer, so the
-    // whole non-replay corpus keeps its fused, handler-free output and a program
-    // with its own reified handlers is never wrapped in a world handler it cannot
-    // fuse through. `Output` interception only changes behaviour where it matters.
-    let route_output = effect_ops.contains("out_print")
-        && (crate::names::REPLAY_DRIVERS
-            .iter()
-            .any(|f| arity.contains_key(*f))
-            || crate::names::INCR_REPLAY_DRIVERS
-                .iter()
-                .any(|f| arity.contains_key(*f)));
+    // Keep print routing in lockstep with the checker, which rewrites
+    // `print`/`println` from `IO` to `Output` only for programs that include the
+    // replay driver surface. Key on the checked scheme, not the arity table after
+    // builtins and constants have been merged in.
+    let route_output =
+        effect_ops.contains(names::OUTPUT_PRINT_OP) && checked_routes_output(checked);
     let consts: BTreeMap<String, &S<Expr<CorePhase>>> = prog
         .fns
         .iter()
@@ -1353,7 +1377,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         let mut locals = param_locals(checked, &d.name, &names);
         let mut params = names;
         if !d.constraints.is_empty() {
-            let dps: Vec<String> = (0..d.constraints.len()).map(|i| format!("_c{i}")).collect();
+            let dps: Vec<String> = (0..d.constraints.len()).map(names::dict_param).collect();
             for dp in &dps {
                 locals.insert(dp.clone(), None);
             }
@@ -1390,12 +1414,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         // The dictionary arity every function in this instance carries: one param
         // per declared context obligation plus one per superclass.
         let ndict = nctx + info.supers.len();
-        let dps: Vec<String> = (0..ndict).map(|i| format!("_c{i}")).collect();
+        let dps: Vec<String> = (0..ndict).map(names::dict_param).collect();
         for m in &inst.methods {
             let sig = &class
                 .methods
                 .iter()
-                .find(|(n, _)| n == &m.name)
+                .find(|(n, _)| n.as_str() == m.name)
                 .ok_or_else(|| Error::Ice(format!("no class signature for `{}`", m.name)))?
                 .1;
             let expected = sig.subst_var(class.param, &info.head);
@@ -1426,14 +1450,14 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         // one thunk per method. `Dict::Super` and method projection index past
         // these leading fields.
         for j in 0..info.supers.len() {
-            fields.push(Value::Var(format!("_c{}", nctx + j).into()));
+            fields.push(Value::Var(names::dict_param(nctx + j).into()));
         }
         for (mname, sig) in &class.methods {
             let arity = match sig {
                 Type::Fun(d, _, _) => d.len(),
                 _ => 0,
             };
-            let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
+            let ps: Vec<String> = (0..arity).map(names::generated_param).collect();
             let mut args: Vec<Value> = dps.iter().map(|d| Value::Var(d.clone().into())).collect();
             args.extend(ps.iter().map(|p| Value::Var(p.clone().into())));
             let call = Comp::Call(instance_method(&inst.name, mname.as_str()).into(), args);
@@ -1519,13 +1543,7 @@ pub fn elaborate_expr(
         consts: consts.iter().map(|(k, v)| (k.clone(), v)).collect(),
         checked,
         dicts,
-        route_output: effect_ops.contains("out_print")
-            && (crate::names::REPLAY_DRIVERS
-                .iter()
-                .any(|f| arity.contains_key(*f))
-                || crate::names::INCR_REPLAY_DRIVERS
-                    .iter()
-                    .any(|f| arity.contains_key(*f))),
+        route_output: effect_ops.contains(names::OUTPUT_PRINT_OP) && checked_routes_output(checked),
         effect_ops,
         show_fns: Vec::new(),
         show_seen: BTreeSet::new(),

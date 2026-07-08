@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/no_alloc_fresh.pr
 ---
 == tokens ==
-VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("fresh") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Without Alloc Eq UIdent("Box") LParen Ident("x") RParen VClose
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("fresh") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") At Ident("noalloc") Eq UIdent("Box") LParen Ident("x") RParen VClose
 
 == ast ==
 Program {
@@ -24,7 +24,7 @@ Program {
             ],
             deriving: [],
             newtype: false,
-            span: 185..204,
+            span: 182..201,
         },
     ],
     effects: [],
@@ -59,22 +59,22 @@ Program {
                         node: Var(
                             "Box",
                         ),
-                        span: 246..249,
+                        span: 239..242,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 250..251,
+                            span: 243..244,
                         },
                     ],
                 ),
-                span: 246..252,
+                span: 239..245,
             },
             wheres: [],
             no_alloc: true,
-            span: 206..252,
+            span: 203..245,
         },
     ],
 }
@@ -87,12 +87,10 @@ fn fresh(x) =
   return x to t@0; return Box(t@0)
 
 == fip ==
-Type Error: allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+Type Error: allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
    ╭─[ <source>:6:1 ]
    │
- 6 │ fn fresh(x : Int) : Box without alloc = Box(x)
-   │ ───────────────────────┬──────────────────────  
-   │                        ╰──────────────────────── allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+ 6 │ fn fresh(x : Int) : Box @ noalloc = Box(x)
+   │ ─────────────────────┬────────────────────  
+   │                      ╰────────────────────── allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 ───╯

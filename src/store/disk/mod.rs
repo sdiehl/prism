@@ -43,7 +43,7 @@ mod meta;
 mod objects;
 mod verified;
 
-pub use index::CanonicalKey;
+pub use index::{CanonicalConflict, CanonicalKey};
 pub use meta::DefMeta;
 pub use verified::VerifiedRecord;
 
@@ -239,6 +239,18 @@ impl Store {
         index::set_canonical(&self.root, key, instance_hash)
     }
 
+    /// Atomically merge canonical instance bindings, rejecting any divergent
+    /// existing binding under the same index lock that protects the write.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error.
+    pub fn merge_canonicals(
+        &self,
+        bindings: &[(CanonicalKey, String)],
+    ) -> io::Result<Result<(), CanonicalConflict>> {
+        index::merge_canonicals(&self.root, bindings)
+    }
+
     /// The canonical instance hash for a `(class, type-head)`, if bound.
     ///
     /// # Errors
@@ -345,6 +357,24 @@ pub fn commit_program(
                 deps: hashes,
                 meta: hash_meta,
             });
+            let derived = codec::decode_def(&payload)
+                .ok()
+                .and_then(|decoded| decoded.rehash())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("could not rehash encoded object for {}", func.name.as_str()),
+                    )
+                })?;
+            if &derived != hash {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "encoded object for {} hashes to {derived}, not store key {hash}",
+                        func.name.as_str()
+                    ),
+                ));
+            }
             match store.put(hash, &payload)? {
                 Written::New => stats.objects_written += 1,
                 Written::Hit => stats.objects_hit += 1,

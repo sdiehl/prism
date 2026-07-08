@@ -31,14 +31,65 @@ use std::collections::BTreeSet;
 use super::super::cbpv::{Comp, Core, Value};
 use super::super::fv;
 use super::super::traverse::Visit;
+use super::PassStage;
 use crate::sym::Sym;
 
-/// Lint `core`, returning one message per violation. `Ok(())` means well-formed.
+/// Lint `core` at pipeline `stage`, returning one message per violation.
+/// `Ok(())` means well-formed.
+///
+/// The stage decides which of the two node families is legal: pre-lowering Core
+/// must carry no runtime node (`Dup`, `Drop`, reuse, local cells) because effect
+/// lowering has not run yet, and post-lowering Core must carry no effect node
+/// (`Do`, `Handle`, `Mask`) because lowering eliminates every one. A node from
+/// the wrong family is a pass constructing ill-formed Core, the residual bug the
+/// stage newtypes at the pipeline seams cannot catch (they gate whole-program
+/// routing, not the nodes inside a tree).
+///
+/// # Examples
+///
+/// A single function returning a literal is well-formed at the elaborated
+/// (pre-lowering) stage:
+///
+/// ```
+/// use prism::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
+/// use prism::sym::Sym;
+///
+/// // fn main = return 42
+/// let prog = Core {
+///     fns: vec![CoreFn {
+///         name: Sym::new("main"),
+///         params: vec![],
+///         body: Comp::Return(Value::Int(42)),
+///         dict_arity: 0,
+///     }],
+/// };
+/// assert!(lint_core(&prog, PassStage::PreLowering).is_ok());
+/// ```
+///
+/// A reference-counting node is legal only after effect lowering, so linting a
+/// program that carries one at the pre-lowering stage is an error:
+///
+/// ```
+/// use prism::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
+/// use prism::sym::Sym;
+///
+/// let bad = Core {
+///     fns: vec![CoreFn {
+///         name: Sym::new("main"),
+///         params: vec![],
+///         body: Comp::Dup(Value::Int(1)), // a runtime node, illegal pre-lowering
+///         dict_arity: 0,
+///     }],
+/// };
+/// let errs = lint_core(&bad, PassStage::PreLowering).unwrap_err();
+/// assert!(errs[0].contains("runtime node"));
+/// ```
 ///
 /// # Errors
-/// Returns the list of well-formedness violations (out-of-scope free variables
-/// and reuse tokens spent more than once on a path), one message per violation.
-pub fn lint(core: &Core) -> Result<(), Vec<String>> {
+/// Returns the list of well-formedness violations (a wrong-stage node, an
+/// out-of-scope free variable, or a reuse token spent more than once on a path),
+/// one message per violation.
+pub fn lint(core: &Core, stage: PassStage) -> Result<(), Vec<String>> {
     let top: BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     let mut errs = Vec::new();
     for f in &core.fns {
@@ -58,11 +109,49 @@ pub fn lint(core: &Core) -> Result<(), Vec<String>> {
         };
         rl.visit_comp(&f.body);
         errs.append(&mut rl.errs);
+        let mut sl = StageLint {
+            fname: f.name,
+            stage,
+            errs: Vec::new(),
+        };
+        sl.visit_comp(&f.body);
+        errs.append(&mut sl.errs);
     }
     if errs.is_empty() {
         Ok(())
     } else {
         Err(errs)
+    }
+}
+
+// Flags any node belonging to the family the stage forbids: runtime nodes before
+// lowering, effect nodes after it. The two families are defined once on `Comp`
+// (`is_effect_node` / `is_runtime_node`), so a new node in either family is
+// classified there and this walk needs no edit.
+struct StageLint {
+    fname: Sym,
+    stage: PassStage,
+    errs: Vec<String>,
+}
+
+impl Visit for StageLint {
+    fn visit_comp(&mut self, c: &Comp) {
+        let forbidden = match self.stage {
+            PassStage::PreLowering => c.is_runtime_node(),
+            PassStage::Late => c.is_effect_node(),
+        };
+        if forbidden {
+            let (banned, expected) = match self.stage {
+                PassStage::PreLowering => ("runtime", "before effect lowering"),
+                PassStage::Late => ("effect", "after effect lowering"),
+            };
+            self.errs.push(format!(
+                "fn `{}`: {banned} node `{}` is illegal {expected}",
+                self.fname,
+                c.kind()
+            ));
+        }
+        self.descend_comp(c);
     }
 }
 

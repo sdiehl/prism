@@ -10,7 +10,7 @@ The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language
 
 ### `singleton`
 
-```prism,sig,h-1364910643295f9c2237531afe6760372e1cbd457bda487da690afac12c3529e
+```prism,sig,h-a9a194ae81b3f193244ad5b652035f7d12d9dc2bb5d0a6b88721f85322d13fda
 singleton : forall a. (a) -> List(a)
 ```
 
@@ -18,7 +18,7 @@ The one-element list `Cons(x, Nil)`.
 
 ### `is_nil`
 
-```prism,sig,h-57fa2ff9ddd46e77eceb94f3bfc230509f4e25f31f400b8aee1fdf5ab670e363
+```prism,sig,h-04e03dca1732beb68520a48ded9ce937d73107751fc0a26258f49597fdd868a0
 is_nil : forall a. (List(a)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True for the empty list.
 
 ### `head`
 
-```prism,sig,h-c215aca938813a71e93a3e0c72396b2365fb4ec836e821fd053dd8c329aeb4c2
+```prism,sig,h-04bd000332c53f768d8328e673ff63da3d3a8606de5db9b29456d64f3bb95042
 head : forall a. (List(a)) -> Option(a)
 ```
 
@@ -34,7 +34,7 @@ The first element as `Some`, or `None` when the list is empty.
 
 ### `tail`
 
-```prism,sig,h-99984c329f7372dcbfd5caa560114a4252a3c0d61dc24880f264ef8b732dfe2d
+```prism,sig,h-d59a69227d9a845beaa2803e49a71295ae085c7d02e151f606c88f9598b6201b
 tail : forall a. (List(a)) -> List(a)
 ```
 
@@ -42,7 +42,7 @@ Everything after the first element (`Nil` for the empty list).
 
 ### `last`
 
-```prism,sig,h-38c400646c09541786277bc8cf11e9f85f24870ecfc381fef2bff5b169f47add
+```prism,sig,h-b5f3c7d4f3b548b925f4ebc052336307ea3b88b9c7d848cb5335d6b4be657d13
 last : forall a. (List(a)) -> Option(a)
 ```
 
@@ -50,7 +50,7 @@ The final element as `Some`, or `None` when the list is empty.
 
 ### `nth`
 
-```prism,sig,h-4a12566ca508f24a88d93646d86300e412f190771dbe4800e221e3cee604332f
+```prism,sig,h-9d36473c0a32433082f3bbf542f70a6a26fcd5414b855ae8ebf0b07e8e0eb382
 nth : forall a. (Int, List(a)) -> Option(a)
 ```
 
@@ -58,7 +58,7 @@ The element at index `n` (zero-based) as `Some`, or `None` if out of range.
 
 ### `take`
 
-```prism,sig,h-001ed6a921b554a2ebc05869204266750d627ecd2b5f530ba847d9e051d6fefe
+```prism,sig,h-46bf43e41bcc95ae9be9cf1f8fde84267230b4c39b2d69c2be72025d4f68c8c0
 take : forall a. (Int, List(a)) -> List(a)
 ```
 
@@ -66,7 +66,7 @@ The first `n` elements (fewer if the list is shorter).
 
 ### `drop`
 
-```prism,sig,h-c10ee4b10dc6a026c1f7f5e4efc92cddf4235549dad6307cc99f7b89bff5415f
+```prism,sig,h-23d534c0820c601485a991da1e3120045a09aa22c1b1838145d201f7f08999a0
 drop : forall a. (Int, List(a)) -> List(a)
 ```
 
@@ -74,7 +74,7 @@ The list with its first `n` elements removed.
 
 ### `take_while`
 
-```prism,sig,h-68280c76ea5b2beffec0d25de67903d55518547712ba4b172948207295d58564
+```prism,sig,h-bd4103e00592549387c9cd5b3001747d80eaf01107f18c0fbbed0c9d4f979f01
 take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -82,7 +82,7 @@ The longest prefix of elements satisfying `p`.
 
 ### `drop_while`
 
-```prism,sig,h-1a4eeb23e8a7584eb1a07ca05393512a53399ed84494895aeaf048b179c13c96
+```prism,sig,h-54a4fe7e560782774fa700eb315da761493ae53e265502ef7737adc606882656
 drop_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -90,7 +90,7 @@ The suffix remaining after `take_while(p, xs)`.
 
 ### `split_at`
 
-```prism,sig,h-68a3e95085a3b386c814fab66752d4b5cd64ad79c8dae6cee4b72cccf6dc6658
+```prism,sig,h-281f4fa7e1eabd9f9d8611f6d3307e8fbc858316e0d52ee0441cd583b641b6ad
 split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 ```
 
@@ -98,7 +98,7 @@ split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 
 ### `map`
 
-```prism,sig,h-8b924de0ba185423f89b3f585ed226b915af4fc6fcc502200b01907cdc325c93
+```prism,sig,h-a4f280f0f9319f9f07464eed76ca9c6cb8e86b5f09173691b817e40c6115947a
 map : forall e0 a b. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
 ```
 
@@ -110,7 +110,7 @@ map(\(x) -> x + 1, [1, 2, 3])
 
 ### `filter`
 
-```prism,sig,h-604c207dcd71c4c460254f4d6c2194f3cf6f8d3fb2e57485f2079ab5d16be3bf
+```prism,sig,h-33a95f837dd7e0b66bb172e461e7260f5df22fc391e083a54ebb65a812d7d798
 filter : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -122,7 +122,7 @@ filter(\(x) -> x > 1, [1, 2, 3])
 
 ### `foldr`
 
-```prism,sig,h-307d635e70d91a52a833c6fb86d44680288e386aef4060a9a672ad3297fd50d3
+```prism,sig,h-8352a5021f1a7a16272a57a20e6d09c60041e1a4247898e559f488bcf4789583
 foldr : forall e0 a b. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
 ```
 
@@ -130,7 +130,7 @@ Right fold: `f(x0, f(x1, ... f(xn, z)))`.
 
 ### `foldl`
 
-```prism,sig,h-e33a4d899e5ff2572c8c6462526e87ab54c660f0c05e545192d6ec4d148af5d6
+```prism,sig,h-bd78f0fde16d7e54704625b1d4906ca72cc38c52d599b0e27668bdfa8a1dca9d
 foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
 ```
 
@@ -142,7 +142,7 @@ foldl(\(a, b) -> a + b, 0, [1, 2, 3])
 
 ### `append`
 
-```prism,sig,h-f09306684b6953ef32d416f02b507d1280a720fe07f68b0a3715abd618f1d779
+```prism,sig,h-c738ed21727021a2cf1338598e9f138a64b751e7a96081b901de194c1a18f145
 append : forall a. (List(a), List(a)) -> List(a)
 ```
 
@@ -150,7 +150,7 @@ Concatenate two lists.
 
 ### `reverse`
 
-```prism,sig,h-714b75c0baf0959822b9ca8ac609c621ec0569e18a92f51062a2a980104893e6
+```prism,sig,h-d81133e144bbb68abadaf48b744276c73660a8427c0f3bf490c2f36de32fdb59
 reverse : forall a. (List(a)) -> List(a)
 ```
 
@@ -158,7 +158,7 @@ The list in reverse order.
 
 ### `flatten`
 
-```prism,sig,h-b9d5b7e52887e8309c45b3b3af33b776e5a65560bf34a64c9161e18ad18227cf
+```prism,sig,h-c10542e967f86fb935c326ae3fe716764276fa771f1b219b0ebff4d5f31224c6
 flatten : forall a. (List(List(a))) -> List(a)
 ```
 
@@ -166,7 +166,7 @@ Concatenate a list of lists.
 
 ### `concat_map`
 
-```prism,sig,h-475a38a499fe5b201a0ad252d2606eaa059d76d9b9e1b39e2888d4b4e9f9c878
+```prism,sig,h-cc17609e5a8dcde888b8f3d5192cb78738e69584923dba8bef3ea122aab718f6
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
@@ -174,7 +174,7 @@ Map `f` over the list and concatenate the resulting lists.
 
 ### `zip_with`
 
-```prism,sig,h-2846a9f9c52c3efd943d728dc35a12216fc84f4063401f501f76b5d4aac68e37
+```prism,sig,h-899696ecb63c2032ef49769ebda06733a62cbec1ae6944fd2ca04f6124efd24f
 zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
 ```
 
@@ -182,7 +182,7 @@ Combine two lists elementwise with `f`, stopping at the shorter length.
 
 ### `zip`
 
-```prism,sig,h-8269f2027d6a13baa8dbd91c7bf6320ec5b0f12902ca96557b09c6c1ecc957eb
+```prism,sig,h-791d5335567d72e54570c2e251998639b7c5111bcf3c45d6c2d3895707d3822b
 zip : forall a b. (List(a), List(b)) -> List((a, b))
 ```
 
@@ -190,7 +190,7 @@ Pair up two lists elementwise, stopping at the shorter length.
 
 ### `unzip`
 
-```prism,sig,h-af84c86ef6ca241c573b055e45c8eb497a1eedd1039d5d733a2f7d3220f64e60
+```prism,sig,h-d4f33411161fe7296cedb8ebff7251fdcf7ed28a81c7b8d05329cc11431e0d0f
 unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 ```
 
@@ -198,7 +198,7 @@ Split a list of pairs into a pair of lists.
 
 ### `count`
 
-```prism,sig,h-59b95af4868e1004358a0d6bb006328bac6c0d83d36d4498748127c3d384ce2d
+```prism,sig,h-437b1266c7bd9fe505b5403a436d319ab1527623852fd6f322129d68090aa3d7
 count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
@@ -206,7 +206,7 @@ The number of elements satisfying `p`.
 
 ### `position_go`
 
-```prism,sig,h-3decd7b498123715bb50c56b5dab38e68140139e74fbc126d151de8dd212be8a
+```prism,sig,h-6b4c9ed7a5b8f17befe783d5efd49a7f7227b4048cb94e688a18e48236978239
 position_go : forall e0 a. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0}
 ```
 
@@ -214,7 +214,7 @@ Helper for `position`: search from index `n`.
 
 ### `position`
 
-```prism,sig,h-ea767f2f2864a204bcb71606d3eadd9275ea7b8e08690acff1e5931b0ba034c1
+```prism,sig,h-09005c8fc6025262c4d42a795f87d29f32b5850f77ad7679bff49369cfe60053
 position : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
 ```
 
@@ -222,7 +222,7 @@ The index of the first element satisfying `p` as `Some`, or `None`.
 
 ### `maximum`
 
-```prism,sig,h-8ff9577c56d3928d012d53ed91726b8ff50d2f6b7947e70f7fbc954cee209f41
+```prism,sig,h-f0b6534c4edf226e15be31ee90ee82d282454ab8b57e333e0d8727745056f0d2
 maximum : (List(Int)) -> Option(Int)
 ```
 
@@ -230,7 +230,7 @@ The greatest element as `Some`, or `None` for the empty list.
 
 ### `minimum`
 
-```prism,sig,h-1f0a6fc24b717bc5a0d9ec68bcc13e5c20dc69ff7863dd7035780bf319428c70
+```prism,sig,h-0ba0a051712c930b1267a08c1a82f87c0dbcaff641848218020b388774f68389
 minimum : (List(Int)) -> Option(Int)
 ```
 
@@ -238,7 +238,7 @@ The least element as `Some`, or `None` for the empty list.
 
 ### `replicate`
 
-```prism,sig,h-2ebfd6ead3f79fcf403c75b1b56ec45a857e8326668d369a50bcb361bfff8675
+```prism,sig,h-80b003e44a9b69185ad8af9d65dffecf704421133d7bb7b21eddd27f638eceed
 replicate : forall a. (Int, a) -> List(a)
 ```
 
@@ -246,7 +246,7 @@ A list of `n` copies of `x`.
 
 ### `range`
 
-```prism,sig,h-a0f33d7e350a273802669a8084b5e84ec18510b33de0b726d52cd8d51006e621
+```prism,sig,h-ac53e1edac65c996ea82be79ca074540bff94ffd99aec570a2f60e1fbad53f4d
 range : (Int, Int) -> List(Int)
 ```
 
@@ -258,7 +258,7 @@ range(0, 5)
 
 ### `tabulate`
 
-```prism,sig,h-3d7da257b0be72991742e4c3251d9eba60b752746733cab86b26fd0d1b9b3066
+```prism,sig,h-795b505a45a9f34742b3e1789a743e3eb11268705fd7367499ca7b8ca116ab49
 tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 ```
 
@@ -266,7 +266,7 @@ The list `[f(0), f(1), ..., f(n-1)]`.
 
 ### `insert_sorted`
 
-```prism,sig,h-24db20c3e990d6434f14dd8e297fafbdf9d91ed71f5f04a8c0c178a60766ac28
+```prism,sig,h-c8612275f166f99903cd45f5aeae8343c71ba8324c36341067041fdcd44d2976
 insert_sorted : (Int, List(Int)) -> List(Int)
 ```
 
@@ -274,7 +274,7 @@ Insert `x` into an already-ascending list, keeping it sorted.
 
 ### `list_to_option`
 
-```prism,sig,h-c215aca938813a71e93a3e0c72396b2365fb4ec836e821fd053dd8c329aeb4c2
+```prism,sig,h-04bd000332c53f768d8328e673ff63da3d3a8606de5db9b29456d64f3bb95042
 list_to_option : forall a. (List(a)) -> Option(a)
 ```
 
@@ -282,7 +282,7 @@ The first element as `Some`, or `None` (an `Option` view of the head).
 
 ### `partition`
 
-```prism,sig,h-cbb904b9550220166c1af452d9d3e4a3fbc0a65436bb536cf9e0cc05c40fa98d
+```prism,sig,h-9a9664bec258d45efa0e5306918d1f83c499abed76a7b7eb5ae8724e580912c6
 partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
 ```
 
@@ -290,7 +290,7 @@ Split into `(matching, non-matching)` by predicate `p`.
 
 ### `chunks_of`
 
-```prism,sig,h-abdc3324c09440699e3d46e3591b436d12acb1d01e4448c369230b838e5b9f52
+```prism,sig,h-d40608c9730e577f16268bf90bece94ad031bf1af4de64e977b6fb99d3faf220
 chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 
@@ -298,7 +298,7 @@ Break the list into consecutive chunks of up to `n` elements.
 
 ### `scan_left`
 
-```prism,sig,h-a4ff3cce5944931400de677ef5eb1951a6f44b4b21845b195e4f907a292af129
+```prism,sig,h-f1addd30a697b009a26c8097c0d168c7719241d9a0b0e9d22bb997ac9848dfb8
 scan_left : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
 ```
 
@@ -306,7 +306,7 @@ Left scan: the running accumulators of `foldl`, starting from `z`.
 
 ### `list_ap`
 
-```prism,sig,h-b9efd279c5f0560bcb808cf146db54207bfad419639179ba80ba045c0d477e01
+```prism,sig,h-fc1a3d730988bcfcfd46ef1247b550af0d5f209ffb67100d7f2a91f27eb81228
 list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 

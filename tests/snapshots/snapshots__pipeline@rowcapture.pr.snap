@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/rowcapture.pr
 ---
 == tokens ==
-VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("use_pure") LParen Ident("h") Colon Forall Ident("e0") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("apply_io") LParen Ident("h") RParen VSemi Fn Ident("call_poly") LParen Ident("h") Colon Forall Ident("e0") Dot LParen LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("amb") RBrace RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace Comma Ident("f") RParen Eq Ident("h") LParen Ident("f") RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Ident("use_pure") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VSemi Ident("println") LParen Ident("call_poly") LParen Lambda LParen Ident("g") RParen Arrow Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen Comma Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose VClose
+VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("use_pure") LParen Ident("h") Colon Forall Ident("e0") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("apply_io") LParen Ident("h") RParen VSemi Fn Ident("call_poly") LParen Ident("h") Colon Forall Ident("e0") Dot LParen LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("amb") RBrace RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace Comma Ident("f") RParen Eq Ident("h") LParen Ident("f") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("use_pure") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -217,168 +217,67 @@ Program {
             eff: None,
             constraints: [],
             body: Spanned {
-                node: Let(
-                    "_",
+                node: Call(
                     Spanned {
-                        node: Call(
-                            Spanned {
-                                node: Var(
-                                    "println",
-                                ),
-                                span: 377..384,
-                            },
-                            [
-                                Spanned {
-                                    node: Call(
-                                        Spanned {
-                                            node: Var(
-                                                "use_pure",
-                                            ),
-                                            span: 385..393,
-                                        },
-                                        [
-                                            Spanned {
-                                                node: Lam(
-                                                    [
-                                                        Param {
-                                                            name: "x",
-                                                            ty: None,
-                                                            borrow: false,
-                                                            default: None,
-                                                        },
-                                                    ],
-                                                    Spanned {
-                                                        node: Bin(
-                                                            Add,
-                                                            Spanned {
-                                                                node: Var(
-                                                                    "x",
-                                                                ),
-                                                                span: 402..403,
-                                                            },
-                                                            Spanned {
-                                                                node: Int(
-                                                                    IntLit {
-                                                                        value: 41,
-                                                                        suffix: None,
-                                                                    },
-                                                                ),
-                                                                span: 406..408,
-                                                            },
-                                                        ),
-                                                        span: 402..408,
-                                                    },
-                                                ),
-                                                span: 394..408,
-                                            },
-                                        ],
-                                    ),
-                                    span: 385..409,
-                                },
-                            ],
+                        node: Var(
+                            "println",
                         ),
-                        span: 377..410,
+                        span: 375..382,
                     },
-                    Spanned {
-                        node: Call(
-                            Spanned {
-                                node: Var(
-                                    "println",
-                                ),
-                                span: 413..420,
-                            },
-                            [
+                    [
+                        Spanned {
+                            node: Call(
                                 Spanned {
-                                    node: Call(
-                                        Spanned {
-                                            node: Var(
-                                                "call_poly",
-                                            ),
-                                            span: 421..430,
-                                        },
-                                        [
-                                            Spanned {
-                                                node: Lam(
-                                                    [
-                                                        Param {
-                                                            name: "g",
-                                                            ty: None,
-                                                            borrow: false,
-                                                            default: None,
-                                                        },
-                                                    ],
-                                                    Spanned {
-                                                        node: Call(
-                                                            Spanned {
-                                                                node: Var(
-                                                                    "g",
-                                                                ),
-                                                                span: 439..440,
-                                                            },
-                                                            [
-                                                                Spanned {
-                                                                    node: Int(
-                                                                        IntLit {
-                                                                            value: 1,
-                                                                            suffix: None,
-                                                                        },
-                                                                    ),
-                                                                    span: 441..442,
-                                                                },
-                                                            ],
-                                                        ),
-                                                        span: 439..443,
-                                                    },
-                                                ),
-                                                span: 431..443,
-                                            },
-                                            Spanned {
-                                                node: Lam(
-                                                    [
-                                                        Param {
-                                                            name: "x",
-                                                            ty: None,
-                                                            borrow: false,
-                                                            default: None,
-                                                        },
-                                                    ],
-                                                    Spanned {
-                                                        node: Bin(
-                                                            Add,
-                                                            Spanned {
-                                                                node: Var(
-                                                                    "x",
-                                                                ),
-                                                                span: 453..454,
-                                                            },
-                                                            Spanned {
-                                                                node: Int(
-                                                                    IntLit {
-                                                                        value: 41,
-                                                                        suffix: None,
-                                                                    },
-                                                                ),
-                                                                span: 457..459,
-                                                            },
-                                                        ),
-                                                        span: 453..459,
-                                                    },
-                                                ),
-                                                span: 445..459,
-                                            },
-                                        ],
+                                    node: Var(
+                                        "use_pure",
                                     ),
-                                    span: 421..460,
+                                    span: 383..391,
                                 },
-                            ],
-                        ),
-                        span: 413..461,
-                    },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "x",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "x",
+                                                        ),
+                                                        span: 400..401,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 41,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 404..406,
+                                                    },
+                                                ),
+                                                span: 400..406,
+                                            },
+                                        ),
+                                        span: 392..406,
+                                    },
+                                ],
+                            ),
+                            span: 383..407,
+                        },
+                    ],
                 ),
-                span: 377..461,
+                span: 375..408,
             },
             wheres: [],
-            span: 363..461,
+            span: 363..408,
         },
     ],
 }
@@ -397,7 +296,7 @@ fn use_pure(h) =
 fn call_poly(h, f) =
   return f to t@3; return h to t@4; (force t@4)(t@3)
 fn main() =
-  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; print_nl to _; return thunk { \g. return 1 to t@10; return g to t@11; (force t@11)(t@10) } to t@12; return thunk { \x. return x to t@13; return 41 to t@14; t@13 + t@14 } to t@15; call_poly(t@12, t@15) to t@16; print t@16 to t@17; print_nl
+  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; print_nl
 
 == fbip (rc) ==
 fn apply_io(g) =
@@ -407,21 +306,16 @@ fn use_pure(h) =
 fn call_poly(h, f) =
   return f to t@3; return h to t@4; (force t@4)(t@3)
 fn main() =
-  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; drop t@9 to _; print_nl to _; drop _ to _; return thunk { \g. return 1 to t@10; return g to t@11; (force t@11)(t@10) } to t@12; return thunk { \x. return x to t@13; return 41 to t@14; t@13 + t@14 } to t@15; call_poly(t@12, t@15) to t@16; print t@16 to t@17; drop t@17 to _; print_nl
+  return thunk { \x. return x to t@5; return 41 to t@6; t@5 + t@6 } to t@7; use_pure(t@7) to t@8; print t@8 to t@9; drop t@9 to _; print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.kont.shadow.prism_main = private constant [11 x i8] c"prism_main\00"
-@.kont.shadow.prism_lam_0 = private constant [12 x i8] c"prism_lam_0\00"
-@.kont.shadow.prism_lam_1 = private constant [12 x i8] c"prism_lam_1\00"
-@.kont.shadow.prism_lam_2 = private constant [12 x i8] c"prism_lam_2\00"
-@.kont.shadow.prism_apply_1 = private constant [14 x i8] c"prism_apply_1\00"
-@prism_native_kont_table = constant [1039 x i8] c"scheme  prism-core-hash-v1\0Abundle  530141aaa2f1346386d3c15904f5d8c0c462dc7ce1de6c99972709800d4b4bd2\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:530141aaa2f1346386d3c15904f5d8c0c462dc7ce1de6c99972709800d4b4bd2\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply_io  636a568f9144f82ee93e1d5a6f0aa6289d3c3f0ab8b30825b2ef17d64f6b6960  apply_io\0Afn      prism_call_poly  fdf1c023561111aad1858350a5392c032c5f3ad2603f0f47d440350e8bbaf7a9  call_poly\0Afn      prism_main  7529f15890a2cb3174e76c986f87d30aee87bc9e5fd11497bc8564221928f764  main\0Afn      prism_use_pure  93bc9169ff443e05cbe0104cf966bc5a2ed492362afda06b49894b8d7a4c616b  use_pure\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1225 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  530141aaa2f1346386d3c15904f5d8c0c462dc7ce1de6c99972709800d4b4bd2\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:530141aaa2f1346386d3c15904f5d8c0c462dc7ce1de6c99972709800d4b4bd2\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply_io 636a568f9144f82ee93e1d5a6f0aa6289d3c3f0ab8b30825b2ef17d64f6b6960 apply_io arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_call_poly fdf1c023561111aad1858350a5392c032c5f3ad2603f0f47d440350e8bbaf7a9 call_poly arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 7529f15890a2cb3174e76c986f87d30aee87bc9e5fd11497bc8564221928f764 main arity 0 slots abi-word[]\0Astate prism_use_pure 93bc9169ff443e05cbe0104cf966bc5a2ed492362afda06b49894b8d7a4c616b use_pure arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [1039 x i8] c"scheme  prism-core-hash-v1\0Abundle  cdec443ed0e810a33c082cccbef7e8c9281e9ee95915ecf79dbb193f566634d8\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cdec443ed0e810a33c082cccbef7e8c9281e9ee95915ecf79dbb193f566634d8\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply_io  fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5  apply_io\0Afn      prism_call_poly  fb534d6addbd4bae93e5d7d9d9ef985f2ae20a3269e12da03c3623af6175d716  call_poly\0Afn      prism_main  3a7c65074bcf57ae38bc5683f248f1460370ed2d056e62112e0fee9751c18d72  main\0Afn      prism_use_pure  f76cc3e227f58ddee8796e4d518de66318c8e0db88551b2ee0a9445e09031996  use_pure\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1076 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  cdec443ed0e810a33c082cccbef7e8c9281e9ee95915ecf79dbb193f566634d8\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cdec443ed0e810a33c082cccbef7e8c9281e9ee95915ecf79dbb193f566634d8\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply_io fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5 apply_io arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 3a7c65074bcf57ae38bc5683f248f1460370ed2d056e62112e0fee9751c18d72 main arity 0 slots abi-word[]\0Astate prism_use_pure f76cc3e227f58ddee8796e4d518de66318c8e0db88551b2ee0a9445e09031996 use_pure arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [11 x i8] c"prism_main\00"
-@.kont_hash2 = private constant [65 x i8] c"7529f15890a2cb3174e76c986f87d30aee87bc9e5fd11497bc8564221928f764\00"
+@.kont_hash2 = private constant [65 x i8] c"3a7c65074bcf57ae38bc5683f248f1460370ed2d056e62112e0fee9751c18d72\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
@@ -430,7 +324,6 @@ source_filename = "prism"
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_main, i64 0)
   %t1 = call ptr @prism_alloc(i64 0)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 0, ptr %t2, align 8
@@ -441,27 +334,8 @@ entry:
   call void @prism_rc_dec(i64 %t6)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
-  call void @prism_rc_dec(i64 0)
-  %t12 = call ptr @prism_alloc(i64 0)
-  %t13 = getelementptr inbounds i8, ptr %t12, i64 8
-  store i64 1, ptr %t13, align 8
-  %t15 = ptrtoint ptr %t12 to i64
-  %t17 = call ptr @prism_alloc(i64 0)
-  %t18 = getelementptr inbounds i8, ptr %t17, i64 8
-  store i64 2, ptr %t18, align 8
-  %t20 = ptrtoint ptr %t17 to i64
-  %t21 = call i64 @prism_apply_1(i64 %t15, i64 %t20)
-  call void @prism_rc_dec(i64 %t15)
-  call void @prism_print_int(i64 %t21)
-  call void @prism_rc_dec(i64 %t21)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  call void @prism_native_kont_leave()
   ret i64 0
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_enter(ptr, i64) #0
 
 ; Function Attrs: nounwind
 declare ptr @prism_alloc(i64) #0
@@ -469,37 +343,23 @@ declare ptr @prism_alloc(i64) #0
 ; Function Attrs: nounwind
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_apply_1, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_clos)
-  call void @prism_native_kont_arg(i64 1, i64 %_a0)
   %_cp = inttoptr i64 %_clos to ptr
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
   switch i64 %_tag, label %_dead [
     i64 0, label %_lam0
-    i64 1, label %_lam1
-    i64 2, label %_lam2
   ]
 
 _lam0:                                            ; preds = %entry
   %_r0 = call i64 @prism_lam_0(i64 %_a0)
   br label %_merge
 
-_lam1:                                            ; preds = %entry
-  %_r1 = call i64 @prism_lam_1(i64 %_a0)
-  br label %_merge
-
-_lam2:                                            ; preds = %entry
-  %_r2 = call i64 @prism_lam_2(i64 %_a0)
-  br label %_merge
-
 _dead:                                            ; preds = %entry
   call void @prism_apply_error()
   unreachable
 
-_merge:                                           ; preds = %_lam2, %_lam1, %_lam0
-  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ]
-  call void @prism_native_kont_leave()
+_merge:                                           ; preds = %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ]
   ret i64 %_result
 }
 
@@ -513,13 +373,8 @@ declare void @prism_print_int(i64) #0
 declare void @prism_print_nl() #0
 
 ; Function Attrs: nounwind
-declare void @prism_native_kont_leave() #0
-
-; Function Attrs: nounwind
 define i64 @prism_lam_0(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_0, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t1 = and i64 %_p0, 83
   %t3 = and i64 %t1, 1
   %t4 = icmp eq i64 %t3, 1
@@ -545,60 +400,11 @@ b2:                                               ; preds = %b1, %b3
   %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
   call void @prism_rc_dec(i64 %_p0)
   call void @prism_rc_dec(i64 83)
-  call void @prism_native_kont_leave()
   ret i64 %t16
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_arg(i64, i64) #0
 
 ; Function Attrs: nounwind
 declare i64 @prism_rt_int_add(i64, i64) #0
-
-; Function Attrs: nounwind
-define i64 @prism_lam_1(i64 %_p0) #0 {
-entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_1, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
-  %t1 = call i64 @prism_apply_1(i64 %_p0, i64 3)
-  call void @prism_rc_dec(i64 %_p0)
-  call void @prism_native_kont_leave()
-  ret i64 %t1
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_2(i64 %_p0) #0 {
-entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_2, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
-  %t1 = and i64 %_p0, 83
-  %t3 = and i64 %t1, 1
-  %t4 = icmp eq i64 %t3, 1
-  br i1 %t4, label %b0, label %b1
-
-b0:                                               ; preds = %entry
-  %t6 = ashr i64 %_p0, 1
-  %t9 = add i64 %t6, 41
-  %t11 = shl i64 %t9, 1
-  %t12 = ashr i64 %t11, 1
-  %t13 = icmp eq i64 %t12, %t9
-  br i1 %t13, label %b3, label %b1
-
-b1:                                               ; preds = %b0, %entry
-  %t15 = call i64 @prism_rt_int_add(i64 %_p0, i64 83)
-  br label %b2
-
-b3:                                               ; preds = %b0
-  %t14 = or i64 %t11, 1
-  br label %b2
-
-b2:                                               ; preds = %b1, %b3
-  %t16 = phi i64 [ %t14, %b3 ], [ %t15, %b1 ]
-  call void @prism_rc_dec(i64 %_p0)
-  call void @prism_rc_dec(i64 83)
-  call void @prism_native_kont_leave()
-  ret i64 %t16
-}
 
 ; Function Attrs: nounwind
 declare void @prism_apply_error() #0
@@ -606,5 +412,5 @@ declare void @prism_apply_error() #0
 attributes #0 = { nounwind }
 
 == run ==
-output: [42, 42]
+output: [42]
 result: ()

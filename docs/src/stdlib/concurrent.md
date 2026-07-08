@@ -78,7 +78,7 @@ A logical-time capability: `now` reads the current tick and `sleep` advances it.
 
 ### `yield`
 
-```prism,sig,h-9e1b87ce227294e111d21d2df7f8cf2161e50f80a0948a5d8a8656647ffcaa8d
+```prism,sig,h-d67c0777c8987999034fabcab877d686938fbf0856e1a18dfd4a29e06ce9ae4e
 yield : forall a. (Unit) -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -86,7 +86,7 @@ Reschedule the current fiber. A cooperative yield point; also a cancellation poi
 
 ### `await`
 
-```prism,sig,h-51745f34cea012616e1aa42b4148e4e2d0d1b8a25c6451af1cd129eea1df7a5a
+```prism,sig,h-02e622d96c2e70f9ede1f9a292807f182bebd72da721c5c2d5613f3e113fe13a
 await : forall a. (Concurrent.Fiber) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -94,7 +94,7 @@ Block until fiber `f` finishes, returning its result. If `f` was cancelled, this
 
 ### `send`
 
-```prism,sig,h-37a7631c574f0c73c9c374e001c6eabdb60675bb9f392f030da4ad216f4c6441
+```prism,sig,h-91f37d4b8e4a376586179c2b6ba884c368e3c1a28838aa0406abf265efe330e3
 send : forall a. (Concurrent.Chan, a) -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -102,7 +102,7 @@ Send `v` on channel `c`. On a bounded channel a full buffer parks the sender unt
 
 ### `recv`
 
-```prism,sig,h-b464ca4555cf264b39335b41e69bd2e8bdc129b89a21fd0ab2028b8001affa7c
+```prism,sig,h-92ee8f6bf03ce409ae89c7437fcff22f26de5cd8251ff5fe609d38fe089ee823
 recv : forall a. (Concurrent.Chan) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -110,7 +110,7 @@ Receive a value from channel `c`, parking until one is available. A cancellation
 
 ### `on_cancel`
 
-```prism,sig,h-ca45ba048c8fb9a3c7e198134e0dfba26bd0f891feb3b94f77c184b33b83099a
+```prism,sig,h-9262514dc0170a60f350d80debaf73373f1b95eb16e9fabd0306969b9be76a84
 on_cancel : forall e0 a b. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
 ```
 
@@ -118,7 +118,7 @@ Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once 
 
 ### `try_await`
 
-```prism,sig,h-a4ca66466a2a719b855ee691809f3328644a35ff496222be66134e27e51e198c
+```prism,sig,h-557f352db4233cad6d57b6107c3a4abb63929ba1864ac3709682427e0cfc190a
 try_await : forall a. (Concurrent.Fiber) -> Concurrent.Outcome(a) ! {Concurrent.Async(a)}
 ```
 
@@ -126,7 +126,7 @@ Await fiber `f`, observing cancellation as a value instead of a signal: `Complet
 
 ### `run_async`
 
-```prism,sig,h-09f56184e912a949ddd1a60491635d0f4df12e924ee6a2ab35a4c3efae0f3394
+```prism,sig,h-5cee9b9fe02b84ef8f61a56f29c677925da414139411b9c0a43b943e14d98427
 run_async : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -134,7 +134,7 @@ Run `main` and its fibers cooperatively under the FIFO (round-robin) policy, ret
 
 ### `run_cooperative`
 
-```prism,sig,h-3c211c7f4a99b6293290909722e4ead7dfbd59113ff9930e1509e3034fe2ac13
+```prism,sig,h-5e9b92c645f65aad8d1fbb496eeba15f5c0d1ed7c1b51a8fbc97f2db06d07b31
 run_cooperative : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -142,7 +142,7 @@ The policy-neutral entry point: run `main` under the deployment's default cooper
 
 ### `run_lifo`
 
-```prism,sig,h-b888c9c6467472f477e83c6971e20d1b9f514e963f724cee9d15f095470a2c9c
+```prism,sig,h-f45c8ea4086b73923518f9b4a0f16a1c0358f96fa6e83c55216766c179cb04b4
 run_lifo : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -150,7 +150,7 @@ A second scheduling policy over the same `Async` effect: LIFO (depth-first), whi
 
 ### `scope`
 
-```prism,sig,h-de612853dbe70ab39c37bdfaadf6917cdc5b24fd220d78956c4b8e99567cd96f
+```prism,sig,h-f2c159196a30186a72f06c2798f418e272e401087dbeb9c42016799aa2141e97
 scope : forall e0 a. (List(() -> a ! {Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
 ```
 
@@ -158,7 +158,7 @@ Structured nursery: run `tasks` concurrently and join them all, returning the re
 
 ### `run_clock`
 
-```prism,sig,h-99878178f96584d69508eeb2120acdc936a5052ff1229c33a7e3db769f3d93a2
+```prism,sig,h-8fd2158c5129008c85af9f271661a71c190cec7f4418969a488100636f7bfe9e
 run_clock : forall e0 a. (() -> a ! {Concurrent.Clock, e0}) -> a ! {e0}
 ```
 

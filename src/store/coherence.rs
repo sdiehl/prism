@@ -96,20 +96,20 @@ pub fn commit_canonical<P: Phase>(
     hashes: &Hashes,
 ) -> Result<(), CoherenceError> {
     let bindings = canonical_bindings(instances, canonicals, hashes);
-    // Detect every conflict before writing anything, so a refused commit never
-    // half-updates the canonical index.
-    for b in &bindings {
-        if let Some(existing) = store.canonical(&b.key)? {
-            if existing != b.instance_hash {
-                return Err(CoherenceError::Conflict {
-                    span: b.span,
-                    msg: conflict_msg(&b.key, &existing, &b.instance_hash),
-                });
-            }
-        }
-    }
-    for b in &bindings {
-        store.set_canonical(&b.key, &b.instance_hash)?;
+    let rows: Vec<_> = bindings
+        .iter()
+        .map(|b| (b.key.clone(), b.instance_hash.clone()))
+        .collect();
+    if let Err(conflict) = store.merge_canonicals(&rows)? {
+        let Some(b) = bindings.get(conflict.incoming_index) else {
+            return Err(CoherenceError::Io(io::Error::other(
+                "canonical conflict did not correspond to an incoming binding",
+            )));
+        };
+        return Err(CoherenceError::Conflict {
+            span: b.span,
+            msg: conflict_msg(&b.key, &conflict.existing, &b.instance_hash),
+        });
     }
     Ok(())
 }

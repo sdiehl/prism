@@ -1,0 +1,61 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/coeffect_noalloc_misplaced.pr
+---
+== tokens ==
+VOpen Fn Ident("f") LParen Ident("x") Colon KwInt At Ident("noalloc") RParen Colon KwInt Eq Ident("x") VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "f",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Coeffect(
+                            Int,
+                            CoeffectRow {
+                                facts: [
+                                    Noalloc,
+                                ],
+                            },
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Var(
+                    "x",
+                ),
+                span: 163..164,
+            },
+            wheres: [],
+            span: 131..164,
+        },
+    ],
+}
+
+== types ==
+Type Error: `@ noalloc` certifies a function declaration: write it after a `fn`'s return type
+   ╭─[ <source>:3:1 ]
+   │
+ 3 │ fn f(x : Int @ noalloc) : Int = x
+   │ ────────────────┬────────────────  
+   │                 ╰────────────────── `@ noalloc` certifies a function declaration: write it after a `fn`'s return type
+───╯

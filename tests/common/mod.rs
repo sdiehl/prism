@@ -160,6 +160,10 @@ pub const CORPUS_SKIPS: &[(&str, &str)] = &[
         "examples/game.pr",
         "interactive: blocks on read_int over empty stdin",
     ),
+    (
+        "examples/greet.pr",
+        "off-platform: file_exists/read_file (the lineage chapter's input-file demo)",
+    ),
     ("examples/os.pr", "off-platform: file IO + getenv"),
     (
         "examples/sandbox.pr",

@@ -144,6 +144,20 @@ fn ladder_composed(o : V2) : Bool =
       else
         true
 
+-- A stable block gives a real, compiler-known contract digest, unlike the fake
+-- `good_digest`/`wrong_digest` header strings below (which pin the mismatch and
+-- trailing-byte behavior on a hand-built frame). Its generated
+-- `wire_encode_Ticket`/`wire_decode_Ticket` thread that real digest, so this
+-- exercises the genuine envelope end to end: no magic string is hand-written.
+stable Ticket {
+  V1 = { n: Int, label: String }
+}
+
+fn rt_ticket_go(x : Ticket) : Bool =
+  wire_decode_Ticket(wire_encode_Ticket(x)) == x
+
+fn rt_ticket(x : Ticket) : Bool = caught(false, \() -> rt_ticket_go(x))
+
 -- The envelope roundtrips a value under its contract digest, rejects a frame
 -- opened under a different digest, and rejects a frame with a byte appended after
 -- the body. All three go through Fail, discharged here to a Bool.
@@ -151,23 +165,27 @@ let good_digest : String = "1c0ffee"
 
 let wrong_digest : String = "0ddba11"
 
-fn dec_shape_at(bs : Bytes, dig : String) : Shape = wire_decode_value(bs, dig)
+fn dec_shape_at(bs : Bytes, dig : String) : Shape =
+  wire_decode_value_with_digest(bs, dig)
 
 fn envelope_ok(x : Shape) : Bool =
   caught(false) fn
-    dec_shape_at(wire_encode_value(good_digest, x), good_digest) == x
+    dec_shape_at(wire_encode_value_with_digest(good_digest, x), good_digest)
+      == x
 
 -- The `&& false` forces the decode: if the frame is (wrongly) accepted the thunk
 -- yields false, but a correct reject aborts through Fail and `caught` returns its
 -- true default. So a true result means the frame was rejected as it should be.
 fn envelope_wrong_digest(x : Shape) : Bool =
   caught(true) fn
-    dec_shape_at(wire_encode_value(good_digest, x), wrong_digest) == x && false
+    dec_shape_at(wire_encode_value_with_digest(good_digest, x), wrong_digest)
+      == x
+      && false
 
 fn envelope_trailing(x : Shape) : Bool =
   caught(true) fn
     dec_shape_at(
-        wire_cat(wire_encode_value(good_digest, x), wire_tag(0)),
+        wire_cat(wire_encode_value_with_digest(good_digest, x), wire_tag(0)),
         good_digest,
       )
       == x
@@ -175,6 +193,39 @@ fn envelope_trailing(x : Shape) : Bool =
 
 fn envelope_law(x : Shape) : Bool =
   envelope_ok(x) && envelope_wrong_digest(x) && envelope_trailing(x)
+
+-- The `Stable` class wrappers carry the compiler-injected shape digest, so a plain
+-- `deriving (Stable)` value round-trips with no digest string in sight: no
+-- hand-written `good_digest` appears in this path, unlike the envelope tests above.
+-- `Parcel` derives the frozen witness alongside its codec and generator.
+type Parcel = Parcel(
+  Int,
+  String,
+  Bool
+) deriving (Eq, Show, Serialize, Stable, Arbitrary)
+
+fn rt_stable_go(x : Parcel) : Bool =
+  wire_decode_stable(wire_encode_stable(x)) == x
+
+fn rt_stable(x : Parcel) : Bool = caught(false, \() -> rt_stable_go(x))
+
+-- A typed decode wrapper pins `wire_decode_stable`'s result so its instance
+-- resolves, the same device `dec_shape_at` uses. A frame minted under a wrong digest
+-- (via the explicit-digest escape hatch), or one carrying a trailing byte, must fail
+-- through Fail; `caught` returns its true default, so a true result means the
+-- hostile frame was refused.
+fn dec_parcel(bs : Bytes) : Parcel = wire_decode_stable(bs)
+
+fn stable_wrong_digest(x : Parcel) : Bool =
+  caught(true) fn
+    dec_parcel(wire_encode_value_with_digest(wrong_digest, x)) == x && false
+
+fn stable_trailing(x : Parcel) : Bool =
+  caught(true) fn
+    dec_parcel(wire_cat(wire_encode_stable(x), wire_tag(0))) == x && false
+
+fn stable_wrapper_law(x : Parcel) : Bool =
+  rt_stable(x) && stable_wrong_digest(x) && stable_trailing(x)
 
 -- Fold a drawn Int into a byte value, and a generator of arbitrary byte strings
 -- to fuzz the decoder with.
@@ -222,6 +273,11 @@ fn body() =
   report("ladder adjacent", quickcheck(arb_gen(), ladder_adjacent))
   report("ladder composed", quickcheck(arb_gen(), ladder_composed))
   report("envelope digest+trailing", quickcheck(arb_gen(), envelope_law))
+  report(
+      "stable wrappers roundtrip+hostile",
+      quickcheck(arb_gen(), stable_wrapper_law),
+    )
+  report("stable frame real digest", quickcheck(arb_gen(), rt_ticket))
   report("hostile decode terminates", quickcheck(gen_bytes, hostile))
 
 fn main() = default(body, ())

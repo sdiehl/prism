@@ -40,7 +40,7 @@ static unsigned char *buf_data(long *p) {
    is the length word plus the byte capacity rounded up; computed in size_t so a
    near-LONG_MAX capacity cannot overflow before prism_cell_bytes re-checks it. */
 static long *buf_alloc(long cap_bytes) {
-    if (cap_bytes < 0) abort();
+    if (cap_bytes < 0) prism_buf_oob();
     size_t span, capw;
     if (__builtin_add_overflow((size_t)cap_bytes, (size_t)7, &span)) abort();
     capw = span / 8;

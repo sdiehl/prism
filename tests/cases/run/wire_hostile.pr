@@ -1,0 +1,118 @@
+-- Hand-crafted hostile frames and bodies: every one must fail through `Fail` and
+-- be caught, never trap or hang. Covers the frame header checks (a foreign scheme
+-- tag, a wrong kind, a wrong contract digest), a body truncated mid-value, a
+-- length prefix larger than the bytes that follow it, and a map body whose keys
+-- arrive out of canonical order. Each hostile case is paired with a well-formed
+-- control that must be accepted, so the rejection is never vacuous. Runs under the
+-- parity + leak oracles: native and interpreter must agree byte-for-byte.
+--
+-- Sibling coverage: `wire_laws.pr` fuzzes random bodies and pins the trailing-byte
+-- and wrong-digest envelope laws under generators; `ordered_wire_stopgap.pr` is
+-- the dedicated map-ordering fault. This file pins the deterministic header and
+-- length faults on frames built byte by byte.
+
+import Wire (..)
+
+import Data.Map (..)
+
+-- Discharge `Fail` to a default, so a fallible decode becomes a pure `Bool`: a
+-- hostile case passes `true` (a fault is the correct outcome), a control passes
+-- `false` (a fault would be the failure).
+fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
+  handle action() with
+    final ctl fail() => d
+    return r => r
+
+-- Typed decode wrappers so `decode`/`wire_decode_value_with_digest` resolve their
+-- instance at the annotated type.
+fn dec_str(bs : Bytes) : (String, Bytes) = decode(bs)
+
+fn dec_map_ii(bs : Bytes) : (Map(Int, Int), Bytes) = decode(bs)
+
+fn dec_val(bs : Bytes) : Int = wire_decode_value_with_digest(bs, dig)
+
+-- Keep the first `k` bytes of a body, so a valid frame can be cut mid-value.
+fn list_prefix(xs : List(Int), k : Int) : List(Int) =
+  if k <= 0 then
+    Nil
+  else
+    match xs of
+      Nil => Nil
+      Cons(h, t) => Cons(h, list_prefix(t, k - 1))
+
+fn bytes_prefix(bs : Bytes, k : Int) : Bytes =
+  bytes_of_list(list_prefix(bytes_to_list(bs), k))
+
+let dig : String = "cafe"
+
+-- A well-formed `value` frame carrying an Int body under digest `dig`, and the
+-- control that it decodes back cleanly.
+fn control() : Bool =
+  caught(false) fn
+    dec_val(wire_encode_value_with_digest(dig, 100000)) == 100000
+
+fn map_control() : Bool =
+  caught(false) fn
+    match dec_map_ii(wire_cat(encode([1, 2]), encode([0, 0]))) of
+      (m, _r) => map_size(m) == 2
+
+-- A foreign scheme tag: the frame is well-formed but names a scheme this reader
+-- does not speak, rejected before the kind or digest is even read.
+fn wrong_scheme() : Bool =
+  let f = wire_cat(
+      encode("not-prism"),
+      wire_cat(wire_tag(wire_kind_value), wire_cat(encode(dig), encode(7))),
+    )
+  caught(true) fn
+    match wire_open(f, wire_kind_value, dig) of
+      _ => false
+
+-- A wrong kind byte: a `def`-kind frame opened as a `value`.
+fn wrong_kind() : Bool =
+  let f = wire_frame(wire_kind_def, dig, encode(7))
+  caught(true) fn
+    match wire_open(f, wire_kind_value, dig) of
+      _ => false
+
+-- A wrong contract digest: the frame's digest does not match the one demanded.
+fn wrong_digest() : Bool =
+  let f = wire_frame(wire_kind_value, dig, encode(7))
+  caught(true) fn
+    match wire_open(f, wire_kind_value, "beef") of
+      _ => false
+
+-- A body truncated mid-value: the header is intact but the last byte of the
+-- multi-byte varint body is missing, so the body decode runs out.
+fn truncated_body() : Bool =
+  let f = wire_encode_value_with_digest(dig, 100000)
+  let t = bytes_prefix(f, wire_len(f) - 1)
+  caught(true, \() -> dec_val(t) == 100000)
+
+-- A hostile declared length: the string body claims 100 bytes but only three
+-- follow, so `take_bytes` runs out rather than reading past the input.
+fn hostile_length() : Bool =
+  let body = wire_cat(wire_tag(100), bytes_of_list([65, 66, 67]))
+  caught(true) fn
+    match dec_str(body) of
+      _ => false
+
+-- A map body whose keys are descending under the reader's canonical `Ord(Int)`:
+-- the strict-ascending check faults rather than rebuild a mis-ordered tree.
+fn map_ordering() : Bool =
+  let body = wire_cat(encode([2, 1]), encode([0, 0]))
+  caught(true) fn
+    match dec_map_ii(body) of
+      _ => false
+
+fn report(name : String, ok : Bool) =
+  println(concat(name, if ok then ": OK" else ": FAIL"))
+
+fn main() =
+  report("control accepts good frame", control())
+  report("control accepts ascending map", map_control())
+  report("wrong scheme rejected", wrong_scheme())
+  report("wrong kind rejected", wrong_kind())
+  report("wrong digest rejected", wrong_digest())
+  report("truncated body rejected", truncated_body())
+  report("hostile length rejected", hostile_length())
+  report("descending map rejected", map_ordering())

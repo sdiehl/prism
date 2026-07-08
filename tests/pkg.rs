@@ -5,14 +5,15 @@
 //! code; this file is the integration layer, where a multi-definition program is
 //! committed to a temp store and the resolver's closure is checked against the
 //! dependency graph the commit wrote. It also pins the missing-hash diagnostic
-//! (it must name the hash and the edge that wanted it), the `prism why` trace, and
+//! (it must name the hash and the edge that wanted it), the `prism pkg why` trace, and
 //! the container-reification reservation (the two homes of the
 //! representation-affecting class list must agree).
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -46,6 +47,10 @@ const STORE_PKG_SOURCE: &str = "pub fn answer() : Int = 41\n";
 const STORE_PKG_ORIGIN: &str = "example.invalid/StorePkg";
 const STORE_PKG_OTHER_ORIGIN: &str = "example.invalid/OtherStorePkg";
 const STORE_PKG_TAG: &str = "v1";
+// The usage-gate golden a package commits at its root (mirrors bin/prism.rs's
+// PACKAGE_USAGE_SUMMARY, which the binary crate does not export to tests): the
+// markdown projection of the usage summary.
+const USAGE_SUMMARY_GOLDEN: &str = "usage-summary.md";
 
 // --- temp store scaffolding ---------------------------------------------
 
@@ -78,6 +83,75 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+#[test]
+fn pkg_init_prompts_and_creates_minimal_package() {
+    let tmp = TempDir::new("init");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("init")
+        .current_dir(&tmp.path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawns prism pkg init");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"demo_pkg\ndemo-dir\n")
+        .expect("writes init answers");
+    let out = child.wait_with_output().expect("waits for init");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("package name: "), "{stdout}");
+    assert!(stdout.contains("directory name: "), "{stdout}");
+    assert!(stdout.contains("created package `demo_pkg`"), "{stdout}");
+
+    let project = tmp.path.join("demo-dir");
+    assert!(project.join("prism.toml").is_file());
+    let main = project.join("src").join("main.pr");
+    assert!(main.is_file());
+    let manifest = fs::read_to_string(project.join("prism.toml")).unwrap();
+    assert!(manifest.contains("name = \"demo_pkg\""));
+    assert!(manifest.contains("entry = \"src/main.pr\""));
+    assert_eq!(
+        fs::read_to_string(&main).unwrap(),
+        "fn main() = println(\"Hello World from Prism! Taste the rainbow.\")\n"
+    );
+
+    let check = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .current_dir(&project)
+        .output()
+        .expect("runs prism check");
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let run = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(".")
+        .current_dir(&project)
+        .output()
+        .expect("runs generated package");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "Hello World from Prism! Taste the rainbow.\n=> ()\n"
+    );
 }
 
 fn store_cfg(root: PathBuf) -> Config {
@@ -343,10 +417,14 @@ fn project_check_uses_locked_std_source_bundle() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("main") && stdout.contains("Int"),
-        "stdout:\n{stdout}\nstderr:\n{}",
+        out.stdout.is_empty(),
+        "successful `prism check` should be quiet, stdout:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        out.stderr.is_empty(),
+        "successful `prism check` should be quiet, stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -642,11 +720,12 @@ fn why_rejects_foreign_lock_scheme_before_using_hashes() {
     .unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("why")
         .arg(STORE_PKG_NAME)
         .current_dir(&project)
         .output()
-        .expect("runs prism why");
+        .expect("runs prism pkg why");
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -696,6 +775,7 @@ fn publish_add_and_run_git_package_end_to_end() {
     fs::write(&package, "pub fn answer() : Int = 41\n").unwrap();
 
     let publish = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("publish")
         .arg(&package)
         .arg("--tag")
@@ -707,7 +787,7 @@ fn publish_add_and_run_git_package_end_to_end() {
         .env("PRISM_STORE_PATH", tmp.root())
         .env("PRISM_SIGN_MODE", "unsigned")
         .output()
-        .expect("runs prism publish");
+        .expect("runs prism pkg publish");
     assert!(
         publish.status.success(),
         "{}",
@@ -728,13 +808,14 @@ fn publish_add_and_run_git_package_end_to_end() {
     .unwrap();
 
     let add = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("add")
         .arg("example.invalid/StorePkg@v1")
         .current_dir(&project)
         .env("PRISM_STORE_PATH", tmp.root())
         .env("PRISM_SIGN_MODE", "unsigned")
         .output()
-        .expect("runs prism add");
+        .expect("runs prism pkg add");
     assert!(
         add.status.success(),
         "{}",
@@ -765,6 +846,7 @@ fn publish_add_and_run_git_package_end_to_end() {
 fn repo_tzdb_package_publishes_and_runs_end_to_end() {
     let tmp = TempDir::new("tzdb-seed");
     let publish = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("publish")
         .arg(tzdb_package())
         .arg("--tag")
@@ -776,7 +858,7 @@ fn repo_tzdb_package_publishes_and_runs_end_to_end() {
         .env("PRISM_STORE_PATH", tmp.root())
         .env("PRISM_SIGN_MODE", "unsigned")
         .output()
-        .expect("runs prism publish");
+        .expect("runs prism pkg publish");
     assert!(
         publish.status.success(),
         "{}",
@@ -787,13 +869,14 @@ fn repo_tzdb_package_publishes_and_runs_end_to_end() {
     copy_dir(&project_fixture("tzdb_app"), &project);
 
     let add = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("add")
         .arg("example.invalid/Tzdb@v0")
         .current_dir(&project)
         .env("PRISM_STORE_PATH", tmp.root())
         .env("PRISM_SIGN_MODE", "unsigned")
         .output()
-        .expect("runs prism add");
+        .expect("runs prism pkg add");
     assert!(
         add.status.success(),
         "{}",
@@ -818,11 +901,12 @@ fn repo_tzdb_package_publishes_and_runs_end_to_end() {
 #[test]
 fn check_world_reports_real_package_roots_by_digest() {
     let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("check-world")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("packages"))
         .arg("--json")
         .output()
-        .expect("runs prism check-world");
+        .expect("runs prism pkg check-world");
     assert!(
         output.status.success(),
         "{}",
@@ -853,11 +937,12 @@ fn check_world_reports_real_package_roots_by_digest() {
 #[test]
 fn check_world_reports_package_identity_conflicts() {
     let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("check-world")
         .arg(project_fixture("check_world_duplicate"))
         .arg("--json")
         .output()
-        .expect("runs prism check-world");
+        .expect("runs prism pkg check-world");
     assert!(
         output.status.success(),
         "{}",
@@ -899,12 +984,13 @@ fn check_world_reports_dependency_root_conflicts() {
     }
 
     let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("check-world")
         .arg(tmp.path.join("world"))
         .arg("--json")
         .env("PRISM_STORE_PATH", tmp.root())
         .output()
-        .expect("runs prism check-world");
+        .expect("runs prism pkg check-world");
     assert!(
         output.status.success(),
         "{}",
@@ -922,11 +1008,12 @@ fn check_world_reports_dependency_root_conflicts() {
 #[test]
 fn check_world_strict_fails_on_incompatible_universe() {
     let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
         .arg("check-world")
         .arg(project_fixture("check_world_duplicate"))
         .arg("--strict")
         .output()
-        .expect("runs prism check-world");
+        .expect("runs prism pkg check-world");
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -937,4 +1024,444 @@ fn check_world_strict_fails_on_incompatible_universe() {
         stderr.contains("incompatible package universe"),
         "stderr:\n{stderr}"
     );
+}
+
+fn check_world_fixture() -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("check_world_tzdb.json");
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+// The one tzdb package entry in a check-world report, keyed by source-root digest
+// but found by name (the digest is path-independent, so a fixture generated from a
+// relative path and a live report from an absolute one agree on it).
+fn tzdb_entry(report: &Value) -> Value {
+    report["packages"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|p| p["name"] == "tzdb")
+        .expect("tzdb package is reported")
+        .clone()
+}
+
+fn run_docs(args: &[&std::ffi::OsStr]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("docs")
+        .args(args)
+        .output()
+        .expect("runs prism docs")
+}
+
+#[test]
+fn docs_manifest_round_trips_and_rejects_stale_and_drifted_inputs() {
+    let tmp = TempDir::new("docs-manifest");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    let _ = fs::remove_dir_all(project.join("docs"));
+    let out = project.join("docs");
+
+    // Generation writes the manifest beside the pages, and it verifies clean.
+    let gen = run_docs(&[project.as_os_str(), "--out".as_ref(), out.as_ref()]);
+    assert!(
+        gen.status.success(),
+        "{}",
+        String::from_utf8_lossy(&gen.stderr)
+    );
+    assert!(out.join("docs.plineage").is_file(), "manifest is written");
+    let ok = run_docs(&[
+        project.as_os_str(),
+        "--out".as_ref(),
+        out.as_ref(),
+        "--verify-manifest".as_ref(),
+    ]);
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+
+    // A tampered page fails verification, naming the changed page by digest.
+    let page = out.join("tzdb.md");
+    let mut bytes = fs::read_to_string(&page).unwrap();
+    bytes.push_str("\n<!-- tampered -->\n");
+    fs::write(&page, bytes).unwrap();
+    let stale = run_docs(&[
+        project.as_os_str(),
+        "--out".as_ref(),
+        out.as_ref(),
+        "--verify-manifest".as_ref(),
+    ]);
+    assert!(
+        !stale.status.success(),
+        "a stale page must fail verification"
+    );
+    assert!(
+        String::from_utf8_lossy(&stale.stderr).contains("changed"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&stale.stderr)
+    );
+
+    // Restore the page, then move a source root: verification fails on the drifted
+    // input rather than silently documenting against a new one.
+    let regen = run_docs(&[project.as_os_str(), "--out".as_ref(), out.as_ref()]);
+    assert!(regen.status.success());
+    let entry = project.join("src").join("Tzdb.pr");
+    let mutated = fs::read_to_string(&entry)
+        .unwrap()
+        .replace("offset_minutes = 540", "offset_minutes = 541");
+    fs::write(&entry, mutated).unwrap();
+    let drifted = run_docs(&[
+        project.as_os_str(),
+        "--out".as_ref(),
+        out.as_ref(),
+        "--verify-manifest".as_ref(),
+    ]);
+    assert!(
+        !drifted.status.success(),
+        "a moved source root must fail manifest verification"
+    );
+    assert!(
+        String::from_utf8_lossy(&drifted.stderr).contains("moved"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&drifted.stderr)
+    );
+}
+
+#[test]
+fn check_world_reports_per_package_gates_and_public_surface() {
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("check-world")
+        .arg(tzdb_package())
+        .arg("--json")
+        .output()
+        .expect("runs prism pkg check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let live = tzdb_entry(&report);
+    let fixture = tzdb_entry(&check_world_fixture());
+
+    // Every per-package gate reads back with the committed status: the seed commits
+    // a docs manifest and a doctest (both verified/run) and no examples or replay.
+    assert_eq!(live["gates"], fixture["gates"], "per-package gates drifted");
+    assert_eq!(live["gates"]["check"], "passed");
+    assert_eq!(live["gates"]["docs"], "passed");
+    assert_eq!(live["gates"]["doctests"], "passed");
+    assert_eq!(live["gates"]["example"], "not-run");
+    assert_eq!(live["gates"]["replay"], "not-run");
+
+    // The public surface reads back by digest, name-sorted. Names and scheme are
+    // pinned against the fixture; the hashes are exercised for movement by the
+    // baseline test below rather than frozen here.
+    let names = |entry: &Value| -> Vec<String> {
+        entry["public_api"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(
+        names(&live),
+        names(&fixture),
+        "public surface names drifted"
+    );
+    assert!(
+        live["public_api"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["scheme"] == HASH_SCHEME && d["hash"].is_string()),
+        "every public def carries a scheme-tagged hash"
+    );
+    assert!(names(&live).contains(&"asia_tokyo".to_string()));
+    assert!(names(&live).contains(&"Zone".to_string()));
+}
+
+#[test]
+fn check_world_names_moved_public_definition_against_baseline() {
+    let tmp = TempDir::new("check-world-public-surface");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    // The committed docs manifest no longer matches the mutated source; drop it so
+    // the docs gate is honestly not-run and the report focuses on the surface diff.
+    let _ = fs::remove_dir_all(project.join("docs"));
+    let entry = project.join("src").join("Tzdb.pr");
+    let mutated = fs::read_to_string(&entry)
+        .unwrap()
+        .replace("offset_minutes = 540", "offset_minutes = 541");
+    fs::write(&entry, mutated).unwrap();
+
+    let baseline = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("check_world_tzdb.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("check-world")
+        .arg(&project)
+        .arg("--baseline")
+        .arg(&baseline)
+        .arg("--json")
+        .output()
+        .expect("runs prism pkg check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let changes = &tzdb_entry(&report)["public_api_changes"];
+    assert_eq!(changes["changed"], true);
+    let moved = changes["moved"].as_array().expect("moved defs are named");
+    let asia = moved
+        .iter()
+        .find(|m| m["name"] == "asia_tokyo")
+        .expect("the mutated definition is named as moved");
+    assert_ne!(
+        asia["old"], asia["new"],
+        "a moved definition names both digests"
+    );
+    // Named by digest, never by path: the change carries hashes, not file names.
+    assert!(asia["old"].is_string() && asia["new"].is_string());
+}
+
+// The usage gate has three reported states. `tzdb` commits a `usage-summary.md`
+// golden, so it reads back `passed` with no drift line.
+#[test]
+fn usage_gate_passes_on_committed_golden() {
+    let report = check_world_json(tzdb_package());
+    let gates = &tzdb_entry(&report)["gates"];
+    assert_eq!(gates["usage"], "passed");
+    assert!(
+        gates.get("usage_drift").is_none(),
+        "a passing usage gate carries no drift line: {gates}"
+    );
+}
+
+// A golden that no longer matches the regenerated summary reports `failed` and names
+// the first differing line. Because the gate is report-only this release, the drift
+// never fails strict mode: `--strict` still exits zero.
+#[test]
+fn usage_gate_reports_drift_with_named_line_yet_never_fails_strict() {
+    let tmp = TempDir::new("usage-gate-drift");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    drift_usage_golden(&project);
+
+    let report = check_world_json(&project);
+    let gates = &tzdb_entry(&report)["gates"];
+    assert_eq!(gates["usage"], "failed");
+    let drift = gates["usage_drift"].as_str().expect("drift line is named");
+    assert!(
+        drift.starts_with("line ")
+            && drift.contains("| utc")
+            && drift.contains("YES")
+            && drift.contains("no "),
+        "drift names the first differing markdown line with both sides quoted: {drift:?}"
+    );
+
+    // Report-only: a drifted usage gate does not fail strict mode the way the other
+    // gates do.
+    let strict = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("check-world")
+        .arg(&project)
+        .arg("--strict")
+        .output()
+        .expect("runs prism pkg check-world");
+    assert!(
+        strict.status.success(),
+        "usage drift must not fail strict mode:\n{}",
+        String::from_utf8_lossy(&strict.stderr)
+    );
+}
+
+// A package that commits no golden reports `not-run`, with no drift line.
+#[test]
+fn usage_gate_is_not_run_without_a_golden() {
+    let tmp = TempDir::new("usage-gate-not-run");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    fs::remove_file(project.join(USAGE_SUMMARY_GOLDEN)).unwrap();
+
+    let report = check_world_json(&project);
+    let gates = &tzdb_entry(&report)["gates"];
+    assert_eq!(gates["usage"], "not-run");
+    assert!(gates.get("usage_drift").is_none());
+}
+
+// Flip the `utc` row's noalloc cell in the committed golden so it drifts from the
+// regenerated summary. The replacement is the same width as the original, so the
+// table alignment is untouched and the first drifted line is the corrupted row.
+fn drift_usage_golden(project: &Path) {
+    let golden = project.join(USAGE_SUMMARY_GOLDEN);
+    let corrupted: String = fs::read_to_string(&golden)
+        .unwrap()
+        .lines()
+        .map(|l| {
+            if l.starts_with("| utc ") {
+                l.replacen(" no ", " YES", 1)
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&golden, corrupted).unwrap();
+}
+
+fn accept_usage(path: &Path) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("accept-usage")
+        .arg(path)
+        .output()
+        .expect("runs prism pkg accept-usage")
+}
+
+// Run `pkg check-world` against `path` with extra flags, returning the raw output so
+// a test can assert on the exit status.
+fn check_world_exit(path: &Path, flags: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("check-world")
+        .arg(path)
+        .args(flags)
+        .output()
+        .expect("runs prism pkg check-world")
+}
+
+// `pkg accept-usage` writes the summary a package commits, and the gate reads it
+// straight back as `passed`. The write is byte-stable: accepting an unchanged
+// package a second time rewrites identical bytes, so a committed golden never churns.
+#[test]
+fn accept_usage_writes_a_gate_passing_and_byte_stable_summary() {
+    let tmp = TempDir::new("accept-usage");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    let golden = project.join(USAGE_SUMMARY_GOLDEN);
+    fs::remove_file(&golden).unwrap();
+
+    let out = accept_usage(&project);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(golden.is_file(), "accept-usage writes the summary");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("usage-summary.md"),
+        "the confirmation names the file"
+    );
+
+    let gates = &tzdb_entry(&check_world_json(&project))["gates"];
+    assert_eq!(
+        gates["usage"], "passed",
+        "a freshly accepted summary passes"
+    );
+
+    let first = fs::read(&golden).unwrap();
+    accept_usage(&project);
+    assert_eq!(
+        first,
+        fs::read(&golden).unwrap(),
+        "a second accept rewrites identical bytes"
+    );
+}
+
+// A drifted golden reads back `failed`; `accept-usage` regenerates it in place and
+// the gate returns to `passed`.
+#[test]
+fn accept_usage_heals_a_drifted_summary() {
+    let tmp = TempDir::new("accept-usage-heal");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    drift_usage_golden(&project);
+    assert_eq!(
+        tzdb_entry(&check_world_json(&project))["gates"]["usage"],
+        "failed"
+    );
+
+    accept_usage(&project);
+    assert_eq!(
+        tzdb_entry(&check_world_json(&project))["gates"]["usage"],
+        "passed"
+    );
+}
+
+// `--strict-usage` promotes a usage drift to a strict failure; plain `--strict`
+// still ignores it (usage is report-only by default).
+#[test]
+fn strict_usage_promotes_drift_to_a_strict_failure() {
+    let tmp = TempDir::new("strict-usage");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    drift_usage_golden(&project);
+
+    assert!(
+        check_world_exit(&project, &["--strict"]).status.success(),
+        "plain --strict leaves usage report-only"
+    );
+    assert!(
+        !check_world_exit(&project, &["--strict", "--strict-usage"])
+            .status
+            .success(),
+        "--strict-usage makes a drifted summary fail strict mode"
+    );
+}
+
+// A package that commits no summary is `not-run`, never fatal, under either strict
+// mode: missing means the package has not opted in.
+#[test]
+fn missing_usage_summary_is_never_fatal() {
+    let tmp = TempDir::new("missing-usage");
+    let project = tmp.path.join("tzdb");
+    copy_dir(tzdb_package(), &project);
+    fs::remove_file(project.join(USAGE_SUMMARY_GOLDEN)).unwrap();
+
+    assert_eq!(
+        tzdb_entry(&check_world_json(&project))["gates"]["usage"],
+        "not-run"
+    );
+    assert!(check_world_exit(&project, &["--strict"]).status.success());
+    assert!(
+        check_world_exit(&project, &["--strict", "--strict-usage"])
+            .status
+            .success(),
+        "a missing summary is not opted in, so --strict-usage does not fail on it"
+    );
+}
+
+// The check-world JSON names the artifact format the golden is compared under and
+// the whole-program tier the summary is headed by.
+#[test]
+fn check_world_json_names_usage_format_and_tier() {
+    let gates = &tzdb_entry(&check_world_json(tzdb_package()))["gates"];
+    assert_eq!(gates["usage_format"], "usage-summary-md");
+    assert_eq!(gates["usage_tier"], "whole-program-free-monad");
+}
+
+// Run `pkg check-world --json` against `path` and parse the report.
+fn check_world_json(path: &Path) -> Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("pkg")
+        .arg("check-world")
+        .arg(path)
+        .arg("--json")
+        .output()
+        .expect("runs prism pkg check-world");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
 }

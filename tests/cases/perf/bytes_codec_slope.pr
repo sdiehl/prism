@@ -1,0 +1,18 @@
+import Data.Bytes (..)
+
+import Wire (..)
+
+-- Hex-encode then hex-decode N bytes. The input is one `buf_new` allocation, so
+-- the whole remaining allocation is the codec's: both directions accumulate into a
+-- buffer builder in one linear pass (two output chars per byte on encode, one byte
+-- per two chars on decode) and emit their result in a single `string_of_buf` /
+-- `bytes_of_buf`, so the per-element allocation slope is flat. A regression to
+-- per-character string concatenation would make either direction allocate one cell
+-- per element.
+fn hex_round(bs : Bytes) : Int =
+  match hex_decode(hex_encode(bs)) of
+    Some(out) => bytes_length(out)
+    None => 0 - 1
+
+fn main() : !{IO} Unit =
+  println(show_int(hex_round(bytes_of_buf(buf_new(__N__, 65)))))

@@ -27,13 +27,17 @@
 
 use marginalia::Span;
 
-use super::{call, evar, sp};
-use crate::core::{shape_digests, HASH_PREFIX_HEX};
+use super::{call, evar, sp, spat};
+use crate::core::contract_digest;
 use crate::error::TypeError;
 use crate::names;
+use crate::names::{
+    DECODE_METHOD, FAIL_OP, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_ENCODE_VALUE_WITH_DIGEST,
+    WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY,
+};
 use crate::syntax::ast::{
-    ConvDir, Converter, Ctor, DataDecl, Decl, Expr, Fip, Param, Program, Rung, StableDecl,
-    SynonymDecl, Ty, S,
+    Arm, BinOp, ConvDir, Converter, Ctor, DataDecl, Decl, Expr, Fip, Param, Pattern, Program, Rung,
+    StableDecl, SynonymDecl, Ty, S,
 };
 use crate::types::{ARBITRARY_CLASS, EQ_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS};
 
@@ -50,6 +54,12 @@ const RUNG_OPTIONAL: &[&str] = &[EQ_CLASS, SHOW_CLASS, ARBITRARY_CLASS];
 // (`Wire.Loss`) is resolved from the imported types, since this pass runs after
 // name resolution and emits references the resolver never sees.
 const LOSS_TYPE: &str = "Loss";
+
+// The `Bytes` type a generated frame function encodes to and decodes from. Like
+// `Loss`, its canonical name (`Wire.Bytes`) is resolved from the imported types,
+// since this pass runs after name resolution and emits references the resolver
+// never sees.
+const BYTES_TYPE: &str = "Bytes";
 
 // The resolved `Loss` type and its constructor, threaded into the downgrade
 // builders. Both are the same canonical name; a program that reaches here has
@@ -70,6 +80,22 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     let blocks = std::mem::take(&mut prog.stable);
     let in_scope: std::collections::BTreeSet<&str> =
         prog.classes.iter().map(|c| bare(&c.name)).collect();
+    // Each imported function's bare name mapped to its canonical `Module.fn`, so a
+    // generated frame helper's reference to a wire library function is already the
+    // canonical name the resolver would have produced (this pass runs after name
+    // resolution). The `stable` block's own generated functions never collide with
+    // these, so building it once up front is sound. Mirrors `derive.rs`'s `lib`.
+    let wire_canon: std::collections::BTreeMap<String, String> = prog
+        .fns
+        .iter()
+        .map(|f| (bare(&f.name).to_string(), f.name.clone()))
+        .collect();
+    let libf = |n: &str| {
+        wire_canon
+            .get(n)
+            .map_or_else(|| n.to_string(), std::string::ToString::to_string)
+    };
+    let bytes_ty = canon_ty(prog, BYTES_TYPE);
     for sd in &blocks {
         if let Some(missing) = RUNG_REQUIRED.iter().find(|c| !in_scope.contains(**c)) {
             return Err(TypeError::Other {
@@ -98,8 +124,10 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
             span: sd.span,
         });
         let fns = ladder_fns(sd, &rungs, &loss)?;
+        let frames = frame_fns(sd, &rungs, &bytes_ty, &libf);
         prog.types.extend(datas);
         prog.fns.extend(fns);
+        prog.fns.extend(frames);
     }
     Ok(())
 }
@@ -137,6 +165,19 @@ fn loss_ref(prog: &Program) -> LossRef {
         ty: Ty::Con(canon.clone(), Vec::new()),
         ctor: canon,
     }
+}
+
+// Resolve an imported nullary type to its canonical name (a bare fallback keeps a
+// missing import as the reported error rather than a panic), the same lookup
+// `loss_ref` does for `Loss`.
+fn canon_ty(prog: &Program, bare_name: &str) -> Ty {
+    let canon = prog
+        .types
+        .iter()
+        .find(|d| bare(&d.name) == bare_name)
+        .map_or(bare_name, |d| d.name.as_str())
+        .to_string();
+    Ty::Con(canon, Vec::new())
 }
 
 // One rung with its version tag and its fully-resolved field list (the extension
@@ -287,8 +328,7 @@ fn check_frozen(sd: &StableDecl, r: &Rung, data: &DataDecl) -> Result<(), TypeEr
 // The committed shape-digest prefix of a rung's record type, in the exact scheme
 // (`prism-core-hash-v1`) and truncation the stdlib goldens use.
 pub(crate) fn rung_digest(data: &DataDecl) -> String {
-    let shapes = shape_digests(std::slice::from_ref(data), &[]);
-    shapes[&data.name][..HASH_PREFIX_HEX].to_string()
+    contract_digest(data)
 }
 
 fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: Span) -> Decl {
@@ -309,7 +349,6 @@ fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: 
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
-        no_alloc_bs: false,
         span,
     }
 }
@@ -503,4 +542,203 @@ fn mut_downgrade(
         body,
         z,
     ))
+}
+
+// The binders the generated frame functions bind. Underscore-prefixed like the
+// derived codec's binders, so a rung's own field never shadows one.
+const FRAME_PARAM: &str = "_x";
+const FRAME_BYTES: &str = "_bs";
+const FRAME_DIGEST: &str = "_dig";
+const FRAME_BODY: &str = "_body";
+const FRAME_VALUE: &str = "_v";
+const FRAME_REST: &str = "_rest";
+
+// The compiler-known contract digest of rung `idx`: its record type's shape digest
+// in the exact scheme and truncation the frozen goldens use. The current rung is
+// the editable head, never sealed, but its digest is still computed here so the
+// frame it encodes and the ladder that decodes it agree on one value.
+fn frame_digest(sd: &StableDecl, idx: usize, r: &RungInfo) -> String {
+    rung_digest(&rung_data(sd, idx, r, &[]))
+}
+
+// The three per-block frame helpers for the current rung: `wire_encode_T` /
+// `wire_decode_T` wrap and unwrap a current-rung value under its compiler-known
+// digest (so user code stops hand-threading a magic string), and `decode_ladder_T`
+// dispatches an older frame up to the current type by its digest.
+fn frame_fns(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    bytes_ty: &Ty,
+    libf: &impl Fn(&str) -> String,
+) -> Vec<Decl> {
+    let total = rungs.len();
+    let ty = Ty::Con(sd.name.clone(), Vec::new());
+    let cur = frame_digest(sd, total - 1, &rungs[total - 1]);
+    vec![
+        wire_encode_fn(sd, &ty, bytes_ty, &cur, libf),
+        wire_decode_fn(sd, &ty, bytes_ty, &cur, libf),
+        decode_ladder_fn(sd, rungs, &ty, bytes_ty, libf),
+    ]
+}
+
+// `wire_encode_T(x) = wire_encode_value_with_digest("<current digest>", x)`.
+fn wire_encode_fn(
+    sd: &StableDecl,
+    ty: &Ty,
+    bytes_ty: &Ty,
+    digest: &str,
+    libf: &impl Fn(&str) -> String,
+) -> Decl {
+    let z = sd.span;
+    let body = call(
+        evar(&libf(WIRE_ENCODE_VALUE_WITH_DIGEST), z),
+        vec![sp(Expr::Str(digest.to_string()), z), evar(FRAME_PARAM, z)],
+        z,
+    );
+    mdecl(
+        names::stable_wire_encode(&sd.name),
+        FRAME_PARAM,
+        ty.clone(),
+        bytes_ty.clone(),
+        body,
+        z,
+    )
+}
+
+// `wire_decode_T(bs) = wire_decode_value_with_digest(bs, "<current digest>")`. The
+// `! {Fail}` row is inferred from that callee, so the signature carries no `eff`.
+fn wire_decode_fn(
+    sd: &StableDecl,
+    ty: &Ty,
+    bytes_ty: &Ty,
+    digest: &str,
+    libf: &impl Fn(&str) -> String,
+) -> Decl {
+    let z = sd.span;
+    let body = call(
+        evar(&libf(WIRE_DECODE_VALUE_WITH_DIGEST), z),
+        vec![evar(FRAME_BYTES, z), sp(Expr::Str(digest.to_string()), z)],
+        z,
+    );
+    mdecl(
+        names::stable_wire_decode(&sd.name),
+        FRAME_BYTES,
+        bytes_ty.clone(),
+        ty.clone(),
+        body,
+        z,
+    )
+}
+
+// `decode_ladder_T(bs)`: open the frame without knowing its digest, then dispatch
+// on that digest to the matching frozen rung, decode the body as that rung's type,
+// reject trailing bytes, and walk the adjacent upgrades up to the current type. An
+// unknown digest, a malformed body, and trailing bytes all fail through `Fail`, the
+// same channel the frame helpers use.
+fn decode_ladder_fn(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    ty: &Ty,
+    bytes_ty: &Ty,
+    libf: &impl Fn(&str) -> String,
+) -> Decl {
+    let z = sd.span;
+    let total = rungs.len();
+    // Fold the rungs into an if/elif chain from the innermost `else fail()` out, so
+    // each `dig == "<rung k>"` guards decoding the body as rung k and lifting it.
+    let mut chain = call(evar(FAIL_OP, z), vec![], z);
+    for k in (0..total).rev() {
+        let digest = frame_digest(sd, k, &rungs[k]);
+        let cond = sp(
+            Expr::Bin(
+                BinOp::Eq,
+                Box::new(evar(FRAME_DIGEST, z)),
+                Box::new(sp(Expr::Str(digest), z)),
+            ),
+            z,
+        );
+        let arm = ladder_arm(sd, rungs, k, libf, z);
+        chain = sp(Expr::If(Box::new(cond), Box::new(arm), Box::new(chain)), z);
+    }
+    let open = call(
+        evar(&libf(WIRE_OPEN_VALUE_ANY), z),
+        vec![evar(FRAME_BYTES, z)],
+        z,
+    );
+    let arm = Arm {
+        pat: spat(
+            Pattern::Tuple(vec![
+                spat(Pattern::Var(FRAME_DIGEST.to_string()), z),
+                spat(Pattern::Var(FRAME_BODY.to_string()), z),
+            ]),
+            z,
+        ),
+        guard: None,
+        body: chain,
+    };
+    let body = sp(Expr::Match(Box::new(open), vec![arm]), z);
+    mdecl(
+        names::stable_decode_ladder(&sd.name),
+        FRAME_BYTES,
+        bytes_ty.clone(),
+        ty.clone(),
+        body,
+        z,
+    )
+}
+
+// One rung's decode arm: `match decode(_body) of (_v, _rest) => if empty(_rest)
+// then <upgrade _v to current> else fail()`. The decoded value's type is pinned to
+// rung k by how `_v` is used (fed to rung k's upgrade, or returned as the current
+// type), which selects the right `Serialize` instance.
+fn ladder_arm(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    k: usize,
+    libf: &impl Fn(&str) -> String,
+    z: Span,
+) -> S<Expr> {
+    let lifted = lift_to_current(sd, rungs, k, evar(FRAME_VALUE, z), z);
+    let ok = sp(
+        Expr::If(
+            Box::new(call(
+                evar(&libf(WIRE_IS_EMPTY), z),
+                vec![evar(FRAME_REST, z)],
+                z,
+            )),
+            Box::new(lifted),
+            Box::new(call(evar(FAIL_OP, z), vec![], z)),
+        ),
+        z,
+    );
+    let dec = call(evar(DECODE_METHOD, z), vec![evar(FRAME_BODY, z)], z);
+    let arm = Arm {
+        pat: spat(
+            Pattern::Tuple(vec![
+                spat(Pattern::Var(FRAME_VALUE.to_string()), z),
+                spat(Pattern::Var(FRAME_REST.to_string()), z),
+            ]),
+            z,
+        ),
+        guard: None,
+        body: ok,
+    };
+    sp(Expr::Match(Box::new(dec), vec![arm]), z)
+}
+
+// Chain the adjacent upgrades from rung k up to the current type. The current rung
+// is already the current type, so its chain is the value unchanged.
+fn lift_to_current(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    k: usize,
+    val: S<Expr>,
+    z: Span,
+) -> S<Expr> {
+    let mut e = val;
+    for j in k..rungs.len() - 1 {
+        let up = names::stable_upgrade(&sd.name, &rungs[j].ver, &rungs[j + 1].ver);
+        e = call(evar(&up, z), vec![e], z);
+    }
+    e
 }

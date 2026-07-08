@@ -14,8 +14,8 @@ use super::{call, evar, lam1, sp, Cx};
 use crate::error::TypeError;
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
-    Arm, BinOp, Core, Decl, Expr, Fip, HandlerArm, Marker, Param, PathOp, PathStep, Pattern,
-    Qualifier, Sugar, SugarArm, Surface, S,
+    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, PathStep, Pattern, Qualifier, Sugar,
+    SugarArm, Surface, S,
 };
 
 mod defaults;
@@ -467,8 +467,25 @@ fn rw_sugar(
             env,
             cx,
         ),
+        // `[ head for x in s ]` with no qualifiers is exactly a mapped stream, so
+        // lower it to `scollect(smap(s, \x -> head))`: the head map is a stream
+        // combinator that fuses with the collecting fold. The general form below
+        // hands `scollect` a first-class effectful thunk (the qualifier-folded
+        // for-consumer), which cannot fuse and reifies into the free monad, one
+        // eff-op cell per element. Both paths evaluate `s` once, in emission order,
+        // and produce the identical list; this one just stays on the fused tier.
+        Sugar::Comp(head, x, s, quals) if quals.is_empty() => {
+            let f = lam1(x, (**head).clone(), head.span);
+            let mapped = call(evar(names::SMAP_FN, span), vec![(**s).clone(), f], span);
+            rw(
+                &call(evar(names::SCOLLECT_FN, span), vec![mapped], span),
+                env,
+                cx,
+            )
+        }
         // `[ head for x in s, <quals> ]`: re-emit the head from a thunk-stream
-        // and collect the emits into a list with `scollect`.
+        // and collect the emits into a list with `scollect`. The guards and binds
+        // fold around the head inside the for-consumer, so this path keeps them.
         Sugar::Comp(head, x, s, quals) => {
             let emit_head = call(
                 evar(names::EMIT_OP, head.span),
@@ -585,7 +602,6 @@ fn rw_sugar(
             };
             rw(&sp(Expr::Lam(vec![param], Box::new(body)), span), env, cx)
         }
-        Sugar::WithoutAlloc(body) => rw_without_alloc(body, span, env, cx),
     }
 }
 
@@ -601,57 +617,6 @@ fn validate_probe_name(name: &str, span: Span) -> Result<(), TypeError> {
         span,
         msg: "probe name must match [A-Za-z0-9_.:-]+".into(),
     })
-}
-
-// `without alloc { block }` lifts the block to a synthetic top-level function
-// carrying the zero-allocation certificate (`no_alloc: true`, checked with `fbip`
-// semantics over the whole call tree), and replaces the block with a call to it.
-// A local lambda would be a heap closure (allocating), so the block must become a
-// named top-level supercombinator instead. The captured locals are exactly the
-// block's free `Binding::Local` names in scope; a `var` read or a handler-instance
-// op has already been rewritten to an effect operation that tunnels out to its
-// enclosing handler, so neither needs to be captured.
-fn rw_without_alloc(
-    body: &S<Expr>,
-    span: Span,
-    env: &Vars,
-    cx: &mut Cx,
-) -> Result<S<Expr<Core>>, TypeError> {
-    let body = rw(body, env, cx)?;
-    // Free locals to capture: referenced names bound as ordinary locals in the
-    // enclosing scope. `referenced_names` yields a sorted set, so parameters and
-    // call arguments share one deterministic order.
-    let captured: Vec<String> = referenced_names(&body)
-        .into_iter()
-        .filter(|x| matches!(env.get(x), Some(Binding::Local)))
-        .collect();
-    let name = names::without_alloc_block(cx.next.bump());
-    let params = captured
-        .iter()
-        .map(|x| Param {
-            name: x.clone(),
-            ty: None,
-            borrow: false,
-            default: None,
-        })
-        .collect();
-    cx.lifted.push(Decl {
-        name: name.clone(),
-        params,
-        ret: None,
-        eff: None,
-        constraints: Vec::new(),
-        body,
-        wheres: Vec::new(),
-        konst: false,
-        fip: Fip::No,
-        replayable: false,
-        no_alloc: true,
-        no_alloc_bs: false,
-        span,
-    });
-    let args = captured.iter().map(|x| evar(x, span)).collect();
-    Ok(call(evar(&name, span), args, span))
 }
 
 // `while cond do body` / `loop body` desugar to the tail-recursive prelude
@@ -811,11 +776,10 @@ impl CtlScan {
                 self.found.2 = true;
                 self.go(e);
             }
-            // A `without alloc { .. }` region is transparent to control flow: a
-            // `break`/`continue`/`return` inside it is caught by the enclosing loop
-            // or function (its lifted body performs the control effect, which
-            // tunnels back out), so scan through it to install those handlers.
-            Sugar::WithoutAlloc(body) | Sugar::Probe(_, body) => self.go(body),
+            // A probe body is transparent to control flow: a `break`/`continue`/
+            // `return` inside it belongs to the enclosing loop or function, so
+            // scan through it to install those handlers.
+            Sugar::Probe(_, body) => self.go(body),
             Sugar::While(c, b) if self.descend_loops => {
                 if let Some(c) = c {
                     self.go(c);

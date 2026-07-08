@@ -1,0 +1,7 @@
+---
+source: tests/showcase.rs
+expression: "diff(COLLATZ, COLLATZ_REFACTOR)"
+---
+diff: 0 changed, 0 added, 0 removed, 4 unchanged
+text-only: 3 respelled, behavior held (collatz_len, collatz_max, collatz_step)
+cone: 0 affected

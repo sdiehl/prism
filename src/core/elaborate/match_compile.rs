@@ -524,7 +524,7 @@ pub(super) fn desugar_record_pat(
         })
         .collect();
     for (fname, fpat) in fields {
-        if let Some(fi) = info.fields.iter().position(|f| f == fname) {
+        if let Some(fi) = info.fields.iter().position(|f| f.as_str() == fname) {
             subs[fi] = fpat.clone();
         }
     }

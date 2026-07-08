@@ -19,7 +19,7 @@ Compilation is a pipeline from source text to a native binary. Each phase is a t
 | [Reference count](#reference-counting-and-fbip-reuse) | insert `dup`/`drop`, then reuse                                                                                               | `src/core/fbip.rs`                         |
 | [Codegen](#backends)                                  | core to interpreter, LLVM, or MLIR                                                                                            | `src/eval/`, `src/codegen/`                |
 
-The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `core-json` (the core as a JSON tree the Lean model reads, covered under [verification](#verification)), `core-hash` (a content-addressed hash of each definition's elaborated core, `src/core/hash.rs`), `native-kont-table` (the native-symbol-to-definition-hash table that native LLVM builds embed as `prism_native_kont_table`), `native-kont-state-map` (the entry ABI-word state map embedded as `prism_native_kont_state_map`), `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
+The driver (`src/driver/`) exposes these as subcommands: a bare `prism <file.pr>` compiles a single file to a native binary named after the source (override with `-o`), `prism build` compiles the enclosing project (the nearest `prism.toml`) and fails outside one, `prism run` interprets, `prism check` runs the front end only, `prism fmt` formats, and `prism dump <phase>` prints an intermediate form, where `<phase>` is `tokens`, `ast`, `types`, `core`, `core-json` (the core as a JSON tree the Lean model reads, covered under [verification](#verification)), `core-hash` (a content-addressed hash of each definition's elaborated core, `src/core/hash.rs`), `native-kont-table` (the native-symbol-to-definition-hash table that native LLVM builds embed as `prism_native_kont_table`), `native-kont-state-map` (the entry ABI-word state map embedded as `prism_native_kont_state_map`), `fbip` (core after reference-count insertion and reuse), `lowered` (after effect lowering), `captures` (closure-capture portability facts), `usage-summary` (a per-definition allocation/`fip`/borrow/effect table, with `usage-summary-md` and `usage-summary-json` projections of the same facts), `llvm`, or `mlir` (the last gated on the MLIR backend feature).
 
 A project build writes its output rustc-style into a `target/` directory at the package root (the binary and its codegen intermediates) rather than dropping the binary in the current directory; an explicit `-o`/`--out` still wins, and single-file `prism <file.pr>` builds are unaffected. `prism clean` removes that `target/` directory, resolved at the nearest enclosing `prism.toml` (or the given path outside a project); an already-absent `target/` is a no-op success.
 
@@ -76,28 +76,6 @@ Function composition lowers to a lambda, kept as sugar only so the operator surv
 
 ```text
 {{#include ../examples/compose_desugared.txt}}
-```
-
-{{#endtab }}
-
-{{#endtabs }}
-
-A `without alloc` block lifts to a synthetic top-level function carrying the zero-allocation certificate. The block's free locals become its parameters and the block becomes a call to it, so the whole-call-tree check that backs the `without alloc` function suffix covers exactly the region. A local lambda would be a heap closure, which allocates, so the region must lift to a named top-level function rather than an applied lambda; a `var` read or a handler-instance operation inside the block is already an effect that tunnels out to its enclosing handler, so neither is captured.
-
-{{#tabs }}
-
-{{#tab name="Surface" }}
-
-```prism
-{{#include ../examples/without_alloc_sugar.pr}}
-```
-
-{{#endtab }}
-
-{{#tab name="Desugared" }}
-
-```text
-{{#include ../examples/without_alloc_desugared.txt}}
 ```
 
 {{#endtab }}
@@ -756,6 +734,8 @@ The compiler front end and the interpreter also compile to WebAssembly (`src/was
 
 That same-origin boundary is intentional. The demo proves migration of a running computation between contexts that already share the same origin and bundle; it does not claim cross-origin or cross-stranger execution. Running an envelope from an untrusted peer is deferred to a typed `Mobile` envelope with explicit receiver capabilities and a distribution trust model.
 
+**PRISM WORLD** (`web/prism-world.html`, `web/src/prism-world.ts`) is a dedicated resident: a shared cellular universe whose state is an integer grid and whose law is real Prism code (`examples/world.pr`) run through the wasm interpreter. Both are content-addressed values. Each grid carries a state hash computed in Prism with the same blake3 that content-addresses Core, and each life-like law carries the compiler's Core content hash of its step function, so the two rules on offer are two laws with two hashes and editing the law moves that hash in every tab. Same-origin tabs converge without a server: each independently recomputes the same timeline and gets the same state hash for the same seed, law, and tick. History is a branchable execution prefix, so forks and scrubbing reuse the determinism machinery rather than inventing a second notion of time. The timeline exports as a `.plineage` graph, the fourth [lineage](#build-lineage) variant, that the CLI reads: `prism lineage show` renders its laws, branches, and forks, and `prism lineage verify` confirms it is structurally well-formed while honestly reporting that re-derivation is not implemented. The page holds itself to the same honesty: the horizon panels say `reserved`, and nothing claims a proof that did not run locally.
+
 ## 12. Lowering Core to LLVM {#lowering-core-to-llvm}
 
 The translation from core to instructions is narrow because the machine underneath it is narrow. By the time the backend runs, effect lowering has erased every `Handle` and `Do` (see [effect lowering](#effect-lowering)), reference counting has inserted every `Dup` and `Drop` (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)), and the [value representation](#value-representation) has collapsed every type to one machine word. So the emitter faces only two things to lower: data laid out in cells, and computation as straight-line calls and branches over `i64` words. It emits no struct types and no read barriers; one `i64` is the type of every value, and `inttoptr`/`ptrtoint` reinterpret that word as a cell pointer only where a field must be reached. Because this is the shared emitter's mapping, the MLIR backend emits the identical shape in the `llvm` dialect, byte for byte.
@@ -1311,7 +1291,7 @@ Two `:set` toggles exist: `t` (`types`) shows the inferred type and effect row o
 
 Documentation comments are the only convention it layers on top of the language. A `-- |` line comment (an ordinary `--` comment marked with a bar) directly above a declaration is that declaration's docstring, and one at the top of a file is the module description; every other comment is ignored. This adds nothing to the lexer or grammar: the comment never reaches the AST, and the generator recovers it from the [`marginalia`](https://crates.io/crates/marginalia) trivia table by span, exactly as the [formatter](#the-formatter) re-associates leading comments. So `-- |` is a documentation convention, not a syntactic form.
 
-Signatures are not read from the source but taken from the checker, because most standard-library functions carry no written signature: the generator type-checks each module and renders the declaration's inferred type (`Type::show`), the same text `prism check` prints. Types, classes, and effects are printed from the surface AST with the formatter's own declaration printers, so they read exactly as written.
+Signatures are not read from the source but taken from the checker, because most standard-library functions carry no written signature: the generator type-checks each module and renders the declaration's inferred type (`Type::show`). Types, classes, and effects are printed from the surface AST with the formatter's own declaration printers, so they read exactly as written.
 
 A fenced `prism` code block inside a docstring is a doctest. `prism docs --test` extracts every such block and compiles it, running it when it produces a program to run, so an example that drifts out of sync with the code fails the build. An example need not spell out a `main`: a block without one is wrapped as the body of an implicit `main`, so a bare expression like `unwrap_or(0, Some(5))` or a short `let`-block runs like a REPL line and shows its value, which keeps examples to the point. The in-browser Run button (and the playground) apply the same wrapping. Per-fence attributes gate the treatment: `ignore` skips a block, `no_run` compiles without running, and `compile_fail` expects a type error, for the cases where a snippet is illustrative or is meant to be rejected. The standard-library pages are committed to the book, and `prism docs --stdlib --check` in continuous integration regenerates them in memory and fails if the checked-in Markdown has drifted, the same contract `prism fmt --check` enforces for source.
 
@@ -1387,7 +1367,7 @@ root(entries) = blake3(SCHEME ++ concat  [ "|" ++ len(name) ++ ":" ++ name ++ "=
                                             for (name, hash) in sorted(entries) ])
 ```
 
-One fold, sorted by key, is both a module's root and the stdlib's: `root` moves under any rename or content change, entry by entry, but never under reordering. `stdlib_root = root(entries)` over the whole library's `entries` is exactly the value the docs anchor and CI byte-diffs. The same construction now reaches values and persisted formats: a derived [`Hash`](spec.md#type-classes) instance folds a runtime value through the identical BLAKE3 tokenization, so a value's digest is canonical across backends for the same reason a definition's is, and each frozen rung of a [`stable` block](spec.md#stable-blocks) commits its shape digest in source, checked at compile time and reseated only by the explicit `prism wire --accept`, which extends the committed-golden discipline from the standard library's docs to every user-declared wire format.
+One fold, sorted by key, is both a module's root and the stdlib's: `root` moves under any rename or content change, entry by entry, but never under reordering. `stdlib_root = root(entries)` over the whole library's `entries` is exactly the value the docs anchor and CI byte-diffs. The same construction now reaches values and persisted formats: a derived [`Hash`](spec.md#type-classes) instance folds a runtime value through the identical BLAKE3 tokenization, so a value's digest is canonical across backends for the same reason a definition's is, and each frozen rung of a [`stable` block](spec.md#stable-blocks) commits its shape digest in source, checked at compile time and reseated only by the explicit `prism store wire --accept`, which extends the committed-golden discipline from the standard library's docs to every user-declared wire format.
 
 Prism is an unusually good host for the Unison-style managed codebase this points at, because two of the hardest preconditions are already paid. Name resolution canonicalizes every definition to a globally unique symbol ([modules](spec.md#modules)), and the [differential oracle](#the-model-as-a-differential-oracle) makes "equal hash means equal behavior" a verified property rather than an assertion, since the hash is taken over the very core the parity gate runs byte-identically across three backends. The direction is the codebase as a content-addressed database: names become a mutable index over immutable `hash -> core` entries, so a rename is an O(1) metadata edit, two versions of a dependency coexist as two hashes with no version solver, an unchanged hash is already compiled and parity-verified so a rebuild touches only a definition's Merkle closure, and a computation named by a hash can be shipped across a wire and run with a proof it is the same computation.
 
@@ -1439,7 +1419,7 @@ A stored object carries its verification verdicts alongside it (`src/store/verif
 
 Store-level instance coherence extends the compile-time [coherence check](spec.md#coherence-and-resolution) across programs. At commit time each canonical `(class, head)` binding records its instance's identity digest in the canonical index (`src/store/coherence.rs`), and a second program that commits a divergent canonical instance for the same key is rejected as a hard error before anything is written, the cross-program form of the ambiguity the single-program checker already forbids. This is the enforcement the instance identity digest of the previous section was the primitive for.
 
-A verified record is local to the build that wrote it; a _parity certificate_ (`src/store/cert.rs`, `src/store/disk/certs.rs`) is the transferable form of the same idea, an immutable object in a `certs/` layer beside the verified records. `prism attest` compiles a program through two of the three backends (LLVM and MLIR, or LLVM and the interpreter) and, once their output is byte-identical, emits a certificate whose body records the claim (`parity-passed`), the hash scheme, and which backend pair agreed, addressed by the hash of its own envelope so it is itself content-addressed. `prism audit` reads the certificate back and reports it per root, and a certificate that fails to verify (a foreign scheme or a subject mismatch) blocks the audit, while a certificate whose claim a reader does not recognize is reported unverifiable rather than treated as corruption, so an older build reads a newer certificate without rejecting it. Exactly one claim is live, parity agreement across backends; a Lean-checked claim that would let the certificate carry the [differential oracle](#the-model-as-a-differential-oracle)'s verdict too is reserved.
+A verified record is local to the build that wrote it; a _parity certificate_ (`src/store/cert.rs`, `src/store/disk/certs.rs`) is the transferable form of the same idea, an immutable object in a `certs/` layer beside the verified records. `prism store attest` compiles a program through two of the three backends (LLVM and MLIR, or LLVM and the interpreter) and, once their output is byte-identical, emits a certificate whose body records the claim (`parity-passed`), the hash scheme, and which backend pair agreed, addressed by the hash of its own envelope so it is itself content-addressed. `prism pkg audit` reads the certificate back and reports it per root, and a certificate that fails to verify (a foreign scheme or a subject mismatch) blocks the audit, while a certificate whose claim a reader does not recognize is reported unverifiable rather than treated as corruption, so an older build reads a newer certificate without rejecting it. Exactly one claim is live, parity agreement across backends; a Lean-checked claim that would let the certificate carry the [differential oracle](#the-model-as-a-differential-oracle)'s verdict too is reserved.
 
 ### 20.3 The Kont Envelope {#the-kont-envelope}
 
@@ -1478,7 +1458,7 @@ The package manager is deliberately a synthesis, not a clone. It takes the fast 
 
 The Prism-specific move is the unit of identity. A package is not a tarball, a registry row, a checkout, or a semver range; it is the compiler's content-addressed Core/source bundle and the complete dependency closure reachable from that bundle, folded to one Merkle root. Names, tags, manifests, and indexes are mutable ways to find the root. The root is the package.
 
-Distribution is therefore the content-addressed store carried across a network. A project declares its dependencies in a `[dependencies]` table in its `prism.toml` (`src/project/`), in one of three forms: a `path` to a local directory, a `git` URL paired with an opaque tag, or a bare content-hash pin naming an exact definition graph. The three are the same `DepSource` the resolver consumes, differing only in how a name is turned into a root hash. Edits to the table go through a format-preserving manifest writer (`src/pkg/writer.rs`) that rewrites only the dependency lines and leaves every comment, blank line, and untouched byte exactly where the author put it, so `prism add` does not reformat a hand-maintained manifest.
+Distribution is therefore the content-addressed store carried across a network. A project declares its dependencies in a `[dependencies]` table in its `prism.toml` (`src/project/`), in one of three forms: a `path` to a local directory, a `git` URL paired with an opaque tag, or a bare content-hash pin naming an exact definition graph. The three are the same `DepSource` the resolver consumes, differing only in how a name is turned into a root hash. Edits to the table go through a format-preserving manifest writer (`src/pkg/writer.rs`) that rewrites only the dependency lines and leaves every comment, blank line, and untouched byte exactly where the author put it, so `prism pkg add` does not reformat a hand-maintained manifest.
 
 All dependency spellings are explicit about where the eventual root hash comes from:
 
@@ -1496,31 +1476,47 @@ Resolution is a Merkle-closure walk, not a version solver. Given a set of root h
 
 The resolved closure is frozen into a v2 `prism.lock` (`src/pkg/lock.rs`) whose header pins the lock format and whose Std and dependency rows carry both hash scheme and root hash. Its entries are terminal: a locked hash on a warm cache is never re-resolved, re-fetched, or re-verified, because a content hash cannot mean two things.
 
-`prism export` (`src/pkg/export.rs`) writes a project's closure back out as source text and a v2 `.namespace` manifest naming the hash scheme, artifact kind, and namespace root; consumers verify all three before trusting the projection. Its guarantee is source stability, the exported text round-trips through the parser, and it deliberately stops short of promising that re-ingesting that text reproduces the same store hashes.
+`prism pkg export` (`src/pkg/export.rs`) writes a project's closure back out as source text and a v2 `.namespace` manifest naming the hash scheme, artifact kind, and namespace root; consumers verify all three before trusting the projection. Its guarantee is source stability, the exported text round-trips through the parser, and it deliberately stops short of promising that re-ingesting that text reproduces the same store hashes.
 
 Trust over that graph is a signed package-identity-to-root index and a local transparency log (`src/pkg/trust.rs`). A publish signs the `(origin, name, tag, hash scheme, artifact kind, root)` row of the index, through one of three interchangeable seams selected by [`PRISM_SIGN_MODE`](#environment-variables): an `ssh-keygen -Y sign` signature verified against an allowed-signers file, a `minisign` signature, or an explicit unsigned mode for a private store. Verification classifies each artifact `Ok`, `Unsigned`, or `Bad`.
 
-Alongside the index a project keeps an append-only transparency log that verifies each entry as it is appended and assigns it a dense, monotonic sequence number. A package identity silently repointed at a different root leaves a detectable gap in the log after the fact rather than passing unnoticed. The verbs are `prism add`, `prism why`, `prism export`, `prism publish`, `prism audit`, and `prism check-world`; they are tabulated with the rest of the surface under [commands](#commands).
+Alongside the index a project keeps an append-only transparency log that verifies each entry as it is appended and assigns it a dense, monotonic sequence number. A package identity silently repointed at a different root leaves a detectable gap in the log after the fact rather than passing unnoticed. The verbs are `prism pkg add`, `prism pkg why`, `prism pkg export`, `prism pkg publish`, `prism pkg audit`, and `prism pkg check-world`; they are tabulated with the rest of the surface under [commands](#commands).
 
-## 22. Build Lineage {#build-lineage}
+## 22. Lineage {#build-lineage}
 
-Project builds write a `.plineage` sidecar beside the emitted binary. This is the minimal bridge from the current explicit driver to the future build-as-handler model: it records facts the build already knows, without introducing a new scheduler, cache protocol, or effect operation. The sidecar names the root request, the source namespace root, the Std root, every store-served package root, the full compiler artifact identity rows (compiler version, hash scheme, target, backend, optimizer surface, scheduler, behavior-affecting flags, and native linker toolchain inputs when a native backend is used), emitted artifact digests, store cache hits when the store is enabled, and diagnostics.
+Every served artifact explains itself through one typed graph. `src/lineage/` defines a single format, `prism-lineage-graph-v1`, whose nodes are content-addressed inputs, capability observations, produced artifacts, and the verification edges between them; a node's identity is derived from its own digest, so the graph is content-addressed the same way Core is ([content-addressed core](#content-addressed-core)). Four variants ride that one format, `Variant::ProjectBuild`, `Variant::Run`, `Variant::Docs`, and the world resident's timeline, and they share one envelope, one renderer (`render.rs`), one verifier (`verify.rs`), and one differ (`diff.rs`). A new kind of served thing becomes a new node family and a variant tag, not a new file format, a second explainer, or a parallel verifier.
 
-`prism lineage FILE` reads either `FILE.plineage` or a `.plineage` path directly and renders the why-style explanation: the artifact exists because that request compiled that entry against those source/Std/package roots with that compiler identity and emitted those digests. `prism lineage FILE --json` prints the recorded facts as data.
+The identity every variant records is computed in one place. `BuildIdentity` (`src/driver/identity.rs`) folds the compiler version, hash scheme, target, backend, optimizer surface, scheduler, behavior-affecting flags, and, for a native backend, the linker toolchain inputs, into the identity rows the sidecar carries. Every consumer that previously assembled those rows piecewise now derives them from this one computation, so a build sidecar, a run sidecar, and a docs manifest cannot disagree about what "the compiler that produced this" means.
 
-```shell
-prism build
-prism lineage target/myapp
-prism lineage target/myapp --json
+A **project build** writes a `.plineage` sidecar beside the emitted binary, naming the root request, the source namespace root, the Std root, every store-served package root, the `BuildIdentity` rows, emitted artifact digests, store cache hits when the store is enabled, and diagnostics. This is the minimal bridge from the current explicit driver to a future build-as-handler model: it records facts the build already knows, without introducing a new scheduler, cache protocol, or effect operation.
+
+A **run** sidecar (`src/lineage/run.rs`) is the same graph over an executed program. `prism run p.pr --record run.replay --lineage run.plineage` writes it beside the `.replay` trace it explains, naming the source/Std/package roots, the `BuildIdentity`, `argv`, each environment read, each input file by content digest, each file the run wrote, the stdout digest, and the trace digest. The trace's own file relation is recorded as an edge, so verification reads the graph rather than a filesystem convention. `--lineage` is gated on `--record` in the CLI definition, because a run sidecar's whole point is to explain a trace.
+
+Those observations are backed by the **provenance event protocol** (`src/provenance.rs`). Every capability the run performs, every `Console`/`FileSystem`/`Random`/`Env` operation, is recorded as an event carrying a canonical hash of its kind and its payload, and a variable-length value commits a content digest rather than raw bytes, so a hostile input cannot forge an event boundary by embedding a delimiter. The protocol's guarantee is asserted by test, not claimed: recording a run and replaying its trace produce identical event hashes, so the trace a sidecar explains is provably the trace the program performed. A mismatched replay names the failing event index and the operation it expected, rather than diverging silently.
+
+Verification comes in the three strengths the variants need. `prism lineage verify SIDECAR` **rehashes**: it recomputes the digests the sidecar recorded and confirms they still match, cheap and offline. `--replay` **re-runs**: it replays the trace through the interpreter and re-checks the result, catching a divergence the recorded numbers alone could not. The world variant **verifies structurally**: a timeline's node ids are self-certifying, so `verify` confirms the graph is well-formed (its laws, states, and forks are consistent) and honestly reports that re-derivation of the cellular evolution is not implemented rather than claiming a re-execution it did not run. `prism lineage show` and `prism lineage why` render an explanation from any variant, and both work after the source files are gone, because every fact is in the graph. `prism diff` over two `.plineage` sidecars reports preserved, moved, added, and removed digests by logical key, exiting nonzero when anything moved; it is the same `diff` verb that compares two source revisions, dispatched by whether its arguments are sidecars (`is_lineage_sidecar`, `bin/prism.rs`).
+
+A passed verification can be **persisted as a certificate** (`src/lineage/cert.rs`). `prism lineage verify SIDECAR --certify out.cert` mints a digest-named certificate over the sidecar it verified, claiming `replay-verified` under `--replay` or `lineage-verified` otherwise. The certificate rides the store's existing certificate discipline (`src/store/cert.rs`, [verification caching](#verification-caching)): it shares the one claim number space parity certificates use, is addressed by the hash of its own envelope, and is checked by scheme, subject digest, and claim recognition. `prism lineage check-cert out.cert SIDECAR` rejects a certificate whose subject digest does not match the named sidecar, and a certificate carrying a claim the reader does not recognize is recognized-but-untrusted, reported unverifiable rather than honored, so a newer certificate read by an older build is neither trusted nor treated as corruption.
+
+`prism docs` is the one **docs-manifest** writer (`src/lineage/docs.rs`). Alongside the rendered pages it emits `docs.plineage`, the docs variant of the graph, naming the same roots and `BuildIdentity` a build carries, plus the generator format (`prism-docs-markdown-v1`), every page digest, and every doctest output hash. Regenerating under the same roots is byte-identical. `prism docs --verify-manifest` rehashes the committed pages and confirms the roots have not drifted, rejecting a stale page or a moved root by name; `prism pkg check-world` runs the same check as one of its per-package gates.
+
+`prism pkg check-world [path]` applies the identity discipline to a whole package universe. It discovers package projects under `path` (default `packages/`), resolves each project's explicit Std and dependency roots, and reports the package set keyed by source-root digest, with a compatibility summary: all observed Std roots, compiler surfaces, packages grouped by declared name, store dependencies grouped by package identity, and problems such as duplicate package names with different source roots or one dependency identity resolving to multiple roots. `--strict` turns incompatibility into a nonzero CI gate. Each package now carries **per-package gates**, the build lineage, examples run through the compiler-owned runner, doctests, committed replay traces, and the docs manifest, each reporting `passed`, `failed`, or `not-run`. The `not-run` convention is load-bearing: a gate that does not apply says so rather than passing silently, so a green report never overstates what was checked. Each package also exposes a **public-API surface** of definition behavior hashes; given a prior report as `--baseline`, check-world names exactly which public definitions changed behavior, by digest and never by path, so an API break is reported as which definitions moved rather than which files were touched.
+
+```console
+$ prism pkg check-world packages
+checked 1 package(s) in packages
+validation: typecheck-only
+  typecheck: passed
+  doctests: not-run
+  replay: not-run
+  native: not-run
+compatibility: compatible
+  tzdb: prism-core-hash-v1:b9e853148727...
+    gates: check=passed example=not-run doctests=passed replay=not-run docs=passed usage=passed root=passed dependency=passed
+    stdlib: prism-core-hash-v1:ac8a7aa43202...
 ```
 
-The JSON form exposes the same facts as fields: the request, source root, Std root, package roots, compiler identity, emitted artifact digests, cache hits, and diagnostics. This is the guardrail that build artifacts are explainable by digest before the compiler grows an effect-handled build engine.
-
-`prism check-world [path] --json` applies the same identity discipline to a package universe. It discovers package projects under `path` (default `packages/`), resolves their explicit Std and dependency roots, type-checks each entry, and reports the package set keyed by source root digest. The report also carries a compatibility summary: all observed Std roots, compiler surfaces, packages grouped by declared name, store dependencies grouped by package identity, and problems such as duplicate package names with different source roots or the same dependency identity resolving to multiple roots.
-
-By default the command reports the facts and exits successfully when every package type-checks; `--strict` turns incompatibility into a nonzero CI gate. Its validation scope is explicitly `typecheck-only`: typechecking must pass, while package doctests, replay checks, and native builds are named as `not-run`.
-
-That is a compatibility gate, not full package certification. The useful invariant is that a package-world report can answer "which source root, Std root, package roots, compiler scheme, target, and flags did this package check against?" without reading ambient process state, and can say whether that package universe is internally coherent by digest without implying gates it has not run.
+The useful invariant across all of this is that any served artifact, a binary, a run's output, a documentation set, a package universe, answers "which source root, Std root, package roots, compiler scheme, target, and flags produced you?" by digest, without reading ambient process state, and says whether it is internally coherent without implying gates it has not run.
 
 ## 23. Metaprogramming {#metaprogramming}
 
@@ -1544,34 +1540,74 @@ The `prism` binary is one executable with a handful of subcommands. With no subc
 
 ### 25.1 Commands {#commands}
 
-| Command                                        | What it does                                                                                                                                                |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prism`                                        | Start the interactive shell (REPL).                                                                                                                         |
-| `prism <file.pr>`                              | Compile a single file to a native binary named after the source (`-o` overrides).                                                                           |
-| `prism <dir>` / `prism <prism.toml>`           | Compile the project rooted at that manifest to `target/<package>`.                                                                                          |
-| `prism build [path]`                           | Compile the enclosing project (the nearest `prism.toml`); fails outside a project.                                                                          |
-| `prism clean [path]`                           | Remove the project's `target/` build-artifact directory; an absent one is a no-op success.                                                                  |
-| `prism lineage <file> [--json]`                | Inspect a build `.plineage` sidecar and explain why an artifact exists.                                                                                     |
-| `prism run <file.pr>`                          | Type-check and run in the interpreter, with real stdin/stdout (`exit(n)` becomes a real process exit); `--record PATH` writes a `.replay` trace of the run. |
-| `prism check <file.pr>`                        | Type-check only; print each definition's inferred signature and effect row.                                                                                 |
-| `prism fmt [paths..]`                          | Format `.pr` files in place. No path formats the current tree recursively; `-` filters stdin to stdout.                                                     |
-| `prism dump <phase> <file.pr>`                 | Print one pipeline artifact (see [dump phases](#dump-phases)).                                                                                              |
-| `prism wire <file.pr> [--accept]`              | Check the `stable` rung goldens of a file; `--accept` recomputes and reseats them in place.                                                                 |
-| `prism docs [path]`                            | Generate API documentation; `--test` runs doctests, `--accept`/`--bless` rewrites stale output blocks.                                                      |
-| `prism add <dep>`                              | Add a dependency to `prism.toml` (path, `git` URL plus tag, or hash pin) and update `prism.lock` (see [the package manager](#package-manager)).             |
-| `prism why <name>`                             | Explain why a definition is in the resolved dependency closure.                                                                                             |
-| `prism export [path]`                          | Write the project's content-addressed closure back out as source text.                                                                                      |
-| `prism publish`                                | Sign and record a package-identity-to-root binding in the signed index; `--tag`, `--name`, and `--origin` set the row.                                      |
-| `prism audit`                                  | Verify the signed index and the transparency log; `--allow-unsigned` tolerates the unsigned seam.                                                           |
-| `prism check-world [path] [--json] [--strict]` | Type-check package projects in a package universe and report digest-addressed source, Std, dependency, compiler, and compatibility identities.              |
-| `prism diff <old> <new>`                       | Report the definitions that changed between two versions by content hash, plus their dependents cone.                                                       |
-| `prism replay <file.pr> <trace>`               | Re-run a recorded `.replay` trace, producing output byte-identical to the original.                                                                         |
-| `prism suspend <file.pr> --at N`               | Run the program, pause after `N` machine steps, and write the live continuation to a [`kont` envelope](#the-kont-envelope) (`-o` names the file).           |
-| `prism resume <file.pr> <snap.kont>`           | Decode a `kont` envelope, check its bundle digest against the program's code identity, and run the continuation to completion.                              |
-| `prism debug <file.pr> <trace>`                | Terminal reverse-step debugger over a recorded trace (step forward and back by replay-to-N).                                                                |
-| `prism attest <file.pr>`                       | Compile through two independent backends, attest byte-identical output, and cross-check the signed index.                                                   |
-| `prism report <file.pr>`                       | Print every pipeline phase for a program.                                                                                                                   |
-| `prism repl`                                   | Start the interactive shell (same as bare `prism`); accepts `--no-banner`.                                                                                  |
+The surface is eleven top-level commands plus four noun groups (`exec`, `lineage`, `pkg`, `store`), each group collecting the verbs that share a subject.
+
+#### Top-level
+
+The everyday commands: build, run, check, format, inspect, document, compare.
+
+| Command                              | What it does                                                                                                                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prism`                              | Start the interactive shell (REPL).                                                                                                                                              |
+| `prism <file.pr>`                    | Compile a single file to a native binary named after the source (`-o` overrides).                                                                                                |
+| `prism <dir>` / `prism <prism.toml>` | Compile the project rooted at that manifest to `target/<package>`.                                                                                                               |
+| `prism build [path]`                 | Compile the enclosing project (the nearest `prism.toml`); fails outside a project.                                                                                               |
+| `prism run <file.pr>`                | Type-check and run in the interpreter, with real stdin/stdout (`exit(n)` becomes a real process exit); `--record PATH` writes a `.replay` trace, `--lineage PATH` a run sidecar. |
+| `prism check [file.pr]`              | Type-check only; with no file, check the enclosing project; with a file, check that one source. Success is quiet and reported by exit status.                                    |
+| `prism fmt [paths..]`                | Format `.pr` files in place. No path formats the current tree recursively; `-` filters stdin to stdout.                                                                          |
+| `prism dump <phase> <file.pr>`       | Print one pipeline artifact (see [dump phases](#dump-phases)).                                                                                                                   |
+| `prism docs [path]`                  | Generate API documentation and a `docs.plineage` manifest; `--test` runs doctests, `--accept`/`--bless` rewrites stale output blocks, `--verify-manifest` rechecks the manifest. |
+| `prism diff <old> <new>`             | Diff two source revisions by content hash (changed definitions plus dependents cone), or two `.plineage` sidecars by logical key.                                                |
+| `prism report <file.pr>`             | Print every pipeline phase for a program.                                                                                                                                        |
+| `prism clean [path]`                 | Remove the project's `target/` build-artifact directory; an absent one is a no-op success.                                                                                       |
+| `prism repl`                         | Start the interactive shell (same as bare `prism`); accepts `--no-banner`.                                                                                                       |
+
+#### `prism exec`: recorded and suspended execution
+
+Verbs over a run as a value: replay a trace, cut a running program into a snapshot, resume one, step through a recording.
+
+| Command                                   | What it does                                                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prism exec replay <file.pr> <trace>`     | Re-run a recorded `.replay` trace, producing output byte-identical to the original.                                                               |
+| `prism exec steps <file.pr> [--json]`     | Run the program and print each observation with the machine step at which it fired, the ruler a suspend budget is picked from.                    |
+| `prism exec suspend <file.pr> --at N`     | Run the program, pause after `N` machine steps, and write the live continuation to a [`kont` envelope](#the-kont-envelope) (`-o` names the file). |
+| `prism exec resume <file.pr> <snap.kont>` | Decode a `kont` envelope, check its bundle digest against the program's code identity, and run the continuation to completion.                    |
+| `prism exec debug <file.pr> <trace>`      | Terminal reverse-step debugger over a recorded trace (step forward and back by replay-to-N).                                                      |
+
+#### `prism lineage`: explaining artifacts
+
+Verbs over a `.plineage` sidecar ([lineage](#build-lineage)): render it, interrogate it, verify it, certify a verification.
+
+| Command                                     | What it does                                                                                                                                             |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prism lineage show <file> [--json]`        | Render a build or run `.plineage` sidecar and explain why an artifact exists.                                                                            |
+| `prism lineage why <sidecar> <output>`      | Walk a sidecar backward to explain why an output exists (`--json` for data).                                                                             |
+| `prism lineage verify <sidecar> [--replay]` | Rehash a sidecar's recorded artifacts; `--replay` re-runs and re-checks a run sidecar; `--certify PATH` persists a passed verification as a certificate. |
+| `prism lineage check-cert <cert> <sidecar>` | Check a lineage certificate against the sidecar it names; a subject mismatch or unrecognized claim is rejected.                                          |
+
+#### `prism pkg`: the package manager
+
+Verbs over projects and the package universe ([the package manager](#package-manager)).
+
+| Command                                            | What it does                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prism pkg init`                                   | Prompt for a package name and directory, then create a minimal `prism.toml` and `src/main.pr`.                                                                                                                                                                                                          |
+| `prism pkg add <dep>`                              | Add a dependency to `prism.toml` (path, `git` URL plus tag, or hash pin) and update `prism.lock`.                                                                                                                                                                                                       |
+| `prism pkg why <name>`                             | Explain why a definition is in the resolved dependency closure.                                                                                                                                                                                                                                         |
+| `prism pkg export [path]`                          | Write the project's content-addressed closure back out as source text.                                                                                                                                                                                                                                  |
+| `prism pkg publish`                                | Sign and record a package-identity-to-root binding in the signed index; `--tag`, `--name`, and `--origin` set the row.                                                                                                                                                                                  |
+| `prism pkg audit`                                  | Verify the signed index and the transparency log; `--allow-unsigned` tolerates the unsigned seam.                                                                                                                                                                                                       |
+| `prism pkg check-world [path] [--json] [--strict]` | Check package projects in a package universe and report digest-addressed source, Std, dependency, compiler, and compatibility identities plus per-package gates; `--baseline REPORT` names public definitions that changed behavior; `--strict-usage` promotes usage-summary drift to a strict failure. |
+| `prism pkg accept-usage [path]`                    | Regenerate a package's usage summary and write it to `usage-summary.md` at the package root, creating or reseating the usage gate's golden.                                                                                                                                                             |
+
+#### `prism store`: the content-addressed store
+
+Verbs over content-addressed code identity ([the store](#content-addressed-core)).
+
+| Command                                 | What it does                                                                                              |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `prism store wire <file.pr> [--accept]` | Check the `stable` rung goldens of a file; `--accept` recomputes and reseats them in place.               |
+| `prism store attest <file.pr>`          | Compile through two independent backends, attest byte-identical output, and cross-check the signed index. |
 
 ### 25.2 Flags {#flags}
 
@@ -1587,10 +1623,16 @@ The four optimizer/backend flags are global (`-O`, `--passes`, `--backend-opt` a
 | `--backend-opt <LEVEL>`       | global               | `2`                            | LLVM-backend opt level handed to the C compiler as `-O<LEVEL>`: `0`, `1`, `2`, `3`, or `s`/`z` for size. Distinct from `-O`, which tunes Prism's Core optimizer.               |
 | `--no-banner`                 | `repl`               | off                            | Skip the REPL startup banner.                                                                                                                                                  |
 | `--check`                     | `fmt`                | off                            | Check only: exit 1 if any file is not canonical, write nothing.                                                                                                                |
-| `--record <PATH>`             | `run`                | off                            | Write a `.replay` trace of the run to `PATH`, replayable with `prism replay`.                                                                                                  |
-| `--accept`                    | `wire`, `docs`       | off                            | Reseat stale goldens in place (`wire` rung digests, `docs` expected-output blocks); alias `--bless` for `docs`.                                                                |
-| `--tag`, `--name`, `--origin` | `publish`            | source-derived                 | The tag, display name, and canonical package identity of the published index row.                                                                                              |
-| `--allow-unsigned`            | `audit`              | off                            | Accept an unsigned artifact instead of reporting it (the unsigned signing seam).                                                                                               |
+| `--time-compile`              | compiling commands   | off, or `PRISM_TIME_COMPILE=1` | Emit one tab-separated timing row per compiler phase on stderr: phase, wall time, abbreviated input artifact key, cache status, output key and counts where they exist.        |
+| `--record <PATH>`             | `run`                | off                            | Write a `.replay` trace of the run to `PATH`, replayable with `prism exec replay`.                                                                                             |
+| `--lineage <PATH>`            | `run`                | off                            | Write a run `.plineage` sidecar to `PATH` (requires `--record`, which it explains); see [lineage](#build-lineage).                                                             |
+| `--certify <PATH>`            | `lineage verify`     | off                            | Persist a passed verification as a digest-named certificate (`replay-verified` with `--replay`, else `lineage-verified`).                                                      |
+| `--verify-manifest`           | `docs`               | off                            | Verify the committed `docs.plineage` manifest against the output pages; rehash pages, confirm roots have not drifted, write nothing.                                           |
+| `--baseline <PATH>`           | `pkg check-world`    | off                            | Diff each package's public-surface hashes against a prior `--json` report and name the changed definitions.                                                                    |
+| `--strict-usage`              | `pkg check-world`    | off                            | With `--strict`, fail on usage-summary drift; a package with no committed summary still reports missing without failing.                                                       |
+| `--accept`                    | `store wire`, `docs` | off                            | Reseat stale goldens in place (`wire` rung digests, `docs` expected-output blocks); alias `--bless` for `docs`.                                                                |
+| `--tag`, `--name`, `--origin` | `pkg publish`        | source-derived                 | The tag, display name, and canonical package identity of the published index row.                                                                                              |
+| `--allow-unsigned`            | `pkg audit`          | off                            | Accept an unsigned artifact instead of reporting it (the unsigned signing seam).                                                                                               |
 | `-h`, `--help`                | binary, all commands |                                | Print help.                                                                                                                                                                    |
 | `-V`, `--version`             | binary               |                                | Print the version.                                                                                                                                                             |
 
@@ -1611,11 +1653,21 @@ The four optimizer/backend flags are global (`-O`, `--passes`, `--backend-opt` a
 | `fbip`                  | Core after reference-count insertion and in-place reuse.                                                       |
 | `lowered`               | Core after [effect lowering](#effect-lowering) (handlers and operations removed).                              |
 | `tier`                  | The [effect-lowering](#effect-lowering) strategy the program's handlers compile to.                            |
+| `captures`              | Closure-capture facts, each classified portable, nonportable, or unknown for a move across a suspend boundary. |
+| `usage-summary`         | A per-definition table of allocation, `fip`/`fbip`, borrow, and effect-row facts, committable as a golden.     |
+| `usage-summary-md`      | The same usage facts as a markdown pipe table, the projection `prism pkg check-world`'s usage gate compares.   |
+| `usage-summary-json`    | The same usage facts as a JSON object, for tooling that consumes the summary programmatically.                 |
 | `shape`                 | The structural shape digest of each datatype, effect, and class.                                               |
 | `stdlib-hash`           | The standard library's Merkle root ([content-addressed core](#content-addressed-core)).                        |
 | `namespace`             | The versioned definition-layer export, wrapped in the wire envelope header.                                    |
 | `llvm`                  | The emitted LLVM IR.                                                                                           |
 | `mlir`                  | The emitted textual MLIR (requires the `mlir` build feature).                                                  |
+
+`dump captures` is a read-only analysis over the program's own elaborated core. For every lambda and thunk it lists what the closure closes over (a source value or a call to a top-level definition) and what scoped operations it performs (a `var` cell's get/set, a named handler instance's private op), and classifies each fact as **portable**, **nonportable**, or **unknown** for a hypothetical move across a suspend boundary. A value type defers to the suspend codec's own encodability judgment; a top-level definition is portable because it travels as a content-addressed code reference; a `var` cell and a named handler instance are nonportable because their backing scope ends before a moved computation could resume. The classification is conservative in one direction: nothing is called portable unless it provably is, so a false "unknown" only costs a diagnostic while a false "portable" is impossible. The dump is diagnostic and changes no compilation output.
+
+`dump usage-summary` prints one tab-separated line per definition, name-sorted, of the usage facts the compiler already holds: the `@ noalloc` allocation certificate, the `fip`/`fbip` discipline, the per-parameter borrow mask (`b` for a borrowed parameter, `-` for an owned one), and the checked effect row. A header names the format version and the whole-program [lowering tier](#effect-lowering); the tier is a whole-program cost decision, so it heads the table rather than repeating on every line. The table is scoped to the program's own definitions, the entry file plus the modules its own source directories serve, so an imported library's rows never appear and a committed summary drifts only when the program's own source changes. Every fact is read from its canonical source and none is recomputed.
+
+The same facts project three ways: `usage-summary` is the tab-separated form above, `usage-summary-md` renders them as an aligned markdown pipe table (cells escape `|`, so a row-polymorphic tail like `{X | e}` cannot break the table, and the alignment matches the repository formatter so a committed file is stable under it), and `usage-summary-json` emits one JSON object for tooling. A package may commit the markdown projection as `usage-summary.md` at its root; `prism pkg check-world` regenerates it and reports drift as the `usage` gate, naming the first differing line. `prism pkg accept-usage <pkg>` writes that golden, creating it the first time and reseating a drifted one with the same byte-stable regeneration, the same accept discipline as the tier manifest and the wire rung goldens. The gate is report-only by default: drift is printed but excluded from `--strict` failure, so packages can adopt the golden incrementally, and a package that commits no summary reports the gate as missing rather than failing. `--strict-usage` opts a CI lane in, promoting usage drift to a strict failure while a missing summary stays non-fatal, since missing means not opted in rather than wrong. In the `--json` report the gate carries its evidence: `usage` (`missing`, `passed`, `failed`), `usage_drift` naming the first differing line with expected and actual, `usage_format` naming the artifact format the golden is compared under (`usage-summary-md`), and `usage_tier`, the whole-program lowering tier that heads the summary, present only when a summary was regenerated. The tier is deliberately a single whole-program scalar, the same fact the summary's header states; per-definition rows carry no tier, so the JSON claims none.
 
 ### 25.4 Environment Variables {#environment-variables}
 
@@ -1676,6 +1728,28 @@ assert_eq!(run.term, "3");
 For projects or custom module sources, pass explicit roots instead of relying on the current directory: `prism::default_roots(base)` gives the normal single-file search path, while `prism::project_roots`, `prism::project_roots_with_std`, and `prism::project_roots_with_packages_and_std` are the project/package forms. The important rule is the same identity rule the CLI follows: module roots, Std roots, package roots, stores, lockfiles, and behavior-affecting flags are inputs to the driver call, not hidden globals.
 
 A different front end should target the same `syntax::ast::Program<Surface>` or go lower and produce `core::Core` directly. The ordinary route is `lex::lex` / `parse::parse`, module resolution through `resolve::resolve_modules_in`, desugaring through `syntax::desugar::desugar`, typechecking through the driver (`check_on`) or the internal checker, and elaboration through `core::elaborate` into Core. If you produce Core yourself, you have taken responsibility for the invariants the front end usually proves: names are resolved, types and effects are coherent, builtins are used with the right arity, and the Core is well-formed enough for optimization, effect lowering, reference counting, interpretation, and codegen.
+
+The tool that checks those invariants is Core Lint, exported as `prism::core::lint_core`. It is stage-aware: a `PassStage` argument says where in the pipeline the Core sits, because the two families of node have opposite legality across the effect-lowering seam. Effect nodes (`Do`, `Handle`, `Mask`) are legal only before lowering, and the reference-counting and local-cell nodes (`Dup`, `Drop`, `WithReuse`, `Reuse`, `RefNew`/`RefGet`/`RefSet`) are legal only after it. Lint at `PassStage::PreLowering` on Core you assembled or transformed by hand and it rejects any runtime node that leaked in early; lint at `PassStage::Late` on lowered Core and it rejects any effect node lowering should have erased. It also checks scoping (every free variable resolves to a parameter or a top-level function) and reuse-token linearity (no token spent twice on one path). A violation comes back as `Err(Vec<String>)`, one message per problem, attributed to the offending function.
+
+```rust,ignore
+use prism::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
+use prism::sym::Sym;
+
+// fn main = return 42
+let prog = Core {
+    fns: vec![CoreFn {
+        name: Sym::new("main"),
+        params: vec![],
+        body: Comp::Return(Value::Int(42)),
+        dict_arity: 0,
+    }],
+};
+assert!(lint_core(&prog, PassStage::PreLowering).is_ok());
+```
+
+This snippet mirrors the runnable doctest on `prism::core::lint_core` (in `src/core/opt/lint.rs`), which CI compiles and runs under `cargo test --doc`. That doctest, including the companion case where a pre-lowering lint rejects a stray runtime node, is the tested source of truth; the block here cannot drift from it silently.
+
+To read Core back out, the pretty printers are exported from `prism::core`. `pp_core_pretty` renders a whole program in the indented, one-bind-per-line notation `dump core` prints; `pp_core` renders the same program in the compact single-line form the snapshot tests pin; `pp_comp` renders a single computation and `pp_value` a single value. They are the same functions the `dump` surfaces call, so Core you produced or rewrote prints in exactly the notation the rest of the toolchain reads.
 
 A different backend should start from Core, not from the surface language. The easiest in-tree pattern is the shared emitter: `src/codegen/emit.rs` walks lowered Core once and delegates instruction spelling to the `Isa` trait, with LLVM and MLIR as the two current instances. Today that trait is crate-internal (`pub(super)`), so a serious external target either lives in-tree, grows a public backend trait, or consumes a serialized/dumped Core form and owns its own lowering. If the target can share Prism's runtime representation, implement the small instruction vocabulary (`load`, `store`, `call`, `switch`, `ret`, merge blocks, tail calls, and the primitive arithmetic/float operations) and let the existing Core walk keep evaluation order, reference counting, handler lowering, and FBIP reuse centralized. If it cannot share that representation, treat `core::Core` as the semantic contract and write a backend that re-proves the same byte-parity obligations the LLVM path is held to.
 

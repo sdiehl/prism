@@ -1,0 +1,156 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/coeffect_reserved.pr
+---
+== tokens ==
+VOpen Fn Ident("apply") LParen Ident("f") Colon LParen LParen KwInt RParen Arrow KwInt RParen At LBrace Ident("once") Comma Ident("portable") RBrace Comma Ident("x") Colon KwInt RParen Colon KwInt Eq Ident("f") LParen Ident("x") RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("apply") LParen Lambda LParen Ident("y") RParen Arrow Ident("y") Plus Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 41, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "apply",
+            params: [
+                Param {
+                    name: "f",
+                    ty: Some(
+                        Coeffect(
+                            Fun(
+                                [
+                                    Int,
+                                ],
+                                Empty,
+                                Int,
+                            ),
+                            CoeffectRow {
+                                facts: [
+                                    Once,
+                                    Portable,
+                                ],
+                            },
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "f",
+                        ),
+                        span: 242..243,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "x",
+                            ),
+                            span: 244..245,
+                        },
+                    ],
+                ),
+                span: 242..246,
+            },
+            wheres: [],
+            span: 177..246,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "apply",
+                        ),
+                        span: 266..271,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "y",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Var(
+                                                "y",
+                                            ),
+                                            span: 280..281,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 1,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 284..285,
+                                        },
+                                    ),
+                                    span: 280..285,
+                                },
+                            ),
+                            span: 272..285,
+                        },
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 41,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 287..289,
+                        },
+                    ],
+                ),
+                span: 266..290,
+            },
+            wheres: [],
+            span: 248..290,
+        },
+    ],
+}
+
+== types ==
+Type Error: usage fact `once` is reserved but not implemented
+   ╭─[ <source>:4:1 ]
+   │
+ 4 │ fn apply(f : ((Int) -> Int) @ {once, portable}, x : Int) : Int = f(x)
+   │ ──────────────────────────────────┬──────────────────────────────────  
+   │                                   ╰──────────────────────────────────── usage fact `once` is reserved but not implemented
+───╯

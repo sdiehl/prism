@@ -86,7 +86,7 @@ The infinite sequence `x, f(x), f(f(x)), ...`. Bound it with `take`.
 
 ### `repeat`
 
-```prism,sig,h-43314a24eb3997d7ff80b68be600d3acd76b1fabb897c4655c9b74e8bc9c1cc7
+```prism,sig,h-54970cfebe2f4dd8906d509325cc09ffc1e946fe63fed6d5f638c772ce35f132
 repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 ```
 

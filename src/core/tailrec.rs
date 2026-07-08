@@ -50,9 +50,9 @@ pub enum TrmcShape<'a> {
 
 fn occurs(v: &Value, x: &str) -> usize {
     match v {
-        Value::Var(y) => usize::from(*y == x),
+        Value::Var(y) => usize::from(y.as_str() == x),
         Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().map(|f| occurs(f, x)).sum(),
-        Value::Thunk(c) => 2 * usize::from(fv::comp(c).iter().any(|s| *s == x)),
+        Value::Thunk(c) => 2 * usize::from(fv::comp(c).iter().any(|s| s.as_str() == x)),
         _ => 0,
     }
 }
@@ -65,7 +65,7 @@ fn ctor_shape<'a>(v: &'a Value, x: &str, token: Option<&'a Sym>) -> Option<TrmcS
     };
     let hole = fields
         .iter()
-        .position(|f| matches!(f, Value::Var(y) if *y == x))?;
+        .position(|f| matches!(f, Value::Var(y) if y.as_str() == x))?;
     let total: usize = fields.iter().map(|f| occurs(f, x)).sum();
     (total == 1).then_some(TrmcShape::Ctor {
         token,
@@ -82,7 +82,7 @@ fn ctor_shape<'a>(v: &'a Value, x: &str, token: Option<&'a Sym>) -> Option<TrmcS
 pub fn trmc_shape<'a>(k: &'a Comp, x: &str) -> Option<TrmcShape<'a>> {
     match k {
         Comp::Return(v) => ctor_shape(v, x, None),
-        Comp::Reuse(tok, v) if *tok != x => ctor_shape(v, x, Some(tok)),
+        Comp::Reuse(tok, v) if tok.as_str() != x => ctor_shape(v, x, Some(tok)),
         Comp::Prim(CoreOp::Add, a, b) => match (occurs(a, x), occurs(b, x)) {
             (1, 0) if matches!(a, Value::Var(_)) => Some(TrmcShape::Acc(b)),
             (0, 1) if matches!(b, Value::Var(_)) => Some(TrmcShape::Acc(a)),
@@ -96,7 +96,7 @@ fn scan_trmc(c: &Comp, name: &str, arity: usize, ctor: &mut bool, acc: &mut bool
     match c {
         Comp::Bind(m, x, n) => {
             if let Comp::Call(g, args) = m.as_ref() {
-                if *g == name && args.len() == arity {
+                if g.as_str() == name && args.len() == arity {
                     match trmc_shape(n, x.as_str()) {
                         Some(TrmcShape::Ctor { .. }) => return *ctor = true,
                         Some(TrmcShape::Acc(_)) => return *acc = true,
@@ -163,7 +163,7 @@ pub fn reassoc(c: &Comp) -> Comp {
 
 fn rebind(m: Comp, x: Sym, n: Comp) -> Comp {
     match m {
-        Comp::Bind(a, y, b) if y == "_" || (y != x && !fv::comp(&n).contains(&y)) => {
+        Comp::Bind(a, y, b) if y.as_str() == "_" || (y != x && !fv::comp(&n).contains(&y)) => {
             Comp::Bind(a, y, Box::new(rebind(*b, x, n)))
         }
         other => Comp::Bind(Box::new(other), x, Box::new(n)),

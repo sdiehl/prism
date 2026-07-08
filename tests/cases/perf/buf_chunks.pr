@@ -1,0 +1,14 @@
+import Data.Bytes (..)
+
+-- Append N single-byte chunks through the builder seam, threading one uniquely
+-- owned buffer. Each push extends in place (FBIP) with amortized-doubling growth,
+-- so the whole accumulation allocates O(log N) buffers, a per-element slope of
+-- zero. A copy-on-every-push regression (the buffer losing unique ownership)
+-- turns this into one fresh buffer per element, a slope of one.
+fn go(acc : Bytes, n : Int) : Bytes =
+  if n == 0 then
+    acc
+  else
+    go(bytes_push(acc, mod(n, 256)), n - 1)
+
+fn main() : !{IO} Unit = println(show_int(bytes_length(go(bytes_empty, __N__))))

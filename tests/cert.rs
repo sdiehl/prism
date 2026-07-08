@@ -77,6 +77,7 @@ const fn report(rows: Vec<RootAudit>) -> AuditReport {
         verdict: Verdict::Unsigned,
         rows,
         repoints: Vec::new(),
+        log_head: None,
     }
 }
 

@@ -174,6 +174,59 @@ fn clean_removes_target_at_package_root() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn check_without_file_checks_enclosing_project() {
+    let dir = env::temp_dir().join(format!("prism_check_project_{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src").join("nested")).unwrap();
+    fs::write(
+        dir.join("prism.toml"),
+        "[package]\nname = \"checkproj\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src").join("main.pr"), "fn main() = ()\n").unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .current_dir(dir.join("src").join("nested"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "check failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty(), "stdout should be quiet: {out:?}");
+    assert!(out.stderr.is_empty(), "stderr should be quiet: {out:?}");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_explicit_file_checks_that_file_without_project() {
+    let dir = env::temp_dir().join(format!("prism_check_file_{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("oneoff.pr");
+    fs::write(&file, "fn main() = ()\n").unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .arg(&file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "check failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty(), "stdout should be quiet: {out:?}");
+    assert!(out.stderr.is_empty(), "stderr should be quiet: {out:?}");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn cc() -> String {
     env::var("PRISM_CC").unwrap_or_else(|_| "clang".into())
 }

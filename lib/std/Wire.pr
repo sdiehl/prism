@@ -8,7 +8,8 @@
 -- The surface has three layers. The `Serialize` class and its instances are the
 -- codec: a value's compact positional body, derived structurally by
 -- `deriving (Serialize)` and bottoming out in the primitive instances below. The
--- envelope (`wire_encode_value`/`wire_decode_value`) wraps a body in the frame
+-- envelope (`wire_encode_stable`/`wire_decode_stable`, or the explicit-digest
+-- `*_with_digest` escape hatches) wraps a body in the frame
 -- `[scheme tag][kind][contract digest][body?]`, checked before the body so a
 -- stale layout is rejected up front. The version ladder (`compose_upgrade`/
 -- `compose_downgrade`) spans frozen versions with O(n) adjacent converters.
@@ -120,12 +121,20 @@ pub class Serialize(a)
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
 
 -- | The structural witness that a type's format is frozen-serializable: a record
--- is `Stable` when all its fields are, a sum when all its variants' arguments
--- are. It is a marker with no methods precisely so that the _derivability_ is the
--- whole content of the proof. Persisting a type with a non-stable component
--- (a function, an effectful thunk) fails at the `deriving (Stable)` site, at
--- compile time, naming the offending field.
+-- is `Stable` when all its fields are, a sum when all its variants' arguments are.
+-- The derivability is the whole content of the proof: persisting a type with a
+-- non-stable component (a function, an effectful thunk) fails at the `deriving
+-- (Stable)` site, at compile time, naming the offending field.
+--
+-- The one method, `shape_digest_of`, is the type's contract digest: the shape
+-- digest of its frozen layout. A derived instance's body is that digest injected by
+-- the compiler from its single shape-digest computation, so `shape_digest_of` is a
+-- per-type constant no source can forge (`Stable` is derive-only; a hand-written
+-- instance is rejected). The argument is used only to resolve the instance by
+-- value; the digest does not depend on it. `wire_encode_stable`/`wire_decode_stable`
+-- read it, so ordinary code never hand-threads a digest string into the envelope.
 pub class Stable(a)
+  shape_digest_of : (a) -> String
 
 -- Wrap a whole buffer (cursor at 0) as a body, and recover the buffer of a body's
 -- remaining bytes (compacting away a non-zero cursor with a single slice). The
@@ -610,23 +619,79 @@ pub fn wire_open(bs : Bytes, kind : Int, digest : String) : Bytes =
 pub fn wire_is_reference(bs : Bytes, kind : Int, digest : String) : Bool =
   wire_is_empty(wire_open(bs, kind, digest))
 
--- | Encode a value as a `value`-kind frame carrying the given contract digest.
--- The digest is passed in for now: it is the type's shape digest, which the
--- compiler computes but does not yet thread to a derived instance (the seam a
--- later `shape_digest` intrinsic closes).
-pub fn wire_encode_value(digest : String, x : a) : Bytes given Serialize(a) =
+-- | Open a `value`-kind frame without knowing its contract digest up front,
+-- returning that digest alongside the body bytes. It checks the scheme and the
+-- `value` kind before the digest. An empty body is legal and returned as-is: a
+-- record with no fields encodes to zero bytes, so emptiness cannot be read as
+-- "reference" here without an explicit marker in the frame. Trailing-byte
+-- discipline is left to the body decoder, exactly as `wire_open` leaves it. A
+-- version-dispatched reader uses the returned digest to pick which frozen rung
+-- the body decodes as.
+pub fn wire_open_value_any(bs : Bytes) : (String, Bytes) =
+  match get_frame_str(bs) of
+    (scheme, r1) =>
+      if scheme == wire_scheme_tag then
+        match wire_get_tag(r1) of
+          (k, r2) =>
+            if k == wire_kind_value then
+              match get_frame_str(r2) of
+                (d, r3) => (d, r3)
+            else
+              fail()
+      else
+        fail()
+
+-- | Encode a value as a `value`-kind frame carrying an explicitly supplied contract
+-- digest. This is the escape hatch: it trusts the caller's digest verbatim, so it is
+-- for code that already holds a compiler-computed digest (a `stable` block's
+-- generated frame helpers) or is exercising a hand-built frame in a test. Ordinary
+-- `Stable` code uses `wire_encode_stable`, which supplies the digest from the type.
+pub fn wire_encode_value_with_digest(
+  digest : String,
+  x : a
+) : Bytes given Serialize(a) =
   wire_frame(wire_kind_value, digest, encode(x))
 
--- | Decode a `value`-kind frame: check the header, decode the body, and reject
--- trailing bytes. A bodyless reference frame fails here, because a value cannot be
--- materialized without its bytes.
-pub fn wire_decode_value(bs : Bytes, digest : String) : a given Serialize(a) =
+-- | Decode a `value`-kind frame against an explicitly supplied contract digest:
+-- check the header, decode the body, and reject trailing bytes. A bodyless reference
+-- frame fails here, because a value cannot be materialized without its bytes. The
+-- digest-supplying counterpart to `wire_encode_value_with_digest`; ordinary `Stable`
+-- code uses `wire_decode_stable`.
+pub fn wire_decode_value_with_digest(
+  bs : Bytes,
+  digest : String
+) : a given Serialize(a) =
   match decode(wire_open(bs, wire_kind_value, digest)) of
     (v, rest) =>
       if wire_is_empty(rest) then
         v
       else
         fail()
+
+-- | Encode a `Stable` value as a `value` frame under its own contract digest. The
+-- digest is `shape_digest_of`, a per-type constant the `deriving (Stable)` instance
+-- carries, so no digest string is hand-threaded. This is the ordinary encode for a
+-- frozen-serializable value.
+pub fn wire_encode_stable(x : a) : Bytes given Stable(a), Serialize(a) =
+  wire_encode_value_with_digest(shape_digest_of(x), x)
+
+-- | Decode a `Stable` value from a `value` frame, checking the frame's digest
+-- against the type's own `shape_digest_of` and rejecting trailing bytes. The result
+-- type comes from the use site; an unannotated call is ambiguous and asks for an
+-- annotation. A wrong digest, a wrong kind, a truncated body, and trailing bytes are
+-- all decode failures through `Fail`. The frame is opened without assuming its
+-- digest, the body decoded as the annotated type, and only then is the frame's
+-- digest required to equal that type's own, so a frame minted for another shape is
+-- refused.
+pub fn wire_decode_stable(bs : Bytes) : a given Stable(a), Serialize(a) =
+  match wire_open_value_any(bs) of
+    (dig, body) =>
+      match decode(body) of
+        (v, rest) =>
+          if wire_is_empty(rest) && dig == shape_digest_of(v) then
+            v
+          else
+            fail()
 
 -- The version ladder. Frozen versions are spanned by O(n) adjacent converters
 -- composed along the ladder, never the N-squared matrix. `upgrade` is total (it

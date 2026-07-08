@@ -1,0 +1,16 @@
+-- Behavior diff, baseline. `prism diff` matches definitions by content hash, so a
+-- pure refactor of this file (examples/diff_after_refactor.pr) diffs to zero, while
+-- a one-constant edit (examples/diff_after_edit.pr) lights up only the definitions
+-- whose behavior actually moved.
+
+fn weight(n : Int) : Int = 3 * n + 1
+
+fn total(upto : Int) : Int =
+  var acc := 0
+  var i := 1
+  while i <= upto do
+    acc := acc + weight(i)
+    i := i + 1
+  acc
+
+fn main() = println(total(10))

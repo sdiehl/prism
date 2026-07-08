@@ -7,6 +7,7 @@
 use std::fmt::Write as _;
 
 use super::{block_trailing_call, forces_break, Fmt, Mode, INDENT, LINE_WIDTH};
+use crate::coeffect::CoeffectFact;
 use crate::kw;
 use crate::syntax::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
@@ -263,6 +264,14 @@ pub(crate) fn fmt_ty(t: &Ty) -> String {
             let args: Vec<String> = args.iter().map(fmt_ty).collect();
             format!("{}({})", name, args.join(", "))
         }
+        // A usage row prints through the canonical `CoeffectRow` display
+        // (singleton sugar, alphabetized braces). Arrow and forall types are
+        // re-parenthesized: the row attaches to atoms only, so the parens are
+        // what parsing required and round-tripping must restore.
+        Ty::Coeffect(inner, row) => match inner.as_ref() {
+            t @ (Ty::Fun(..) | Ty::Forall(..)) => format!("({}) {row}", fmt_ty(t)),
+            t => format!("{} {row}", fmt_ty(t)),
+        },
         Ty::Tuple(ts) => {
             let ts: Vec<String> = ts.iter().map(fmt_ty).collect();
             format!("({})", ts.join(", "))
@@ -398,9 +407,16 @@ impl Fmt<'_> {
             };
         }
         let params: Vec<String> = d.params.iter().map(|p| self.fmt_param(p)).collect();
+        // A certified declaration re-parenthesizes a function return type: the
+        // `@ noalloc` appended below must re-parse at the annotation's root, and
+        // an unparenthesized arrow would capture the row on its codomain atom.
+        let ret_ty = |t: &Ty| match t {
+            t @ (Ty::Fun(..) | Ty::Forall(..)) if d.no_alloc => format!("({})", fmt_ty(t)),
+            t => fmt_ty(t),
+        };
         let ret_ann = match (&d.eff, &d.ret) {
             (None, None) => String::new(),
-            (None, Some(t)) => format!(" : {}", fmt_ty(t)),
+            (None, Some(t)) => format!(" : {}", ret_ty(t)),
             (Some(effs), None) => {
                 if effs.is_empty() {
                     " : !".into()
@@ -410,9 +426,9 @@ impl Fmt<'_> {
             }
             (Some(effs), Some(t)) => {
                 if effs.is_empty() {
-                    format!(" : ! {}", fmt_ty(t))
+                    format!(" : ! {}", ret_ty(t))
                 } else {
-                    format!(" : !{{{}}} {}", fmt_labels(effs), fmt_ty(t))
+                    format!(" : !{{{}}} {}", fmt_labels(effs), ret_ty(t))
                 }
             }
         };
@@ -431,18 +447,11 @@ impl Fmt<'_> {
         } else {
             fip_key
         };
-        // `without alloc` is a postfix suffix on the signature (after the return
-        // annotation, before any `given` constraints), so it prints there, not in
-        // the leading `key`.
+        // The allocation certificate `@ noalloc` is a postfix on the return
+        // annotation (lifted onto the decl flag at parse), so it prints there,
+        // not in the leading `key`.
         let na = if d.no_alloc {
-            // Print back the spelling the author wrote (`\ alloc` vs `without
-            // alloc`) so a format round-trips rather than canonicalizing it away.
-            let kw = if d.no_alloc_bs {
-                kw::LAMBDA
-            } else {
-                kw::WITHOUT
-            };
-            format!(" {} {}", kw, kw::ALLOC)
+            format!(" {} {}", kw::AT, CoeffectFact::Noalloc)
         } else {
             String::new()
         };

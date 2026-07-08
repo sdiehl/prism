@@ -23,61 +23,61 @@ A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends th
 
 ### `arbitraryInt`
 
-```prism,def,h-65eb9ac863bc6c3fd7adceaa95ea0065899254d2818f4a1e456db3c9f4475f43
+```prism,def,h-5945b83976352810b07cb7c9b2afca522ef6c41408b467465878109933825d69
 instance arbitraryInt : Arbitrary(Int)
 ```
 
 ### `arbitraryI64`
 
-```prism,def,h-f6f5f8d3d2ba9199631ea1115d800e1a791b0eebc86a7210530efeb6ca58d01e
+```prism,def,h-4d4fb3a67b655327e381b5d46fc0074b066cac9084df8df55a0a77aa54f3ae46
 instance arbitraryI64 : Arbitrary(I64)
 ```
 
 ### `arbitraryU64`
 
-```prism,def,h-a1422095a0cf142fbfb26e5b09801eb21e86f37d33822668c564e9573d683636
+```prism,def,h-eb1fe2575052bd782861b71ed4e39470af108358546ce156e6e6eeff3533c7c3
 instance arbitraryU64 : Arbitrary(U64)
 ```
 
 ### `arbitraryBool`
 
-```prism,def,h-efab9958c2428d98178d4d94003edfad3c9b3120a9f5d2560f4b884c096a3846
+```prism,def,h-e85bd82ddde4fc2b0c36b87d1219f4ea26e14624fe4818ae1c8d1f1ed87c3fe6
 instance arbitraryBool : Arbitrary(Bool)
 ```
 
 ### `arbitraryUnit`
 
-```prism,def,h-3fe5ae6f8c0bd486b310fad23bcd26300be5b79db214f8db25adc8322441108c
+```prism,def,h-c13a22e81c4c9ac0015c965a25c14dda3af499d3a55fabc011c02eea06d0c344
 instance arbitraryUnit : Arbitrary(Unit)
 ```
 
 ### `arbitraryChar`
 
-```prism,def,h-4eb7140ece0bd73f57ff81ab6706ae35fe001f0bbc9a1e7bbab79724a0a5b1d1
+```prism,def,h-8a02d7a66eb688baf2b52a30b8cc10c8a40e44d4ea91267a5163642fa9c85f54
 instance arbitraryChar : Arbitrary(Char)
 ```
 
 ### `arbitraryFloat`
 
-```prism,def,h-038cc0a6bbaf210a5061faf70e8f65c20a8389dbe968a64f989a3da23e545ad9
+```prism,def,h-5410ba1dffeb786a47c765c9bb8ff184716ec738c33722cb6ce8b068f64329b8
 instance arbitraryFloat : Arbitrary(Float)
 ```
 
 ### `arbitraryString`
 
-```prism,def,h-7d40fa35a39b8822444862264bb75ddcf76fed2a484fdb9cda577c7b6aa48e84
+```prism,def,h-9d507faac57120991163e0b5feb3042f24484a5952e1c460c18e4f905950311a
 instance arbitraryString : Arbitrary(String)
 ```
 
 ### `arbitraryOption`
 
-```prism,def,h-9d055b5d66cbdf46a5aac3a6f3fa7a4e8046dac625e4cf0aa4e134d4e9a97d08
+```prism,def,h-f62439427e5e882f9a35dfbb13e05271562d7e2cfa6ad52e37df695dae0dede1
 instance arbitraryOption : Arbitrary(Option(a))
 ```
 
 ### `arbitraryList`
 
-```prism,def,h-6edae00dc41792b39e858a63524939158ba31efd218ef2ef28b01d3dd871fb80
+```prism,def,h-70efd1bb02dc20223d1bb65e18ae659e7c6aed0ec359ce5ea660a265baaad95e
 instance arbitraryList : Arbitrary(List(a))
 ```
 
@@ -85,7 +85,7 @@ instance arbitraryList : Arbitrary(List(a))
 
 ### `arb_gen`
 
-```prism,sig,h-305cbbce8df40cab265296a04558dc82c6dfc4f970ddcaddafb7e26e7ce5e6dc
+```prism,sig,h-f2c3feb066a1cd8d1e7f7ad7db6a8f96fcd0f8b41a86d80d98ef45d9a198f4cf
 arb_gen : forall a. () -> Quickcheck.Gen(a)
 ```
 

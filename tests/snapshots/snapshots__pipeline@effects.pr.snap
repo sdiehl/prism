@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/effects.pr
 ---
 == tokens ==
@@ -497,38 +497,16 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.kont.shadow.prism_main = private constant [11 x i8] c"prism_main\00"
-@.kont.shadow.prism_0.region = private constant [15 x i8] c"prism_0.region\00"
 @.str0 = private constant [50 x i8] c"ICE: unhandled effect op in closed native handler\00"
-@.kont.shadow.prism_22.region = private constant [16 x i8] c"prism_22.region\00"
 @.str1 = private constant [54 x i8] c"ICE: effect op escaped a closed native handler clause\00"
 @.str2 = private constant [50 x i8] c"ICE: unhandled effect op in closed native handler\00"
-@.kont.shadow.prism_46.region = private constant [16 x i8] c"prism_46.region\00"
 @.str3 = private constant [54 x i8] c"ICE: effect op escaped a closed native handler clause\00"
 @.str4 = private constant [54 x i8] c"ICE: effect op escaped a closed native handler clause\00"
 @.str5 = private constant [50 x i8] c"ICE: unhandled effect op in closed native handler\00"
-@.kont.shadow.prism_ebind = private constant [12 x i8] c"prism_ebind\00"
-@.kont.shadow.prism_qApply = private constant [13 x i8] c"prism_qApply\00"
-@.kont.shadow.prism_lam_0 = private constant [12 x i8] c"prism_lam_0\00"
-@.kont.shadow.prism_lam_1 = private constant [12 x i8] c"prism_lam_1\00"
-@.kont.shadow.prism_lam_2 = private constant [12 x i8] c"prism_lam_2\00"
-@.kont.shadow.prism_lam_3 = private constant [12 x i8] c"prism_lam_3\00"
-@.kont.shadow.prism_lam_4 = private constant [12 x i8] c"prism_lam_4\00"
-@.kont.shadow.prism_lam_5 = private constant [12 x i8] c"prism_lam_5\00"
-@.kont.shadow.prism_lam_6 = private constant [12 x i8] c"prism_lam_6\00"
-@.kont.shadow.prism_lam_7 = private constant [12 x i8] c"prism_lam_7\00"
-@.kont.shadow.prism_lam_8 = private constant [12 x i8] c"prism_lam_8\00"
-@.kont.shadow.prism_lam_9 = private constant [12 x i8] c"prism_lam_9\00"
-@.kont.shadow.prism_lam_10 = private constant [13 x i8] c"prism_lam_10\00"
-@.kont.shadow.prism_lam_11 = private constant [13 x i8] c"prism_lam_11\00"
-@.kont.shadow.prism_lam_12 = private constant [13 x i8] c"prism_lam_12\00"
-@.kont.shadow.prism_lam_13 = private constant [13 x i8] c"prism_lam_13\00"
-@.kont.shadow.prism_lam_14 = private constant [13 x i8] c"prism_lam_14\00"
-@.kont.shadow.prism_apply_1 = private constant [14 x i8] c"prism_apply_1\00"
-@prism_native_kont_table = constant [1055 x i8] c"scheme  prism-core-hash-v1\0Abundle  7e5370ef4c56405dee904a9d73ae6db1a9b2c6688339994ede34f03bb654491b\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:7e5370ef4c56405dee904a9d73ae6db1a9b2c6688339994ede34f03bb654491b\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_ask_example  c5d6270d3901b77a4a92e24b5e9bc337eeac2a44599ce8801f667f152fc56096  ask_example\0Afn      prism_catch_exn  3bc3565b2ad129b32fe4e84ae10511c87303ce3679b1c12fa8dabf20d08d1d36  catch_exn\0Afn      prism_main  145f47c5513a3f6eaef5956ee448eec7fe46aec3c4cb15411f0405efa8a50163  main\0Afn      prism_state_example  d0927547f8e6bd6d04f473e18b2503f4f81aef098fce6745c3b646592389d7eb  state_example\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1188 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  7e5370ef4c56405dee904a9d73ae6db1a9b2c6688339994ede34f03bb654491b\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:7e5370ef4c56405dee904a9d73ae6db1a9b2c6688339994ede34f03bb654491b\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_ask_example c5d6270d3901b77a4a92e24b5e9bc337eeac2a44599ce8801f667f152fc56096 ask_example arity 0 slots abi-word[]\0Astate prism_catch_exn 3bc3565b2ad129b32fe4e84ae10511c87303ce3679b1c12fa8dabf20d08d1d36 catch_exn arity 0 slots abi-word[]\0Astate prism_main 145f47c5513a3f6eaef5956ee448eec7fe46aec3c4cb15411f0405efa8a50163 main arity 0 slots abi-word[]\0Astate prism_state_example d0927547f8e6bd6d04f473e18b2503f4f81aef098fce6745c3b646592389d7eb state_example arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [1055 x i8] c"scheme  prism-core-hash-v1\0Abundle  52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_ask_example  e5e9da8fc4b676bdb948be7f5bb35807b75cd481b68b3b76894bad77449c0af9  ask_example\0Afn      prism_catch_exn  fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba  catch_exn\0Afn      prism_main  ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393  main\0Afn      prism_state_example  40a2c83934e56b2c81488394d595365304547e71b95cb91f4f37e80b80c38f0f  state_example\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1188 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_ask_example e5e9da8fc4b676bdb948be7f5bb35807b75cd481b68b3b76894bad77449c0af9 ask_example arity 0 slots abi-word[]\0Astate prism_catch_exn fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba catch_exn arity 0 slots abi-word[]\0Astate prism_main ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393 main arity 0 slots abi-word[]\0Astate prism_state_example 40a2c83934e56b2c81488394d595365304547e71b95cb91f4f37e80b80c38f0f state_example arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [11 x i8] c"prism_main\00"
-@.kont_hash2 = private constant [65 x i8] c"145f47c5513a3f6eaef5956ee448eec7fe46aec3c4cb15411f0405efa8a50163\00"
+@.kont_hash2 = private constant [65 x i8] c"ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
@@ -537,7 +515,6 @@ source_filename = "prism"
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_main, i64 0)
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
   store i64 0, ptr %t3, align 8
@@ -635,12 +612,8 @@ b6:                                               ; preds = %b5, %b7
   call void @prism_rc_dec(i64 %t79)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
-  call void @prism_native_kont_leave()
   ret i64 0
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_enter(ptr, i64) #0
 
 ; Function Attrs: nounwind
 declare ptr @prism_alloc(i64) #0
@@ -648,9 +621,6 @@ declare ptr @prism_alloc(i64) #0
 ; Function Attrs: nounwind
 define i64 @prism_ebind(i64 %a0, i64 %a1) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_ebind, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %a0)
-  call void @prism_native_kont_arg(i64 1, i64 %a1)
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -667,7 +637,6 @@ b2:                                               ; preds = %entry
   call void @prism_rc_dec(i64 %a0)
   %t7 = call i64 @prism_apply_1(i64 %a1, i64 %t4)
   call void @prism_rc_dec(i64 %a1)
-  call void @prism_native_kont_leave()
   ret i64 %t7
 
 b3:                                               ; preds = %entry
@@ -699,7 +668,6 @@ b3:                                               ; preds = %entry
   %t29 = getelementptr inbounds i8, ptr %t23, i64 48
   store i64 %t21, ptr %t29, align 8
   %t30 = ptrtoint ptr %t23 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t30
 
 b1:                                               ; preds = %entry
@@ -710,8 +678,6 @@ b1:                                               ; preds = %entry
 ; Function Attrs: nounwind
 define i64 @prism_0.region(i64 %a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_0.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %a0)
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -726,7 +692,6 @@ b2:                                               ; preds = %entry
   %t4 = load i64, ptr %t3, align 8
   call void @prism_rc_inc(i64 %t4)
   call void @prism_rc_dec(i64 %a0)
-  call void @prism_native_kont_leave()
   ret i64 %t4
 
 b3:                                               ; preds = %entry
@@ -774,7 +739,6 @@ b6:                                               ; preds = %b5, %b4
 
 b7:                                               ; preds = %b6
   call void @prism_rc_dec(i64 %t35)
-  call void @prism_native_kont_leave()
   ret i64 %t12
 
 b8:                                               ; preds = %b6
@@ -782,15 +746,12 @@ b8:                                               ; preds = %b6
   call void @prism_rc_dec(i64 %t35)
   %t41 = call i64 @prism_str_lit(ptr @.str0, i64 49)
   call void @prism_fatal(i64 %t41)
-  call void @prism_native_kont_leave()
   ret i64 0
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_22.region(i64 %a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_22.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %a0)
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -805,7 +766,6 @@ b2:                                               ; preds = %entry
   %t4 = load i64, ptr %t3, align 8
   call void @prism_rc_inc(i64 %t4)
   call void @prism_rc_dec(i64 %a0)
-  call void @prism_native_kont_leave()
   ret i64 %t4
 
 b3:                                               ; preds = %entry
@@ -880,7 +840,6 @@ b8:                                               ; preds = %b6
   call void @prism_rc_dec(i64 %t14)
   %t82 = call i64 @prism_str_lit(ptr @.str2, i64 49)
   call void @prism_fatal(i64 %t82)
-  call void @prism_native_kont_leave()
   ret i64 0
 
 b11:                                              ; preds = %b7
@@ -892,8 +851,6 @@ b11:                                              ; preds = %b7
   call void @prism_rc_inc(i64 %t59)
   call void @prism_rc_dec(i64 %t52)
   %t63 = call i64 @prism_qApply(i64 %t57, i64 %t59)
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_22.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %t63)
   %t64 = musttail call i64 @prism_22.region(i64 %t63)
   ret i64 %t64
 
@@ -909,7 +866,6 @@ b12:                                              ; preds = %b7
   call void @prism_rc_dec(i64 %t52)
   %t74 = call i64 @prism_str_lit(ptr @.str1, i64 53)
   call void @prism_fatal(i64 %t74)
-  call void @prism_native_kont_leave()
   ret i64 0
 
 b13:                                              ; preds = %b7
@@ -917,7 +873,6 @@ b13:                                              ; preds = %b7
   %t77 = load i64, ptr %t76, align 8
   call void @prism_rc_inc(i64 %t77)
   call void @prism_rc_dec(i64 %t52)
-  call void @prism_native_kont_leave()
   ret i64 %t77
 
 b10:                                              ; preds = %b7
@@ -928,8 +883,6 @@ b10:                                              ; preds = %b7
 ; Function Attrs: nounwind
 define i64 @prism_46.region(i64 %a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_46.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %a0)
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -944,7 +897,6 @@ b2:                                               ; preds = %entry
   %t4 = load i64, ptr %t3, align 8
   call void @prism_rc_inc(i64 %t4)
   call void @prism_rc_dec(i64 %a0)
-  call void @prism_native_kont_leave()
   ret i64 %t4
 
 b3:                                               ; preds = %entry
@@ -1032,8 +984,6 @@ b11:                                              ; preds = %b7
   call void @prism_rc_inc(i64 %t61)
   call void @prism_rc_dec(i64 %t54)
   %t65 = call i64 @prism_qApply(i64 %t59, i64 %t61)
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_46.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %t65)
   %t66 = musttail call i64 @prism_46.region(i64 %t65)
   ret i64 %t66
 
@@ -1049,7 +999,6 @@ b12:                                              ; preds = %b7
   call void @prism_rc_dec(i64 %t54)
   %t76 = call i64 @prism_str_lit(ptr @.str3, i64 53)
   call void @prism_fatal(i64 %t76)
-  call void @prism_native_kont_leave()
   ret i64 0
 
 b13:                                              ; preds = %b7
@@ -1057,7 +1006,6 @@ b13:                                              ; preds = %b7
   %t79 = load i64, ptr %t78, align 8
   call void @prism_rc_inc(i64 %t79)
   call void @prism_rc_dec(i64 %t54)
-  call void @prism_native_kont_leave()
   ret i64 %t79
 
 b10:                                              ; preds = %b7
@@ -1115,7 +1063,6 @@ b18:                                              ; preds = %b16
   call void @prism_rc_dec(i64 %t14)
   %t147 = call i64 @prism_str_lit(ptr @.str5, i64 49)
   call void @prism_fatal(i64 %t147)
-  call void @prism_native_kont_leave()
   ret i64 0
 
 b21:                                              ; preds = %b17
@@ -1127,8 +1074,6 @@ b21:                                              ; preds = %b17
   call void @prism_rc_inc(i64 %t124)
   call void @prism_rc_dec(i64 %t117)
   %t128 = call i64 @prism_qApply(i64 %t122, i64 %t124)
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_46.region, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %t128)
   %t129 = musttail call i64 @prism_46.region(i64 %t128)
   ret i64 %t129
 
@@ -1144,7 +1089,6 @@ b22:                                              ; preds = %b17
   call void @prism_rc_dec(i64 %t117)
   %t139 = call i64 @prism_str_lit(ptr @.str4, i64 53)
   call void @prism_fatal(i64 %t139)
-  call void @prism_native_kont_leave()
   ret i64 0
 
 b23:                                              ; preds = %b17
@@ -1152,7 +1096,6 @@ b23:                                              ; preds = %b17
   %t142 = load i64, ptr %t141, align 8
   call void @prism_rc_inc(i64 %t142)
   call void @prism_rc_dec(i64 %t117)
-  call void @prism_native_kont_leave()
   ret i64 %t142
 
 b20:                                              ; preds = %b17
@@ -1171,12 +1114,6 @@ declare void @prism_print_int(i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_print_nl() #0
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_leave() #0
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_arg(i64, i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_drive_step() #0
@@ -1199,9 +1136,6 @@ declare void @prism_fatal(i64) #0
 ; Function Attrs: nounwind
 define i64 @prism_qApply(i64 %a0, i64 %a1) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_qApply, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %a0)
-  call void @prism_native_kont_arg(i64 1, i64 %a1)
   call void @prism_drive_step()
   %t0 = call i64 @prism_taq_uncons(i64 %a0)
   call void @prism_rc_dec(i64 %a0)
@@ -1221,7 +1155,6 @@ b2:                                               ; preds = %entry
   %t9 = getelementptr inbounds i8, ptr %t6, i64 24
   store i64 %a1, ptr %t9, align 8
   %t10 = ptrtoint ptr %t6 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t10
 
 b3:                                               ; preds = %entry
@@ -1251,9 +1184,6 @@ b6:                                               ; preds = %b3
   %t23 = load i64, ptr %t22, align 8
   call void @prism_rc_inc(i64 %t23)
   call void @prism_rc_dec(i64 %t18)
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_qApply, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %t14)
-  call void @prism_native_kont_arg(i64 1, i64 %t23)
   %t26 = musttail call i64 @prism_qApply(i64 %t14, i64 %t23)
   ret i64 %t26
 
@@ -1286,7 +1216,6 @@ b7:                                               ; preds = %b3
   %t48 = getelementptr inbounds i8, ptr %t42, i64 48
   store i64 %t40, ptr %t48, align 8
   %t49 = ptrtoint ptr %t42 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t49
 
 b5:                                               ; preds = %b3
@@ -1295,14 +1224,8 @@ b5:                                               ; preds = %b3
 }
 
 ; Function Attrs: nounwind
-declare void @prism_native_kont_tailcall(ptr, i64) #0
-
-; Function Attrs: nounwind
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_apply_1, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_clos)
-  call void @prism_native_kont_arg(i64 1, i64 %_a0)
   %_cp = inttoptr i64 %_clos to ptr
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
@@ -1404,7 +1327,6 @@ _dead:                                            ; preds = %entry
 
 _merge:                                           ; preds = %_lam14, %_lam13, %_lam12, %_lam11, %_lam10, %_lam9, %_lam8, %_lam7, %_lam6, %_lam5, %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
   %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ], [ %_r5, %_lam5 ], [ %_r6, %_lam6 ], [ %_r7, %_lam7 ], [ %_r8, %_lam8 ], [ %_r9, %_lam9 ], [ %_r10, %_lam10 ], [ %_r11, %_lam11 ], [ %_r12, %_lam12 ], [ %_r13, %_lam13 ], [ %_r14, %_lam14 ]
-  call void @prism_native_kont_leave()
   ret i64 %_result
 }
 
@@ -1426,8 +1348,6 @@ declare i64 @prism_taq_concat(i64, i64) #0
 ; Function Attrs: nounwind
 define i64 @prism_lam_0(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_0, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
   store i64 1, ptr %t5, align 8
@@ -1441,7 +1361,6 @@ entry:
   store i64 0, ptr %t10, align 8
   %t11 = ptrtoint ptr %t4 to i64
   call void @prism_effop_alloc()
-  call void @prism_native_kont_leave()
   ret i64 %t11
 }
 
@@ -1451,8 +1370,6 @@ declare void @prism_effop_alloc() #0
 ; Function Attrs: nounwind
 define i64 @prism_lam_1(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_1, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
   store i64 1, ptr %t5, align 8
@@ -1466,15 +1383,12 @@ entry:
   store i64 0, ptr %t10, align 8
   %t11 = ptrtoint ptr %t4 to i64
   call void @prism_effop_alloc()
-  call void @prism_native_kont_leave()
   ret i64 %t11
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_2(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_2, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
   store i64 1, ptr %t5, align 8
@@ -1488,15 +1402,12 @@ entry:
   store i64 0, ptr %t10, align 8
   %t11 = ptrtoint ptr %t4 to i64
   call void @prism_effop_alloc()
-  call void @prism_native_kont_leave()
   ret i64 %t11
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_3(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_3, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t1 = call ptr @prism_alloc(i64 1)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 0, ptr %t2, align 8
@@ -1518,16 +1429,12 @@ entry:
   store i64 9, ptr %t20, align 8
   %t22 = ptrtoint ptr %t19 to i64
   %t23 = call i64 @prism_ebind(i64 %t17, i64 %t22)
-  call void @prism_native_kont_leave()
   ret i64 %t23
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_4(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_4, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1541,9 +1448,6 @@ entry:
   %t11 = getelementptr inbounds i8, ptr %t8, i64 24
   store i64 %_p0, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_ebind, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %t6)
-  call void @prism_native_kont_arg(i64 1, i64 %t12)
   %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
   ret i64 %t13
 }
@@ -1551,9 +1455,6 @@ entry:
 ; Function Attrs: nounwind
 define i64 @prism_lam_5(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_5, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1567,9 +1468,6 @@ entry:
   %t11 = getelementptr inbounds i8, ptr %t8, i64 24
   store i64 %_p0, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_ebind, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %t6)
-  call void @prism_native_kont_arg(i64 1, i64 %t12)
   %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
   ret i64 %t13
 }
@@ -1577,9 +1475,6 @@ entry:
 ; Function Attrs: nounwind
 define i64 @prism_lam_6(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_6, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1593,9 +1488,6 @@ entry:
   %t11 = getelementptr inbounds i8, ptr %t8, i64 24
   store i64 %_p0, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
-  call void @prism_native_kont_tailcall(ptr @.kont.shadow.prism_ebind, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %t6)
-  call void @prism_native_kont_arg(i64 1, i64 %t12)
   %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
   ret i64 %t13
 }
@@ -1603,8 +1495,6 @@ entry:
 ; Function Attrs: nounwind
 define i64 @prism_lam_7(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_7, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
   store i64 0, ptr %t3, align 8
@@ -1618,15 +1508,12 @@ entry:
   store i64 %_p0, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
   %t13 = call i64 @prism_ebind(i64 %t6, i64 %t12)
-  call void @prism_native_kont_leave()
   ret i64 %t13
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_8(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_8, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
   store i64 1, ptr %t5, align 8
@@ -1640,15 +1527,12 @@ entry:
   store i64 0, ptr %t10, align 8
   %t11 = ptrtoint ptr %t4 to i64
   call void @prism_effop_alloc()
-  call void @prism_native_kont_leave()
   ret i64 %t11
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_9(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_9, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   call void @prism_rc_dec(i64 %_p0)
   %t3 = call ptr @prism_alloc(i64 1)
   %t4 = getelementptr inbounds i8, ptr %t3, i64 8
@@ -1661,16 +1545,12 @@ entry:
   store i64 14, ptr %t10, align 8
   %t12 = ptrtoint ptr %t9 to i64
   %t13 = call i64 @prism_ebind(i64 %t7, i64 %t12)
-  call void @prism_native_kont_leave()
   ret i64 %t13
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_10(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_10, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 2)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1680,16 +1560,12 @@ entry:
   %t6 = getelementptr inbounds i8, ptr %t2, i64 32
   store i64 %_fv0, ptr %t6, align 8
   %t7 = ptrtoint ptr %t2 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t7
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_11(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_11, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 2)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1699,16 +1575,12 @@ entry:
   %t6 = getelementptr inbounds i8, ptr %t2, i64 32
   store i64 %_fv0, ptr %t6, align 8
   %t7 = ptrtoint ptr %t2 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t7
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_12(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_12, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t2 = call ptr @prism_alloc(i64 2)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1718,16 +1590,12 @@ entry:
   %t6 = getelementptr inbounds i8, ptr %t2, i64 32
   store i64 %_fv0, ptr %t6, align 8
   %t7 = ptrtoint ptr %t2 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t7
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_13(i64 %_fv0, i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_13, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_fv0)
-  call void @prism_native_kont_arg(i64 1, i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
   %t1 = and i64 %_fv0, %_p0
   %t3 = and i64 %t1, 1
@@ -1761,15 +1629,12 @@ b2:                                               ; preds = %b1, %b3
   %t21 = getelementptr inbounds i8, ptr %t18, i64 24
   store i64 %t16, ptr %t21, align 8
   %t22 = ptrtoint ptr %t18 to i64
-  call void @prism_native_kont_leave()
   ret i64 %t22
 }
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_14(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_14, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
   store i64 1, ptr %t5, align 8
@@ -1783,7 +1648,6 @@ entry:
   store i64 0, ptr %t10, align 8
   %t11 = ptrtoint ptr %t4 to i64
   call void @prism_effop_alloc()
-  call void @prism_native_kont_leave()
   ret i64 %t11
 }
 

@@ -10,7 +10,7 @@ The type is wired in; the prelude opens this module, so these are in unqualified
 
 ### `is_ok`
 
-```prism,sig,h-0868e95a4201d1650dcbf45b345cd5bc0db15228c88ea312c3c405a57a3d8842
+```prism,sig,h-3921f17fb00ab1cc691b8aecfc4d0ce5440bd4a86325dbd1042e09ae28067151
 is_ok : forall a b. (Result(a, b)) -> Bool
 ```
 
@@ -18,7 +18,7 @@ True when the result is `Ok`.
 
 ### `is_err`
 
-```prism,sig,h-76eeb25db20ed472b6193d6ed7be73fdd935220e1ee0ce13fcbb6f47488a93c4
+```prism,sig,h-7ed51dcc882c4cd38297f2d76f3c4105515cf5f395e617a4825c88ee0de6c277
 is_err : forall a b. (Result(a, b)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True when the result is `Err`.
 
 ### `map_result`
 
-```prism,sig,h-107d5ac519c4d2d98db4f7f54d52d12b81127324f082d5f0526885bcd30d62b4
+```prism,sig,h-6d7505d801888c6d06045761a8ca4984d98a9e02820f9513e051530a63f658d5
 map_result : forall e0 a b c. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! {e0}
 ```
 
@@ -34,7 +34,7 @@ Apply `f` to the `Ok` value, leaving an `Err` untouched.
 
 ### `and_then_result`
 
-```prism,sig,h-8aa44499400773357c2d246abf5239d1c9fc5eb10b8b8112ff67883198326ccb
+```prism,sig,h-762e3c763cebc49e596b3f8653d3571398616e314c9bd9a09d32efb59c4acf63
 and_then_result : forall e0 a b c. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0}
 ```
 
@@ -42,7 +42,7 @@ Chain a result-returning function, short-circuiting on `Err` (monadic bind for `
 
 ### `result_or`
 
-```prism,sig,h-030d4f25341b063f5c367256d9a9a227e154afac24067a436fef1e007f68aa2f
+```prism,sig,h-99e0f3e001404bb7ed5ad87828b76d9d76797e24a60123954f5dd443381376e2
 result_or : forall a b. (a, Result(a, b)) -> a
 ```
 
@@ -50,7 +50,7 @@ The `Ok` value, or the default `d` when the result is `Err`.
 
 ### `ok_of_option`
 
-```prism,sig,h-567bd90cbe152162c9b634e3b37aaa00d64d4feb2c531d5d6107aa0b14eb2fcb
+```prism,sig,h-a3bca133e1a3a87cc96f4222ebeff1b6bea496a2fcb635b34b923f95fbcd167f
 ok_of_option : forall a b. (a, Option(b)) -> Result(b, a)
 ```
 
@@ -58,7 +58,7 @@ Convert an `Option` to a `Result`, using `err` in place of `None`.
 
 ### `option_of_result`
 
-```prism,sig,h-3f687179278a126dab34ed4eadc04b5314c6e8e80a1a8fe9cb6e10410ecced2a
+```prism,sig,h-e24057e16a4870c67ff0a2e5446602e20dbb8463b4ef14276179adfa98f023a5
 option_of_result : forall a b. (Result(a, b)) -> Option(a)
 ```
 

@@ -58,6 +58,15 @@ pub struct CanonicalKey {
     pub head: String,
 }
 
+/// A canonical index transaction rejected a divergent binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalConflict {
+    pub incoming_index: usize,
+    pub key: CanonicalKey,
+    pub existing: String,
+    pub incoming: String,
+}
+
 fn index_dir(root: &Path) -> PathBuf {
     root.join(INDEX_DIR)
 }
@@ -222,6 +231,31 @@ pub(super) fn set_canonical(
     write_canonical(root, &map)
 }
 
+pub(super) fn merge_canonicals(
+    root: &Path,
+    bindings: &[(CanonicalKey, String)],
+) -> io::Result<Result<(), CanonicalConflict>> {
+    let _lock = Lock::acquire(root)?;
+    let mut map = load_canonical(root)?;
+    for (incoming_index, (key, incoming)) in bindings.iter().enumerate() {
+        if let Some(existing) = map.get(&(key.class.clone(), key.head.clone())) {
+            if existing != incoming {
+                return Ok(Err(CanonicalConflict {
+                    incoming_index,
+                    key: key.clone(),
+                    existing: existing.clone(),
+                    incoming: incoming.clone(),
+                }));
+            }
+        }
+    }
+    for (key, incoming) in bindings {
+        map.insert((key.class.clone(), key.head.clone()), incoming.clone());
+    }
+    write_canonical(root, &map)?;
+    Ok(Ok(()))
+}
+
 pub(super) fn canonical(root: &Path, key: &CanonicalKey) -> io::Result<Option<String>> {
     Ok(load_canonical(root)?.remove(&(key.class.clone(), key.head.clone())))
 }
@@ -333,5 +367,31 @@ mod tests {
         let names = load_names(&root).unwrap();
         assert_eq!(names.get("alpha").map(String::as_str), Some("hash-alpha"));
         assert_eq!(names.get("beta").map(String::as_str), Some("hash-beta"));
+    }
+
+    #[test]
+    fn canonical_merge_rejects_conflict_without_overwrite() {
+        let tmp = TempDir::new("canonical-conflict");
+        let root = &tmp.path;
+        fs::create_dir_all(index_dir(root)).unwrap();
+        let key = CanonicalKey {
+            class: "Ord".to_string(),
+            head: "Int".to_string(),
+        };
+
+        assert_eq!(
+            merge_canonicals(root, &[(key.clone(), "hash-a".to_string())]).unwrap(),
+            Ok(()),
+        );
+        assert_eq!(
+            merge_canonicals(root, &[(key.clone(), "hash-b".to_string())]).unwrap(),
+            Err(CanonicalConflict {
+                incoming_index: 0,
+                key: key.clone(),
+                existing: "hash-a".to_string(),
+                incoming: "hash-b".to_string(),
+            }),
+        );
+        assert_eq!(canonical(root, &key).unwrap().as_deref(), Some("hash-a"));
     }
 }

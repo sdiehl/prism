@@ -24,6 +24,45 @@ use super::writer::{render_source, set_dependency};
 const MANIFEST: &str = "prism.toml";
 const LOCKFILE: &str = "prism.lock";
 
+/// `prism pkg init`: create a minimal package directory from scratch.
+///
+/// # Errors
+/// Fails when the package name or directory is empty, the package name is not a
+/// simple manifest name, the target directory already exists, or a filesystem
+/// write fails.
+pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::Resolve("package name cannot be empty".into()));
+    }
+    if !is_package_name(name) {
+        return Err(Error::Resolve(format!(
+            "package name `{name}` must contain only ASCII letters, digits, `_`, or `-`"
+        )));
+    }
+    if dir.as_os_str().is_empty() {
+        return Err(Error::Resolve("directory name cannot be empty".into()));
+    }
+    if dir.exists() {
+        return Err(Error::Resolve(format!(
+            "`{}` already exists; `prism pkg init` creates a new package directory",
+            dir.display()
+        )));
+    }
+
+    fs::create_dir_all(dir.join("src"))?;
+    fs::write(
+        dir.join(MANIFEST),
+        format!("[package]\nname = \"{name}\"\n\n[bin]\nentry = \"src/main.pr\"\n"),
+    )?;
+    fs::write(
+        dir.join("src").join("main.pr"),
+        "fn main() = println(\"Hello World from Prism! Taste the rainbow.\")\n",
+    )?;
+
+    Ok(format!("created package `{name}` at {}", dir.display()))
+}
+
 /// `prism add <git-url-or-hash>`: record a dependency in `prism.toml`, and pin its
 /// resolved root hash in `prism.lock` when it can be resolved locally.
 ///
@@ -235,6 +274,11 @@ fn store_name(store: &Store, hash: &str) -> Option<String> {
 // A short, human-facing hash prefix for labels, the same width the dumps use.
 fn short(hash: &str) -> String {
     hash.chars().take(HASH_PREFIX_HEX).collect()
+}
+
+fn is_package_name(name: &str) -> bool {
+    name.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 fn load_lock(root: &Path) -> Result<Lock, Error> {

@@ -1,29 +1,22 @@
 ---
 source: tests/alloc_certificate.rs
-assertion_line: 51
 expression: out
 ---
 === closure value ===
-allocation certificate `without alloc` failed for function `make`: allocates a fresh closure (no reuse token available)
-witness: a lambda/thunk value must be materialized as a closure cell; call a named function directly or move the lambda outside the zero-allocation region
+allocation certificate `@ noalloc` failed for function `make`: in `make`, a lambda is materialized as a fresh closure cell
 === explicit fbip allocation ===
-usage check `fbip` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 === fip calls fbip ===
-usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
-witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
+usage check `fip` failed for function `use_it`: in `use_it`, call to `helper` is not certified `fip`, so bounded stack and zero allocation cannot be proven
 === fresh constructor ===
-allocation certificate `without alloc` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 === fresh tuple ===
-allocation certificate `without alloc` failed for function `pair`: allocates a fresh `tuple` (no reuse token available)
-witness: `tuple` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+allocation certificate `@ noalloc` failed for function `pair`: in `pair`, a tuple is built fresh outside `reuse`
+=== hoisted region fresh ===
+allocation certificate `@ noalloc` failed for function `wrap_region`: in `wrap_region`, constructor `Box` is built fresh outside `reuse`
 === indirect call ===
-allocation certificate `without alloc` failed for function `apply`: calls a first-class function value
-witness: indirect calls have no callee certificate at this call site; call a named `fip`/`without alloc` function directly or move the call outside the zero-allocation region
-=== lifted block ===
-allocation certificate `without alloc` failed for block: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+allocation certificate `@ noalloc` failed for function `apply`: in `apply`, an indirect call through a first-class function value has no callee certificate
+=== many alloc sites ===
+allocation certificate `@ noalloc` failed for function `many`: in `many`, constructor `Wrap` is built fresh outside `reuse`; constructor `Wrap` is built fresh outside `reuse`; constructor `Wrap` is built fresh outside `reuse`; and 2 more
 === uncertified callee ===
-allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
-witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree
+allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)

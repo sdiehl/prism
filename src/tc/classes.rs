@@ -12,7 +12,7 @@ use crate::names::{dict_ctor, module_of};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, NodeId, Program};
 use crate::types::ty::{EffRow, Kind, Type};
-use crate::types::SHOW_CLASS;
+use crate::types::{EQ_CLASS, ORD_CLASS, SHOW_CLASS};
 
 // Cap on recursive instance resolution: a cyclic or diverging instance set
 // reports an error instead of overflowing the stack.
@@ -103,22 +103,43 @@ impl Tc<'_> {
                 self.subtype(&val, &elem).map_err(|e| e.at(op.span))?;
             }
         }
-        // Resolve deferred numeric operands next, so dictionary resolution below
-        // sees their final types. An operand a later use already pinned to a
-        // fixed-width lane is recorded; one still ambiguous defaults to `Int`; a
-        // `Float` or non-numeric one (an int operator on a float) is rejected.
-        for (id, span, t) in std::mem::take(&mut self.num_default) {
+        // Resolve deferred numeric/comparison operands next, so dictionary
+        // resolution below sees their final types. Arithmetic leftovers default
+        // to `Int`; Eq/Ord leftovers either select a primitive lane or raise the
+        // corresponding class obligation on the final non-primitive type.
+        for (id, span, t, class) in std::mem::take(&mut self.num_default) {
             let t = self.apply(&t);
-            match &t {
-                Type::Int => {}
-                // `Float` joined the arithmetic operators with the tower, so a
-                // deferred operand that resolved to it is recorded like a
-                // fixed-width lane rather than rejected.
-                Type::I64 | Type::U64 | Type::Float => {
-                    self.fixed.insert(id, t);
+            if let Some(class) = class {
+                match (&t, class) {
+                    (Type::Int, _) => {}
+                    (Type::I64 | Type::U64, _)
+                    | (Type::Float, EQ_CLASS | ORD_CLASS)
+                    | (Type::Bool | Type::Str, EQ_CLASS) => {
+                        self.fixed.insert(id, t);
+                    }
+                    (Type::Exist(_), _) => {
+                        self.default_numeric(&t, span)?;
+                    }
+                    _ => {
+                        self.wanted.push(Wanted {
+                            id,
+                            span,
+                            items: vec![(class.into(), t, None)],
+                        });
+                    }
                 }
-                other => {
-                    self.default_numeric(other, span)?;
+            } else {
+                match &t {
+                    Type::Int => {}
+                    // `Float` joined the arithmetic operators with the tower, so a
+                    // deferred operand that resolved to it is recorded like a
+                    // fixed-width lane rather than rejected.
+                    Type::I64 | Type::U64 | Type::Float => {
+                        self.fixed.insert(id, t);
+                    }
+                    other => {
+                        self.default_numeric(other, span)?;
+                    }
                 }
             }
         }
@@ -198,7 +219,7 @@ impl Tc<'_> {
                     span,
                     msg: format!("unknown instance `{name}`"),
                 })?;
-            if info.class != class {
+            if info.class.as_str() != class {
                 return Err(TypeError::Other {
                     span,
                     msg: format!(

@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/coeffect_tail.pr
+---
+== tokens ==
+VOpen Fn Ident("f") LParen Ident("x") Colon KwInt At LBrace Ident("once") Bar Ident("u") RBrace RParen Colon KwInt Eq Ident("x") VClose
+
+== parse ==
+Parse Error: usage-row polymorphism (`@ {fact | tail}`) is reserved but not implemented
+   ╭─[ <source>:3:10 ]
+   │
+ 3 │ fn f(x : Int @ {once | u}) : Int = x
+   │          ────────┬───────  
+   │                  ╰───────── here
+───╯

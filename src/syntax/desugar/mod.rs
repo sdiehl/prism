@@ -13,8 +13,10 @@ use super::ast::{
     BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
     NodeId, Param, Pattern, Phase, Program, Spanned, Suffix, Ty, S,
 };
+use crate::coeffect::CoeffectFact;
 use crate::error::TypeError;
 use crate::fresh::Fresh;
+use crate::kw;
 use crate::names;
 
 mod aliases;
@@ -35,8 +37,8 @@ use synonyms::expand_synonyms;
 
 pub use sugar::{
     assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, interp_lit, let_pat,
-    let_stmt, open_if, pattern_decl, seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem,
-    DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT, FLIP_INSTANCE,
+    let_stmt, lift_noalloc, open_if, pattern_decl, seq_stmt, try_mark, with_rest, with_stmt,
+    IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT, FLIP_INSTANCE,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -63,9 +65,6 @@ pub(super) struct Cx {
     pub(super) errors: BTreeSet<String>,
     pub(super) patterns: PatMap,
     pub(super) fn_sigs: BTreeMap<String, FnSig>,
-    // Synthetic top-level functions lifted out of `without alloc { .. }` blocks,
-    // drained into the program's `fns` after every body is rewritten.
-    pub(super) lifted: Vec<Decl<Core>>,
 }
 
 // Hygienic return-type var for a throw op: never resumes, so the checker
@@ -223,7 +222,13 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
             let tv = Ty::Var(cl.param.clone());
             let ret_ty = ret.as_ref().clone();
             let body = call(evar(method, p.span), vec![evar("_x", p.span)], p.span);
-            let mut d = lift_lam(names::pat_view(&p.name), lam1("_x", body, p.span), p.span);
+            let mut d = lift_lam(
+                names::pat_view(&p.name),
+                lam1("_x", body, p.span),
+                p.span,
+                "view",
+                &p.name,
+            )?;
             d.params[0].ty = Some(tv.clone());
             d.ret = Some(ret_ty);
             d.constraints = vec![Constraint {
@@ -238,7 +243,13 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
                 data.params.iter().cloned().map(Ty::Var).collect(),
             );
             make_ret = Some(fty.clone());
-            let mut d = lift_lam(names::pat_view(&p.name), p.view.clone(), p.span);
+            let mut d = lift_lam(
+                names::pat_view(&p.name),
+                p.view.clone(),
+                p.span,
+                "view",
+                &p.name,
+            )?;
             d.params[0].ty = Some(fty);
             d
         } else {
@@ -270,7 +281,7 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
             .position(|d| d.span.start > p.span.start)
             .unwrap_or(prog.fns.len());
         if let Some(mk) = p.make {
-            let mut d = lift_lam(names::pat_make(&p.name), mk, p.span);
+            let mut d = lift_lam(names::pat_make(&p.name), mk, p.span, "make", &p.name)?;
             d.ret = make_ret;
             prog.fns.insert(at, d);
         }
@@ -296,11 +307,28 @@ fn fold_wheres(d: &mut Decl) {
         });
 }
 
-fn lift_lam(name: String, lam: S<Expr>, span: Span) -> Decl {
+// Lower a pattern clause body into a hidden top-level function. A `view`/`make`
+// clause must be written as a lambda (`view` takes the scrutinee, `make` one
+// argument per pattern parameter); a bare expression (e.g. a plain function
+// reference) has no parameters to bind and is rejected with a pointed error
+// rather than reaching the constructor blindly.
+fn lift_lam(
+    name: String,
+    lam: S<Expr>,
+    span: Span,
+    clause: &str,
+    pat: &str,
+) -> Result<Decl, TypeError> {
+    let clause_span = lam.span;
     let Expr::Lam(params, body) = lam.node else {
-        unreachable!("ICE: pattern clause is not a lambda")
+        return Err(TypeError::Other {
+            span: clause_span,
+            msg: format!(
+                "`{clause}` clause of pattern `{pat}` must be a lambda, as in `{clause} \\(x) -> ...`"
+            ),
+        });
     };
-    Decl {
+    Ok(Decl {
         name,
         params,
         ret: None,
@@ -312,9 +340,8 @@ fn lift_lam(name: String, lam: S<Expr>, span: Span) -> Decl {
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
-        no_alloc_bs: false,
         span,
-    }
+    })
 }
 
 // A later definition replaces an earlier one of the same name, so user
@@ -338,11 +365,14 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
     let mut effs = BTreeSet::new();
     let mut ops: BTreeMap<&str, &str> = BTreeMap::new();
     for e in &prog.effects {
-        if crate::names::RESERVED_SEAM_EFFECTS.contains(&e.name.as_str()) {
+        if let Some((_, reason)) = crate::names::RESERVED_SEAM_EFFECTS
+            .iter()
+            .find(|(n, _)| *n == e.name)
+        {
             return Err(TypeError::Other {
                 span: e.span,
                 msg: format!(
-                    "effect `{}` is a reserved name (reserved for the concurrency preemption seam)",
+                    "effect `{}` is a reserved name (reserved for {reason})",
                     e.name
                 ),
             });
@@ -368,6 +398,95 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
     Ok(())
 }
 
+// Reject any usage row that survives in a type. One walk over every surface
+// position that carries a `Ty` (fn signatures, class methods, instance heads,
+// contexts and methods, data constructors, effect operations, synonyms, and
+// aliases), one diagnostic shape, so no reserved fact can acquire a meaning by
+// slipping through a position this pass does not visit.
+fn reject_coeffect_tys(prog: &Program) -> Result<(), TypeError> {
+    fn check(t: &Ty, span: Span) -> Result<(), TypeError> {
+        if let Ty::Coeffect(_, row) = t {
+            let msg = row.first_unwired().map_or_else(
+                || {
+                    format!(
+                        "`{} {}` certifies a function declaration: write it after a `fn`'s return type",
+                        kw::AT,
+                        CoeffectFact::Noalloc
+                    )
+                },
+                |f| format!("usage fact `{f}` is reserved but not implemented"),
+            );
+            return Err(TypeError::Other { span, msg });
+        }
+        let mut out = Ok(());
+        t.each_child(&mut |c| {
+            if out.is_ok() {
+                out = check(c, span);
+            }
+        });
+        out
+    }
+    let check_decl = |d: &Decl| -> Result<(), TypeError> {
+        for p in &d.params {
+            if let Some(t) = &p.ty {
+                check(t, d.span)?;
+            }
+        }
+        if let Some(t) = &d.ret {
+            check(t, d.span)?;
+        }
+        Ok(())
+    };
+    for d in &prog.fns {
+        check_decl(d)?;
+    }
+    for c in &prog.classes {
+        for (_, t) in &c.methods {
+            check(t, c.span)?;
+        }
+    }
+    for i in &prog.instances {
+        check(&i.head, i.span)?;
+        for c in &i.context {
+            check(&c.ty, i.span)?;
+        }
+        for m in &i.methods {
+            check_decl(m)?;
+        }
+    }
+    for ty in &prog.types {
+        for c in &ty.ctors {
+            for a in &c.args {
+                check(a, ty.span)?;
+            }
+            if let Some(fs) = &c.fields {
+                for (_, ft) in fs {
+                    check(ft, ty.span)?;
+                }
+            }
+        }
+    }
+    for e in &prog.effects {
+        for op in &e.ops {
+            for p in &op.params {
+                check(p, e.span)?;
+            }
+            check(&op.ret, e.span)?;
+        }
+    }
+    for s in &prog.synonyms {
+        check(&s.ty, s.span)?;
+    }
+    for a in &prog.aliases {
+        for label in &a.labels {
+            for arg in &label.args {
+                check(arg, a.span)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// # Errors
 /// Fails on malformed sugar, reported as a type error.
 pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
@@ -386,6 +505,11 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     // current-rung version tag is a synonym), and before the frozen goldens are
     // gated against the recomputed per-rung shape digests.
     expand_stable(&mut prog)?;
+    // Every usage row still inside a type is rejected here, before synonym and
+    // alias expansion can copy one into other positions: the single wired fact
+    // (`@ noalloc` at a `fn` return root) was lifted onto the decl flag at
+    // parse, so anything left is a reserved fact or a misplaced certificate.
+    reject_coeffect_tys(&prog)?;
     expand_synonyms(&mut prog)?;
     expand_aliases(&mut prog)?;
     derive_instances(&mut prog)?;
@@ -447,7 +571,6 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         errors,
         patterns,
         fn_sigs,
-        lifted: Vec::new(),
     };
     let mut fns = Vec::with_capacity(prog.fns.len());
     for mut d in std::mem::take(&mut prog.fns) {
@@ -473,9 +596,6 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         });
     }
     prog.effects.append(&mut cx.effects);
-    // Splice in the functions lifted from `without alloc { .. }` blocks (from both
-    // top-level bodies and instance methods) as ordinary top-level definitions.
-    fns.append(&mut cx.lifted);
     let mut out = Program {
         types: prog.types,
         effects: prog.effects,
@@ -606,7 +726,6 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         fip: d.fip,
         replayable: d.replayable,
         no_alloc: d.no_alloc,
-        no_alloc_bs: d.no_alloc_bs,
         span: d.span,
     })
 }
@@ -624,7 +743,6 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
         errors: BTreeSet::new(),
         patterns: PatMap::new(),
         fn_sigs: BTreeMap::new(),
-        lifted: Vec::new(),
     };
     let mut out = rw(e, &Vars::new(), &mut cx)?;
     ids::assign_expr_ids(&mut out);

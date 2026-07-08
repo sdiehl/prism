@@ -293,7 +293,7 @@ impl Tc<'_> {
             let fi = info
                 .fields
                 .iter()
-                .position(|f| *f == field_name)
+                .position(|f| f.as_str() == field_name)
                 .ok_or_else(|| TypeError::Other {
                     span,
                     msg: format!("unknown field {field_name} on {ctor_name}"),
@@ -500,11 +500,9 @@ impl Tc<'_> {
                     }
                 };
                 let (field_ty, fi) = self.find_field(span, ctor_name.as_str(), field, &te)?;
-                if let Some((cname, info)) = self
-                    .ctors
-                    .iter()
-                    .find(|(_, c)| c.type_name == ctor_name && c.fields.iter().any(|f| *f == field))
-                {
+                if let Some((cname, info)) = self.ctors.iter().find(|(_, c)| {
+                    c.type_name == ctor_name && c.fields.iter().any(|f| f.as_str() == field)
+                }) {
                     self.field_res
                         .insert(id, (cname.clone(), fi, info.args.len()));
                 }
@@ -603,7 +601,7 @@ impl Tc<'_> {
             let fi = info
                 .fields
                 .iter()
-                .position(|f| *f == field_name)
+                .position(|f| f.as_str() == field_name)
                 .ok_or_else(|| TypeError::Other {
                     span,
                     msg: format!("unknown field {field_name} on {ctor_name}"),
@@ -757,7 +755,7 @@ impl Tc<'_> {
                 let mut named: Vec<_> = self
                     .ctors
                     .iter()
-                    .filter(|(_, c)| c.type_name == tname.as_str())
+                    .filter(|(_, c)| c.type_name == tname)
                     .map(|(n, c)| (n.clone(), c.args.len()))
                     .collect();
                 let Some((cname, arity)) = named.pop().filter(|_| named.is_empty()) else {
@@ -909,7 +907,12 @@ impl Tc<'_> {
                 Ok(())
             }
             Type::Exist(_) => {
-                self.num_default.push((id, span, t.clone()));
+                let deferred_class = match class {
+                    NumClass::Eq => Some(EQ_CLASS),
+                    NumClass::Ord => Some(ORD_CLASS),
+                    NumClass::Arith => None,
+                };
+                self.num_default.push((id, span, t.clone(), deferred_class));
                 Ok(())
             }
             _ => match class {

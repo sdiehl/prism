@@ -1,0 +1,120 @@
+-- Prism World: the shared cellular universe as pure, total Prism.
+--
+-- The state is a flat Array(Int) of 0/1 cells, row-major over a toroidal grid
+-- whose width and height travel as ordinary arguments, so a law's identity is a
+-- function of its rule alone, not of the field it runs on. Two life-like laws
+-- are given: Conway (B3/S23) and HighLife (B36/S23). Each `step_*` is a pure
+-- function whose content hash IS its law identity in the browser resident, and
+-- the whole grid evolution is executed through the interpreter, so the universe
+-- the page animates is genuinely this code run as data.
+
+-- Toroidal wrap of a coordinate into 0..m.
+fn wrap(a, m) = mod(mod(a, m) + m, m)
+
+-- The cell at (x, y), wrapping at the edges.
+fn cell(w, h, g, x, y) = array_get(g, wrap(y, h) * w + wrap(x, w))
+
+-- Live neighbours in the Moore neighbourhood (the eight surrounding cells).
+fn neighbours(w, h, g, x, y) =
+  cell(w, h, g, x - 1, y - 1)
+    + cell(w, h, g, x, y - 1)
+    + cell(w, h, g, x + 1, y - 1)
+    + cell(w, h, g, x - 1, y)
+    + cell(w, h, g, x + 1, y)
+    + cell(w, h, g, x - 1, y + 1)
+    + cell(w, h, g, x, y + 1)
+    + cell(w, h, g, x + 1, y + 1)
+
+-- Conway B3/S23: a live cell survives on 2 or 3 neighbours, a dead cell is born
+-- on exactly 3.
+fn conway_cell(w, h, g, i) =
+  let x = mod(i, w)
+  let y = i / w
+  let n = neighbours(w, h, g, x, y)
+  if array_get(g, i) == 1 then
+    if n == 2 || n == 3 then
+      1
+    else
+      0
+  elif n == 3 then
+    1
+  else
+    0
+
+fn step_conway(w, h, g) =
+  array_of_list(map(\(i) -> conway_cell(w, h, g, i), range(0, w * h)))
+
+-- HighLife B36/S23: identical survival, but a dead cell is also born on 6, which
+-- makes the replicator. A different rule is a different law hash.
+fn highlife_cell(w, h, g, i) =
+  let x = mod(i, w)
+  let y = i / w
+  let n = neighbours(w, h, g, x, y)
+  if array_get(g, i) == 1 then
+    if n == 2 || n == 3 then
+      1
+    else
+      0
+  elif n == 3 || n == 6 then
+    1
+  else
+    0
+
+fn step_highlife(w, h, g) =
+  array_of_list(map(\(i) -> highlife_cell(w, h, g, i), range(0, w * h)))
+
+-- Canonical state encoding: the grid printed as its row-major 0/1 string, with a
+-- domain tag naming the format and dimensions so a grid of one size can never
+-- collide with the same bits read at another. The content hash is the same
+-- blake3 the compiler content-addresses Core with, so two clients that reach the
+-- same grid print the same digest with no coordination.
+fn bits(g) = concat_all(map(\(c) -> show_int(c), array_to_list(g)))
+
+fn state_tag(w, h) =
+  concat(
+      "prism-world-life-v1|",
+      concat(show_int(w), concat("x", concat(show_int(h), "|"))),
+    )
+
+fn state_hash(w, h, g) = blake3(concat(state_tag(w, h), bits(g)))
+
+-- Decode a seed bitstring ("010110...") into a grid array; the browser generates
+-- a pattern from a seed and hands it across, so the seed is data too.
+fn bit_of(s, i) = char_at(s, i) - 48
+
+fn grid_of(s) = array_of_list(map(\(i) -> bit_of(s, i), range(0, byte_len(s))))
+
+-- One frame line: the state hash and the raw bits, space-separated.
+fn frame_line(w, h, g) = concat(state_hash(w, h, g), concat(" ", bits(g)))
+
+-- The trajectory under a first-class law value: frames for ticks 0..n, one per
+-- line. `step` is any (w, h, grid) -> grid function, so the same driver runs any
+-- law without knowing which.
+fn trace(w, h, g, step, n) =
+  if n == 0 then
+    frame_line(w, h, g)
+  else
+    concat(
+        frame_line(w, h, g),
+        concat("\n", trace(w, h, step(w, h, g), step, n - 1)),
+      )
+
+-- @world:main-below
+-- A standalone demonstration for the example gate: three ticks of a blinker on a
+-- 5x5 torus printed as raw bits. The wasm resident slices this main off and
+-- supplies its own driver over the definitions above.
+fn demo_seed(i) =
+  let x = mod(i, 5)
+  let y = i / 5
+  if y == 2 && (x == 1 || x == 2 || x == 3) then
+    1
+  else
+    0
+
+fn main() =
+  let g0 = array_of_list(map(demo_seed, range(0, 25)))
+  let g1 = step_conway(5, 5, g0)
+  let g2 = step_conway(5, 5, g1)
+  print(
+      concat(bits(g0), concat("\n", concat(bits(g1), concat("\n", bits(g2))))),
+    )

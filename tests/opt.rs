@@ -57,7 +57,9 @@ fn core_lint_clean_on_corpus() {
             // Only files that compile produce Core; skip error cases / library
             // files with no `main` rather than asserting they compile.
             if let Ok(core) = prism::core_of(&src) {
-                if let Err(errs) = prism::core::lint_core(&core) {
+                if let Err(errs) =
+                    prism::core::lint_core(&core, prism::core::PassStage::PreLowering)
+                {
                     panic!("{}: ill-formed Core:\n{}", path.display(), errs.join("\n"));
                 }
                 checked += 1;

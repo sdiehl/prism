@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fbip_callee.pr
 ---
 == tokens ==
@@ -102,12 +102,10 @@ fn caller(x) =
   return x to t@2; plain(t@2)
 
 == fip ==
-Type Error: usage check `fbip` failed for function `caller`: may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
-witness: `plain` has no zero-allocation certificate, so it may allocate inside `caller`'s call tree
+Type Error: usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
    ╭─[ <source>:7:1 ]
    │
  7 │ fbip fn caller(x) = plain(x)
    │ ──────────────┬─────────────  
-   │               ╰─────────────── usage check `fbip` failed for function `caller`: may only call `fip`/`fbip` functions, but `caller` calls unannotated `plain`
-witness: `plain` has no zero-allocation certificate, so it may allocate inside `caller`'s call tree
+   │               ╰─────────────── usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
 ───╯

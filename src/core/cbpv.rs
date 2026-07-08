@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
 use super::builtins::{Builtin, FloatOp};
 use crate::names::ENTRY_POINT;
@@ -64,6 +65,35 @@ impl CoreOp {
             BinOp::And | BinOp::Or | BinOp::Pow => return None,
         })
     }
+
+    // Stable content-hash tag. Keep these spellings byte-identical to the old
+    // `Debug` rendering, but independent of enum variant names.
+    #[must_use]
+    pub const fn hash_tag(self) -> &'static str {
+        match self {
+            Self::Add => "Add",
+            Self::Sub => "Sub",
+            Self::Mul => "Mul",
+            Self::Div => "Div",
+            Self::Rem => "Rem",
+            Self::Eq => "Eq",
+            Self::Ne => "Ne",
+            Self::Lt => "Lt",
+            Self::Le => "Le",
+            Self::Gt => "Gt",
+            Self::Ge => "Ge",
+            Self::Addf => "Addf",
+            Self::Subf => "Subf",
+            Self::Mulf => "Mulf",
+            Self::Divf => "Divf",
+            Self::Eqf => "Eqf",
+            Self::Nef => "Nef",
+            Self::Ltf => "Ltf",
+            Self::Lef => "Lef",
+            Self::Gtf => "Gtf",
+            Self::Gef => "Gef",
+        }
+    }
 }
 
 // Pattern shapes that survive match compilation. Literals, booleans, and record
@@ -71,7 +101,7 @@ impl CoreOp {
 // so a `Case` arm can only test a ctor or tuple (or bind/ignore the whole
 // scrutinee). Field positions are plain binders (`Some` names it, `None` ignores
 // it); nested sub-patterns are always flattened out, so they cannot appear here.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CorePat {
     Wild,
     Var(Sym),
@@ -79,7 +109,7 @@ pub enum CorePat {
     Tuple(Vec<Option<Sym>>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Var(Sym),
     Int(i64),
@@ -108,7 +138,19 @@ pub enum NegLane {
     Float,
 }
 
-#[derive(Clone, Debug)]
+impl NegLane {
+    // Stable content-hash tag, byte-identical to the old `Debug` rendering.
+    #[must_use]
+    pub const fn hash_tag(self) -> &'static str {
+        match self {
+            Self::Int => "Int",
+            Self::I64 => "I64",
+            Self::Float => "Float",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct HandleOp {
     pub name: Sym,
     pub params: Vec<Sym>,
@@ -162,7 +204,7 @@ impl IoOp {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Comp {
     Return(Value),
     Bind(Box<Self>, Sym, Box<Self>),
@@ -256,6 +298,36 @@ impl Comp {
             Self::RefSet(..) => "RefSet",
         }
     }
+
+    /// A pre-lowering effect node (`Do`, `Handle`, `Mask`). Effect lowering
+    /// eliminates every one of these, so their presence in post-lowering Core is
+    /// a compiler bug. The single canonical membership test for this family; the
+    /// stage lint reads it rather than re-listing the variants.
+    #[must_use]
+    pub const fn is_effect_node(&self) -> bool {
+        matches!(self, Self::Do(..) | Self::Handle { .. } | Self::Mask(..))
+    }
+
+    /// A post-lowering runtime node: the reference-counting forms (`Dup`,
+    /// `Drop`), the in-place reuse forms (`WithReuse`, `Reuse`), and the local
+    /// mutable cell forms (`RefNew`, `RefGet`, `RefSet`). Effect lowering (and the
+    /// rc/reuse passes that run after it) introduce these, so their presence in
+    /// pre-lowering Core is a compiler bug. The single canonical membership test
+    /// for this family; the stage lint reads it rather than re-listing the
+    /// variants.
+    #[must_use]
+    pub const fn is_runtime_node(&self) -> bool {
+        matches!(
+            self,
+            Self::Dup(_)
+                | Self::Drop(_)
+                | Self::WithReuse { .. }
+                | Self::Reuse(..)
+                | Self::RefNew(_)
+                | Self::RefGet(_)
+                | Self::RefSet(..)
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -274,6 +346,45 @@ pub struct CoreFn {
 #[derive(Clone, Debug)]
 pub struct Core {
     pub fns: Vec<CoreFn>,
+}
+
+// Whole-program Core, tagged by its position across the effect-lowering seam so
+// the pipeline cannot route a program to the wrong consumer. Both wrappers are
+// thin newtypes over the same `Core`; they carry no extra data and `Deref` to
+// `&Core`, so a pass inside a stage unwraps for free. Their only job is to make
+// wrong-stage *routing* a type error at the handful of seam signatures that name
+// them: effect lowering consumes an `ElaboratedCore` and yields a `LoweredCore`,
+// native codegen accepts only `LoweredCore`, and the store commit / content
+// hasher accept only `ElaboratedCore`. A wrong-stage *node* inside a tree stays
+// the stage lint's job (`Comp::is_effect_node` / `is_runtime_node`).
+
+/// Post-elaboration, pre-effect-lowering whole-program Core.
+///
+/// Still carries the effect nodes (`Do`, `Handle`, `Mask`) and no runtime nodes.
+/// The interpreter evaluates it directly and the store / content hasher observe
+/// it (identity is a property of the elaborated term, independent of the
+/// optimizer level).
+#[derive(Clone, Debug)]
+pub struct ElaboratedCore(pub Core);
+
+/// Post-effect-lowering whole-program Core. The effect nodes are gone; the
+/// runtime nodes (`Dup`, `Drop`, `WithReuse`, `Reuse`, `RefNew`/`RefGet`/
+/// `RefSet`) may appear. Only native codegen consumes it.
+#[derive(Clone, Debug)]
+pub struct LoweredCore(pub Core);
+
+impl Deref for ElaboratedCore {
+    type Target = Core;
+    fn deref(&self) -> &Core {
+        &self.0
+    }
+}
+
+impl Deref for LoweredCore {
+    type Target = Core;
+    fn deref(&self) -> &Core {
+        &self.0
+    }
 }
 
 // Functions reachable from main. Dead code must not steer whole-program
@@ -322,4 +433,90 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
         }
     }
     super::traverse::Visit::visit_comp(&mut Calls(out), c);
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::{CoreOp, IoOp, NegLane};
+    use std::collections::BTreeSet;
+
+    // Assert a frozen `variant -> tag` table: every entry's `tag` reproduces its
+    // frozen spelling and no two variants share one. The content hash commits to
+    // these strings, so a variant rename that also touched the tag method would
+    // silently move every affected definition's hash; freezing the spelling here
+    // turns that into a test failure instead. The method's own `match` is
+    // exhaustive, so a new variant cannot ship without a tag; this pins that tag.
+    fn frozen<T: Copy>(table: &[(T, &str)], tag: impl Fn(T) -> &'static str) {
+        let mut seen = BTreeSet::new();
+        for &(variant, spelling) in table {
+            assert_eq!(
+                tag(variant),
+                spelling,
+                "hash tag drifted from frozen spelling"
+            );
+            assert!(
+                seen.insert(spelling),
+                "two variants share the hash tag {spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn core_op_hash_tags_are_frozen() {
+        frozen(
+            &[
+                (CoreOp::Add, "Add"),
+                (CoreOp::Sub, "Sub"),
+                (CoreOp::Mul, "Mul"),
+                (CoreOp::Div, "Div"),
+                (CoreOp::Rem, "Rem"),
+                (CoreOp::Eq, "Eq"),
+                (CoreOp::Ne, "Ne"),
+                (CoreOp::Lt, "Lt"),
+                (CoreOp::Le, "Le"),
+                (CoreOp::Gt, "Gt"),
+                (CoreOp::Ge, "Ge"),
+                (CoreOp::Addf, "Addf"),
+                (CoreOp::Subf, "Subf"),
+                (CoreOp::Mulf, "Mulf"),
+                (CoreOp::Divf, "Divf"),
+                (CoreOp::Eqf, "Eqf"),
+                (CoreOp::Nef, "Nef"),
+                (CoreOp::Ltf, "Ltf"),
+                (CoreOp::Lef, "Lef"),
+                (CoreOp::Gtf, "Gtf"),
+                (CoreOp::Gef, "Gef"),
+            ],
+            CoreOp::hash_tag,
+        );
+    }
+
+    #[test]
+    fn neg_lane_hash_tags_are_frozen() {
+        frozen(
+            &[
+                (NegLane::Int, "Int"),
+                (NegLane::I64, "I64"),
+                (NegLane::Float, "Float"),
+            ],
+            NegLane::hash_tag,
+        );
+    }
+
+    #[test]
+    fn io_op_kinds_are_frozen() {
+        frozen(
+            &[
+                (IoOp::Print, "Print"),
+                (IoOp::PrintF, "PrintF"),
+                (IoOp::PrintS, "PrintS"),
+                (IoOp::PrintNl, "PrintNl"),
+                (IoOp::ReadInt, "ReadInt"),
+                (IoOp::ReadLine, "ReadLine"),
+                (IoOp::Rand, "Rand"),
+                (IoOp::Srand, "Srand"),
+            ],
+            IoOp::kind,
+        );
+    }
 }

@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/no_alloc_callee.pr
 ---
 == tokens ==
-VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("mk") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Eq UIdent("Box") LParen Ident("x") RParen VSemi Fn Ident("top") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Without Alloc Eq Ident("mk") LParen Ident("x") RParen VClose
+VOpen Type UIdent("Box") Eq UIdent("Box") LParen KwInt RParen VSemi Fn Ident("mk") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") Eq UIdent("Box") LParen Ident("x") RParen VSemi Fn Ident("top") LParen Ident("x") Colon KwInt RParen Colon UIdent("Box") At Ident("noalloc") Eq Ident("mk") LParen Ident("x") RParen VClose
 
 == ast ==
 Program {
@@ -24,7 +24,7 @@ Program {
             ],
             deriving: [],
             newtype: false,
-            span: 228..247,
+            span: 221..240,
         },
     ],
     effects: [],
@@ -59,21 +59,21 @@ Program {
                         node: Var(
                             "Box",
                         ),
-                        span: 272..275,
+                        span: 265..268,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 276..277,
+                            span: 269..270,
                         },
                     ],
                 ),
-                span: 272..278,
+                span: 265..271,
             },
             wheres: [],
-            span: 249..278,
+            span: 242..271,
         },
         Decl {
             name: "top",
@@ -101,22 +101,22 @@ Program {
                         node: Var(
                             "mk",
                         ),
-                        span: 318..320,
+                        span: 307..309,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 321..322,
+                            span: 310..311,
                         },
                     ],
                 ),
-                span: 318..323,
+                span: 307..312,
             },
             wheres: [],
             no_alloc: true,
-            span: 280..323,
+            span: 273..312,
         },
     ],
 }
@@ -132,12 +132,10 @@ fn top(x) =
   return x to t@1; mk(t@1)
 
 == fip ==
-Type Error: allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
-witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree
+Type Error: allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
    ╭─[ <source>:8:1 ]
    │
- 8 │ fn top(x : Int) : Box without alloc = mk(x)
-   │ ─────────────────────┬─────────────────────  
-   │                      ╰─────────────────────── allocation certificate `without alloc` failed for function `top`: may only call `fip`/`without alloc` functions, but `top` calls unannotated `mk`
-witness: `mk` has no zero-allocation certificate, so it may allocate inside `top`'s call tree
+ 8 │ fn top(x : Int) : Box @ noalloc = mk(x)
+   │ ───────────────────┬───────────────────  
+   │                    ╰───────────────────── allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
 ───╯

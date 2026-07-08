@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/guard_true_exhaustive.pr
 ---
 == tokens ==
@@ -147,12 +147,11 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.kont.shadow.prism_main = private constant [11 x i8] c"prism_main\00"
 @.str0 = private constant [32 x i8] c"ICE: guarded match fell through\00"
-@prism_native_kont_table = constant [839 x i8] c"scheme  prism-core-hash-v1\0Abundle  fbd7eea3c0acd29e2d44f93ade157933c9acc57d927e6d086f66d9a173c5dd0c\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:fbd7eea3c0acd29e2d44f93ade157933c9acc57d927e6d086f66d9a173c5dd0c\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_classify  3b84c2a29758d9f01a6de6795ebb6bb081145611fd54df6833c5cfbe0606f6fe  classify\0Afn      prism_main  77c0800a17ce0a8f77ad194e3a7abffe3a02a76bfc0bdeee66821a555dc09a05  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [943 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  fbd7eea3c0acd29e2d44f93ade157933c9acc57d927e6d086f66d9a173c5dd0c\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:fbd7eea3c0acd29e2d44f93ade157933c9acc57d927e6d086f66d9a173c5dd0c\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_classify 3b84c2a29758d9f01a6de6795ebb6bb081145611fd54df6833c5cfbe0606f6fe classify arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 77c0800a17ce0a8f77ad194e3a7abffe3a02a76bfc0bdeee66821a555dc09a05 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [839 x i8] c"scheme  prism-core-hash-v1\0Abundle  318c0df2c441538b26855654371945a4507cbb94d3518ec32448872c595f92f2\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:318c0df2c441538b26855654371945a4507cbb94d3518ec32448872c595f92f2\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_classify  b556f762198a4849a46ebbbfd130abcb42805d2e9b2d5797d520995d7aa13f12  classify\0Afn      prism_main  dc7a285f7f9f82dea53094feb9d816a2bf35db44c3346134cbba5b001aa695fd  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [943 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  318c0df2c441538b26855654371945a4507cbb94d3518ec32448872c595f92f2\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:318c0df2c441538b26855654371945a4507cbb94d3518ec32448872c595f92f2\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_classify b556f762198a4849a46ebbbfd130abcb42805d2e9b2d5797d520995d7aa13f12 classify arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main dc7a285f7f9f82dea53094feb9d816a2bf35db44c3346134cbba5b001aa695fd main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
-@.kont_hash1 = private constant [65 x i8] c"77c0800a17ce0a8f77ad194e3a7abffe3a02a76bfc0bdeee66821a555dc09a05\00"
+@.kont_hash1 = private constant [65 x i8] c"dc7a285f7f9f82dea53094feb9d816a2bf35db44c3346134cbba5b001aa695fd\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
@@ -161,32 +160,22 @@ source_filename = "prism"
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_main, i64 0)
   br i1 false, label %b0, label %b1
 
 b0:                                               ; preds = %entry
-  call void @prism_native_kont_leave()
   ret i64 1
 
 b1:                                               ; preds = %entry
   br i1 true, label %b2, label %b3
 
 b2:                                               ; preds = %b1
-  call void @prism_native_kont_leave()
   ret i64 3
 
 b3:                                               ; preds = %b1
   %t8 = call i64 @prism_str_lit(ptr @.str0, i64 31)
   call void @prism_fatal(i64 %t8)
-  call void @prism_native_kont_leave()
   ret i64 0
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_enter(ptr, i64) #0
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_leave() #0
 
 ; Function Attrs: nounwind
 declare i64 @prism_str_lit(ptr, i64) #0

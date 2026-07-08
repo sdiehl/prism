@@ -8,9 +8,14 @@
 //!
 //! Beside the index, a local append-only transparency log records every
 //! pointer ever seen with a monotonic sequence number, so a silent repoint of a
-//! published identity is detectable after the fact. This is the log's local rung:
-//! no witnessing, no gossip, just an on-disk record that is only appended to,
-//! never rewritten.
+//! published identity is detectable after the fact. Each line commits the digest
+//! of the previous line (rooted at the header), so an in-place edit anywhere
+//! breaks every later link and reads fail loudly; the chain head is exposed
+//! through `audit` as the one value an external witness pins, which is what
+//! makes a cleanly truncated suffix (the only mutilation a local check cannot
+//! see) detectable after the fact. This is the log's local rung: no gossip
+//! protocol, just an on-disk record that is only appended to, never rewritten,
+//! plus one head hash worth writing down somewhere else.
 //!
 //! Signing is done by an external tool behind a narrow seam ([`sign`],
 //! [`verify_signature`]), so no cryptographic dependency enters the compiler. The
@@ -44,17 +49,22 @@ use crate::store::disk::{resolve_store_path, Store};
 // stops a signature made for one purpose being replayed as another.
 const SIG_NAMESPACE: &str = "prism-package-index";
 
-// Line-oriented, tab-separated, header-versioned artifact formats. A row is one
-// line; hashes and git tags contain no tab, so the separator is unambiguous.
-const INDEX_HEADER_V1: &str = "prism-pkg-index\tv1";
-const INDEX_HEADER_V2: &str = "prism-pkg-index\tv2";
-const INDEX_HEADER_V3: &str = "prism-pkg-index\tv3";
-const INDEX_HEADER_V4: &str = "prism-pkg-index\tv4";
-const LOG_HEADER_V1: &str = "prism-pkg-log\tv1";
-const LOG_HEADER_V2: &str = "prism-pkg-log\tv2";
-const LOG_HEADER_V3: &str = "prism-pkg-log\tv3";
-const LOG_HEADER_V4: &str = "prism-pkg-log\tv4";
+// Line-oriented, tab-separated artifact formats. A row is one line; hashes and
+// git tags contain no tab, so the separator is unambiguous. This compiler is
+// still pre-stability, so the trust surface accepts only the current protocol.
+const INDEX_HEADER: &str = "prism-pkg-index\tv4";
+const LOG_HEADER: &str = "prism-pkg-log\tv5";
 const FIELD_SEP: char = '\t';
+
+// The digest a chained log line carries for its predecessor: the previous
+// line's exact bytes (no newline), in the provenance scheme spelling.
+fn line_digest(line: &str) -> String {
+    format!(
+        "{}:{}",
+        crate::provenance::EVENT_HASH_SCHEME,
+        crate::provenance::sha256_hex(line.as_bytes())
+    )
+}
 
 /// Signed-index kind for a whole-program namespace root.
 pub const INDEX_KIND_NAMESPACE: &str = crate::driver::NAMESPACE_ARTIFACT_KIND;
@@ -146,46 +156,14 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
     // A body with the wrong header parses to no rows rather than an error: callers
     // that need the distinction check `index_artifact` for presence.
     let header = lines.next();
-    if header != Some(INDEX_HEADER_V1)
-        && header != Some(INDEX_HEADER_V2)
-        && header != Some(INDEX_HEADER_V3)
-        && header != Some(INDEX_HEADER_V4)
-    {
+    if header != Some(INDEX_HEADER) {
         return Vec::new();
     }
     lines
         .filter_map(|line| {
             let fields: Vec<&str> = line.split(FIELD_SEP).collect();
             match (header, fields.as_slice()) {
-                (Some(INDEX_HEADER_V1), [name, tag, root]) if !name.is_empty() => Some(IndexRow {
-                    name: (*name).to_string(),
-                    tag: (*tag).to_string(),
-                    origin: (*name).to_string(),
-                    root: (*root).to_string(),
-                    scheme: HASH_SCHEME.to_string(),
-                    kind: INDEX_KIND_NAMESPACE.to_string(),
-                }),
-                (Some(INDEX_HEADER_V2), [name, tag, scheme, root]) if !name.is_empty() => {
-                    Some(IndexRow {
-                        name: (*name).to_string(),
-                        tag: (*tag).to_string(),
-                        origin: (*name).to_string(),
-                        scheme: (*scheme).to_string(),
-                        kind: INDEX_KIND_NAMESPACE.to_string(),
-                        root: (*root).to_string(),
-                    })
-                }
-                (Some(INDEX_HEADER_V3), [name, tag, scheme, kind, root]) if !name.is_empty() => {
-                    Some(IndexRow {
-                        name: (*name).to_string(),
-                        tag: (*tag).to_string(),
-                        origin: (*name).to_string(),
-                        scheme: (*scheme).to_string(),
-                        kind: (*kind).to_string(),
-                        root: (*root).to_string(),
-                    })
-                }
-                (Some(INDEX_HEADER_V4), [origin, name, tag, scheme, kind, root])
+                (Some(INDEX_HEADER), [origin, name, tag, scheme, kind, root])
                     if !origin.is_empty() && !name.is_empty() =>
                 {
                     Some(IndexRow {
@@ -210,7 +188,7 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
 pub fn serialize_index(rows: &[IndexRow]) -> Vec<u8> {
     let mut sorted: Vec<&IndexRow> = rows.iter().collect();
     sorted.sort_by(|a, b| (&a.origin, &a.name, &a.tag).cmp(&(&b.origin, &b.name, &b.tag)));
-    let mut body = String::from(INDEX_HEADER_V4);
+    let mut body = String::from(INDEX_HEADER);
     body.push('\n');
     for r in sorted {
         let _ = writeln!(
@@ -341,7 +319,11 @@ fn ssh_verify(body: &[u8], sig: &[u8], flags: &DynFlags) -> Verdict {
             "ssh verify needs an allowed_signers file: set PRISM_SIGN_ALLOWED_SIGNERS".into(),
         );
     };
-    let identity = flags.sign_identity.clone().unwrap_or_default();
+    let Some(identity) = flags.sign_identity.as_deref() else {
+        return Verdict::Unavailable(
+            "ssh verify needs a signer identity: set PRISM_SIGN_IDENTITY".into(),
+        );
+    };
     let sig_file = match write_temp("sig", sig) {
         Ok(p) => p,
         Err(e) => return Verdict::Unavailable(format!("could not stage signature: {e}")),
@@ -354,7 +336,7 @@ fn ssh_verify(body: &[u8], sig: &[u8], flags: &DynFlags) -> Verdict {
             "-f",
             &allowed.to_string_lossy(),
             "-I",
-            &identity,
+            identity,
             "-n",
             SIG_NAMESPACE,
             "-s",
@@ -531,6 +513,9 @@ pub struct LogEntry {
     pub kind: String,
     /// The root hash the name and tag were pointed at.
     pub root: String,
+    /// The chain link: the digest of the previous log line's exact bytes
+    /// (`sha256:<hex>`, the header line for entry zero).
+    pub prev: Option<String>,
 }
 
 /// A detected repoint: an `(origin, name, tag)` that the log shows pointed at more
@@ -567,12 +552,16 @@ impl Log {
 
     /// Append a pointer, returning its assigned sequence number.
     ///
-    /// Verify-on-append: the prior entries are read (never rewritten) to assign the
-    /// next dense sequence, then one line is appended. A crash can only lose the
-    /// tail, never corrupt earlier history.
+    /// Verify-on-append: the prior entries are read (never rewritten, and
+    /// rejected if mutilated) before one line is appended, so an append can only
+    /// ever extend a valid dense log. A crash can only lose the tail, never
+    /// corrupt earlier history. What no local check can detect is a cleanly
+    /// truncated suffix, a shortened log that is internally consistent; that
+    /// requires an external witness holding a later sequence number, which is
+    /// what `audit` against a remote index provides.
     ///
     /// # Errors
-    /// Fails on a filesystem error.
+    /// Fails on a filesystem error or a log `entries` rejects as mutilated.
     pub fn append(
         &self,
         origin: &str,
@@ -582,8 +571,13 @@ impl Log {
         kind: &str,
         root: &str,
     ) -> io::Result<u64> {
-        let existing = self.entries()?;
-        let seq = existing.len() as u64;
+        let text = self.read_text()?.unwrap_or_default();
+        let existing = self.parse(&text)?;
+        // The next sequence comes from the last entry's own number, never from a
+        // count: a count silently renumbers into any hole, while continuing from
+        // the recorded maximum keeps the numbers a property of the entries
+        // themselves (and `parse` has already rejected a non-dense log).
+        let seq = existing.last().map_or(0, |e| e.seq + 1);
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -591,82 +585,120 @@ impl Log {
             .create(true)
             .append(true)
             .open(&self.path)?;
-        if existing.is_empty() {
-            writeln!(f, "{LOG_HEADER_V4}")?;
-        }
+        // The header is owed exactly when the file has no bytes yet (fresh, or
+        // left empty by a crash between create and header write, which this
+        // heals). Keying on `existing.is_empty()` instead would write a second
+        // header into a crashed header-only file.
+        let need_header = f.metadata()?.len() == 0;
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        writeln!(
-            f,
-            "{seq}{FIELD_SEP}{nanos}{FIELD_SEP}{origin}{FIELD_SEP}{name}{FIELD_SEP}{tag}{FIELD_SEP}{scheme}{FIELD_SEP}{kind}{FIELD_SEP}{root}"
-        )?;
+        // One buffered write for header plus line, so the crash window between
+        // them is a single syscall rather than two.
+        let mut out = String::new();
+        if need_header {
+            out.push_str(LOG_HEADER);
+            out.push('\n');
+        }
+        // Chained format: each line commits the previous line's bytes, the first
+        // entry committing the header itself, so any in-place edit breaks every
+        // later link.
+        let prev_line = if need_header {
+            LOG_HEADER
+        } else {
+            text.lines().last().unwrap_or(LOG_HEADER)
+        };
+        let prev = line_digest(prev_line);
+        let _ = writeln!(
+            out,
+            "{seq}{FIELD_SEP}{nanos}{FIELD_SEP}{prev}{FIELD_SEP}{origin}{FIELD_SEP}{name}{FIELD_SEP}{tag}{FIELD_SEP}{scheme}{FIELD_SEP}{kind}{FIELD_SEP}{root}"
+        );
+        f.write_all(out.as_bytes())?;
         Ok(seq)
+    }
+
+    /// The chain head: the digest of the last line of a chained (v5) log, the
+    /// value an external witness pins so a cleanly truncated suffix is
+    /// detectable after the fact. `None` for a missing or empty log.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error.
+    pub fn head(&self) -> io::Result<Option<String>> {
+        let Some(text) = self.read_text()? else {
+            return Ok(None);
+        };
+        if text.lines().next() != Some(LOG_HEADER) {
+            return Ok(None);
+        }
+        Ok(text.lines().last().map(line_digest))
+    }
+
+    fn read_text(&self) -> io::Result<Option<String>> {
+        match fs::read_to_string(&self.path) {
+            Ok(t) => Ok(Some(t)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     /// Every entry, in append order. A missing log is empty.
     ///
     /// # Errors
-    /// Fails on a filesystem error or a malformed header.
+    /// Fails on a filesystem error, a malformed header or line, or a log whose
+    /// sequence numbers are not dense from zero (evidence of a hole or a
+    /// reordering; the log is tamper-evident, so it fails loudly rather than
+    /// pretending the surviving lines are the whole history).
     pub fn entries(&self) -> io::Result<Vec<LogEntry>> {
-        let text = match fs::read_to_string(&self.path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e),
+        let Some(text) = self.read_text()? else {
+            return Ok(Vec::new());
+        };
+        self.parse(&text)
+    }
+
+    // The one parser behind `entries` and `append`: header dispatch, per-line
+    // shape checks, chain verification (v5), and the dense-from-zero check.
+    fn parse(&self, text: &str) -> io::Result<Vec<LogEntry>> {
+        // A zero-byte (or whitespace-only) file is an uninitialized log, not a
+        // malformed one: a crash between file creation and the header write
+        // leaves exactly this state, and `append` heals it by writing the
+        // header. Treating it as malformed would brick publishing permanently.
+        if text.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let malformed = |what: &str| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "malformed transparency log at {}: {what}",
+                    self.path.display()
+                ),
+            )
         };
         let mut lines = text.lines();
         let header = lines.next();
-        if header != Some(LOG_HEADER_V1)
-            && header != Some(LOG_HEADER_V2)
-            && header != Some(LOG_HEADER_V3)
-            && header != Some(LOG_HEADER_V4)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("malformed transparency log at {}", self.path.display()),
-            ));
+        if header != Some(LOG_HEADER) {
+            return Err(malformed("unrecognized header"));
         }
+        // The chain pointer each v5 line must carry: the digest of the previous
+        // line's exact bytes, rooted at the header line.
+        let mut prev_line = header.unwrap_or_default();
+        let parse_seq = |s: &str| {
+            s.parse::<u64>()
+                .map_err(|_| malformed(&format!("unparseable sequence number `{s}`")))
+        };
         let mut out = Vec::new();
         for line in lines {
             let fields: Vec<&str> = line.split(FIELD_SEP).collect();
             match (header, fields.as_slice()) {
-                (Some(LOG_HEADER_V1), [seq, time, name, tag, root]) => out.push(LogEntry {
-                    seq: seq.parse().unwrap_or_default(),
-                    time_nanos: time.parse().unwrap_or_default(),
-                    origin: (*name).to_string(),
-                    name: (*name).to_string(),
-                    tag: (*tag).to_string(),
-                    scheme: HASH_SCHEME.to_string(),
-                    kind: INDEX_KIND_NAMESPACE.to_string(),
-                    root: (*root).to_string(),
-                }),
-                (Some(LOG_HEADER_V2), [seq, time, name, tag, scheme, root]) => {
+                (Some(LOG_HEADER), [seq, time, prev, origin, name, tag, scheme, kind, root]) => {
+                    let want = line_digest(prev_line);
+                    if *prev != want {
+                        return Err(malformed(&format!(
+                            "chain break before seq {seq}: line commits `{prev}`, previous line hashes to `{want}`"
+                        )));
+                    }
                     out.push(LogEntry {
-                        seq: seq.parse().unwrap_or_default(),
-                        time_nanos: time.parse().unwrap_or_default(),
-                        origin: (*name).to_string(),
-                        name: (*name).to_string(),
-                        tag: (*tag).to_string(),
-                        scheme: (*scheme).to_string(),
-                        kind: INDEX_KIND_NAMESPACE.to_string(),
-                        root: (*root).to_string(),
-                    });
-                }
-                (Some(LOG_HEADER_V3), [seq, time, name, tag, scheme, kind, root]) => {
-                    out.push(LogEntry {
-                        seq: seq.parse().unwrap_or_default(),
-                        time_nanos: time.parse().unwrap_or_default(),
-                        origin: (*name).to_string(),
-                        name: (*name).to_string(),
-                        tag: (*tag).to_string(),
-                        scheme: (*scheme).to_string(),
-                        kind: (*kind).to_string(),
-                        root: (*root).to_string(),
-                    });
-                }
-                (Some(LOG_HEADER_V4), [seq, time, origin, name, tag, scheme, kind, root]) => {
-                    out.push(LogEntry {
-                        seq: seq.parse().unwrap_or_default(),
+                        seq: parse_seq(seq)?,
                         time_nanos: time.parse().unwrap_or_default(),
                         origin: (*origin).to_string(),
                         name: (*name).to_string(),
@@ -674,9 +706,24 @@ impl Log {
                         scheme: (*scheme).to_string(),
                         kind: (*kind).to_string(),
                         root: (*root).to_string(),
+                        prev: Some((*prev).to_string()),
                     });
                 }
-                _ => {}
+                // A line that fits no known shape is evidence, not noise:
+                // skipping it would desynchronize the sequence numbering and
+                // hide whatever put it there.
+                _ => return Err(malformed(&format!("unrecognized line `{line}`"))),
+            }
+            prev_line = line;
+        }
+        // The dense-from-zero promise is checked, not assumed: a gap or
+        // regression means lines were lost or reordered after they were written.
+        for (i, e) in out.iter().enumerate() {
+            if e.seq != i as u64 {
+                return Err(malformed(&format!(
+                    "sequence hole: entry at position {i} carries seq {}",
+                    e.seq
+                )));
             }
         }
         Ok(out)
@@ -801,6 +848,9 @@ pub struct AuditReport {
     pub rows: Vec<RootAudit>,
     /// Repoints detected in the transparency log (a published pointer that moved).
     pub repoints: Vec<Repoint>,
+    /// The transparency log's chain head (chained logs only): the digest an
+    /// external witness pins so a cleanly truncated suffix is detectable.
+    pub log_head: Option<String>,
 }
 
 impl AuditReport {
@@ -821,6 +871,9 @@ impl AuditReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "index signature: {}", verdict_label(&self.verdict));
+        if let Some(head) = &self.log_head {
+            let _ = writeln!(out, "log head: {head}");
+        }
         for r in &self.rows {
             let short = short_hash(&r.pointer.root);
             match &r.outcome {
@@ -911,10 +964,12 @@ pub fn audit(
         })
         .collect();
 
+    let log_head = log.head()?;
     Ok(AuditReport {
         verdict,
         rows,
         repoints,
+        log_head,
     })
 }
 

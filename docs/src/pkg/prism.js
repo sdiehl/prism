@@ -454,6 +454,85 @@ export function tokens(src) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * The content hash of a law's `step` function, the identity the resident shows
+ * as its law hash. It is the compiler's own Merkle hash of the elaborated Core,
+ * so it moves when and only when the rule's behaviour moves, and is independent
+ * of the grid the law runs on. Returns `error: ...` for an unknown law or a
+ * front-end failure.
+ * @param {string} law
+ * @returns {string}
+ */
+export function world_law_hash(law) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(law, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.world_law_hash(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Evolve a seed grid under a law for `ticks` generations and return the whole
+ * trajectory. Each output line is one tick, `<state-hash> <bits>`: the blake3
+ * digest of the canonical grid encoding (see `examples/world.pr`) and the raw
+ * row-major 0/1 string. Line 0 is the seed itself, so its hash is the seed hash.
+ *
+ * `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
+ * so the seed is data too); `law` selects the step function. Because `trace` is
+ * a pure function of the seed, law, and tick count, forking a timeline is just
+ * re-running from a perturbed grid, and two clients evolving the same seed under
+ * the same law print identical hashes with no coordination. A malformed seed,
+ * unknown law, or front-end error returns an `error:` line.
+ * @param {string} law
+ * @param {number} w
+ * @param {number} h
+ * @param {string} seed_bits
+ * @param {number} ticks
+ * @returns {string}
+ */
+export function world_run(law, w, h, seed_bits, ticks) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(law, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(seed_bits, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.world_run(ptr0, len0, w, h, ptr1, len1, ticks);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * The Prism source of the world laws, exactly as it runs: the same definitions
+ * the hash and evolution paths compile, so the resident's source face shows the
+ * real law, not a paraphrase.
+ * @returns {string}
+ */
+export function world_source() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.world_source();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

@@ -97,6 +97,47 @@ fn stable_rejects_a_non_stable_field_with_the_field_and_type() {
     assert!(err.contains("not Stable"), "{err}");
 }
 
+// The digest a derived `Stable` instance injects into `shape_digest_of` (and so
+// stamps into every `wire_encode_stable` frame) is exactly the type's canonical
+// shape digest. Encode at runtime, read the frame's digest back with
+// `wire_open_value_any`, and it must equal `shape_digests_of` computed in Rust:
+// the injected literal and the compiler's shape-digest computation are one value.
+#[test]
+fn stable_injected_digest_equals_canonical_shape_digest() {
+    let src = r#"
+import Wire (..)
+
+type T = T(Int, String) deriving (Serialize, Stable)
+
+fn main() =
+  match wire_open_value_any(wire_encode_stable(T(7, "hi"))) of
+    (dig, _body) => println(dig)
+"#;
+    let printed = run(src);
+    let all = prism::shape_digests_of(&prism::with_prelude(
+        "type T = T(Int, String)\nfn main() = println(\"ok\")\n",
+    ))
+    .expect("shape digests");
+    assert_eq!(printed.trim(), &all["T"][..16]);
+}
+
+// A hand-written `Stable` instance is rejected: the shape digest is compiler-owned,
+// so the only instance is the derived one, and a manual one could forge a frozen
+// contract.
+#[test]
+fn stable_rejects_a_hand_written_instance() {
+    let src = "import Wire (..)\n\
+               type T = T(Int) deriving (Serialize)\n\
+               instance stableT : Stable(T)\n  \
+               fn shape_digest_of(_x) = \"deadbeefdeadbeef\"\n\
+               fn main() = println(\"x\")\n";
+    let err = check_err(src);
+    assert!(
+        err.contains("Stable") && err.contains("deriving (Stable)"),
+        "manual Stable instance must be rejected pointing at deriving: {err}"
+    );
+}
+
 // The derived `Serialize` roundtrips end to end over the real wire library: a sum
 // tags each constructor, and decode peels the tag and reads the fields in order,
 // bottoming out in the library's primitive `Serialize(Int)` instance.

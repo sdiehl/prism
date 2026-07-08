@@ -239,163 +239,163 @@ Process-environment capability (`getenv`, `args_count`, `arg`).
 
 ### `eqInt`
 
-```prism,def,h-81058d7d49b650d467973397c14b41787b2717b95386369101e5aeea34d8a3a6
+```prism,def,h-428f9040b34463dab21f24e7b4cbc0f9ce4f2e68a5836b693d26400e3df4d814
 instance eqInt : Eq(Int)
 ```
 
 ### `eqI64`
 
-```prism,def,h-d67f0e803a59832d4f8c2fb31760f6e29e1048b8870fb78b0e541ab17e494c7b
+```prism,def,h-dd9229520199a662003fc81f51e93d46486f7408a59f79e0e3b8d3a6bcaac12d
 instance eqI64 : Eq(I64)
 ```
 
 ### `eqU64`
 
-```prism,def,h-050b2840aba162f01eb31a5c5f991926a953daa774f42e0203186aff0185a18f
+```prism,def,h-7160813259fe8611b67de38efe577839d2a493824a6ec833738d63d5db10d5c1
 instance eqU64 : Eq(U64)
 ```
 
 ### `eqBool`
 
-```prism,def,h-76faefd93b1472e00705344f9f60b34e5afa85072fe5318f5f3f60c524fbf494
+```prism,def,h-43ba258ce37e643080e11b8885b1d660a729efda66a845656eb8f2cab51c3ad1
 instance eqBool : Eq(Bool)
 ```
 
 ### `eqStr`
 
-```prism,def,h-d14fb8d7c5094fc875d3750a22094b01ddf8fbcbe7a32076cee378417b482e10
+```prism,def,h-764599400622d55f165e04e5c1447aed1dc914604bf776ae9f8c38e55ca443fb
 instance eqStr : Eq(String)
 ```
 
 ### `eqFloat`
 
-```prism,def,h-b993eff99f02b335e1abcbf04edf79a939b540854cfd03f59096bd0def09045f
+```prism,def,h-34265c3e74baecf80e3761a3678b3c2797c94ff4686707790f7993c1e8aa8ba4
 instance eqFloat : Eq(Float)
 ```
 
 ### `eqChar`
 
-```prism,def,h-dd9b534e8e44776b49b3c6df80ba82a8402252075695808df37e6931bffd7ad5
+```prism,def,h-b9d3efb2cb905d45f87d15c2c7f23f69f27b2fa250df6336eb4ea5248a45c3eb
 instance eqChar : Eq(Char)
 ```
 
 ### `ordInt`
 
-```prism,def,h-60d22c26ee0e6cb6951eed3de78c5eaea46333845dda195ee4e094230a240db4
+```prism,def,h-267edbcc111468b61d54ed8dbf00c53f40ff3236d92ec2a0b1509fe0e43e49f1
 instance ordInt : Ord(Int)
 ```
 
 ### `ordI64`
 
-```prism,def,h-a3a79eb2c06c910168a8a20f6cecfbf7aed4448f2af4bc53e5dd983806e3d8dc
+```prism,def,h-4eec663ea37b55d812c7762c3cd518c8ecc9ee0e02d879e1f54b55ab21b0df79
 instance ordI64 : Ord(I64)
 ```
 
 ### `ordU64`
 
-```prism,def,h-c9419f9f18a07399a97c04ec98fd5001c4057e5a6e59270707178f2939199a8c
+```prism,def,h-0e66e47095285f2bcc22a5ea10f4f41538c7d85158050948731898da482bd44c
 instance ordU64 : Ord(U64)
 ```
 
 ### `ordBool`
 
-```prism,def,h-e7fbf8c5120385f0fb13e5144f22d9a6e5893056149c7512199e3d7ce493e44c
+```prism,def,h-e4813624f5bc2be283af01cfdb6bc57f11ac4c7a6f9d765b1c1d4bd5e7a4b054
 instance ordBool : Ord(Bool)
 ```
 
 ### `ordStr`
 
-```prism,def,h-74e64091f0c6e880dad39bbd9a95ddd2f26e283b38b17cc8b6915e30650bd2dc
+```prism,def,h-1627877ebdbfa784da77f366f81d84e88961275048b78dea675ee00a58cc1868
 instance ordStr : Ord(String)
 ```
 
 ### `ordChar`
 
-```prism,def,h-b1bdde492f603025e906a39c50878e7dfcd4d3880903a4e25c37a6662f7c22d9
+```prism,def,h-23f544d6ebcae253d0650eeb3b8a22a24a6600b09e79ca37a9faf830adf69f08
 instance ordChar : Ord(Char)
 ```
 
 ### `ordFloat`
 
-```prism,def,h-471e28f84d6452f51e8879c08128b7824c041d7e3995195d0697155b7d961316
+```prism,def,h-97bf408fa5931914c76b71c1f07bad46ff1f653895b1e68382b7e674d9983882
 instance ordFloat : Ord(Float)
 ```
 
 ### `eqPair`
 
-```prism,def,h-73482baa3810f91e83617e5b2336e9250cd4190219333cc7a14ace9b0d0b03e4
+```prism,def,h-735ce07f84d1249154c6e98d85404e07e7c8395edbb2d54f922baf703cef60dd
 instance eqPair : Eq((a, b))
 ```
 
 ### `ordPair`
 
-```prism,def,h-31ff6b90f08057367e337a1ba57cb627c0d639a9e7779f308f01a26a7a278d01
+```prism,def,h-4abb1f45af49de4f7ff8de41963ab284ab69d2b7d41521a45c36ee2f9e2f3caf
 instance ordPair : Ord((a, b))
 ```
 
 ### `eqTriple`
 
-```prism,def,h-c4db0444c79ff96fbaa8f3b377a8d953f86e64ae5ba66aca5c5d0afe5ea431ca
+```prism,def,h-9134c158790b00cc836b1ff0243922b46c9d1108acf6d7cd0843b71ec04aa5ac
 instance eqTriple : Eq((a, b, c))
 ```
 
 ### `ordTriple`
 
-```prism,def,h-20349236eea39e50e073f419a61ab0593d217f8ee31e9c8fb1840e5063fb0a2a
+```prism,def,h-25493ee1174ffca512b6f2f2318f2810c3c0b23af0535459f6e8fd83319038bd
 instance ordTriple : Ord((a, b, c))
 ```
 
 ### `showInt`
 
-```prism,def,h-bf70ff70e5a3fa8a82735f71ddabacf9b97b4334f1a6fdef73bb1b9ff2acaf16
+```prism,def,h-39b69c6b82433d4d396a3d24d0ee05f16ba2378ded36dbd23394d31b60d39bbb
 instance showInt : Show(Int)
 ```
 
 ### `showI64`
 
-```prism,def,h-fe4e4c168628cc8f5af0f908e000875de95f978d57c89343870fa2dfb97629f3
+```prism,def,h-75543790e0fbd26ba1643d040bef1b244f4e11a1e2fcd6df99431d1e162a9bb8
 instance showI64 : Show(I64)
 ```
 
 ### `showU64`
 
-```prism,def,h-d4604a0117834ab47872a9256a714c92dc79853eb1261b76d8752e115a8e70cc
+```prism,def,h-a275a319b0a14f83681ef85d77e3cf7255d46efbfa6045d2a97fd19d35e7e3e0
 instance showU64 : Show(U64)
 ```
 
 ### `showFloat`
 
-```prism,def,h-f4e68a409289828ce44ae347599e799a51b77a485074a453e13c58c695a58a0f
+```prism,def,h-7acce2d2e52bf60c40ca8c2a85ee28b312b6a6d90767f62d4f91c3298a6d2ab9
 instance showFloat : Show(Float)
 ```
 
 ### `showBool`
 
-```prism,def,h-945ef634d6e2f668528441f1e237f9675c66857bcf6300b16d62c0e30802af23
+```prism,def,h-cad714a4d440e58d5718583a09803e2c1221da9a5280d7dcd1bef005e9ca5d49
 instance showBool : Show(Bool)
 ```
 
 ### `showStr`
 
-```prism,def,h-a19e7f9b24e79f66cd1b791e73a68a374796009f4cd05c9248829ab06e6150d6
+```prism,def,h-b3b7630da6b3acb1d8f452cd3864d810975116ee1d6cdae5f44aac612a507d01
 instance showStr : Show(String)
 ```
 
 ### `showChar`
 
-```prism,def,h-4635e0781eb7ea6eebf6dfbf324cc6ff99bee5149ef71dc182f20c83ecf17f59
+```prism,def,h-2444b9b0403299be20c9ae36cf7c956cfc2503ea67215268fd345ff5b7175538
 instance showChar : Show(Char)
 ```
 
 ### `showUnit`
 
-```prism,def,h-71e69f8dd8fba39f52712ca0fcb8bc794d82c066d199a95aecd8674a3d8f1f70
+```prism,def,h-44bcee2897e4e0be2bfcaaf0c0019c610103efd61bf7ed8822c400ecdaf02fe9
 instance showUnit : Show(Unit)
 ```
 
 ### `showList`
 
-```prism,def,h-4092b5ffd1fdee6c3097a0e0ae5f62e30aaa27e603453333e18fabee1802024c
+```prism,def,h-40466a34c3ef414d8952546344811b35d0a87225e3f8085985b6b7ac902dd19b
 instance showList : Show(List(a))
 ```
 
@@ -403,169 +403,169 @@ Lists render in bracket form, `[a, b, c]`, matching the print-site generator; th
 
 ### `hashInt`
 
-```prism,def,h-7ecfb37d3310753051aba6fe293dbe6ac3f229ab2a29075b4284ba35041c4a18
+```prism,def,h-d170292c70b1f34deb86ff35c48beb90aeae662d3db455be2cea07bb3b713a74
 instance hashInt : Hash(Int)
 ```
 
 ### `hashI64`
 
-```prism,def,h-9f38ff0627a9710c1748347d9e64004f6bc8e5f11bf3ba52d24e0b040fcfa63e
+```prism,def,h-5163714ba0d2be4efc18998a5dcdd1f47d61abd3b07721e656f37d0148ff7093
 instance hashI64 : Hash(I64)
 ```
 
 ### `hashU64`
 
-```prism,def,h-fc58aa2174715a979d27e43f9b5c249639e007f261d66ac3ee8a8ab5dd659e30
+```prism,def,h-beecd2c9ae3de3751e648a6cdbc1afdcca92219058dca490582e8eea109c6cb2
 instance hashU64 : Hash(U64)
 ```
 
 ### `hashBool`
 
-```prism,def,h-5824490bad33670fd57909e99285d2bd37c914b8989f78b739f97a5abbf837ff
+```prism,def,h-de8115bc26d65c44929285aa6066e10134f841387f2c498f6eea837524aad517
 instance hashBool : Hash(Bool)
 ```
 
 ### `hashChar`
 
-```prism,def,h-e9cab9d1b38e4fc725f994baa160e095068512f06f2aa1d488e2d20f9d1896b5
+```prism,def,h-0544456b7d857e1b07e5285ae0336100ed5fbff19ac16877f8ca9fbd5a8538df
 instance hashChar : Hash(Char)
 ```
 
 ### `hashFloat`
 
-```prism,def,h-9a2df12e4c8cfa5a1709149fd33d12329d692d8f22ddc8478b55bd8d2a74e14f
+```prism,def,h-1f414f3197d675113d387b8ca10d03715a3ff44f0183f76e93dbe823033c5cfa
 instance hashFloat : Hash(Float)
 ```
 
 ### `hashStr`
 
-```prism,def,h-c448748a64101f68a26e8fae08fc53001b0c884f92a8944bef7a19940c03aa96
+```prism,def,h-2062ad4cbee57b0723d701014aa9e63b069c746f18c169a244f68c1aa9b487e3
 instance hashStr : Hash(String)
 ```
 
 ### `hashUnit`
 
-```prism,def,h-6914da7d3e177a02689570b8a98ec48383f0a9a5b6157e90d56502b16a75bf2e
+```prism,def,h-43eaac402d4f8413de0cc34f6bb5b51be73b2b6cb89b7192526436de29a491ff
 instance hashUnit : Hash(Unit)
 ```
 
 ### `powInt`
 
-```prism,def,h-30655d4f0bbf8d7c17d5fd3d56cca8cff63bc9bc866fbbdaf65165c3d5ffd047
+```prism,def,h-b31a9f0070cbd1ff82a6ba5317500c1481afafe4317585e15a3c15b7af7ec6eb
 instance powInt : Pow(Int)
 ```
 
 ### `powFloat`
 
-```prism,def,h-aa694593f507ca7b34d656480ed50f99158dd7dc4f8b0942086482c8a7186c52
+```prism,def,h-3965a847871f6b684fd8ee8a7511837e843e77c1031fbe56c81ae30dbd4f4f19
 instance powFloat : Pow(Float)
 ```
 
 ### `numInt`
 
-```prism,def,h-0b7c18f824979558b31870db172f3395157fc7d7cfdd36fdc5a470fca588ad2d
+```prism,def,h-d18c27b017c1977ccad4a8de555425e712ac4e67528101f65621f9f2a8c26be0
 instance numInt : Num(Int)
 ```
 
 ### `numI64`
 
-```prism,def,h-36183c05e9470fa24c72deadc64f840bccb9c2ccadb9ca0e5e7e69d3d07989a9
+```prism,def,h-80027930c378b7f2983d216ad25566fe0d3551ba36759ea3587b275f2cce44f0
 instance numI64 : Num(I64)
 ```
 
 ### `numU64`
 
-```prism,def,h-677852318a790919ae23d6bf69feb21299c2eca208f65072c2479d5af6967e4f
+```prism,def,h-7c113715866b1d9bb3abb71033ffe1b6b2a1489105a4ca976d9af5a740acc7f1
 instance numU64 : Num(U64)
 ```
 
 ### `numFloat`
 
-```prism,def,h-43185af17acde4f0cb512258384098af564a517f60b60fce0c4e52f424b26600
+```prism,def,h-052fd8f5917b9247dc97c10cb706d63f0bbe05590ee9c4ac1263e95ac7286fc0
 instance numFloat : Num(Float)
 ```
 
 ### `divInt`
 
-```prism,def,h-fc5a2a079b4941fff8e48fa40a70bb13faa1865aef24b3406de8c458badc06cc
+```prism,def,h-6ca78cd9136361575fbac3905826311116d807149c18f486cadc0180a3789803
 instance divInt : Div(Int)
 ```
 
 ### `divI64`
 
-```prism,def,h-2cc4177c7c47cd970f49d033d0a99998b9079cacbaeb03ae72c30073fdec05ca
+```prism,def,h-14983bbcfd31b6bf6365157cdac5f8bef5d56520e4f68b0702f23fce08da275f
 instance divI64 : Div(I64)
 ```
 
 ### `divU64`
 
-```prism,def,h-af5e40a1db2b5cbf1578a447da00b4301d437c01f354e7f6d0b12aa573c69878
+```prism,def,h-2444062d0ab625ab89fc488bdfa327df041f889383b93ee25dee795cc901be95
 instance divU64 : Div(U64)
 ```
 
 ### `divFloat`
 
-```prism,def,h-2be1a0b5a2542288b43e46f0f95dcd381ee84baa945edb7e69841c970f749f0c
+```prism,def,h-e5ed43dabc4853db1975e2b1c4cb710928f58ee949271635e747f9dabf779e92
 instance divFloat : Div(Float)
 ```
 
 ### `functorList`
 
-```prism,def,h-aac8d8a2473b9745c456a0a46977a3c3cfb3549b654280536c3163c21cf7eb3f
+```prism,def,h-befd6cf36ec14e2005466a5aa9ab29fd15168c443dac7ab2528c828805043e53
 instance functorList : Functor(List)
 ```
 
 ### `functorOption`
 
-```prism,def,h-7d775ca0a86b1d749a8bab63d3f5d42c7ed5295dac97b7e1e6927b155f499c5f
+```prism,def,h-a602dcc153cefe9f29df24a9fc20b5d48e48df850d306ccc40e9096a1caccefa
 instance functorOption : Functor(Option)
 ```
 
 ### `foldableList`
 
-```prism,def,h-ae53a74bb3a036e0c99dd76a53b234711702c7d0b2da8d1c55188b9656477ec3
+```prism,def,h-f75dab7a99d9978cdfc8ab2b05e9d5139253db2e89d27de16b7fbc0e85b219e9
 instance foldableList : Foldable(List)
 ```
 
 ### `foldableOption`
 
-```prism,def,h-ee8049be17b8f873ec4f3f7dfa5d9d5e8c3f77c881d6bc3b21786d09397c589b
+```prism,def,h-54ced29f877a89fff0d28b7cda6ebc5dd9ae4aeea32577bbf7fa7baf2f8c3c23
 instance foldableOption : Foldable(Option)
 ```
 
 ### `applicativeList`
 
-```prism,def,h-155ea22e1fc5e6b454dcacfee1a5c79a515f5cf64e45bc74c1eaf0b0ea910681
+```prism,def,h-07953de677e6f00ba08597fb7917cd0200808a44a71da1b9bc103d5d513c6f99
 instance applicativeList : Applicative(List)
 ```
 
 ### `applicativeOption`
 
-```prism,def,h-d4934c2ad5ec31cdec035eb116a929dead6b19e7a94045d03558d573f3f57738
+```prism,def,h-a9ead1a166f29b35cc5699022d4ab9939f9523fc98eea650b71bd275571328f1
 instance applicativeOption : Applicative(Option)
 ```
 
 ### `monadList`
 
-```prism,def,h-f3d92e5818a615fe5afcf4ad6abdd899527c7c2561dd8862f50ea33c87955b00
+```prism,def,h-f126e86fd8975ec0d23d73f75521b6b3dc51c73ae46ceade7c7d3483522f9344
 instance monadList : Monad(List)
 ```
 
 ### `monadOption`
 
-```prism,def,h-9f3610c16c4637212fd4aeb6b2bdb8851bfaedde0e033526559e8b875b817b2f
+```prism,def,h-ce88f0e556968ccac7bdfb2f0e6252b3a1d82d964d7548bb9d57cbc2b2dbc1ff
 instance monadOption : Monad(Option)
 ```
 
 ### `traversableList`
 
-```prism,def,h-2165c6b126e305e6d50ba11adf812b490fdf52928d1034bbc3205f7578a9092b
+```prism,def,h-2e52d44b7851a1462e8fd01adacfba1ec6d1b6ccbca5d2d2b6363ad5449ca439
 instance traversableList : Traversable(List)
 ```
 
 ### `traversableOption`
 
-```prism,def,h-a149b9fb0642595142c114071357faaa73f3f5eb09e3402da8293bcf98b4bc4e
+```prism,def,h-1fa1e595cce722fb3be276d236adc303a982ae8b9d1fe5bfa42293c54b5b7071
 instance traversableOption : Traversable(Option)
 ```
 
@@ -573,7 +573,7 @@ instance traversableOption : Traversable(Option)
 
 ### `id`
 
-```prism,sig,h-12b9905051498ea6ae73ce31826ffa7f8d827a82c7c9781bd0328c7024493f2e
+```prism,sig,h-3346fb164d13251a5923fd1495e3737ad7966244d880f26618760d260fc3c7ed
 id : forall a. (a) -> a
 ```
 
@@ -581,7 +581,7 @@ The identity function.
 
 ### `const`
 
-```prism,sig,h-21ad7b46bfd43160847256db3c1cf1feba4770c10a95e602a542b0dfea2888f9
+```prism,sig,h-5abe0b4f9ddbcb2ad17e09c2aa77485358d1eb345c5025c0aa0ccfef999637fe
 const : forall a b. (a, b) -> a
 ```
 
@@ -589,7 +589,7 @@ The constant function: returns `x`, ignoring `y`.
 
 ### `compose`
 
-```prism,sig,h-b5ba12b39d792a0ee68753f6aaf8d7fc5e445df9fc368460431386eedc34b48f
+```prism,sig,h-474252584fd4da679763dd41ab7f2d175dc8780bd7ae6ed099c25d9b9552ac62
 compose : forall e0 a b c. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0}
 ```
 
@@ -597,7 +597,7 @@ Function composition: `compose(f, g, x)` is `f(g(x))`.
 
 ### `flip`
 
-```prism,sig,h-ed792dcbddee613e7c9645825c13ccd19aeda7382deca933110be6b96ce65782
+```prism,sig,h-0f1006e43b9938c7b3b735c1cbd50f385d3e345fefe7c497a72ed8b4d4bed0d3
 flip : forall e0 a b c. ((b, c) -> a ! {e0}, c, b) -> a ! {e0}
 ```
 
@@ -605,7 +605,7 @@ flip : forall e0 a b c. ((b, c) -> a ! {e0}, c, b) -> a ! {e0}
 
 ### `not`
 
-```prism,sig,h-ec9d065f8f53f51a8ac7ec4eb5d585cabea9351a992cd4c0cea57585919796d8
+```prism,sig,h-b4763e98b2287a73bdd41a7b22b7e5dc17aad8aba2fc542b260d36c689e2a131
 not : (Bool) -> Bool
 ```
 
@@ -613,7 +613,7 @@ Boolean negation.
 
 ### `and`
 
-```prism,sig,h-e46fdedfd7b74a3ee5931bc833dc6ab7cf617f3ab22ef4b98cd9b64231a3b15d
+```prism,sig,h-7115677531645d5205feeb1df0412fad83e54f450c216dd1f9867866499f6635
 and : (Bool, Bool) -> Bool
 ```
 
@@ -621,7 +621,7 @@ Boolean conjunction (the function form of `&&`).
 
 ### `or`
 
-```prism,sig,h-7c08ae689a2bb2c074f0a9276d637e8c00485428c8a69e43df520406ba13c2b1
+```prism,sig,h-de901b2fcac3f9ea4994b78d8a0f3e42387c0e2c4d18e8a203d152e9ad784482
 or : (Bool, Bool) -> Bool
 ```
 
@@ -629,7 +629,7 @@ Boolean disjunction (the function form of `||`).
 
 ### `xor`
 
-```prism,sig,h-ff2a02ca59b69816b014781c2261447f96f1286ca977bdd6acc6cea7e302664d
+```prism,sig,h-69e49c056b879364e5ba877d5fa2ffba135bdc4b84ddbfcfa7c3d2a2a25ab979
 xor : (Bool, Bool) -> Bool
 ```
 
@@ -637,7 +637,7 @@ Exclusive or.
 
 ### `abs`
 
-```prism,sig,h-d10adb6e0d2d9deb61db6f96e214e1be3b6ad4266ff41df03926fd1e9fdd5fad
+```prism,sig,h-a95c8be4a45c836d443466cc9e5fdc4df5d4695d3958a0bbed5b3279d88e67c6
 abs : (Int) -> Int
 ```
 
@@ -645,7 +645,7 @@ Absolute value.
 
 ### `max`
 
-```prism,sig,h-c5615bf07516f2e8bb83a981bfcf3c0c96daf53116546431be02f1a5c6ced673
+```prism,sig,h-c47c49a14c7a64bdd3f7a54780b569ce54c14c77292f5c1fb01dc16a9b37438c
 max : (Int, Int) -> Int
 ```
 
@@ -653,7 +653,7 @@ The greater of two values.
 
 ### `min`
 
-```prism,sig,h-8f46a029818461af79caf0056b74858af3e4c037b585e92c08d415e3b24392fc
+```prism,sig,h-3c38676c6482b16563c6337e1f16b0b5c76369d28a2fab3d7bb6b5ac17130286
 min : (Int, Int) -> Int
 ```
 
@@ -661,7 +661,7 @@ The lesser of two values.
 
 ### `clamp`
 
-```prism,sig,h-6c322798840b91aceabbc0c6f07ddf0ed76881b4b53fabab2e759caa281cf58c
+```prism,sig,h-8a46658209c6175806716b201cd28458969263fad98dabb7abb8b2dbe4f5d4e9
 clamp : (Int, Int, Int) -> Int
 ```
 
@@ -669,7 +669,7 @@ Constrain `x` to the range `[lo, hi]`.
 
 ### `signum`
 
-```prism,sig,h-f5fa519a1f01af7c61ff570ae69d7e6e12680d1124893e17284cf924658414f8
+```prism,sig,h-714357d0e71b27e83064dd5f690a7b3003d48b3bc950c5f6a6a8183e9be31e22
 signum : (Int) -> Int
 ```
 
@@ -677,7 +677,7 @@ The sign of `n`, as `-1`, `0`, or `1`.
 
 ### `mod`
 
-```prism,sig,h-4ff106428d85ad9eaeb17300eff4b742f5643128cb52d98c3e7e7730ee262197
+```prism,sig,h-effdbb9eece15d348665e8e16b7a28952ab9ced958ecad0946e1322c00b27b26
 mod : (Int, Int) -> Int
 ```
 
@@ -685,7 +685,7 @@ The remainder `a % b`.
 
 ### `even`
 
-```prism,sig,h-664388742c1b9e93ce69a4f639867ce64c48c7d37d050a7a2bd115c11e92f937
+```prism,sig,h-ed82ce411a2f366f87900c3b2edb69477c660c937567ee6fd3750cb7280acac7
 even : (Int) -> Bool
 ```
 
@@ -693,7 +693,7 @@ True when `n` is even.
 
 ### `odd`
 
-```prism,sig,h-cdb98e9c4605102c61e51b555b5446895ee06d06b4c3899e8bca14d6e1e6529b
+```prism,sig,h-a51dc84e266f9d5fa9ac42eccdf1fe71229f746844f972ecba7ccfd3e7921b8a
 odd : (Int) -> Bool
 ```
 
@@ -701,7 +701,7 @@ True when `n` is odd.
 
 ### `gcd`
 
-```prism,sig,h-83f5bd6c42ea95225096e3356f99a43ebd24833298f1706f754adf3a105c9593
+```prism,sig,h-6762be2dad3ed63c465014051e8c5a7aed084b00d6f0231a0ccd6c8fe479a712
 gcd : (Int, Int) -> Int
 ```
 
@@ -709,7 +709,7 @@ The greatest common divisor (Euclid's algorithm).
 
 ### `lcm`
 
-```prism,sig,h-42f5b66492b57cc4935370691e5b8e8353e893d86b7d4286985f3e63d0588aab
+```prism,sig,h-038170a52079f2d7b043f0b9b12cc023cce6e71f3b2b977a4675a46366176075
 lcm : (Int, Int) -> Int
 ```
 
@@ -717,13 +717,13 @@ The least common multiple.
 
 ### `int_pow_go`
 
-```prism,sig,h-df1e3b7a73dd36be37383a21a288e9580d8e3fc16956516e2a3730693f87170f
+```prism,sig,h-e6e82c4d4fc1f7cf2d7f161d7541d044c826b120a23a6c971722a98a68eeeb05
 int_pow_go : (Int, Int, Int) -> Int
 ```
 
 ### `int_pow`
 
-```prism,sig,h-54e927f46a3ef5d1dfa6ee443a3a946a812f227b27f9edd1b08aa61e23dfd320
+```prism,sig,h-0c45c897c03778273f135fa15c10a84f5656554149807042a2a007cd834c757c
 int_pow : (Int, Int) -> Int
 ```
 
@@ -731,7 +731,7 @@ Integer exponentiation, the `Pow(Int)` instance: bignum-correct because `*` prom
 
 ### `factorial`
 
-```prism,sig,h-5c1d62291a71be3b25c38cec086fa94dddb820cf5939bf4bf46acb48c8a07f55
+```prism,sig,h-a6d57530ba017dd802de264a084509d1ff53a6c5a7470acad280a1cb427124b1
 factorial : (Int) -> Int
 ```
 
@@ -739,7 +739,7 @@ factorial : (Int) -> Int
 
 ### `fib`
 
-```prism,sig,h-de35af5067d9054fbd02225362d3f4ae5034d1154d5a423609d257ab57ccadac
+```prism,sig,h-f3232afb129702cdf1668cf55753134cc0715350bd337e13aef3af2f2a1b1f13
 fib : (Int) -> Int
 ```
 
@@ -747,7 +747,7 @@ The nth Fibonacci number (naive, exponential).
 
 ### `pi`
 
-```prism,sig,h-9afd11d0417ad4c8313a8142b81f5904375edcfe3348651ffb9b6bf4ceb379f4
+```prism,sig,h-e2418c7d70e9409908e5b586311b098cc98013392ee001551fac755226fb38d2
 pi : Float
 ```
 
@@ -755,7 +755,7 @@ Pi. The transcendental functions (`sin`, `cos`, `tan`, the inverse and hyperboli
 
 ### `e`
 
-```prism,sig,h-0b51c44a6e90c211c4f0a9fce9801a227d11e9990eade4a58e231c2e56eff257
+```prism,sig,h-68216443854fb8ef2ed90261f13b61b9fc4121a204f3e34b2ad95285778ee8b9
 e : Float
 ```
 
@@ -763,7 +763,7 @@ Euler's number.
 
 ### `tau`
 
-```prism,sig,h-6c3fd5cdae4a908820cba67cbc9a229aa14e1d6969241ab80261fc16e18ac9fa
+```prism,sig,h-60e62a178be6130c33cf459ea9f95e73f9ab139c7ca8a38dec257906279f6e04
 tau : Float
 ```
 
@@ -771,7 +771,7 @@ Tau, `2 * pi`.
 
 ### `rand_below`
 
-```prism,sig,h-ab9454113e5d2064cdb558bdc21f915719fb0b2277ab1b6ddaba9a6dd3d0239a
+```prism,sig,h-41dfa4dc95a1886adad5af60936772a828de5018222dbe7d79ed1dfcc7d03e83
 rand_below : (Int) -> Int ! {Random}
 ```
 
@@ -779,7 +779,7 @@ A random integer in `[0, n)`, over the seeded SplitMix64 stream.
 
 ### `rand_range`
 
-```prism,sig,h-b3e5fe76f805fc5ce65e658f8f28cf7fbdfa367f5cd22affce9270209d89e5cf
+```prism,sig,h-b8a6aa258e51332d9cfa8491c599dc0f6fc1e4489c6f35d504e8dee26917332b
 rand_range : (Int, Int) -> Int ! {Random}
 ```
 
@@ -787,7 +787,7 @@ A random integer in `[lo, hi)`.
 
 ### `rand_bool`
 
-```prism,sig,h-f32fa72f68028c5336dc67654c4baa16fd6dbd263506cf37f1f26189818b8a57
+```prism,sig,h-2586aab31280658f2d6bc6f873876d0f6122b70207c4b6676c8e7a2505f1cd0e
 rand_bool : () -> Bool ! {Random}
 ```
 
@@ -795,7 +795,7 @@ A random boolean.
 
 ### `between`
 
-```prism,sig,h-700eca28775aaba820d6ead44a94f5820536a4ccab58e088399e30ccfa168c19
+```prism,sig,h-1721d3a12873adea201431cd0e19129e05408bf909311426c84a6b2c0cdae881
 between : (Int, Int, Int) -> Bool
 ```
 
@@ -803,7 +803,7 @@ True when `lo <= x <= hi`.
 
 ### `fst`
 
-```prism,sig,h-1d9023fc7369508db3eae2ceaacdd1d107c3cc7160fc37d8c26b1237f0a1a6f3
+```prism,sig,h-d6d5b8cb46f9c1aa07f13f3a00cb7ab7de6300490f03cadfd17f7ab4cf9af2ee
 fst : forall a b. ((a, b)) -> a
 ```
 
@@ -811,7 +811,7 @@ The first component of a pair.
 
 ### `snd`
 
-```prism,sig,h-56f9e07e320ac4f69135281f042c7b4b83f90a286f9225d13780d88b6b12783d
+```prism,sig,h-6326cb90805d2382384f565f6d8c26276b89cac2a61a7ba257f9d606c8a14fd8
 snd : forall a b. ((a, b)) -> b
 ```
 
@@ -819,7 +819,7 @@ The second component of a pair.
 
 ### `swap`
 
-```prism,sig,h-d70881b1bb7a5f98563da353a4ec19aac4700177eb8443026baa4ed58233f7c3
+```prism,sig,h-6e01f332704d7e0005066c531d43ce5cfa555681401f4e706216f08888235ed9
 swap : forall a b. ((a, b)) -> (b, a)
 ```
 
@@ -827,7 +827,7 @@ A pair with its two components swapped.
 
 ### `pair_map`
 
-```prism,sig,h-1a7099b89b21f057323de747e3c9dc465ee5f62b18ae5f157b02c2fae9de88b0
+```prism,sig,h-615ed98b618fe44e68078a68e9349c93018a766cd40443a98eaeea945b5e06e1
 pair_map : forall e0 a b c d. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, c) ! {e0}
 ```
 
@@ -835,7 +835,7 @@ Apply `f` to the first component and `g` to the second.
 
 ### `guard`
 
-```prism,sig,h-1925f506753a094c481ae6dccef17bf46908e9de4102e008383cc66022536e84
+```prism,sig,h-e4f311b7d819769d3362a6d27d02f0873241ede09993eee6bb7a0a5f9c8a93b6
 guard : (Bool) -> Unit ! {Fail}
 ```
 
@@ -843,7 +843,7 @@ guard : (Bool) -> Unit ! {Fail}
 
 ### `optional`
 
-```prism,sig,h-bb8e4c4b2d216238f4e4731d3f402758d47e0524ad1814a00d00081970d50dcf
+```prism,sig,h-07829cac9d29160d44f52d840bdd2f4d49f2f4483f183eef0a4dd3af5284807e
 optional : forall e0 a. (() -> a ! {e0}) -> Option(a) ! {e0}
 ```
 
@@ -851,7 +851,7 @@ Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 
 ### `succeeds`
 
-```prism,sig,h-9e9526cfd50e0fde4329ab6001850ef9bed2581ff37a7dc347e4dd4c390cbaba
+```prism,sig,h-2578632e7cb3d703fdb7254f9bec45e5d45414a9c13676146e2e7872d6517726
 succeeds : forall e0 a. (() -> a ! {e0}) -> Bool ! {e0}
 ```
 
@@ -859,7 +859,7 @@ True when `thunk` runs to completion without calling `fail()`.
 
 ### `default`
 
-```prism,sig,h-ef3a9515fd11f4e327fc0d5e65a6b246840330aa2fb23c8abbce5ba35008de55
+```prism,sig,h-4dc34d21833231c7dcbb46e5c6109fd5e51f6b613a75a8204c9690a5c9310771
 default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
 ```
 
@@ -867,7 +867,7 @@ Run `thunk`, returning its result or the default `d` if it calls `fail()`.
 
 ### `at_list`
 
-```prism,sig,h-fc42cd5cb8fa126aa5b51736615b643932012b0651429cf35da9b8988b77d9cc
+```prism,sig,h-e30f7acfd8076758db383f40882d3d563b6d927d01ae8225f35500458e8127a1
 at_list : forall a. (List(a), Int) -> a ! {Fail}
 ```
 
@@ -875,7 +875,7 @@ The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so `xs.at_
 
 ### `at_map`
 
-```prism,sig,h-d1a05662076d61102fb2e9a11a5847c30cf2b6f9857c587f282ff92c3e078716
+```prism,sig,h-847b89557a247d14ddc65dc9022bd2357b47c90a9299cad1bf65503462492543
 at_map : forall a b c. (Map(b, c, a), b) -> c ! {Fail}
 ```
 
@@ -883,7 +883,7 @@ The value bound to `key`, or `fail()` if absent. Backs `m[k]`.
 
 ### `force`
 
-```prism,sig,h-797b0e6137e5eefc87820975d72b2da894dffe5f4cd9173e1558bc7be9702eb1
+```prism,sig,h-e289efd86b6ab154d625d47e77ad7a4f3e2e8b448c15e2c3f9558035715bebb6
 force : forall a. (Option(a)) -> a ! {Fail}
 ```
 
@@ -891,7 +891,7 @@ The value inside `Some`, or `fail()` for `None`; `o.force() ?? d` defaults.
 
 ### `at_array`
 
-```prism,sig,h-d8c89bc3d6bc1bdd60b28972c1ca7b18947d62ccc6c7b5a8258f66bda923a324
+```prism,sig,h-2c6ca7c234b144b8fa70a44d0aaffcf794cd102b8241ab3867b07738ac2ca259
 at_array : forall a. (Array(a), Int) -> a ! {Fail}
 ```
 
@@ -899,7 +899,7 @@ The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
 
 ### `at_hashmap`
 
-```prism,sig,h-8d93642f4281b28af0f9ac33b8b7bbb35802c97cce27d3717cf837b31257247d
+```prism,sig,h-2d8dd49edaf0b8f7fb0caec02be7148827a5dbabb62512a0b7ae1c94f3df81a9
 at_hashmap : forall a. (HashMap(a), String) -> a ! {Fail}
 ```
 
@@ -907,7 +907,7 @@ The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`.
 
 ### `at_byte`
 
-```prism,sig,h-251cbc5a456872318af820f7ca7510b8d3624bc8e1ad1002280fb5ced0d9ebe7
+```prism,sig,h-766cb2860a0204498ec0f2183ef8519724f0485295e67558924b33a7dab4e7cb
 at_byte : (String, Int) -> Int ! {Fail}
 ```
 
@@ -915,7 +915,7 @@ The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`.
 
 ### `list_set`
 
-```prism,sig,h-912dd50a864ae3d8201d7c4e45947ef88cc6360a18e6a07b145caf21d7bc94b1
+```prism,sig,h-f100992ebacc8abe167f1c95ed51153d38937836eb8e83ac2e143fcc690691a7
 list_set : forall a. (List(a), Int, a) -> List(a)
 ```
 
@@ -923,7 +923,7 @@ A new list with element `i` replaced by `v` (out of range: unchanged). Backs `xs
 
 ### `sort`
 
-```prism,sig,h-4ad2e2c91996ae6744936305417515c2c973ed0dd9b5ad38d3c9ff7da3af3a2e
+```prism,sig,h-26e1fa3607bc7a6ea804b784d2ff00079ec197556fd423d2ca737f0f5ebc356f
 sort : forall a. (List(a)) -> List(a)
 ```
 
@@ -931,7 +931,7 @@ Sort a list in ascending order, a stable O(n log n) merge sort. Primitive elemen
 
 ### `while_loop`
 
-```prism,sig,h-28d75a59a9b850e97e8af0c391ecb0409c30de49234db7d6139175bdfc23013d
+```prism,sig,h-14786429e9b36ef75129695f1b6ddc3184a6fab28fdc1079c2472215ed175637
 while_loop : forall e0 a. ((a) -> Bool ! {e0}, (a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
@@ -939,7 +939,7 @@ Iterate `body` from state `s` while `cond(s)` holds, returning the final state. 
 
 ### `for_range`
 
-```prism,sig,h-d6caf9ce5c71c6b6865ee538d7c205b531124fa48fab77faaf44c5d6d52901dd
+```prism,sig,h-d539af89806cdbdbf87999436afbb37965271719a864e149de98bd73b9f7d099
 for_range : forall e0 a. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
@@ -947,7 +947,7 @@ Fold `f(i, s)` over `i` in `[lo, hi)`, threading the state `s`.
 
 ### `repeat_while`
 
-```prism,sig,h-62f265c62d154dc6e77fb074a5d09ea4916253cd2f527eda45eb78c86c04f137
+```prism,sig,h-40bc0970049aed06d542351f68371b0841d50f55eec0dc82f870b0fe866a28b5
 repeat_while : forall e0 a. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
 ```
 
@@ -955,7 +955,7 @@ The driver `while c do body` (and `loop body` with `break`) desugars to. Conditi
 
 ### `forever`
 
-```prism,sig,h-d09966402b26f7d65719c21b0f8abffcd6434db10f0082b5610c241e7aa159ba
+```prism,sig,h-09ce3b9f645f34fb2ffe2220d6a12bcd93da6389fd87aca139b91f2f55934112
 forever : forall e0 a b. (() -> b ! {e0}) -> a ! {e0}
 ```
 
@@ -963,7 +963,7 @@ The driver an unconditional `loop body` (no `break`) desugars to: it never retur
 
 ### `repeat`
 
-```prism,sig,h-43314a24eb3997d7ff80b68be600d3acd76b1fabb897c4655c9b74e8bc9c1cc7
+```prism,sig,h-54970cfebe2f4dd8906d509325cc09ffc1e946fe63fed6d5f638c772ce35f132
 repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 ```
 
@@ -971,7 +971,7 @@ Run `body` `n` times for its effects.
 
 ### `read_int`
 
-```prism,sig,h-dc9a45dcda660dca79b4ad2378b1c4b808545ce78fd116dbd754dacac5c6beb7
+```prism,sig,h-86131d9ea0231bf311033e9d245da0a25006ef4c146e3e298e70e25b992cf440
 read_int : () -> Int ! {Console}
 ```
 
@@ -979,7 +979,7 @@ Read an integer from standard input.
 
 ### `read_line`
 
-```prism,sig,h-0dd54f83c3ff1d0b7ab4408ff084f00e48578b5b2ce71dded71a0c9b94e5efc2
+```prism,sig,h-5bdb5cd811aeb0b397f13e84f1b8da0cf8a64a0cb1948234d52566ee38a10984
 read_line : () -> String ! {Console}
 ```
 
@@ -987,7 +987,7 @@ Read a line from standard input.
 
 ### `read_file`
 
-```prism,sig,h-f887ce105d29014cdfee393b6be766ca4b1c1e1ba580061458fb10dc1c1d602a
+```prism,sig,h-e0077992cf599a7f3f85de2be3a0aaa8ef88c5addf4f2b26c83af7e84635f6e5
 read_file : (String) -> String ! {FileSystem}
 ```
 
@@ -995,7 +995,7 @@ Read the contents of the file at path `p`.
 
 ### `read_file_bytes`
 
-```prism,sig,h-d66f2d98321bd6a7bcba115f5f3900d5d0f341d0175df316da159b54206a1fd6
+```prism,sig,h-01aedb772d2af46f928612a177bce5184b1fe24e8d2b6963081af98f676221d0
 read_file_bytes : (String) -> Buf ! {FileSystem}
 ```
 
@@ -1003,7 +1003,7 @@ Read the raw bytes of the file at path `p` as a byte buffer, with no UTF-8 inter
 
 ### `file_exists`
 
-```prism,sig,h-7ae7e537ac508b1ed5d24051f73a964800a6841fa07878e0c96e6a58190d2a36
+```prism,sig,h-831c697f4fa70fd963b33b88d42fe7751352003c80f321c9218a7a74ae6deb7e
 file_exists : (String) -> Bool ! {FileSystem}
 ```
 
@@ -1011,7 +1011,7 @@ True when a file exists at path `p`.
 
 ### `rand`
 
-```prism,sig,h-c03517bd216717ef85f1a11f720db6334184cccddbcd264011bc0ac41d016c5f
+```prism,sig,h-db92ce01b9fe29accea875e316cf2355e347edb3b5b52fd3f0188dc3e4a16b50
 rand : () -> Int ! {Random}
 ```
 
@@ -1019,7 +1019,7 @@ A random integer.
 
 ### `getenv`
 
-```prism,sig,h-42c659e314bd5f93e3b9232f4e01e9aa9013d429187ef6525687a116442e27d8
+```prism,sig,h-52e8d4f2747a3f4fb620d18a2df9a5cc9383c69253d6db551189da1bd95234e9
 getenv : (String) -> String ! {Env}
 ```
 
@@ -1027,7 +1027,7 @@ The value of environment variable `s` (empty when unset).
 
 ### `args_count`
 
-```prism,sig,h-546f945fed820611d6b0168a075720fe81c0944994c05376432907091921a4a9
+```prism,sig,h-2e441c5f6bce826afef617751fbe4773a9fd82d24a2a5819bf758f09285c4867
 args_count : () -> Int ! {Env}
 ```
 
@@ -1035,7 +1035,7 @@ The number of command-line arguments.
 
 ### `arg`
 
-```prism,sig,h-1034ecd6436227f54404febc2b14dbe3bacf0d37b056e498dd31247545338c12
+```prism,sig,h-3da91a567d78888e49c4c6213a03978d541579257ecb9344c266120c9e8e1f4a
 arg : (Int) -> String ! {Env}
 ```
 
@@ -1043,7 +1043,7 @@ The `i`th command-line argument.
 
 ### `run_io`
 
-```prism,sig,h-84eae80a7caf6f8185f1e4495ee982970bd9ecadebf6e49933f0c3aaa1ce3a93
+```prism,sig,h-ee1d35d810f5955da6c19a1a275a83a3baa51898883645c671b9fcc5e1e103e0
 run_io : forall e0 a. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0}
 ```
 
@@ -1051,7 +1051,7 @@ The default world handler the entry point is wrapped in. Each capability effect 
 
 ### `srange_go`
 
-```prism,sig,h-ea088d163cbaeb9c5679bb89c8bb7ec0771469c2394e8c97e27db5aa3a92dc31
+```prism,sig,h-b3aa099a7127a28f0f3b44d7ddd81b04262972e23e847d508a278ef1140e9461
 srange_go : (Int, Int) -> Unit ! {Emit(Int)}
 ```
 
@@ -1059,7 +1059,7 @@ Helper for `srange`: emit `lo, lo+1, ..., hi-1`.
 
 ### `srange`
 
-```prism,sig,h-b4bb4e275f9433323979e57d30166e2e78621645ea53ebda5330b2551ce4dfcc
+```prism,sig,h-c3168f63a4282c3a1775801788535f9cf5faf1acb75b2f419a29876c4bbdaeaa
 srange : forall a. (Int, Int) -> (a) -> Unit ! {Emit(Int)}
 ```
 
@@ -1067,7 +1067,7 @@ A stream of the integers in `[lo, hi)`, for the `Emit` combinators.
 
 ### `sof_go`
 
-```prism,sig,h-b3b4697f26d54c0d1e6655ad3eb1f007e8ab00db8220d50fa02da3cf52b39051
+```prism,sig,h-f3413a8eb9f831b0dea309e5d88ec5b63db4b12970dc74baf37aa2c805bbc2f2
 sof_go : forall a. (List(a)) -> Unit ! {Emit(a)}
 ```
 
@@ -1075,7 +1075,7 @@ Helper for `sof`: emit each element of `xs`.
 
 ### `sof`
 
-```prism,sig,h-749b3799e8ced5fe39f02f3360bc9f5e2478a8b8b4a4a6cbdac8337e34772657
+```prism,sig,h-9eedfc36775e25b39cd1d565ae58eb741d65701409e00c8a95e8af69315adfbc
 sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)}
 ```
 
@@ -1083,7 +1083,7 @@ A stream of the elements of the list `xs`.
 
 ### `enum_from_to`
 
-```prism,sig,h-d215e4d3fd7158558dfce193e8a8d1b4be3cb3707a3aed3ee5fc93a178cbb9e6
+```prism,sig,h-a3321483377d803d4e5454904e49a2916055a4b2b1f1f73db85d7f5e8845dc14
 enum_from_to : (Int, Int) -> List(Int)
 ```
 
@@ -1091,7 +1091,7 @@ The ascending list `[lo, lo+1, ..., hi]` (empty when `lo > hi`). Backs the `[a..
 
 ### `enum_seq`
 
-```prism,sig,h-eaf4fb79cc487dc8fde17773235e9f5081dd1b95b748ebdc342c0db910f736c1
+```prism,sig,h-9466899b1de8e976a8af5f9a1767ab3e5ee3fe6de0e7047222da5ec9c10c2274
 enum_seq : (Int, Int, Int) -> List(Int)
 ```
 
@@ -1099,7 +1099,7 @@ Helper for `enum_from_then_to`: the list from `x` by `step` up to `hi`.
 
 ### `enum_from_then_to`
 
-```prism,sig,h-c35146df27bc7d0b6241b822353137886bdcdaf4de482f2b3fc86290ed98d509
+```prism,sig,h-a79fb5241152be5ead1a0881c6b05cca6da4cf62eb8a7699b43c2bf26bfbcbd4
 enum_from_then_to : (Int, Int, Int) -> List(Int)
 ```
 
@@ -1107,7 +1107,7 @@ The list from `a`, stepping by `b - a`, up to `hi`. Backs the `[a,b..z]` list sy
 
 ### `smap_go`
 
-```prism,sig,h-abb2e6c879536452cbac87dbfb53ce859ee7e876e474247d3f90629c8df71723
+```prism,sig,h-678710e1c26a10c07e904c915ea8dc9c8ee0dce97441b6d89539fa98cad8df46
 smap_go : forall e0 a b c. ((Unit) -> a ! {Emit(b), e0}, (c) -> b ! {Emit(b), e0}) -> a ! {Emit(b), e0}
 ```
 
@@ -1115,7 +1115,7 @@ Helper for `smap`.
 
 ### `smap`
 
-```prism,sig,h-b7e97df661799716effe794b6bcab59aa1bf44b5d05ebc293d81d276b01f2939
+```prism,sig,h-895407abdebeeed39c4e903c8c85fc260df50ed40fccd0921950c48db3a2f775
 smap : forall e1 a b c d. ((Unit) -> a ! {Emit(b), e1}, (c) -> b ! {Emit(b), e1}) -> (d) -> a ! {Emit(b), e1}
 ```
 
@@ -1123,7 +1123,7 @@ Map `f` over every element of a stream, fusing (no intermediate list).
 
 ### `skeep_go`
 
-```prism,sig,h-b0487ef5f5f7651b5c6ef98d8b671b3c5b70833cc8709e4fc7f05ad5bde11749
+```prism,sig,h-2d466223e25482f71569f9045cfa1a6eb135f64d34ddc5e37d6722fd46353340
 skeep_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, (b) -> Bool ! {Emit(b), e0}) -> a ! {Emit(b), e0}
 ```
 
@@ -1131,7 +1131,7 @@ Helper for `skeep`.
 
 ### `skeep`
 
-```prism,sig,h-2fec25291f3da92d938ecdd7800e0eb4d3aa182f67ad28f702fd27f198bbac85
+```prism,sig,h-1c36b0c2d2443932681f59e3f9c81f30850abce0602ff6601d635cf26b6e6d64
 skeep : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> Bool ! {Emit(b), e1}) -> (c) -> a ! {Emit(b), e1}
 ```
 
@@ -1139,7 +1139,7 @@ Keep only the stream elements satisfying `p`, fusing.
 
 ### `stake_go`
 
-```prism,sig,h-eb8c744426e538937b1598d2805cb38c8395c918a6a43c1840e69f2ecc8f5ac4
+```prism,sig,h-6585d6a38b9a310cbe0120d16b71d9f4c8415c66212e1d91d944b385f803046d
 stake_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0}
 ```
 
@@ -1147,7 +1147,7 @@ Helper for `stake`.
 
 ### `stake`
 
-```prism,sig,h-91ee7f6e1eec2f6d3c6076a2b4a39afca204ae4997f822a0076d1272e0a38051
+```prism,sig,h-e83902a8b3bd41b741ff20f14bf7aecba6a18ee77585adbbaf1607c89aadbfe3
 stake : forall e1 a b c. ((Unit) -> b ! {Emit(a), e1}, Int) -> (c) -> Unit ! {Emit(a), e1}
 ```
 
@@ -1155,7 +1155,7 @@ The first `n` elements of a stream, stopping the producer early.
 
 ### `sfold`
 
-```prism,sig,h-32090cf4ae12fe945d6dcae114c21f02e32675fab7dd641a7d8548011260dcaf
+```prism,sig,h-057d631c70c5d006957d103412a093dcb38ba910ab500a99fab253abdbfc64a4
 sfold : forall e0 a b c. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 ```
 
@@ -1163,7 +1163,7 @@ Left-fold a stream with `f` from the initial accumulator `z`, fusing.
 
 ### `ssum`
 
-```prism,sig,h-0976621cf2fe495ee83abc38c422f9b363c20c0ed61d139a44aeecce18aa2413
+```prism,sig,h-1acd72923aecf7a9603b72e34a923e7557490bf5fef6d8b4930d6531a71fdfe8
 ssum : forall e0 a. ((Unit) -> a ! {e0}) -> Int ! {e0}
 ```
 
@@ -1171,7 +1171,7 @@ Sum a stream of numbers.
 
 ### `scollect`
 
-```prism,sig,h-68b1f0f3cb81ff73ee06009d11cb210589d32a00c3b489e44b1a2ec5f756a7f1
+```prism,sig,h-07eae7dab4778a4da24c198c4a99fc43eaa906050d05e76b70c6e04aeacbf56c
 scollect : forall e0 a b. ((Unit) -> a ! {e0}) -> List(b) ! {e0}
 ```
 
@@ -1179,7 +1179,7 @@ Collect a stream into a list, in emission order.
 
 ### `concat_map`
 
-```prism,sig,h-475a38a499fe5b201a0ad252d2606eaa059d76d9b9e1b39e2888d4b4e9f9c878
+```prism,sig,h-cc17609e5a8dcde888b8f3d5192cb78738e69584923dba8bef3ea122aab718f6
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
@@ -1187,7 +1187,7 @@ Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude (as w
 
 ### `eprintln`
 
-```prism,sig,h-1ff344dbe606619fa35bb5136c82c7847cdcc6d775fadc30aae90689420ac41a
+```prism,sig,h-4509379839352457c29bc1eba18c2349d608fa7a8727e63dae881f6a32f2abbf
 eprintln : (String) -> Unit ! {IO}
 ```
 
@@ -1195,7 +1195,7 @@ Print `s` to standard error, followed by a newline.
 
 ### `push_all`
 
-```prism,sig,h-fa97a16ab6cd067fce20252275ff07433387e781520801ac1335a2ae3814d705
+```prism,sig,h-19fbb0832d2ba9d4bde63d2b848a34a2c84b8f16add49dd530f78865e17abfc8
 push_all : forall a. (Array(a), List(a)) -> Array(a)
 ```
 
@@ -1203,7 +1203,7 @@ Helper for `array_of_list`: push each element of `xs` onto `arr`.
 
 ### `array_of_list`
 
-```prism,sig,h-71399035ddfc0a1f2c01d39b932a653489c8c9021d5e85622964dbd3828b9ab3
+```prism,sig,h-ed2fc5496823664e552fb8c3f9ea2d56a17895062782b60dedf878ef4d8a64fa
 array_of_list : forall a. (List(a)) -> Array(a)
 ```
 
@@ -1211,7 +1211,7 @@ Build a growable `Array` from a list.
 
 ### `concat_all`
 
-```prism,sig,h-d05e36f380338f703eeb172cb3f00eda8cad2024d6bb85a4c1c48e9664d65db5
+```prism,sig,h-fdd8bf8c74e492b857c1e27e446c8bb1adf40de91bca04419b69d6534192c480
 concat_all : (List(String)) -> String
 ```
 
@@ -1219,7 +1219,7 @@ Join a list of strings into one with a single allocation (an O(n) builder that r
 
 ### `fnv_from`
 
-```prism,sig,h-225d6a83c79b2ceed7b80b6b8c8f4b1460be735c4a12238be9eab3b2a177fbf8
+```prism,sig,h-0429bce29fe99117becf7cb3c4dc5ea6fc325646159baefee3ba97f3a76c7205
 fnv_from : (String, Int, U64) -> U64
 ```
 
@@ -1227,7 +1227,7 @@ Helper for `str_hash`: fold one byte into the running FNV-1a hash.
 
 ### `str_hash`
 
-```prism,sig,h-9af2d8747076e7c09154829544932efae13b95c5db8cade2b417fb9aebdc86de
+```prism,sig,h-8f2afbe6f2227e953795c76a695282dc0c2efcc72f3db6fa098738bad911616d
 str_hash : (String) -> U64
 ```
 
@@ -1235,7 +1235,7 @@ The FNV-1a 64-bit hash of a string (the U64 lane wraps, O(length)).
 
 ### `bucket_of`
 
-```prism,sig,h-5b83744b3d5a3f5af08302f9bba3a44986678e0d3db86d146d072beda897f8ee
+```prism,sig,h-a79263beeb68ee53b7a862e94dcb7b97eca8626d095d808a608d063585d5179b
 bucket_of : (String, Int) -> Int
 ```
 
@@ -1243,7 +1243,7 @@ Helper: the bucket index of key `k` in a table of `n` buckets.
 
 ### `hm_new`
 
-```prism,sig,h-b199e5ac2374e8f20db6d328cb1d33380db1dc29c89317be333aef347eacd44b
+```prism,sig,h-5024f43551dfeeeb9b3cd7dc7547e8a897b706df0508375b749eb3e540f7bfb6
 hm_new : forall a. () -> HashMap(a)
 ```
 
@@ -1251,7 +1251,7 @@ An empty hash map.
 
 ### `assoc_get`
 
-```prism,sig,h-852bf7e36ed4656b28b80d4fa7e3363551db15a87eb1f98b53976c4c8f09f44c
+```prism,sig,h-ef0a4a2f3fc7b6051d8c89902afbaecea50f57943126cc1c6e6151ea344c91ea
 assoc_get : forall a. (List((String, a)), String) -> Option(a)
 ```
 
@@ -1259,7 +1259,7 @@ Helper: look up `k` in an association-list bucket (matches pairs directly so it 
 
 ### `hm_lookup`
 
-```prism,sig,h-979f5e3fabd1dbb9123dec92491121c28e766d83c46411bf9626f9de5567af43
+```prism,sig,h-22ded004622f21440d75f3d275ea8f0da2da71b2dcfe13e8a124eafa311a4abf
 hm_lookup : forall a. (HashMap(a), String) -> Option(a)
 ```
 
@@ -1267,7 +1267,7 @@ The value bound to `k` as `Some`, or `None`.
 
 ### `hm_member`
 
-```prism,sig,h-1a5a3a6326fcfb20ac4f2d8e8635e8d53d4fae38aa096f4d558d08efd38a9611
+```prism,sig,h-3c6cd8320cf620f3f4e50086bba7c6f8d001a980933b5411f7e256b94539fb16
 hm_member : forall a. (HashMap(a), String) -> Bool
 ```
 
@@ -1275,7 +1275,7 @@ True when `k` is present.
 
 ### `hm_get_or`
 
-```prism,sig,h-30e3c87e425a32deead5d50609af4390779d7533a5ddd7794d11e77fc17adefe
+```prism,sig,h-8c5ae0b0cf7e7ec092f6377a2555605bb61ccd0a1b1b50468ccc32a0beb71d40
 hm_get_or : forall a. (a, HashMap(a), String) -> a
 ```
 
@@ -1283,7 +1283,7 @@ The value bound to `k`, or the default `d`.
 
 ### `assoc_put`
 
-```prism,sig,h-0a3f3b740299d0569b38989db165480efa78100ef1738f9325717f1c2070ba25
+```prism,sig,h-bd2e9563fbbd165d0c9816763bfc6131296ad9d840b8e972405c8e09ee3fe1f0
 assoc_put : forall a. (List((String, a)), String, a) -> (List((String, a)), Int)
 ```
 
@@ -1291,7 +1291,7 @@ Helper for `hm_put_raw`: replace or add `k` in a bucket, returning the chain and
 
 ### `hm_put_raw`
 
-```prism,sig,h-010d51e24a96cc19da422029efe48ca4bad22c32e85f5b6d7aaa433fb2151587
+```prism,sig,h-fd1e8cf942154bb61f59918328a1d344ee6867ef059d4f869d83a19b1a4420a2
 hm_put_raw : forall a. (HashMap(a), String, a) -> HashMap(a)
 ```
 
@@ -1299,7 +1299,7 @@ Helper for `hm_insert`: insert without resizing.
 
 ### `buckets_to_list`
 
-```prism,sig,h-7cc8be05b094b57c25675d185c32dbdb509dc404994376022f8e1267c1080292
+```prism,sig,h-5c7559d4b139b99d0a87d9671327ce5a6d128e5f9adb554f76f3b88ebafda31c
 buckets_to_list : forall a. (Array(List(a)), Int, Int) -> List(a)
 ```
 
@@ -1307,7 +1307,7 @@ Helper for `hm_to_list`: concatenate buckets `i..n`.
 
 ### `hm_to_list`
 
-```prism,sig,h-31c971b66ae32feb93df6ecdd70c52d140be3c8db4dc13ccee24461b3f061ab3
+```prism,sig,h-a605415f6a7ad90daeb53589ca34d8ccb3d453397a047186d8ca0061c5bddb41
 hm_to_list : forall a. (HashMap(a)) -> List((String, a))
 ```
 
@@ -1315,7 +1315,7 @@ The `(key, value)` pairs, in bucket order.
 
 ### `pair_keys`
 
-```prism,sig,h-a87cbb3d83ca6219231f66a4ac373ff9712ba33153c1d65db700aaa51a60617c
+```prism,sig,h-948b307de48a3841730da193d013e20b239e62442dfd0e54a72cfdae2be2a76f
 pair_keys : forall a b. (List((a, b))) -> List(a)
 ```
 
@@ -1323,7 +1323,7 @@ Helper: the keys of a list of pairs.
 
 ### `hm_keys`
 
-```prism,sig,h-fc93d0f06b00c768f8355d46080f49ae14308afeadc178f6999c2d024c29a83a
+```prism,sig,h-f36325ef11096861f0ee466765634e196a1f53ca2c759af4b7efcad5890edaf5
 hm_keys : forall a. (HashMap(a)) -> List(String)
 ```
 
@@ -1331,7 +1331,7 @@ The keys of the map.
 
 ### `hm_size`
 
-```prism,sig,h-08e11d3ed0c2280800710610dd302b4addc179968a502fcedb780436bdaa4387
+```prism,sig,h-6bac9606e34fc134654e050130ec31e11180c80c72d16443bb0a73548b5ad749
 hm_size : forall a. (HashMap(a)) -> Int
 ```
 
@@ -1339,7 +1339,7 @@ The number of entries.
 
 ### `hm_reinsert`
 
-```prism,sig,h-afb5960ba1e7b4cf6cfa48fdcf77d7ad9f68cf37d78ba114dd73c0a2c1d4cb5e
+```prism,sig,h-61bff050802c92b83be95e0abc1112eb29fe282c3bc83aa5e12e2b7a9c984b09
 hm_reinsert : forall a. (HashMap(a), List((String, a))) -> HashMap(a)
 ```
 
@@ -1347,7 +1347,7 @@ Helper for `hm_insert`: re-insert every pair into a fresh table.
 
 ### `hm_insert`
 
-```prism,sig,h-b8d685dda3284474503350ddf01fb249f74148c6cd33ecf3bdc2fed166b3800d
+```prism,sig,h-dd693cfe2447d0d6c2608fbc276a7f7fc8a795523a6fbd4e0d42abb7c30c566a
 hm_insert : forall a. (HashMap(a), String, a) -> HashMap(a)
 ```
 
@@ -1355,7 +1355,7 @@ Insert or overwrite `k`, doubling the bucket count and rehashing once the load f
 
 ### `hm_delete`
 
-```prism,sig,h-b3fe545dd0e65046678c60aa724cfebadee9f60616af0889ae70b51c49cdadb5
+```prism,sig,h-863416228834cee56cd408b28779a3299d89be73554daebef2823f5b9dab0342
 hm_delete : forall a. (HashMap(a), String) -> HashMap(a)
 ```
 
@@ -1363,7 +1363,7 @@ Remove `k` (a no-op if absent).
 
 ### `assoc_del`
 
-```prism,sig,h-bee9049dab89594034e5cbe2275a622e84f7345e82d76c99283720accfe92357
+```prism,sig,h-40cd2a508f5834593bba47b05e213bdfac2290c681e5e5de7168cf961d11a1f3
 assoc_del : forall a. (List((String, a)), String) -> (List((String, a)), Int)
 ```
 
@@ -1371,7 +1371,7 @@ Helper for `hm_delete`: remove `k` from a bucket, returning the chain and 1 if a
 
 ### `pair_values`
 
-```prism,sig,h-b6ac29652c367b0aa2470c08136f74470860544809386af7b3ba72e4d6e19dfb
+```prism,sig,h-3d6392204db5e60cb95db6df6af3e3a0d4fa43c358a26606316b6dbe32a0ea8f
 pair_values : forall a b. (List((a, b))) -> List(b)
 ```
 
@@ -1379,7 +1379,7 @@ Helper: the values of a list of pairs.
 
 ### `hm_values`
 
-```prism,sig,h-1139f465e2fe5984220af635401f8707b8a5cf9638d66890e3ef4bc149ff22bd
+```prism,sig,h-eb692c2a38ea0f64e9f0589e3643a0036d40ac2341750511ba1e86cabdab4d3c
 hm_values : forall a. (HashMap(a)) -> List(a)
 ```
 
@@ -1387,7 +1387,7 @@ The values of the map.
 
 ### `hm_from_list_go`
 
-```prism,sig,h-be01827396360700eddbdff7d7f897214103de768540668d637b1bfd9d1d1631
+```prism,sig,h-5878a35545a47d2e70e7207ead8fc318c37c454654ce22caf29cb9ae6cfc0508
 hm_from_list_go : forall a. (HashMap(a), List((String, a))) -> HashMap(a)
 ```
 
@@ -1395,7 +1395,7 @@ Helper for `hm_from_list`.
 
 ### `hm_from_list`
 
-```prism,sig,h-06dbdaf2b0c7b03120b4ab1cc06bb8893ba972037c08365c020ed008bf590623
+```prism,sig,h-5f8d1d11cb105d025e930a4fa2e0941425563bc4676700d1ef5651c98a49dd97
 hm_from_list : forall a. (List((String, a))) -> HashMap(a)
 ```
 
@@ -1403,7 +1403,7 @@ Build a hash map from `(key, value)` pairs (later pairs win).
 
 ### `hm_adjust`
 
-```prism,sig,h-2ab8abce3c23afa802f9f67588b376db0b5fee64c0a9fa29cc4820ec6868eb40
+```prism,sig,h-0331808a226efcef10adff4db2e47a0377fb5894bf5ab74b738b1b1065e9fa0b
 hm_adjust : forall e0 a. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0}
 ```
 
@@ -1411,7 +1411,7 @@ Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
 
 ### `array_foldl_go`
 
-```prism,sig,h-33b27ba8225890ec7937cb59b86188a6b69e6ea48e3e886da9fe5c1fe101c067
+```prism,sig,h-d7f52997dd2d3c5d0d9115c4b3b72b907b89c1442dd8df85d50b4d651abff94a
 array_foldl_go : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b), Int) -> a ! {e0}
 ```
 
@@ -1419,7 +1419,7 @@ Helper for `array_foldl`.
 
 ### `array_foldl`
 
-```prism,sig,h-9f224df5305d8401674e9bb951be9574a088f9eb9e78222086ee65ba8f119689
+```prism,sig,h-258e2ea30990d71666519c2147b5f409320be1c660a4fc39051f244ac36c2fcc
 array_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0}
 ```
 
@@ -1427,7 +1427,7 @@ Left-fold `f` over the elements of an array from `acc`.
 
 ### `array_to_list_go`
 
-```prism,sig,h-78ba8ca3d9f4f29b912738b5d5b3003bc09c5e1112320d7c9c8363303d9389af
+```prism,sig,h-15069c7ca4b05fd6bf410f6af04890d8423d7c426f8266505efc96cb87fbf499
 array_to_list_go : forall a. (Array(a), Int, List(a)) -> List(a)
 ```
 
@@ -1435,7 +1435,7 @@ Helper for `array_to_list`.
 
 ### `array_to_list`
 
-```prism,sig,h-d6bf69cc1f005f21d2121a4b7ee89ca25c4e4aa6abdf6e69a53ef4c7a7c51bb2
+```prism,sig,h-f727d463c9ea2e89dedeb58b5dcdb3c6420afbfeaeaf7f909eb0cd477dbc8208
 array_to_list : forall a. (Array(a)) -> List(a)
 ```
 
@@ -1443,7 +1443,7 @@ The elements of an array as a list, in order.
 
 ### `args_go`
 
-```prism,sig,h-153d7e54526c72b2fcc09cd9d79c6cd85e57802d8c55a563dfad654f4f63d0fd
+```prism,sig,h-c6be9052dfe994b76a94854fbf18f76871a5c4c5dab0ef466e1a4e6870057eef
 args_go : (Int, Int) -> List(String) ! {Env}
 ```
 
@@ -1451,7 +1451,7 @@ Helper for `args`.
 
 ### `args`
 
-```prism,sig,h-51359f199819141aacc474ea8aabc11be5f6b47e7bd04e65c7af964da69be6c8
+```prism,sig,h-88d85ca6a626c8c741ce734306b0ae767d82c7c1cc215dfdcb86d2f4c9d2e3e6
 args : () -> List(String) ! {Env}
 ```
 
@@ -1459,7 +1459,7 @@ The command-line arguments as a list.
 
 ### `int_cmp`
 
-```prism,sig,h-6cca4edf5b03be77c637bd21d9bf8655c8d3ce8d954ac6d05d7677c5bb62a90b
+```prism,sig,h-6b2062fd2d24bd909f50ee9f438601dd151b4a097599e7013ca577df2b559d9b
 int_cmp : (Int, Int) -> Int
 ```
 
@@ -1467,7 +1467,7 @@ Three-way comparison of two ints: `-1`, `0`, or `1` (the `Ord(Int)` kernel).
 
 ### `str_escape`
 
-```prism,sig,h-3f3c8921e0781cd33ab47e126069c03154081438e9d1ad3cd410eff6e28849e3
+```prism,sig,h-bf2d07e4a708a3331d36203223d98b4703e7c13fe1e836215f08e6d8f1c4cfe8
 str_escape : (String) -> String
 ```
 
@@ -1475,25 +1475,25 @@ Render `s` as a canonical double-quoted string literal, escaping the characters 
 
 ### `escape_body`
 
-```prism,sig,h-1913b06057ff831f8ff2824b93a59a0dcb9c6a13f6c0f20be380b09671413750
+```prism,sig,h-945efa1dbbb76c2939a7c0cde40f8ce574808d400df7c56e58b607e5e0d407e8
 escape_body : (String, Int, Int) -> String
 ```
 
 ### `escape_at`
 
-```prism,sig,h-481a0324f5af4fa01f735bc436bcb0d5eddc8aee9c7bdb097f804e3c7529a0f2
+```prism,sig,h-4523191b497388d23d6cb9980e941e269745785033ce00618dcafdc8c9165e82
 escape_at : (Int, String, Int) -> String
 ```
 
 ### `show_list_body`
 
-```prism,sig,h-288ef2bed34b7894747d1cf1abee320a324b0885d03f3aa88f45196bd68ccdd8
+```prism,sig,h-f2728e96e387162378758247bc5ff179d59d81a5295a574075ae7d82ff62199b
 show_list_body : forall a. (List(a), Bool) -> String
 ```
 
 ### `insert_by_ord`
 
-```prism,sig,h-0ccc910ed27555142efa8a5af3dd280b4a5af636fca283b7a156141207950c56
+```prism,sig,h-fca44dc116dec776872358fbceae85528f606b3e83c3376562a34f6b12e8dfd1
 insert_by_ord : forall a. (a, List(a)) -> List(a)
 ```
 
@@ -1501,7 +1501,7 @@ Insert `x` into an already-sorted list, keeping it sorted (`Ord`).
 
 ### `merge_by_ord`
 
-```prism,sig,h-d7dd98e69cebb1554dd8fc5449a2ed4d0d7f8b5b34d4749519ab5ba43a2ef310
+```prism,sig,h-fc2923e62d9fcb2c58ef53103f6defd89c9f6c4475db94d0409430af54476724
 merge_by_ord : forall a. (List(a), List(a)) -> List(a)
 ```
 
@@ -1509,7 +1509,7 @@ Stable merge of two already-sorted lists. The recursive `Cons` becomes a loop by
 
 ### `sort_by_ord`
 
-```prism,sig,h-3d30ab528b13f69efe36b1f7b6a20cc8aac889f1495146565cc33f504de1573f
+```prism,sig,h-15c128100c2e1414c6d0ca1f7b532191b441f8bd0328568c8098af93b32a0ae3
 sort_by_ord : forall a. (List(a)) -> List(a)
 ```
 

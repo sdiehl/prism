@@ -1,6 +1,0 @@
-fn tick(n : Int) : Int =
-  let base = n + 1
-  -- assert this region allocates no fresh heap cell
-  without alloc base + base
-
-fn main() = println(tick(20))

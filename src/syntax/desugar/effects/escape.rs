@@ -37,24 +37,16 @@ pub(super) fn free_resume(e: &S<Expr>, sh: bool) -> Option<Span> {
             })
         }),
         Expr::Handle(b, arms) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
-        Expr::Bin(_, a, b) | Expr::Pipe(a, b) => fr(a).or_else(|| fr(b)),
-        Expr::If(c, t, f) => fr(c).or_else(|| fr(t)).or_else(|| fr(f)),
-        Expr::Call(f, args) => fr(f).or_else(|| args.iter().find_map(fr)),
-        Expr::List(es) | Expr::Tuple(es) => es.iter().find_map(fr),
-        Expr::FieldAccess(b, _) | Expr::Inst(b, _) | Expr::Ann(b, _) | Expr::Mask(_, b) => fr(b),
-        Expr::Index(recv, key) => fr(recv).or_else(|| fr(key)),
-        Expr::RecordCreate(_, fs) => fs.iter().find_map(|(_, v)| fr(v)),
-        Expr::RecordUpdate(b, _, fs) => fr(b).or_else(|| fs.iter().find_map(|(_, v)| fr(v))),
-        Expr::RecordUpdatePath(b, ups) => fr(b).or_else(|| {
-            ups.iter().find_map(|(steps, op)| {
-                steps
-                    .iter()
-                    .find_map(|s| s.sub_expr().and_then(fr))
-                    .or_else(|| fr(op.expr()))
-            })
-        }),
         Expr::Sugar(s) => free_resume_sugar(s),
-        _ => None,
+        _ => {
+            let mut found = None;
+            e.node.each_child(&mut |child| {
+                if found.is_none() {
+                    found = fr(child);
+                }
+            });
+            found
+        }
     }
 }
 
@@ -91,7 +83,7 @@ fn free_resume_sugar(s: &Sugar<Surface>) -> Option<Span> {
         Sugar::Range(pre, hi) => pre.iter().find_map(fr).or_else(|| fr(hi)),
         Sugar::While(cond, b) => cond.as_deref().and_then(fr).or_else(|| fr(b)),
         Sugar::Break | Sugar::Continue => None,
-        Sugar::Return(e) | Sugar::WithoutAlloc(e) => fr(e),
+        Sugar::Return(e) => fr(e),
         Sugar::ReadPath(b, steps) => {
             fr(b).or_else(|| steps.iter().find_map(|s| s.sub_expr().and_then(fr)))
         }
@@ -140,84 +132,7 @@ pub(in crate::syntax::desugar) fn referenced_names(
 
 fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
     f(e);
-    match &e.node {
-        Expr::Bin(_, a, b) | Expr::Pipe(a, b) | Expr::Let(_, a, b) => {
-            walk(a, f);
-            walk(b, f);
-        }
-        Expr::If(a, b, c) => {
-            walk(a, f);
-            walk(b, f);
-            walk(c, f);
-        }
-        Expr::Lam(_, a)
-        | Expr::FieldAccess(a, _)
-        | Expr::Inst(a, _)
-        | Expr::Ann(a, _)
-        | Expr::Mask(_, a) => {
-            walk(a, f);
-        }
-        Expr::Index(recv, key) => {
-            walk(recv, f);
-            walk(key, f);
-        }
-        Expr::Call(h, args) => {
-            walk(h, f);
-            for a in args {
-                walk(a, f);
-            }
-        }
-        Expr::Match(s, arms) => {
-            walk(s, f);
-            for a in arms {
-                if let Some(g) = &a.guard {
-                    walk(g, f);
-                }
-                walk(&a.body, f);
-            }
-        }
-        Expr::Handle(b, arms) => {
-            walk(b, f);
-            for a in arms {
-                match a {
-                    HandlerArm::Return(_, body) | HandlerArm::Op(_, _, _, body) => walk(body, f),
-                    #[expect(
-                        clippy::uninhabited_references,
-                        reason = "Never is uninhabited in Core; arm is unreachable"
-                    )]
-                    HandlerArm::Sugar(never) => match *never {},
-                }
-            }
-        }
-        Expr::List(es) | Expr::Tuple(es) => {
-            for a in es {
-                walk(a, f);
-            }
-        }
-        Expr::RecordCreate(_, fs) => {
-            for (_, a) in fs {
-                walk(a, f);
-            }
-        }
-        Expr::RecordUpdate(b, _, fs) => {
-            walk(b, f);
-            for (_, a) in fs {
-                walk(a, f);
-            }
-        }
-        Expr::RecordUpdatePath(b, ups) => {
-            walk(b, f);
-            for (steps, op) in ups {
-                for s in steps {
-                    if let Some(e) = s.sub_expr() {
-                        walk(e, f);
-                    }
-                }
-                walk(op.expr(), f);
-            }
-        }
-        _ => {}
-    }
+    e.node.each_child(&mut |child| walk(child, f));
 }
 
 // Walk the statement spine of the handled block and flag a block value that
@@ -302,11 +217,15 @@ pub(super) fn escapes(
                 })
             })
         }
+        Expr::IndexSet(recv, key, val) => escapes(recv, ops, ctors, &mut tainted.clone())
+            .or_else(|| escapes(key, ops, ctors, &mut tainted.clone()))
+            .or_else(|| escapes(val, ops, ctors, &mut tainted.clone())),
         Expr::Handle(b, _)
         | Expr::FieldAccess(b, _)
         | Expr::Ann(b, _)
         | Expr::Inst(b, _)
-        | Expr::Mask(_, b) => escapes(b, ops, ctors, tainted),
+        | Expr::Mask(_, b)
+        | Expr::Neg(b) => escapes(b, ops, ctors, tainted),
         Expr::Index(recv, key) => escapes(recv, ops, ctors, &mut tainted.clone())
             .or_else(|| escapes(key, ops, ctors, &mut tainted.clone())),
         _ => None,

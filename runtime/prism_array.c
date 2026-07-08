@@ -32,6 +32,7 @@ long prism_array_empty(void) {
 }
 
 long prism_array_new(long n, long init) {
+    if (n < 0) prism_array_oob();
     long *p = prism_alloc(n + 1); /* cap = len = n */
     arr_setlen(p, n);
     for (long i = 0; i < n; i++) {

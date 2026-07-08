@@ -20,3 +20,8 @@
 /result-*
 /dist
 /.direnv
+# Generated outputs of the lineage_tiles example (the run writes these); the
+# inputs (pipeline.pr, config.json, tiles/) are committed, the artifacts are not.
+/examples/lineage_tiles/summary.json
+/examples/lineage_tiles/*.replay
+/examples/lineage_tiles/*.plineage

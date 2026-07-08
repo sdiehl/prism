@@ -6,10 +6,14 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Sym(u32);
+#[derive(Copy, Clone)]
+pub struct Sym {
+    id: u32,
+    name: &'static str,
+}
 
 #[derive(Debug)]
 struct Interner {
@@ -36,20 +40,22 @@ impl Sym {
     /// distinct symbols are interned.
     #[must_use]
     pub fn new(s: &str) -> Self {
-        let id = {
+        let (id, name) = {
             let mut it = interner().lock().expect("sym interner poisoned");
-            if let Some(&id) = it.ids.get(s) {
-                id
+            let interned = if let Some(&id) = it.ids.get(s) {
+                (id, it.names[id as usize])
             } else {
                 let leaked: &'static str = Box::leak(s.to_owned().into_boxed_str());
                 let id =
                     u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
                 it.names.push(leaked);
                 it.ids.insert(leaked, id);
-                id
-            }
+                (id, leaked)
+            };
+            drop(it);
+            interned
         };
-        Self(id)
+        Self { id, name }
     }
 
     /// Mint a fresh anonymous `Sym`: a unique identity from the interner,
@@ -64,25 +70,48 @@ impl Sym {
     /// are allocated.
     #[must_use]
     pub fn fresh() -> Self {
-        let id = {
+        let (id, name) = {
             let mut it = interner().lock().expect("sym interner poisoned");
             let id = u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
             let leaked: &'static str = Box::leak(format!("%{id}").into_boxed_str());
             it.names.push(leaked);
             it.ids.insert(leaked, id);
-            id
+            drop(it);
+            (id, leaked)
         };
-        Self(id)
+        Self { id, name }
     }
 
     /// Resolve a `Sym` back to its interned name.
-    ///
-    /// # Panics
-    /// Panics if the interner mutex is poisoned.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
-        let name = interner().lock().expect("sym interner poisoned").names[self.0 as usize];
-        name
+    pub const fn as_str(self) -> &'static str {
+        self.name
+    }
+}
+
+impl PartialEq for Sym {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Sym {}
+
+impl PartialOrd for Sym {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Sym {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl Hash for Sym {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }
 
@@ -113,29 +142,5 @@ impl From<String> for Sym {
 impl From<&String> for Sym {
     fn from(s: &String) -> Self {
         Self::new(s)
-    }
-}
-
-impl PartialEq<str> for Sym {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<&str> for Sym {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-
-impl PartialEq<String> for Sym {
-    fn eq(&self, other: &String) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<&String> for Sym {
-    fn eq(&self, other: &&String) -> bool {
-        self.as_str() == other.as_str()
     }
 }

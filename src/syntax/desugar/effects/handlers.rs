@@ -117,70 +117,9 @@ fn scan_k(e: &S<Expr<Core>>, k: &str, under: bool, direct: &mut usize, escaped: 
             }
         }
         Expr::Lam(_, b) => scan_k(b, k, true, direct, escaped),
-        Expr::Bin(_, a, b) | Expr::Pipe(a, b) | Expr::Let(_, a, b) | Expr::Index(a, b) => {
-            scan_k(a, k, under, direct, escaped);
-            scan_k(b, k, under, direct, escaped);
-        }
-        Expr::If(a, b, c) => {
-            scan_k(a, k, under, direct, escaped);
-            scan_k(b, k, under, direct, escaped);
-            scan_k(c, k, under, direct, escaped);
-        }
-        Expr::FieldAccess(a, _) | Expr::Inst(a, _) | Expr::Ann(a, _) | Expr::Mask(_, a) => {
-            scan_k(a, k, under, direct, escaped);
-        }
-        Expr::Match(s, arms) => {
-            scan_k(s, k, under, direct, escaped);
-            for a in arms {
-                if let Some(g) = &a.guard {
-                    scan_k(g, k, under, direct, escaped);
-                }
-                scan_k(&a.body, k, under, direct, escaped);
-            }
-        }
-        Expr::Handle(b, arms) => {
-            scan_k(b, k, under, direct, escaped);
-            for a in arms {
-                match a {
-                    HandlerArm::Return(_, body) | HandlerArm::Op(_, _, _, body) => {
-                        scan_k(body, k, under, direct, escaped);
-                    }
-                    #[expect(
-                        clippy::uninhabited_references,
-                        reason = "Never is uninhabited in Core; arm is unreachable"
-                    )]
-                    HandlerArm::Sugar(never) => match *never {},
-                }
-            }
-        }
-        Expr::List(es) | Expr::Tuple(es) => {
-            for a in es {
-                scan_k(a, k, under, direct, escaped);
-            }
-        }
-        Expr::RecordCreate(_, fs) => {
-            for (_, a) in fs {
-                scan_k(a, k, under, direct, escaped);
-            }
-        }
-        Expr::RecordUpdate(b, _, fs) => {
-            scan_k(b, k, under, direct, escaped);
-            for (_, a) in fs {
-                scan_k(a, k, under, direct, escaped);
-            }
-        }
-        Expr::RecordUpdatePath(b, ups) => {
-            scan_k(b, k, under, direct, escaped);
-            for (steps, op) in ups {
-                for s in steps {
-                    if let Some(x) = s.sub_expr() {
-                        scan_k(x, k, under, direct, escaped);
-                    }
-                }
-                scan_k(op.expr(), k, under, direct, escaped);
-            }
-        }
-        _ => {}
+        _ => e
+            .node
+            .each_child(&mut |child| scan_k(child, k, under, direct, escaped)),
     }
 }
 

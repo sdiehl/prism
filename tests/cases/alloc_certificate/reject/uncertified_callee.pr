@@ -2,4 +2,4 @@ type Box = Box(Int)
 
 fn mk(x : Int) : Box = Box(x)
 
-fn top(x : Int) : Box without alloc = mk(x)
+fn top(x : Int) : Box @ noalloc = mk(x)

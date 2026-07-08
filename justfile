@@ -125,7 +125,7 @@ fmt-examples: build-release
     ./target/release/prism fmt --check
 
 package-world: build-release
-    ./target/release/prism check-world packages --strict
+    ./target/release/prism pkg check-world packages --strict
 
 ci: fmt-check clippy test fmt-examples package-world
 

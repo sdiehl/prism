@@ -59,7 +59,9 @@ pub(super) fn each_value<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Value)) {
                 f(a);
             }
         }
-        _ => {}
+        // The remaining forms carry no immediate value positions (their children
+        // are all sub-computations); enumerated so a new variant fails the match.
+        Comp::Bind(..) | Comp::Lam(..) | Comp::Mask(..) | Comp::Handle { .. } => {}
     }
 }
 
@@ -94,7 +96,24 @@ pub(super) fn each_subcomp<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
                 f(&o.body);
             }
         }
-        _ => {}
+        // The remaining forms carry no immediate sub-computations (their children
+        // are all values); enumerated so a new variant fails the match.
+        Comp::Return(_)
+        | Comp::Force(_)
+        | Comp::Error(_)
+        | Comp::FloatBuiltin(..)
+        | Comp::Neg(..)
+        | Comp::Dup(_)
+        | Comp::Drop(_)
+        | Comp::Reuse(..)
+        | Comp::RefNew(_)
+        | Comp::RefGet(_)
+        | Comp::RefSet(..)
+        | Comp::Prim(..)
+        | Comp::Call(..)
+        | Comp::Do(..)
+        | Comp::StrBuiltin(..)
+        | Comp::Io(..) => {}
     }
 }
 

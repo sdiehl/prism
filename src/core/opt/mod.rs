@@ -439,7 +439,7 @@ pub fn run(
     if flags.fuse && stage == PassStage::PreLowering && !passes.contains(&CorePass::Fuse) {
         passes.insert(0, CorePass::Fuse);
     }
-    run_passes(core, nt, &passes, disabled, flags)
+    run_passes(core, nt, &passes, stage, disabled, flags)
 }
 
 /// Run an explicit ordered list of `passes` over `core`, the `--passes` analogue
@@ -458,10 +458,11 @@ pub fn run_spec_stage(
     core: &Core,
     nt: &BTreeSet<Sym>,
     passes: &[CorePass],
+    stage: PassStage,
     disabled: &[CorePass],
     flags: &DynFlags,
 ) -> (Core, PassStats) {
-    run_passes(core, nt, passes, disabled, flags)
+    run_passes(core, nt, passes, stage, disabled, flags)
 }
 
 // The shared pass-running loop behind [`run`] and [`run_spec_stage`]: Core Lint
@@ -473,6 +474,7 @@ fn run_passes(
     core: &Core,
     nt: &BTreeSet<Sym>,
     passes: &[CorePass],
+    stage: PassStage,
     disabled: &[CorePass],
     flags: &DynFlags,
 ) -> (Core, PassStats) {
@@ -493,7 +495,7 @@ fn run_passes(
     };
     let check = |c: &Core, after: &str| {
         if lint_on {
-            if let Err(errs) = lint(c) {
+            if let Err(errs) = lint(c, stage) {
                 panic!(
                     "PRISM_CORE_LINT: ill-formed Core after {after}:\n{}",
                     errs.join("\n")

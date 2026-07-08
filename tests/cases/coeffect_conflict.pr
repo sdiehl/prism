@@ -1,0 +1,3 @@
+-- Two facts from one exclusive axis contradict: a value cannot be consumed
+-- both at most once and many times.
+fn f(x : Int @ {once, many}) : Int = x

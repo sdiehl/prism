@@ -1,6 +1,6 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, CoeffectRow};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH};
 use crate::lex::Token;
 use crate::kw::DEPRECATED;
 
@@ -19,8 +19,6 @@ extern {
         "fip"    => Token::Fip,
         "fbip"   => Token::Fbip,
         "replayable" => Token::Replayable,
-        "without" => Token::Without,
-        "alloc"  => Token::Alloc,
         "pub"    => Token::Pub,
         "import" => Token::Import,
         "as"     => Token::As,
@@ -133,6 +131,7 @@ extern {
         ":="    => Token::ColonEq,
         ":"     => Token::Colon,
         "!"     => Token::Bang,
+        "@"     => Token::At,
         ".."    => Token::DotDot,
         "."     => Token::Dot,
         "?"     => Token::Question,
@@ -578,8 +577,12 @@ EffOpParam: Ty = {
 };
 
 Fn: Decl = {
-    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <na:WithoutAlloc?> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> =>
-        Decl { name, params, eff: ann.0, ret: ann.1, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), no_alloc: na.is_some(), no_alloc_bs: na == Some(true), span: Span::new(l, r) },
+    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
+        // A `@ noalloc` row at the root of the return annotation is the
+        // declaration's allocation certificate, not part of the type.
+        let (ret, no_alloc) = lift_noalloc(ann.1);
+        Decl { name, params, eff: ann.0, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
+    },
 };
 
 // An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
@@ -589,24 +592,12 @@ FipKw: Fip = {
     ()     => Fip::No,
 };
 
-// A postfix `without alloc` on a signature certifies zero fresh allocation
-// across the whole call tree (`fbip` semantics, spelled as a revoked capability).
-// `\ alloc` is the terser row-subtraction spelling of the same certificate, read
-// as the result type with the `alloc` coeffect subtracted (`Int \ alloc`).
-// Returns which surface spelling was used: `true` for the terser `\ alloc`,
-// `false` for `without alloc`. Both certify the same thing; the flag only lets
-// the formatter print back what the author wrote.
-WithoutAlloc: bool = {
-    "without" "alloc" => false,
-    "\\" "alloc" => true,
-};
-
 // A top-level immutable constant: `let NAME = EXPR` or `let NAME : TYPE = EXPR`.
 // Modeled as a zero-param `Decl` flagged `konst`, so references inline the
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, no_alloc: false, no_alloc_bs: false, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
@@ -653,6 +644,12 @@ Stmts: S<Expr> = {
     // single desugar pass reports the one "nothing to wrap" diagnostic.
     <l:@L> "with" <x:"ident"> "<-" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::NamedHandle(x, Box::new(with_rest(rest, l, r)), arms)), span: Span::new(l, r) },
+    // The usage-row position on a handler instance (`with h <- handler @ {local}`)
+    // is reserved but deliberately has no production: the layout lexer opens the
+    // handler block keyed on the `handler` head, so a same-line row cannot parse
+    // and no program can give it a meaning. When the handler fact is
+    // implemented, the layout opener learns about `@` and the form gains its
+    // real grammar; until then old attempts fail as a plain parse error.
     <l:@L> "with" <x:"ident"> "<-" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
         with_stmt(Some(x), c, with_rest(rest, l, r), l, r),
     <l:@L> "with" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
@@ -693,22 +690,67 @@ Type: Ty = {
             }),
         },
     },
+    // A usage row binds tighter than `->` and attaches to atomic types only, so
+    // one written after a function type's effect row is refused with the fix
+    // spelled out rather than silently picking a precedence. The row itself is
+    // consumed so the reduction (and with it this pointed error) fires in every
+    // follow context, not only where a bare `@` happens to end the type.
+    <l:@L> Arrow ArrowEff "@" CoeffRowParts <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (
+            Span::new(l, r),
+            "parenthesize the function type before `@`: write `((a) -> b ! {E}) @ fact`".to_string(),
+        ),
+    }),
 };
 
 pub TypeSig: Ty = { Type };
 
 Arrow: Ty = {
     "(" ")" "->" <cod:Arrow> => Ty::Fun(vec![], Row::Empty, Box::new(cod)),
-    <dom:AType> "->" <cod:Arrow> => match dom {
+    <dom:UType> "->" <cod:Arrow> => match dom {
         Ty::Tuple(ts) => Ty::Fun(ts, Row::Empty, Box::new(cod)),
         d => Ty::Fun(vec![d], Row::Empty, Box::new(cod)),
     },
-    AType,
+    UType,
 };
 
 ArrowEff: Row = {
     "!" "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Row::Cons(ls, tl),
     "!" => Row::Cons(vec![], None),
+};
+
+// A usage row (internally: coeffect row) as a postfix on an atomic type:
+// `T @ fact` or `T @ {fact, fact}`. The row is a set validated here, where the
+// span is at hand: unknown facts, duplicates, same-axis contradictions, and the
+// empty row are all hard errors, and the reserved open tail `@ {fact | u}`
+// (usage-row polymorphism) is recognized and refused by name. Arrow types must
+// be parenthesized to take a row (see the pointed error under `Type`).
+UType: Ty = {
+    <l:@L> <t:AType> "@" <row:CoeffRowParts> <r:@R> =>? {
+        if row.1 {
+            Err(lalrpop_util::ParseError::User {
+                error: (
+                    Span::new(l, r),
+                    "usage-row polymorphism (`@ {fact | tail}`) is reserved but not implemented".to_string(),
+                ),
+            })
+        } else {
+            match CoeffectRow::new(&row.0) {
+                Ok(cr) => Ok(Ty::Coeffect(Box::new(t), cr)),
+                Err(e) => Err(lalrpop_util::ParseError::User {
+                    error: (Span::new(l, r), e.to_string()),
+                }),
+            }
+        }
+    },
+    AType,
+};
+
+// Raw usage-row spellings plus whether an open tail was written; the consuming
+// production validates against the canonical fact table in `src/coeffect.rs`.
+CoeffRowParts: (Vec<String>, bool) = {
+    "{" <fs:Comma<"ident">> <tl:("|" <"ident">)?> "}" => (fs, tl.is_some()),
+    <f:"ident"> => (vec![f], false),
 };
 
 AType: Ty = {
@@ -758,8 +800,6 @@ pub Expr: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
     <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
-    <l:@L> "without" "alloc" <body:ExprOrBlock> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::WithoutAlloc(Box::new(body))), span: Span::new(l, r) },
     <l:@L> "return" <e:Expr> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
     // The left side is parsed as a general `Call` so an index target `a[i]`

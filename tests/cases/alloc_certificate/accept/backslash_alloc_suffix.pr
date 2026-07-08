@@ -1,1 +1,0 @@
-fn inc(x : Int) : Int \ alloc = x + 1

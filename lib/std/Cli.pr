@@ -306,7 +306,11 @@ fn lex_eq(specs, name, rest, opts_acc, pos_acc) =
   let v = substring(name, eq + 1, str_len(name) - eq - 1)
   match find_long(specs, k) of
     None => Err(UnknownFlag(concat("--", k)))
-    Some(_) => lex_go(specs, rest, Cons((k, v), opts_acc), pos_acc)
+    Some(spec) =>
+      if spec.takes_value then
+        lex_go(specs, rest, Cons((k, v), opts_acc), pos_acc)
+      else
+        Err(UnknownFlag(concat("--", k)))
 
 fn lex_valued(specs, name, rest, opts_acc, pos_acc, tok) =
   match rest of

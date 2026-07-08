@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::cbpv::{reachable_fns, Comp, Core, CoreFn, HandleOp, Value};
+use super::cbpv::{reachable_fns, Core, CoreFn, ElaboratedCore, LoweredCore, Value};
+use super::traverse::map_children as map_kids;
 use crate::error::TypeError;
 use crate::flags::{DynFlags, EffectTier};
 use crate::fresh::Fresh;
@@ -181,6 +182,12 @@ type Env = BTreeMap<i64, Sym>;
 // any free-monad fallback warning for the driver to surface.
 pub(crate) type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
 
+// The public result of [`lower`]: like [`Lowered`] but with its whole-program
+// term wrapped as `LoweredCore`, the stage tag native codegen requires. The
+// internal `Lowered` stays a bare `Core` because the lowering helpers build and
+// splice raw functions; only the seam that leaves the pass is stage-tagged.
+pub type LowerResult = (LoweredCore, BTreeMap<String, CtorInfo>, Option<String>);
+
 // How a `resume` application inside the clause body currently being monadified is
 // reified. The three constant-stack backends each reify it differently, and at
 // most one is ever active, so the mode is one enum rather than a bool per backend:
@@ -277,14 +284,14 @@ struct Lowerer {
 /// monadified tail that is not Eff-shaped (a compiler bug surfaced as an error
 /// rather than a panic).
 pub fn lower(
-    core: &Core,
+    core: &ElaboratedCore,
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
     grades: &OpGrades,
-) -> Result<Lowered, TypeError> {
+) -> Result<LowerResult, TypeError> {
     let mut warning = None;
     let (c, ct, _) = lower_impl(core, ctors, flags, grades, &mut warning)?;
-    Ok((c, ct, warning))
+    Ok((LoweredCore(c), ct, warning))
 }
 
 /// No residual effects survive lowering: the program compiles to direct code.
@@ -348,7 +355,7 @@ fn lower_impl(
     // Dead prelude code must not flip the program into monadic mode, so only
     // functions reachable from main are lowered (and kept) at all.
     let shaken;
-    let core = if core.fns.iter().any(|f| f.name == ENTRY_POINT) {
+    let core = if core.fns.iter().any(|f| f.name.as_str() == ENTRY_POINT) {
         let live = reachable_fns(core);
         shaken = Core {
             fns: core
@@ -586,72 +593,5 @@ impl Lowerer {
 
     fn fresh(&mut self, hint: &str) -> Sym {
         Sym::from(names::lowered(hint, self.fresh.bump()))
-    }
-}
-
-// Rebuild `c`, applying `g` to every immediate sub-computation and to every
-// thunk body in immediate values: the single structural recursion the
-// recognize-or-leave Core passes (`erase_var`, `erase_control`) share.
-pub(super) fn map_kids<G: FnMut(&Comp) -> Comp>(c: &Comp, g: &mut G) -> Comp {
-    let vals = |args: &[Value], g: &mut G| args.iter().map(|a| map_val(a, g)).collect();
-    match c {
-        Comp::Bind(m, x, n) => Comp::Bind(Box::new(g(m)), *x, Box::new(g(n))),
-        Comp::Lam(ps, b) => Comp::Lam(ps.clone(), Box::new(g(b))),
-        Comp::App(f, args) => Comp::App(Box::new(g(f)), vals(args, g)),
-        Comp::If(v, t, e) => Comp::If(map_val(v, g), Box::new(g(t)), Box::new(g(e))),
-        Comp::Case(v, arms) => {
-            let v = map_val(v, g);
-            Comp::Case(v, arms.iter().map(|(p, b)| (p.clone(), g(b))).collect())
-        }
-        Comp::Mask(ops, b) => Comp::Mask(ops.clone(), Box::new(g(b))),
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: Box::new(g(body)),
-            return_var: *return_var,
-            return_body: return_body.as_ref().map(|rb| Box::new(g(rb))),
-            ops: ops
-                .iter()
-                .map(|op| HandleOp {
-                    name: op.name,
-                    params: op.params.clone(),
-                    resume: op.resume,
-                    body: g(&op.body),
-                })
-                .collect(),
-        },
-        Comp::Return(v) => Comp::Return(map_val(v, g)),
-        Comp::Force(v) => Comp::Force(map_val(v, g)),
-        Comp::Error(v) => Comp::Error(map_val(v, g)),
-        Comp::Io(op, args) => Comp::Io(*op, vals(args, g)),
-        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, map_val(v, g)),
-        Comp::Neg(l, v) => Comp::Neg(*l, map_val(v, g)),
-        Comp::Dup(v) => Comp::Dup(map_val(v, g)),
-        Comp::Drop(v) => Comp::Drop(map_val(v, g)),
-        Comp::Prim(op, a, b) => Comp::Prim(*op, map_val(a, g), map_val(b, g)),
-        Comp::Call(n, args) => Comp::Call(*n, vals(args, g)),
-        Comp::Do(op, args) => Comp::Do(*op, vals(args, g)),
-        Comp::StrBuiltin(b, args) => Comp::StrBuiltin(*b, vals(args, g)),
-        Comp::RefNew(v) => Comp::RefNew(map_val(v, g)),
-        Comp::RefGet(v) => Comp::RefGet(map_val(v, g)),
-        Comp::RefSet(a, b) => Comp::RefSet(map_val(a, g), map_val(b, g)),
-        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
-            token: *token,
-            freed: map_val(freed, g),
-            body: Box::new(g(body)),
-        },
-        Comp::Reuse(tok, v) => Comp::Reuse(*tok, map_val(v, g)),
-    }
-}
-
-pub(super) fn map_val<G: FnMut(&Comp) -> Comp>(v: &Value, g: &mut G) -> Value {
-    match v {
-        Value::Thunk(c) => Value::Thunk(Box::new(g(c))),
-        Value::Ctor(n, t, fs) => Value::Ctor(*n, *t, fs.iter().map(|f| map_val(f, g)).collect()),
-        Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| map_val(f, g)).collect()),
-        _ => v.clone(),
     }
 }

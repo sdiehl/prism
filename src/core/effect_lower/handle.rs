@@ -1098,14 +1098,14 @@ fn state_clause(op: &HandleOp, drift: &DriftLog) -> Option<StateClause> {
             // per-helper checks must NOT be threaded into the accumulator rewrite:
             // debug builds panic to surface it; release builds reject the match and
             // return None so the caller falls back to general handler lowering.
-            if mentions(&fv::value(&a), &aliases)
+            let escaped_resume = mentions(&fv::value(&a), &aliases)
                 || mentions(&fv::value(&b), &aliases)
                 || prefix
                     .iter()
-                    .any(|(pm, _)| mentions(&fv::comp(pm), &aliases))
-            {
+                    .any(|(pm, _)| mentions(&fv::comp(pm), &aliases));
+            if escaped_resume {
                 debug_assert!(
-                    false,
+                    !escaped_resume,
                     "state_clause matched a clause that still references the resume: elaborated shape drifted"
                 );
                 drift.shape_drift("state_clause");

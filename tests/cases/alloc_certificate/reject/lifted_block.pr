@@ -1,3 +1,0 @@
-type Box = Box(Int)
-
-fn wrap(n : Int) : Box = without alloc Box(n)

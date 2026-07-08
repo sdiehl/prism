@@ -1,0 +1,46 @@
+-- The buffer runtime object's value semantics under sharing, and the two
+-- String/Bytes conversion seams. `buffer_ops.pr` covers the unique-owner ops
+-- (in-place set/push, slice, cat, compare, hash, valid conversion); this pins the
+-- SHARED-owner path (copy-on-write) and the ill-formed-UTF-8 boundary. Runs under
+-- the parity + leak oracles: native and interpreter must print byte-identical
+-- output (the U+FFFD repair and the content hash included) and leak no cells.
+
+import Data.Bytes (..)
+
+import Wire (..)
+
+fn build(b : Buf, i : Int, n : Int) : Buf =
+  if i >= n then
+    b
+  else
+    build(buf_push(b, i * 17), i + 1, n)
+
+fn main() =
+  let a = build(buf_empty(), 0, 6)
+  -- `a` is read again below, so it is shared here: `buf_set` and `buf_push` must
+  -- copy rather than mutate, leaving the original untouched behind the other
+  -- reference. This is the copy-on-shared half of the value-semantics contract.
+  let b = buf_set(a, 0, 200)
+  let c = buf_push(a, 250)
+  println(show_int(buf_get(a, 0)))
+  println(show_int(buf_get(b, 0)))
+  println(show_int(buf_len(a)))
+  println(show_int(buf_len(c)))
+  println(show_int(buf_get(c, 6)))
+  -- The content hash is a pure function of the bytes, identical on both backends:
+  -- the shared original and a freshly built equal buffer hash equal.
+  let a2 = build(buf_empty(), 0, 6)
+  println(if buf_hash(a) == buf_hash(a2) then "hash-eq" else "hash-neq")
+  -- A lone 0xFF byte between two ASCII bytes is ill-formed UTF-8. The validating
+  -- seam reports it honestly as `None`; the lossy builtin repairs it to U+FFFD,
+  -- byte-for-byte identically on both backends.
+  let bad = buf_push(buf_push(buf_of_string("a"), 255), 98)
+  println(if buf_utf8_valid(bad) then "valid" else "invalid")
+  println(show_opt(bytes_to_string(bytes_of_buf(bad))))
+  println(string_of_buf(bad))
+  println(show_int(byte_len(string_of_buf(bad))))
+
+fn show_opt(o : Option(String)) : String =
+  match o of
+    Some(_) => "some"
+    None => "none"

@@ -1,0 +1,202 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/row_skolem_escape.pr
+---
+== tokens ==
+VOpen Fn Ident("call_poly") LParen Ident("h") Colon Forall Ident("e0") Dot LParen LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("amb") RBrace RParen Arrow KwInt Bang LBrace Bar Ident("e0") RBrace Comma Ident("f") RParen Eq Ident("h") LParen Ident("f") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("call_poly") LParen Lambda LParen Ident("g") RParen Arrow Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen Comma Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "call_poly",
+            params: [
+                Param {
+                    name: "h",
+                    ty: Some(
+                        Forall(
+                            [
+                                "e0",
+                            ],
+                            Fun(
+                                [
+                                    Fun(
+                                        [
+                                            Int,
+                                        ],
+                                        Cons(
+                                            [],
+                                            Some(
+                                                "amb",
+                                            ),
+                                        ),
+                                        Int,
+                                    ),
+                                ],
+                                Cons(
+                                    [],
+                                    Some(
+                                        "e0",
+                                    ),
+                                ),
+                                Int,
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "f",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "h",
+                        ),
+                        span: 470..471,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "f",
+                            ),
+                            span: 472..473,
+                        },
+                    ],
+                ),
+                span: 470..474,
+            },
+            wheres: [],
+            span: 395..474,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 488..495,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "call_poly",
+                                    ),
+                                    span: 496..505,
+                                },
+                                [
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "g",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Call(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "g",
+                                                        ),
+                                                        span: 514..515,
+                                                    },
+                                                    [
+                                                        Spanned {
+                                                            node: Int(
+                                                                IntLit {
+                                                                    value: 1,
+                                                                    suffix: None,
+                                                                },
+                                                            ),
+                                                            span: 516..517,
+                                                        },
+                                                    ],
+                                                ),
+                                                span: 514..518,
+                                            },
+                                        ),
+                                        span: 506..518,
+                                    },
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "x",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Bin(
+                                                    Add,
+                                                    Spanned {
+                                                        node: Var(
+                                                            "x",
+                                                        ),
+                                                        span: 528..529,
+                                                    },
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 41,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 532..534,
+                                                    },
+                                                ),
+                                                span: 528..534,
+                                            },
+                                        ),
+                                        span: 520..534,
+                                    },
+                                ],
+                            ),
+                            span: 496..535,
+                        },
+                    ],
+                ),
+                span: 488..536,
+            },
+            wheres: [],
+            span: 476..536,
+        },
+    ],
+}
+
+== types ==
+Type Error: in `main`: effect row `{e0}` would capture the rigid row `e0`: `e0` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it
+   ╭─[ <source>:8:31 ]
+   │
+ 8 │ fn main() = println(call_poly(\(g) -> g(1), \(x) -> x + 41))
+   │                               ──────┬─────  
+   │                                     ╰─────── in `main`: effect row `{e0}` would capture the rigid row `e0`: `e0` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it
+───╯

@@ -1,13 +1,13 @@
 # The Prism Language Specification {#the-prism-language-specification}
 
-Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document defines the surface language: its lexical structure, grammar, type system, and evaluation. It describes the language as the `prism` compiler accepts it.
+Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document is a modest proposal of the surface language as the `prism` compiler accepts it: its lexical structure, grammar, type system, and evaluation.
 
 ## 0. Goals {#goal}
 
 1. Take deterministic simulation testing down to the language level: a deterministic core, typed effects, content-addressed identity, and replayable observations make every output an accountable artifact that can be mechanically rebuilt, moved, cached, diffed, audited, and explained using modern type-system methods.
 2. Lineage is the user-facing form of determinism: given an output, Prism should be able to precisely describe and check what code, packages, inputs, effects, handlers, and compiler artifacts produced it.
-3. The world meets Prism only at effect boundaries: every nondeterministic observation is named, typed, handled, and therefore available to record, replay, sandbox, or audit. The unfortunate existence of the physical world should be constrained by types.
-4. Programming should be fun again.
+3. The so-called real world meets Prism only at effect boundaries: every nondeterministic observation is named, typed, handled, and therefore available to record, replay, sandbox, or audit. The unfortunate existence of the physical world should be constrained by types.
+4. Obtain pure functional language purity by being completely inaccessible and having zero users, but having fun!
 
 ## 1. Introduction {#introduction}
 
@@ -153,11 +153,108 @@ Prism infers types by the **bidirectional, higher-rank inference** algorithm of 
 
 Quantification is **predicative**: a type-constructor argument and an inferred type variable range over monomorphic types, so a `forall` may not be written directly as a type argument (`List(forall a. (a) -> a)` is rejected as **impredicative**). **Higher-rank types** are allowed wherever they are not a type argument, namely as a function parameter, a function result, and a declared data field; a polymorphic value can be carried through a generic container by wrapping it in a data type with a polymorphic field.
 
-### 5.1 Types {#types}
+### 5.1 Three Lattices {#three-lattices}
+
+A Prism signature carries three orders: what a computation may do (the effect row, after `!`), how its values may be used (the usage row, after `@`), and how a handler may consume a continuation (the operation grade). All three are lattices, and each behaves the way it does because of the one lattice property it has or lacks.
+
+**Effect rows: joins always exist.** The carrier is a set of effect names, the order is inclusion, the join is union:
+
+<p align="center"><img src="images/lattice-rows.svg" alt="the effect row lattice: {IO, Ask} above {IO} and {Ask} above the empty row" width="420"></p>
+
+Sequencing takes the join; handling subtracts back toward the pure bottom:
+
+```prism
+effect Ask
+  fun ask(Unit) : Int
+
+fn f() : !{IO} Unit = println("f")
+
+fn g() : !{Ask} Int = ask(())
+
+fn foo() : !{IO, Ask} Int =
+  f()
+  g()
+
+fn bar() : !{IO} Int =
+  handle foo() with
+    fun ask(u) => 7
+
+fn main() = println(bar())
+```
+
+`foo` sequences `f` and `g`, so its row is their join; `bar` handles `Ask`, so its row steps back down to `{IO}`.
+
+**Coeffect axes: meets sometimes missing.** Each axis ([coeffects](#usage-and-resource-annotations)) has silence at the top, the mode of all unannotated code. An exclusive axis has no meet below its points; the fip axis is a product of chains, so its meet exists:
+
+<p align="center"><img src="images/lattice-axes.svg" alt="two coeffect axes: an exclusive axis where once and many have no meet below them, and the fip axis where linear and bounded_stack meet at {linear, bounded_stack}" width="560"></p>
+
+Descending is a strengthening someone must prove; ascending, forgetting a claim, is always free; and holding two claims at once is exactly having a point below both:
+
+```prism
+fn f() : Int @ noalloc = 1  -- a proven claim: f's call tree allocates nothing
+
+fn g() : Int = f()          -- ok: forgetting the claim moves up, always free
+
+-- fn foo() : Int @ noalloc = g()
+--   rejected, descent needs proof: in `foo`, call to `g` may
+--   allocate (`g` has no zero-allocation certificate)
+
+-- h : ((Int) -> Int) @ {linear, bounded_stack}
+--   a legal row: the meet exists, the claims compose (reserved today)
+
+-- h : ((Int) -> Int) @ {once, many}
+--   never parses: usage facts `once` and `many` contradict each other (same axis)
+
+fn main() = println(g())
+```
+
+**Operation grades: a total chain.** Continuation use is a quantity, so its lattice is a total order:
+
+<p align="center"><img src="images/lattice-grades.svg" alt="the grade chain as a single vertical total order: many over once over never, paired with the keywords ctl, fun, and final ctl" width="240"></p>
+
+The whole discipline is one comparison at one boundary: a clause's grade at most its operation's declared grade ([effects and handlers](#effects-and-handlers)):
+
+```prism
+effect E
+  final ctl quit(Unit) : Int  -- never: a clause must drop the continuation
+  fun ask(Unit) : Int         -- once:  a clause resumes exactly once, in tail
+  ctl coin(Unit) : Bool       -- many:  a clause may capture k, resume freely
+
+fn foo() : !{E} Int =
+  let x = ask(())
+  if coin(()) then x else quit(())
+
+fn run() : Int =
+  handle foo() with
+    final ctl quit(u) => 0    -- never <= never  ok
+    fun ask(u) => 42          -- once  <= once   ok
+    coin(u, k) => k(true)     -- once  <= many   ok: below the grade is allowed
+
+-- ask(u, k) => k(1) + k(2) would be rejected: the clause for `ask`
+-- exceeds its declared grade `fun`, resuming more than once
+
+fn main() = println(run())
+```
+
+One signature exercises all three at once:
+
+```text
+fn spawn(f : (() -> a ! e) @ {once, portable}) : Fiber(a) ! {Async(a), e}
+```
+
+- **Row, joined**: whatever `f` performs is unioned into the caller's row alongside `Async`; the handler that later runs the fiber subtracts `Async` back out.
+- **Axes, met**: `@ {once, portable}` is one point on each of two axes, their meet in the product: `spawn` promises to call the thunk at most once and may carry it to another fiber.
+- **Grade, bounded**: the `Async` operations are `ctl`, the top of the chain, so a scheduler may hold the continuation and resume it later; `fun` would have pinned every handler to immediate single resumption.
+
+The design is the three properties side by side. Effects always have joins: doing more must always be expressible. Coeffects sometimes lack meets: some promises genuinely contradict. Continuation use is a total order: it is a quantity, not a set.
+
+None of this should be surprising. An effect is just a coeffect on its own continuation; what's the problem?
+
+### 5.2 Types {#types}
 
 The scalar types are `Int` (arbitrary precision), `I64`, `U64`, `Float`, `Bool`, `Char`, `String`, and `Unit`. A type constructor applied to arguments is written `Con(t, ...)`; the list type has the sugar `[t]` for `List(t)`. A tuple type is `(t, ...)`. A function type is `(t, ...) -> u`, optionally carrying an effect row on `u`. A universally quantified type is `forall a. t`. Type variables are `varid`s.
 
-### 5.2 Kinds {#kinds}
+### 5.3 Kinds {#kinds}
 
 A type has **kind** `*` (a type of values) or `* -> *` (a type constructor awaiting one argument), and so on; `List` has kind `* -> *`, since `List(Int)` is a type only once `Int` is supplied. A class parameter may range over a constructor of kind `* -> *`, applied as `f(a)` in method signatures; see [type classes](#type-classes). Each constructor's parameter kinds form an arrow `k1 -> ... -> *`, and an applied head is checked argument by argument against that arrow: too many arguments, or an argument whose kind does not match the parameter's, is a kind mismatch reported at the annotation. There is no separate global kind-checking phase; the remaining well-kindedness obligations are discharged during **unification**, which requires a constructor and its arguments to agree in arity.
 
@@ -171,11 +268,11 @@ The consequence is stated honestly rather than worked around: an operation whose
 
 Dimensions are erased before the Core IR and never reach code generation, so a `Nat` index is a purely static fact: it constrains what type-checks but is invisible to every backend and to the determinism contract, exactly like a phantom parameter. An unannotated parameter still defaults to `*`, so `Nat` is opt-in.
 
-### 5.3 Inference, Generalization, and Defaulting {#inference-generalization-and-defaulting}
+### 5.4 Inference, Generalization, and Defaulting {#inference-generalization-and-defaulting}
 
 A row is built from _labels_, the effect names of [effects and handlers](#effects-and-handlers) (a parametric effect's label carries type arguments). It is _closed_ when it ends in a fixed set of labels and _open_ when it ends in a row variable (`! {L | r}`), which stands for further labels the caller may add. An unannotated binding is generalized over its free type and row variables not fixed by the surrounding scope. A bare type variable written in a top-level function's signature is an implicit `forall`: it is universally quantified and rigid, so the body is checked to hold for every instantiation and may neither narrow it to a concrete type nor equate two distinct signature variables (a body that does is a type error), and the declaration exports exactly the polymorphic scheme it wrote. Two cases default rather than generalize, both resolved in one pass at generalization. A numeric operand of an arithmetic or comparison operator left otherwise unconstrained defaults to `Int`; because the default is deferred to that pass rather than applied at the operator, a later use that fixes the operand to a fixed-width lane (`I64`/`U64`) takes precedence, so `x + y` followed by an `i64` use of `x` is fixed-width, not `Int`. An open row left unconstrained at a monomorphic declaration (one with no remaining free row variable) defaults to empty (pure); an effect-polymorphic declaration keeps its row variable, as `traverse` does in the prelude ([the standard prelude](#the-standard-prelude)).
 
-### 5.4 Subsumption and Row Equivalence {#subsumption-and-row-equivalence}
+### 5.5 Subsumption and Row Equivalence {#subsumption-and-row-equivalence}
 
 Checking a value against an expected type uses **subsumption**, not equality. A more polymorphic type is accepted where a less polymorphic one is expected: a `forall` on the expected side introduces a rigid variable the value must satisfy for all instances, and a `forall` on the value side is instantiated to meet the expectation. Function subtyping is **contravariant** in the arguments and **covariant** in the result, so a function accepting more and returning less may stand in for one accepting less and returning more.
 
@@ -183,7 +280,7 @@ Effect rows are checked by unification over scoped labels, not by covariant wide
 
 At a function arrow the value's effect row is made _equal_ to the expected one by this same unification, so a narrower row fits a wider context only by _solving_ a row variable, never by silent widening. A pure function still fits an effectful context, because its own latent row is a quantified variable ([effect polymorphism](#effect-polymorphism)) that unification solves to the demanded effects. Where a function carries an explicit return row, that annotation is the row its body is unified against: a body that performs an effect the annotation omits does not unify and is rejected with a diagnostic naming the effect the annotation must declare, and the annotation's row variables are rigid, so an annotation may not silently narrow to fewer effects than the body performs.
 
-### 5.5 Fixed-Width Integers {#fixed-width-integers}
+### 5.6 Fixed-Width Integers {#fixed-width-integers}
 
 `Int` is arbitrary precision. `I64` and `U64` are the signed two's-complement and unsigned 64-bit lanes; they wrap on overflow rather than promoting to a bignum. Their operations are named builtins, not operators, since the surface `+`, `-`, and so on target `Int` and `Float`. Each takes two operands of the lane type.
 
@@ -195,7 +292,7 @@ At a function arrow the value's effect row is made _equal_ to the expected one b
 
 `and`, `or`, and `xor` share a single bit pattern across both lanes; `i64_shr` is an arithmetic (sign-extending) shift while `u64_shr` is logical; a shift count is taken modulo 64. `to_i64`/`to_u64` and `int_of_i64`/`int_of_u64` convert between `Int` and the fixed-width lanes.
 
-### 5.6 Integer Arithmetic and Division {#integer-arithmetic}
+### 5.7 Integer Arithmetic and Division {#integer-arithmetic}
 
 The arithmetic operators `+`, `-`, `*`, `/`, and `%` spell integer arithmetic here through the [numerical tower](#numerical-tower)'s `Int`, `I64`, and `U64` instances; `^` is [exponentiation](#exponentiation). On `Int` they are arbitrary precision: a sum, product, or difference is exact and never overflows, promoting a machine-word result to a bignum on demand. This section states the two facts that arithmetic on `Int` cannot state by its type alone: how division rounds, and what division by zero does. Both are identical on the interpreter and native backends, a corollary of the determinism contract and pinned by the parity corpus.
 
@@ -227,7 +324,7 @@ The families are not independent definitions that happen to line up; each fixed-
 {{#include ../../tests/cases/run/law_checked.pr}}
 ```
 
-### 5.7 Floating-Point Arithmetic {#floating-point}
+### 5.8 Floating-Point Arithmetic {#floating-point}
 
 `Float` is an IEEE-754 double. Its arithmetic and comparison operators are the plain `+`, `-`, `*`, `/`, `%`, `==`, `/=`, `<`, `<=`, `>`, and `>=` through the [numerical tower](#numerical-tower); the dot-suffixed forms `+.`, `-.`, `*.`, `/.`, `==.`, `/=.`, `<.`, `<=.`, `>.`, and `>=.` remain as deprecated aliases. There is no implicit coercion between `Int` and `Float`, so a mixed expression is a type error resolved by an explicit `to_float` ([exponentiation](#exponentiation)). Floating-point arithmetic is where a language most often becomes tier-dependent, because a fused multiply-add, an extended-precision register, or a differently rounded library call changes a low bit. Prism forbids that: every float operation follows one rounding rule and one set of special-value rules, and the interpreter and both native backends agree bit for bit, pinned by the parity corpus and, for the printer, by a dedicated formatter oracle.
 
@@ -263,7 +360,7 @@ Integer literals are polymorphic. A literal with no width suffix adopts whatever
 
 There is no implicit coercion, ever. The lane a value carries is fixed by its type, and only literals adapt; a variable never does. `x + 2.5` where `x : Int` is a type error naming both lanes, not a promotion of `x` to `Float`, and the same holds across any two distinct lanes (`I64` and `U64`, `Int` and `Float`). Cross-lane movement is always an explicit, named conversion (`to_float`, the checked narrowings and exact widenings of [fixed-width integers](#fixed-width-integers) and [safe arithmetic](#safe-arithmetic)). This is the line between a numeric surface that stays predictable and one whose every operator hides a possible conversion.
 
-### 5.8 Algebraic Data Types {#algebraic-data-types}
+### 5.9 Algebraic Data Types {#algebraic-data-types}
 
 A `type` declaration introduces an **algebraic data type**: a _sum_ of constructors, each a _product_ of fields. A constructor is named with an upper-case identifier and applied like a function to build a value; a `match` ([patterns](#patterns)) destructures a value by constructor. A type may take type parameters and may be recursive, including mutually so. A type parameter may be annotated `: Row` to range over an effect row rather than a type ([kinds](#kinds)), so a field can store an effectful computation, as in `type Cmd(a, e : Row)` whose field is a `() -> a ! {e}`, or `: Nat` to range over a compile-time dimension, as in `type Vec(a, n : Nat)` whose length index is erased rather than stored.
 
@@ -277,7 +374,7 @@ A `deriving (C, ...)` clause generates the named instances structurally ([type c
 
 Three more classes derive against opt-in modules: `Serialize` and `Stable` (`import Wire`) for the wire codec, where `Stable` derives only when every component is itself `Stable` and a non-stable field is a compile error at the derive site, and `Arbitrary` (`import Test`) for property-test generators built from the type's structure ([stable blocks](#stable-blocks)). `deriving (Identifiable)` is shorthand for the identity starter pack, expanding to exactly `Eq`, `Ord`, `Hash`, and `Show` so an ID newtype is comparable, hashable, and printable from one keyword with no imports; a class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
 
-### 5.9 Records {#record-types}
+### 5.10 Records {#record-types}
 
 A constructor may instead take _named_ fields, `C { f : T, ... }`, making the type a record. A field is read with `e.f`; records are built and updated by the [record expressions](#record-expressions). `deriving (Lens)` synthesizes a getter `f_of` and a setter `with_f` per field.
 
@@ -509,11 +606,78 @@ A function can be generic over the effects of a thunk it is given by quantifying
 
 The same row variable also governs an effect operation whose argument is a computation. An operation such as concurrency's `fork(() -> a ! {Async(a) | e})` shares the **ambient row** for `e`: performing it ties the argument's row to the caller's own, so a forked or deferred computation may perform only effects the caller already admits, and those effects flow out to whoever handles the operation rather than escaping it (the discipline of Koka, Frank, and Links; [Leijen, 2017](bibliography.md#leijen-2017)). Combined with a `Row`-kinded parameter ([kinds](#kinds)) that stores the reified continuations, this is what makes a handler like `run_async` both effect-polymorphic and sound: it is written once for any row `e` the fibers perform, and a fiber cannot smuggle past it an effect that no outer handler was required to discharge.
 
+The quantifier's scope is enforced in the other direction too. A row bound by an inner `forall` is rigid and dies with its binder, so a row introduced outside that `forall` may never be solved to it: a closure whose body's effects could only be satisfied by pinning an enclosing row onto the bound variable is rejected with an error naming the capture, the row analogue of a skolem-escape error, rather than accepted with a solution that outlives its scope.
+
 ```prism
 {{#include ../examples/eff_poly.pr}}
 ```
 
-### 7.9 Structured Concurrency and Cancellation {#structured-concurrency}
+### 7.9 Coeffects {#usage-and-resource-annotations}
+
+Prism has two static axes that deliberately do not collapse into one row. The effect row records what a computation may _do_ to the world: perform `Console`, `FileSystem`, `Async`, `Clock`, `Fail`, a user effect, and so on. Usage and resource annotations record how a value, call tree, or continuation may be _used_. They are **coeffects**, the dual of effects: an effect flows outward from the computation and is discharged by a handler around it, while a coeffect flows inward from the context and is discharged by the boundary that consumes the value, so one tracks what the program does to its world and the other what the world may do with the program's values. The user model is one sentence: `!` says what happens; `@` says how a value may be used.
+
+Think of a bottle of prescription medicine. The effect row is the side-effects leaflet: take this and it may cause drowsiness, print to the console, or talk to the filesystem; whoever administers it (the handler) decides what to do about that. The usage row is the dosage instructions on the label: take at most once (`@ once`), do not share (`@ noescape`), keep refrigerated (`@ local`), safe to travel with (`@ portable`). The leaflet describes what the pill does to you; the label restricts what you may do with the pill. A pharmacist who ignores the leaflet has a surprised patient; one who ignores the label has a lawsuit.
+
+**Usage rows.** A usage row attaches usage facts to a type with a postfix `@`, mirroring how `!` attaches an effect row to a function type:
+
+```text
+buf : Buffer @ unique
+fn spawn(f : (() -> a ! e) @ {once, portable}) : Fiber(a) ! {Async(a), e}
+```
+
+The row attaches to an atomic type: a constructor, an application, a tuple, or a parenthesized type. A function type must be parenthesized to take a row; writing one after an effect row is refused with the fix spelled out (`parenthesize the function type before '@'`) rather than silently picking a precedence. A single fact may drop the braces (`T @ unique`); the formatter canonicalizes a one-fact row to that form. A row is a set: duplicate facts and two facts from one exclusive axis (`@ {once, many}`) are errors, the empty row is an error, and the canonical order is alphabetical, so a row's spelling, its formatted output, and its contribution to a definition's content hash never depend on the order the author wrote. The open-tailed form `@ {fact | u}` is recognized and refused by name: it is the future spelling of usage-row polymorphism.
+
+The reserved vocabulary is fixed, and an unknown word in usage position is a hard error, never a warning, so no program or package can establish a private meaning for a fact before its checker exists. The facts are not a flat list: each belongs to one semantic axis, and the axis determines how its facts combine in a row and which side of an API seam owes the proof:
+
+| Axis         | Facts                     | In one row | Polarity |
+| ------------ | ------------------------- | ---------- | -------- |
+| Allocation   | `noalloc`                 | single     | past     |
+| Fip          | `linear`, `bounded_stack` | compose    | past     |
+| Multiplicity | `once`, `many`            | exclusive  | future   |
+| Aliasing     | `unique`, `aliased`       | exclusive  | past     |
+| Escape       | `local`, `noescape`       | exclusive  | future   |
+| Mobility     | `portable`                | single     | past     |
+
+<p align="center"><img src="images/lattice-coeffect-axes.svg" alt="the six coeffect axes as mini-lattices: Allocation over noalloc (the one checked fact today) and Mobility over portable are two-point chains, Fip meets at {linear, bounded_stack}, and Multiplicity (once, many), Aliasing (unique, aliased), and Escape (local, noescape) are exclusive axes with no meet" width="700"></p>
+
+An exclusive axis is a choice of one point, which is why `@ {once, many}` is rejected as a contradiction at parse. Only the fip axis composes, because its facts are cumulative strengthenings of one certificate rather than alternatives. **Polarity** is the axis's variance discipline, the direction its proof obligation flows. A **past** fact is covariant: it records how a value was built, the producer proves it, and the fact travels with the value wherever it goes. A **future** fact is contravariant: it restricts what may still be done with the value, the consumer promises it, and the fact binds at the use site. The polarity is stated by proof obligation, deciding which side of an API seam owes the evidence when a fact's checker lands, not by an algebraic comonadic/monadic decomposition.
+
+The facts themselves:
+
+| Fact            | Axis         | Meaning                                                                      | Status      |
+| --------------- | ------------ | ---------------------------------------------------------------------------- | ----------- |
+| `noalloc`       | Allocation   | the result is computed without allocating a fresh heap cell, whole call tree | **checked** |
+| `linear`        | Fip          | no duplication of owned heap inputs (the `fip` family)                       | reserved    |
+| `bounded_stack` | Fip          | bounded stack usage (the strict `fip` promise)                               | reserved    |
+| `once`          | Multiplicity | consumed or called at most once                                              | reserved    |
+| `many`          | Multiplicity | may be consumed or called many times                                         | reserved    |
+| `unique`        | Aliasing     | statically unaliased ownership                                               | reserved    |
+| `aliased`       | Aliasing     | explicitly shared, non-unique                                                | reserved    |
+| `local`         | Escape       | tied to the current dynamic scope or region                                  | reserved    |
+| `noescape`      | Escape       | cannot be stored, returned, or captured past the boundary                    | reserved    |
+| `portable`      | Mobility     | may cross a mobility/replay/receiver boundary                                | reserved    |
+
+The one checked fact today is the [allocation certificate](#allocation-certificates): `@ noalloc` at the root of a `fn`'s return annotation. Every other fact parses and is rejected as reserved.
+
+**Boundary facts, not ambient modes.** A usage fact attaches at the boundary that needs it, as a checked contract on a value at an API seam, and is checked where claimed; there is no whole-program usage vector threading through every judgment, and no ambient default on every value. Unannotated code claims nothing and pays nothing: the language is deterministic and replayable by default, so a usage fact marks an exceptional claim rather than repairing an unsafe baseline.
+
+**Reading this as a mode system.** The closest relative to usage rows in other languages is the modal "modes" discipline grown by recent systems dialects of the ML family. The surface is the same, down to the postfix syntax: `x : String @ local` there means what it means here, a qualifier on one value rather than a new type. Their axes and Prism's line up nearly word for word: a locality axis (`local`/`global`), a uniqueness axis (`unique`/`aliased`), a linearity axis (`once`/`many`), and mobility and contention axes for values crossing thread boundaries.
+
+Three pieces of the shared skeleton are worth naming. An axis is a small lattice, and a value may always move toward the permissive end: treating a unique value as aliased is free, while the reverse direction needs proof. Prism states the same lattices as exclusive axes, a row picking one point per axis, which is why `@ {once, many}` is a contradiction. Both systems also split their facts by direction, some recording how a value was produced and some constraining how it may still be consumed, which is the past/future polarity above. And their "mode crossing", where a type irrelevant to an axis moves freely along it, survives here as scalar exemption: an immediate carries no heap cell, so the allocation and multiplicity checkers have nothing to count. One renaming is deliberate: their linearity axis is Prism's multiplicity axis, because `linear` here already names a different fact, the fip axis's no-duplication discipline, and one word cannot serve both.
+
+The real fork in the road is the ambient vector. In the modal design, every value has a mode on every axis all the time. Unannotated code sits at a default point, the checker threads the whole vector through every judgment, and adding an axis means choosing a default for a world of existing code and teaching every signature and error message the new column. That is the right cost for their problem: the axes exist chiefly to prove data-race freedom and safe transfer between threads in a language where any value might cross, so the question "what mode is this value at?" genuinely has an answer everywhere, and the checker must be able to ask it everywhere.
+
+Prism does not have that problem, so it declines the tax. Data-race freedom and safe transfer are already theorems of the effect row and the determinism contract; there is no ambient question left for a mode vector to answer on every value. What remains are occasional, boundary-shaped resource claims: this function's call tree allocates nothing, this continuation is called at most once, this closure may cross a replay boundary. A coeffect row states exactly those claims, exactly where they are made, and an absent annotation is not a default point on a lattice but the absence of any claim, so unannotated code claims nothing, pays nothing, and cannot be broken by a default shifting underneath it. The economics follow from that shape: a new fact costs one reserved word and one checker at one kind of boundary, not a new column in every typing judgment, which is how the table above can reserve a vocabulary years ahead of its checkers at zero cost to programs that never write `@`.
+
+Depth splits the same way. An ambient mode applies recursively through structured data and needs per-field modalities to cut the recursion off. A Prism fact is a claim at the annotated boundary, and its checker decides how deep the proof reaches: the allocation certificate walks the whole call tree because allocation anywhere would falsify the claim, while a future `once` checker would look only at the uses of the one annotated value.
+
+The proof the template works was in the language before the syntax was: operation grades. An effect operation is declared `fun`, `ctl`, or `final ctl`, and those three words are a usage lattice on the continuation, never < once < many, checked at exactly one boundary (`clause_grade <= op_grade`), preserved through desugaring as data, and consumed by lowering instead of being reconstructed by whole-program analysis. Every future usage fact follows that shape.
+
+The wider family reads as one story. `borrow` lets a function read an argument without taking ownership. `fip` certifies allocation-freedom, linear consumption of owned heap values, and bounded stack for the recursive group. `fbip` keeps the allocation-free call-tree certificate without the full linear and bounded-stack promise. `@ noalloc` is the allocation certificate alone. Operation grades classify continuation use in handlers. Arena handlers live on the dynamic side of the same resource story: an arena handler decides who services allocation, not whether a static allocation certificate permits allocation.
+
+This split matters. A function may be `@ noalloc` and still perform `IO`; the row says the output effect is observable, while the allocation certificate says the call tree does not allocate fresh cells. Conversely, an arena facility may reify allocation as an effect only inside an explicit handler scope, while `@ noalloc` remains an allocation certificate rather than a row label.
+
+### 7.10 Structured Concurrency and Cancellation {#structured-concurrency}
 
 The [`Concurrent`](./stdlib/concurrent.md) library builds structured concurrency and cancellation on the `Async` operations above, and their contract is stated here as observable behavior rather than as a property of the scheduler. A `scope(tasks)` forks a list of fibers and joins them all before it returns, so no fiber outlives the call that spawned it, and a fiber's descendants are tracked so that an action taken on a fiber reaches everything it forked.
 
@@ -521,7 +685,7 @@ Cancellation is a cooperative unwind, not an abrupt drop. `cancel(f)` marks the 
 
 A `scope` is fail-fast. If one task fails with an unhandled `fail()` ([errors and failure](#errors-and-failure)), its sibling tasks are cancelled, their `on_cancel` finalizers run, and the failure is re-raised at the scope boundary rather than being swallowed. The failure therefore leaves `run_async` in the caller's residual row: `run_async : (() -> a ! {Async(a) | e}) -> a ! {e}` discharges `Async` but a failing scope forces `Fail` into `e`, so a program that spawns fallible work carries `{Fail}` out to a handler exactly as if it had performed `fail()` directly. Cancellation and failure are thus one mechanism seen from two sides: a deliberate `cancel` and a fail-fast sibling cancellation unwind through the identical finalizer path, so a resource is released once and only once on either.
 
-### 7.10 Capability Effects and IO {#capability-effects-and-io}
+### 7.11 Capability Effects and IO {#capability-effects-and-io}
 
 Reading the outside world is itself effectful, and the row records which part of the world a function reads. The nondeterministic input operations are the four _capability_ effects `Console` (`read_int`, `read_line`), `FileSystem` (`read_file`, `file_exists`), `Random` (`rand`), and `Env` (`getenv`, `args_count`, `arg`). A function that reads input names exactly that capability in its row: a function calling `read_int` carries `! {Console}`, not a blanket `! {IO}`, so the row says which part of the world is read rather than merely that some IO happens. (`Console`, `FileSystem`, `Random`, and `Env` are therefore reserved effect names, among the [keywords](#keywords). The `Concurrent` library adds a fifth capability, `Clock`, described below. One further name, `Preempt`, the row label a preemptive scheduler will discharge, is reserved not shipped: it is rejected as a user effect declaration and, being outside the `replayable`-permitted set, makes a preemptive program non-replayable by the existing row check with no new rule.)
 
@@ -549,7 +713,7 @@ The example below is the whole discipline on one page. Two fibers `sleep` and re
 {{#include ../examples/clock.pr}}
 ```
 
-### 7.11 Capability-Based Sandboxing {#capability-based-sandboxing}
+### 7.12 Capability-Based Sandboxing {#capability-based-sandboxing}
 
 Because a function's row records exactly which capabilities it exercises and a handler is what discharges a capability, a `handle` block that installs a restricted set of handlers is a sandbox: a sub-computation it runs can perform only the operations those handlers answer. A function given no `Async` handler in scope cannot spawn a fiber; a function whose row lacks `FileSystem` cannot read a file; a computation run under a world handler that stubs `read_file` to a fixed value cannot reach the real filesystem no matter what it calls, because the only interpreter for that operation in scope is the stub.
 
@@ -563,7 +727,7 @@ Below, `untrusted` reads files, but `sandbox` discharges its `FileSystem` capabi
 {{#include ../examples/sandbox.pr}}
 ```
 
-### 7.12 Record and Replay {#record-and-replay}
+### 7.13 Record and Replay {#record-and-replay}
 
 A program that reads stdin, files, randomness, or the environment takes a different path each time the world answers differently, which is what makes such a run hard to reproduce. Record and replay captures one run as a trace and re-runs it deterministically: an interactive session becomes a fixed regression test, a failing run becomes a reproducible bug report that needs none of the original environment, and a program can be re-executed offline against the captured trace rather than the live world. Persisting that trace to a log as it is produced turns replay into durable execution: the module's `durable` handler reloads the logged prefix on restart and continues live once it is exhausted, so a crashed run resumes where it stopped rather than starting over. The direction this points at is a suspended computation that is itself a value, one that can be persisted and resumed later or after a crash, the durable-execution semantics other systems provide as a separate service.
 
@@ -583,7 +747,48 @@ The two pieces fit together in a few lines: `roll` is `replayable` because it re
 {{#include ../examples/durable_intro.pr}}
 ```
 
-### 7.13 Streams {#streams}
+### 7.14 Lineage {#lineage}
+
+Record and replay pins a run; lineage explains one. A run recorded with a `--lineage` sidecar carries, beside the replay trace, a typed account of everything that produced its output, so an artifact can be asked why it exists after the source, inputs, and environment are gone. `prism run p.pr --record run.replay --lineage run.plineage -- args` writes both: the `.replay` trace ([record and replay](#record-and-replay)) and a `.plineage` sidecar. `--lineage` requires `--record`, because the sidecar names the trace it explains.
+
+The sidecar names the source, Std, and package roots (content-addressed, [content-addressed core](./compiler.md#content-addressed-core)); the full compiler identity (version, hash scheme, target, backend, optimizer surface, and every behavior-affecting flag); the invocation's `argv`; each environment read; each input file by content digest and byte length; any file the run wrote; the stdout digest; and the replay trace digest, recorded as a relation so verification reads the graph rather than a filesystem convention. It records observations of the world, not the world: an input file is named by the hash of the bytes read, never by trusting the file still on disk.
+
+Four verbs read a sidecar. `prism lineage show SIDECAR` renders the why-style explanation, and `prism lineage why SIDECAR OUTPUT` walks one output backward through the request, its inputs, the trace, and the compiler identity; both work after the source files are gone, since every fact is in the sidecar. `prism lineage verify SIDECAR` rehashes what the sidecar recorded and confirms it still matches; `--replay` verifies the stronger way, by re-running the trace and re-checking the result rather than trusting the sidecar's own numbers. `prism diff` takes two sidecars and reports, by logical key, which digests were preserved, moved, added, or removed, exiting nonzero when anything moved. The change-one-input workflow reads directly. The program under observation ([`examples/greet.pr`](https://github.com/sdiehl/prism/blob/main/examples/greet.pr)) reads one input file and prints one line:
+
+```prism
+{{#include ../examples/greet.pr}}
+```
+
+Record it twice, changing only the input file in between, and ask what moved:
+
+```console
+$ printf ada > name.txt
+$ prism run greet.pr --record run.replay --lineage run.plineage
+hello ada
+recorded 4 observations to run.replay and run lineage to run.plineage
+$ printf grace > name.txt
+$ prism run greet.pr --record run2.replay --lineage run2.plineage
+hello grace
+recorded 4 observations to run2.replay and run lineage to run2.plineage
+$ prism diff run.plineage run2.plineage
+lineage diff: 3 moved, 0 added, 0 removed, 5 preserved
+  moved    trace: sha256:f8e63490265d... -> sha256:46f3e178a163...
+  moved    stdout: stdout:sha256:e27f6e52492b... -> stdout:sha256:9b915ac89684...
+  moved    input-file name.txt: input-file:sha256:fdee430d40bd... -> input-file:sha256:e010fd1ce1ac...
+  same     request: sha256:4ad56c808cb9...
+  same     source-root: prism-core-hash-v1:f8b5f50c4578...
+  same     stdlib-root: prism-core-hash-v1:ac8a7aa43202...
+  same     compiler: sha256:ab4bbf1853f2...
+  same     argv: sha256:5feceb66ffc8...
+```
+
+The source root and compiler identity held; the changed input, the trace it drove, and the stdout it produced all moved. `prism lineage verify run.plineage --replay` confirms the first run still reproduces exactly, provided its input files are unchanged on disk.
+
+A passed verification can be persisted. `prism lineage verify SIDECAR --certify out.cert` mints a digest-named certificate over the sidecar it verified, its claim being `replay-verified` under `--replay` or `lineage-verified` otherwise, riding the store's existing certificate discipline ([parity certificates](./compiler.md#verification-caching)). `prism lineage check-cert out.cert SIDECAR` checks a certificate against the sidecar it names; a certificate whose subject digest does not match the sidecar is rejected, and a certificate carrying a claim the reader does not recognize is rejected rather than trusted, so no unknown assertion is ever silently honored.
+
+Two further surfaces share the same lineage graph, detailed in the [compiler chapter](./compiler.md#build-lineage). `prism docs` writes a manifest of what it documented, and `prism docs --verify-manifest` rejects a stale page or a drifted root. `prism pkg check-world` reports per-package gates over a package universe, each gate either passing or honestly marked not-run, and against a baseline names exactly which public definitions changed behavior, by digest.
+
+### 7.15 Streams {#streams}
 
 Streams are the prelude's data-processing combinators, built on a single `Emit(a)` effect rather than on intermediate collections. A **producer** performs `Emit` once per element (`srange`, `sof`); a **transformer** handles a producer's emissions and re-emits the survivors (`smap`, `skeep`, `stake`); and a **consumer** handles `Emit` by folding every emission into a result (`sfold`, `ssum`, `scollect`). A pipeline is the consumer wrapped around the transformers wrapped around the producer, one handler stack over one producer loop.
 
@@ -595,7 +800,7 @@ The push model above fuses but is single-source: a consumer drives one producer.
 {{#include ../examples/streams.pr}}
 ```
 
-### 7.14 Incremental Computation {#incremental-computation}
+### 7.16 Incremental Computation {#incremental-computation}
 
 The `Incr` stdlib module (`import Incr`) is **self-adjusting computation** as a handler: a program builds a demand graph of source nodes and derivations, and re-reading the graph after a change recomputes only the part a change can reach. `input(v)` creates a mutable source, `get(n)` reads a node (recording the read as a dependency of whatever derivation is running), `set(n, v)` updates a source, and `memo(thunk)` wraps a derivation whose value is cached and re-demanded rather than recomputed blindly. `run_incr(action)` discharges the effect, running `action` as the root observer of a fresh graph; the ambient row of effects the derivations perform flows out unchanged, exactly as `run_async` passes a fiber's row through.
 
@@ -605,9 +810,9 @@ The contract that makes it incremental is **early cutoff**: after a `set`, re-re
 
 `run_incr_durable_replay(path, tag, action)` lifts the purity restriction for the one effect a skipped thunk can still honor: output. It records each memo's emitted output beside its cached result and _replays_ that output on a warm hit, so a derivation that prints when it fires is warmed from the snapshot without running its thunk yet reproduces the recorded lines byte-for-byte. A second run therefore fires no memo, does no work, and still prints exactly what the first run printed, effects and all, extending the "snapshot changes cost, never result" guarantee to effectful memos rather than only pure ones (the action's row is `! {Incr, Output, Fail | e}`). The worked example is [`examples/incr_trace.pr`](https://github.com/sdiehl/prism/blob/main/examples/incr_trace.pr), which prints identically whether run cold or warm.
 
-### 7.15 Suspend and Resume {#suspend-and-resume}
+### 7.17 Suspend and Resume {#suspend-and-resume}
 
-Record and replay reproduces a run from its start; suspend and resume is the stronger checkpoint the previous section points at, a paused computation that is itself a value. `prism suspend FILE --at N -o snapshot.kont` runs a program, pauses it after `N` machine steps, and writes the whole live continuation, its pending work, its call stack, and every value bound along the way, to a file as a `kont` envelope. `prism resume FILE snapshot.kont` reads that file and runs the continuation to completion. The suspending run's output followed by the resuming run's output is byte-identical to one uninterrupted run: suspend is a cut, not a change, another corollary of the determinism contract. Because a machine step is a pure state transition, a given step count pauses at a deterministic point, so a snapshot is reproducible.
+Record and replay reproduces a run from its start; suspend and resume is the stronger checkpoint the previous section points at, a paused computation that is itself a value. `prism exec suspend FILE --at N -o snapshot.kont` runs a program, pauses it after `N` machine steps, and writes the whole live continuation, its pending work, its call stack, and every value bound along the way, to a file as a `kont` envelope. `prism exec resume FILE snapshot.kont` reads that file and runs the continuation to completion. The suspending run's output followed by the resuming run's output is byte-identical to one uninterrupted run: suspend is a cut, not a change, another corollary of the determinism contract. Because a machine step is a pure state transition, a given step count pauses at a deterministic point, so a snapshot is reproducible.
 
 ```prism
 fn count(i, last) =
@@ -619,14 +824,33 @@ fn count(i, last) =
 fn main() = count(1, 6)
 ```
 
-The recursion is an ordinary tail call carrying `i` forward; nothing in the program knows it can be interrupted. Suspend it partway and the live call (the pending `count`, the bound `i`, the frame that will print next) is written to a file; resume it elsewhere and the count continues from where it stopped:
+The recursion is an ordinary tail call carrying `i` forward; nothing in the program knows it can be interrupted. Where should the cut go? A step count is opaque until the program is laid out on the step clock, which is what `prism exec steps` does: it runs the program once and prints every observation with the machine step at which it fired. Because a step is a pure state transition, these indices are stable program points, the same on every machine and every run:
 
-```text
-$ prism suspend count.pr --at 120 -o half.kont
+```console
+$ prism exec steps count.pr
+step 1: 1 squared is 1
+...
+step 6: 6 squared is 36
+step  68  Console.print    "step 1: 1 squared is 1"
+step  70  Console.newline
+step 145  Console.print    "step 2: 2 squared is 4"
+step 147  Console.newline
+step 222  Console.print    "step 3: 3 squared is 9"
+step 224  Console.newline
+step 299  Console.print    "step 4: 4 squared is 16"
+...
+total 482 steps, 12 observations
+```
+
+Pausing after the third line and before the fourth is any budget between steps 224 and 299. Suspend there and the live call (the pending `count`, the bound `i`, the frame that will print next) is written to a file; resume it elsewhere and the count continues from where it stopped, the suspend reporting exactly where on the observation timeline the cut fell:
+
+```console
+$ prism exec suspend count.pr --at 240 -o half.kont
 step 1: 1 squared is 1
 step 2: 2 squared is 4
 step 3: 3 squared is 9
-$ prism resume count.pr half.kont
+suspended after 240 steps to half.kont (632 bytes); 6 observation(s) before the cut, last at step 224 (Console.newline)
+$ prism exec resume count.pr half.kont
 step 4: 4 squared is 16
 step 5: 5 squared is 25
 step 6: 6 squared is 36
@@ -641,14 +865,6 @@ The suspendable subset is explicit. A value that cannot cross the boundary, a gr
 Mobility is therefore a consequence of the same two invariants the rest of the runtime already uses: continuations are reified values, and code identity is content-addressed. Teleporting a computation means sending the `kont` envelope, not inventing a separate remote-call mechanism: the receiver decodes the suspended continuation, recomputes the namespace root for its local program, and resumes only if that digest matches the envelope. What crosses the wire is the pending computation and captured state; what authorizes it is the hash of the code it was captured in.
 
 That keeps the mobility story aligned with replay rather than distribution magic. A suspended program resumed by another same-origin context must produce the same suffix as the original uninterrupted run, because the step it resumes from and the code it resumes into are both checked facts. Content addressing names the definitions, the `kont` envelope names the live continuation over those definitions, and deterministic replay is the observable contract tying them together.
-
-### 7.16 Usage and Resource Annotations {#usage-and-resource-annotations}
-
-Prism has two static axes that deliberately do not collapse into one row. The effect row records what a computation may _do_ to the world: perform `Console`, `FileSystem`, `Async`, `Clock`, `Fail`, a user effect, and so on. Usage and resource annotations record how a value, call tree, or continuation may be _used_. They are **coeffects**: facts demanded of the surrounding program, not operations the program performs.
-
-The current family is small but intentionally named as one family. `borrow` lets a function read an argument without taking ownership. `fip` certifies allocation-freedom, linear consumption of owned heap values, and bounded stack for the recursive group. `fbip` keeps the allocation-free call-tree certificate without the full linear and bounded-stack promise. `without alloc` and its shorthand `\ alloc` are the **allocation certificate** alone: the annotated function or lifted block and everything it calls allocate no fresh cell. Operation grades (`final ctl`, `fun`, `ctl`) classify continuation use in handlers: no resume, one tail resume, or general multi-shot resume. Arena handlers live on the dynamic side of the same resource story: an arena handler decides who services allocation, not whether a static allocation certificate permits allocation.
-
-This split matters. A function may be `without alloc` and still perform `IO`; the row says the output effect is observable, while the allocation certificate says the call tree does not allocate fresh cells. Conversely, an arena facility may reify allocation as an effect only inside an explicit handler scope, while ordinary `without alloc` remains an allocation certificate rather than a row label.
 
 ## 8. Expressions {#expressions}
 
@@ -665,6 +881,8 @@ A method call `e.m(args)` is **uniform-function-call syntax (UFCS)**: pure sugar
 ### 8.2 Comprehensions {#comprehensions}
 
 A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qualifier `q` is a guard `if g` or a binder `let y = e`. A guard is evaluated in a failure context, so an element is pruned both when `g` is false and when computing `g` fails: a failable accessor such as `at_list` (a prelude lookup from [the standard prelude](#the-standard-prelude)) past the end of a list prunes that element rather than aborting. The statement form `for x in s, q, ... do body` runs `body` per survivor. Both desugar to the prelude's stream combinators (the `Emit` effect of [the standard prelude](#the-standard-prelude)), so they fuse without building an intermediate list.
+
+A guard-free comprehension `[ e for x in s ]` is exactly a mapped and collected stream, and it desugars to that composition directly, so it rides the fused state-threading tier of [effect lowering](./compiler.md#effect-lowering): no effect-operation cells, about two cells per element (the result list itself), the source evaluated exactly once before iteration, and `e` evaluated left to right once per element. Qualifiers (guards and binders) keep the general consumer path, whose pruning semantics need the failure context above. The choice of path is a cost decision only; both produce the identical list in the identical order.
 
 ```prism
 {{#include ../examples/comprehension.pr}}
@@ -998,25 +1216,21 @@ A function may be annotated `fip` or `fbip` to assert the fully-in-place discipl
 {{#include ../examples/fip_list.pr}}
 ```
 
-### 10.1 Zero-Allocation Blocks {#zero-allocation-blocks}
+### 10.1 Allocation Certificates {#allocation-certificates}
 
-The zero-allocation guarantee has a postfix spelling, `without alloc`, written after the return annotation. It is an [allocation certificate](#usage-and-resource-annotations), not an effect-row label: the body and its whole call tree allocate no fresh cell, calling only allocation-free functions. It carries the same check as `fbip`, without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: !{IO} T without alloc`), and interoperates with the keyword forms: a `without alloc` function may call `fip`, `fbip`, or `without alloc` functions.
+The zero-allocation guarantee is the first checked [usage fact](#usage-and-resource-annotations): `@ noalloc`, written at the root of the return annotation. Read it as the result type with the allocation coeffect subtracted: the body and its whole call tree allocate no fresh cell, calling only allocation-free functions. It carries the same check as `fbip`, without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: !{IO} T @ noalloc`), and interoperates with the keyword forms: an `@ noalloc` function may call `fip`, `fbip`, or `@ noalloc` functions.
 
-The same guarantee applies to a region rather than a whole function through the block form `without alloc <block>`, which asserts that the block allocates no fresh cell. Desugar lifts the block to a synthetic top-level `without alloc` function capturing the block's free locals and replaces it with a call ([desugaring](compiler.md#desugaring)), so the identical check covers exactly the region; a `return`, `break`, or `var` inside the block behaves as if written inline, since its control or state effect tunnels out to the enclosing handler. `gcd` below certifies a whole function; `horner` certifies only the expression after its `let`.
+A failed certificate explains itself. The diagnostic lists the first three allocation witnesses in evaluation order, each a concrete reason with its name attached: a constructor built fresh outside `reuse` (by constructor name), a fresh tuple, a lambda materialized as a closure cell, a call to a function with no zero-allocation certificate (by callee name), an indirect call through a function value, or a primitive off the allocation-free list. A body with more sites than the bound reports the remainder as a trailing count (`and 2 more`), and the same witness detail backs the `fip` and `fbip` usage-check failures, so every discipline in the family points at its offending sites rather than restating the rule. The witnesses are read off the reuse-lowered core, after the compiler has already spent every reuse opportunity, so a reported allocation is one the optimizer could not eliminate, not folklore about the source text.
+
+A region certifies by becoming a function of its own: hoist the expression, passing its free locals as parameters, and certify that function, so the identical whole-call-tree check covers exactly the region. `gcd` below certifies a whole function; `horner` certifies only its core.
 
 ```prism
 {{#include ../examples/no_alloc.pr}}
 ```
 
-The same certificate has a terser second spelling, `\ alloc`, read as the result type with the `alloc` usage subtracted. It is a pure synonym, checked identically; the formatter canonicalizes it to `without alloc`.
+Writing `@ noalloc` anywhere other than the root of a `fn` return annotation is an error naming the certificate's one position; interface-level allocation contracts on higher-order arguments are future work reserved through the same row syntax.
 
-```prism
-fn scale(x : Int, k : Int) : Int \ alloc = k * x
-
-fn area(w : Int, h : Int) : Int \ alloc = scale(w, h)
-```
-
-See [usage and resource annotations](#usage-and-resource-annotations) for the mode-family boundary: `borrow`, `fip`/`fbip`, `without alloc`/`\ alloc`, operation grades, and future arenas are one resource story, but they are not all effect rows.
+See [usage rows](#usage-and-resource-annotations) for the mode-family boundary: `borrow`, `fip`/`fbip`, `@ noalloc`, operation grades, and future arenas are one resource story, but they are not all effect rows.
 
 ### 10.2 Stable Blocks {#stable-blocks}
 
@@ -1028,9 +1242,11 @@ A serialized value is a contract across time: bytes written by yesterday's binar
 
 The inline default (`fog: Int = 30`) is the entire cost of an additive change: from it the compiler generates the total `upgrade_Save_V1_V2` (fill the new field with its default) and the honest `downgrade_Save_V2_V1`, which drops the field and returns the lowered value together with a `Loss` naming what could not be carried down. A change the compiler cannot guess, such as a field changing type, is written by hand inside the block as an `upgrade Vn -> Vm = ...` or `downgrade Vm -> Vn = ... drop_loss(f)` converter. Only adjacent converters ever exist; spanning several rungs composes along the ladder, so N rungs cost N-1 converters, never a pairwise matrix. Upgrade after downgrade is the identity on the safe subset, a law emitted as a property test over the derived generators rather than left to review.
 
-A rung marked `frozen "<digest>"` is sealed: the digest is the rung's structural shape digest, the same construction that content-addresses every datatype ([content-addressed core](compiler.md#content-addressed-core)). Editing a sealed rung in place moves the digest and the program stops compiling, with the error naming the rung and the remedy: add a new rung instead of editing a shipped one. A rung that never shipped is reseated with `prism wire --accept <file>`, which recomputes and rewrites its digest in place, loudly.
+A rung marked `frozen "<digest>"` is sealed: the digest is the rung's structural shape digest, the same construction that content-addresses every datatype ([content-addressed core](compiler.md#content-addressed-core)). Editing a sealed rung in place moves the digest and the program stops compiling, with the error naming the rung and the remedy: add a new rung instead of editing a shipped one. A rung that never shipped is reseated with `prism store wire --accept <file>`, which recomputes and rewrites its digest in place, loudly.
 
 The block also derives the type's `Serialize` against the current rung, and the generated ladder functions lift a value between rungs explicitly, so an old value is carried up through its converters rather than re-parsed by hand; a frame's rung rides its envelope, and dispatching an old frame through the ladder automatically is the wire library's job as that layer grows. The codec itself, the byte-level frame with its total decoder, is the `Wire` library, an opt-in import ([the standard prelude](#the-standard-prelude)): a program that never persists a value pays for none of this.
+
+An ordinary value persists through the same frame without a hand-written digest string. `deriving (Stable)` carries one method, `shape_digest_of`, whose derived body is a per-type constant the compiler injects at the derive site: the type's truncated structural shape digest, the same construction a `frozen` rung seals, computed in one place so the runtime frame check and the content hash can never disagree. `wire_encode_stable(x)` frames a value under its own digest; `wire_decode_stable(bs)` opens the frame, decodes the body at the annotated type, and fails unless the frame's digest matches the type's and no bytes trail. A wrong digest, wrong kind, truncation, or trailing byte is a hard `Fail`, never a mis-decoded value. Code that already holds a digest, a ladder rung or a peer's advertised contract, uses the explicit escape hatches `wire_encode_value_with_digest` and `wire_decode_value_with_digest`. A hand-written `instance Stable(T)` is rejected outright: the class's only method is compiler-computed, so a manual instance could only forge a frozen contract, and the error points at `deriving (Stable)`.
 
 ### 10.3 Deprecation {#deprecation}
 
@@ -1045,7 +1261,7 @@ The annotation attaches to the declaration that follows it (a `fn`, `type`, `cla
 
 A _use_ of a deprecated definition compiles, with a warning that names the definition, the suggestion, and the use site. It is only a warning: behavior is unchanged, so a deprecation never breaks a build or alters what a program computes (a determinism corollary: the warning is a diagnostic, not a semantic). A definition's own body may use it without warning; only references from other definitions are reported, and only in the user's own source, so a deprecation inside an imported library does not warn at the library's internal call sites.
 
-The compiler applies the same mechanism to two families it supersedes but has no declaration to annotate: the float dot-operators `+.` `-.` `*.` `/.` `==.` `/=.` `<.` `<=.` `>.` `>=.`, now that the plain operators are lane-polymorphic ([numeric arithmetic](#floating-point)), each warn with the plain spelling; and the fixed-width arithmetic builtins that duplicate an operator (`i64_add`, `u64_mul`, and the rest of the `+ - * / %` set) warn with that operator. The bitwise, shift, comparison, and conversion builtins have no operator replacement and are not deprecated.
+The compiler applies the same mechanism to families it supersedes but has no declaration to annotate: the float dot-operators `+.` `-.` `*.` `/.` `==.` `/=.` `<.` `<=.` `>.` `>=.`, now that the plain operators are lane-polymorphic ([numeric arithmetic](#floating-point)), each warn with the plain spelling; the fixed-width arithmetic builtins that duplicate an operator (`i64_add`, `u64_mul`, and the rest of the `+ - * / %` set) warn with that operator; and the `string_of_bytes` builtin, superseded by `Data.Bytes` now that byte buffers are first-class, warns with `bytes_to_string`, the validating decoder that returns an `Option` (the explicit lossy repair is `string_of_buf`). The bitwise, shift, comparison, and conversion builtins have no operator replacement and are not deprecated.
 
 The policy is one deprecation window wide: a deprecated name keeps working with the warning through that window, and is removed after it. This is what lets the standard library evolve without a flag day: Base's surface may only ever grow, or shrink through one full deprecation window, never break in place.
 
@@ -1125,7 +1341,7 @@ The table form `path = "../geometry"` names a local Prism project, and the bare 
 
 A hash dependency names a source bundle directly and is already the exact accountable identity the build will use. A git dependency names an opaque `version` tag whose signed package index entry maps `(git URL, dependency name, version)` to that exact source-bundle identity: origin, display name, artifact kind, hash scheme, and root. Versions are not ranges and are not solved.
 
-`prism add` writes the matching manifest row and `prism.lock` pin. A project build loads non-path dependencies from the configured package store only after the bundle digest, artifact kind, and hash scheme match the lock and signed index; git dependencies additionally require the package index to authenticate the `origin name@version -> source-bundle` pointer (unsigned indexes are accepted only under the explicit local-development signing mode). The rule is intentionally asymmetric: path dependencies are live source, while hash and git dependencies are accountable artifacts.
+`prism pkg add` writes the matching manifest row and `prism.lock` pin. A project build loads non-path dependencies from the configured package store only after the bundle digest, artifact kind, and hash scheme match the lock and signed index; git dependencies additionally require the package index to authenticate the `origin name@version -> source-bundle` pointer (unsigned indexes are accepted only under the explicit local-development signing mode). The rule is intentionally asymmetric: path dependencies are live source, while hash and git dependencies are accountable artifacts.
 
 ## 12. The Standard Prelude {#the-standard-prelude}
 

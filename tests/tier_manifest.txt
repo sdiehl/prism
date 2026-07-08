@@ -30,6 +30,9 @@ examples/deep_tco.pr	pure
 examples/delim.pr	selective-free-monad
 examples/derivative.pr	pure
 examples/deriving.pr	pure
+examples/diff_after_edit.pr	pure
+examples/diff_after_refactor.pr	pure
+examples/diff_before.pr	pure
 examples/echo.pr	evidence
 examples/eff_amb.pr	selective-free-monad
 examples/eff_exn.pr	selective-free-monad
@@ -92,6 +95,7 @@ examples/poly.pr	pure
 examples/polynomial.pr	pure
 examples/primes.pr	pure
 examples/proptest.pr	whole-program-free-monad
+examples/protocol_ladder.pr	whole-program-free-monad
 examples/queens.pr	selective-free-monad
 examples/rbtree.pr	pure
 examples/record_replay.pr	whole-program-free-monad
@@ -124,6 +128,7 @@ examples/var_pure.pr	evidence
 examples/vectors.pr	pure
 examples/where_blocks.pr	pure
 examples/wordcount.pr	pure
+examples/world.pr	pure
 examples/zipper.pr	pure
 tests/cases/run/accum.pr	pure
 tests/cases/run/annot.pr	pure
@@ -136,6 +141,7 @@ tests/cases/run/block_match.pr	pure
 tests/cases/run/block_stmts.pr	pure
 tests/cases/run/bool_print.pr	pure
 tests/cases/run/borrow.pr	pure
+tests/cases/run/buf_shared.pr	pure
 tests/cases/run/buffer_ops.pr	pure
 tests/cases/run/bytes_codec.pr	pure
 tests/cases/run/cancel_await.pr	whole-program-free-monad
@@ -152,6 +158,7 @@ tests/cases/run/classes.pr	pure
 tests/cases/run/combine_effects.pr	selective-free-monad
 tests/cases/run/comp_guard_dispatch.pr	whole-program-free-monad
 tests/cases/run/comp_guards.pr	whole-program-free-monad
+tests/cases/run/comp_map_once.pr	state-fusion
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
 tests/cases/run/default_args.pr	pure
@@ -278,6 +285,7 @@ tests/cases/run/vec_nat.pr	pure
 tests/cases/run/visibility.pr	pure
 tests/cases/run/while_compound.pr	pure
 tests/cases/run/while_state.pr	whole-program-free-monad
+tests/cases/run/wire_hostile.pr	whole-program-free-monad
 tests/cases/run/wire_laws.pr	whole-program-free-monad
 tests/cases/run/with_handler.pr	selective-free-monad
 tests/cases/run/with_reader.pr	pure

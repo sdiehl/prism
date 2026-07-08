@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 670 716" role="img" aria-label="the six coeffect axes as mini-lattices: Allocation and Mobility as two-point chains, Fip meeting at {linear, bounded_stack}, and Multiplicity, Aliasing, and Escape as exclusive axes with no meet">
+<title>the six coeffect axes as mini-lattices: Allocation and Mobility as two-point chains, Fip meeting at {linear, bounded_stack}, and Multiplicity, Aliasing, and Escape as exclusive axes with no meet</title>
+<desc>A three-row by two-column grid of mini-lattices, one per usage axis, each titled with its axis name and a past or future caption. Allocation: (no claim) over noalloc, marked as the one checked fact today. Fip: (no claim) over linear and bounded_stack, which meet at {linear, bounded_stack}. Multiplicity: (no claim) over once and many, no meet. Aliasing: (no claim) over unique and aliased, no meet. Escape: (no claim) over local and noescape, no meet. Mobility: (no claim) over portable.</desc>
+<rect x="16" y="16" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="171" y="34" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Allocation</text>
+<rect x="143" y="42" width="56" height="18" rx="9" fill="rgba(77, 132, 200, 0.16)" stroke="rgba(77, 132, 200, 0.62)" stroke-width="1"/>
+<path d="M 152 51 L 159 47 L 159 55 Z" fill="#4d84c8"/>
+<text x="164" y="51" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#4d84c8" text-anchor="start" dominant-baseline="central">past</text>
+<line x1="171" y1="96" x2="171" y2="176" stroke="#8a8f98" stroke-width="1.25"/>
+<rect x="120" y="68" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="131" y="176" width="79" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="190" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">noalloc</text>
+<text x="171" y="215" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#6f747c" text-anchor="middle" dominant-baseline="central">checked</text>
+<rect x="344" y="16" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="499" y="34" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Fip</text>
+<rect x="471" y="42" width="56" height="18" rx="9" fill="rgba(77, 132, 200, 0.16)" stroke="rgba(77, 132, 200, 0.62)" stroke-width="1"/>
+<path d="M 480 51 L 487 47 L 487 55 Z" fill="#4d84c8"/>
+<text x="492" y="51" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#4d84c8" text-anchor="start" dominant-baseline="central">past</text>
+<line x1="499" y1="96" x2="424" y2="122" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="499" y1="96" x2="574" y2="122" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="424" y1="150" x2="499" y2="176" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="574" y1="150" x2="499" y2="176" stroke="#8a8f98" stroke-width="1.25"/>
+<rect x="448" y="68" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="499" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="388" y="122" width="71" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="424" y="136" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">linear</text>
+<rect x="511" y="122" width="125" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="574" y="136" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">bounded_stack</text>
+<rect x="397" y="176" width="203" height="27" rx="7" fill="rgba(47, 158, 99, 0.12)" stroke="#2f9e63" stroke-width="1.25"/>
+<text x="499" y="190" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">{linear, bounded_stack}</text>
+<rect x="16" y="250" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="171" y="268" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Multiplicity</text>
+<rect x="136" y="276" width="70" height="18" rx="9" fill="rgba(202, 132, 62, 0.18)" stroke="rgba(202, 132, 62, 0.64)" stroke-width="1"/>
+<path d="M 152 285 L 145 281 L 145 289 Z" fill="#c07f2e"/>
+<text x="157" y="285" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#c07f2e" text-anchor="start" dominant-baseline="central">future</text>
+<line x1="171" y1="330" x2="115" y2="356" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="171" y1="330" x2="227" y2="356" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="115" y1="384" x2="171" y2="410" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="227" y1="384" x2="171" y2="410" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<circle cx="171" cy="424" r="13" fill="none" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="165" y1="418" x2="177" y2="430" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="165" y1="430" x2="177" y2="418" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="451" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no meet)</text>
+<rect x="120" y="302" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="316" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="87" y="356" width="55" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="115" y="370" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">once</text>
+<rect x="199" y="356" width="55" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="227" y="370" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">many</text>
+<rect x="344" y="250" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="499" y="268" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Aliasing</text>
+<rect x="471" y="276" width="56" height="18" rx="9" fill="rgba(77, 132, 200, 0.16)" stroke="rgba(77, 132, 200, 0.62)" stroke-width="1"/>
+<path d="M 480 285 L 487 281 L 487 289 Z" fill="#4d84c8"/>
+<text x="492" y="285" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#4d84c8" text-anchor="start" dominant-baseline="central">past</text>
+<line x1="499" y1="330" x2="439" y2="356" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="499" y1="330" x2="559" y2="356" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="439" y1="384" x2="499" y2="410" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="559" y1="384" x2="499" y2="410" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<circle cx="499" cy="424" r="13" fill="none" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="493" y1="418" x2="505" y2="430" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="493" y1="430" x2="505" y2="418" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="499" y="451" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no meet)</text>
+<rect x="448" y="302" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="499" y="316" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="403" y="356" width="71" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="439" y="370" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">unique</text>
+<rect x="519" y="356" width="79" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="559" y="370" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">aliased</text>
+<rect x="16" y="484" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="171" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Escape</text>
+<rect x="136" y="510" width="70" height="18" rx="9" fill="rgba(202, 132, 62, 0.18)" stroke="rgba(202, 132, 62, 0.64)" stroke-width="1"/>
+<path d="M 152 519 L 145 515 L 145 523 Z" fill="#c07f2e"/>
+<text x="157" y="519" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#c07f2e" text-anchor="start" dominant-baseline="central">future</text>
+<line x1="171" y1="564" x2="109" y2="590" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="171" y1="564" x2="233" y2="590" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="109" y1="618" x2="171" y2="644" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="233" y1="618" x2="171" y2="644" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<circle cx="171" cy="658" r="13" fill="none" stroke="#8a8f98" stroke-width="1.25" stroke-dasharray="4 4"/>
+<line x1="165" y1="652" x2="177" y2="664" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="165" y1="664" x2="177" y2="652" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="685" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no meet)</text>
+<rect x="120" y="536" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="171" y="550" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="77" y="590" width="63" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="109" y="604" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">local</text>
+<rect x="190" y="590" width="86" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="233" y="604" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">noescape</text>
+<rect x="344" y="484" width="310" height="216" rx="9" fill="rgba(138, 143, 152, 0.04)" stroke="rgba(138, 143, 152, 0.35)" stroke-width="1"/>
+<text x="499" y="502" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Mobility</text>
+<rect x="471" y="510" width="56" height="18" rx="9" fill="rgba(77, 132, 200, 0.16)" stroke="rgba(77, 132, 200, 0.62)" stroke-width="1"/>
+<path d="M 480 519 L 487 515 L 487 523 Z" fill="#4d84c8"/>
+<text x="492" y="519" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#4d84c8" text-anchor="start" dominant-baseline="central">past</text>
+<line x1="499" y1="564" x2="499" y2="644" stroke="#8a8f98" stroke-width="1.25"/>
+<rect x="448" y="536" width="102" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="499" y="550" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">(no claim)</text>
+<rect x="456" y="644" width="86" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="499" y="658" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">portable</text>
+</svg>

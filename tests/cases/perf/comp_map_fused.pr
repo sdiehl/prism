@@ -1,0 +1,8 @@
+fn total(xs) =
+  match xs of
+    Nil => 0
+    Cons(h, t) => h + total(t)
+
+fn run(n : Int) : Int = total([x * x for x in srange(0, n)])
+
+fn main() = println(run(__N__))

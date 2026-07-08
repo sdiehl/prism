@@ -6,19 +6,20 @@ use marginalia::Span;
 
 use super::{call, eint, evar, lam1, sp, spat};
 use crate::core::builtins::Builtin;
+use crate::core::contract_digest;
 use crate::error::TypeError;
 use crate::fmt::decl::fmt_ty;
 use crate::names::{
     ARBITRARY_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP, HASH_METHOD, INT_CMP,
     ORD_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN,
-    SHOW_METHOD, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
+    SHAPE_DIGEST_METHOD, SHOW_METHOD, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
 };
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Constraint, Ctor, DataDecl, Decl, Expr, Fip, InstanceDecl, IntLit, Param,
     PathOp, PathStep, Pattern, Program, Suffix, Ty, S,
 };
 use crate::types::{
-    ARBITRARY_CLASS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, ORD_CLASS,
+    ARBITRARY_CLASS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, LENS, ORD_CLASS,
     SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
 };
 
@@ -61,6 +62,26 @@ fn expand_derives(deriving: &[(String, Span)]) -> Vec<(String, Span)> {
 }
 
 pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
+    // `Stable`'s sole method is its shape contract digest, a per-type constant the
+    // compiler computes and injects. A hand-written instance could only restate that
+    // digest (or lie about it), so `Stable` is derive-only: reject a user-authored
+    // instance and point at the derive, closing the one way a frozen contract could
+    // be forged. The rungs a `stable` block generates go through the derive path
+    // below, not here, so they are unaffected.
+    if let Some(i) = prog
+        .instances
+        .iter()
+        .find(|i| bare(&i.class) == STABLE_CLASS)
+    {
+        return Err(TypeError::Other {
+            span: i.span,
+            msg: format!(
+                "`Stable` cannot be given a hand-written instance; its shape digest is \
+                 compiler-computed. Write `deriving (Stable)` on `{}` instead.",
+                fmt_ty(&i.head)
+            ),
+        });
+    }
     // Each in-scope class's bare name mapped to its canonical name. A derived
     // instance must reference the canonical `Module.Class` the instance store
     // keys on, even though `deriving` writes the bare name; a prelude/root class
@@ -95,7 +116,7 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
         for (class, cspan) in &derives {
             // Lens is not a class: it synthesizes plain `<f>_of` / `with_<f>`
             // accessors, so it bypasses the class-existence and instance paths.
-            if class == "Lens" {
+            if class == LENS {
                 fns.extend(derive_lens(d, *cspan)?);
                 continue;
             }
@@ -118,7 +139,7 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
                         span: *cspan,
                         msg: format!(
                             "cannot derive {other} for {}; derivable are Eq, Ord, Show, Hash, \
-                             Serialize, Stable, Arbitrary, Lens",
+                             Serialize, Stable, Arbitrary, {LENS}",
                             d.name
                         ),
                     })
@@ -238,7 +259,6 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
-        no_alloc_bs: false,
         span: z,
     }
 }
@@ -657,14 +677,20 @@ fn is_stable(t: &Ty, set: &BTreeSet<String>) -> bool {
         | Ty::Nat(_) => true,
         Ty::Tuple(ts) => ts.iter().all(|x| is_stable(x, set)),
         Ty::Con(n, args) => set.contains(n) && args.iter().all(|x| is_stable(x, set)),
-        Ty::App(..) | Ty::Fun(..) | Ty::Forall(..) | Ty::State(_) | Ty::RowLit(_) => false,
+        // A usage row is rejected in desugar before deriving; a type carrying
+        // one is never frozen-serializable.
+        Ty::App(..) | Ty::Fun(..) | Ty::Forall(..) | Ty::State(_) | Ty::RowLit(_)
+        | Ty::Coeffect(..) => false,
     }
 }
 
-// `Stable` is a marker: the derived instance is empty, and the whole content of
-// the proof is that every field is itself `Stable`. Derivability is the proof of
-// a frozen format, so a non-stable field is a compile error at the derive site
-// naming the offending field and its type.
+// `Stable` proves a frozen format and carries one method, `shape_digest_of`: the
+// type's shape contract digest, injected here as a string literal from the single
+// digest computation (`core::contract_digest`), so no downstream code hand-threads
+// that digest into the wire envelope. The proof obligation is unchanged: every
+// field must itself be `Stable`, or this is a compile error at the derive site
+// naming the offending field and its type. The injected literal lands in the
+// instance's elaborated Core, so it is content-hashed for free.
 fn derive_stable(
     d: &DataDecl,
     class: &str,
@@ -691,7 +717,11 @@ fn derive_stable(
             }
         }
     }
-    Ok(inst_skel(d, class, "stable", Vec::new(), Z))
+    // The method ignores its argument (the digest is a compile-time constant of the
+    // type); the argument exists only so dispatch resolves the instance by value.
+    let digest = sp(Expr::Str(contract_digest(d)), Z);
+    let method = mdecl(SHAPE_DIGEST_METHOD, &["_x"], digest, Z);
+    Ok(inst_skel(d, class, "stable", vec![method], Z))
 }
 
 // Whether a type expression mentions the type being derived, so a recursive

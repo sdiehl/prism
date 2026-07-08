@@ -1,0 +1,3 @@
+-- `@ noalloc` is wired only at the root of a fn return annotation; anywhere
+-- else it is a misplaced certificate, named as such.
+fn f(x : Int @ noalloc) : Int = x

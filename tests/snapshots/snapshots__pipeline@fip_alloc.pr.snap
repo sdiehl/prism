@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fip_alloc.pr
 ---
 == tokens ==
@@ -80,12 +80,10 @@ fn fresh(x) =
   return x to t@0; return Box(t@0)
 
 == fip ==
-Type Error: usage check `fbip` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+Type Error: usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
    ╭─[ <source>:3:1 ]
    │
  3 │ fbip fn fresh(x) = Box(x)
    │ ────────────┬────────────  
-   │             ╰────────────── usage check `fbip` failed for function `fresh`: allocates a fresh `Box` (no reuse token available)
-witness: `Box` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell
+   │             ╰────────────── usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 ───╯

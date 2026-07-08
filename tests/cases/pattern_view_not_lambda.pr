@@ -1,0 +1,21 @@
+-- A data-type pattern whose `view` clause is a bare expression (a plain
+-- function reference) rather than a lambda. The clause has no parameter to
+-- bind the scrutinee to, so desugaring rejects it with a pointed error instead
+-- of panicking.
+type Point = Point { x: Int, y: Int }
+
+fn diag(p : Point) : Option(Int) =
+  if p.x == p.y then
+    Some(p.x)
+  else
+    None
+
+pattern Diag(n) for Point =
+  view diag
+
+fn f(p : Point) : Int =
+  match p of
+    Diag(n) => n
+    _ => 0
+
+fn main() : Unit = println(f(Point { x = 1, y = 1 }))

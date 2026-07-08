@@ -1,0 +1,3 @@
+-- The open tail is usage-row polymorphism, reserved with its own diagnostic
+-- so the syntax shape stays available.
+fn f(x : Int @ {once | u}) : Int = x

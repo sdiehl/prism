@@ -106,6 +106,7 @@
               ./examples/incr_resident.pr
               ./examples/pendulum.pr
               ./examples/teleport.pr
+              ./examples/world.pr
               ./src/syntax/grammar.lalrpop
             ];
           };

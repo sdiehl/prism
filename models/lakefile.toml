@@ -41,6 +41,11 @@ name = "Replay"
 [[lean_lib]]
 name = "Certificates"
 
+# Experimental typechecker soundness scaffold. Not in `defaultTargets`: this tree
+# intentionally contains `sorry`s as proof obligations for future work.
+[[lean_lib]]
+name = "Tc"
+
 # JSON core-IR decoder (consumer of `prism dump core-json`); exe-only support.
 [[lean_lib]]
 name = "Json"

@@ -119,6 +119,27 @@ pub trait Rewrite {
     }
 }
 
+/// Rebuild `c` by applying `g` to every immediate child.
+///
+/// Applies to every immediate sub-computation and, through the default value
+/// descent, every thunk body a value holds. This is the
+/// recognize-or-leave shape a `Comp -> Comp` pass takes for the variants it does
+/// not itself transform, routed through the one [`Rewrite::descend_comp`] child
+/// enumeration so a new `Comp`/`Value` variant is handled in a single place.
+pub fn map_children<G: FnMut(&Comp) -> Comp>(c: &Comp, g: &mut G) -> Comp {
+    Kids(g).descend_comp(c, &())
+}
+
+struct Kids<'a, G>(&'a mut G);
+
+impl<G: FnMut(&Comp) -> Comp> Rewrite for Kids<'_, G> {
+    type Ctx = ();
+
+    fn comp(&mut self, c: &Comp, _cx: &Self::Ctx) -> Comp {
+        (self.0)(c)
+    }
+}
+
 /// Read-only walk. The implementor carries its own state (and, if scope-aware,
 /// its own binder stack), overriding `visit_*` for the variants it observes.
 pub trait Visit {

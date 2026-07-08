@@ -25,6 +25,10 @@ use pat::{fmt_pat, fmt_pat_inline};
 const INDENT: &str = "  ";
 const LINE_WIDTH: usize = 80;
 
+fn text_width(s: &str) -> usize {
+    s.chars().count()
+}
+
 // Layout mode prints offside blocks. Flat is for bracketed contexts where
 // virtual layout tokens are suppressed, so only inline let/braced arms parse.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -199,7 +203,7 @@ fn wants_break(e: &Expr) -> bool {
     match e {
         Expr::RecordCreate(_, fields) | Expr::RecordUpdate(_, _, fields) => {
             fields.len() > MAX_INLINE_RECORD_FIELDS
-                || fields.iter().any(|(_, v)| is_record_lit(&v.node))
+                || fields.iter().any(|(_, v)| contains_record_lit(&v.node))
         }
         Expr::RecordUpdatePath(_, ups) => {
             ups.len() > 1 && ups.iter().any(|(p, _)| p.iter().any(path_step_traverses))
@@ -213,6 +217,19 @@ const fn is_record_lit(e: &Expr) -> bool {
         e,
         Expr::RecordCreate(..) | Expr::RecordUpdate(..) | Expr::RecordUpdatePath(..)
     )
+}
+
+fn contains_record_lit(e: &Expr) -> bool {
+    if is_record_lit(e) {
+        return true;
+    }
+    let mut found = false;
+    e.each_child(&mut |child| {
+        if !found {
+            found = contains_record_lit(&child.node);
+        }
+    });
+    found
 }
 
 const fn path_step_traverses(s: &PathStep) -> bool {
@@ -897,7 +914,7 @@ impl Fmt<'_> {
     fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
         if !wants_break(&e.node) {
             if let Some(s) = self.fmt_expr_inline(e, mode) {
-                if indent * INDENT.len() + s.len() <= LINE_WIDTH {
+                if indent * INDENT.len() + text_width(&s) <= LINE_WIDTH {
                     return s;
                 }
             }
@@ -1344,10 +1361,6 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{} {e_s}", kw::RETURN))
             }
-            Sugar::WithoutAlloc(body) => {
-                let b = self.fmt_expr_inline(body, Mode::Flat)?;
-                Some(format!("{} {} {b}", kw::WITHOUT, kw::ALLOC))
-            }
             Sugar::VarDecl(..) | Sugar::NamedHandle(..) => None,
         }
     }
@@ -1396,7 +1409,7 @@ impl Fmt<'_> {
     fn fmt_head(&self, e: &S<Expr>, indent: usize) -> String {
         if !wants_break(&e.node) {
             if let Some(s) = self.fmt_expr_inline(e, Mode::Flat) {
-                if indent * INDENT.len() + s.len() + 16 <= LINE_WIDTH {
+                if indent * INDENT.len() + text_width(&s) + 16 <= LINE_WIDTH {
                     return s;
                 }
             }
@@ -1409,7 +1422,7 @@ impl Fmt<'_> {
     fn fmt_arm_body(&self, b: &S<Expr>, indent: usize, used: usize, from: usize) -> String {
         if !forces_break(b) && !self.has_comments(from, b.span.end) {
             if let Some(s) = self.fmt_expr_inline(b, Mode::Layout) {
-                if used + 1 + s.len() <= LINE_WIDTH {
+                if used + 1 + text_width(&s) <= LINE_WIDTH {
                     return format!(" {s}");
                 }
             }
@@ -1498,12 +1511,6 @@ impl Fmt<'_> {
             (Expr::Sugar(Sugar::While(cond, body)), Mode::Layout) => {
                 self.fmt_while_layout(cond.as_deref(), body, indent)
             }
-            (Expr::Sugar(Sugar::WithoutAlloc(body)), Mode::Layout) => format!(
-                "{} {}\n{}",
-                kw::WITHOUT,
-                kw::ALLOC,
-                self.fmt_block(body, indent + 1, body.span.start)
-            ),
             (Expr::Sugar(Sugar::VarDecl(..) | Sugar::NamedHandle(..)), _) => self
                 .fmt_block(e, indent, e.span.start)
                 .trim_start()
@@ -1586,13 +1593,15 @@ impl Fmt<'_> {
                 let b_inline = self.fmt_expr_inline(&a.body, mode);
                 if let Some(ref b) = b_inline {
                     let one_line = format!("{p} {} {b}", kw::FAT_ARROW);
-                    if ind1.len() + one_line.len() + usize::from(!is_last) <= LINE_WIDTH {
+                    if text_width(&ind1) + text_width(&one_line) + usize::from(!is_last)
+                        <= LINE_WIDTH
+                    {
                         return format!("{ind1}{one_line}{trail}");
                     }
                 }
                 let ind2 = INDENT.repeat(indent + 2);
                 if let Some(ref b) = b_inline {
-                    if ind2.len() + b.len() + trail.len() <= LINE_WIDTH {
+                    if text_width(&ind2) + text_width(b) + text_width(trail) <= LINE_WIDTH {
                         return format!("{ind1}{p} {}\n{ind2}{b}{trail}", kw::FAT_ARROW);
                     }
                 }

@@ -82,7 +82,7 @@ impl Elab<'_> {
         // The `Output` ops carry a `String`, so the value is rendered here at the
         // call site where its type is concrete, then handed to the op.
         let val = self.display_comp(v, arg_expr, locals);
-        let op = if newline { "out_println" } else { "out_print" };
+        let op = names::output_op(newline);
         let s = self.fresh();
         Comp::Bind(
             Box::new(val),
@@ -122,7 +122,7 @@ impl Elab<'_> {
     pub(super) fn print_string(&mut self, shown: Comp, newline: bool) -> Comp {
         let s = self.fresh();
         let tail = if self.route_output {
-            let op = if newline { "out_println" } else { "out_print" };
+            let op = names::output_op(newline);
             Comp::Do(op.into(), vec![Value::Var(s.clone().into())])
         } else {
             let put = Comp::Io(IoOp::PrintS, vec![Value::Var(s.clone().into())]);

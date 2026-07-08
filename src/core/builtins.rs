@@ -18,521 +18,459 @@ pub enum BuiltinKind {
     Coerce,
 }
 
-/// Inline unary floating-point op the elaborator emits as `Comp::FloatBuiltin`.
-///
-/// Three lowering classes, distinguished by [`FloatOp::runtime_sym`] and the
-/// exhaustive match in codegen:
-/// - int/float conversions (`to_float`, `truncate`, `floor_to_int`,
-///   `ceil_to_int`): int<->float casts with pinned saturating rounding;
-/// - exact float->float ops (`floor`, `ceil`, `round`, `trunc`, `abs_float`,
-///   `sqrt`): correctly rounded / exact on every IEEE-754 platform, so they lower
-///   to hardware intrinsics and need no owned implementation;
-/// - transcendentals (the rest): platform libm would diverge in the last bit, so
-///   each routes through the owned vendored libm ([`FloatOp::runtime_sym`]).
-///
-/// Binary math (`pow`, `atan2`, `hypot`, `fmod`) is not here: those take two
-/// arguments and ride the boxed-float [`Builtin`] path instead.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FloatOp {
-    // int<->float conversions.
-    ToFloat,
-    Truncate,
-    FloorToInt,
-    CeilToInt,
-    // Exact float->float.
-    AbsFloat,
-    Sqrt,
-    Floor,
-    Ceil,
-    Round,
-    Trunc,
-    // Transcendentals, owned by the vendored libm.
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Sinh,
-    Cosh,
-    Tanh,
-    Exp,
-    Exp2,
-    Expm1,
-    Ln,
-    Log2,
-    Log10,
-    Log1p,
-    Cbrt,
-}
+// Every inline float op is surface-callable at this arity with this dispatch
+// kind, so the two facts are uniform across the family and generated once here
+// rather than repeated on every registry row.
+const FLOAT_ARITY: usize = 1;
+const FLOAT_KIND: BuiltinKind = BuiltinKind::Float;
 
-impl FloatOp {
-    pub(crate) const ALL: &'static [Self] = &[
-        Self::ToFloat,
-        Self::Truncate,
-        Self::FloorToInt,
-        Self::CeilToInt,
-        Self::AbsFloat,
-        Self::Sqrt,
-        Self::Floor,
-        Self::Ceil,
-        Self::Round,
-        Self::Trunc,
-        Self::Sin,
-        Self::Cos,
-        Self::Tan,
-        Self::Asin,
-        Self::Acos,
-        Self::Atan,
-        Self::Sinh,
-        Self::Cosh,
-        Self::Tanh,
-        Self::Exp,
-        Self::Exp2,
-        Self::Expm1,
-        Self::Ln,
-        Self::Log2,
-        Self::Log10,
-        Self::Log1p,
-        Self::Cbrt,
-    ];
+// One declarative registry for the inline floating-point op family the elaborator
+// emits as `Comp::FloatBuiltin`. Each row is the single home for a float op's
+// variant, surface name, content-hash tag, stable wire index, type signature, and
+// (for a transcendental) its owned-libm runtime symbol. The macro fans a row out
+// to the enum, the accessors, the codec wire number, and the signature the type
+// checker seeds; adding a float op is one row.
+//
+// Three lowering classes, distinguished by [`FloatOp::runtime_sym`] and the
+// exhaustive match in codegen:
+// - int/float conversions (`to_float`, `truncate`, `floor_to_int`, `ceil_to_int`):
+//   int<->float casts with pinned saturating rounding;
+// - exact float->float ops (`abs_float`, `sqrt`, `floor`, `ceil`, `round`,
+//   `trunc`): correctly rounded / exact on every IEEE-754 platform, so they lower
+//   to hardware intrinsics and carry no runtime symbol;
+// - transcendentals (the rest): platform libm would diverge in the last bit, so
+//   each carries the owned vendored-libm symbol (`sym "prism_m_*"`), the one
+//   canonical place that `prism_m_*` ABI contract lives, the analogue of
+//   [`Builtin::sym`]; codegen and the interpreter both dispatch off it.
+//
+// Binary math (`pow`, `atan2`, `hypot`, `fmod`) is not here: those take two
+// arguments and ride the boxed-float [`Builtin`] path instead.
+//
+// The wire index is EXPLICIT per row and decoupled from both enum and row order:
+// it is the store's append-only content-format tag, guarded dense-and-unique from
+// zero by `FLOAT_OPS_BY_WIRE`. The hash tag stays byte-identical across renames
+// (frozen by `float_op_hash_tags_are_frozen`) because the content hash commits to
+// it.
+macro_rules! float_ops {
+    ( $(
+        $variant:ident $name:literal $tag:literal $wire:literal $sig:literal
+            $( sym $sym:literal )? ;
+    )* ) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum FloatOp { $( $variant, )* }
 
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::ToFloat => "to_float",
-            Self::Truncate => "truncate",
-            Self::FloorToInt => "floor_to_int",
-            Self::CeilToInt => "ceil_to_int",
-            Self::AbsFloat => "abs_float",
-            Self::Sqrt => "sqrt",
-            Self::Floor => "floor",
-            Self::Ceil => "ceil",
-            Self::Round => "round",
-            Self::Trunc => "trunc",
-            Self::Sin => "sin",
-            Self::Cos => "cos",
-            Self::Tan => "tan",
-            Self::Asin => "asin",
-            Self::Acos => "acos",
-            Self::Atan => "atan",
-            Self::Sinh => "sinh",
-            Self::Cosh => "cosh",
-            Self::Tanh => "tanh",
-            Self::Exp => "exp",
-            Self::Exp2 => "exp2",
-            Self::Expm1 => "expm1",
-            Self::Ln => "ln",
-            Self::Log2 => "log2",
-            Self::Log10 => "log10",
-            Self::Log1p => "log1p",
-            Self::Cbrt => "cbrt",
+        impl FloatOp {
+            pub(crate) const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
+
+            /// Surface name; the single string source the IR, interpreter
+            /// dispatch, and codegen all key off.
+            #[must_use]
+            pub const fn name(self) -> &'static str {
+                match self { $( Self::$variant => $name, )* }
+            }
+
+            /// Stable content-hash tag, independent of the enum variant name.
+            #[must_use]
+            pub const fn hash_tag(self) -> &'static str {
+                match self { $( Self::$variant => $tag, )* }
+            }
+
+            /// Stable, append-only wire number for the store and kont codecs.
+            #[must_use]
+            pub const fn wire(self) -> u64 {
+                match self { $( Self::$variant => $wire, )* }
+            }
+
+            /// Inverse of [`FloatOp::wire`]; `None` on an unknown index.
+            #[must_use]
+            pub const fn from_wire(n: u64) -> Option<Self> {
+                match n { $( $wire => Some(Self::$variant), )* _ => None }
+            }
+
+            /// The type signature the checker seeds for this op.
+            #[must_use]
+            pub const fn signature(self) -> &'static str {
+                match self { $( Self::$variant => $sig, )* }
+            }
+
+            /// The owned-libm C symbol a transcendental routes to on native and
+            /// via FFI in the interpreter, or `None` for the conversions and exact
+            /// ops (which lower to casts/intrinsics with no owned implementation).
+            #[must_use]
+            pub const fn runtime_sym(self) -> Option<&'static str> {
+                match self { $( Self::$variant => float_ops!(@sym $($sym)?), )* }
+            }
+
+            #[must_use]
+            pub fn from_name(s: &str) -> Option<Self> {
+                Self::ALL.iter().copied().find(|o| o.name() == s)
+            }
         }
-    }
+    };
+    (@sym $sym:literal) => { Some($sym) };
+    (@sym) => { None };
+}
 
-    /// The owned-libm C symbol a transcendental routes to on native and via FFI
-    /// in the interpreter, or `None` for the conversions and exact ops (which
-    /// lower to casts/intrinsics with no owned implementation). This is the one
-    /// canonical place the `prism_m_*` ABI contract for the unary ops lives, the
-    /// analogue of [`Builtin::sym`]; codegen and the interpreter both dispatch
-    /// off it, so a variant cannot be added without wiring both.
-    #[must_use]
-    pub const fn runtime_sym(self) -> Option<&'static str> {
-        match self {
-            Self::ToFloat
-            | Self::Truncate
-            | Self::FloorToInt
-            | Self::CeilToInt
-            | Self::AbsFloat
-            | Self::Sqrt
-            | Self::Floor
-            | Self::Ceil
-            | Self::Round
-            | Self::Trunc => None,
-            Self::Sin => Some("prism_m_sin"),
-            Self::Cos => Some("prism_m_cos"),
-            Self::Tan => Some("prism_m_tan"),
-            Self::Asin => Some("prism_m_asin"),
-            Self::Acos => Some("prism_m_acos"),
-            Self::Atan => Some("prism_m_atan"),
-            Self::Sinh => Some("prism_m_sinh"),
-            Self::Cosh => Some("prism_m_cosh"),
-            Self::Tanh => Some("prism_m_tanh"),
-            Self::Exp => Some("prism_m_exp"),
-            Self::Exp2 => Some("prism_m_exp2"),
-            Self::Expm1 => Some("prism_m_expm1"),
-            Self::Ln => Some("prism_m_log"),
-            Self::Log2 => Some("prism_m_log2"),
-            Self::Log10 => Some("prism_m_log10"),
-            Self::Log1p => Some("prism_m_log1p"),
-            Self::Cbrt => Some("prism_m_cbrt"),
+float_ops! {
+    ToFloat "to_float" "ToFloat" 0 "(Int) -> Float";
+    Truncate "truncate" "Truncate" 1 "(Float) -> Int";
+    FloorToInt "floor_to_int" "FloorToInt" 2 "(Float) -> Int";
+    CeilToInt "ceil_to_int" "CeilToInt" 3 "(Float) -> Int";
+    AbsFloat "abs_float" "AbsFloat" 4 "(Float) -> Float";
+    Sqrt "sqrt" "Sqrt" 5 "(Float) -> Float";
+    Floor "floor" "Floor" 10 "(Float) -> Float";
+    Ceil "ceil" "Ceil" 11 "(Float) -> Float";
+    Round "round" "Round" 12 "(Float) -> Float";
+    Trunc "trunc" "Trunc" 13 "(Float) -> Float";
+    Sin "sin" "Sin" 6 "(Float) -> Float" sym "prism_m_sin";
+    Cos "cos" "Cos" 7 "(Float) -> Float" sym "prism_m_cos";
+    Tan "tan" "Tan" 14 "(Float) -> Float" sym "prism_m_tan";
+    Asin "asin" "Asin" 15 "(Float) -> Float" sym "prism_m_asin";
+    Acos "acos" "Acos" 16 "(Float) -> Float" sym "prism_m_acos";
+    Atan "atan" "Atan" 17 "(Float) -> Float" sym "prism_m_atan";
+    Sinh "sinh" "Sinh" 18 "(Float) -> Float" sym "prism_m_sinh";
+    Cosh "cosh" "Cosh" 19 "(Float) -> Float" sym "prism_m_cosh";
+    Tanh "tanh" "Tanh" 20 "(Float) -> Float" sym "prism_m_tanh";
+    Exp "exp" "Exp" 8 "(Float) -> Float" sym "prism_m_exp";
+    Exp2 "exp2" "Exp2" 21 "(Float) -> Float" sym "prism_m_exp2";
+    Expm1 "expm1" "Expm1" 22 "(Float) -> Float" sym "prism_m_expm1";
+    Ln "ln" "Ln" 9 "(Float) -> Float" sym "prism_m_log";
+    Log2 "log2" "Log2" 23 "(Float) -> Float" sym "prism_m_log2";
+    Log10 "log10" "Log10" 24 "(Float) -> Float" sym "prism_m_log10";
+    Log1p "log1p" "Log1p" 25 "(Float) -> Float" sym "prism_m_log1p";
+    Cbrt "cbrt" "Cbrt" 26 "(Float) -> Float" sym "prism_m_cbrt";
+}
+
+// Float ops in wire order: index `i` holds the op whose [`FloatOp::wire`] is `i`.
+// Built from the per-row wire numbers so it cannot drift, the analogue of
+// [`BUILTINS_BY_WIRE`]. The const evaluation panics if the wire numbers are not
+// dense and unique from zero, the compile-time guard that the append-only float
+// wire space stays intact.
+const FLOAT_OPS_BY_WIRE_ARR: [FloatOp; FloatOp::ALL.len()] = {
+    let mut arr = [FloatOp::ALL[0]; FloatOp::ALL.len()];
+    let mut i = 0;
+    while i < arr.len() {
+        arr[i] = match FloatOp::from_wire(i as u64) {
+            Some(f) => f,
+            None => panic!("float op wire indices must be dense and unique from zero"),
+        };
+        i += 1;
+    }
+    arr
+};
+
+/// Float ops in wire order, the single source the store and kont codecs number
+/// from. See [`FloatOp::wire`].
+pub const FLOAT_OPS_BY_WIRE: &[FloatOp] = &FLOAT_OPS_BY_WIRE_ARR;
+
+/// Every inline float op with its uniform surface arity and dispatch kind, for the
+/// elaborator's arity map and head dispatch. Sourced from the one registry so the
+/// name set cannot drift from the enum.
+#[must_use]
+pub fn float_surface(name: &str) -> Option<(usize, BuiltinKind)> {
+    FloatOp::from_name(name).map(|_| (FLOAT_ARITY, FLOAT_KIND))
+}
+
+/// Per-argument calling convention for the `prism_*` runtime call a builtin
+/// lowers to, read by codegen at `Comp::StrBuiltin`. The first slice is the
+/// pointer-tagged immediate (int/bool) args untagged before the call, the second
+/// the boxed-double args unboxed before the call; every other argument passes raw
+/// (string cell, boxed 64-bit cell, or tagged Int word). The flag is true when the
+/// result is a bare integer to retag.
+type AbiSpec = (&'static [usize], &'static [usize], bool);
+
+// The calling conventions the runtime builtins use, named once so each registry
+// row states its convention by name instead of an inline tuple.
+//
+// Default: every argument passes raw and the result is a cell or already-tagged
+// word (string ops, fixed-width arithmetic on boxed cells, elaborator-only ops).
+const RAW: AbiSpec = (&[], &[], false);
+// Bare-integer result to retag (predicates, lengths, exit codes).
+const RETAG: AbiSpec = (&[], &[], true);
+// Index arg raw; bare-integer (char/byte) result to retag.
+const IDX1_RETAG: AbiSpec = (&[1], &[], true);
+// Index arg raw; element/array result (cell or polymorphic) passes through.
+const IDX1: AbiSpec = (&[1], &[], false);
+// Single immediate arg (bool/char/index/exit/capacity); raw result.
+const IMM0: AbiSpec = (&[0], &[], false);
+// Two immediate args (length and init byte); cell result.
+const IMM01: AbiSpec = (&[0, 1], &[], false);
+// One boxed-float arg; raw result.
+const F0: AbiSpec = (&[], &[0], false);
+// Float arg 0, immediate arg 1; raw result.
+const F0_IMM1: AbiSpec = (&[1], &[0], false);
+// Two boxed-float args; boxed-float result.
+const F01: AbiSpec = (&[], &[0, 1], false);
+// Two immediate index/length args; cell result (a fresh string or buffer).
+const IDX12: AbiSpec = (&[1, 2], &[], false);
+
+// Platform facts a builtin can carry. `OffPlatform` touches the host OS (file IO,
+// env, process, args), so it has no implementation in a browser build and is
+// rejected up front. `NativeDeferred` has a full interpreter implementation but no
+// C runtime symbol yet, so native codegen refuses to lower it rather than emitting
+// a call to an undefined `prism_*` symbol that would only surface as a link error.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flag {
+    OffPlatform,
+    NativeDeferred,
+}
+
+// One declarative registry for the runtime-call builtin family. Each row is the
+// single home for a builtin's variant, surface name, content-hash tag, stable wire
+// index, calling convention, optional platform flags, and (for a surface-callable
+// builtin) its arity, dispatch kind, and type signature. Adding a builtin is one
+// row; the macro fans it out to the enum, the accessors, the codec wire number,
+// the surface arity/kind table, and the signature the type checker seeds. The
+// `non_enum_surface` block lists the surface builtins that are not members of this
+// enum (output, float ops, coercions) and so carry only an arity and a kind.
+//
+// The wire index is EXPLICIT per row and decoupled from both enum order and row
+// order: it is the store's append-only content-format tag and feeds nothing but
+// the codec. A new row takes the next free index; a reorder would corrupt every
+// serialized program. `wire_indices_are_dense_and_unique` guards that. The hash tag
+// likewise stays byte-identical across renames (frozen by
+// `builtin_hash_tags_are_frozen`) because the content hash commits to it.
+macro_rules! builtins {
+    (
+        non_enum_surface: [ $( ($ne_name:literal, $ne_arity:literal, $ne_kind:ident) ),* $(,)? ],
+        registry: [ $(
+            $variant:ident $name:literal $tag:literal $wire:literal $abi:ident
+                $( surface $arity:literal $kind:ident $sig:literal )?
+                $( flags [ $( $flag:ident ),* ] )?
+            ;
+        )* ]
+    ) => {
+        /// Runtime-call builtin the elaborator emits as `Comp::StrBuiltin`.
+        ///
+        /// Lowered to a `prism_*` C call. Spans surface builtins (`concat`,
+        /// `show_int`, ...) and compiler-internal ops never surface-callable
+        /// (`show_i64`/`show_u64`, fixed-width arithmetic). `name()` is the single
+        /// string source; the IR, interpreter dispatch, and codegen all key off
+        /// the enum so a name can never drift.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Builtin { $( $variant, )* }
+
+        impl Builtin {
+            pub(crate) const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
+
+            /// Surface name; the single string source the IR, interpreter
+            /// dispatch, and codegen all key off.
+            #[must_use]
+            pub const fn name(self) -> &'static str {
+                match self { $( Self::$variant => $name, )* }
+            }
+
+            /// Stable content-hash tag, independent of the enum variant name.
+            #[must_use]
+            pub const fn hash_tag(self) -> &'static str {
+                match self { $( Self::$variant => $tag, )* }
+            }
+
+            /// Calling convention for the runtime call this builtin lowers to.
+            #[must_use]
+            pub const fn abi(self) -> AbiSpec {
+                match self { $( Self::$variant => $abi, )* }
+            }
+
+            /// Stable, append-only wire number for the store codec.
+            #[must_use]
+            pub const fn wire(self) -> u64 {
+                match self { $( Self::$variant => $wire, )* }
+            }
+
+            /// Inverse of [`Builtin::wire`]; `None` on an unknown index.
+            #[must_use]
+            pub const fn from_wire(n: u64) -> Option<Self> {
+                match n { $( $wire => Some(Self::$variant), )* _ => None }
+            }
+
+            const fn flags(self) -> &'static [Flag] {
+                match self { $( Self::$variant => &[ $( $( Flag::$flag ),* )? ], )* }
+            }
+
+            /// Touches the host OS, so it has no browser implementation.
+            #[must_use]
+            pub fn off_platform(self) -> bool {
+                self.flags().contains(&Flag::OffPlatform)
+            }
+
+            /// Has an interpreter implementation but no C runtime symbol yet, so
+            /// native codegen refuses to lower it.
+            #[must_use]
+            pub fn native_deferred(self) -> bool {
+                self.flags().contains(&Flag::NativeDeferred)
+            }
+
+            /// Surface arity and dispatch kind, or `None` for an elaborator-only
+            /// builtin that is never surface-callable.
+            #[must_use]
+            pub const fn surface(self) -> Option<(usize, BuiltinKind)> {
+                match self {
+                    $( $( Self::$variant => Some(($arity, BuiltinKind::$kind)), )? )*
+                    _ => None,
+                }
+            }
+
+            /// The type signature the checker seeds for a surface builtin.
+            #[must_use]
+            pub const fn signature(self) -> Option<&'static str> {
+                match self {
+                    $( $( Self::$variant => Some($sig), )? )*
+                    _ => None,
+                }
+            }
         }
-    }
 
-    #[must_use]
-    pub fn from_name(s: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|o| o.name() == s)
-    }
+        /// Surface builtins with their arity and dispatch kind.
+        ///
+        /// The members of this enum that are surface-callable, plus the non-enum
+        /// surface builtins, in one table for the elaborator's arity map and head
+        /// dispatch.
+        pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
+            $( ($ne_name, $ne_arity, BuiltinKind::$ne_kind), )*
+            $( $( ($name, $arity, BuiltinKind::$kind), )? )*
+        ];
+    };
 }
 
-/// Runtime-call builtin the elaborator emits as `Comp::StrBuiltin`.
-///
-/// Lowered to a `prism_*` C call. Spans surface builtins (`concat`, `show_int`,
-/// ...) and compiler-internal ops never surface-callable (`show_i64`/`show_u64`,
-/// fixed-width arithmetic). `name()` is the single string source; the IR,
-/// interpreter dispatch, and codegen all key off the enum so a name can never
-/// drift.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Builtin {
-    Concat,
-    StrLen,
-    StrEq,
-    StrCmp,
-    Substring,
-    CharAt,
-    ShowChar,
-    // blake3 of a string's bytes, returned as lowercase hex. The one runtime hash
-    // primitive, shared by every derived `Hash` instance: the interpreter calls
-    // the `blake3` crate, the native runtime a portable in-repo blake3, and the
-    // two must agree byte-for-byte (gated by `tests/hash_value_parity.rs`).
-    Blake3,
-    ParseInt,
-    // Materializes a bignum literal that overflows the 63-bit immediate from its
-    // decimal text. Not surface-callable; emitted only by the elaborator, where
-    // the input is always valid digits, so unlike `parse_int` it returns the raw
-    // `Integer` cell rather than an `Option`.
-    BigLit,
-    ParseFloat,
-    // Binary float transcendentals: boxed-float args in, boxed float out, routed
-    // through the owned vendored libm (see prism_float.c's `prism_float_binop`).
-    // The unary transcendentals ride `FloatOp` instead; these need two arguments.
-    PowFloat,
-    Atan2,
-    Hypot,
-    Fmod,
-    ShowFloatPrec,
-    // Runtime source instrumentation gate. `probe "name" do body` lowers to an
-    // if over this builtin, so disabled probes skip the whole body.
-    ProbeEnabled,
-    Getenv,
-    ReadFile,
-    ReadBytesFile,
-    WriteBytesFile,
-    WriteFile,
-    FileExists,
-    AppendFile,
-    RemoveFile,
-    // The content-addressed store bridge: a named blob rides the real store
-    // (immutable object keyed by its content hash, plus a mutable ref keyed by a
-    // caller tag) instead of a snapshot file. `StoreGet`/`StoreHas` read, so they
-    // are input prims reached through the world handler; `StorePut` writes, so it
-    // is off-platform like `WriteFile`. Interpreter-only for now: the native path
-    // has no C runtime symbol yet (see `native_deferred`).
-    StoreGet,
-    StorePut,
-    StoreHas,
-    Exit,
-    System,
-    Eprint,
-    ArgsCount,
-    Arg,
-    // Real-time clock reads (nanoseconds): `WallNow` is the system clock (Unix
-    // epoch, UTC), `MonoNow` a monotonic counter. Both are input prims reached
-    // through a `Clock` handler and recorded as trace entries, so a time-reading
-    // program replays byte-identically.
-    WallNow,
-    MonoNow,
-    ShowInt,
-    ShowI64,
-    ShowU64,
-    ShowBool,
-    ShowFloat,
-    ToI64,
-    ToU64,
-    IntOfI64,
-    IntOfU64,
-    I64Add,
-    I64Sub,
-    I64Mul,
-    I64Div,
-    U64Div,
-    I64Rem,
-    U64Rem,
-    I64Cmp,
-    U64Cmp,
-    // Wrapping fixed-width add/sub/mul (the I64 variants already exist below for
-    // the elaborator; both lanes are surface-exposed so a userland hash can do
-    // fixed-width arithmetic without bignum promotion).
-    U64Add,
-    U64Sub,
-    U64Mul,
-    // O(1) byte access and byte-wise string building (UTF-8 unaware), so a lexer
-    // or hash scans raw bytes in linear time rather than walking codepoints.
-    ByteAt,
-    ByteLen,
-    StringOfBytes,
-    // Pop last element, in place when uniquely owned.
-    ArrayPop,
-    // Fixed-width bitwise and shift ops, one runtime call each, both lanes (the
-    // and/or/xor bit patterns coincide across signedness; `i64_shr` is arithmetic
-    // and `u64_shr` logical). Shift counts are taken modulo 64.
-    I64And,
-    I64Or,
-    I64Xor,
-    I64Shl,
-    I64Shr,
-    U64And,
-    U64Or,
-    U64Xor,
-    U64Shl,
-    U64Shr,
-    // Fixed-size polymorphic array, an ordinary heap cell (so reference counting
-    // recurses into its elements for free). `array_set` writes in place when the
-    // array is uniquely owned (FBIP), else copies.
-    ArrayNew,
-    ArrayEmpty,
-    ArrayLen,
-    ArrayGet,
-    ArraySet,
-    ArrayPush,
-    // Concatenate every string in an array into one fresh string with a single
-    // allocation: the O(n) string builder that replaces a chain of `concat`.
-    StringOfArray,
-    // Unboxed byte buffer, the storage under `Bytes` (`runtime/prism_buffer.c`): a
-    // contiguous refcounted u8 region, header-compatible with the cell layout, so
-    // Perceus, the leak balance, and the rc==1 in-place / shared-copy discipline
-    // apply unchanged. `buf_set`/`buf_push` mutate in place when uniquely owned
-    // (FBIP) and copy when shared, exactly like `array_set`. `string_of_buf` is the
-    // total lossy decode; `buf_utf8_valid` gates the `String`/`Bytes` boundary.
-    BufEmpty,
-    BufNew,
-    BufLen,
-    BufGet,
-    BufSet,
-    BufPush,
-    BufSlice,
-    BufCat,
-    BufEq,
-    BufCmp,
-    BufHash,
-    BufOfString,
-    StringOfBuf,
-    BufUtf8Valid,
-    // Stable sort of a `List` of a primitive element, chosen at the call site
-    // when a `sort`/`sort_by_ord` use resolves to a canonical primitive `Ord`
-    // instance. Not surface-callable; emitted only by the elaborator. Args are
-    // `(kind, list)` where kind selects the key (see `prism_sort_prim`).
-    SortPrim,
-    // Type-aligned continuation queue ops, the Freer representation of an `EOp`'s
-    // continuation. Emitted only by the free-monad effect lowering; never
-    // surface-callable. `snoc(q, arrow)` appends, `concat(q1, q2)` joins, both
-    // O(1); `uncons(q)` returns `TQNil`/`TQCons(head, tail)` for the Core `qApply`
-    // template to match. The empty queue is `Unit`.
-    TaqSnoc,
-    TaqConcat,
-    TaqUncons,
+builtins! {
+    non_enum_surface: [
+        ("print", 1, Print),
+        ("println", 1, Println),
+        ("prim_print", 1, Print),
+        ("prim_println", 1, Println),
+        ("prim_read_int", 0, ReadInt),
+        ("prim_read_line", 0, ReadLine),
+        ("error", 1, Error),
+        ("fatal", 1, Error),
+        ("prim_rand", 0, Rand),
+        ("srand", 1, Srand),
+        ("ord", 1, Coerce),
+        ("chr", 1, Coerce),
+    ],
+    registry: [
+    Concat "concat" "Concat" 0 RAW surface 2 Str "(String, String) -> String";
+    StrLen "str_len" "StrLen" 1 RETAG surface 1 Str "(String) -> Int";
+    StrEq "str_eq" "StrEq" 2 RETAG surface 2 Str "(String, String) -> Bool";
+    StrCmp "str_cmp" "StrCmp" 3 RETAG surface 2 Str "(String, String) -> Int";
+    Substring "substring" "Substring" 4 IDX12 surface 3 Str "(String, Int, Int) -> String";
+    CharAt "char_at" "CharAt" 5 IDX1_RETAG surface 2 Str "(String, Int) -> Int";
+    ShowChar "show_char" "ShowChar" 6 IMM0 surface 1 Str "(Char) -> String";
+    Blake3 "blake3" "Blake3" 7 RAW surface 1 Str "(String) -> String";
+    ParseInt "parse_int" "ParseInt" 8 RAW surface 1 Str "(String) -> Option(Int)";
+    BigLit "big_lit" "BigLit" 9 RAW;
+    ParseFloat "parse_float" "ParseFloat" 10 RAW surface 1 Str "(String) -> Float";
+    PowFloat "pow_float" "PowFloat" 11 F01 surface 2 Str "(Float, Float) -> Float";
+    Atan2 "atan2" "Atan2" 70 F01 surface 2 Str "(Float, Float) -> Float";
+    Hypot "hypot" "Hypot" 71 F01 surface 2 Str "(Float, Float) -> Float";
+    Fmod "fmod" "Fmod" 72 F01 surface 2 Str "(Float, Float) -> Float";
+    ShowFloatPrec "show_float_prec" "ShowFloatPrec" 12 F0_IMM1 surface 2 Str "(Float, Int) -> String";
+    ProbeEnabled "probe_enabled" "ProbeEnabled" 94 RETAG surface 1 Str "(String) -> Bool";
+    Getenv "prim_getenv" "Getenv" 13 RAW surface 1 Str "(String) -> String ! {IO}";
+    ReadFile "prim_read_file" "ReadFile" 14 RAW surface 1 Str "(String) -> String ! {IO}";
+    ReadBytesFile "prim_read_bytes" "ReadBytesFile" 73 RAW surface 1 Str "(String) -> Buf ! {IO}";
+    WriteBytesFile "prim_write_bytes" "WriteBytesFile" 74 RAW surface 2 Str "(String, Buf) -> Result(Unit, String) ! {IO}" flags [OffPlatform];
+    WriteFile "write_file" "WriteFile" 15 RAW surface 2 Str "(String, String) -> Result(Unit, String) ! {IO}" flags [OffPlatform];
+    FileExists "prim_file_exists" "FileExists" 16 RETAG surface 1 Str "(String) -> Bool ! {IO}";
+    AppendFile "append_file" "AppendFile" 17 RAW surface 2 Str "(String, String) -> Result(Unit, String) ! {IO}" flags [OffPlatform];
+    RemoveFile "remove_file" "RemoveFile" 18 RAW surface 1 Str "(String) -> Unit ! {IO}" flags [OffPlatform];
+    StoreGet "prim_store_get" "StoreGet" 75 RAW surface 2 Str "(String, String) -> String ! {IO}" flags [NativeDeferred];
+    StorePut "prim_store_put" "StorePut" 76 RAW surface 3 Str "(String, String, String) -> Unit ! {IO}" flags [OffPlatform, NativeDeferred];
+    StoreHas "prim_store_has" "StoreHas" 77 RETAG surface 2 Str "(String, String) -> Bool ! {IO}" flags [NativeDeferred];
+    Exit "exit" "Exit" 19 IMM0 surface 1 Str "forall a. (Int) -> a" flags [OffPlatform];
+    System "system" "System" 20 RETAG surface 1 Str "(String) -> Int ! {IO}" flags [OffPlatform];
+    Eprint "eprint" "Eprint" 21 RAW surface 1 Str "(String) -> Unit ! {IO}" flags [OffPlatform];
+    ArgsCount "prim_args_count" "ArgsCount" 22 RETAG surface 0 Str "() -> Int ! {IO}";
+    Arg "prim_arg" "Arg" 23 IMM0 surface 1 Str "(Int) -> String ! {IO}";
+    WallNow "prim_wall_now" "WallNow" 92 RETAG surface 0 Str "() -> Int ! {IO}";
+    MonoNow "prim_mono_now" "MonoNow" 93 RETAG surface 0 Str "() -> Int ! {IO}";
+    ShowInt "show_int" "ShowInt" 24 RAW surface 1 Str "(Int) -> String";
+    ShowI64 "show_i64" "ShowI64" 25 RAW surface 1 Str "(I64) -> String";
+    ShowU64 "show_u64" "ShowU64" 26 RAW surface 1 Str "(U64) -> String";
+    ShowBool "show_bool" "ShowBool" 27 IMM0 surface 1 Str "(Bool) -> String";
+    ShowFloat "show_float" "ShowFloat" 28 F0 surface 1 Str "(Float) -> String";
+    ToI64 "to_i64" "ToI64" 29 RAW surface 1 Int "(Int) -> I64";
+    ToU64 "to_u64" "ToU64" 30 RAW surface 1 Int "(Int) -> U64";
+    IntOfI64 "int_of_i64" "IntOfI64" 31 RAW surface 1 Int "(I64) -> Int";
+    IntOfU64 "int_of_u64" "IntOfU64" 32 RAW surface 1 Int "(U64) -> Int";
+    I64Add "i64_add" "I64Add" 33 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Sub "i64_sub" "I64Sub" 34 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Mul "i64_mul" "I64Mul" 35 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Div "i64_div" "I64Div" 36 RAW surface 2 Str "(I64, I64) -> I64";
+    U64Div "u64_div" "U64Div" 37 RAW surface 2 Str "(U64, U64) -> U64";
+    I64Rem "i64_rem" "I64Rem" 38 RAW surface 2 Str "(I64, I64) -> I64";
+    U64Rem "u64_rem" "U64Rem" 39 RAW surface 2 Str "(U64, U64) -> U64";
+    I64Cmp "i64_cmp" "I64Cmp" 40 RETAG surface 2 Str "(I64, I64) -> Int";
+    U64Cmp "u64_cmp" "U64Cmp" 41 RETAG surface 2 Str "(U64, U64) -> Int";
+    U64Add "u64_add" "U64Add" 42 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Sub "u64_sub" "U64Sub" 43 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Mul "u64_mul" "U64Mul" 44 RAW surface 2 Str "(U64, U64) -> U64";
+    ByteAt "byte_at" "ByteAt" 45 IDX1_RETAG surface 2 Str "(String, Int) -> Int";
+    ByteLen "byte_len" "ByteLen" 46 RETAG surface 1 Str "(String) -> Int";
+    StringOfBytes "string_of_bytes" "StringOfBytes" 47 RAW surface 1 Str "(Array(Int)) -> String";
+    ArrayPop "array_pop" "ArrayPop" 48 RAW surface 1 Str "forall a. (Array(a)) -> Array(a)";
+    I64And "i64_and" "I64And" 49 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Or "i64_or" "I64Or" 50 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Xor "i64_xor" "I64Xor" 51 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Shl "i64_shl" "I64Shl" 52 RAW surface 2 Str "(I64, I64) -> I64";
+    I64Shr "i64_shr" "I64Shr" 53 RAW surface 2 Str "(I64, I64) -> I64";
+    U64And "u64_and" "U64And" 54 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Or "u64_or" "U64Or" 55 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Xor "u64_xor" "U64Xor" 56 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Shl "u64_shl" "U64Shl" 57 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Shr "u64_shr" "U64Shr" 58 RAW surface 2 Str "(U64, U64) -> U64";
+    ArrayNew "array_new" "ArrayNew" 59 IMM0 surface 2 Str "forall a. (Int, a) -> Array(a)";
+    ArrayEmpty "array_empty" "ArrayEmpty" 60 RAW surface 0 Str "forall a. () -> Array(a)";
+    ArrayLen "array_len" "ArrayLen" 61 RETAG surface 1 Str "forall a. (Array(a)) -> Int";
+    ArrayGet "array_get" "ArrayGet" 62 IDX1 surface 2 Str "forall a. (Array(a), Int) -> a";
+    ArraySet "array_set" "ArraySet" 63 IDX1 surface 3 Str "forall a. (Array(a), Int, a) -> Array(a)";
+    ArrayPush "array_push" "ArrayPush" 64 RAW surface 2 Str "forall a. (Array(a), a) -> Array(a)";
+    StringOfArray "string_of_array" "StringOfArray" 65 RAW surface 1 Str "(Array(String)) -> String";
+    BufEmpty "buf_empty" "BufEmpty" 78 RAW surface 0 Str "() -> Buf";
+    BufNew "buf_new" "BufNew" 79 IMM01 surface 2 Str "(Int, Int) -> Buf";
+    BufLen "buf_len" "BufLen" 80 RETAG surface 1 Str "(Buf) -> Int";
+    BufGet "buf_get" "BufGet" 81 IDX1_RETAG surface 2 Str "(Buf, Int) -> Int";
+    BufSet "buf_set" "BufSet" 82 IDX12 surface 3 Str "(Buf, Int, Int) -> Buf";
+    BufPush "buf_push" "BufPush" 83 IDX1 surface 2 Str "(Buf, Int) -> Buf";
+    BufSlice "buf_slice" "BufSlice" 84 IDX12 surface 3 Str "(Buf, Int, Int) -> Buf";
+    BufCat "buf_cat" "BufCat" 85 RAW surface 2 Str "(Buf, Buf) -> Buf";
+    BufEq "buf_eq" "BufEq" 86 RETAG surface 2 Str "(Buf, Buf) -> Bool";
+    BufCmp "buf_cmp" "BufCmp" 87 RETAG surface 2 Str "(Buf, Buf) -> Int";
+    BufHash "buf_hash" "BufHash" 88 RAW surface 1 Str "(Buf) -> String";
+    BufOfString "buf_of_string" "BufOfString" 89 RAW surface 1 Str "(String) -> Buf";
+    StringOfBuf "string_of_buf" "StringOfBuf" 90 RAW surface 1 Str "(Buf) -> String";
+    BufUtf8Valid "buf_utf8_valid" "BufUtf8Valid" 91 RETAG surface 1 Str "(Buf) -> Bool";
+    SortPrim "sort_prim" "SortPrim" 66 RAW;
+    TaqSnoc "taq_snoc" "TaqSnoc" 67 RAW;
+    TaqConcat "taq_concat" "TaqConcat" 68 RAW;
+    TaqUncons "taq_uncons" "TaqUncons" 69 RAW;
+    ]
 }
+
+// Builtins in wire order: index `i` holds the builtin whose [`Builtin::wire`] is
+// `i`. Built from the per-row wire numbers so it cannot drift from them, and the
+// store codec numbers builtins by position in this table (which equals their wire
+// number). The const evaluation panics if the wire numbers are not dense and
+// unique from zero, since a gap or a duplicate leaves some index unfilled: that is
+// the compile-time guard that the append-only wire space stays intact.
+const BUILTINS_BY_WIRE_ARR: [Builtin; Builtin::ALL.len()] = {
+    let mut arr = [Builtin::ALL[0]; Builtin::ALL.len()];
+    let mut i = 0;
+    while i < arr.len() {
+        arr[i] = match Builtin::from_wire(i as u64) {
+            Some(b) => b,
+            None => panic!("builtin wire indices must be dense and unique from zero"),
+        };
+        i += 1;
+    }
+    arr
+};
+
+/// Builtins in wire order, the single source the store and kont codecs number
+/// from. See [`Builtin::wire`].
+pub const BUILTINS_BY_WIRE: &[Builtin] = &BUILTINS_BY_WIRE_ARR;
 
 impl Builtin {
-    pub(crate) const ALL: &'static [Self] = &[
-        Self::Concat,
-        Self::StrLen,
-        Self::StrEq,
-        Self::StrCmp,
-        Self::Substring,
-        Self::CharAt,
-        Self::ShowChar,
-        Self::Blake3,
-        Self::ParseInt,
-        Self::BigLit,
-        Self::ParseFloat,
-        Self::PowFloat,
-        Self::Atan2,
-        Self::Hypot,
-        Self::Fmod,
-        Self::ShowFloatPrec,
-        Self::ProbeEnabled,
-        Self::Getenv,
-        Self::ReadFile,
-        Self::ReadBytesFile,
-        Self::WriteBytesFile,
-        Self::WriteFile,
-        Self::FileExists,
-        Self::AppendFile,
-        Self::RemoveFile,
-        Self::StoreGet,
-        Self::StorePut,
-        Self::StoreHas,
-        Self::Exit,
-        Self::System,
-        Self::Eprint,
-        Self::ArgsCount,
-        Self::Arg,
-        Self::WallNow,
-        Self::MonoNow,
-        Self::ShowInt,
-        Self::ShowI64,
-        Self::ShowU64,
-        Self::ShowBool,
-        Self::ShowFloat,
-        Self::ToI64,
-        Self::ToU64,
-        Self::IntOfI64,
-        Self::IntOfU64,
-        Self::I64Add,
-        Self::I64Sub,
-        Self::I64Mul,
-        Self::I64Div,
-        Self::U64Div,
-        Self::I64Rem,
-        Self::U64Rem,
-        Self::I64Cmp,
-        Self::U64Cmp,
-        Self::U64Add,
-        Self::U64Sub,
-        Self::U64Mul,
-        Self::ByteAt,
-        Self::ByteLen,
-        Self::StringOfBytes,
-        Self::ArrayPop,
-        Self::I64And,
-        Self::I64Or,
-        Self::I64Xor,
-        Self::I64Shl,
-        Self::I64Shr,
-        Self::U64And,
-        Self::U64Or,
-        Self::U64Xor,
-        Self::U64Shl,
-        Self::U64Shr,
-        Self::ArrayNew,
-        Self::ArrayEmpty,
-        Self::ArrayLen,
-        Self::ArrayGet,
-        Self::ArraySet,
-        Self::ArrayPush,
-        Self::StringOfArray,
-        Self::BufEmpty,
-        Self::BufNew,
-        Self::BufLen,
-        Self::BufGet,
-        Self::BufSet,
-        Self::BufPush,
-        Self::BufSlice,
-        Self::BufCat,
-        Self::BufEq,
-        Self::BufCmp,
-        Self::BufHash,
-        Self::BufOfString,
-        Self::StringOfBuf,
-        Self::BufUtf8Valid,
-        Self::SortPrim,
-        Self::TaqSnoc,
-        Self::TaqConcat,
-        Self::TaqUncons,
-    ];
-
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Concat => "concat",
-            Self::StrLen => "str_len",
-            Self::StrEq => "str_eq",
-            Self::StrCmp => "str_cmp",
-            Self::Substring => "substring",
-            Self::CharAt => "char_at",
-            Self::ShowChar => "show_char",
-            Self::Blake3 => "blake3",
-            Self::ParseInt => "parse_int",
-            Self::BigLit => "big_lit",
-            Self::ParseFloat => "parse_float",
-            Self::PowFloat => "pow_float",
-            Self::Atan2 => "atan2",
-            Self::Hypot => "hypot",
-            Self::Fmod => "fmod",
-            Self::ShowFloatPrec => "show_float_prec",
-            Self::ProbeEnabled => "probe_enabled",
-            Self::Getenv => "prim_getenv",
-            Self::ReadFile => "prim_read_file",
-            Self::ReadBytesFile => "prim_read_bytes",
-            Self::WriteBytesFile => "prim_write_bytes",
-            Self::WriteFile => "write_file",
-            Self::FileExists => "prim_file_exists",
-            Self::AppendFile => "append_file",
-            Self::RemoveFile => "remove_file",
-            Self::StoreGet => "prim_store_get",
-            Self::StorePut => "prim_store_put",
-            Self::StoreHas => "prim_store_has",
-            Self::Exit => "exit",
-            Self::System => "system",
-            Self::Eprint => "eprint",
-            Self::ArgsCount => "prim_args_count",
-            Self::Arg => "prim_arg",
-            Self::WallNow => "prim_wall_now",
-            Self::MonoNow => "prim_mono_now",
-            Self::ShowInt => "show_int",
-            Self::ShowI64 => "show_i64",
-            Self::ShowU64 => "show_u64",
-            Self::ShowBool => "show_bool",
-            Self::ShowFloat => "show_float",
-            Self::ToI64 => "to_i64",
-            Self::ToU64 => "to_u64",
-            Self::IntOfI64 => "int_of_i64",
-            Self::IntOfU64 => "int_of_u64",
-            Self::I64Add => "i64_add",
-            Self::I64Sub => "i64_sub",
-            Self::I64Mul => "i64_mul",
-            Self::I64Div => "i64_div",
-            Self::U64Div => "u64_div",
-            Self::I64Rem => "i64_rem",
-            Self::U64Rem => "u64_rem",
-            Self::I64Cmp => "i64_cmp",
-            Self::U64Cmp => "u64_cmp",
-            Self::U64Add => "u64_add",
-            Self::U64Sub => "u64_sub",
-            Self::U64Mul => "u64_mul",
-            Self::ByteAt => "byte_at",
-            Self::ByteLen => "byte_len",
-            Self::StringOfBytes => "string_of_bytes",
-            Self::ArrayPop => "array_pop",
-            Self::I64And => "i64_and",
-            Self::I64Or => "i64_or",
-            Self::I64Xor => "i64_xor",
-            Self::I64Shl => "i64_shl",
-            Self::I64Shr => "i64_shr",
-            Self::U64And => "u64_and",
-            Self::U64Or => "u64_or",
-            Self::U64Xor => "u64_xor",
-            Self::U64Shl => "u64_shl",
-            Self::U64Shr => "u64_shr",
-            Self::ArrayNew => "array_new",
-            Self::ArrayEmpty => "array_empty",
-            Self::ArrayLen => "array_len",
-            Self::ArrayGet => "array_get",
-            Self::ArraySet => "array_set",
-            Self::ArrayPush => "array_push",
-            Self::StringOfArray => "string_of_array",
-            Self::BufEmpty => "buf_empty",
-            Self::BufNew => "buf_new",
-            Self::BufLen => "buf_len",
-            Self::BufGet => "buf_get",
-            Self::BufSet => "buf_set",
-            Self::BufPush => "buf_push",
-            Self::BufSlice => "buf_slice",
-            Self::BufCat => "buf_cat",
-            Self::BufEq => "buf_eq",
-            Self::BufCmp => "buf_cmp",
-            Self::BufHash => "buf_hash",
-            Self::BufOfString => "buf_of_string",
-            Self::StringOfBuf => "string_of_buf",
-            Self::BufUtf8Valid => "buf_utf8_valid",
-            Self::SortPrim => "sort_prim",
-            Self::TaqSnoc => "taq_snoc",
-            Self::TaqConcat => "taq_concat",
-            Self::TaqUncons => "taq_uncons",
-        }
-    }
-
     /// Runtime C symbol. `concat` maps to `prism_str_concat`; the rest are
     /// `prism_<name>`.
     #[must_use]
@@ -547,281 +485,7 @@ impl Builtin {
     pub fn from_name(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|b| b.name() == s)
     }
-
-    /// Per-argument calling convention for the `prism_*` runtime call this
-    /// builtin lowers to, read by codegen at `Comp::StrBuiltin`. `imm_args` are
-    /// pointer-tagged immediates (int/bool) untagged before the call,
-    /// `float_args` are boxed doubles unboxed before the call; every other
-    /// argument passes raw (string cell, boxed 64-bit cell, or tagged Int word).
-    /// `imm_res` is true when the result is a bare integer to retag.
-    ///
-    /// The match is exhaustive with no wildcard, so a new `Builtin` variant
-    /// cannot ship without declaring its convention here: the compiler rejects
-    /// the omission rather than letting a typo silently desync codegen untagging
-    /// from the C runtime (the footgun the old string-keyed table carried).
-    #[must_use]
-    pub const fn abi(self) -> (&'static [usize], &'static [usize], bool) {
-        match self {
-            // Bare-integer result to retag (predicates, lengths, exit codes).
-            Self::StrLen
-            | Self::StrEq
-            | Self::StrCmp
-            | Self::ProbeEnabled
-            | Self::ArgsCount
-            | Self::WallNow
-            | Self::MonoNow
-            | Self::I64Cmp
-            | Self::U64Cmp
-            | Self::FileExists
-            | Self::StoreHas
-            | Self::System
-            | Self::ArrayLen
-            | Self::ByteLen
-            | Self::BufLen
-            | Self::BufEq
-            | Self::BufCmp
-            | Self::BufUtf8Valid => (&[], &[], true),
-            // Index arg raw; bare-integer (char/byte) result to retag.
-            Self::CharAt | Self::ByteAt | Self::BufGet => (&[1], &[], true),
-            // Index arg raw; element/array result (cell or polymorphic) passes through.
-            Self::ArrayGet | Self::ArraySet | Self::BufPush => (&[1], &[], false),
-            // Single immediate arg (bool/char/index/exit/capacity); raw result.
-            Self::ShowBool | Self::ShowChar | Self::Arg | Self::Exit | Self::ArrayNew => {
-                (&[0], &[], false)
-            }
-            // Two immediate args (length and init byte); cell result.
-            Self::BufNew => (&[0, 1], &[], false),
-            Self::ShowFloat => (&[], &[0], false),
-            Self::ShowFloatPrec => (&[1], &[0], false),
-            Self::PowFloat | Self::Atan2 | Self::Hypot | Self::Fmod => (&[], &[0, 1], false),
-            // Two immediate index/length args; cell result (a fresh string or buffer).
-            Self::Substring | Self::BufSet | Self::BufSlice => (&[1, 2], &[], false),
-            // Default: every argument passes raw and the result is a cell or an
-            // already-tagged word. String ops, fixed-width arithmetic on boxed
-            // 64-bit cells, and the elaborator-only ops all sit here.
-            Self::Concat
-            | Self::Blake3
-            | Self::ParseInt
-            | Self::BigLit
-            | Self::ParseFloat
-            | Self::Getenv
-            | Self::ReadFile
-            | Self::WriteFile
-            | Self::AppendFile
-            | Self::RemoveFile
-            | Self::StoreGet
-            | Self::StorePut
-            | Self::Eprint
-            | Self::ShowInt
-            | Self::ShowI64
-            | Self::ShowU64
-            | Self::ToI64
-            | Self::ToU64
-            | Self::IntOfI64
-            | Self::IntOfU64
-            | Self::I64Add
-            | Self::I64Sub
-            | Self::I64Mul
-            | Self::I64Div
-            | Self::U64Div
-            | Self::I64Rem
-            | Self::U64Rem
-            | Self::U64Add
-            | Self::U64Sub
-            | Self::U64Mul
-            | Self::StringOfBytes
-            | Self::ArrayPop
-            | Self::I64And
-            | Self::I64Or
-            | Self::I64Xor
-            | Self::I64Shl
-            | Self::I64Shr
-            | Self::U64And
-            | Self::U64Or
-            | Self::U64Xor
-            | Self::U64Shl
-            | Self::U64Shr
-            | Self::ArrayEmpty
-            | Self::ArrayPush
-            | Self::StringOfArray
-            | Self::BufEmpty
-            | Self::BufCat
-            | Self::BufHash
-            | Self::BufOfString
-            | Self::StringOfBuf
-            | Self::ReadBytesFile
-            | Self::WriteBytesFile
-            | Self::SortPrim
-            // Queue ops: arguments (queue cells, the Unit-typed empty, arrow
-            // thunks) pass raw, result is a cell.
-            | Self::TaqSnoc
-            | Self::TaqConcat
-            | Self::TaqUncons => (&[], &[], false),
-        }
-    }
-
-    // Touches the host OS (file IO, env, process, args), so it has no
-    // implementation in a browser build. Used to reject a snippet up front. The
-    // input prims (read_file, file_exists, getenv, args_count, arg) are reached
-    // only through the always-installed world handler, so their off-platform use
-    // is detected from the surface wrappers instead (see `off_platform_builtins`).
-    #[must_use]
-    pub const fn off_platform(self) -> bool {
-        matches!(
-            self,
-            Self::WriteFile
-                | Self::WriteBytesFile
-                | Self::AppendFile
-                | Self::RemoveFile
-                | Self::StorePut
-                | Self::Exit
-                | Self::System
-                | Self::Eprint
-        )
-    }
-
-    // The store-bridge prims have a full interpreter implementation but no C
-    // runtime symbol yet, so native codegen refuses to lower them rather than
-    // emitting a call to an undefined `prism_*` symbol that would only surface as
-    // a link failure. Flip these off here once the C runtime grows the three
-    // `prism_prim_store_*` functions (see the store bridge notes).
-    #[must_use]
-    pub const fn native_deferred(self) -> bool {
-        matches!(self, Self::StoreGet | Self::StorePut | Self::StoreHas)
-    }
 }
-
-pub const BUILTINS: &[(&str, usize, BuiltinKind)] = &[
-    ("print", 1, BuiltinKind::Print),
-    ("println", 1, BuiltinKind::Println),
-    ("prim_print", 1, BuiltinKind::Print),
-    ("prim_println", 1, BuiltinKind::Println),
-    ("prim_read_int", 0, BuiltinKind::ReadInt),
-    ("prim_read_line", 0, BuiltinKind::ReadLine),
-    ("error", 1, BuiltinKind::Error),
-    ("fatal", 1, BuiltinKind::Error),
-    ("prim_rand", 0, BuiltinKind::Rand),
-    ("srand", 1, BuiltinKind::Srand),
-    ("to_float", 1, BuiltinKind::Float),
-    ("truncate", 1, BuiltinKind::Float),
-    ("floor_to_int", 1, BuiltinKind::Float),
-    ("ceil_to_int", 1, BuiltinKind::Float),
-    ("abs_float", 1, BuiltinKind::Float),
-    ("sqrt", 1, BuiltinKind::Float),
-    ("floor", 1, BuiltinKind::Float),
-    ("ceil", 1, BuiltinKind::Float),
-    ("round", 1, BuiltinKind::Float),
-    ("trunc", 1, BuiltinKind::Float),
-    ("sin", 1, BuiltinKind::Float),
-    ("cos", 1, BuiltinKind::Float),
-    ("tan", 1, BuiltinKind::Float),
-    ("asin", 1, BuiltinKind::Float),
-    ("acos", 1, BuiltinKind::Float),
-    ("atan", 1, BuiltinKind::Float),
-    ("sinh", 1, BuiltinKind::Float),
-    ("cosh", 1, BuiltinKind::Float),
-    ("tanh", 1, BuiltinKind::Float),
-    ("exp", 1, BuiltinKind::Float),
-    ("exp2", 1, BuiltinKind::Float),
-    ("expm1", 1, BuiltinKind::Float),
-    ("ln", 1, BuiltinKind::Float),
-    ("log2", 1, BuiltinKind::Float),
-    ("log10", 1, BuiltinKind::Float),
-    ("log1p", 1, BuiltinKind::Float),
-    ("cbrt", 1, BuiltinKind::Float),
-    ("concat", 2, BuiltinKind::Str),
-    ("str_len", 1, BuiltinKind::Str),
-    ("str_eq", 2, BuiltinKind::Str),
-    ("str_cmp", 2, BuiltinKind::Str),
-    ("show_int", 1, BuiltinKind::Str),
-    ("show_i64", 1, BuiltinKind::Str),
-    ("show_u64", 1, BuiltinKind::Str),
-    ("show_bool", 1, BuiltinKind::Str),
-    ("show_float", 1, BuiltinKind::Str),
-    ("show_float_prec", 2, BuiltinKind::Str),
-    ("pow_float", 2, BuiltinKind::Str),
-    ("atan2", 2, BuiltinKind::Str),
-    ("hypot", 2, BuiltinKind::Str),
-    ("fmod", 2, BuiltinKind::Str),
-    ("parse_float", 1, BuiltinKind::Str),
-    ("probe_enabled", 1, BuiltinKind::Str),
-    ("substring", 3, BuiltinKind::Str),
-    ("char_at", 2, BuiltinKind::Str),
-    ("show_char", 1, BuiltinKind::Str),
-    ("blake3", 1, BuiltinKind::Str),
-    ("ord", 1, BuiltinKind::Coerce),
-    ("chr", 1, BuiltinKind::Coerce),
-    ("parse_int", 1, BuiltinKind::Str),
-    ("prim_getenv", 1, BuiltinKind::Str),
-    ("prim_read_file", 1, BuiltinKind::Str),
-    ("prim_read_bytes", 1, BuiltinKind::Str),
-    ("prim_write_bytes", 2, BuiltinKind::Str),
-    ("write_file", 2, BuiltinKind::Str),
-    ("prim_file_exists", 1, BuiltinKind::Str),
-    ("append_file", 2, BuiltinKind::Str),
-    ("remove_file", 1, BuiltinKind::Str),
-    ("prim_store_get", 2, BuiltinKind::Str),
-    ("prim_store_put", 3, BuiltinKind::Str),
-    ("prim_store_has", 2, BuiltinKind::Str),
-    ("exit", 1, BuiltinKind::Str),
-    ("system", 1, BuiltinKind::Str),
-    ("eprint", 1, BuiltinKind::Str),
-    ("prim_args_count", 0, BuiltinKind::Str),
-    ("prim_wall_now", 0, BuiltinKind::Str),
-    ("prim_mono_now", 0, BuiltinKind::Str),
-    ("prim_arg", 1, BuiltinKind::Str),
-    ("to_i64", 1, BuiltinKind::Int),
-    ("to_u64", 1, BuiltinKind::Int),
-    ("int_of_i64", 1, BuiltinKind::Int),
-    ("int_of_u64", 1, BuiltinKind::Int),
-    ("array_new", 2, BuiltinKind::Str),
-    ("array_empty", 0, BuiltinKind::Str),
-    ("array_len", 1, BuiltinKind::Str),
-    ("array_get", 2, BuiltinKind::Str),
-    ("array_set", 3, BuiltinKind::Str),
-    ("array_push", 2, BuiltinKind::Str),
-    ("array_pop", 1, BuiltinKind::Str),
-    ("string_of_array", 1, BuiltinKind::Str),
-    ("buf_empty", 0, BuiltinKind::Str),
-    ("buf_new", 2, BuiltinKind::Str),
-    ("buf_len", 1, BuiltinKind::Str),
-    ("buf_get", 2, BuiltinKind::Str),
-    ("buf_set", 3, BuiltinKind::Str),
-    ("buf_push", 2, BuiltinKind::Str),
-    ("buf_slice", 3, BuiltinKind::Str),
-    ("buf_cat", 2, BuiltinKind::Str),
-    ("buf_eq", 2, BuiltinKind::Str),
-    ("buf_cmp", 2, BuiltinKind::Str),
-    ("buf_hash", 1, BuiltinKind::Str),
-    ("buf_of_string", 1, BuiltinKind::Str),
-    ("string_of_buf", 1, BuiltinKind::Str),
-    ("buf_utf8_valid", 1, BuiltinKind::Str),
-    ("string_of_bytes", 1, BuiltinKind::Str),
-    ("byte_at", 2, BuiltinKind::Str),
-    ("byte_len", 1, BuiltinKind::Str),
-    ("i64_add", 2, BuiltinKind::Str),
-    ("i64_sub", 2, BuiltinKind::Str),
-    ("i64_mul", 2, BuiltinKind::Str),
-    ("u64_add", 2, BuiltinKind::Str),
-    ("u64_sub", 2, BuiltinKind::Str),
-    ("u64_mul", 2, BuiltinKind::Str),
-    ("i64_div", 2, BuiltinKind::Str),
-    ("i64_rem", 2, BuiltinKind::Str),
-    ("i64_cmp", 2, BuiltinKind::Str),
-    ("u64_div", 2, BuiltinKind::Str),
-    ("u64_rem", 2, BuiltinKind::Str),
-    ("u64_cmp", 2, BuiltinKind::Str),
-    ("i64_and", 2, BuiltinKind::Str),
-    ("i64_or", 2, BuiltinKind::Str),
-    ("i64_xor", 2, BuiltinKind::Str),
-    ("i64_shl", 2, BuiltinKind::Str),
-    ("i64_shr", 2, BuiltinKind::Str),
-    ("u64_and", 2, BuiltinKind::Str),
-    ("u64_or", 2, BuiltinKind::Str),
-    ("u64_xor", 2, BuiltinKind::Str),
-    ("u64_shl", 2, BuiltinKind::Str),
-    ("u64_shr", 2, BuiltinKind::Str),
-];
 
 #[must_use]
 pub fn builtin(name: &str) -> Option<(usize, BuiltinKind)> {
@@ -829,6 +493,7 @@ pub fn builtin(name: &str) -> Option<(usize, BuiltinKind)> {
         .iter()
         .find(|(n, ..)| *n == name)
         .map(|&(_, arity, kind)| (arity, kind))
+        .or_else(|| float_surface(name))
 }
 
 /// The surface output builtins (`print`/`println`).
@@ -837,3 +502,207 @@ pub fn builtin(name: &str) -> Option<(usize, BuiltinKind)> {
 /// `Replay` machinery is in scope. Lives here, with the rest of the builtin name
 /// knowledge, so the desugarer's world-handler decision does not re-spell them.
 pub const OUTPUT_BUILTINS: &[&str] = &["print", "println"];
+
+#[cfg(test)]
+mod tag_tests {
+    use super::{Builtin, FloatOp};
+    use std::collections::BTreeSet;
+
+    // Assert a frozen `variant -> tag` table: every entry's `hash_tag` reproduces
+    // its frozen spelling, no two variants share one, and the table covers every
+    // variant (its length equals `ALL`). The content hash commits to these
+    // strings, so freezing them turns a rename that also touched the tag method
+    // (which would silently move affected definition hashes) into a test failure.
+    fn frozen_all<T: Copy>(all_len: usize, table: &[(T, &str)], tag: impl Fn(T) -> &'static str) {
+        assert_eq!(
+            table.len(),
+            all_len,
+            "frozen tag table is missing a variant present in ALL",
+        );
+        let mut seen = BTreeSet::new();
+        for &(variant, spelling) in table {
+            assert_eq!(
+                tag(variant),
+                spelling,
+                "hash tag drifted from frozen spelling"
+            );
+            assert!(
+                seen.insert(spelling),
+                "two variants share the hash tag {spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn float_op_hash_tags_are_frozen() {
+        frozen_all(
+            FloatOp::ALL.len(),
+            &[
+                (FloatOp::ToFloat, "ToFloat"),
+                (FloatOp::Truncate, "Truncate"),
+                (FloatOp::FloorToInt, "FloorToInt"),
+                (FloatOp::CeilToInt, "CeilToInt"),
+                (FloatOp::AbsFloat, "AbsFloat"),
+                (FloatOp::Sqrt, "Sqrt"),
+                (FloatOp::Floor, "Floor"),
+                (FloatOp::Ceil, "Ceil"),
+                (FloatOp::Round, "Round"),
+                (FloatOp::Trunc, "Trunc"),
+                (FloatOp::Sin, "Sin"),
+                (FloatOp::Cos, "Cos"),
+                (FloatOp::Tan, "Tan"),
+                (FloatOp::Asin, "Asin"),
+                (FloatOp::Acos, "Acos"),
+                (FloatOp::Atan, "Atan"),
+                (FloatOp::Sinh, "Sinh"),
+                (FloatOp::Cosh, "Cosh"),
+                (FloatOp::Tanh, "Tanh"),
+                (FloatOp::Exp, "Exp"),
+                (FloatOp::Exp2, "Exp2"),
+                (FloatOp::Expm1, "Expm1"),
+                (FloatOp::Ln, "Ln"),
+                (FloatOp::Log2, "Log2"),
+                (FloatOp::Log10, "Log10"),
+                (FloatOp::Log1p, "Log1p"),
+                (FloatOp::Cbrt, "Cbrt"),
+            ],
+            FloatOp::hash_tag,
+        );
+    }
+
+    #[test]
+    fn builtin_hash_tags_are_frozen() {
+        frozen_all(
+            Builtin::ALL.len(),
+            &[
+                (Builtin::Concat, "Concat"),
+                (Builtin::StrLen, "StrLen"),
+                (Builtin::StrEq, "StrEq"),
+                (Builtin::StrCmp, "StrCmp"),
+                (Builtin::Substring, "Substring"),
+                (Builtin::CharAt, "CharAt"),
+                (Builtin::ShowChar, "ShowChar"),
+                (Builtin::Blake3, "Blake3"),
+                (Builtin::ParseInt, "ParseInt"),
+                (Builtin::BigLit, "BigLit"),
+                (Builtin::ParseFloat, "ParseFloat"),
+                (Builtin::PowFloat, "PowFloat"),
+                (Builtin::Atan2, "Atan2"),
+                (Builtin::Hypot, "Hypot"),
+                (Builtin::Fmod, "Fmod"),
+                (Builtin::ShowFloatPrec, "ShowFloatPrec"),
+                (Builtin::ProbeEnabled, "ProbeEnabled"),
+                (Builtin::Getenv, "Getenv"),
+                (Builtin::ReadFile, "ReadFile"),
+                (Builtin::ReadBytesFile, "ReadBytesFile"),
+                (Builtin::WriteBytesFile, "WriteBytesFile"),
+                (Builtin::WriteFile, "WriteFile"),
+                (Builtin::FileExists, "FileExists"),
+                (Builtin::AppendFile, "AppendFile"),
+                (Builtin::RemoveFile, "RemoveFile"),
+                (Builtin::StoreGet, "StoreGet"),
+                (Builtin::StorePut, "StorePut"),
+                (Builtin::StoreHas, "StoreHas"),
+                (Builtin::Exit, "Exit"),
+                (Builtin::System, "System"),
+                (Builtin::Eprint, "Eprint"),
+                (Builtin::ArgsCount, "ArgsCount"),
+                (Builtin::Arg, "Arg"),
+                (Builtin::WallNow, "WallNow"),
+                (Builtin::MonoNow, "MonoNow"),
+                (Builtin::ShowInt, "ShowInt"),
+                (Builtin::ShowI64, "ShowI64"),
+                (Builtin::ShowU64, "ShowU64"),
+                (Builtin::ShowBool, "ShowBool"),
+                (Builtin::ShowFloat, "ShowFloat"),
+                (Builtin::ToI64, "ToI64"),
+                (Builtin::ToU64, "ToU64"),
+                (Builtin::IntOfI64, "IntOfI64"),
+                (Builtin::IntOfU64, "IntOfU64"),
+                (Builtin::I64Add, "I64Add"),
+                (Builtin::I64Sub, "I64Sub"),
+                (Builtin::I64Mul, "I64Mul"),
+                (Builtin::I64Div, "I64Div"),
+                (Builtin::U64Div, "U64Div"),
+                (Builtin::I64Rem, "I64Rem"),
+                (Builtin::U64Rem, "U64Rem"),
+                (Builtin::I64Cmp, "I64Cmp"),
+                (Builtin::U64Cmp, "U64Cmp"),
+                (Builtin::U64Add, "U64Add"),
+                (Builtin::U64Sub, "U64Sub"),
+                (Builtin::U64Mul, "U64Mul"),
+                (Builtin::ByteAt, "ByteAt"),
+                (Builtin::ByteLen, "ByteLen"),
+                (Builtin::StringOfBytes, "StringOfBytes"),
+                (Builtin::ArrayPop, "ArrayPop"),
+                (Builtin::I64And, "I64And"),
+                (Builtin::I64Or, "I64Or"),
+                (Builtin::I64Xor, "I64Xor"),
+                (Builtin::I64Shl, "I64Shl"),
+                (Builtin::I64Shr, "I64Shr"),
+                (Builtin::U64And, "U64And"),
+                (Builtin::U64Or, "U64Or"),
+                (Builtin::U64Xor, "U64Xor"),
+                (Builtin::U64Shl, "U64Shl"),
+                (Builtin::U64Shr, "U64Shr"),
+                (Builtin::ArrayNew, "ArrayNew"),
+                (Builtin::ArrayEmpty, "ArrayEmpty"),
+                (Builtin::ArrayLen, "ArrayLen"),
+                (Builtin::ArrayGet, "ArrayGet"),
+                (Builtin::ArraySet, "ArraySet"),
+                (Builtin::ArrayPush, "ArrayPush"),
+                (Builtin::StringOfArray, "StringOfArray"),
+                (Builtin::BufEmpty, "BufEmpty"),
+                (Builtin::BufNew, "BufNew"),
+                (Builtin::BufLen, "BufLen"),
+                (Builtin::BufGet, "BufGet"),
+                (Builtin::BufSet, "BufSet"),
+                (Builtin::BufPush, "BufPush"),
+                (Builtin::BufSlice, "BufSlice"),
+                (Builtin::BufCat, "BufCat"),
+                (Builtin::BufEq, "BufEq"),
+                (Builtin::BufCmp, "BufCmp"),
+                (Builtin::BufHash, "BufHash"),
+                (Builtin::BufOfString, "BufOfString"),
+                (Builtin::StringOfBuf, "StringOfBuf"),
+                (Builtin::BufUtf8Valid, "BufUtf8Valid"),
+                (Builtin::SortPrim, "SortPrim"),
+                (Builtin::TaqSnoc, "TaqSnoc"),
+                (Builtin::TaqConcat, "TaqConcat"),
+                (Builtin::TaqUncons, "TaqUncons"),
+            ],
+            Builtin::hash_tag,
+        );
+    }
+
+    // Wire indices are dense and unique from zero (also enforced at compile time by
+    // the `BUILTINS_BY_WIRE` const), and `wire`/`from_wire` round-trip. The wire
+    // space is the store's append-only content format, so a gap, a duplicate, or a
+    // broken inverse is corruption.
+    #[test]
+    fn wire_indices_are_dense_and_unique() {
+        let mut seen = BTreeSet::new();
+        for b in Builtin::ALL {
+            assert!(seen.insert(b.wire()), "two builtins share a wire index");
+            assert_eq!(Builtin::from_wire(b.wire()), Some(*b), "wire round-trip");
+        }
+        assert_eq!(seen, (0..Builtin::ALL.len() as u64).collect());
+        assert_eq!(super::BUILTINS_BY_WIRE.len(), Builtin::ALL.len());
+    }
+
+    // A builtin is surface-callable exactly when it carries an arity/kind and a
+    // signature: both projections must agree, so a new surface builtin cannot land
+    // with a signature but no dispatch entry (or the reverse). The five internal
+    // ops carry neither.
+    #[test]
+    fn surface_and_signature_agree() {
+        for b in Builtin::ALL {
+            assert_eq!(
+                b.surface().is_some(),
+                b.signature().is_some(),
+                "surface/signature presence disagree for {}",
+                b.name()
+            );
+        }
+    }
+}

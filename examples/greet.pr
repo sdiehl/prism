@@ -1,0 +1,10 @@
+-- Greet whoever name.txt names. The fallback keeps the program runnable
+-- before the input file exists, so the same source serves both runs of the
+-- change-one-input lineage workflow.
+fn main() =
+  let name =
+    if file_exists("name.txt") then
+      read_file("name.txt")
+    else
+      "ada"
+  println("hello {name}")

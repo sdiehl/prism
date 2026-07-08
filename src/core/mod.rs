@@ -1,4 +1,5 @@
 pub mod builtins;
+pub mod captures;
 mod cbpv;
 pub mod effect_lower;
 mod elaborate;
@@ -14,7 +15,8 @@ pub mod tailrec;
 pub mod traverse;
 
 pub use cbpv::{
-    reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value,
+    reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, ElaboratedCore, HandleOp, IoOp,
+    LoweredCore, NegLane, Value,
 };
 pub use effect_lower::lower as lower_effects;
 pub use effect_lower::strategy as effect_strategy;
@@ -31,7 +33,7 @@ pub use hash::{
 pub use json::core_to_json;
 pub use opt::{
     erase_newtypes, lint as lint_core, newtype_ctors, run as run_opt,
-    run_spec_stage as run_opt_spec, specialize, CorePass, OptLevel, PassSpec, PassStats,
+    run_spec_stage as run_opt_spec, specialize, CorePass, OptLevel, PassSpec, PassStage, PassStats,
 };
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};
-pub use shape::{class_digests, instance_digest, shape_digests};
+pub use shape::{class_digests, contract_digest, instance_digest, shape_digests};

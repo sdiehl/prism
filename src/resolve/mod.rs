@@ -26,8 +26,8 @@ mod lints;
 mod load;
 pub use lints::lint_bindings;
 pub use load::{
-    load, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity, SourceBundleKind,
-    SourceBundleOrigin,
+    load, serving_root, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity,
+    SourceBundleKind, SourceBundleOrigin,
 };
 
 /// The search path for a single-file or test program: the given source root,
@@ -875,7 +875,7 @@ impl<'a> Rw<'a> {
                 self.expr(body);
             }
             Sugar::Break | Sugar::Continue => {}
-            Sugar::Return(e) | Sugar::WithoutAlloc(e) | Sugar::Probe(_, e) => self.expr(e),
+            Sugar::Return(e) | Sugar::Probe(_, e) => self.expr(e),
         }
     }
 

@@ -504,7 +504,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 let obj = self.alloc_obj(idx64(*tag), &fvs);
                 // Count the EOp cell each `do op` builds (stderr-only under
                 // PRISM_EFFOP_STATS, so stdout is untouched).
-                if *name == EOP {
+                if name.as_str() == EOP {
                     self.isa.call_void(&mut self.b, rt::EFFOP_ALLOC, &[]);
                 }
                 Ok(obj)
@@ -1316,7 +1316,7 @@ impl<'a, I: Isa> Cg<'a, I> {
             all_params.push(r);
         }
         for (i, p) in params.iter().enumerate() {
-            let r = format!("%_p{i}");
+            let r = format!("%{}", crate::names::generated_param(i));
             regs.insert(*p, r.clone());
             all_params.push(r);
         }
