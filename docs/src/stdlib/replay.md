@@ -10,7 +10,7 @@ Record/replay handlers for the capability effects.
 
 ### `record`
 
-```prism,sig,h-ef77246a2c8446204560c7e2de3f26822c611fd545d937827c057fb5a990d6eb
+```prism,sig,h-cef8c2f564dec484360261a7a53a32884fec2f2b106ef35a21ac1569793432e0
 record : forall e0 a. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
 ```
 
@@ -18,7 +18,7 @@ Run `action` against the real world, logging every capability observation (conso
 
 ### `replay`
 
-```prism,sig,h-96a568061a1a455b10cba5e926587dc57875176009e9aaeb65d65ffe82196f26
+```prism,sig,h-57bce7a2d56cafc58de03cc5614762039486d5d7272f06a64ecaa0a0fadccde1
 replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -26,7 +26,7 @@ Re-run `action` against a recorded `trace`, performing no real IO: each capabili
 
 ### `serialize`
 
-```prism,sig,h-f7651c100e960da3ab40f28b9c79d356bc44eb15fe376ea763f6143291ec26ee
+```prism,sig,h-bb78c5a9078b7621f3da82412ce1d0b6bb2ed98ebd63c9c0464e83cd36d22ac0
 serialize : (List(Replay@TraceEntry)) -> String
 ```
 
@@ -34,7 +34,7 @@ Encode a trace to a self-delimiting string for durable storage, read back with `
 
 ### `deserialize`
 
-```prism,sig,h-31a37088ef7717165c7ce9b9dab39b03f94e576466569bcd95f16b1a98f6798e
+```prism,sig,h-d65506ba0c83ad17894a90cb9cff4d39a894cdf3aba717b340739b00a0dc01f1
 deserialize : (String) -> List(Replay@TraceEntry)
 ```
 
@@ -42,7 +42,7 @@ Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 
 ### `durable`
 
-```prism,sig,h-235b2ef96238f9bf43bcfcc7129ca033f4c3a9e9a002b1084731deed5c6dbb75
+```prism,sig,h-b59570cac0a93480bb6e50ff3651d3344a21152412100058705a5d98d49f174f
 durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
 ```
 

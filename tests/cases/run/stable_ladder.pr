@@ -20,6 +20,13 @@ stable Order {
   V2 = { ..V1, tif: Int = 0 }
 }
 
+-- A single-rung type with no fields: its body encodes to zero bytes, so the
+-- ladder must open the empty body rather than reading emptiness as a bodyless
+-- reference frame.
+stable Empty {
+  V1 = {  }
+}
+
 -- Discharge Fail to an explicit default so a fallible reader is a pure property.
 fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
   handle action() with
@@ -44,11 +51,60 @@ fn ladder_adjacent(o : Order) : Bool =
       else
         true
 
+-- The generated current-rung frame helpers carry the compiler-known digest, so a
+-- value round-trips through `wire_encode_Order`/`wire_decode_Order` with no
+-- hand-threaded magic string.
+fn rt_frame_go(o : Order) : Bool = wire_decode_Order(wire_encode_Order(o)) == o
+
+fn rt_frame(o : Order) : Bool = caught(false, \() -> rt_frame_go(o))
+
+-- The committed V1 golden is the digest a V1 frame carries; the generated
+-- `decode_ladder_Order` matches it against the same compiler-computed digest.
+let v1_digest : String = "377ee9c637d0924c"
+
+-- A digest matching no rung, to check that an unknown frame is rejected.
+let bogus_digest : String = "deadbeefdeadbeef"
+
+-- Frame a current value as its older V1 predecessor: downgrade drops `tif`, then
+-- encode the V1 value under the V1 digest. Naming the older frame this way avoids
+-- referring to the dotted `Order.V1` constructor in surface syntax.
+fn v1_frame(o : Order) : Bytes =
+  match downgrade_Order_V2_V1(o) of
+    (lo, _l) => wire_encode_value_with_digest(v1_digest, lo)
+
+-- The required case: an old V1 frame decodes through the ladder up to the current
+-- type, and the field V2 added (`tif`) shows up defaulted to 0, even though the
+-- value that was framed had it dropped.
+fn old_frame_defaults() : Bool =
+  let o = Order { id = 7, qty = 3, sym = "ABC", tif = 9 }
+  caught(false) fn
+    match decode_ladder_Order(v1_frame(o)) of
+      r => r.tif == 0 && r == Order { id = 7, qty = 3, sym = "ABC", tif = 0 }
+
+-- A frame whose digest matches no known rung is rejected through Fail; `caught`
+-- returns its true default, so a true result means the frame was refused.
+fn unknown_digest(o : Order) : Bool =
+  caught(true) fn
+    match (decode_ladder_Order(wire_encode_value_with_digest(bogus_digest, o))) of
+      _r => false
+
 fn report(name : String, o : Outcome(a)) =
   println(concat(name, if passed(o) then ": OK" else ": FAILED"))
+
+fn check(name : String, ok : Bool) =
+  println(concat(name, if ok then ": OK" else ": FAILED"))
+
+fn empty_body_ladder() : Bool =
+  caught(false) fn
+    match decode_ladder_Empty(wire_encode_Empty(Empty)) of
+      _r => true
 
 fn body() =
   report("stable roundtrip", quickcheck(arb_gen(), rt))
   report("stable ladder adjacent", quickcheck(arb_gen(), ladder_adjacent))
+  report("stable frame roundtrip", quickcheck(arb_gen(), rt_frame))
+  report("stable ladder unknown digest", quickcheck(arb_gen(), unknown_digest))
+  check("stable ladder old frame defaults", old_frame_defaults())
+  check("stable ladder empty body", empty_body_ladder())
 
 fn main() = default(body, ())

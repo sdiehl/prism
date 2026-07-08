@@ -97,13 +97,22 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
             }
             // Equal precedence, left-associative: `parent(a, child(b, c))` reprints as
             // `a P b C c` and reparses as `child(parent(a, b), c)`. That regrouping is
-            // meaning-preserving only when the ops reassociate. Additive parents always
-            // do (`a + (b - c) == (a + b) - c`); a multiplicative parent only does over
-            // a pure `*` child, since `a * (b / c) != (a * b) / c` under integer division
-            // (likewise `%`).
+            // meaning-preserving only when the ops reassociate. Integer additive parents
+            // do (`a + (b - c) == (a + b) - c`); float additive parents do not, because
+            // rounding makes reassociation observable. A multiplicative parent only does
+            // over a pure `*` child, and never for floats.
             match parent_op {
-                BinOp::Sub | BinOp::Div | BinOp::Rem | BinOp::Subf | BinOp::Divf => true,
-                BinOp::Mul | BinOp::Mulf => matches!(*op, BinOp::Div | BinOp::Divf | BinOp::Rem),
+                // Int subtractive/multiplicative parents keep parens because the
+                // regrouping changes meaning; float additive/multiplicative parents
+                // keep them because rounding makes reassociation observable.
+                BinOp::Sub
+                | BinOp::Div
+                | BinOp::Rem
+                | BinOp::Subf
+                | BinOp::Divf
+                | BinOp::Addf
+                | BinOp::Mulf => true,
+                BinOp::Mul => matches!(*op, BinOp::Div | BinOp::Rem),
                 _ => false,
             }
         }

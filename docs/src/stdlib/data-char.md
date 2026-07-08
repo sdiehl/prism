@@ -10,7 +10,7 @@ Operates on the byte/codepoint returned by `byte_at`/`char_at`. The prelude open
 
 ### `is_digit`
 
-```prism,sig,h-4459a97047fb4a96ae1bbe5d12036e3fa586b3acbc3821644bd79c36b15904ea
+```prism,sig,h-499ac215cd52d3268eff12f0f6abf139e1c9164994ba50515b0ec4bd9bdfd9bd
 is_digit : (Int) -> Bool
 ```
 
@@ -18,7 +18,7 @@ True for an ASCII decimal digit (`0`-`9`).
 
 ### `is_upper`
 
-```prism,sig,h-15945dd9e707a7b46e4e333251d48da1ac1ec30564bc00f8989007ba75c9fbdd
+```prism,sig,h-22a64a1fa706766c6162c4ed890f841fd6fdd429c488627d33d640fcc02cd94f
 is_upper : (Int) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True for an ASCII upper-case letter (`A`-`Z`).
 
 ### `is_lower`
 
-```prism,sig,h-02fb6afae2da45914455abe7cd0f0479fa4d136e5a4aa58977af0ac135841a9b
+```prism,sig,h-504a097d77402e701ed51889b8d2927db788ade6a579557a22aae593e334e224
 is_lower : (Int) -> Bool
 ```
 
@@ -34,7 +34,7 @@ True for an ASCII lower-case letter (`a`-`z`).
 
 ### `is_alpha`
 
-```prism,sig,h-f2fc097a4a532245656dd46c06203498d2351f3196abfc859ad948b7ab126a80
+```prism,sig,h-b51f9f41f0bf153c8bed7dcb8bae44834d9cf5d894bae558f06161d54fdc243b
 is_alpha : (Int) -> Bool
 ```
 
@@ -42,7 +42,7 @@ True for an ASCII letter.
 
 ### `is_alnum`
 
-```prism,sig,h-7f6772b4b549d2a70719151b588679eb48c22b8b36c6100e097767d8ca67e452
+```prism,sig,h-59c21a0e7e1a538c4380af20b86bf85d7d500aa8a135b378cc637fe0fbdbdf41
 is_alnum : (Int) -> Bool
 ```
 
@@ -50,7 +50,7 @@ True for an ASCII letter or digit.
 
 ### `is_space`
 
-```prism,sig,h-21ff46231fdda8120121d7930a2cb3eb50a0cf4fbe716e2d7354ec29c7504dba
+```prism,sig,h-2fd5ed9d4b880d7f61cde6b0a96e9b0c5f66cf4cdafc030480ec358c4b615f64
 is_space : (Int) -> Bool
 ```
 
@@ -58,7 +58,7 @@ True for ASCII whitespace (space, tab, newline, or carriage return).
 
 ### `to_lower_c`
 
-```prism,sig,h-93025a873b1120ea038104af1361d5f7fb5ae79923682d8fbfee3cc7bfad8164
+```prism,sig,h-7621d65659a704009528ba12eac220d2c34bf980b4c1e322ae8f5a7fdac31e1c
 to_lower_c : (Int) -> Int
 ```
 
@@ -66,7 +66,7 @@ Lower-case an ASCII letter; any other codepoint is returned unchanged.
 
 ### `to_upper_c`
 
-```prism,sig,h-0fbd99f16182bd7e0a7fe6a9ee30dd6969d2b94d25e22281a818d1794ad5fcb6
+```prism,sig,h-de5ea33bdd4d20748795f39ef5b0457e8bf19aed8be665f0af78d3af92c7f87e
 to_upper_c : (Int) -> Int
 ```
 

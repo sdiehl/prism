@@ -597,6 +597,28 @@ fn comp_pure(c: &Comp, cx: &mut Cx<'_>) -> bool {
                 return;
             }
             match c {
+                Comp::Call(f, _) => {
+                    if fn_pure(*f, self.cx) {
+                        self.descend_comp(c);
+                    } else {
+                        self.ok = false;
+                    }
+                }
+                Comp::Return(_)
+                | Comp::Bind(..)
+                | Comp::Force(_)
+                | Comp::Lam(..)
+                | Comp::App(..)
+                | Comp::If(..)
+                | Comp::Prim(..)
+                | Comp::Case(..)
+                | Comp::FloatBuiltin(..)
+                | Comp::Neg(..)
+                | Comp::StrBuiltin(..)
+                | Comp::Dup(_)
+                | Comp::Drop(_)
+                | Comp::WithReuse { .. }
+                | Comp::Reuse(..) => self.descend_comp(c),
                 Comp::Io(..)
                 | Comp::Do(..)
                 | Comp::Handle { .. }
@@ -605,14 +627,6 @@ fn comp_pure(c: &Comp, cx: &mut Cx<'_>) -> bool {
                 | Comp::RefNew(_)
                 | Comp::RefGet(_)
                 | Comp::RefSet(..) => self.ok = false,
-                Comp::Call(f, _) => {
-                    if fn_pure(*f, self.cx) {
-                        self.descend_comp(c);
-                    } else {
-                        self.ok = false;
-                    }
-                }
-                _ => self.descend_comp(c),
             }
         }
     }
@@ -1270,7 +1284,7 @@ fn classify(
             // non-closure non-abstracted value must not change.
             (Arg::Val(Value::Thunk(_)), Arg::Val(Value::Thunk(_))) => {}
             (Arg::Val(sv), Arg::Val(tv)) => {
-                if !debug_eq(sv, tv) {
+                if !value_eq(sv, tv) {
                     return None;
                 }
             }
@@ -1399,12 +1413,6 @@ fn step_size(step: &Step) -> usize {
     }
 }
 
-// Structural equality via the derived `Debug` form: used only to confirm a closure
-// argument or a tail pipeline is unchanged across the recursion.
-fn debug_eq(a: &Value, b: &Value) -> bool {
-    format!("{a:?}") == format!("{b:?}")
-}
-
 // Structural equality of two pipeline tails, ignoring closure (thunk) arguments:
 // mappers/predicates/fold functions are threaded unchanged, so an alpha-rename of a
 // baked closure's binder must not make two otherwise-identical tails disagree.
@@ -1414,9 +1422,25 @@ fn stream_eq(a: &StreamExpr, b: &StreamExpr) -> bool {
         && a.args.iter().zip(&b.args).all(|(x, y)| match (x, y) {
             (Arg::Stream(xi), Arg::Stream(yi)) => stream_eq(xi, yi),
             (Arg::Val(Value::Thunk(_)), Arg::Val(Value::Thunk(_))) => true,
-            (Arg::Val(xv), Arg::Val(yv)) => debug_eq(xv, yv),
+            (Arg::Val(xv), Arg::Val(yv)) => value_eq(xv, yv),
             _ => false,
         })
+}
+
+fn value_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
+        (Value::Ctor(xn, xt, xs), Value::Ctor(yn, yt, ys)) => {
+            xn == yn
+                && xt == yt
+                && xs.len() == ys.len()
+                && xs.iter().zip(ys).all(|(x, y)| value_eq(x, y))
+        }
+        (Value::Tuple(xs), Value::Tuple(ys)) => {
+            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| value_eq(x, y))
+        }
+        _ => a == b,
+    }
 }
 
 // The scope-safety gate on an emitted join: its body may close over nothing but
@@ -1447,5 +1471,41 @@ mod tests {
         assert!(join_is_closed(&closed, &[p]));
         let open = Comp::Return(Value::Var(leaked));
         assert!(!join_is_closed(&open, &[p]));
+    }
+
+    #[test]
+    fn stream_equality_compares_float_bits() {
+        let comb = Sym::new("producer");
+        let a = StreamExpr {
+            comb,
+            args: vec![Arg::Val(Value::Float(0.0))],
+        };
+        let b = StreamExpr {
+            comb,
+            args: vec![Arg::Val(Value::Float(-0.0))],
+        };
+        assert!(!stream_eq(&a, &b));
+    }
+
+    #[test]
+    fn classify_rejects_changed_non_abstracted_float_bits() {
+        let comb = Sym::new("producer");
+        let sym = StreamExpr {
+            comb,
+            args: vec![Arg::Val(Value::Float(0.0))],
+        };
+        let tail = StreamExpr {
+            comb,
+            args: vec![Arg::Val(Value::Float(-0.0))],
+        };
+        assert!(classify(
+            &sym,
+            &tail,
+            &BTreeMap::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut BTreeMap::new(),
+        )
+        .is_none());
     }
 }

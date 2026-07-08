@@ -1,0 +1,11 @@
+-- A region certifies zero allocation by becoming a function of its own: the
+-- free locals become parameters (`base`), so the whole-call-tree check behind
+-- `@ noalloc` covers exactly that region while `tick` itself stays free to
+-- allocate.
+fn tick_region(base : Int) : Int @ noalloc = base + base
+
+fn tick(n : Int) : Int =
+  let base = n + 1
+  tick_region(base)
+
+fn main() : Int = tick(20)

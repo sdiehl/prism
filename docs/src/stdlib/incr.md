@@ -36,7 +36,7 @@ effect IncrRaw
 
 ### `run_incr`
 
-```prism,sig,h-9fed73c1de89b2f8f4907ef8cf46d3b0452a3bf33ad3620b4b2169151f411af4
+```prism,sig,h-45dd7c92bd32db9ba04a684a77f0ea384728aee656473b84da5f48c08eee082d
 run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 ```
 
@@ -44,7 +44,7 @@ Discharge the `Incr` effect, running `action` as the root observer of a fresh de
 
 ### `input`
 
-```prism,sig,h-68cde0500812a5a507800f822c2616307d1f8f2710e53caf5c62e491832c666e
+```prism,sig,h-2ea98abacb0bdce235b44e795eb251403237880edc4bd5cc82d41f9eab591d36
 input : forall a. (a) -> Incr.Incr(a) ! {Incr.IncrRaw}
 ```
 
@@ -52,7 +52,7 @@ Create an input node holding `v`. Its key is its creation order in the run.
 
 ### `get`
 
-```prism,sig,h-582d6f6ca53dfa5ebeaae392aaf3a5f5bda2cb7f86904c8447a0f669509733fd
+```prism,sig,h-cdc2ff11beac2a6208127f9a27830fca0510cab85104eefccfda5a363695d687
 get : forall a. (Incr.Incr(a)) -> a ! {Fail, Incr.IncrRaw}
 ```
 
@@ -60,7 +60,7 @@ Read a node, recording a dependency edge from the memo currently being computed 
 
 ### `set`
 
-```prism,sig,h-200c7c637a6ffa884d29ec107e32fb89d4b3fe9bcbb6a1176a473b001aae326e
+```prism,sig,h-c3eca70107a5310c8e0ee6103ff09bf1917aea3c34a1adf5e5045fe4bba068c4
 set : forall a. (Incr.Incr(a), a) -> Unit ! {Incr.IncrRaw}
 ```
 
@@ -68,7 +68,7 @@ Update an input node. A no-op when `v` is equal (by content) to the node's curre
 
 ### `memo`
 
-```prism,sig,h-05a1fb786237c0bab04435ad4d3f6c2f028b7d110007b6b485ae089baada8963
+```prism,sig,h-bcafdddfaaaf666eb947411fd47a4e2dd97dcc7e60c8d6098cff45b1f2b571ae
 memo : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> Incr.Incr(a) ! {Incr.IncrRaw, e0}
 ```
 
@@ -86,7 +86,7 @@ A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
 
 ### `run_incr_durable`
 
-```prism,sig,h-9db447cae3c1d2e57baf5413f16d40025cb3e9bc705fde9a4ab04fe95475aee8
+```prism,sig,h-61d3fadbd498c4246379390d6b1f5836ba5128bf9433332e0560a4da593a8c50
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -96,7 +96,7 @@ The action must be pure up to `Fail`, so its row is closed at `{IncrRaw, Fail}`:
 
 ### `run_incr_store`
 
-```prism,sig,h-0bed8b8f34a0b51b14d4f420586f2b26545bf5f70c06cb6f115e9fec7587937d
+```prism,sig,h-2c8ca0bea816b1e5e1481047706acf109c6f9543f5ca9a8e3d8cc108698402d7
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -106,7 +106,7 @@ Every durability guarantee of the file form carries over. The action is pure up 
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-1392eeb8d7be32bf6c1eeae5d4259902def7813c23f81c551bf84fb428df2785
+```prism,sig,h-b4bcb23ca83596d3646ba557ed1e832eee82841ba96afd25ae39262fe72c60af
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -114,7 +114,7 @@ Discharge the `Incr` effect with a durable, trace-replay snapshot at `path`, tag
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-1ac6b4ba0f425c5a2ab4bd568c0833ba927cc070418ca4b7d9b4610ba951ea94
+```prism,sig,h-01d9cb53177f10f9b31e635c68186b4c5a48db9e0d37ab3bea946cbc68d2462b
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 

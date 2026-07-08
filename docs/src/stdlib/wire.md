@@ -6,7 +6,7 @@ The opt-in serialization layer.
 
 Serialization is deliberately out of the always-on prelude: a program that never persists a value imports none of this. Everything here is pure total functions over `Bytes`; writing those bytes to a file, a socket, or a replay log is a capability routed through the effect system, never performed here.
 
-The surface has three layers. The `Serialize` class and its instances are the codec: a value's compact positional body, derived structurally by `deriving (Serialize)` and bottoming out in the primitive instances below. The envelope (`wire_encode_value`/`wire_decode_value`) wraps a body in the frame `[scheme tag][kind][contract digest][body?]`, checked before the body so a stale layout is rejected up front. The version ladder (`compose_upgrade`/ `compose_downgrade`) spans frozen versions with O(n) adjacent converters.
+The surface has three layers. The `Serialize` class and its instances are the codec: a value's compact positional body, derived structurally by `deriving (Serialize)` and bottoming out in the primitive instances below. The envelope (`wire_encode_stable`/`wire_decode_stable`, or the explicit-digest `*_with_digest` escape hatches) wraps a body in the frame `[scheme tag][kind][contract digest][body?]`, checked before the body so a stale layout is rejected up front. The version ladder (`compose_upgrade`/ `compose_downgrade`) spans frozen versions with O(n) adjacent converters.
 
 ## The frame
 
@@ -86,89 +86,92 @@ The codec, derived structurally by `deriving (Serialize)`. `encode` writes a val
 
 ### `Stable`
 
-```prism,def,h-0fb640d949423dc00312b82400fb54b4066dcbd26bc8ccd3b86f9030946aaadf
+```prism,def,h-8f7d672da3bb5cc2779df057b9c82e0bc4884c26b8b96970a5b17d30771fa91a
 class Stable(a)
+  shape_digest_of : (a) -> String
 ```
 
-The structural witness that a type's format is frozen-serializable: a record is `Stable` when all its fields are, a sum when all its variants' arguments are. It is a marker with no methods precisely so that the _derivability_ is the whole content of the proof. Persisting a type with a non-stable component (a function, an effectful thunk) fails at the `deriving (Stable)` site, at compile time, naming the offending field.
+The structural witness that a type's format is frozen-serializable: a record is `Stable` when all its fields are, a sum when all its variants' arguments are. The derivability is the whole content of the proof: persisting a type with a non-stable component (a function, an effectful thunk) fails at the `deriving (Stable)` site, at compile time, naming the offending field.
+
+The one method, `shape_digest_of`, is the type's contract digest: the shape digest of its frozen layout. A derived instance's body is that digest injected by the compiler from its single shape-digest computation, so `shape_digest_of` is a per-type constant no source can forge (`Stable` is derive-only; a hand-written instance is rejected). The argument is used only to resolve the instance by value; the digest does not depend on it. `wire_encode_stable`/`wire_decode_stable` read it, so ordinary code never hand-threads a digest string into the envelope.
 
 ## Instances
 
 ### `serializeInt`
 
-```prism,def,h-25fefc867da6eae869f3b264c01064f37532a7961b05ffa5840514b23bfbba10
+```prism,def,h-7afa29e42e62ad3ed67f94387376f1a61b468189ab92fac280930fabec83806c
 instance serializeInt : Serialize(Int)
 ```
 
 ### `serializeI64`
 
-```prism,def,h-64181680839bf2ef0df0c7b7119d2c137c9d5019a6adfad48794387fab775206
+```prism,def,h-89f6b2e173cfcc5da2f9e567578bd5894a1c11f8b0f09a17bc166a77d2b4af3e
 instance serializeI64 : Serialize(I64)
 ```
 
 ### `serializeU64`
 
-```prism,def,h-84342f8ece25686e21d02a31f6faf4d08009e2beb8c8b42ebcf37f5804c9d512
+```prism,def,h-6a9d02136aedfd59dc956fc38eab79046f383c3fc348aa915442a5ac799f68d0
 instance serializeU64 : Serialize(U64)
 ```
 
 ### `serializeBool`
 
-```prism,def,h-bcfd7d29a8119ad7ffee7756fd856fe715b27b4d217b6c679934a34d44de582c
+```prism,def,h-4b115ebaea0af1d5868d90e051270d6ce476d9ab1263243b39f972ca3a4e4528
 instance serializeBool : Serialize(Bool)
 ```
 
 ### `serializeUnit`
 
-```prism,def,h-a3f44ebebdfefa139afae2d3cc0df48325de3f4bc4502f36f004ca3753c0f2cb
+```prism,def,h-9c1fc8014699dc43e35fff141b4e8ca40182a0955ecdbe701d2f8dc11b8f9309
 instance serializeUnit : Serialize(Unit)
 ```
 
 ### `serializeChar`
 
-```prism,def,h-c09aaebe912d075bd8f08f85bba0b70a062e77d7d25435281a225be45c6a61c9
+```prism,def,h-33cdf12df4cc3a5ed99e1e8035281daaae89485be29407cd90e1de68dd50f1ce
 instance serializeChar : Serialize(Char)
 ```
 
 ### `serializeString`
 
-```prism,def,h-dcf783d5ebcb5b64ca2cbc4aa00ea850171aa9bf6b7d79fbd7a11a0218deba6a
+```prism,def,h-9d38fbcc2a5b0efc3d3b2fbcf83e5f1a295bbe5a80e14fbedb42b393910db66d
 instance serializeString : Serialize(String)
 ```
 
 ### `serializeList`
 
-```prism,def,h-435f4e5e8cddd16e77d3a66a0ba4ec652f6936d35e204a25780be762bb6031e7
+```prism,def,h-e48cc2ec3f0172ac967097954fa85fa946bb62917cde982b4a546d67501c2d77
 instance serializeList : Serialize(List(a))
 ```
 
 ### `serializeBytes`
 
-```prism,def,h-516046ee3f5be68f268d783599ad46c21e8286183a06d731f114c2dc089250b7
+```prism,def,h-497e69f340d966c3658dac974e79275e88884d7ca7e87d0714f6be36f9442abe
 instance serializeBytes : Serialize(Bytes)
 ```
 
 ### `serializeOption`
 
-```prism,def,h-8d0b8fb24d9f88954a1fd1aa42a2d5616acde9f3daf8028573d3a88182d0d31c
+```prism,def,h-e39c4a05de59884ae5eeccb86660b3c4605c5e0b7d3702fe251d932cee6a0bef
 instance serializeOption : Serialize(Option(a))
 ```
 
 ### `serializePair`
 
-```prism,def,h-68195bcfac7ede37c641be44ea403e76259cd60a2da5ca0453e28abce025ef58
+```prism,def,h-2f8abfc6390eaf7b97f99ec6f0e84923f051bb70c91bb3ae59c3afdf04a20f3d
 instance serializePair : Serialize((a, b))
 ```
 
 ### `serializeTriple`
 
-```prism,def,h-f01c6a5185fbb95265958d025f0957fbc6989efed94693c222ff8dcfbf12cbed
+```prism,def,h-50404a199b751b8a5e8ca12a7464e320e363d6959dc9366ded316a9c855d69dc
 instance serializeTriple : Serialize((a, b, c))
 ```
 
 ### `serializeMap`
 
-```prism,def,h-4be09fb20bfeca10412e91f54f1e227bd4fecd61c6d0000e3bb6c28f320751a7
+```prism,def,h-753eabda3fd22e6bd0caaf507740ff95d0b3835927cff299722f9c5e1ed09f87
 instance serializeMap : Serialize(Map(k, v, ord))
 ```
 
@@ -176,31 +179,31 @@ instance serializeMap : Serialize(Map(k, v, ord))
 
 ### `bytes_of_buf`
 
-```prism,sig,h-846f398ad27188512bad2f7372e42a4eccab255dbbbb673fa7ace3e82e7f2615
+```prism,sig,h-b1fe7e2b47bbeece8cc4539c391b442b13e5724b660ee1f6602cc6dfbbc05b0e
 bytes_of_buf : (Buf) -> Wire.Bytes
 ```
 
 ### `bytes_buf`
 
-```prism,sig,h-d8789008a86566313a955d8a7f866eecb0c0ea78632de857b491fc0fed6a63ba
+```prism,sig,h-0a3dbdf894312bbc6673f5d2b45653aec406e2200268863a0282a3f0bfc423e2
 bytes_buf : (Wire.Bytes) -> Buf
 ```
 
 ### `bytes_at`
 
-```prism,sig,h-b85b2b24ac1001645a7f628800f3b12e8faa3c17ad22a2bf98842000b4c94da7
+```prism,sig,h-df73b372ec6f7a519e5e81691b1c2811f5765c4c7fc5bd44a3b4138f64b82b9c
 bytes_at : (Wire.Bytes, Int) -> Int
 ```
 
 ### `wire_empty`
 
-```prism,sig,h-ebb5493e9145dfa9a685e0c8803c4b948b63fa4a57a6c02a423bddcfbcef0c78
+```prism,sig,h-452073dbf2139781fa303bcae9a56414285965fb0a9fc52dafbc321d3beb3c13
 wire_empty : Wire.Bytes
 ```
 
 ### `wire_cat`
 
-```prism,sig,h-d4cb793ac4e0d88b036a425f770810636a1808bffe22d0bccc45eea1493583ca
+```prism,sig,h-936a50e4bc0ba50bf2d962dfcb09acc04f7b076ed3e83555701d60e1940f3da2
 wire_cat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -208,7 +211,7 @@ Concatenate two byte bodies into a fresh buffer.
 
 ### `wire_is_empty`
 
-```prism,sig,h-deb8353354ab9d7b67ff4df3cde20fd46b88d482ffd16733a268d0585a53b526
+```prism,sig,h-ad754ff7856da933e459cbc868957d835b7330f72d1bf624f26dce3f3b97598c
 wire_is_empty : (Wire.Bytes) -> Bool
 ```
 
@@ -216,7 +219,7 @@ True when a body has no bytes left. The reader uses it to reject trailing bytes 
 
 ### `wire_len`
 
-```prism,sig,h-f0dbed28d6ac96ae85f83415437c16e120fead543af86695d20b76643d02995f
+```prism,sig,h-b32aeb989cf2d63a504db7c7f7adbaa263b1bb438b208074fccfbcf03aabf7f8
 wire_len : (Wire.Bytes) -> Int
 ```
 
@@ -224,7 +227,7 @@ The number of bytes in a body.
 
 ### `bytes_of_list`
 
-```prism,sig,h-ba096af663910cb0bae7b08ddc6d46fb45579ebf926893d2e00d1a5b0e793ae9
+```prism,sig,h-749627ef9545d668471e3f8473205ae94df2abfce16ccc5a60babc58b59fe78a
 bytes_of_list : (List(Int)) -> Wire.Bytes
 ```
 
@@ -232,13 +235,13 @@ Build a body from a `List(Int)` of byte values (each masked into `0..255`), and 
 
 ### `bytes_to_list`
 
-```prism,sig,h-b13ac8ba038c9a8b93c30dd1a06bde121f90d73ecd44800d336786c4b0a0e389
+```prism,sig,h-f7e479f2a75bc450edc123148aad4abd0ffdf420d6ee3790752fadf628faf673
 bytes_to_list : (Wire.Bytes) -> List(Int)
 ```
 
 ### `wire_tag`
 
-```prism,sig,h-3e7e6c8ed8aa36453a0f7859cfc65db47b423e9d53e649494adf57867cc5db38
+```prism,sig,h-69ec8d8ae0a7c327142f39db0911d701a637f52efdc711f20ea4f43e4c8a8de8
 wire_tag : (Int) -> Wire.Bytes
 ```
 
@@ -246,7 +249,7 @@ Encode a constructor tag (a small non-negative integer) as a varint. The derived
 
 ### `wire_get_tag`
 
-```prism,sig,h-b80e7a5744fb1f7612ebbc76e20dfc4b15a0449767bcc5bbec3038b27cce36df
+```prism,sig,h-8aed34b5fe8e9a41619572623cd08a6a4493eabddd653adeccf20c74d38652d5
 wire_get_tag : (Wire.Bytes) -> (Int, Wire.Bytes) ! {Fail}
 ```
 
@@ -254,43 +257,43 @@ Peel a constructor tag off the front of a body, returning it and the rest. The d
 
 ### `wire_scheme_tag`
 
-```prism,sig,h-c7794a0117e444eac7df9c500b1c0335d3908c4c45e1086bffc931885279aaec
+```prism,sig,h-1230acaecea06c7632adb155b4f65d14574b7f1c798aab98e3c44307f2cc517d
 wire_scheme_tag : String
 ```
 
 ### `wire_kind_value`
 
-```prism,sig,h-f1826bfe53041d69f75cb4a03be94aaba269a9293eb6e23c74e6df40de72b98d
+```prism,sig,h-6f4e8b98e355756dab22c85f235f7d77f82e26a2da234845a2c92b6fe143a16e
 wire_kind_value : Int
 ```
 
 ### `wire_kind_def`
 
-```prism,sig,h-80656a2461bd0ed7fe637ab872907ae76b0895966634361560f8311ce9bef2e1
+```prism,sig,h-c238746efcd770f31f6a62fd6b2c99030809736101e41a8e65df8b93c5a12c9f
 wire_kind_def : Int
 ```
 
 ### `wire_kind_protocol`
 
-```prism,sig,h-305e58056d40593a3042955c09fce9c77b725350af344295f26bd9771262a4d9
+```prism,sig,h-f0ef1f6cc1646d545dc09407b1d5ab48b769e61cc287e7ae66f88cf0c2b33193
 wire_kind_protocol : Int
 ```
 
 ### `wire_kind_kont`
 
-```prism,sig,h-fb245c2fd25651b2922adfe1a698b3b6fdd84e8c70090f50b03ac4a41de81335
+```prism,sig,h-8d5bded8ed42b81cff432808a559cb46f0dd9e9a3229e3ffb23020b7960a42ed
 wire_kind_kont : Int
 ```
 
 ### `wire_kind_cert`
 
-```prism,sig,h-70cc211ca0b666c7ed45ce43acc47ebe643f7003e2c5668a50777808b4bba573
+```prism,sig,h-7f02bc50861a58a772eb3a30a94d42257bbd4f5847ceaef4db4f1af4b47d8ce7
 wire_kind_cert : Int
 ```
 
 ### `wire_frame`
 
-```prism,sig,h-a85c1a98162034164615dd23ac766a878028adff8a9d1f92f8c3fa5eac53fdd2
+```prism,sig,h-0ebdf4c5bd15055a83137fac4583e37f8e194d88f9d172a637725f6b77b6afc9
 wire_frame : (Int, String, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -298,7 +301,7 @@ Build a frame around a body. `wire_ref` builds the bodyless reference form.
 
 ### `wire_ref`
 
-```prism,sig,h-5b296d3afaa94bdd343414613090e83cff9adebf9057ae7a7faeba891aba3b54
+```prism,sig,h-09dc90c181dc48f4d9beed368ac240d1aed1497fc965c46e60bdb82156d6e2ca
 wire_ref : (Int, String) -> Wire.Bytes
 ```
 
@@ -306,7 +309,7 @@ A pure reference: a frame that carries its contract digest and no body. Its iden
 
 ### `wire_open`
 
-```prism,sig,h-f8c74bf920074d9083f33768c5406616d9b358ce84606b792c84691f3e8a4852
+```prism,sig,h-37139d6744e36c305fc805723376dd3a8afb3625455fe01e91bcedaf8ab6f5d3
 wire_open : (Wire.Bytes, Int, String) -> Wire.Bytes ! {Fail}
 ```
 
@@ -314,31 +317,55 @@ Open a frame, checking the scheme, kind, and digest before the body and returnin
 
 ### `wire_is_reference`
 
-```prism,sig,h-cfd0dd4787c33daef09c03ea427aa75093b2a9624f9f6745118bc9645325d961
+```prism,sig,h-062572a4d0978577459ee3f20a49fe74bcc4e4f2455fc4beb7ba2f3c6498449c
 wire_is_reference : (Wire.Bytes, Int, String) -> Bool ! {Fail}
 ```
 
 True when a well-formed frame for `kind`/`digest` carries no body (a pure reference). Fails if the header itself does not match.
 
-### `wire_encode_value`
+### `wire_open_value_any`
 
-```prism,sig,h-5b7a627e4913b6b500916ba1f642956937bbbe1d7185094914ce67558c234767
-wire_encode_value : forall a. (String, a) -> Wire.Bytes
+```prism,sig,h-96d3550988c91d2ca32b3aad80ae6b8c56eee629455b5863b3efc0196514f460
+wire_open_value_any : (Wire.Bytes) -> (String, Wire.Bytes) ! {Fail}
 ```
 
-Encode a value as a `value`-kind frame carrying the given contract digest. The digest is passed in for now: it is the type's shape digest, which the compiler computes but does not yet thread to a derived instance (the seam a later `shape_digest` intrinsic closes).
+Open a `value`-kind frame without knowing its contract digest up front, returning that digest alongside the body bytes. It checks the scheme and the `value` kind before the digest. An empty body is legal and returned as-is: a record with no fields encodes to zero bytes, so emptiness cannot be read as "reference" here without an explicit marker in the frame. Trailing-byte discipline is left to the body decoder, exactly as `wire_open` leaves it. A version-dispatched reader uses the returned digest to pick which frozen rung the body decodes as.
 
-### `wire_decode_value`
+### `wire_encode_value_with_digest`
 
-```prism,sig,h-8efb50aeabb7e029696bc291fe35f54d768e482ce7720ac7e077f309b9143092
-wire_decode_value : forall a. (Wire.Bytes, String) -> a ! {Fail}
+```prism,sig,h-83f1f1937bbf3b9d4674920d5190c1bde7c9198b7e28792180accca6ccd8777c
+wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes
 ```
 
-Decode a `value`-kind frame: check the header, decode the body, and reject trailing bytes. A bodyless reference frame fails here, because a value cannot be materialized without its bytes.
+Encode a value as a `value`-kind frame carrying an explicitly supplied contract digest. This is the escape hatch: it trusts the caller's digest verbatim, so it is for code that already holds a compiler-computed digest (a `stable` block's generated frame helpers) or is exercising a hand-built frame in a test. Ordinary `Stable` code uses `wire_encode_stable`, which supplies the digest from the type.
+
+### `wire_decode_value_with_digest`
+
+```prism,sig,h-d2e685ae60f716357ffe80681ee042fea4351362658dae432e1740e056cfd4e9
+wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail}
+```
+
+Decode a `value`-kind frame against an explicitly supplied contract digest: check the header, decode the body, and reject trailing bytes. A bodyless reference frame fails here, because a value cannot be materialized without its bytes. The digest-supplying counterpart to `wire_encode_value_with_digest`; ordinary `Stable` code uses `wire_decode_stable`.
+
+### `wire_encode_stable`
+
+```prism,sig,h-c2bf010a678936a59a46e3c9a66ab98e86c8734326ec685eb742128ff9c13f6c
+wire_encode_stable : forall a. (a) -> Wire.Bytes
+```
+
+Encode a `Stable` value as a `value` frame under its own contract digest. The digest is `shape_digest_of`, a per-type constant the `deriving (Stable)` instance carries, so no digest string is hand-threaded. This is the ordinary encode for a frozen-serializable value.
+
+### `wire_decode_stable`
+
+```prism,sig,h-86e71ad9a2a7f6552379ea9220d20ae6b9f1d7057b8dc12b1dd0a68435cc92e1
+wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail}
+```
+
+Decode a `Stable` value from a `value` frame, checking the frame's digest against the type's own `shape_digest_of` and rejecting trailing bytes. The result type comes from the use site; an unannotated call is ambiguous and asks for an annotation. A wrong digest, a wrong kind, a truncated body, and trailing bytes are all decode failures through `Fail`. The frame is opened without assuming its digest, the body decoded as the annotated type, and only then is the frame's digest required to equal that type's own, so a frame minted for another shape is refused.
 
 ### `no_loss`
 
-```prism,sig,h-978eb6b064926def1e55e2a4169ed5b1ffebc3897889c31120baf1d6c85372ed
+```prism,sig,h-5f7e5dcc4f215cfca689293341c41bbe670218ca7e5acef80880245b9575e105
 no_loss : Wire.Loss
 ```
 
@@ -346,7 +373,7 @@ The empty `Loss`: a downgrade that dropped nothing.
 
 ### `dropped`
 
-```prism,sig,h-8900be4b92d532f5d5903ac2f6108e7043b06e016949aeb941d16aee2c7b037f
+```prism,sig,h-990c364bb02382a9f0bc2f63c15a0e5e6e2618016da9d8b04ff69e2491270de2
 dropped : (List(String)) -> Wire.Loss
 ```
 
@@ -354,7 +381,7 @@ A `Loss` naming the fields a downgrade dropped.
 
 ### `loss_names`
 
-```prism,sig,h-9a89afc2d9726ca74d9d440def8cf573f70f31182be40663b30f4d1c716535e2
+```prism,sig,h-65d1334d3b9011fbc03ff8105a87092b8d6f947af8e12166ae08878f7da860c0
 loss_names : (Wire.Loss) -> List(String)
 ```
 
@@ -362,7 +389,7 @@ The field names inside a `Loss`.
 
 ### `lossless`
 
-```prism,sig,h-b13330cb440d70d6c372ba55a1afcbdd1ec4763558c599b959213ad477167b0f
+```prism,sig,h-1f7c7e90bb9e5fa19a4238c119782c55e107ff4c0c137ac6f1bfd58a6500ae43
 lossless : (Wire.Loss) -> Bool
 ```
 
@@ -370,7 +397,7 @@ True when a `Loss` dropped nothing, so the downgrade was lossless. The safe subs
 
 ### `loss_union`
 
-```prism,sig,h-0e221f447be4e2d74bbc31a64bcfdf44a4f0d2483de741f5373168fe7e31d2b1
+```prism,sig,h-691e6bea2ef18787492eb8db645cc948f13da77fc9825d25b7279d6fe393bd25
 loss_union : (Wire.Loss, Wire.Loss) -> Wire.Loss
 ```
 
@@ -378,7 +405,7 @@ Merge two losses along a composed downgrade.
 
 ### `compose_upgrade`
 
-```prism,sig,h-dd9111fb2473a64636d124f5d5a21d6958267950be33ebb31a7101b007f0c018
+```prism,sig,h-0a238edbce40624df52c011bdd6720cfc465d993caf6bed6940d6b65fe384f25
 compose_upgrade : forall a b c. ((a) -> b, (b) -> c) -> (a) -> c
 ```
 
@@ -386,7 +413,7 @@ Compose two adjacent upgrades into one spanning upgrade.
 
 ### `compose_downgrade`
 
-```prism,sig,h-9f1550c1780c24d2170cbf5bc60fff651c0bd13c8403ee49dcfc21b8efacc875
+```prism,sig,h-1cc7ba9e22469d894dec8d4fc6d4a5ca8ac97167b3abf4fb03520a935f149c7a
 compose_downgrade : forall a b c. ((a) -> (b, Wire.Loss), (b) -> (c, Wire.Loss)) -> (a) -> (c, Wire.Loss)
 ```
 
@@ -394,7 +421,7 @@ Compose two adjacent downgrades into one spanning downgrade, unioning the losses
 
 ### `reconcile`
 
-```prism,sig,h-2d0b610e13adc9b66bdc4dd45823195b3268f46196448ef5aa2c0e2cc62875f9
+```prism,sig,h-c4a45feb7201bc1f2ab11f9c9b7b911b5350e58f0e0329eff098174ac7bd1252
 reconcile : forall a b. (Wire.Policy, (a) -> (b, Wire.Loss), a) -> (b, Wire.Loss) ! {Fail}
 ```
 

@@ -93,6 +93,17 @@ const SCRUBBER_MAIN_SPLIT: &str = "-- @scrubber:main-below";
 const BOIDS_SRC: &str = include_str!("../examples/boids.pr");
 const PENDULUM_SRC: &str = include_str!("../examples/pendulum.pr");
 
+// Prism World: the shared cellular universe. Its kernel (everything above the
+// sentinel) is a set of pure life-like laws over integer state; the browser
+// appends a `main` that either evolves a seed or hashes a law.
+const WORLD_MAIN_SPLIT: &str = "-- @world:main-below";
+const WORLD_SRC: &str = include_str!("../examples/world.pr");
+
+// The curated law set as (public law id, step-function name) pairs. Both the
+// hash path and the run path read this one table, so a renamed law cannot drift
+// between the identity a client sees and the code that actually evolves it.
+const WORLD_LAWS: &[(&str, &str)] = &[("conway", "step_conway"), ("highlife", "step_highlife")];
+
 // The chaos-counter swarm: a concurrent fiber swarm over a channel under a
 // seeded-shuffle scheduler. Its kernel (everything above the sentinel) is reused
 // verbatim; the browser appends a `main` that reports one batch of schedules.
@@ -202,6 +213,110 @@ fn boids_state_literal(state: &str) -> Result<String, String> {
         return Err("empty boid state".to_string());
     }
     Ok(format!("[{}]", tuples.join(",")))
+}
+
+// The world kernel: every definition above the sentinel, shared by both the hash
+// and run drivers.
+fn world_defs() -> &'static str {
+    WORLD_SRC
+        .split(WORLD_MAIN_SPLIT)
+        .next()
+        .unwrap_or(WORLD_SRC)
+}
+
+// The step-function name for a law id, or `None` for an unknown law.
+fn world_step_fn(law: &str) -> Option<&'static str> {
+    WORLD_LAWS
+        .iter()
+        .find(|(id, _)| *id == law)
+        .map(|(_, step)| *step)
+}
+
+/// The Prism source of the world laws, exactly as it runs: the same definitions
+/// the hash and evolution paths compile, so the resident's source face shows the
+/// real law, not a paraphrase.
+#[wasm_bindgen]
+#[must_use]
+pub fn world_source() -> String {
+    world_defs().trim_end().to_string()
+}
+
+/// The content hash of a law's `step` function, the identity the resident shows
+/// as its law hash. It is the compiler's own Merkle hash of the elaborated Core,
+/// so it moves when and only when the rule's behaviour moves, and is independent
+/// of the grid the law runs on. Returns `error: ...` for an unknown law or a
+/// front-end failure.
+#[wasm_bindgen]
+#[must_use]
+pub fn world_law_hash(law: &str) -> String {
+    let Some(step) = world_step_fn(law) else {
+        return format!("error: unknown law '{law}'");
+    };
+    let full = with_prelude(WORLD_SRC);
+    let ns = match crate::dump("namespace", &full) {
+        Ok(s) => s,
+        Err(e) => return format!("error: {e}"),
+    };
+    let doc: serde_json::Value = match serde_json::from_str(&ns) {
+        Ok(v) => v,
+        Err(_) => return "error: could not read namespace export".to_string(),
+    };
+    let hash = doc
+        .get("defs")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|defs| {
+            defs.iter().find_map(|d| {
+                let name = d
+                    .pointer("/meta/name")
+                    .and_then(serde_json::Value::as_str)?;
+                if name == step {
+                    d.get("hash").and_then(serde_json::Value::as_str)
+                } else {
+                    None
+                }
+            })
+        });
+    match hash {
+        Some(h) => h[..h.len().min(crate::core::HASH_PREFIX_HEX)].to_string(),
+        None => format!("error: law '{law}' has no '{step}' definition"),
+    }
+}
+
+/// Evolve a seed grid under a law for `ticks` generations and return the whole
+/// trajectory. Each output line is one tick, `<state-hash> <bits>`: the blake3
+/// digest of the canonical grid encoding (see `examples/world.pr`) and the raw
+/// row-major 0/1 string. Line 0 is the seed itself, so its hash is the seed hash.
+///
+/// `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
+/// so the seed is data too); `law` selects the step function. Because `trace` is
+/// a pure function of the seed, law, and tick count, forking a timeline is just
+/// re-running from a perturbed grid, and two clients evolving the same seed under
+/// the same law print identical hashes with no coordination. A malformed seed,
+/// unknown law, or front-end error returns an `error:` line.
+#[wasm_bindgen]
+#[must_use]
+pub fn world_run(law: &str, w: u32, h: u32, seed_bits: &str, ticks: u32) -> String {
+    let Some(step) = world_step_fn(law) else {
+        return format!("error: unknown law '{law}'");
+    };
+    let cells = (w as usize) * (h as usize);
+    if seed_bits.len() != cells {
+        return format!(
+            "error: seed has {} cells, expected {w}x{h} = {cells}",
+            seed_bits.len()
+        );
+    }
+    if !seed_bits.bytes().all(|b| b == b'0' || b == b'1') {
+        return "error: seed must be a string of 0 and 1".to_string();
+    }
+    let defs = world_defs();
+    let driver = format!(
+        "{defs}\nfn main() = print(trace({w}, {h}, grid_of(\"{seed_bits}\"), {step}, {ticks}))\n"
+    );
+    match interpret(&with_prelude(&driver)) {
+        Ok(r) => r.term,
+        Err(e) => format!("error: {e}"),
+    }
 }
 
 /// Run the double pendulum for `steps` frames and return the whole trajectory as
@@ -344,7 +459,7 @@ pub fn teleport_suspend(steps: u32) -> Vec<u8> {
         steps as usize,
         &Config::from_env(),
     ) {
-        Ok(SuspendResult::Suspended(bytes)) => bytes,
+        Ok(SuspendResult::Suspended { bytes, .. }) => bytes,
         // Completed before the budget, or a fault: nothing to teleport.
         _ => Vec::new(),
     }

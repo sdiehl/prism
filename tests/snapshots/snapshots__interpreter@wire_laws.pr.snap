@@ -12,5 +12,7 @@ roundtrip list of pairs: OK
 ladder adjacent: OK
 ladder composed: OK
 envelope digest+trailing: OK
+stable wrappers roundtrip+hostile: OK
+stable frame real digest: OK
 hostile decode terminates: OK
 => ()

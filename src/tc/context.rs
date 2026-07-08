@@ -60,6 +60,16 @@ impl Tc<'_> {
             .iter()
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
             .ok_or_else(|| TcErr::Ice(format!("solve_row: ^{v} not in context")))?;
+        if let Some(sk) = self.row_skolem_escaping(v, &r) {
+            // A user program reaches this: a closure created outside a
+            // row-polymorphic boundary whose effects can only be satisfied by
+            // pinning them onto the bound row. Rejecting it here is the row
+            // analogue of a skolem-escape error, not an internal fault.
+            return Err(TcErr::Keep(format!(
+                "effect row `{}` would capture the rigid row `{sk}`: `{sk}` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it",
+                r.show()
+            )));
+        }
         self.ctx[i] = Entry::SolvedRow(v, r);
         Ok(())
     }
@@ -275,6 +285,22 @@ impl Tc<'_> {
             && rvars
                 .iter()
                 .all(|n| self.index_row_uni(*n).is_none_or(|i| i < ai))
+    }
+
+    // The first rigid row variable in `r` that stands to the right of the
+    // existential `a` in the context, if any. Solving `a` to such a row would
+    // let the skolem outlive the `forall` that binds it (the skolem is dropped
+    // when its binder's scope closes; `a`, introduced earlier, survives). A
+    // skolem absent from the context is ambient (bound outside every entry) and
+    // is never an escape, mirroring `well_formed_before`.
+    pub(super) fn row_skolem_escaping(&self, a: u32, r: &EffRow) -> Option<Sym> {
+        let ai = self.index_ex_row(a)?;
+        let row_ty = Type::Row(r.clone());
+        let mut rvars = BTreeSet::new();
+        row_ty.free_row_vars(&mut rvars);
+        rvars
+            .into_iter()
+            .find(|n| self.index_row_uni(*n).is_some_and(|i| i >= ai))
     }
 
     pub(super) fn articulate(

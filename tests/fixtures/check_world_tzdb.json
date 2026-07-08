@@ -1,0 +1,221 @@
+{
+  "compatibility": {
+    "compiler_surfaces": [
+      "compiler=0.8.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false"
+    ],
+    "dependencies_by_identity": {},
+    "dependency_root_conflicts": {},
+    "duplicate_packages": {},
+    "package_count": 1,
+    "packages_by_name": {
+      "tzdb": [
+        "namespace@prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90"
+      ]
+    },
+    "problems": [],
+    "stdlib_roots": [
+      "embedded-stdlib@prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0"
+    ],
+    "unique_package_names": 1,
+    "verdict": "compatible"
+  },
+  "format": "prism-check-world-v1",
+  "lineage_format": "prism-build-lineage-v1",
+  "packages": {
+    "b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90": {
+      "gates": {
+        "check": "passed",
+        "dependency": "passed",
+        "docs": "passed",
+        "doctests": "passed",
+        "example": "not-run",
+        "replay": "not-run",
+        "root": "passed",
+        "usage": "passed",
+        "usage_format": "usage-summary-md",
+        "usage_tier": "whole-program-free-monad"
+      },
+      "lineage": {
+        "artifacts": [],
+        "cache": {
+          "enabled": false,
+          "meta_written": 0,
+          "names_bound": 0,
+          "objects_hit": 0,
+          "objects_written": 0
+        },
+        "compiler": {
+          "identity": "compiler=0.8.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;source-root=prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90;stdlib-root=prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false;",
+          "rows": [
+            {
+              "key": "compiler",
+              "value": "0.8.0"
+            },
+            {
+              "key": "hash-scheme",
+              "value": "prism-core-hash-v1"
+            },
+            {
+              "key": "target",
+              "value": "aarch64-apple-darwin"
+            },
+            {
+              "key": "backend",
+              "value": "check"
+            },
+            {
+              "key": "source-root",
+              "value": "prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90"
+            },
+            {
+              "key": "stdlib-root",
+              "value": "prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0"
+            },
+            {
+              "key": "opt",
+              "value": "O1"
+            },
+            {
+              "key": "passes",
+              "value": "level-default"
+            },
+            {
+              "key": "disabled",
+              "value": "none"
+            },
+            {
+              "key": "backend-opt",
+              "value": "2"
+            },
+            {
+              "key": "scheduler",
+              "value": "cooperative"
+            },
+            {
+              "key": "effect-tier",
+              "value": "auto"
+            },
+            {
+              "key": "native-effects",
+              "value": "true"
+            },
+            {
+              "key": "trampoline",
+              "value": "true"
+            },
+            {
+              "key": "cek-spike",
+              "value": "false"
+            },
+            {
+              "key": "fuse",
+              "value": "false"
+            },
+            {
+              "key": "rt-checks",
+              "value": "false"
+            },
+            {
+              "key": "native-kont-frames",
+              "value": "false"
+            }
+          ]
+        },
+        "diagnostics": [],
+        "format": "prism-build-lineage-v1",
+        "inputs": {
+          "packages": [],
+          "source": {
+            "artifact_kind": "namespace",
+            "name": null,
+            "origin": null,
+            "role": "source",
+            "root": "b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90",
+            "scheme": "prism-core-hash-v1"
+          },
+          "stdlib": {
+            "artifact_kind": "embedded-stdlib",
+            "name": null,
+            "origin": null,
+            "role": "stdlib",
+            "root": "ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0",
+            "scheme": "prism-core-hash-v1"
+          }
+        },
+        "request": {
+          "entry": "packages/tzdb/src/Tzdb.pr",
+          "kind": "check-world",
+          "path": "packages/tzdb/prism.toml"
+        }
+      },
+      "name": "tzdb",
+      "public_api": [
+        {
+          "hash": "27c1611e12bb23d40cfab58822e4d464886be8876144889e09aea1f5d667cb0d",
+          "name": "Zone",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "f0e4916c7d8727ffc1c5cdf8395a930dfdd889629b0bcc8fe089b111e24f6837",
+          "name": "america_new_york",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "fc55f614e150bb4bcb87b33539dd9b2d5d869ac93b62b753827aa65d06414b16",
+          "name": "asia_tokyo",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "a7a093434a3fa41e05faa969803c7c3326d4a36a893a21ee220e940430a6a177",
+          "name": "europe_london",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "155f6302f18456929c126c67b361fa599d406d412d7600f1fbfb19d0a7e0b584",
+          "name": "find_zone",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "57fe2e6b32d8c9b0fff95fa4ba5b224db0ecb63e88a21fceddbc9783be8b166e",
+          "name": "format_in_zone",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "0705a6adfc39a1af5f5f291952e52f505c275852d4b4363360b37a349c7c7126",
+          "name": "offset_duration",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "7c2ae112ad1a57be909b4ea213732ac4957af7afa384e05e3f35e495494a2ffd",
+          "name": "utc",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "f1d17bf08bacfd1f6ca9e3b4faacd1003441e5f04dbead6764c475aeec22e492",
+          "name": "wall_in_zone",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "5080db2bb142c17cc0a9e088b92f011822c63338903daead88625a8b30d8fa90",
+          "name": "zone_name",
+          "scheme": "prism-core-hash-v1"
+        },
+        {
+          "hash": "30c0a6058bc2f33bf017891a5a95a2dfb6af6f939f0e96f130d705c1984f0db1",
+          "name": "zone_offset_minutes",
+          "scheme": "prism-core-hash-v1"
+        }
+      ]
+    }
+  },
+  "root": "packages",
+  "validation": {
+    "checks": {
+      "doctests": "not-run",
+      "native": "not-run",
+      "replay": "not-run",
+      "typecheck": "passed"
+    },
+    "scope": "typecheck-only"
+  }
+}

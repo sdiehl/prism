@@ -5,7 +5,7 @@ use super::abi::idx64;
 use super::emit::{
     emit_with, escape_str, str_builtin_decls, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa,
 };
-use crate::core::Core;
+use crate::core::LoweredCore;
 use crate::types::CtorInfo;
 
 /// Textual MLIR `llvm` dialect syntax, translated to LLVM IR by
@@ -350,7 +350,7 @@ fn i64s(n: usize) -> String {
 /// # Errors
 /// Fails when a construct reaches codegen unlowered or unsupported, or when the
 /// structural self-check rejects the emitted module.
-pub fn emit(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
+pub fn emit(core: &LoweredCore, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
     let text = emit_with(&MlirText, core, ctors)?;
     verify(&text)?;
     Ok(text)

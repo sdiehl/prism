@@ -66,9 +66,9 @@ fn check_tails(fname: &str, c: &Comp, arities: &BTreeMap<&str, usize>) -> Result
                 check_tails(fname, b, arities)?;
             }
         }
-        Comp::Return(Value::Ctor(n, ..)) if n == EPURE || n == EOP => {}
-        Comp::Call(g, args) if g != ENTRY_POINT && arities.get(g.as_str()) == Some(&args.len()) => {
-        }
+        Comp::Return(Value::Ctor(n, ..)) if n.as_str() == EPURE || n.as_str() == EOP => {}
+        Comp::Call(g, args)
+            if g.as_str() != ENTRY_POINT && arities.get(g.as_str()) == Some(&args.len()) => {}
         Comp::App(..) | Comp::Error(_) => {}
         other => {
             return Err(TypeError::Ice {

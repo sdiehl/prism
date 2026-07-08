@@ -203,7 +203,7 @@ fn encode(
         out: String::new(),
         var_ids: BTreeMap::new(),
     };
-    let _ = write!(e.out, "fn{}", f.params.len());
+    let _ = write!(e.out, "fn{}d{}", f.params.len(), f.dict_arity);
     e.comp(&f.body);
     e.out
 }
@@ -398,11 +398,11 @@ impl Enc<'_> {
                 }
             }
             Comp::FloatBuiltin(op, v) => {
-                self.tok(&format!("{op:?}"));
+                self.tok(op.hash_tag());
                 self.val(v);
             }
             Comp::Neg(lane, v) => {
-                self.tok(&format!("{lane:?}"));
+                self.tok(lane.hash_tag());
                 self.val(v);
             }
             Comp::Bind(m, x, n) => {
@@ -423,7 +423,7 @@ impl Enc<'_> {
                 self.comp(e);
             }
             Comp::Prim(op, a, b) => {
-                self.tok(&format!("{op:?}"));
+                self.tok(op.hash_tag());
                 self.val(a);
                 self.val(b);
             }
@@ -491,7 +491,7 @@ impl Enc<'_> {
                 self.comp(b);
             }
             Comp::StrBuiltin(b, args) => {
-                self.tok(&format!("{b:?}"));
+                self.tok(b.hash_tag());
                 self.vals(args);
             }
             Comp::WithReuse { token, freed, body } => {
@@ -634,6 +634,23 @@ mod tests {
         assert_ne!(
             hash_program(&core, &m1)[&sym("f")],
             hash_program(&core, &m2)[&sym("f")],
+        );
+    }
+
+    #[test]
+    fn dictionary_arity_is_folded_in() {
+        let mk = |dict_arity| Core {
+            fns: vec![CoreFn {
+                name: sym("f"),
+                params: vec![sym("a"), sym("b")],
+                dict_arity,
+                body: Comp::Return(Value::Var(sym("b"))),
+            }],
+        };
+        let m = BTreeMap::new();
+        assert_ne!(
+            hash_program(&mk(0), &m)[&sym("f")],
+            hash_program(&mk(1), &m)[&sym("f")],
         );
     }
 

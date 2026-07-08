@@ -1,46 +1,34 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+#[cfg(feature = "mlir")]
+use std::fs;
 use std::path::Path;
 #[cfg(feature = "mlir")]
 use std::process::Command;
-#[cfg(feature = "native")]
-use std::{env, fs};
 
 #[cfg(feature = "mlir")]
 use crate::codegen::emit_mlir;
 #[cfg(feature = "native")]
 use crate::codegen::rt::RuntimeProfile;
 #[cfg(feature = "native")]
-use crate::codegen::{
-    emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table, native_kont_state_map,
-    native_kont_table, NativeKontIdentityRow,
-};
+use crate::codegen::{emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table};
 #[cfg(feature = "native")]
 use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::{
-    balanced, check_fip, check_fip_linear, elaborate, fip_annots, hash_program, insert_rc,
-    lower_effects, newtype_ctors, pp_core, pp_core_pretty, replayable_annots, reuse, run_opt,
-    run_opt_spec, Comp, Core, CorePass, DepGraph, OpGrades, OptLevel, PassSpec, Value, HASH_SCHEME,
+    balanced, elaborate, fip_annots, hash_program, hash_root, insert_rc, lower_effects, pp_core,
+    pp_core_pretty, reuse, run_opt, run_opt_spec, Comp, Core, CorePass, DepGraph, ElaboratedCore,
+    LoweredCore, OpGrades, OptLevel, PassSpec, Value, HASH_SCHEME,
 };
-use crate::debug::trace;
 use crate::error::{Error, TypeError};
-use crate::eval::{run, run_traced, Run, Rv, Tape};
+use crate::eval::{run, Rv};
 use crate::flags::DynFlags;
 use crate::lex::lex;
 #[cfg(feature = "native")]
 use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
-#[cfg(feature = "native")]
-use crate::pkg::transport::{DiskTransport, Transport};
-#[cfg(feature = "native")]
-use crate::pkg::trust::{parse_index, verify_signature, Verdict};
-#[cfg(feature = "native")]
-use crate::resolve::SourceBundleKind;
 use crate::resolve::{default_roots, resolve_modules_in, Root};
-#[cfg(feature = "native")]
-use crate::store::cert::{emit, parity_cert, BACKEND_LLVM, CLAIM_PARITY_PASSED_NAME};
 use crate::store::coherence::{self, CoherenceError};
 use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
@@ -49,13 +37,41 @@ use crate::syntax::desugar::desugar;
 use crate::types::{check as typecheck, show_effects, Checked, CtorInfo};
 
 mod artifact;
+mod dump;
+mod execution;
+mod front;
+mod identity;
 #[cfg(feature = "native")]
 mod native;
+mod timing;
+mod verify;
 pub use artifact::ArtifactIdentity;
+pub use dump::{dump, dump_at, dump_on};
+pub use execution::{
+    debug_on, interpret, interpret_at, interpret_io_at, interpret_io_on, interpret_io_on_with_args,
+    record_on, record_on_with_args, record_run_on, replay_on, replay_run_on, resume_on,
+    step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun, StepRuler, StepRulerRow, SuspendCut,
+    SuspendResult, STEP_RULER_FORMAT,
+};
+use front::{run_front, Front, FrontOpts};
+pub use identity::{
+    namespace_identity, namespace_root, public_surface, stdlib_hash, NamespaceIdentity, PublicDef,
+    StdlibHash,
+};
+#[cfg(feature = "native")]
+use identity::{
+    native_kont_table_for, native_kont_table_for_with_rows, native_kont_table_of,
+    NativeKontIdentityRows,
+};
+pub(crate) use identity::{stdlib_driver_src, BuildIdentity, BuildRoot};
+#[cfg(feature = "native")]
+use native::cc_link;
 #[cfg(feature = "mlir")]
 use native::ir_failure;
+pub use timing::TimingSink;
 #[cfg(feature = "native")]
-use native::{cc_link, run_native};
+pub use verify::attest_on;
+use verify::{fip_check, replayable_check};
 
 pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
@@ -260,6 +276,12 @@ pub struct Config {
     /// Lint, dumps). Read once from the process environment and threaded into the
     /// effect lowerer and optimizer, so no pass reads the environment itself.
     pub flags: DynFlags,
+    /// The per-compile timing sink, present only when the CLI installs it for a
+    /// top-level `--time-compile`/`PRISM_TIME_COMPILE` compile. Absent on every
+    /// [`Config::from_env`] the internal re-elaboration helpers build, so those
+    /// silent compiles never emit timing rows. When absent, the timing wrappers
+    /// compile away to a bare call, so the feature is zero-cost off.
+    pub timing: Option<TimingSink>,
 }
 
 impl Default for Config {
@@ -271,6 +293,7 @@ impl Default for Config {
             disabled: Vec::new(),
             scheduler: Scheduler::default(),
             flags: DynFlags::default(),
+            timing: None,
         }
     }
 }
@@ -297,6 +320,10 @@ impl Config {
             disabled,
             scheduler: flags.scheduler,
             flags,
+            // A timing sink is never installed from the environment: it is a
+            // property of a top-level CLI compile, so only the CLI attaches one.
+            // This is what keeps the internal re-elaboration helpers silent.
+            timing: None,
         }
     }
 
@@ -407,14 +434,20 @@ pub fn check_at(src: &str, base: &Path) -> Result<Checked, Error> {
 /// # Errors
 /// Fails on lex, parse, module, or type errors.
 pub fn check_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
-    let ParseResult { program, .. } = parse(src)?;
-    let program = resolve_modules_in(program, roots)?;
-    let lints = lint_surface(src, &program);
-    let program = desugar(program)?;
-    let mut checked = typecheck(&program)?;
-    checked.warnings.extend(lints);
-    emit_warnings(src, &checked);
-    Ok(checked)
+    check_on_in(src, roots, &Config::default())
+}
+
+/// Like [`check_on`], threading an explicit [`Config`] so the CLI can carry a
+/// timing sink into a `check`.
+///
+/// The `CHECK` preset consults no other `cfg` field (no scheduler retarget,
+/// elaboration, validators, or optimizer), so the config changes nothing about
+/// the result; it only lets `--time-compile` observe the type-check phases.
+///
+/// # Errors
+/// Fails on lex, parse, module, or type errors.
+pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
+    Ok(run_front(src, roots, cfg, FrontOpts::CHECK)?.into_checked())
 }
 
 // Unused-binding and shadowed-name lints over the resolved surface program,
@@ -436,49 +469,14 @@ fn emit_warnings(src: &str, checked: &Checked) {
     }
 }
 
+// The full compile path (scheduler retarget, validators, pre-lowering optimizer),
+// as the legacy tuple its many consumers destructure.
 fn frontend(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Program<CorePhase>, Checked, Core), Error> {
-    let ParseResult { program, .. } = parse(src)?;
-    let program = resolve_modules_in(program, roots)?;
-    let lints = lint_surface(src, &program);
-    let mut program = desugar(program)?;
-    // The `--scheduler` choice retargets only the policy-neutral `run_cooperative`
-    // entry; a program that pins `run_async`/`run_lifo` is untouched.
-    if let Some(target) = cfg.scheduler.retarget() {
-        crate::syntax::desugar::retarget_cooperative(&mut program, target);
-    }
-    let mut checked = typecheck(&program)?;
-    checked.warnings.extend(lints);
-    emit_warnings(src, &checked);
-    let core = elaborate(&program, &checked)?;
-    fip_check(&program, &checked, &core)?;
-    replayable_check(&program, &checked)?;
-    reconcile_effects(&checked, &core)?;
-    // Mid-level Core-to-Core optimization tier. Runs above the interpreter/native
-    // fork so both backends consume the same optimized Core (the parity oracle
-    // holds by construction). Placed after the fip/effect validators so they
-    // still judge the program as written. Newtype erasure is mandatory (a
-    // representation both backends depend on); specialization is opt-out via
-    // `PRISM_NO_SPECIALIZE`. The level comes from the CLI `-O` flag (default O1),
-    // unless an explicit `--passes` spec overrides it with its pre-stage list.
-    let nt = newtype_ctors(&program);
-    let (core, _stats) = cfg.passes.as_ref().map_or_else(
-        || {
-            run_opt(
-                &core,
-                &nt,
-                cfg.opt,
-                PassStage::PreLowering,
-                &cfg.disabled,
-                &cfg.flags,
-            )
-        },
-        |spec| run_opt_spec(&core, &nt, &spec.pre, &cfg.disabled, &cfg.flags),
-    );
-    Ok((program, checked, core))
+) -> Result<(Program<CorePhase>, Checked, ElaboratedCore), Error> {
+    run_front(src, roots, cfg, FrontOpts::FULL).map(Front::into_elaborated)
 }
 
 /// Elaborate `src` and commit its definitions into the content-addressed store.
@@ -507,7 +505,7 @@ pub fn commit_to_store(src: &str, roots: &[Root], cfg: &Config) -> Result<Commit
 fn store_commit(
     program: &Program<CorePhase>,
     checked: &Checked,
-    core: &Core,
+    core: &ElaboratedCore,
     cfg: &Config,
 ) -> Result<CommitStats, Error> {
     let hash_metas = hash_meta(checked, &borrow_sigs(program), &fip_annots(program));
@@ -572,195 +570,7 @@ pub fn store_def_inputs(
     let (program, checked, core) = elaborated(src, &roots)?;
     let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
     let hashes = hash_program(&core, &metas);
-    Ok((core, hashes, metas))
-}
-
-/// Structured identity for a whole-program namespace artifact.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NamespaceIdentity {
-    /// The hash scheme that gives `root` its meaning.
-    pub scheme: &'static str,
-    /// The artifact kind this root names.
-    pub kind: &'static str,
-    /// The Merkle fold over the namespace entries.
-    pub root: String,
-}
-
-/// The namespace identity of a program: artifact kind plus the Merkle fold over
-/// its `def <name> -> content-hash` entries.
-///
-/// This is the single value a published package tag maps to and `prism audit`
-/// re-derives: the same digest a `dump namespace` export carries as its contract,
-/// and the same fold shape [`stdlib_hash`] uses for the whole standard library. A
-/// tag names a root; the root names the exact set of behaviors under it.
-///
-/// # Errors
-/// Fails on any front-end error.
-pub fn namespace_identity(src: &str, roots: &[Root]) -> Result<NamespaceIdentity, Error> {
-    let (program, checked, core) = elaborated(src, roots)?;
-    let hashes = hash_program(
-        &core,
-        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-    );
-    Ok(NamespaceIdentity {
-        scheme: HASH_SCHEME,
-        kind: NAMESPACE_ARTIFACT_KIND,
-        root: namespace_root_of(&hashes),
-    })
-}
-
-/// The namespace root of a program.
-///
-/// Prefer [`namespace_identity`] at persistence/package boundaries so the scheme
-/// and artifact kind travel with the digest.
-///
-/// # Errors
-/// Fails on any front-end error.
-pub fn namespace_root(src: &str, roots: &[Root]) -> Result<String, Error> {
-    Ok(namespace_identity(src, roots)?.root)
-}
-
-// The namespace-root fold over an already-computed `name -> content-hash` map. The
-// one definition of the fold, shared by `namespace_root`, the `dump namespace`
-// contract digest, and the package tag pointer, so all three agree by
-// construction.
-pub(crate) fn namespace_root_of(hashes: &crate::core::Hashes) -> String {
-    crate::core::hash_root(
-        &hashes
-            .iter()
-            .map(|(sym, h)| {
-                (
-                    format!("{} {}", WireKind::Def.tag(), sym.as_str()),
-                    h.clone(),
-                )
-            })
-            .collect(),
-    )
-}
-
-#[cfg(feature = "native")]
-fn native_kont_table_of(
-    hashes: &crate::core::Hashes,
-    roots: &[Root],
-    cfg: &Config,
-    identity_rows: NativeKontIdentityRows,
-) -> Result<String, Error> {
-    let bundle = namespace_root_of(hashes);
-    Ok(native_kont_table(
-        hashes,
-        &bundle,
-        &native_kont_identity(cfg, &bundle, roots, identity_rows)?,
-    ))
-}
-
-#[cfg(feature = "native")]
-fn native_kont_table_for(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
-    native_kont_table_for_with_rows(src, roots, cfg, NativeKontIdentityRows::Full)
-}
-
-#[cfg(feature = "native")]
-fn native_kont_table_for_with_rows(
-    src: &str,
-    roots: &[Root],
-    cfg: &Config,
-    identity_rows: NativeKontIdentityRows,
-) -> Result<String, Error> {
-    let (program, checked, core) = elaborated(src, roots)?;
-    let hashes = hash_program(
-        &core,
-        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-    );
-    native_kont_table_of(&hashes, roots, cfg, identity_rows)
-}
-
-#[cfg(feature = "native")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeKontIdentityRows {
-    Full,
-    Portable,
-}
-
-#[cfg(feature = "native")]
-fn native_kont_identity(
-    cfg: &Config,
-    source_root: &str,
-    roots: &[Root],
-    identity_rows: NativeKontIdentityRows,
-) -> Result<Vec<NativeKontIdentityRow<'static>>, Error> {
-    let identity = artifact_identity_for_roots(cfg, "llvm", source_root, roots)?;
-    let rows = match identity_rows {
-        NativeKontIdentityRows::Full => identity.rows(),
-        NativeKontIdentityRows::Portable => identity.portable_rows(),
-    };
-    Ok(rows
-        .into_iter()
-        .filter(|(key, _)| !matches!(*key, "compiler" | "hash-scheme" | "target" | "backend"))
-        .map(|(key, value)| NativeKontIdentityRow { key, value })
-        .collect())
-}
-
-#[cfg(feature = "native")]
-fn artifact_identity_for_roots(
-    cfg: &Config,
-    backend: &str,
-    source_root: &str,
-    roots: &[Root],
-) -> Result<ArtifactIdentity, Error> {
-    let mut package_roots = Vec::new();
-    let mut stdlib_root = None;
-    let mut saw_embedded_std = false;
-    for root in roots {
-        match root {
-            Root::Embedded(_) => saw_embedded_std = true,
-            Root::Dir(_) => {}
-            Root::SourceBundle { .. } => {
-                if let Some(identity) = root.source_bundle_identity() {
-                    match &identity.kind {
-                        SourceBundleKind::Std => {
-                            stdlib_root = Some(identity.root.clone());
-                        }
-                        SourceBundleKind::Package { .. } => {
-                            package_roots.push(identity.descriptor());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if stdlib_root.is_none() && saw_embedded_std {
-        stdlib_root = Some(stdlib_hash()?.root);
-    }
-    let mut identity = cfg
-        .artifact_identity_for(backend)
-        .with_source_root(source_root.to_string())
-        .with_package_roots(package_roots);
-    if let Some(root) = stdlib_root {
-        identity = identity.with_stdlib_root(root);
-    }
-    Ok(identity)
-}
-
-// The composed source that pulls in the entire documented standard library:
-// the always-on prelude (which glob-imports the `Data.*` modules) plus every
-// module it does not open. Docs and the stdlib hash share this one definition
-// of "the stdlib", so a module missing here silently gets no hash badge in the
-// generated docs (its types and functions never reach the elaborated Core the
-// hash is taken from). Qualified-only (no `(..)`): the driver body never
-// names anything from these modules directly, and opening them all
-// unqualified collides (`Concurrent.Outcome` vs `Quickcheck.Outcome`); a
-// bare import still resolves and elaborates the module.
-pub(crate) fn stdlib_driver_src() -> String {
-    with_prelude(
-        "import Data.Checked\n\
-         import Data.Vec\n\
-         import Replay\n\
-         import Concurrent\n\
-         import Blit\n\
-         import Incr\n\
-         import Quickcheck\n\
-         import Test\n\
-         import Wire\n",
-    )
+    Ok((core.0, hashes, metas))
 }
 
 // Elaborate a source to Core *before* the Core-to-Core optimizer runs: the one
@@ -771,757 +581,19 @@ pub(crate) fn stdlib_driver_src() -> String {
 // move when the optimizer is tuned, and so it holds every top-level definition
 // exactly once (the optimizer has no whole-program DCE). Quiet: no warning
 // emission, no surface lints.
-fn elaborated(src: &str, roots: &[Root]) -> Result<(Program<CorePhase>, Checked, Core), Error> {
-    let ParseResult { program, .. } = parse(src)?;
-    let program = resolve_modules_in(program, roots)?;
-    let program = desugar(program)?;
-    let checked = typecheck(&program)?;
-    let core = elaborate(&program, &checked)?;
-    Ok((program, checked, core))
-}
-
-/// A content-addressed fingerprint of the whole standard library.
-///
-/// One namespace root (a branch-hash-style fold) over every documented
-/// definition's behavior hash and every datatype/effect's shape digest, tagged
-/// with the hashing scheme and the compiler version that produced it.
-#[derive(Debug)]
-pub struct StdlibHash {
-    /// The single fold over every entry below; the value anchored in the docs.
-    pub root: String,
-    /// The hashing scheme tag every constituent hash commits to.
-    pub scheme: &'static str,
-    /// The compiler version that produced this fingerprint.
-    pub version: &'static str,
-    /// Per-definition behavior hashes (term level).
-    pub defs: crate::core::Hashes,
-    /// Per-declaration structural shape digests (datatypes and effects).
-    pub shapes: BTreeMap<String, String>,
-    /// Per-class interface digests (name, superclasses, method signatures).
-    pub classes: BTreeMap<String, String>,
-    /// Per-instance identity digests (class, head, method behavior hashes).
-    pub instances: BTreeMap<String, String>,
-}
-
-/// Compute the standard-library fingerprint. See [`StdlibHash`].
-///
-/// # Errors
-/// Fails only if the embedded stdlib does not parse, type-check, or elaborate,
-/// which would be a compiler bug.
-pub fn stdlib_hash() -> Result<StdlibHash, Error> {
-    let src = stdlib_driver_src();
-    let (program, checked, mut core) = elaborated(&src, &[Root::Embedded(crate::stdlib::STDLIB)])?;
-    // Top-level constants (`let`) are inlined at use sites, so they are not in the
-    // compiled Core. Elaborate them as zero-param CoreFns so each gets its own
-    // behavior hash (addressable and displayable), then hash the whole set.
-    core.fns.extend(crate::core::konst_fns(&program, &checked)?);
-    let defs = hash_program(
-        &core,
-        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-    );
-    let shapes = crate::core::shape_digests(&program.types, &program.effects);
-    let classes = crate::core::class_digests(&program.classes);
-    // An instance's identity folds its already-computed method behavior hashes
-    // (the `i@<inst>@<method>` CoreFns) with its class and head. This is nearly
-    // free and doubles as the coherence seed: the `(class, head) -> hash` value.
-    let defs_str: BTreeMap<String, String> = defs
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.clone()))
-        .collect();
-    let mut instances: BTreeMap<String, String> = BTreeMap::new();
-    for inst in &program.instances {
-        let prefix = crate::names::instance_method_prefix(&inst.name);
-        let methods: BTreeMap<String, String> = defs_str
-            .iter()
-            .filter_map(|(k, v)| k.strip_prefix(&prefix).map(|m| (m.to_string(), v.clone())))
-            .collect();
-        instances.insert(
-            inst.name.clone(),
-            crate::core::instance_digest(&inst.class, &inst.head, &methods),
-        );
-    }
-    // Merge every kind into one name -> hash map, then fold to a single root.
-    // Namespace the keys by kind so declarations that share a name across
-    // namespaces (a value and an instance are both lowercase) cannot collide.
-    let mut entries: BTreeMap<String, String> = BTreeMap::new();
-    for (sym, h) in &defs {
-        entries.insert(format!("def {}", sym.as_str()), h.clone());
-    }
-    for (name, h) in &shapes {
-        entries.insert(format!("shape {name}"), h.clone());
-    }
-    for (name, h) in &classes {
-        entries.insert(format!("class {name}"), h.clone());
-    }
-    for (name, h) in &instances {
-        entries.insert(format!("instance {name}"), h.clone());
-    }
-    Ok(StdlibHash {
-        root: crate::core::hash_root(&entries),
-        scheme: HASH_SCHEME,
-        version: env!("CARGO_PKG_VERSION"),
-        defs,
-        shapes,
-        classes,
-        instances,
-    })
-}
-
-// Cross-check the two effect engines as a real assertion (not a debug_assert):
-// the op-keyed call-graph fixpoint used by effect lowering (`latent_ops`)
-// against each function's inferred row (the effect labels of its checked type,
-// `DeclInfo::effects`). The agreed direction is containment: every effect a
-// function can still perform must appear in its inferred row. A violation means
-// the checker under-reported an effect a later pass will still try to lower, an
-// internal-consistency bug surfaced here rather than as a miscompile.
-// Synthesized ops that are not type-level effects are skipped rather than
-// flagged.
-fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
-    let latent = crate::core::effect_lower::latent_ops(core);
-    let empty = BTreeSet::new();
-    // Validate against each function's inferred row (the labels of its checked
-    // type), not the set-pass `effects` seed: the seed cannot count the scoped
-    // masking that lets a `mask`ed effect tunnel past its handler, so only the
-    // inferred row reflects what the function actually leaves unhandled.
-    let inferred_rows: std::collections::BTreeMap<&str, &crate::types::Effects> = checked
-        .decls
-        .iter()
-        .map(|d| (d.name.as_str(), &d.effects))
-        .collect();
-    for f in &core.fns {
-        let Some(ops) = latent.get(&f.name) else {
-            continue;
-        };
-        // An instance method is absent from `checked.decls` (those are the
-        // top-level `fn`s); its effect discipline is enforced against the class
-        // signature at `check_instance`, where an effect-polymorphic method may
-        // legitimately perform the effects flowing through its row variable. It
-        // has no standalone inferred row to reconcile against, so validating it
-        // here against an empty row would spuriously flag that permitted effect.
-        if crate::names::is_instance_method(f.name.as_str()) {
-            continue;
-        }
-        let inferred = inferred_rows
-            .get(f.name.as_str())
-            .copied()
-            .unwrap_or(&empty);
-        let extra: Vec<&str> = ops
-            .iter()
-            .filter_map(|op| checked.eff_ops.get(op.as_str()))
-            .map(|info| info.effect_name)
-            .filter(|e| !inferred.contains(e))
-            .collect::<BTreeSet<_>>()
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-        if !extra.is_empty() {
-            let row: Vec<&str> = inferred.iter().map(|s| s.as_str()).collect();
-            return Err(Error::Ice(format!(
-                "effect reconciliation: `{}` can still perform {extra:?} after lowering, \
-                 but its inferred row is {row:?}",
-                f.name
-            )));
-        }
-    }
-    Ok(())
-}
-
-// Check the FP^2 discipline of every `fip`/`fbip`-annotated function. Linearity
-// is a property of the SOURCE term, so it is checked on the raw elaborated core
-// (`check_fip_linear`), using the typechecker's param/field types to exempt
-// scalars (a `dup` on an immediate is a runtime no-op). Zero-allocation, the
-// callee closure, and bounded stack are properties of the COMPILED term, so they
-// are checked on the reuse-lowered core (`check_fip`). Runs on every
-// check/build/interpret (shared `frontend`); pure annotated functions are
-// unaffected by effect lowering, so this un-effect-lowered core matches
-// `dump fbip`.
-fn fip_check(program: &Program<CorePhase>, checked: &Checked, core: &Core) -> Result<(), Error> {
-    let annots = fip_annots(program);
-    if annots.is_empty() {
-        return Ok(());
-    }
-    let to_err = |msg: String| {
-        // Point the diagnostic at the offending annotated function: its name
-        // appears backtick-quoted in the message, so the first annotated decl
-        // whose name occurs there owns the span.
-        let owner = program
-            .fns
-            .iter()
-            .filter(|d| annots.contains_key(&Sym::from(&d.name)))
-            .find(|d| msg.contains(&format!("`{}`", d.name)));
-        let span = owner.map_or_else(marginalia::Span::default, |d| d.span);
-        // A `without alloc` function checks with `fbip` semantics, so the shared
-        // checker phrases its message with `fbip`. Normalize the user-facing
-        // family here: `fip`/`fbip` are usage checks, while `without alloc` is an
-        // allocation certificate. Lifted `without alloc { .. }` blocks keep the
-        // source block in the message rather than leaking the synthetic function
-        // name (the span already points at the source block).
-        let msg = match owner {
-            Some(d) if d.no_alloc && d.fip == Fip::No => {
-                let wa = format!("{} {}", crate::kw::WITHOUT, crate::kw::ALLOC);
-                let m = msg.replace("`fbip`", &format!("`{wa}`"));
-                if crate::names::is_without_alloc_block(&d.name) {
-                    let m = m
-                        .replace(
-                            &format!("function `{}` is marked `{wa}` but", d.name),
-                            &format!("the `{wa}` block"),
-                        )
-                        .replace(&format!("`{}`", d.name), &format!("the `{wa}` block"));
-                    allocation_certificate_message(&wa, None, &m)
-                } else {
-                    allocation_certificate_message(&wa, Some(&d.name), &m)
-                }
-            }
-            Some(d) if d.fip == Fip::Fip => usage_check_message("fip", &d.name, &msg),
-            Some(d) if d.fip == Fip::Fbip => usage_check_message("fbip", &d.name, &msg),
-            _ => msg,
-        };
-        Error::Type(TypeError::Other { span, msg })
-    };
-    let sigs = borrow_sigs(program);
-    let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
-    check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
-    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
-}
-
-fn allocation_certificate_message(kind: &str, name: Option<&str>, msg: &str) -> String {
-    let rest = name.map_or_else(
-        || {
-            msg.strip_prefix(&format!("the `{kind}` block "))
-                .unwrap_or_else(|| strip_sentence_prefix(msg))
-        },
-        |name| strip_marked_prefix(msg, name, kind),
-    );
-    name.map_or_else(
-        || format!("allocation certificate `{kind}` failed for block: {rest}"),
-        |name| format!("allocation certificate `{kind}` failed for function `{name}`: {rest}"),
-    )
-}
-
-fn usage_check_message(kind: &str, name: &str, msg: &str) -> String {
-    let rest = strip_marked_prefix(msg, name, kind);
-    format!("usage check `{kind}` failed for function `{name}`: {rest}")
-}
-
-fn strip_marked_prefix<'a>(msg: &'a str, name: &str, kind: &str) -> &'a str {
-    msg.strip_prefix(&format!("function `{name}` is marked `{kind}` but "))
-        .or_else(|| msg.strip_prefix(&format!("a `{kind}` function ")))
-        .unwrap_or_else(|| strip_sentence_prefix(msg))
-}
-
-fn strip_sentence_prefix(msg: &str) -> &str {
-    msg.strip_prefix("function ")
-        .or_else(|| msg.strip_prefix("a "))
-        .unwrap_or(msg)
-}
-
-// Check every `replayable`-annotated function. The certificate is on the inferred
-// principal row: it must stay within the recordable capabilities (`Console`,
-// `FileSystem`, `Random`, `Env`, `Output`) plus the deterministic builtin effects
-// (`Exn`, `Fail`). `Output` is admitted because replay/durable suppress it during
-// the replayed prefix, so re-running it is sound. A row containing `IO` (un-logged
-// nondeterminism: the system clock, srand) or any user-defined effect cannot be
-// reproduced from a trace, so it is rejected with a caret at the function naming
-// the offending effect(s).
-fn replayable_check(program: &Program<CorePhase>, checked: &Checked) -> Result<(), Error> {
-    let annots = replayable_annots(program);
-    if annots.is_empty() {
-        return Ok(());
-    }
-    let allowed: std::collections::BTreeSet<Sym> = crate::names::INPUT_CAPABILITY_EFFECTS
-        .iter()
-        .copied()
-        .chain([
-            crate::names::OUTPUT_EFFECT,
-            crate::names::EXN_EFFECT,
-            crate::names::FAIL_EFFECT,
-        ])
-        .map(Sym::from)
-        .collect();
-    let inferred: std::collections::BTreeMap<&str, &crate::types::ty::Effects> = checked
-        .decls
-        .iter()
-        .map(|i| (i.name.as_str(), &i.effects))
-        .collect();
-    for d in &program.fns {
-        if !annots.contains(&Sym::from(&d.name)) {
-            continue;
-        }
-        let Some(row) = inferred.get(d.name.as_str()).copied() else {
-            continue;
-        };
-        let offending: Vec<&str> = row
-            .iter()
-            .filter(|e| !allowed.contains(*e))
-            .map(|e| e.as_str())
-            .collect();
-        if !offending.is_empty() {
-            let msg = format!(
-                "function `{}` is marked `replayable` but performs non-replayable {} `{}`; \
-                 a replayable function may use only Console, FileSystem, Random, Env, Clock, Output, Exn, Fail",
-                d.name,
-                if offending.len() == 1 {
-                    "effect"
-                } else {
-                    "effects"
-                },
-                offending.join("`, `")
-            );
-            return Err(Error::Type(TypeError::Other { span: d.span, msg }));
-        }
-    }
-    Ok(())
-}
-
-/// # Examples
-/// ```
-/// let src = prism::with_prelude("fn main() = print(1 + 2)");
-/// let run = prism::interpret(&src).unwrap();
-/// assert_eq!(run.out[0].show(), "3");
-/// ```
-///
-/// # Errors
-/// Fails on front-end errors or a runtime fault.
-pub fn interpret(src: &str) -> Result<Run, Error> {
-    interpret_at(src, Path::new("."))
-}
-
-/// Like [`interpret`], resolving any module imports relative to `base`.
-///
-/// Captures all `print` output into the returned [`Run`]'s `term` (the
-/// differential oracle and wasm path); nothing reaches real stdio.
-///
-/// # Errors
-/// Fails on front-end errors or a runtime fault.
-pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
-    let core = prepared_core(src, &default_roots(base), &Config::from_env())?;
-    run(&core).map_err(Error::Runtime)
-}
-
-/// Like [`interpret_at`], but streams `print` to `out_sink` and reads `input`.
-///
-/// The native CLI passes real stdout/stdin so program output is live and
-/// `read_*` reaches the terminal; `term` still carries the exact transcript and
-/// `Run::exit` carries any `exit(code)`.
-///
-/// # Errors
-/// Fails on front-end errors or a runtime fault.
-pub fn interpret_io_at(
-    src: &str,
-    base: &Path,
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-) -> Result<Run, Error> {
-    interpret_io_on(
-        src,
-        &default_roots(base),
-        out_sink,
-        input,
-        &Config::from_env(),
-    )
-}
-
-/// Like [`interpret_io_at`], but against an explicit module search path (a
-/// project's source root, its path dependencies, and the stdlib).
-///
-/// # Errors
-/// Fails on front-end errors or a runtime fault.
-pub fn interpret_io_on(
+fn elaborated(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    cfg: &Config,
-) -> Result<Run, Error> {
-    interpret_io_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
-}
-
-/// Like [`interpret_io_on`], with explicit host-provided program arguments for
-/// `args_count`/`arg`.
-///
-/// # Errors
-/// Fails on front-end errors or a runtime fault.
-pub fn interpret_io_on_with_args(
-    src: &str,
-    roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    cfg: &Config,
-    args: Vec<String>,
-) -> Result<Run, Error> {
-    let core = prepared_core(src, roots, cfg)?;
-    crate::eval::run_io_with_args(&core, out_sink, input, args).map_err(Error::Runtime)
-}
-
-/// Run `src` against the real world, recording every capability observation.
-///
-/// Streams output live (like `interpret_io_on`) and returns the process exit
-/// code, if any, plus the encoded `.replay` trace to persist and its length.
-///
-/// # Errors
-/// Fails on any front-end error or an evaluation fault.
-pub fn record_on(
-    src: &str,
-    roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    cfg: &Config,
-) -> Result<(Option<i32>, String, usize), Error> {
-    record_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
-}
-
-/// Like [`record_on`], with explicit host-provided program arguments.
-///
-/// # Errors
-/// Fails on any front-end error or an evaluation fault.
-pub fn record_on_with_args(
-    src: &str,
-    roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    cfg: &Config,
-    args: Vec<String>,
-) -> Result<(Option<i32>, String, usize), Error> {
-    let core = prepared_core(src, roots, cfg)?;
-    let run =
-        crate::eval::run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-            .map_err(Error::Runtime)?;
-    Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
-}
-
-/// Replay `src` against a recorded `.replay` trace, performing no real reads.
-///
-/// Reproduces the original run's output byte for byte (a corollary of the
-/// determinism contract) and returns the process exit code, if any.
-///
-/// # Errors
-/// Fails on a front-end error, a malformed trace, an evaluation fault, or a
-/// trace that does not match the program.
-pub fn replay_on(
-    src: &str,
-    roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    trace: &str,
-    cfg: &Config,
-) -> Result<Option<i32>, Error> {
-    let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::Runtime)?;
-    let mut empty = std::io::Cursor::new(Vec::new());
-    let run = run_traced(
-        &core,
-        out_sink,
-        &mut empty,
-        Tape::Replay {
-            frames,
-            cursor: 0,
-            budget: None,
-        },
-    )
-    .map_err(Error::Runtime)?;
-    Ok(run.exit)
-}
-
-/// Drive the terminal reverse-step debugger over `src` and a recorded trace:
-/// read stepping commands from `cmds`, write the debugger UI to `ui`.
-///
-/// # Errors
-/// Fails on a front-end error, a malformed trace, an I/O error, or a trace that
-/// does not match the program.
-pub fn debug_on(
-    src: &str,
-    roots: &[Root],
-    trace: &str,
-    cmds: &mut dyn std::io::BufRead,
-    ui: &mut dyn std::io::Write,
-    cfg: &Config,
-) -> Result<(), Error> {
-    let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::Runtime)?;
-    crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::Runtime)
-}
-
-/// The outcome of a suspendable run: the program either finished (nothing to
-/// snapshot) or paused, yielding the encoded `kont` envelope to persist.
-#[derive(Debug)]
-pub enum SuspendResult {
-    /// Ran to completion before the step budget; carries any `exit(code)`.
-    Done(Option<i32>),
-    /// Paused at the budget; carries the serialized `kont` envelope.
-    Suspended(Vec<u8>),
-}
-
-/// Run `src` under a step budget, streaming its prefix output to `out_sink` and
-/// snapshotting the whole suspended program as a `kont` envelope when it pauses.
-///
-/// The snapshot is tagged with the program's code-identity digest (its namespace
-/// root), which [`resume_on`] re-derives and checks. If a captured value cannot
-/// cross the suspend boundary (too deeply nested, the fingerprint of an
-/// unserializable capture), the refusal is raised here, at suspend time, naming
-/// the value.
-///
-/// # Errors
-/// Fails on any front-end error, an evaluation fault before the budget, or a value
-/// that cannot be serialized.
-pub fn suspend_on(
-    src: &str,
-    roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    budget: usize,
-    cfg: &Config,
-) -> Result<SuspendResult, Error> {
-    let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
-    let core = prepared_core(src, roots, cfg)?;
-    match crate::eval::run_suspending(&core, bundle, budget, out_sink, input)
-        .map_err(Error::Runtime)?
-    {
-        crate::eval::Checkpoint::Done(run) => Ok(SuspendResult::Done(run.exit)),
-        crate::eval::Checkpoint::Suspended(kont) => {
-            let bytes =
-                crate::eval::kont::encode_kont(&kont).map_err(|e| Error::Runtime(e.to_string()))?;
-            Ok(SuspendResult::Suspended(bytes))
-        }
-    }
-}
-
-// A hard cap on the line-cut scan so a nonterminating program cannot spin the
-// mapping forever. Any real demo program prints its lines in far fewer steps.
-const MAX_LINE_CUT_STEPS: usize = 8192;
-
-/// The machine-step budget at which each successive output line first appears.
-///
-/// Compiles `src` once, then re-runs it under growing step budgets and records,
-/// for each printed line, the smallest budget after which that line has been
-/// emitted. The `i`th entry is the budget to pass [`suspend_on`] to pause exactly
-/// after line `i + 1` has printed, so a caller can cut on a legible line boundary
-/// instead of an opaque step count. The final line's boundary is omitted: pausing
-/// there is completion, with nothing left to suspend.
-///
-/// # Errors
-/// Fails on any front-end error or an evaluation fault before the program ends.
-pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<usize>, Error> {
-    let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
-    let core = prepared_core(src, roots, cfg)?;
-    // Build the global table once: it deep-clones every function body, so rebuilding
-    // it per budget would make the scan quadratic in that clone.
-    let g = crate::eval::globals(&core);
-    let mut cuts: Vec<usize> = Vec::new();
-    for budget in 1..=MAX_LINE_CUT_STEPS {
-        let mut out: Vec<u8> = Vec::new();
-        let mut input = std::io::Cursor::new(Vec::new());
-        let checkpoint =
-            crate::eval::run_suspending_in(&g, bundle.clone(), budget, &mut out, &mut input)
-                .map_err(Error::Runtime)?;
-        let lines = out.iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
-        while cuts.len() < lines {
-            cuts.push(budget);
-        }
-        if matches!(checkpoint, crate::eval::Checkpoint::Done(_)) {
-            break;
-        }
-    }
-    // Drop the last line's boundary: a cut there is a completed run.
-    cuts.pop();
-    Ok(cuts)
-}
-
-/// Resume a `kont` envelope against `src`, running the continuation to completion
-/// and streaming its suffix output to `out_sink`.
-///
-/// The envelope is decoded totally (any malformed or hostile bytes are rejected),
-/// then its bundle digest is checked against `src`'s freshly derived code identity:
-/// a snapshot captured against a different program is refused before a single step
-/// runs. The suffix output, following the suspend run's prefix, reproduces an
-/// uninterrupted run byte for byte.
-///
-/// # Errors
-/// Fails on a front-end error, a malformed envelope, a code-identity mismatch, or
-/// an evaluation fault after the resume point.
-pub fn resume_on(
-    src: &str,
-    roots: &[Root],
-    snapshot: &[u8],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
-    cfg: &Config,
-) -> Result<Option<i32>, Error> {
-    let kont = crate::eval::kont::decode_kont(snapshot)
-        .map_err(|e| Error::Runtime(format!("resume: malformed snapshot: {e}")))?;
-    let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
-    if kont.bundle != bundle {
-        return Err(Error::Runtime(format!(
-            "resume: code-identity mismatch: this snapshot was captured against a \
-             different program (snapshot bundle {}, this program {})",
-            kont.bundle, bundle
-        )));
-    }
-    let core = prepared_core(src, roots, cfg)?;
-    let run = crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::Runtime)?;
-    Ok(run.exit)
-}
-
-// The interpreter transcript for `src` on empty stdin: the reference oracle a
-// native backend's output must match, and the second oracle when MLIR is absent.
-#[cfg(feature = "native")]
-fn interp_transcript(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<u8>, Error> {
-    let mut out: Vec<u8> = Vec::new();
-    let mut input = std::io::Cursor::new(Vec::new());
-    interpret_io_on(src, roots, &mut out, &mut input, cfg)?;
-    Ok(out)
-}
-
-// The signed-index cross-check line for a root, or empty when no store, index, or
-// matching pointer is present. Read-only against the package index.
-#[cfg(feature = "native")]
-fn attest_index_line(root: &str, cfg: &Config) -> String {
-    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
-    let Ok(dst) = DiskTransport::open(&store_root) else {
-        return String::new();
-    };
-    let Ok(Some(artifact)) = dst.index_artifact() else {
-        return String::new();
-    };
-    let rows = parse_index(&artifact.body);
-    let Some(row) = rows.iter().find(|r| r.root == root) else {
-        return String::new();
-    };
-    let sig = match verify_signature(&artifact, &cfg.flags) {
-        Verdict::Valid { identity: Some(id) } => format!("valid ({id})"),
-        Verdict::Valid { identity: None } => "valid".to_string(),
-        Verdict::Unsigned => "unsigned (dev mode)".to_string(),
-        Verdict::Invalid(m) => format!("INVALID: {m}"),
-        Verdict::Unavailable(m) => format!("unverifiable: {m}"),
-    };
-    format!("  index: {}@{} signature {sig}\n", row.name, row.tag)
-}
-
-// The second, independent backend for attestation: MLIR native when the feature
-// and toolchain are present, otherwise the interpreter as the second oracle with
-// the limitation named.
-// The `Result` matters under the `mlir` feature (`build_mlir_on` and the
-// native run can fail); the fallback path is infallible, so clippy sees an
-// unnecessary wrap only in the default build.
-#[cfg(feature = "native")]
-#[allow(clippy::unnecessary_wraps)]
-fn attest_second(
-    src: &str,
-    roots: &[Root],
-    cfg: &Config,
-    tmp: &Path,
-    stem: &str,
-    interp: &[u8],
-) -> Result<(&'static str, Vec<u8>, Option<String>), Error> {
-    #[cfg(feature = "mlir")]
-    {
-        let has_tool = Command::new("mlir-translate")
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success());
-        if has_tool {
-            let bin = tmp.join(format!("{stem}_mlir"));
-            build_mlir_on(src, roots, &bin, cfg)?;
-            let out = run_native(&bin)?;
-            let _ = fs::remove_file(&bin);
-            return Ok(("MLIR", out, None));
-        }
-    }
-    let _ = (src, roots, cfg, tmp, stem);
-    Ok((
-        "interpreter",
-        interp.to_vec(),
-        Some(
-            "MLIR backend unavailable (build with --features mlir and install mlir-translate); \
-             the interpreter is the independent second oracle"
-                .to_string(),
-        ),
-    ))
-}
-
-/// Diverse double compilation: compile and run `src` through two independent
-/// backends and confirm their output is byte-identical, attested by the shared
-/// content hash (the whole-program namespace root).
-///
-/// This is Thompson's "Trusting Trust" defeated by construction and Wheeler's
-/// diverse double compilation, made a standing check rather than a heroic
-/// one-off: the same source, compiled two independent ways, must observably agree
-/// to the byte, and the content hash names the identity both compiled. When the
-/// MLIR toolchain is present the two backends are LLVM and MLIR; otherwise the
-/// interpreter is the independent second oracle and the limitation is printed. If
-/// a signed-index pointer exists for the root, its name, tag, and signature
-/// verdict are cross-checked and reported.
-///
-/// # Errors
-/// A front-end error, a codegen or link failure, or a divergence between the
-/// backends (the attestation's whole point is that this never happens).
-#[cfg(feature = "native")]
-pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
-    let identity = namespace_identity(src, roots)?;
-    let root = identity.root;
-    let interp = interp_transcript(src, roots, cfg)?;
-
-    let tmp = std::env::temp_dir();
-    let stem = format!("prism_attest_{}", std::process::id());
-    let llvm_bin = tmp.join(format!("{stem}_llvm"));
-    build_on(src, roots, &llvm_bin, cfg)?;
-    let llvm_out = run_native(&llvm_bin)?;
-    let _ = fs::remove_file(&llvm_bin);
-
-    let (second_name, second_out, limitation) =
-        attest_second(src, roots, cfg, &tmp, &stem, &interp)?;
-
-    // The two backends must agree byte for byte; the interpreter oracle backstops
-    // both, so a three-way agreement is what the green line asserts.
-    if llvm_out != second_out || llvm_out != interp {
-        return Err(Error::Codegen(format!(
-            "attest: backends diverged for root {root}; LLVM and {second_name} are not \
-             byte-identical (this is the invariant the attestation exists to catch)"
-        )));
-    }
-
-    let mut out = format!("attested: {root} identical across LLVM, {second_name}\n");
-    if let Some(l) = limitation {
-        let _ = writeln!(out, "  note: {l}");
-    }
-    out.push_str(&attest_index_line(&root, cfg));
-    out.push_str(&attest_cert_line(&root, second_name, cfg));
-    Ok(out)
-}
-
-// Emit (or find) the parity certificate for a successfully attested root, and
-// report which. Never required for correctness: a store that cannot be opened or written
-// simply yields no line, so a certificate failure never fails the attestation the
-// byte-identity check already established.
-#[cfg(feature = "native")]
-fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
-    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
-    let Ok(store) = store::Store::open_or_create(&store_root) else {
-        return String::new();
-    };
-    let cert = parity_cert(root, (BACKEND_LLVM, second_name));
-    match emit(&store, &cert) {
-        Ok(store::Written::New) => {
-            format!(
-                "  cert: emitted {CLAIM_PARITY_PASSED_NAME}@{}\n",
-                cert.scheme
-            )
-        }
-        Ok(store::Written::Hit) => {
-            format!(
-                "  cert: reused existing {CLAIM_PARITY_PASSED_NAME}@{}\n",
-                cert.scheme
-            )
-        }
-        Err(_) => String::new(),
-    }
+) -> Result<(Program<CorePhase>, Checked, ElaboratedCore), Error> {
+    // The `IDENTITY` preset consults no `cfg` field (no retarget, no optimizer),
+    // so a default config keeps this a pure function of source and roots.
+    run_front(src, roots, &Config::default(), FrontOpts::IDENTITY).map(Front::into_elaborated)
 }
 
 // Shared front-end and rc-balance ICE check for the interpreter entries. The
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
-fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<Core, Error> {
+fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<ElaboratedCore, Error> {
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
     let (lowered, _, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
@@ -1532,7 +604,7 @@ fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<Core, Error>
 }
 
 // The effect-lowered core, its constructor table, and any fallback warning.
-type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
+type Lowered = (LoweredCore, BTreeMap<String, CtorInfo>, Option<String>);
 
 // Effect-lower `core`, then run the late (post-lowering) optimization passes on
 // the result. The late stage is where the simplifier lives: lowering has already
@@ -1540,34 +612,57 @@ type Lowered = (Core, BTreeMap<String, CtorInfo>, Option<String>);
 // path that produces or shows the lowered native core goes through this, so the
 // compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
 fn lower_opt(
-    core: &Core,
+    core: &ElaboratedCore,
     ctors: &BTreeMap<String, CtorInfo>,
     grades: &OpGrades,
     cfg: &Config,
 ) -> Result<Lowered, Error> {
-    let (lowered, ctors, warning) = lower_effects(core, ctors, &cfg.flags, grades)?;
+    let (lowered, ctors, warning) = timing::timed_res(
+        cfg.timing.as_ref(),
+        timing::Phase::LowerEffects,
+        "",
+        || lower_effects(core, ctors, &cfg.flags, grades),
+        |_| timing::RowExtras::default(),
+    )?;
     let empty = std::collections::BTreeSet::new();
-    let (lowered, _stats) = cfg.passes.as_ref().map_or_else(
+    let (lowered, _stats) = timing::timed(
+        cfg.timing.as_ref(),
+        timing::Phase::OptLate,
+        "",
         || {
-            run_opt(
-                &lowered,
-                &empty,
-                cfg.opt,
-                PassStage::Late,
-                &cfg.disabled,
-                &cfg.flags,
+            cfg.passes.as_ref().map_or_else(
+                || {
+                    run_opt(
+                        &lowered,
+                        &empty,
+                        cfg.opt,
+                        PassStage::Late,
+                        &cfg.disabled,
+                        &cfg.flags,
+                    )
+                },
+                |spec| {
+                    run_opt_spec(
+                        &lowered,
+                        &empty,
+                        &spec.late,
+                        PassStage::Late,
+                        &cfg.disabled,
+                        &cfg.flags,
+                    )
+                },
             )
         },
-        |spec| run_opt_spec(&lowered, &empty, &spec.late, &cfg.disabled, &cfg.flags),
+        |_| timing::RowExtras::default(),
     );
-    Ok((lowered, ctors, warning))
+    Ok((LoweredCore(lowered), ctors, warning))
 }
 
 fn lowered_core(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>, Sigs), Error> {
+) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (program, checked, core) = frontend(src, roots, cfg)?;
     let sigs = borrow_sigs(&program);
     let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
@@ -1668,7 +763,7 @@ pub fn core_of(src: &str) -> Result<Core, Error> {
         &default_roots(Path::new(".")),
         &Config::from_env(),
     )?;
-    Ok(core)
+    Ok(core.0)
 }
 
 /// Like [`core_ir`], but `full` already carries the prelude (as the REPL's
@@ -1806,7 +901,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 // snippet's IR dump.
 fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")), &Config::from_env())?;
-    Ok(core.fns.into_iter().map(|f| f.name).collect())
+    Ok(core.0.fns.into_iter().map(|f| f.name).collect())
 }
 
 // Drop the prelude's functions from a core dump, leaving only the snippet's own
@@ -1821,16 +916,19 @@ fn strip_prelude(core: Core, prelude: &std::collections::HashSet<Sym>) -> Core {
             .collect(),
     }
 }
-
 #[cfg(feature = "native")]
 fn compiled(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Checked, Core, BTreeMap<String, CtorInfo>), Error> {
+) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>), Error> {
     let (checked, lowered, ctors, sigs) = lowered_core(src, roots, cfg)?;
     residual_effects(&lowered).map_err(Error::Ice)?;
-    Ok((checked, reuse(&insert_rc(&lowered, &sigs)), ctors))
+    Ok((
+        checked,
+        LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
+        ctors,
+    ))
 }
 
 /// # Errors
@@ -1892,9 +990,29 @@ pub fn build_on_report(
     require_main(&checked)?;
     let native_kont_table = native_kont_table_for(src, roots, cfg)?;
     let bc = out.with_extension("bc");
-    emit_llvm_bc_with_native_kont_table(&core, &ctors, &native_kont_table, &bc)
-        .map_err(Error::Codegen)?;
-    cc_link(&bc, out, cfg, RuntimeProfile::NativeBackend)?;
+    timing::timed_res(
+        cfg.timing.as_ref(),
+        timing::Phase::EmitLlvm,
+        "",
+        || {
+            emit_llvm_bc_with_native_kont_table(
+                &core,
+                &ctors,
+                &native_kont_table,
+                cfg.flags.native_kont_frames,
+                &bc,
+            )
+            .map_err(Error::Codegen)
+        },
+        |()| timing::llvm_artifact(&bc),
+    )?;
+    timing::timed_res(
+        cfg.timing.as_ref(),
+        timing::Phase::CcLink,
+        "",
+        || cc_link(&bc, out, cfg, RuntimeProfile::NativeBackend),
+        |()| timing::RowExtras::default(),
+    )?;
     // A successful build populates the store when the knob is on. Re-elaboration
     // is cheap relative to codegen and only happens under the opt-in flag; the
     // store is a cache, so a failure here would not invalidate the build (but is
@@ -1916,7 +1034,13 @@ pub fn emit_ir(src: &str) -> Result<String, Error> {
     let (_, core, ctors) = compiled(src, &roots, &cfg)?;
     let native_kont_table =
         native_kont_table_for_with_rows(src, &roots, &cfg, NativeKontIdentityRows::Portable)?;
-    emit_llvm_with_native_kont_table(&core, &ctors, &native_kont_table).map_err(Error::Codegen)
+    emit_llvm_with_native_kont_table(
+        &core,
+        &ctors,
+        &native_kont_table,
+        cfg.flags.native_kont_frames,
+    )
+    .map_err(Error::Codegen)
 }
 
 /// # Errors
@@ -2049,7 +1173,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     section(&mut out, "types", types_section(&checked).trim_end());
 
     let core = match elaborate(&program, &checked) {
-        Ok(c) => c,
+        Ok(c) => ElaboratedCore(c),
         Err(e) => {
             section(&mut out, "core (cbpv)", &render(e));
             return out;
@@ -2081,9 +1205,10 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
             match native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
                 .and_then(|native_kont_table| {
                     emit_llvm_with_native_kont_table(
-                        &reuse(&insert_rc(&lowered, &sigs)),
+                        &LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
                         &ctors,
                         &native_kont_table,
+                        cfg.flags.native_kont_frames,
                     )
                     .map_err(Error::Codegen)
                 }) {
@@ -2108,20 +1233,6 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     out
 }
 
-/// # Errors
-/// Fails on front-end errors or an unknown phase name.
-pub fn dump(phase: &str, src: &str) -> Result<String, Error> {
-    dump_at(phase, src, Path::new("."))
-}
-
-/// Like [`dump`], resolving any module imports relative to `base`.
-///
-/// # Errors
-/// Fails on front-end errors or an unknown phase name.
-pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
-    dump_on(phase, src, &default_roots(base), &Config::from_env())
-}
-
 /// The structural shape digest of every datatype and effect a source defines
 /// (prelude included), keyed by name, full-length.
 ///
@@ -2143,7 +1254,7 @@ pub fn shape_digests_of(src: &str) -> Result<BTreeMap<String, String>, Error> {
 // fip/fbip annotation, and the borrow mask. The last two affect
 // codegen (the mask drives `insert_rc`, fip pins the loop lowering), so a change
 // to either must change the hash even when the Core body is byte-identical.
-fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, String> {
+pub(crate) fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, String> {
     checked
         .decls
         .iter()
@@ -2169,263 +1280,22 @@ fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap<Sym, Strin
         .collect()
 }
 
-/// Like [`dump_at`], but against an explicit module search path.
-///
-/// # Errors
-/// Fails on front-end errors or an unknown phase name.
-pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
-    match phase {
-        "tokens" => {
-            let (t, _) = lex(src)?;
-            Ok(t.iter()
-                .map(|(_, t, _)| format!("{t:?}"))
-                .collect::<Vec<_>>()
-                .join(" "))
-        }
-        "ast" => Ok(format!("{:#?}", parse(src)?.program)),
-        "types" => Ok(types_section(&check_on(src, roots)?)),
-        "core" => {
-            let (_, _, core) = frontend(src, roots, cfg)?;
-            Ok(pp_core_pretty(&strip_prelude(core, &prelude_fn_names()?)))
-        }
-        "core-json" => {
-            let (_, _, core) = frontend(src, roots, cfg)?;
-            Ok(crate::core::core_to_json(&core))
-        }
-        "core-hash" => {
-            let (program, checked, core) = elaborated(src, roots)?;
-            let hashes = hash_program(
-                &core,
-                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-            );
-            let mut names: Vec<&Sym> = hashes.keys().collect();
-            names.sort_by_key(|s| s.as_str());
-            let mut out = String::new();
-            for name in names {
-                writeln!(
-                    out,
-                    "{}  {}",
-                    &hashes[name][..crate::core::HASH_PREFIX_HEX],
-                    name.as_str()
-                )
-                .unwrap();
-            }
-            Ok(out)
-        }
-        // The native kont reverse-table precursor: the deterministic map a
-        // native suspendable build must emit so a saved native frame can name its
-        // code by definition hash rather than by a raw function pointer.
-        "native-kont-table" => {
-            #[cfg(feature = "native")]
-            {
-                let (program, checked, core) = elaborated(src, roots)?;
-                let hashes = hash_program(
-                    &core,
-                    &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-                );
-                native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
-            }
-            #[cfg(not(feature = "native"))]
-            {
-                Err(Error::Codegen(
-                    "dump native-kont-table requires the native feature".to_string(),
-                ))
-            }
-        }
-        "native-kont-state-map" => {
-            #[cfg(feature = "native")]
-            {
-                let (program, checked, core) = elaborated(src, roots)?;
-                let hashes = hash_program(
-                    &core,
-                    &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-                );
-                let table =
-                    native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)?;
-                Ok(native_kont_state_map(&core, &table))
-            }
-            #[cfg(not(feature = "native"))]
-            {
-                Err(Error::Codegen(
-                    "dump native-kont-state-map requires the native feature".to_string(),
-                ))
-            }
-        }
-        // Structural shape digests of the file's datatypes and effects (prelude
-        // included, like `core-hash` shows prelude fns). One line per declaration.
-        "shape" => {
-            let (program, _, _) = frontend(src, roots, cfg)?;
-            let shapes = crate::core::shape_digests(&program.types, &program.effects);
-            let mut out = String::new();
-            for (name, h) in &shapes {
-                writeln!(out, "{}  {name}", &h[..crate::core::HASH_PREFIX_HEX]).unwrap();
-            }
-            Ok(out)
-        }
-        // Structural duplicates: definitions that hash identically are the same
-        // behavior under different names (a user `fact` and the prelude
-        // `factorial`, say). One line per group of clones, `<hash>  a, b, c`.
-        "dupes" => {
-            let (program, checked, core) = elaborated(src, roots)?;
-            let hashes = hash_program(
-                &core,
-                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-            );
-            let mut by_hash: BTreeMap<&str, Vec<&Sym>> = BTreeMap::new();
-            for (sym, h) in &hashes {
-                by_hash.entry(h.as_str()).or_default().push(sym);
-            }
-            let mut groups: Vec<(&&str, &Vec<&Sym>)> =
-                by_hash.iter().filter(|(_, v)| v.len() > 1).collect();
-            groups.sort_by_key(|(_, v)| v.iter().map(|s| s.as_str()).min().unwrap_or(""));
-            let mut out = String::new();
-            for (h, members) in groups {
-                let mut names: Vec<&str> = members.iter().map(|s| s.as_str()).collect();
-                names.sort_unstable();
-                writeln!(
-                    out,
-                    "{}  {}",
-                    &h[..crate::core::HASH_PREFIX_HEX],
-                    names.join(", ")
-                )
-                .unwrap();
-            }
-            if out.is_empty() {
-                out.push_str("no structural duplicates\n");
-            }
-            Ok(out)
-        }
-        // The two-layer store shape as a read-only export, wrapped in the one wire
-        // envelope: a header of the hash scheme tag, the kind (`def`,
-        // this being the store's definition layer), and the contract digest (the
-        // namespace's own Merkle root), plus the export layout version and the
-        // producing compiler version, so a persisted export is self-describing
-        // about its format and its content address from the first bytes. Each
-        // definition carries its content hash, the anonymous layer (the direct
-        // dependency hashes, names erased, which is what the hash actually commits
-        // to), and the metadata layer (the human name and inferred type). Docs and
-        // spans belong to the metadata layer too and join it when the on-disk
-        // store lands.
-        "namespace" => {
-            let (program, checked, core) = elaborated(src, roots)?;
-            let hashes = hash_program(
-                &core,
-                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-            );
-            let graph = DepGraph::of(&core);
-            let types: BTreeMap<&str, String> = checked
-                .decls
-                .iter()
-                .map(|d| (d.name.as_str(), d.ty.show()))
-                .collect();
-            let mut names: Vec<&Sym> = hashes.keys().collect();
-            names.sort_by_key(|s| s.as_str());
-            let entries: Vec<serde_json::Value> = names
-                .iter()
-                .map(|name| {
-                    let mut deps: Vec<&str> = graph
-                        .direct_deps(**name)
-                        .iter()
-                        .filter_map(|d| hashes.get(d).map(String::as_str))
-                        .collect();
-                    deps.sort_unstable();
-                    serde_json::json!({
-                        "hash": hashes[name],
-                        "meta": { "name": name.as_str(), "type": types.get(name.as_str()) },
-                        "anon": { "deps": deps },
-                    })
-                })
-                .collect();
-            // The one envelope header: scheme tag, kind, contract
-            // digest, then the body. This export is the store's `def` layer, so
-            // its kind is `def`; its contract digest is the namespace's own root,
-            // a Merkle fold over the sorted `name -> content-hash` entries (the
-            // same fold `stdlib_hash` uses), so the digest moves under any content
-            // change and is checkable before the body is read.
-            let contract = namespace_root_of(&hashes);
-            let doc = serde_json::json!({
-                "envelope": {
-                    "scheme": HASH_SCHEME,
-                    "kind": WireKind::Def.tag(),
-                    "contract": contract,
-                    "format": NAMESPACE_FORMAT,
-                    "compiler": env!("CARGO_PKG_VERSION"),
-                },
-                "defs": entries,
-            });
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
-        }
-        // The whole standard library's fingerprint. Ignores `src`/`roots`: the
-        // stdlib is embedded, so the file argument is only a CLI placeholder.
-        "stdlib-hash" => {
-            let h = stdlib_hash()?;
-            let mut out = String::new();
-            writeln!(out, "scheme    {}", h.scheme).unwrap();
-            writeln!(out, "version   {}", h.version).unwrap();
-            writeln!(out, "root      {}", h.root).unwrap();
-            let mut defs: Vec<&Sym> = h.defs.keys().collect();
-            defs.sort_by_key(|s| s.as_str());
-            for name in defs {
-                writeln!(
-                    out,
-                    "def   {}  {}",
-                    &h.defs[name][..crate::core::HASH_PREFIX_HEX],
-                    name.as_str()
-                )
-                .unwrap();
-            }
-            for (name, dg) in &h.shapes {
-                writeln!(out, "shape {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
-            }
-            for (name, dg) in &h.classes {
-                writeln!(out, "class {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
-            }
-            for (name, dg) in &h.instances {
-                writeln!(out, "inst  {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
-            }
-            Ok(out)
-        }
-        "fbip" => {
-            let (program, _, core) = frontend(src, roots, cfg)?;
-            let sigs = borrow_sigs(&program);
-            Ok(pp_core_pretty(&reuse(&insert_rc(&core, &sigs))))
-        }
-        "lowered" => {
-            let (_, lowered, _, _) = lowered_core(src, roots, cfg)?;
-            Ok(pp_core_pretty(&lowered))
-        }
-        // The effect-lowering tier this program's handlers lower to (`pure`,
-        // `evidence`, `state-fusion`, `local-partial`, `selective-free-monad`,
-        // `whole-program-free-monad`). A pure cost classification, never
-        // observable in output; `tests/perf_gate.rs` pins it per corpus program
-        // so a silent fusion-to-free-monad collapse surfaces as a reviewable diff.
-        "tier" => {
-            let (_, checked, core) = frontend(src, roots, cfg)?;
-            Ok(format!(
-                "{}\n",
-                crate::core::effect_strategy(
-                    &core,
-                    &checked.ctors,
-                    &cfg.flags,
-                    &checked.op_grades()
-                )?
-            ))
-        }
-        #[cfg(feature = "native")]
-        "llvm" => {
-            let (_, core, ctors) = compiled(src, roots, cfg)?;
-            let native_kont_table =
-                native_kont_table_for_with_rows(src, roots, cfg, NativeKontIdentityRows::Portable)?;
-            emit_llvm_with_native_kont_table(&core, &ctors, &native_kont_table)
-                .map_err(Error::Codegen)
-        }
-        #[cfg(feature = "mlir")]
-        "mlir" => {
-            let (_, core, ctors) = compiled(src, roots, cfg)?;
-            emit_mlir(&core, &ctors).map_err(Error::Codegen)
-        }
-        other => Err(Error::Codegen(format!("unknown phase {other}"))),
-    }
+// The whole-program identity of pre-optimizer elaborated Core: the same
+// canonical regime the store commit and the `core-hash`/`namespace` dumps use
+// (per-definition Merkle hashes folded into one root). Used only by the
+// `--time-compile` `elaborate` row as its output artifact key, so it is computed
+// only when the timing sink is installed.
+pub(crate) fn core_root_digest(
+    program: &Program<CorePhase>,
+    checked: &Checked,
+    core: &Core,
+) -> String {
+    let meta = hash_meta(checked, &borrow_sigs(program), &fip_annots(program));
+    let entries: BTreeMap<String, String> = hash_program(core, &meta)
+        .into_iter()
+        .map(|(sym, hash)| (sym.as_str().to_string(), hash))
+        .collect();
+    hash_root(&entries)
 }
 
 /// Answer a dependency-graph query over a program (prelude included), the
@@ -2520,7 +1390,7 @@ fn program_hashes(src: &str, roots: &[Root]) -> Result<Revision, Error> {
 // inflate the unchanged count.
 fn prelude_hash_names(roots: &[Root]) -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = elaborated(PRELUDE, roots)?;
-    Ok(core.fns.into_iter().map(|f| f.name).collect())
+    Ok(core.0.fns.into_iter().map(|f| f.name).collect())
 }
 
 /// A behavior diff between two revisions of a source.
@@ -2546,12 +1416,66 @@ fn prelude_hash_names(roots: &[Root]) -> Result<std::collections::HashSet<Sym>, 
 ///
 /// # Errors
 /// Fails on any front-end error in either revision.
-pub fn diff_on(
+/// One definition whose behavior hash moved between two revisions.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffChangedDef {
+    pub name: String,
+    pub old: String,
+    pub new: String,
+}
+
+/// One definition named by a hash on one side only, or held-but-respelled.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiffNamedDef {
+    pub name: String,
+    pub hash: String,
+}
+
+/// The structured behavior diff between two source revisions.
+///
+/// Carries what moved behaviorally (deep hash), what was added or removed,
+/// which dependents sit in the edited set's cone, and, the classification only
+/// source text can see, which definitions changed spelling while the
+/// canonicalized hash held.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceDiff {
+    pub format: &'static str,
+    pub behavioral: Vec<DiffChangedDef>,
+    pub added: Vec<DiffNamedDef>,
+    pub removed: Vec<DiffNamedDef>,
+    pub text_only: Vec<DiffNamedDef>,
+    pub dependents: Vec<String>,
+    pub unchanged: usize,
+}
+
+/// The format tag `SourceDiff` serializes under.
+pub const SOURCE_DIFF_FORMAT: &str = "prism-source-diff-v1";
+
+// Per-definition source slices, for the text-only classification: bare name to
+// the trimmed span text of each top-level function. Parse-only, no checking.
+fn decl_slices(src: &str) -> Result<std::collections::BTreeMap<String, String>, Error> {
+    let parsed = parse(src)?;
+    Ok(parsed
+        .program
+        .fns
+        .iter()
+        .filter_map(|d| {
+            let text = src.get(d.span.start..d.span.end)?;
+            Some((d.name.clone(), text.trim().to_string()))
+        })
+        .collect())
+}
+
+/// The structured diff behind `prism diff` over two source revisions.
+///
+/// # Errors
+/// Fails when either revision fails the frontend.
+pub fn source_diff_on(
     old_src: &str,
     new_src: &str,
     roots: &[Root],
     _cfg: &Config,
-) -> Result<String, Error> {
+) -> Result<SourceDiff, Error> {
     let prelude = prelude_hash_names(roots)?;
     let old = program_hashes(old_src, roots)?;
     let new = program_hashes(new_src, roots)?;
@@ -2602,33 +1526,125 @@ pub fn diff_on(
     added.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     removed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
 
+    // The classification hashes cannot see: a definition whose canonicalized
+    // hashes held on both sides but whose written text moved (a rename, a
+    // reformat, a comment). Only definitions visible in both parses classify;
+    // canonical (module-qualified) names match a parsed bare name by tail.
+    let old_text = decl_slices(old_src)?;
+    let new_text = decl_slices(new_src)?;
+    let bare = |s: &str| s.rsplit_once('.').map_or(s, |(_, t)| t).to_string();
+    let mut text_only: Vec<DiffNamedDef> = Vec::new();
+    for sym in old_names.intersection(&new_names) {
+        if old.deep[sym] != new.deep[sym] || old.shallow[sym] != new.shallow[sym] {
+            continue;
+        }
+        let key = bare(sym.as_str());
+        if let (Some(a), Some(b)) = (old_text.get(&key), new_text.get(&key)) {
+            if a != b {
+                text_only.push(DiffNamedDef {
+                    name: sym.as_str().to_string(),
+                    hash: new.deep[sym].clone(),
+                });
+            }
+        }
+    }
+    text_only.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut dependents: Vec<String> = cone.iter().map(|s| s.as_str().to_string()).collect();
+    dependents.sort_unstable();
+
+    Ok(SourceDiff {
+        format: SOURCE_DIFF_FORMAT,
+        behavioral: changed
+            .into_iter()
+            .map(|(s, o, n)| DiffChangedDef {
+                name: s.as_str().to_string(),
+                old: o,
+                new: n,
+            })
+            .collect(),
+        added: added
+            .into_iter()
+            .map(|(s, h)| DiffNamedDef {
+                name: s.as_str().to_string(),
+                hash: h,
+            })
+            .collect(),
+        removed: removed
+            .into_iter()
+            .map(|(s, h)| DiffNamedDef {
+                name: s.as_str().to_string(),
+                hash: h,
+            })
+            .collect(),
+        text_only,
+        dependents,
+        unchanged,
+    })
+}
+
+/// The human behavior diff between two source revisions, rendered from
+/// [`source_diff_on`]'s structured result.
+///
+/// # Errors
+/// Fails when either revision fails the frontend.
+pub fn diff_on(
+    old_src: &str,
+    new_src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<String, Error> {
+    let d = source_diff_on(old_src, new_src, roots, cfg)?;
+
     let short = |h: &str| h[..crate::core::HASH_PREFIX_HEX].to_string();
     let mut out = String::new();
     writeln!(
         out,
-        "diff: {} changed, {} added, {} removed, {unchanged} unchanged",
-        changed.len(),
-        added.len(),
-        removed.len(),
+        "diff: {} changed, {} added, {} removed, {} unchanged",
+        d.behavioral.len(),
+        d.added.len(),
+        d.removed.len(),
+        d.unchanged,
     )
     .unwrap();
-    for (sym, oh, nh) in &changed {
-        writeln!(out, "  ~ {}  {} -> {}", sym.as_str(), short(oh), short(nh)).unwrap();
+    for c in &d.behavioral {
+        writeln!(
+            out,
+            "  ~ {}  {} -> {}",
+            c.name,
+            short(&c.old),
+            short(&c.new)
+        )
+        .unwrap();
     }
-    for (sym, nh) in &added {
-        writeln!(out, "  + {}  {}", sym.as_str(), short(nh)).unwrap();
+    for a in &d.added {
+        writeln!(out, "  + {}  {}", a.name, short(&a.hash)).unwrap();
     }
-    for (sym, oh) in &removed {
-        writeln!(out, "  - {}  {}", sym.as_str(), short(oh)).unwrap();
+    for r in &d.removed {
+        writeln!(out, "  - {}  {}", r.name, short(&r.hash)).unwrap();
     }
-    if cone.is_empty() {
+    // Spelling moved, behavior held: named so a pure refactor reads as exactly
+    // that, zero behavioral changes with the text movement accounted for.
+    if !d.text_only.is_empty() {
+        let names: Vec<&str> = d.text_only.iter().map(|t| t.name.as_str()).collect();
+        writeln!(
+            out,
+            "text-only: {} respelled, behavior held ({})",
+            names.len(),
+            names.join(", ")
+        )
+        .unwrap();
+    }
+    if d.dependents.is_empty() {
         writeln!(out, "cone: 0 affected").unwrap();
     } else {
-        // Sort by name: `cone` is a `BTreeSet<Sym>`, whose order is intern id, not
-        // lexicographic, so a stable human listing must sort the strings.
-        let mut names: Vec<&str> = cone.iter().map(|s| s.as_str()).collect();
-        names.sort_unstable();
-        writeln!(out, "cone: {} affected ({})", names.len(), names.join(", ")).unwrap();
+        writeln!(
+            out,
+            "cone: {} affected ({})",
+            d.dependents.len(),
+            d.dependents.join(", ")
+        )
+        .unwrap();
     }
     Ok(out)
 }
@@ -2679,13 +1695,15 @@ fn section(out: &mut String, title: &str, body: &str) {
 mod envelope_tests {
     #[cfg(feature = "native")]
     use std::collections::BTreeMap;
+    #[cfg(feature = "native")]
+    use std::path::Path;
 
     #[cfg(feature = "native")]
     use crate::resolve::{Root, SourceBundleIdentity};
 
-    use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
     #[cfg(feature = "native")]
-    use super::{native_kont_table_for, Config, HASH_SCHEME};
+    use super::{default_roots, dump_on, native_kont_table_for, Config, HASH_SCHEME};
+    use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
 
     const STORE_PKG_NAME: &str = "StorePkg";
     #[cfg(feature = "native")]
@@ -2825,10 +1843,37 @@ mod envelope_tests {
         );
     }
 
+    // The other side of the instrumentation gate: under the DEFAULT flags the
+    // metadata table must still be embedded while the enter/arg/leave calls and
+    // shadow-name constants must be absent, so neither half of the opt-in can
+    // silently flip.
+    #[cfg(feature = "native")]
+    #[test]
+    fn llvm_dump_default_has_table_without_frame_instrumentation() {
+        let out = dump("llvm", "fn main() = 1\n").expect("llvm dump");
+        assert!(
+            out.contains("@prism_native_kont_table = constant"),
+            "default LLVM IR embeds the native kont table global:\n{out}"
+        );
+        assert!(
+            !out.contains("@prism_native_kont_enter") && !out.contains(".kont.shadow."),
+            "default LLVM IR must not carry opt-in frame instrumentation:\n{out}"
+        );
+    }
+
     #[cfg(feature = "native")]
     #[test]
     fn llvm_dump_embeds_native_kont_table_global() {
-        let out = dump("llvm", "fn main() = 1\n").expect("llvm dump");
+        // The native kont metadata globals are always emitted, but the enter/arg/leave
+        // ABI instrumentation calls are gated behind `native_kont_frames`. Enable that
+        // flag (leaving every other flag at the ambient default) so this dump exercises
+        // both the metadata table and the instrumented lowering under one assertion set.
+        let mut cfg = Config::from_env();
+        cfg.flags.native_kont_frames = true;
+        let roots = default_roots(Path::new("."));
+        let llvm = |src: &str| dump_on("llvm", src, &roots, &cfg).expect("llvm dump");
+
+        let out = llvm("fn main() = 1\n");
         assert!(
             out.contains("@prism_native_kont_table = constant"),
             "LLVM IR embeds the native kont table global:\n{out}"
@@ -2840,11 +1885,9 @@ mod envelope_tests {
                 && out.contains("slots abi-word[]"),
             "LLVM IR embeds the native kont state-map:\n{out}"
         );
-        let out = dump(
-            "llvm",
+        let out = llvm(
             "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
-        )
-        .expect("llvm dump");
+        );
         assert!(
             out.contains("state prism_count ")
                 && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),

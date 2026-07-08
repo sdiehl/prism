@@ -1,0 +1,15 @@
+import Wire (..)
+
+-- A derived record whose Serialize instance folds its three fields through the
+-- buffer builder; a list of these drives the container encoder, so the encode
+-- path is the derived per-field fold nested inside the list fold, exactly the
+-- shape a right-nested `wire_cat` regression would turn quadratic.
+type Rec = Rec(Int, Int, Bool) deriving (Serialize)
+
+fn recs(n : Int, acc : List(Rec)) : List(Rec) =
+  if n == 0 then
+    acc
+  else
+    recs(n - 1, Cons(Rec(n, n * 2, true), acc))
+
+fn main() : !{IO} Unit = println(show_int(wire_len(encode(recs(__N__, Nil)))))

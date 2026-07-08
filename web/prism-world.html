@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism World</title>
+    <meta name="description" content="A shared cellular universe where state and law are both content-addressed values. The law is Prism run through the WebAssembly interpreter; every grid carries a state hash and every law its Core content hash. History is a branchable execution prefix, synced across same-origin tabs by hash." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="world-body">
+    <header>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag">world</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../gallery/">Gallery</a>
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="../repl/">REPL</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Docs</a>
+      </div>
+    </header>
+    <main class="world-main">
+      <section class="world-hero">
+        <h2><b>Prism World</b>, a universe you can verify</h2>
+        <p class="world-lede">
+          One shared cellular universe. Its <b>state</b> is an integer grid with a content hash; its <b>law</b>
+          is Prism source run through the WebAssembly interpreter, identified by the compiler's own Core hash.
+          History is a branchable execution prefix. Open this page in a second tab: with no server between
+          them, both tabs compute the same state hash for the same seed, law, and tick.
+        </p>
+        <p class="world-credit">
+          The Autoverse / Copies / Dust / Garden framing is an homage to Greg Egan's <i>Permutation City</i>.
+          It is vocabulary, not a claim: every panel below is either backed by something that actually ran on
+          your machine, or is labelled reserved / unchecked.
+        </p>
+      </section>
+
+      <!-- Always visible: the five hashes that name this moment of the universe. -->
+      <div class="hashbar" aria-label="Live universe identity">
+        <div class="hash-cell">
+          <span class="hash-key">State hash</span>
+          <span class="hash-val accent" id="hState">-</span>
+        </div>
+        <div class="hash-cell">
+          <span class="hash-key">Law hash</span>
+          <span class="hash-val" id="hLaw">-</span>
+        </div>
+        <div class="hash-cell">
+          <span class="hash-key">Tick</span>
+          <span class="hash-val" id="hTick">-</span>
+        </div>
+        <div class="hash-cell">
+          <span class="hash-key">Branch</span>
+          <span class="hash-val" id="hBranch">-</span>
+        </div>
+        <div class="hash-cell">
+          <span class="hash-key">Seed hash</span>
+          <span class="hash-val" id="hSeed">-</span>
+        </div>
+      </div>
+
+      <!-- Autoverse: the real, live universe with its timeline machinery. -->
+      <section class="panel">
+        <div class="panel-head">
+          <h3 class="panel-title">Autoverse</h3>
+          <span class="panel-sub">the shared cellular universe, evolving through the Prism interpreter</span>
+          <span class="panel-badge">live</span>
+        </div>
+        <div class="autoverse">
+          <div class="stage">
+            <canvas id="grid" aria-label="The cellular universe"></canvas>
+            <div class="laws">
+              <span class="laws-label">Law:</span>
+              <button class="law-btn is-active" type="button" data-law="conway" aria-pressed="true">Conway B3/S23</button>
+              <button class="law-btn" type="button" data-law="highlife" aria-pressed="false">HighLife B36/S23</button>
+            </div>
+            <div class="controls-row">
+              <button class="btn" type="button" id="play">Play</button>
+              <input class="scrub" type="range" id="scrub" min="0" max="40" value="0" step="1" aria-label="Scrub the timeline" />
+            </div>
+            <div class="controls-row">
+              <span class="laws-label">Seed:</span>
+              <select class="sel" id="seedSel" aria-label="Seed pattern"></select>
+            </div>
+            <div class="fork-row">
+              <button class="btn primary" type="button" id="fork">Fork here</button>
+              <span class="laws-label">under</span>
+              <select class="sel" id="forkLaw" aria-label="Fork law"></select>
+              <label class="check"><input type="checkbox" id="perturb" /> poke one cell</label>
+              <button class="btn" type="button" id="reset">Reset branches</button>
+              <button class="btn" type="button" id="export" title="Download the whole timeline as a lineage graph (.plineage)">Export lineage</button>
+            </div>
+            <div class="status" id="status"></div>
+          </div>
+          <div class="side">
+            <div class="agree" id="agree">1 tab (open another to compare)</div>
+            <div class="branches" id="branches"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- The two laws, each named by the compiler's content hash of its step function. -->
+      <section class="panel">
+        <div class="panel-head">
+          <h3 class="panel-title">Laws are values</h3>
+          <span class="panel-sub">each rule's identity is the Core content hash of its Prism step function</span>
+        </div>
+        <div class="lawids">
+          <span class="lawid"><b>Conway</b> B3/S23 <code id="lawhash-conway">-</code></span>
+          <span class="lawid"><b>HighLife</b> B36/S23 <code id="lawhash-highlife">-</code></span>
+        </div>
+      </section>
+
+      <!-- The reserved end-state layout: honest locked panels for the horizon. -->
+      <section class="horizon">
+        <div class="locked">
+          <div class="locked-head">
+            <span class="locked-title">Copies</span>
+            <span class="locked-tag">reserved</span>
+          </div>
+          <p class="locked-body">
+            Continuations as movable values. Same-origin continuation teleport is real in its own
+            <a href="../teleport/">resident</a>; stranger-to-stranger Copies need a trust boundary this page does
+            not claim. Not wired here.
+          </p>
+        </div>
+        <div class="locked">
+          <div class="locked-head">
+            <span class="locked-title">Dust</span>
+            <span class="locked-tag">unchecked</span>
+          </div>
+          <p class="locked-body">
+            Chaos and replay agreement under perturbed schedules and inputs, backed by verifiable certificates.
+            No replay-agreement certificate is minted on this page. See the
+            <a href="../chaos/">chaos counter</a> for the same-schedule demonstration.
+          </p>
+        </div>
+        <div class="locked">
+          <div class="locked-head">
+            <span class="locked-title">Garden</span>
+            <span class="locked-tag">reserved</span>
+          </div>
+          <p class="locked-body">
+            The planet-wide execution-prefix DAG: every run of every program, hash-deduplicated, enumerable and
+            searchable. This universe's local timeline branches in the Autoverse above; whole-world time-search
+            is future work, not implemented here.
+          </p>
+        </div>
+      </section>
+
+      <!-- Code as data: the actual Prism law the universe runs. -->
+      <section class="panel">
+        <div class="panel-head">
+          <h3 class="panel-title">The law, as Prism</h3>
+          <span class="panel-sub">this exact source is what the interpreter runs and what the law hash names</span>
+        </div>
+        <div class="code-scroll">
+          <pre class="code"><code id="source">loading...</code></pre>
+        </div>
+      </section>
+
+      <p class="foot-note">
+        Multi-tab sync is a same-origin <code>BroadcastChannel</code>: no relay, no peer-to-peer, no cross-origin,
+        no stranger execution. The agreement readout is a local equality check across your own tabs, not a
+        certificate. The full planet-scale claims of
+        <a href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener">Prism World</a> remain the
+        horizon; this page ships only the same-origin seed of it, with every label kept honest.
+      </p>
+    </main>
+    <script type="module" src="/src/prism-world.ts"></script>
+  </body>
+</html>

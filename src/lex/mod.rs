@@ -33,9 +33,6 @@ const fn opens_block(t: &Token) -> bool {
             | Token::Where
             // `loop <block>` opens directly; `while cond do <block>` opens at `do`.
             | Token::Loop
-            // `without alloc <block>` opens after `alloc`; the conditional opener
-            // rule keeps the postfix suffix (`: T without alloc = ..`) block-free.
-            | Token::Alloc
             // The synthetic head opener (see `inject_decl_openers`): a `class`,
             // `instance`, or `effect` body is the indented block after it.
             | Token::VHead

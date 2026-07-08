@@ -41,6 +41,12 @@ const PERF_STACK_EARLY_RETURN: &str = include_str!("cases/perf/stack_early_retur
 const PERF_PARAM_PASSING_STATE: &str = include_str!("cases/perf/param_passing_state.pr");
 const PERF_DEEP_ABORT: &str = include_str!("cases/perf/deep_abort.pr");
 const PERF_SCHEDULER_YIELD: &str = include_str!("cases/perf/scheduler_yield.pr");
+const PERF_COMP_MAP_FUSED: &str = include_str!("cases/perf/comp_map_fused.pr");
+const PERF_COMP_MAP_GUARDED: &str = include_str!("cases/perf/comp_map_guarded.pr");
+const PERF_WIRE_ENCODE: &str = include_str!("cases/perf/wire_encode.pr");
+const PERF_WIRE_DECODE: &str = include_str!("cases/perf/wire_decode.pr");
+const PERF_BUF_CHUNKS: &str = include_str!("cases/perf/buf_chunks.pr");
+const PERF_BYTES_CODEC: &str = include_str!("cases/perf/bytes_codec_slope.pr");
 
 const N_PLACEHOLDER: &str = "__N__";
 const PIPELINE_PLACEHOLDER: &str = "__PIPELINE__";
@@ -185,6 +191,46 @@ fn effop_fast_path_allocates_nothing() {
     );
 }
 
+// A guard-free comprehension `[ head for x in s ]` lowers to a fusing stream map
+// (`scollect(smap(s, \x -> head))`), not to `scollect` over a first-class
+// effectful for-consumer thunk. The map fuses with the collecting fold, so the
+// pipeline reifies no free-monad eff-op cells: the whole comprehension runs as a
+// loop that allocates only the result list. This pins that the fast path fires,
+// because it is the only lowering that reaches zero eff-op cells; a revert to the
+// thunk form allocates one eff-op cell per element (measured below on the guarded
+// control, which keeps the thunk path). The control also keeps this gate honest:
+// it proves the corpus can reach the free monad here, so the zero above is the
+// fast path at work rather than a comprehension that never reified.
+#[test]
+fn guard_free_comprehension_fuses() {
+    require_cc();
+    let n = 4000_i64;
+    let fused = stat_src(
+        &perf_src_n(PERF_COMP_MAP_FUSED, n),
+        "comp map fused",
+        "PRISM_EFFOP_STATS",
+        "eff ops allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        fused, 0,
+        "a guard-free comprehension allocated {fused} eff-op cell(s); want 0. The fusing \
+         `scollect(smap(..))` lowering regressed to the free-monad for-consumer thunk."
+    );
+    let guarded = stat_src(
+        &perf_src_n(PERF_COMP_MAP_GUARDED, n),
+        "comp map guarded",
+        "PRISM_EFFOP_STATS",
+        "eff ops allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        guarded > 0,
+        "the guarded control comprehension allocated no eff-op cells; the gate is vacuous \
+         unless the fallback path can reach the free monad (got {guarded})"
+    );
+}
+
 // Local monadification: one escaping effectful closure must not drag an
 // unrelated fused pipeline off the fused path. `local_mono_combined.pr` pairs the
 // escaping Log component of `local_mono_escape.pr` with a 99-element fused stream
@@ -325,6 +371,138 @@ fn pull_sequence_module_allocation_baseline() {
         }
     }
     assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// Wire/Bytes allocation ratchets. The serialization codec threads one growable
+// buffer through a linear builder fold (`buf_push`/`buf_append`) instead of a
+// right-nested `wire_cat` (a fresh buffer per element), and decode advances a read
+// cursor instead of re-slicing. A revert to either turns a pass quadratic (bytes
+// copied) or grows its per-element cell count, both silent to parity. These pin the
+// shipped -O2 behavior: the incremental byte builder extends in place, the hex
+// codec is flat, and Wire encode/decode stay linear, never quadratic.
+
+// Cells the program allocates at -O2 for input size `n`, or a panic naming the
+// build/run failure. The shared measurement for the ratchets below.
+fn alloc_cells_o2(template: &str, tag: &str, n: i64) -> i64 {
+    stat_src_o2(
+        &perf_src_n(template, n),
+        tag,
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
+// A linear pass over 4x the input allocates ~4x the cells (measured ~4.05x); a
+// quadratic one (a re-scan of the accumulated body, or a per-byte re-slice on
+// decode) allocates ~16x. This bound sits between, so a linear pass passes with the
+// constant-factor slack the generic codec carries while a quadratic blowup fails.
+const LINEAR_ALLOC_RATIO_BOUND: i64 = 6;
+
+// Encoding a list of derived records to `Bytes` is a linear pass: the derived
+// per-field encoder and the container fold both accumulate into one growable buffer
+// through `buf_append`, so cell count grows in proportion to the element count. The
+// ratio bound fails a quadratic regression (a right-nested container concatenation
+// that re-copies the accumulated body per element).
+#[test]
+fn wire_encode_allocation_is_linear() {
+    require_cc();
+    let (small, big) = (1000_i64, 4000_i64);
+    let (lo, hi) = (
+        alloc_cells_o2(PERF_WIRE_ENCODE, "wire encode", small),
+        alloc_cells_o2(PERF_WIRE_ENCODE, "wire encode", big),
+    );
+    assert!(
+        lo > 0 && hi < LINEAR_ALLOC_RATIO_BOUND * lo,
+        "wire encode allocation is super-linear: {lo} cells at n={small}, {hi} at n={big} \
+         (>= {LINEAR_ALLOC_RATIO_BOUND}x growth for 4x input); the buffer-builder fold \
+         regressed to a quadratic encode"
+    );
+}
+
+// Decoding the same container is a linear pass: `wire_uncons` advances the read
+// cursor with an O(1) offset bump and no slice, so materializing the result grows
+// with the element count. A regression to slicing the remaining bytes per peel is
+// quadratic; the ratio bound catches it.
+#[test]
+fn wire_decode_allocation_is_linear() {
+    require_cc();
+    let (small, big) = (1000_i64, 4000_i64);
+    let (lo, hi) = (
+        alloc_cells_o2(PERF_WIRE_DECODE, "wire decode", small),
+        alloc_cells_o2(PERF_WIRE_DECODE, "wire decode", big),
+    );
+    assert!(
+        lo > 0 && hi < LINEAR_ALLOC_RATIO_BOUND * lo,
+        "wire decode allocation is super-linear: {lo} cells at n={small}, {hi} at n={big} \
+         (>= {LINEAR_ALLOC_RATIO_BOUND}x growth for 4x input); the cursor decode regressed to \
+         a per-byte re-slice"
+    );
+}
+
+// Threading one uniquely-owned `Bytes` through `bytes_push` extends the underlying
+// buffer in place (FBIP), the amortized-doubling growth allocating O(log n)
+// buffers; the only per-element allocation is the `Bytes(buf, off)` wrapper the
+// push returns, a flat slope of one cell per element. A copy-on-shared regression
+// (the buffer losing unique ownership and being copied every push) adds a second
+// cell per element and this slope doubles.
+#[test]
+fn bytes_push_builder_extends_in_place() {
+    require_cc();
+    let (small, big) = (1000_i64, 10_000_i64);
+    let (lo, hi) = (
+        alloc_cells_o2(PERF_BUF_CHUNKS, "buf chunks", small),
+        alloc_cells_o2(PERF_BUF_CHUNKS, "buf chunks", big),
+    );
+    // At most the one wrapper cell per element; a small constant slack absorbs the
+    // handful of buffer doublings.
+    assert!(
+        hi <= lo + (big - small) + 64,
+        "bytes_push allocated ~{} cells per element ({lo} at n={small}, {hi} at n={big}); more \
+         than the one wrapper cell means the buffer is copied per push and FBIP reuse broke",
+        (hi - lo) / (big - small)
+    );
+}
+
+// Hex encode then decode over a single-allocation input (`buf_new`) is flat: both
+// directions accumulate into one buffer builder and emit their result in a single
+// `string_of_buf`/`bytes_of_buf`, so allocation is independent of length. A revert
+// to per-character string concatenation would allocate one cell per element.
+#[test]
+fn bytes_codec_allocation_is_flat() {
+    require_cc();
+    let (small, big) = (1000_i64, 10_000_i64);
+    let (lo, hi) = (
+        alloc_cells_o2(PERF_BYTES_CODEC, "bytes codec", small),
+        alloc_cells_o2(PERF_BYTES_CODEC, "bytes codec", big),
+    );
+    // Flat: allocation does not grow with length. A small constant slack absorbs
+    // the codec's few buffer doublings.
+    assert!(
+        hi <= lo + 64,
+        "hex codec allocation scales with length: {lo} cells at n={small}, {hi} at n={big}; the \
+         builder regressed to per-character concatenation"
+    );
+}
+
+// The container codec's builder fold, checked statically in the elaborated Core.
+// A program that encodes a list must reach `buf_append`, the linear accumulation
+// primitive the element fold threads through; its presence proves the container
+// encoder builds into one growable buffer rather than nesting immutable `wire_cat`
+// concatenations. The runtime slope pins above measure the consequence; this pins
+// the mechanism, and needs no native build. (A right-nested revert is linear in
+// cell count too, since each buffer is a single cell, so the slope pins alone
+// cannot see it; this static check is what does.)
+#[test]
+fn container_encoder_threads_the_builder_fold() {
+    let src = perf_src_n(PERF_WIRE_ENCODE, 8);
+    let core = prism::dump("core", &src).expect("wire encode compiles");
+    assert!(
+        core.contains("buf_append"),
+        "the derived list encoder does not reach `buf_append` in Core; the container fold \
+         regressed from the linear buffer builder to right-nested `wire_cat` concatenation"
+    );
 }
 
 #[test]

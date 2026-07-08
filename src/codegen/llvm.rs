@@ -19,7 +19,7 @@ use super::abi::idx64;
 use super::emit::{emit_with, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::native_kont;
 use super::rt;
-use crate::core::Core;
+use crate::core::{Core, LoweredCore};
 use crate::types::CtorInfo;
 
 const LLVM_USED_GLOBAL: &str = "llvm.used";
@@ -41,6 +41,7 @@ struct Inkwell<'ctx> {
     vals: RefCell<HashMap<String, BasicValueEnum<'ctx>>>,
     blocks: RefCell<HashMap<String, BasicBlock<'ctx>>>,
     func: Cell<Option<FunctionValue<'ctx>>>,
+    native_kont_enabled: bool,
     native_kont_func: RefCell<Option<NativeKontFunction>>,
     pending_musttail: Cell<bool>,
     // First codegen-internal failure (a builder error or an unbound SSA name).
@@ -54,7 +55,7 @@ fn nm(s: &str) -> &str {
 }
 
 impl<'ctx> Inkwell<'ctx> {
-    fn new(ctx: &'ctx Context) -> Self {
+    fn new(ctx: &'ctx Context, native_kont_enabled: bool) -> Self {
         let module = ctx.create_module("prism");
         if Target::initialize_native(&InitializationConfig::default()).is_ok() {
             let triple = TargetMachine::get_default_triple();
@@ -79,6 +80,7 @@ impl<'ctx> Inkwell<'ctx> {
             vals: RefCell::default(),
             blocks: RefCell::default(),
             func: Cell::new(None),
+            native_kont_enabled,
             native_kont_func: RefCell::default(),
             pending_musttail: Cell::new(false),
             err: RefCell::default(),
@@ -281,6 +283,9 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn native_kont_enter_current(&self) {
+        if !self.native_kont_enabled {
+            return;
+        }
         let Some(frame) = self.native_kont_func.borrow().clone() else {
             return;
         };
@@ -305,6 +310,9 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn native_kont_tailcall_symbol(&self, symbol: &str, arity: usize) {
+        if !self.native_kont_enabled {
+            return;
+        }
         let args = [
             self.native_kont_symbol_ptr(symbol).into(),
             self.i64t()
@@ -319,6 +327,9 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn native_kont_arg_value(&self, index: usize, value: IntValue<'ctx>) {
+        if !self.native_kont_enabled {
+            return;
+        }
         let args = [
             self.i64t()
                 .const_int(u64::try_from(index).unwrap_or(u64::MAX), false)
@@ -333,6 +344,9 @@ impl<'ctx> Inkwell<'ctx> {
     }
 
     fn native_kont_leave_current(&self) {
+        if !self.native_kont_enabled {
+            return;
+        }
         let ty = self.ctx.void_type().fn_type(&[], false);
         self.call_void_typed(rt::NATIVE_KONT_LEAVE, ty, &[]);
     }
@@ -821,10 +835,14 @@ impl Isa for Inkwell<'_> {
         self.func.set(Some(f));
         self.vals.borrow_mut().clear();
         self.blocks.borrow_mut().clear();
-        self.native_kont_func.replace(Some(NativeKontFunction {
-            symbol: name.to_string(),
-            params: params.to_vec(),
-        }));
+        if self.native_kont_enabled {
+            self.native_kont_func.replace(Some(NativeKontFunction {
+                symbol: name.to_string(),
+                params: params.to_vec(),
+            }));
+        } else {
+            self.native_kont_func.replace(None);
+        }
         self.pending_musttail.set(false);
         for (i, p) in params.iter().enumerate() {
             let idx = u32::try_from(i).unwrap_or(u32::MAX);
@@ -869,10 +887,11 @@ fn with_module<T>(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
     native_kont_table: Option<&str>,
+    native_kont_frames: bool,
     f: impl FnOnce(&Module<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
     let ctx = Context::create();
-    let isa = Inkwell::new(&ctx);
+    let isa = Inkwell::new(&ctx, native_kont_frames);
     emit_with(&isa, core, ctors)?;
     if let Some(table) = native_kont_table {
         isa.native_kont_table_global(core, table);
@@ -887,20 +906,27 @@ fn with_module<T>(
 
 /// # Errors
 /// Fails when a construct reaches codegen unlowered or unsupported.
-pub fn emit(core: &Core, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
-    with_module(core, ctors, None, |m| Ok(m.print_to_string().to_string()))
+pub fn emit(core: &LoweredCore, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
+    with_module(core, ctors, None, false, |m| {
+        Ok(m.print_to_string().to_string())
+    })
 }
 
 /// # Errors
 /// Fails when a construct reaches codegen unlowered or unsupported.
 pub fn emit_with_native_kont_table(
-    core: &Core,
+    core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
     native_kont_table: &str,
+    native_kont_frames: bool,
 ) -> Result<String, String> {
-    with_module(core, ctors, Some(native_kont_table), |m| {
-        Ok(m.print_to_string().to_string())
-    })
+    with_module(
+        core,
+        ctors,
+        Some(native_kont_table),
+        native_kont_frames,
+        |m| Ok(m.print_to_string().to_string()),
+    )
 }
 
 /// Verify the module and write LLVM bitcode to `bc`. On verifier failure the
@@ -909,11 +935,11 @@ pub fn emit_with_native_kont_table(
 /// # Errors
 /// Fails on codegen failure, a verifier rejection, or an unwritable path.
 pub fn emit_bitcode(
-    core: &Core,
+    core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
     bc: &Path,
 ) -> Result<(), String> {
-    emit_bitcode_with_native_kont_table(core, ctors, "", bc)
+    emit_bitcode_with_native_kont_table(core, ctors, "", false, bc)
 }
 
 /// Verify the module with a native kont metadata table and write LLVM bitcode to
@@ -922,13 +948,14 @@ pub fn emit_bitcode(
 /// # Errors
 /// Fails on codegen failure, a verifier rejection, or an unwritable path.
 pub fn emit_bitcode_with_native_kont_table(
-    core: &Core,
+    core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
     native_kont_table: &str,
+    native_kont_frames: bool,
     bc: &Path,
 ) -> Result<(), String> {
     let table = (!native_kont_table.is_empty()).then_some(native_kont_table);
-    with_module(core, ctors, table, |m| {
+    with_module(core, ctors, table, native_kont_frames, |m| {
         if let Err(e) = m.verify() {
             let kept = std::env::temp_dir().join("prism_failed.ll");
             let _ = std::fs::write(&kept, m.print_to_string().to_string());

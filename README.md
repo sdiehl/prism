@@ -96,7 +96,9 @@ prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml), into target/
 prism clean                          # remove the project's target/ directory
-prism check program.pr               # type check only
+prism check                          # type check the enclosing project
+prism check program.pr               # type check one source file
+prism pkg init                       # create a new package interactively
 prism fmt program.pr                 # format source
 prism dump core program.pr           # inspect a phase: tokens|ast|types|core|core-json|core-hash|native-kont-table|native-kont-state-map|fbip|llvm
 ```

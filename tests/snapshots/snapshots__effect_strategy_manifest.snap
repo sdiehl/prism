@@ -31,6 +31,7 @@ examples/errors.pr: selective-free-monad
 examples/exceptions.pr: selective-free-monad
 examples/game.pr: evidence
 examples/grade_isolation.pr: selective-free-monad
+examples/greet.pr: evidence
 examples/handlers_funval.pr: evidence
 examples/hangman.pr: evidence
 examples/incr_resident.pr: whole-program-free-monad
@@ -52,6 +53,7 @@ examples/param_effects.pr: state-fusion
 examples/parse_dont_validate.pr: whole-program-free-monad
 examples/pipeline.pr: whole-program-free-monad
 examples/proptest.pr: whole-program-free-monad
+examples/protocol_ladder.pr: whole-program-free-monad
 examples/queens.pr: selective-free-monad
 examples/record_replay.pr: whole-program-free-monad
 examples/replay_concurrent.pr: whole-program-free-monad
@@ -85,6 +87,7 @@ tests/cases/run/class_effects.pr: evidence
 tests/cases/run/combine_effects.pr: selective-free-monad
 tests/cases/run/comp_guard_dispatch.pr: whole-program-free-monad
 tests/cases/run/comp_guards.pr: whole-program-free-monad
+tests/cases/run/comp_map_once.pr: state-fusion
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/default_or.pr: selective-free-monad
 tests/cases/run/eff_closure_arg.pr: whole-program-free-monad
@@ -138,6 +141,7 @@ tests/cases/run/var_in_handler.pr: selective-free-monad
 tests/cases/run/var_under_handlers.pr: selective-free-monad
 tests/cases/run/vec_head.pr: whole-program-free-monad
 tests/cases/run/while_state.pr: whole-program-free-monad
+tests/cases/run/wire_hostile.pr: whole-program-free-monad
 tests/cases/run/wire_laws.pr: whole-program-free-monad
 tests/cases/run/with_handler.pr: selective-free-monad
 tests/cases/streams_forin.pr: state-fusion

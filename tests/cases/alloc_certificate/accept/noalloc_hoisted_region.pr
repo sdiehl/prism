@@ -1,0 +1,3 @@
+fn tick_region(base : Int) : Int @ noalloc = base + base
+
+fn tick(n : Int) : Int = tick_region(n + 1)

@@ -167,7 +167,7 @@ impl Tc<'_> {
                     .iter()
                     .map(|fname| {
                         fps.iter()
-                            .find(|(n, _)| *fname == n)
+                            .find(|(n, _)| fname.as_str() == n)
                             .map_or(Pat::Any, |(_, s)| self.lower_pat(&s.node))
                     })
                     .collect();

@@ -19,6 +19,14 @@ pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 
 pub fn america_new_york() : Zone =
   Zone { name = "America/New_York", offset_minutes = 0 - 300 }
 
+-- | Tokyo runs nine hours ahead of UTC, so its offset is 540 minutes.
+--
+-- ```prism
+-- fn main() = println(9 * 60)
+-- ```
+-- ```output
+-- 540
+-- ```
 pub fn asia_tokyo() : Zone = Zone { name = "Asia/Tokyo", offset_minutes = 540 }
 
 pub fn offset_duration(z : Zone) : Duration = minutes(zone_offset_minutes(z))

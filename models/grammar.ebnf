@@ -90,9 +90,10 @@ deriving  ->  "deriving" "(" conid , ... ")"
 
 constdecl ->  "let" varid [ ":" type ] "=" expr
 fundecl   ->  [ "replayable" ] [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
-                [ retann ] [ alloccert ] [ given ] "=" expr [ wheres ]
+                [ retann ] [ given ] "=" expr [ wheres ]
+                -- a usage row spelling exactly "@ noalloc" at the root of the
+                -- return annotation is the declaration's allocation certificate
 param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
-alloccert ->  "without" "alloc" | "\\" "alloc"  -- zero-alloc certificate over the whole call tree ("\ alloc" is the terser spelling)
 retann    ->  ":" "!" "{" [ label , ... ] "}" type
            |  ":" "!" type
            |  ":" type
@@ -137,8 +138,11 @@ converter    ->  ( "upgrade" | "downgrade" ) conid "->" conid "="
 type    ->  "forall" varid { varid } "." type
          |  arrow [ row ]                       -- row applies to a function type
 arrow   ->  "(" [ type , ... ] ")" "->" arrow   -- n-ary domain
-         |  atype "->" arrow                     -- single domain
-         |  atype
+         |  utype "->" arrow                     -- single domain
+         |  utype
+utype   ->  atype [ "@" usagerow ]              -- usage (coeffect) row on an atomic type
+usagerow -> varid                               -- single-fact sugar: T @ noalloc
+         |  "{" varid , ... "}"                 -- fact set, canonical order alphabetical
 atype   ->  scalar
          |  "[" type "]"                          -- List(type)
          |  conid [ "(" typearg , ... ")" ]       -- type constructor

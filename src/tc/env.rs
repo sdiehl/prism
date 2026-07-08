@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
+use crate::core::builtins::{Builtin, FloatOp};
 use crate::error::TypeError;
 use crate::lex::lex_raw;
 use crate::names;
@@ -146,7 +147,7 @@ impl Tc<'_> {
             let known = self
                 .eff_ops
                 .values()
-                .find(|i| i.effect_name == l.name)
+                .find(|i| i.effect_name.as_str() == l.name)
                 .map(|i| i.eff_params.len());
             match known {
                 Some(want) => {
@@ -212,6 +213,9 @@ impl Tc<'_> {
             // A `var` state cell reuses the pinned existential id it was desugared to;
             // see the canonical note on `ast::Ty::State`.
             ast::Ty::State(n) => Type::Exist(*n),
+            // Usage rows are rejected in desugar before any annotation reaches
+            // conversion; convert through the underlying type defensively.
+            ast::Ty::Coeffect(inner, _) => self.convert_annot(inner, a),
             ast::Ty::Forall(names, body) => {
                 let mut rows = BTreeSet::new();
                 ty_row_vars(body, &mut rows);
@@ -340,10 +344,7 @@ impl Tc<'_> {
                 args: l.args.iter().map(|t| self.convert_annot(t, a)).collect(),
             })
             .collect();
-        labels
-            .into_iter()
-            .rev()
-            .fold(base, |acc, l| EffRow::Extend(l, Box::new(acc)))
+        EffRow::canonical(labels, base)
     }
 }
 
@@ -424,10 +425,7 @@ fn data_row_rp(row: &ast::Row, rp: &BTreeSet<Sym>) -> EffRow {
             });
         }
     }
-    concrete
-        .into_iter()
-        .rev()
-        .fold(base, |acc, l| EffRow::Extend(l, Box::new(acc)))
+    EffRow::canonical(concrete, base)
 }
 
 pub(super) fn convert_data(t: &ast::Ty) -> Type {
@@ -500,6 +498,9 @@ pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
         // A `var` state cell reuses the pinned existential id it was desugared to;
         // see the canonical note on `ast::Ty::State`.
         ast::Ty::State(n) => Type::Exist(*n),
+        // Usage rows are rejected in desugar before any annotation reaches
+        // conversion; convert through the underlying type defensively.
+        ast::Ty::Coeffect(inner, _) => convert_data_rp(inner, rp),
         ast::Ty::Forall(names, body) => wrap_forall(
             &names.iter().map(Sym::from).collect::<Vec<_>>(),
             convert_data_rp(body, rp),
@@ -805,7 +806,11 @@ pub(super) fn fn_stub(d: &Decl<Core>, data: &BTreeMap<String, super::DataInfo>) 
     wrap_forall(&vars, Type::fun(pt, rt))
 }
 
-const BUILTINS: &[(&str, &str)] = &[
+// Type signatures for the surface builtins that carry neither a `Builtin` nor a
+// `FloatOp` registry row: output, the interpolation display printer, and the
+// coercions. The enum builtins carry their own signature on their registry row
+// (`Builtin::signature`, `FloatOp::signature`); `base_env` seeds all three.
+const NON_ENUM_SIGS: &[(&str, &str)] = &[
     ("print", "forall a. (a) -> Unit ! {IO}"),
     ("println", "forall a. (a) -> Unit ! {IO}"),
     ("prim_print", "forall a. (a) -> Unit ! {IO}"),
@@ -816,137 +821,11 @@ const BUILTINS: &[(&str, &str)] = &[
     ("srand", "(Int) -> Unit ! {IO}"),
     ("error", "forall a. (Int) -> a ! {Exn}"),
     ("fatal", "forall a. (String) -> a ! {Exn}"),
-    ("to_float", "(Int) -> Float"),
-    ("truncate", "(Float) -> Int"),
-    ("floor_to_int", "(Float) -> Int"),
-    ("ceil_to_int", "(Float) -> Int"),
-    ("abs_float", "(Float) -> Float"),
-    ("sqrt", "(Float) -> Float"),
-    ("floor", "(Float) -> Float"),
-    ("ceil", "(Float) -> Float"),
-    ("round", "(Float) -> Float"),
-    ("trunc", "(Float) -> Float"),
-    ("sin", "(Float) -> Float"),
-    ("cos", "(Float) -> Float"),
-    ("tan", "(Float) -> Float"),
-    ("asin", "(Float) -> Float"),
-    ("acos", "(Float) -> Float"),
-    ("atan", "(Float) -> Float"),
-    ("sinh", "(Float) -> Float"),
-    ("cosh", "(Float) -> Float"),
-    ("tanh", "(Float) -> Float"),
-    ("exp", "(Float) -> Float"),
-    ("exp2", "(Float) -> Float"),
-    ("expm1", "(Float) -> Float"),
-    ("ln", "(Float) -> Float"),
-    ("log2", "(Float) -> Float"),
-    ("log10", "(Float) -> Float"),
-    ("log1p", "(Float) -> Float"),
-    ("cbrt", "(Float) -> Float"),
-    ("pow_float", "(Float, Float) -> Float"),
-    ("atan2", "(Float, Float) -> Float"),
-    ("hypot", "(Float, Float) -> Float"),
-    ("fmod", "(Float, Float) -> Float"),
-    ("parse_float", "(String) -> Float"),
-    ("show_float_prec", "(Float, Int) -> String"),
-    ("probe_enabled", "(String) -> Bool"),
-    ("concat", "(String, String) -> String"),
-    ("str_len", "(String) -> Int"),
-    ("str_eq", "(String, String) -> Bool"),
-    ("str_cmp", "(String, String) -> Int"),
     // The interpolation display printer (`names::DISPLAY_FN`); total and
     // type-directed, elaborated by the display intercept rather than dispatched.
     ("__display", "forall a. (a) -> String"),
-    ("show_int", "(Int) -> String"),
-    ("show_i64", "(I64) -> String"),
-    ("show_u64", "(U64) -> String"),
-    ("show_bool", "(Bool) -> String"),
-    ("show_float", "(Float) -> String"),
-    ("substring", "(String, Int, Int) -> String"),
-    ("char_at", "(String, Int) -> Int"),
     ("ord", "(Char) -> Int"),
     ("chr", "(Int) -> Char"),
-    ("show_char", "(Char) -> String"),
-    ("blake3", "(String) -> String"),
-    ("parse_int", "(String) -> Option(Int)"),
-    ("prim_getenv", "(String) -> String ! {IO}"),
-    ("prim_read_file", "(String) -> String ! {IO}"),
-    ("prim_read_bytes", "(String) -> Buf ! {IO}"),
-    (
-        "prim_write_bytes",
-        "(String, Buf) -> Result(Unit, String) ! {IO}",
-    ),
-    (
-        "write_file",
-        "(String, String) -> Result(Unit, String) ! {IO}",
-    ),
-    ("prim_file_exists", "(String) -> Bool ! {IO}"),
-    (
-        "append_file",
-        "(String, String) -> Result(Unit, String) ! {IO}",
-    ),
-    ("remove_file", "(String) -> Unit ! {IO}"),
-    ("prim_store_get", "(String, String) -> String ! {IO}"),
-    ("prim_store_put", "(String, String, String) -> Unit ! {IO}"),
-    ("prim_store_has", "(String, String) -> Bool ! {IO}"),
-    ("exit", "forall a. (Int) -> a"),
-    ("system", "(String) -> Int ! {IO}"),
-    ("eprint", "(String) -> Unit ! {IO}"),
-    ("prim_args_count", "() -> Int ! {IO}"),
-    ("prim_arg", "(Int) -> String ! {IO}"),
-    ("prim_wall_now", "() -> Int ! {IO}"),
-    ("prim_mono_now", "() -> Int ! {IO}"),
-    ("to_i64", "(Int) -> I64"),
-    ("to_u64", "(Int) -> U64"),
-    ("int_of_i64", "(I64) -> Int"),
-    ("int_of_u64", "(U64) -> Int"),
-    ("i64_and", "(I64, I64) -> I64"),
-    ("i64_or", "(I64, I64) -> I64"),
-    ("i64_xor", "(I64, I64) -> I64"),
-    ("i64_shl", "(I64, I64) -> I64"),
-    ("i64_shr", "(I64, I64) -> I64"),
-    ("u64_and", "(U64, U64) -> U64"),
-    ("u64_or", "(U64, U64) -> U64"),
-    ("u64_xor", "(U64, U64) -> U64"),
-    ("u64_shl", "(U64, U64) -> U64"),
-    ("u64_shr", "(U64, U64) -> U64"),
-    ("array_new", "forall a. (Int, a) -> Array(a)"),
-    ("array_empty", "forall a. () -> Array(a)"),
-    ("array_len", "forall a. (Array(a)) -> Int"),
-    ("array_get", "forall a. (Array(a), Int) -> a"),
-    ("array_set", "forall a. (Array(a), Int, a) -> Array(a)"),
-    ("array_push", "forall a. (Array(a), a) -> Array(a)"),
-    ("array_pop", "forall a. (Array(a)) -> Array(a)"),
-    ("string_of_array", "(Array(String)) -> String"),
-    ("buf_empty", "() -> Buf"),
-    ("buf_new", "(Int, Int) -> Buf"),
-    ("buf_len", "(Buf) -> Int"),
-    ("buf_get", "(Buf, Int) -> Int"),
-    ("buf_set", "(Buf, Int, Int) -> Buf"),
-    ("buf_push", "(Buf, Int) -> Buf"),
-    ("buf_slice", "(Buf, Int, Int) -> Buf"),
-    ("buf_cat", "(Buf, Buf) -> Buf"),
-    ("buf_eq", "(Buf, Buf) -> Bool"),
-    ("buf_cmp", "(Buf, Buf) -> Int"),
-    ("buf_hash", "(Buf) -> String"),
-    ("buf_of_string", "(String) -> Buf"),
-    ("string_of_buf", "(Buf) -> String"),
-    ("buf_utf8_valid", "(Buf) -> Bool"),
-    ("string_of_bytes", "(Array(Int)) -> String"),
-    ("byte_at", "(String, Int) -> Int"),
-    ("byte_len", "(String) -> Int"),
-    ("i64_add", "(I64, I64) -> I64"),
-    ("i64_sub", "(I64, I64) -> I64"),
-    ("i64_mul", "(I64, I64) -> I64"),
-    ("u64_add", "(U64, U64) -> U64"),
-    ("u64_sub", "(U64, U64) -> U64"),
-    ("u64_mul", "(U64, U64) -> U64"),
-    ("i64_div", "(I64, I64) -> I64"),
-    ("i64_rem", "(I64, I64) -> I64"),
-    ("i64_cmp", "(I64, I64) -> Int"),
-    ("u64_div", "(U64, U64) -> U64"),
-    ("u64_rem", "(U64, U64) -> U64"),
-    ("u64_cmp", "(U64, U64) -> Int"),
 ];
 
 // A builtin signature carries its latent effects on the arrow, and the env type
@@ -974,10 +853,26 @@ fn sig_row(t: &ast::Ty) -> Vec<String> {
     }
 }
 
-fn base_env() -> Result<Env, TypeError> {
-    BUILTINS
+/// Every builtin's `(name, signature)`: the non-enum surface builtins, the
+/// signature each runtime-call `Builtin` carries on its registry row, and the
+/// signature each inline `FloatOp` carries on its registry row. `base_env` seeds
+/// the type environment from this; `Env` is keyed by `Sym`, so the order the
+/// sources arrive in does not matter.
+fn builtin_sigs() -> impl Iterator<Item = (&'static str, &'static str)> {
+    NON_ENUM_SIGS
         .iter()
-        .map(|(n, s)| Ok((Sym::from(*n), parse_sig(n, s)?.0)))
+        .map(|&(n, s)| (n, s))
+        .chain(
+            Builtin::ALL
+                .iter()
+                .filter_map(|b| Some((b.name(), b.signature()?))),
+        )
+        .chain(FloatOp::ALL.iter().map(|f| (f.name(), f.signature())))
+}
+
+fn base_env() -> Result<Env, TypeError> {
+    builtin_sigs()
+        .map(|(n, s)| Ok((Sym::from(n), parse_sig(n, s)?.0)))
         .collect()
 }
 
@@ -1170,9 +1065,9 @@ fn max_state_ex(t: &Type, hi: &mut Option<u32>) {
 mod tests {
     #[test]
     fn builtin_signatures_parse() {
-        for (name, sig) in super::BUILTINS {
+        for (name, sig) in super::builtin_sigs() {
             let (_, effs) = super::parse_sig(name, sig).expect("builtin signature parses");
-            let want: &[&str] = match *name {
+            let want: &[&str] = match name {
                 "print" | "println" | "prim_print" | "prim_println" | "prim_read_int"
                 | "prim_read_line" | "prim_rand" | "srand" | "system" | "eprint"
                 | "prim_getenv" | "prim_read_file" | "prim_read_bytes" | "prim_write_bytes"

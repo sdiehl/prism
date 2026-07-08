@@ -17,7 +17,7 @@ impl Elab<'_> {
             if n == 0 {
                 return Ok(Comp::Return(Value::Ctor(name.into(), tag, vec![])));
             }
-            let ps: Vec<String> = (0..n).map(|i| format!("_p{i}")).collect();
+            let ps: Vec<String> = (0..n).map(names::generated_param).collect();
             let vals = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
             let body = Comp::Return(Value::Ctor(name.into(), tag, vals));
             return Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
@@ -30,7 +30,7 @@ impl Elab<'_> {
             .get(name)
             .copied()
             .ok_or_else(|| Error::Ice(format!("no arity for global `{name}`")))?;
-        let ps: Vec<String> = (0..n).map(|i| format!("_p{i}")).collect();
+        let ps: Vec<String> = (0..n).map(names::generated_param).collect();
         let vals: Vec<Value> = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
         let body = Self::head_call(name, vals)?;
         Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
@@ -66,7 +66,7 @@ impl Elab<'_> {
         binds: &mut Vec<(Comp, String)>,
     ) -> Result<Value, Error> {
         Ok(match d {
-            Dict::Param(i) => Value::Var(format!("_c{i}").into()),
+            Dict::Param(i) => Value::Var(names::dict_param(*i).into()),
             Dict::Global(inst, ctxs) => {
                 let mut vals = Vec::new();
                 for c in ctxs {
@@ -193,7 +193,7 @@ impl Elab<'_> {
         })?;
         if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
             let (_, arity) = self.method_sig(class, idx)?;
-            let ps: Vec<String> = (0..arity).map(|i| format!("_p{i}")).collect();
+            let ps: Vec<String> = (0..arity).map(names::generated_param).collect();
             let vals = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
             let body = self.method_invoke(class, idx, first_dict(&ds, name)?, vals)?;
             return Ok(Comp::Return(Value::Thunk(Box::new(Comp::Lam(
@@ -206,7 +206,7 @@ impl Elab<'_> {
             .get(name)
             .copied()
             .ok_or_else(|| Error::Ice(format!("no arity for global `{name}`")))?;
-        let ps: Vec<String> = (0..n).map(|i| format!("_p{i}")).collect();
+        let ps: Vec<String> = (0..n).map(names::generated_param).collect();
         let mut binds = Vec::new();
         let mut all: Vec<Value> = ds
             .iter()

@@ -106,7 +106,7 @@ fn suspend_at_start_resumes_to_the_whole_run() {
 
     let mut prefix: Vec<u8> = Vec::new();
     let mut input = Cursor::new(Vec::new());
-    let SuspendResult::Suspended(bytes) =
+    let SuspendResult::Suspended { bytes, .. } =
         suspend_on(&full, &roots(), &mut prefix, &mut input, 0, &cfg()).expect("suspend at 0")
     else {
         panic!("budget 0 suspends before the first step");
@@ -127,7 +127,7 @@ fn resume_against_a_different_program_is_refused_by_hash() {
     // Suspend somewhere in the middle.
     let mut prefix: Vec<u8> = Vec::new();
     let mut input = Cursor::new(Vec::new());
-    let SuspendResult::Suspended(bytes) =
+    let SuspendResult::Suspended { bytes, .. } =
         suspend_on(&full, &roots(), &mut prefix, &mut input, 20, &cfg()).expect("suspend")
     else {
         panic!("budget 20 suspends mid-run");
@@ -164,7 +164,7 @@ fn teleport_demo_resume_matches_uninterrupted_run_and_refuses_tamper() {
 
     let mut prefix: Vec<u8> = Vec::new();
     let mut input = Cursor::new(Vec::new());
-    let SuspendResult::Suspended(bytes) =
+    let SuspendResult::Suspended { bytes, .. } =
         suspend_on(&full, &roots(), &mut prefix, &mut input, cut, &cfg()).expect("suspend")
     else {
         panic!("interior line cut suspends the teleport demo");
@@ -203,4 +203,80 @@ fn teleport_demo_resume_matches_uninterrupted_run_and_refuses_tamper() {
         refused_out.is_empty(),
         "tamper is refused before any receiver output is emitted"
     );
+}
+
+// The step ruler marks every observation with the machine step it fired at, in
+// strictly increasing step order, and its previews carry the printed text. The
+// indices are pure functions of the source, so the ruler is how a suspend
+// budget is picked deliberately instead of guessed.
+#[test]
+fn step_ruler_marks_every_observation_in_step_order() {
+    let full = with_prelude(COUNTER);
+    let mut out: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let ruler =
+        prism::step_ruler_on(&full, &roots(), &mut out, &mut input, &cfg()).expect("ruled run");
+
+    assert_eq!(ruler.format, prism::STEP_RULER_FORMAT);
+    // Eight `println`s, each a print plus a newline boundary.
+    assert_eq!(ruler.rows.len(), 16, "one mark per output boundary");
+    assert!(
+        ruler.rows.windows(2).all(|w| w[0].step < w[1].step),
+        "marks are strictly increasing on the step clock"
+    );
+    let last = ruler.rows.last().expect("nonempty");
+    assert!(
+        ruler.total_steps >= last.step,
+        "the total covers every mark"
+    );
+    let prints: Vec<&str> = ruler
+        .rows
+        .iter()
+        .filter(|r| r.op == "Console.print")
+        .map(|r| r.preview.as_str())
+        .collect();
+    assert_eq!(prints[0], "0", "the first print's preview is its text");
+    assert_eq!(prints[7], "49", "the last print's preview is its text");
+    // The ruled run is an ordinary run: the transcript is untouched.
+    assert_eq!(String::from_utf8(out).expect("utf8"), uninterrupted(&full));
+}
+
+// A suspend reports where it fell on the observation timeline, and that report
+// agrees with the full ruler: the observations before the cut are exactly the
+// ruler's marks at or before the budget.
+#[test]
+fn suspend_cut_report_agrees_with_the_ruler() {
+    let full = with_prelude(COUNTER);
+    let mut out: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let ruler =
+        prism::step_ruler_on(&full, &roots(), &mut out, &mut input, &cfg()).expect("ruled run");
+    let budget = ruler.rows[4].step; // mid-run, right on an observation's step
+
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut input2 = Cursor::new(Vec::new());
+    let SuspendResult::Suspended { cut, .. } =
+        suspend_on(&full, &roots(), &mut prefix, &mut input2, budget, &cfg()).expect("suspend")
+    else {
+        panic!("a mid-run budget suspends");
+    };
+    // A mark labels the step during whose transition it fired, and `--at N`
+    // executes steps 1..=N before pausing, so the mark AT the budget step has
+    // already fired by the cut.
+    let before: Vec<_> = ruler.rows.iter().filter(|r| r.step <= budget).collect();
+    assert_eq!(cut.observations, before.len());
+    let last = cut.last.expect("observations before the cut");
+    let want = before.last().expect("nonempty prefix");
+    assert_eq!((last.step, last.op.as_str()), (want.step, want.op.as_str()));
+
+    // A budget of 0 pauses before anything fires: an empty timeline, honestly.
+    let mut none_out: Vec<u8> = Vec::new();
+    let mut input3 = Cursor::new(Vec::new());
+    let SuspendResult::Suspended { cut, .. } =
+        suspend_on(&full, &roots(), &mut none_out, &mut input3, 0, &cfg()).expect("suspend at 0")
+    else {
+        panic!("budget 0 suspends before the first step");
+    };
+    assert_eq!(cut.observations, 0);
+    assert!(cut.last.is_none());
 }

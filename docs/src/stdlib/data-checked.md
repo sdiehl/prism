@@ -20,19 +20,19 @@ Laws, tested on both backends over the lane boundaries:
 
 ### `checkedI64`
 
-```prism,def,h-686ab026c15392a862003cac0657e27d2e7c9a661cc94b895fb77305aa9dce26
+```prism,def,h-44f3cf63e7748fda6b74073dd65c0de5e25d89bdc717e06645bcb28024737a0a
 instance checkedI64 : Checked(I64)
 ```
 
 ### `checkedU64`
 
-```prism,def,h-a9e7375588645b1c7d28b0ffe05b2b87f130fcf9c282b934539f2d223fcc63fb
+```prism,def,h-9f85fb707a84b8180b42da335e12787e2fb4540f8740795e8c9b48b9c9b23afd
 instance checkedU64 : Checked(U64)
 ```
 
 ### `checkedInt`
 
-```prism,def,h-4a6f2bbf7bc3cf11c9c699d66cdf1ba4b6ee618cb4c80914462a7ae5ff7c885d
+```prism,def,h-33bb9b254cde4c535007f5990bbb0cbd80f752ef5cc700101e2cca24d307fd9c
 instance checkedInt : Checked(Int)
 ```
 
@@ -40,7 +40,7 @@ instance checkedInt : Checked(Int)
 
 ### `int_to_i64`
 
-```prism,sig,h-c8954b5990f76dc4acd12b59296da73eda7f5b391fd99a8519f86fd7b4986e28
+```prism,sig,h-ce930997e6274abe54e42017eed8c730130d5aa26ba25e1430191be398fc7ee0
 int_to_i64 : (Int) -> Option(I64)
 ```
 
@@ -48,7 +48,7 @@ Narrow an unbounded `Int` to `I64`, or `None` when it falls outside the `I64` ra
 
 ### `int_to_u64`
 
-```prism,sig,h-9afeada60a0921bde7a581dac06f92bc5522bf51afc32eca47110380d0a961c2
+```prism,sig,h-6e87b62a8b669371031114015bc8edd72d218526db755dce46c19aa03451b680
 int_to_u64 : (Int) -> Option(U64)
 ```
 

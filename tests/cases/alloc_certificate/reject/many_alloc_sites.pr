@@ -1,0 +1,9 @@
+-- A body with more allocation sites than the witness bound: each `Wrap(x)` and
+-- the enclosing `Quad` is a fresh cell, five in all. The certificate reports the
+-- first three in evaluation order and summarizes the rest as "and N more", so a
+-- large offending function stays readable instead of dumping every site.
+type Wrap = Wrap(Int)
+
+type Quad = Quad(Wrap, Wrap, Wrap, Wrap)
+
+fn many(x : Int) : Quad @ noalloc = Quad(Wrap(x), Wrap(x), Wrap(x), Wrap(x))

@@ -1,0 +1,99 @@
+effect KvV1
+  ctl get_v1(Int) : Int
+  ctl put_v1(Int, Int) : Unit
+
+effect KvV2
+  ctl get_v2(Int) : Option(Int)
+  ctl put_v2(Int, Int) : Unit
+
+effect KvV3
+  ctl get_v3(Int) : Option(Int)
+  ctl put_v3(Int, Int, Int) : Unit
+
+-- Protocols evolve through handlers, the way frozen formats evolve through
+-- converters. An effect signature is a versioned wire protocol and a handler is
+-- one server for it. To bridge N versions you write N-1 adjacent adapters and
+-- compose them, never a direct converter per pair: an adapter handles the one
+-- version below it by re-performing the version above, forwarding the rest of
+-- the row untouched. Here get evolves from an Int sentinel (V1) to an Option
+-- (V2), then put gains a ttl argument (V3). Old client code, written once
+-- against V1, runs unchanged against the V2 or V3 server by stacking the
+-- adjacent rungs. There is no negotiation and no version detection, only
+-- explicit composition: the whole idea is that the ladder is spelled out.
+
+-- The sentinel V1 uses for an absent key. V2 replaces it with None.
+fn absent_v1() : Int = 0 - 1
+
+-- Terminal V2 server: a parameter-passing store over a Map(Int, Int).
+fn serve_v2(action) =
+  let f =
+    handle action() with
+      get_v2(key, k) => \(m) -> k(map_lookup(key, m))(m)
+      put_v2(key, value, k) => \(m) -> k(())(map_insert(key, value, m))
+      return r => \(_m) -> r
+  f(map_empty)
+
+-- Terminal V3 server: same store, ttl accepted and ignored (0 means no expiry,
+-- which is exactly the permanence V2 assumed).
+fn serve_v3(action) =
+  let f =
+    handle action() with
+      get_v3(key, k) => \(m) -> k(map_lookup(key, m))(m)
+      put_v3(key, value, ttl, k) => \(m) -> k(())(map_insert(key, value, m))
+      return r => \(_m) -> r
+  f(map_empty)
+
+-- Rung one: V1 in terms of V2. get_v1's sentinel is recovered from the Option;
+-- everything V2 (the whole ambient rest-of-row) forwards out untouched.
+fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) =
+  handle action() with
+    get_v1(key, k) =>
+      match get_v2(key) of
+        Some(v) => k(v)
+        None => k(absent_v1())
+    put_v1(key, value, k) =>
+      put_v2(key, value)
+      k(())
+    return r => r
+
+-- Rung two: V2 in terms of V3. put gains a ttl; V2's permanence is ttl 0.
+fn adapt_v2_to_v3(action : () -> a ! {KvV2 | e}) =
+  handle action() with
+    get_v2(key, k) => k(get_v3(key))
+    put_v2(key, value, k) =>
+      put_v3(key, value, 0)
+      k(())
+    return r => r
+
+-- Old client, written once against V1. It never changes again.
+fn client_v1() : !{KvV1} Int =
+  put_v1(1, 100)
+  put_v1(2, 200)
+  let a = get_v1(1)
+  let b = get_v1(9)
+  a + b
+
+-- The same behaviour a programmer would write natively against V2.
+fn client_v2() : !{KvV2} Int =
+  put_v2(1, 100)
+  put_v2(2, 200)
+  let a =
+    match get_v2(1) of
+      Some(v) => v
+      None => absent_v1()
+  let b =
+    match get_v2(9) of
+      Some(v) => v
+      None => absent_v1()
+  a + b
+
+fn main() =
+  -- V1 client + one adapter + V2 server, byte-identical to the V2-native client.
+  let via_adapter = serve_v2(\() -> adapt_v1_to_v2(client_v1))
+  let native = serve_v2(client_v2)
+  -- V1 client + two stacked adapters + V3 server: the ladder by composition.
+  let via_ladder =
+    serve_v3(\() -> adapt_v2_to_v3(\() -> adapt_v1_to_v2(client_v1)))
+  println(via_adapter)
+  println(native)
+  println(via_ladder)

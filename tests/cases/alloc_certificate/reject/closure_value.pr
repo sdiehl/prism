@@ -1,1 +1,1 @@
-fn make(x : Int) : (Int) -> Int without alloc = \(y) -> x + y
+fn make(x : Int) : ((Int) -> Int) @ noalloc = \(y) -> x + y

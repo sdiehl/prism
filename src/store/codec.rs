@@ -59,7 +59,19 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+// The byte substrate (varints, bounded blobs/strings, table numbering, the
+// hostile-input reader) is shared with the `kont` codec; only the `def` schema
+// below is local. `put_str`/`put_uvarint`/`Reader` are re-exported so `store::cert`
+// serializes its own small envelopes through the same discipline.
+use crate::binary::{from_wire, put_indices, put_svarint, to_wire, MAX_EXPANSION, MAX_NODES};
+pub(crate) use crate::binary::{put_str, put_uvarint, Reader};
 use crate::core::builtins::{Builtin, FloatOp};
+// Builtins and float ops are numbered by their per-row wire index, defined once
+// in `crate::core::builtins`. Re-exported here so the kont codec
+// (`crate::eval::kont`) numbers the same operators from the codec's table set.
+pub(crate) use crate::core::builtins::{
+    BUILTINS_BY_WIRE as BUILTINS, FLOAT_OPS_BY_WIRE as FLOAT_OPS,
+};
 use crate::core::{
     hash_group, Comp, CoreFn, CoreOp, CorePat, HandleOp, Hashes, IoOp, NegLane, Value,
 };
@@ -67,21 +79,6 @@ use crate::driver::WireKind;
 use crate::sym::Sym;
 
 use super::CodecError;
-
-// Byte discipline shared with `lib/std/Wire.pr`, restated for the compiler's
-// store: a varint is capped so a hostile all-continuation run cannot read
-// forever, and a length prefix is bounded so a hostile count cannot force
-// unbounded work.
-const VARINT_MAX_BYTES: usize = 10;
-const VARINT_CONT: u8 = 0x80;
-const VARINT_LOW: u64 = 0x7f;
-const WIRE_LEN_MAX: u64 = 1 << 20;
-
-// The node table and the reconstructed graph are both bounded: a table larger
-// than this, or a reconstruction that expands past this many nodes (a shared-DAG
-// blow-up), is rejected rather than allowed to exhaust memory.
-const MAX_NODES: u64 = 1 << 20;
-const MAX_EXPANSION: usize = 1 << 22;
 
 /// Everything the anonymous encoding of one stored object draws on. The store
 /// layer builds this from the pipeline it already runs; the codec never performs
@@ -244,10 +241,7 @@ const TAGS: &[Tag] = &[
 
 impl Tag {
     fn from_u64(n: u64) -> Result<Self, CodecError> {
-        usize::try_from(n)
-            .ok()
-            .and_then(|i| TAGS.get(i).copied())
-            .ok_or(CodecError::Malformed)
+        from_wire(TAGS, n)
     }
 }
 
@@ -267,10 +261,7 @@ const REF_TAGS: &[RefTag] = &[RefTag::Bound, RefTag::Member, RefTag::Dep, RefTag
 
 impl RefTag {
     fn from_u64(n: u64) -> Result<Self, CodecError> {
-        usize::try_from(n)
-            .ok()
-            .and_then(|i| REF_TAGS.get(i).copied())
-            .ok_or(CodecError::Malformed)
+        from_wire(REF_TAGS, n)
     }
 }
 
@@ -289,10 +280,7 @@ const PAT_TAGS: &[PatTag] = &[PatTag::Wild, PatTag::Var, PatTag::Ctor, PatTag::T
 
 impl PatTag {
     fn from_u64(n: u64) -> Result<Self, CodecError> {
-        usize::try_from(n)
-            .ok()
-            .and_then(|i| PAT_TAGS.get(i).copied())
-            .ok_or(CodecError::Malformed)
+        from_wire(PAT_TAGS, n)
     }
 }
 
@@ -340,198 +328,13 @@ pub(crate) const IO_OPS: &[IoOp] = &[
     IoOp::Srand,
 ];
 
-pub(crate) const FLOAT_OPS: &[FloatOp] = &[
-    FloatOp::ToFloat,
-    FloatOp::Truncate,
-    FloatOp::FloorToInt,
-    FloatOp::CeilToInt,
-    FloatOp::AbsFloat,
-    FloatOp::Sqrt,
-    FloatOp::Sin,
-    FloatOp::Cos,
-    FloatOp::Exp,
-    FloatOp::Ln,
-    FloatOp::Floor,
-    FloatOp::Ceil,
-    FloatOp::Round,
-    FloatOp::Trunc,
-    FloatOp::Tan,
-    FloatOp::Asin,
-    FloatOp::Acos,
-    FloatOp::Atan,
-    FloatOp::Sinh,
-    FloatOp::Cosh,
-    FloatOp::Tanh,
-    FloatOp::Exp2,
-    FloatOp::Expm1,
-    FloatOp::Log2,
-    FloatOp::Log10,
-    FloatOp::Log1p,
-    FloatOp::Cbrt,
-];
-
 // Wire order for a unary negation's lane; append-only, like the op tables above.
 pub(crate) const NEG_LANES: &[NegLane] = &[NegLane::Int, NegLane::I64, NegLane::Float];
 
-pub(crate) const BUILTINS: &[Builtin] = &[
-    Builtin::Concat,
-    Builtin::StrLen,
-    Builtin::StrEq,
-    Builtin::StrCmp,
-    Builtin::Substring,
-    Builtin::CharAt,
-    Builtin::ShowChar,
-    Builtin::Blake3,
-    Builtin::ParseInt,
-    Builtin::BigLit,
-    Builtin::ParseFloat,
-    Builtin::PowFloat,
-    Builtin::ShowFloatPrec,
-    Builtin::Getenv,
-    Builtin::ReadFile,
-    Builtin::WriteFile,
-    Builtin::FileExists,
-    Builtin::AppendFile,
-    Builtin::RemoveFile,
-    Builtin::Exit,
-    Builtin::System,
-    Builtin::Eprint,
-    Builtin::ArgsCount,
-    Builtin::Arg,
-    Builtin::ShowInt,
-    Builtin::ShowI64,
-    Builtin::ShowU64,
-    Builtin::ShowBool,
-    Builtin::ShowFloat,
-    Builtin::ToI64,
-    Builtin::ToU64,
-    Builtin::IntOfI64,
-    Builtin::IntOfU64,
-    Builtin::I64Add,
-    Builtin::I64Sub,
-    Builtin::I64Mul,
-    Builtin::I64Div,
-    Builtin::U64Div,
-    Builtin::I64Rem,
-    Builtin::U64Rem,
-    Builtin::I64Cmp,
-    Builtin::U64Cmp,
-    Builtin::U64Add,
-    Builtin::U64Sub,
-    Builtin::U64Mul,
-    Builtin::ByteAt,
-    Builtin::ByteLen,
-    Builtin::StringOfBytes,
-    Builtin::ArrayPop,
-    Builtin::I64And,
-    Builtin::I64Or,
-    Builtin::I64Xor,
-    Builtin::I64Shl,
-    Builtin::I64Shr,
-    Builtin::U64And,
-    Builtin::U64Or,
-    Builtin::U64Xor,
-    Builtin::U64Shl,
-    Builtin::U64Shr,
-    Builtin::ArrayNew,
-    Builtin::ArrayEmpty,
-    Builtin::ArrayLen,
-    Builtin::ArrayGet,
-    Builtin::ArraySet,
-    Builtin::ArrayPush,
-    Builtin::StringOfArray,
-    Builtin::SortPrim,
-    Builtin::TaqSnoc,
-    Builtin::TaqConcat,
-    Builtin::TaqUncons,
-    Builtin::Atan2,
-    Builtin::Hypot,
-    Builtin::Fmod,
-    Builtin::ReadBytesFile,
-    Builtin::WriteBytesFile,
-    Builtin::StoreGet,
-    Builtin::StorePut,
-    Builtin::StoreHas,
-    Builtin::BufEmpty,
-    Builtin::BufNew,
-    Builtin::BufLen,
-    Builtin::BufGet,
-    Builtin::BufSet,
-    Builtin::BufPush,
-    Builtin::BufSlice,
-    Builtin::BufCat,
-    Builtin::BufEq,
-    Builtin::BufCmp,
-    Builtin::BufHash,
-    Builtin::BufOfString,
-    Builtin::StringOfBuf,
-    Builtin::BufUtf8Valid,
-    Builtin::WallNow,
-    Builtin::MonoNow,
-    Builtin::ProbeEnabled,
-];
-
-pub(crate) fn op_wire<T: PartialEq + Copy>(table: &[T], op: T) -> u64 {
-    table
-        .iter()
-        .position(|x| *x == op)
-        .map(|i| i as u64)
-        .expect("operator missing from codec table (append it)")
-}
-
-pub(crate) fn op_from_wire<T: Copy>(table: &[T], n: u64) -> Result<T, CodecError> {
-    usize::try_from(n)
-        .ok()
-        .and_then(|i| table.get(i))
-        .copied()
-        .ok_or(CodecError::Malformed)
-}
-
 // ------------------------------- encoding ----------------------------------
-
-pub(super) fn put_uvarint(out: &mut Vec<u8>, mut n: u64) {
-    loop {
-        let lo = (n & VARINT_LOW) as u8;
-        n >>= 7;
-        if n == 0 {
-            out.push(lo);
-            return;
-        }
-        out.push(lo | VARINT_CONT);
-    }
-}
-
-// Zigzag maps a signed integer to an unsigned one so small negatives stay small
-// under LEB128. The casts reinterpret the bit pattern by design, not a lossy
-// conversion.
-#[allow(clippy::cast_sign_loss)]
-const fn zigzag(x: i64) -> u64 {
-    ((x << 1) ^ (x >> 63)) as u64
-}
-
-#[allow(clippy::cast_possible_wrap)]
-const fn unzigzag(z: u64) -> i64 {
-    ((z >> 1) as i64) ^ -((z & 1) as i64)
-}
-
-fn put_svarint(out: &mut Vec<u8>, x: i64) {
-    put_uvarint(out, zigzag(x));
-}
-
-pub(super) fn put_str(out: &mut Vec<u8>, s: &str) {
-    put_uvarint(out, s.len() as u64);
-    out.extend_from_slice(s.as_bytes());
-}
 
 fn put_tag(out: &mut Vec<u8>, t: Tag) {
     put_uvarint(out, t as u64);
-}
-
-fn put_indices(out: &mut Vec<u8>, idxs: &[u32]) {
-    put_uvarint(out, idxs.len() as u64);
-    for i in idxs {
-        put_uvarint(out, u64::from(*i));
-    }
 }
 
 struct Encoder<'a> {
@@ -746,7 +549,7 @@ impl<'a> Encoder<'a> {
             Comp::Prim(op, a, b) => {
                 let (ai, bi) = (self.value(a), self.value(b));
                 put_tag(&mut out, Tag::CPrim);
-                put_uvarint(&mut out, op_wire(CORE_OPS, *op));
+                put_uvarint(&mut out, to_wire(CORE_OPS, *op));
                 put_uvarint(&mut out, u64::from(ai));
                 put_uvarint(&mut out, u64::from(bi));
             }
@@ -759,19 +562,19 @@ impl<'a> Encoder<'a> {
             Comp::Io(op, args) => {
                 let idxs = self.values(args);
                 put_tag(&mut out, Tag::CIo);
-                put_uvarint(&mut out, op_wire(IO_OPS, *op));
+                put_uvarint(&mut out, to_wire(IO_OPS, *op));
                 put_indices(&mut out, &idxs);
             }
             Comp::FloatBuiltin(op, v) => {
                 let vi = self.value(v);
                 put_tag(&mut out, Tag::CFloat);
-                put_uvarint(&mut out, op_wire(FLOAT_OPS, *op));
+                put_uvarint(&mut out, to_wire(FLOAT_OPS, *op));
                 put_uvarint(&mut out, u64::from(vi));
             }
             Comp::Neg(lane, v) => {
                 let vi = self.value(v);
                 put_tag(&mut out, Tag::CNeg);
-                put_uvarint(&mut out, op_wire(NEG_LANES, *lane));
+                put_uvarint(&mut out, to_wire(NEG_LANES, *lane));
                 put_uvarint(&mut out, u64::from(vi));
             }
             Comp::Do(op, args) => {
@@ -783,7 +586,7 @@ impl<'a> Encoder<'a> {
             Comp::StrBuiltin(b, args) => {
                 let idxs = self.values(args);
                 put_tag(&mut out, Tag::CStr);
-                put_uvarint(&mut out, op_wire(BUILTINS, *b));
+                put_uvarint(&mut out, to_wire(BUILTINS, *b));
                 put_indices(&mut out, &idxs);
             }
             Comp::Case(v, arms) => {
@@ -929,115 +732,27 @@ pub fn encode_def(entry: &AnonEntry<'_>) -> Vec<u8> {
 
 // ------------------------------- decoding ----------------------------------
 
-pub(super) struct Reader<'a> {
-    buf: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Reader<'a> {
-    pub(super) const fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    // Whether every byte has been consumed, the trailing-byte check a total
-    // decoder performs before it trusts a frame.
-    pub(super) const fn at_end(&self) -> bool {
-        self.pos == self.buf.len()
-    }
-
-    fn byte(&mut self) -> Result<u8, CodecError> {
-        let b = *self.buf.get(self.pos).ok_or(CodecError::Truncated)?;
-        self.pos += 1;
-        Ok(b)
-    }
-
-    pub(super) fn uvarint(&mut self) -> Result<u64, CodecError> {
-        let mut acc: u64 = 0;
-        let mut shift = 0;
-        for _ in 0..VARINT_MAX_BYTES {
-            let b = self.byte()?;
-            acc |= (u64::from(b) & VARINT_LOW) << shift;
-            if b & VARINT_CONT == 0 {
-                return Ok(acc);
+// A symbol reference resolved against the `def` schema's tables: an enclosing
+// binder (a de Bruijn distance carried through untouched), the group member, an
+// external dependency (range-checked against the dep count), or a leaf name.
+fn reference(r: &mut Reader<'_>, member_count: usize, dep_count: usize) -> Result<Ref, CodecError> {
+    match RefTag::from_u64(r.uvarint()?)? {
+        RefTag::Bound => Ok(Ref::Bound(r.uvarint()?)),
+        RefTag::Member => {
+            let i = usize::try_from(r.uvarint()?).map_err(|_| CodecError::BadReference)?;
+            if i >= member_count {
+                return Err(CodecError::BadReference);
             }
-            shift += 7;
+            Ok(Ref::Member(i))
         }
-        Err(CodecError::Truncated)
-    }
-
-    fn svarint(&mut self) -> Result<i64, CodecError> {
-        Ok(unzigzag(self.uvarint()?))
-    }
-
-    fn bounded_len(&mut self) -> Result<usize, CodecError> {
-        let n = self.uvarint()?;
-        if n > WIRE_LEN_MAX {
-            return Err(CodecError::TooLarge);
-        }
-        usize::try_from(n).map_err(|_| CodecError::TooLarge)
-    }
-
-    pub(super) fn string(&mut self) -> Result<String, CodecError> {
-        let n = self.bounded_len()?;
-        let end = self.pos.checked_add(n).ok_or(CodecError::Truncated)?;
-        let slice = self.buf.get(self.pos..end).ok_or(CodecError::Truncated)?;
-        let s = std::str::from_utf8(slice).map_err(|_| CodecError::Utf8)?;
-        self.pos = end;
-        Ok(s.to_string())
-    }
-
-    fn float(&mut self) -> Result<f64, CodecError> {
-        let end = self.pos.checked_add(8).ok_or(CodecError::Truncated)?;
-        let slice = self.buf.get(self.pos..end).ok_or(CodecError::Truncated)?;
-        let mut bytes = [0u8; 8];
-        bytes.copy_from_slice(slice);
-        self.pos = end;
-        Ok(f64::from_bits(u64::from_le_bytes(bytes)))
-    }
-
-    fn bool(&mut self) -> Result<bool, CodecError> {
-        match self.byte()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(CodecError::Malformed),
-        }
-    }
-
-    // A node reference: an index into the table strictly below the node being
-    // parsed, so the graph is acyclic and decode is a forward pass.
-    fn node_ref(&mut self, below: u32) -> Result<u32, CodecError> {
-        let i = self.uvarint()?;
-        let i = u32::try_from(i).map_err(|_| CodecError::BadReference)?;
-        if i >= below {
-            return Err(CodecError::BadReference);
-        }
-        Ok(i)
-    }
-
-    fn node_refs(&mut self, below: u32) -> Result<Vec<u32>, CodecError> {
-        let n = self.bounded_len()?;
-        (0..n).map(|_| self.node_ref(below)).collect()
-    }
-
-    fn reference(&mut self, member_count: usize, dep_count: usize) -> Result<Ref, CodecError> {
-        match RefTag::from_u64(self.uvarint()?)? {
-            RefTag::Bound => Ok(Ref::Bound(self.uvarint()?)),
-            RefTag::Member => {
-                let i = usize::try_from(self.uvarint()?).map_err(|_| CodecError::BadReference)?;
-                if i >= member_count {
-                    return Err(CodecError::BadReference);
-                }
-                Ok(Ref::Member(i))
+        RefTag::Dep => {
+            let i = usize::try_from(r.uvarint()?).map_err(|_| CodecError::BadReference)?;
+            if i >= dep_count {
+                return Err(CodecError::BadReference);
             }
-            RefTag::Dep => {
-                let i = usize::try_from(self.uvarint()?).map_err(|_| CodecError::BadReference)?;
-                if i >= dep_count {
-                    return Err(CodecError::BadReference);
-                }
-                Ok(Ref::Dep(i))
-            }
-            RefTag::Global => Ok(Ref::Global(self.string()?)),
+            Ok(Ref::Dep(i))
         }
+        RefTag::Global => Ok(Ref::Global(r.string()?)),
     }
 }
 
@@ -1128,7 +843,7 @@ fn parse_node(
     dep_count: usize,
 ) -> Result<Node, CodecError> {
     let node = match Tag::from_u64(r.uvarint()?)? {
-        Tag::VVar => Node::Var(r.reference(member_count, dep_count)?),
+        Tag::VVar => Node::Var(reference(r, member_count, dep_count)?),
         Tag::VInt => Node::Int(r.svarint()?),
         Tag::VI64 => Node::I64(r.svarint()?),
         Tag::VU64 => Node::U64(r.uvarint()?),
@@ -1150,15 +865,15 @@ fn parse_node(
         Tag::CApp => Node::App(r.node_ref(index)?, r.node_refs(index)?),
         Tag::CIf => Node::If(r.node_ref(index)?, r.node_ref(index)?, r.node_ref(index)?),
         Tag::CPrim => {
-            let op = op_from_wire(CORE_OPS, r.uvarint()?)?;
+            let op = from_wire(CORE_OPS, r.uvarint()?)?;
             Node::Prim(op, r.node_ref(index)?, r.node_ref(index)?)
         }
         Tag::CCall => {
-            let head = r.reference(member_count, dep_count)?;
+            let head = reference(r, member_count, dep_count)?;
             Node::Call(head, r.node_refs(index)?)
         }
         Tag::CIo => {
-            let op = op_from_wire(IO_OPS, r.uvarint()?)?;
+            let op = from_wire(IO_OPS, r.uvarint()?)?;
             Node::Io(op, r.node_refs(index)?)
         }
         Tag::CError => Node::Error(r.node_ref(index)?),
@@ -1171,11 +886,11 @@ fn parse_node(
             Node::Case(scrut, arms)
         }
         Tag::CFloat => {
-            let op = op_from_wire(FLOAT_OPS, r.uvarint()?)?;
+            let op = from_wire(FLOAT_OPS, r.uvarint()?)?;
             Node::FloatOp(op, r.node_ref(index)?)
         }
         Tag::CNeg => {
-            let lane = op_from_wire(NEG_LANES, r.uvarint()?)?;
+            let lane = from_wire(NEG_LANES, r.uvarint()?)?;
             Node::Neg(lane, r.node_ref(index)?)
         }
         Tag::CDo => {
@@ -1207,14 +922,14 @@ fn parse_node(
             Node::Mask(names, r.node_ref(index)?)
         }
         Tag::CStr => {
-            let b = op_from_wire(BUILTINS, r.uvarint()?)?;
+            let b = from_wire(BUILTINS, r.uvarint()?)?;
             Node::StrOp(b, r.node_refs(index)?)
         }
         Tag::CDup => Node::Dup(r.node_ref(index)?),
         Tag::CDrop => Node::Drop(r.node_ref(index)?),
         Tag::CWithReuse => Node::WithReuse(r.node_ref(index)?, r.node_ref(index)?),
         Tag::CReuse => {
-            let token = r.reference(member_count, dep_count)?;
+            let token = reference(r, member_count, dep_count)?;
             Node::Reuse(token, r.node_ref(index)?)
         }
         Tag::CRefNew => Node::RefNew(r.node_ref(index)?),
@@ -1238,6 +953,13 @@ impl Builder<'_> {
     fn spend(&mut self) -> Result<(), CodecError> {
         self.budget = self.budget.checked_sub(1).ok_or(CodecError::DepthLimit)?;
         Ok(())
+    }
+
+    fn binder_count(&self, n: u64) -> Result<usize, CodecError> {
+        if n > self.budget as u64 {
+            return Err(CodecError::DepthLimit);
+        }
+        usize::try_from(n).map_err(|_| CodecError::TooLarge)
     }
 
     fn node(&self, i: u32) -> Result<&Node, CodecError> {
@@ -1305,6 +1027,7 @@ impl Builder<'_> {
         n: usize,
         body: impl FnOnce(&mut Self, &mut Vec<Sym>) -> Result<R, CodecError>,
     ) -> Result<(R, Vec<Sym>), CodecError> {
+        self.budget = self.budget.checked_sub(n).ok_or(CodecError::DepthLimit)?;
         let fresh: Vec<Sym> = (0..n).map(|_| Sym::fresh()).collect();
         binders.extend_from_slice(&fresh);
         let r = body(self, binders);
@@ -1359,7 +1082,7 @@ impl Builder<'_> {
                 Comp::Bind(Box::new(mc), fresh[0], Box::new(nc))
             }
             Node::Lam(nparams, body) => {
-                let nparams = usize::try_from(nparams).map_err(|_| CodecError::Malformed)?;
+                let nparams = self.binder_count(nparams)?;
                 let (bc, fresh) = self.scoped(binders, nparams, |s, b| s.comp(body, b))?;
                 Comp::Lam(fresh, Box::new(bc))
             }
@@ -1412,10 +1135,12 @@ impl Builder<'_> {
                 let handle_ops = ops
                     .iter()
                     .map(|(name, nparams, obody)| {
+                        let nbinders_u64 = nparams.checked_add(1).ok_or(CodecError::Malformed)?;
+                        let nbinders = self.binder_count(nbinders_u64)?;
                         let nparams =
-                            usize::try_from(*nparams).map_err(|_| CodecError::Malformed)?;
+                            usize::try_from(*nparams).map_err(|_| CodecError::TooLarge)?;
                         let (oc, fresh) =
-                            self.scoped(binders, nparams + 1, |s, b| s.comp(*obody, b))?;
+                            self.scoped(binders, nbinders, |s, b| s.comp(*obody, b))?;
                         let (params, resume) = fresh.split_at(nparams);
                         Ok(HandleOp {
                             name: Sym::new(name),
@@ -1534,7 +1259,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
         });
     }
 
-    if r.pos != bytes.len() {
+    if !r.at_end() {
         return Err(CodecError::TrailingBytes);
     }
 
@@ -1584,8 +1309,37 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
 
 #[cfg(test)]
 mod table_tests {
-    use super::{op_wire, BUILTINS, FLOAT_OPS};
+    use super::{
+        decode_def, put_str, put_tag, put_uvarint, to_wire, Tag, BUILTINS, FLOAT_OPS, MAX_EXPANSION,
+    };
     use crate::core::builtins::{Builtin, FloatOp};
+    use crate::driver::WireKind;
+
+    fn def_frame(nodes: impl IntoIterator<Item = Vec<u8>>, root: u32) -> Vec<u8> {
+        let nodes: Vec<Vec<u8>> = nodes.into_iter().collect();
+        let mut out = Vec::new();
+        put_str(&mut out, crate::core::HASH_SCHEME);
+        put_uvarint(&mut out, u64::from(WireKind::Def.varint()));
+        put_str(&mut out, "contract");
+        put_uvarint(&mut out, 1);
+        put_uvarint(&mut out, 0);
+        put_uvarint(&mut out, 0);
+        put_uvarint(&mut out, nodes.len() as u64);
+        for node in nodes {
+            out.extend(node);
+        }
+        put_uvarint(&mut out, 0);
+        put_uvarint(&mut out, 0);
+        put_str(&mut out, "");
+        put_uvarint(&mut out, u64::from(root));
+        out
+    }
+
+    fn unit_node() -> Vec<u8> {
+        let mut node = Vec::new();
+        put_tag(&mut node, Tag::VUnit);
+        node
+    }
 
     // Every operator the compiler can put in Core must be encodable: a Builtin
     // or FloatOp added to the enum without an entry here would otherwise panic
@@ -1596,14 +1350,68 @@ mod table_tests {
     #[test]
     fn every_builtin_is_in_the_codec_table() {
         for b in Builtin::ALL {
-            let _ = op_wire(BUILTINS, *b);
+            let _ = to_wire(BUILTINS, *b);
         }
     }
 
     #[test]
     fn every_float_op_is_in_the_codec_table() {
         for f in FloatOp::ALL {
-            let _ = op_wire(FLOAT_OPS, *f);
+            let _ = to_wire(FLOAT_OPS, *f);
         }
+    }
+
+    #[test]
+    fn lambda_param_count_is_charged_before_allocation() {
+        let mut lam = Vec::new();
+        put_tag(&mut lam, Tag::CLam);
+        put_uvarint(&mut lam, MAX_EXPANSION as u64 + 1);
+        put_uvarint(&mut lam, 0);
+
+        assert_eq!(
+            decode_def(&def_frame([unit_node(), lam], 1)).unwrap_err(),
+            crate::store::CodecError::DepthLimit,
+        );
+    }
+
+    fn handle_node(nparams: u64) -> Vec<u8> {
+        let mut handle = Vec::new();
+        put_tag(&mut handle, Tag::CHandle);
+        put_uvarint(&mut handle, 1);
+        handle.push(0);
+        handle.push(0);
+        put_uvarint(&mut handle, 1);
+        put_str(&mut handle, "op");
+        put_uvarint(&mut handle, nparams);
+        put_uvarint(&mut handle, 1);
+        handle
+    }
+
+    #[test]
+    fn handler_param_count_is_charged_before_allocation() {
+        let mut ret = Vec::new();
+        put_tag(&mut ret, Tag::CReturn);
+        put_uvarint(&mut ret, 0);
+
+        assert_eq!(
+            decode_def(&def_frame(
+                [unit_node(), ret, handle_node(MAX_EXPANSION as u64)],
+                2
+            ))
+            .unwrap_err(),
+            crate::store::CodecError::DepthLimit,
+        );
+    }
+
+    #[test]
+    fn handler_param_count_resume_binder_cannot_wrap() {
+        let mut ret = Vec::new();
+        put_tag(&mut ret, Tag::CReturn);
+        put_uvarint(&mut ret, 0);
+
+        assert_eq!(
+            decode_def(&def_frame([unit_node(), ret, handle_node(u64::MAX)], 2)).unwrap_err(),
+            crate::store::CodecError::Malformed,
+        );
     }
 }

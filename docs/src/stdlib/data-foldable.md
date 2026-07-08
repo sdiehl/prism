@@ -12,7 +12,7 @@ The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `e
 
 ### `sum`
 
-```prism,sig,h-5ef0347725601eec31134e6f5be01092d9b83574bd306488f109569641787cd1
+```prism,sig,h-0345b1a4c31a8230a00c5ecb112b6c18ad2b0f8f9ff469e87dc996e01bfa3d83
 sum : forall a. (a(Int)) -> Int
 ```
 
@@ -20,7 +20,7 @@ The sum of a container of ints (`0` when empty).
 
 ### `product`
 
-```prism,sig,h-f0a8b6a14e9532ae607cf30c3e6d1b1d61ee6e28ac5ffc8f37cb0345725d01a2
+```prism,sig,h-349ae69eaf5972419bb245b60b7a8b5c3716de91a7adeb34e18cc166b3a3295d
 product : forall a. (a(Int)) -> Int
 ```
 
@@ -28,7 +28,7 @@ The product of a container of ints (`1` when empty).
 
 ### `length`
 
-```prism,sig,h-b80bf47aa9da2f2b887b9071778369c8a9a2174dc1cf0ca3ddd1e2bf1def2c6f
+```prism,sig,h-a8cad35ce5571b0bdbf5778a77bb4857ceb7f232a00cd51a40de17faf3ad1abf
 length : forall a b. (a(b)) -> Int
 ```
 
@@ -36,7 +36,7 @@ The number of elements.
 
 ### `is_empty`
 
-```prism,sig,h-c1f1fa6b691ff50f7969587c462e4c31ee5e80ed245556d47f92cd015bc11b27
+```prism,sig,h-ac86e4897bb32a3da6f3cd6ef4c7b69d6e1badea51ca59d546fdec9e3b0dc33c
 is_empty : forall a b. (a(b)) -> Bool
 ```
 
@@ -44,7 +44,7 @@ True when the container has no elements.
 
 ### `all`
 
-```prism,sig,h-25b1878a3e14b5993dc087276f0e8f63f1dadb230a2af0105cf8103e15c0f038
+```prism,sig,h-e63f03a68bac48fff675d503b3338f55771f14bbc6f7a3ef27955f056617fc84
 all : forall a b. ((a) -> Bool, b(a)) -> Bool
 ```
 
@@ -52,7 +52,7 @@ True when every element satisfies `p` (vacuously true when empty).
 
 ### `any`
 
-```prism,sig,h-0f9d6fa14ba8d46d99468c823328edacaf98d6b8c31dcd28b35a01f6993d8c53
+```prism,sig,h-cc3dd29f141c603cbb74be60e386b243f3bc42ef92624c134285c2153c87837d
 any : forall a b. ((a) -> Bool, b(a)) -> Bool
 ```
 
@@ -60,7 +60,7 @@ True when some element satisfies `p`.
 
 ### `find`
 
-```prism,sig,h-9ab9d7a5d54a03cfb36320c1f9fe690caa57c516b0a1362c122a73349b541a83
+```prism,sig,h-555f152008ff5500a84bc2fdeb907210dcdecdfc547d6d1d687ef2176d0b35d0
 find : forall a b. ((a) -> Bool, b(a)) -> Option(a)
 ```
 
@@ -68,7 +68,7 @@ The first element satisfying `p` as `Some` (leftmost match), or `None`.
 
 ### `elem`
 
-```prism,sig,h-4f3ef3a9f44127aa4ba1eafe1181560d8ff2d7365fd056653566d518216dff98
+```prism,sig,h-957f4a4324ce7ac62e74f5b423650befe149e674e02a6f8d27c80b8c3b2ac744
 elem : forall a b. (a, b(a)) -> Bool
 ```
 
@@ -76,7 +76,7 @@ True when `x` is an element (`Eq`).
 
 ### `to_list`
 
-```prism,sig,h-a818364043e0b9c897010c0c1c7d4a8ba5a4f9e38151cbaec59d92814a363baa
+```prism,sig,h-379a3b22ab74dd9532f3118499795214d346e9c13ae71696930be1e74241e316
 to_list : forall a b. (a(b)) -> List(b)
 ```
 

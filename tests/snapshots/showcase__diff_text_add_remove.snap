@@ -1,0 +1,9 @@
+---
+source: tests/showcase.rs
+expression: "diff(old, new)"
+---
+diff: 1 changed, 1 added, 1 removed, 1 unchanged
+  ~ main  a024c250e41333ef -> c2e47a470c47c1e5
+  + fresh  2b9b7bc9737e589d
+  - gone  e1e89e07f13e9379
+cone: 0 affected

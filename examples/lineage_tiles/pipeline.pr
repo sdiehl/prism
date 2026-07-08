@@ -1,0 +1,169 @@
+-- A tiny deterministic byte pipeline that pressure-tests run lineage end to end.
+--
+-- It reads a JSON config, reads each named tile's raw bytes, computes a pure
+-- per-tile summary (a four-bucket histogram, an above-threshold count, a sum),
+-- writes a canonical `summary.json`, and prints a one-line digest. Nothing here
+-- observes a clock or a random source, so the whole run is a pure function of the
+-- committed fixtures: cold run and replay agree byte for byte, and changing one
+-- tile moves exactly that tile's input node plus the outputs that depend on it.
+--
+-- Run it from this directory so the relative paths resolve here:
+--   prism run pipeline.pr --record run.replay --lineage run.plineage
+--
+-- Paths are chosen so the demo works from this directory and the repo root alike:
+-- when `config.json` is not in the working directory we fall back to the checked-in
+-- location, which keeps the non-gated `run --examples` sweep (run from the repo
+-- root) green without a per-example fixture convention.
+
+import Json (..)
+
+import Data.Bytes (..)
+
+-- A per-tile tally: the above-threshold count, the byte sum, and the four
+-- histogram buckets (values 0..63, 64..127, 128..191, 192..255).
+type Tally = Tally { above: Int, sum: Int, b0: Int, b1: Int, b2: Int, b3: Int }
+
+fn empty_tally() : Tally =
+  Tally {
+    above = 0,
+    sum = 0,
+    b0 = 0,
+    b1 = 0,
+    b2 = 0,
+    b3 = 0
+  }
+
+fn one_if(c : Bool) : Int =
+  if c then
+    1
+  else
+    0
+
+-- Fold every byte of `bs` into a `Tally`, bucketing by `v / 64` (which lands 255
+-- in the last of four buckets) and counting `v >= thr` as above threshold.
+fn tally_bytes(bs : Bytes, i : Int, n : Int, thr : Int, acc : Tally) : Tally =
+  if i >= n then
+    acc
+  else
+    let v = bytes_index(bs, i)
+    let bucket = v / 64
+    let next =
+      Tally {
+        above = acc.above + one_if(v >= thr),
+        sum = acc.sum + v,
+        b0 = acc.b0 + one_if(bucket == 0),
+        b1 = acc.b1 + one_if(bucket == 1),
+        b2 = acc.b2 + one_if(bucket == 2),
+        b3 = acc.b3 + one_if(bucket == 3)
+      }
+    tally_bytes(bs, i + 1, n, thr, next)
+
+-- Dynamic-JSON accessors over the config object, total on any shape.
+
+fn obj_get(pairs : List((String, Json)), key : String) : Option(Json) =
+  match pairs of
+    Nil => None
+    Cons(kv, rest) =>
+      match kv of
+        (k, v) =>
+          if str_eq(k, key) then
+            Some(v)
+          else
+            obj_get(rest, key)
+
+fn cfg_threshold(j : Json) : Int =
+  match j of
+    JObj(ps) =>
+      match obj_get(ps, "threshold") of
+        Some(JInt(n)) => n
+        _ => 128
+    _ => 128
+
+fn json_strings(xs : List(Json)) : List(String) =
+  match xs of
+    Nil => Nil
+    Cons(JStr(s), rest) => Cons(s, json_strings(rest))
+    Cons(_, rest) => json_strings(rest)
+
+fn cfg_tiles(j : Json) : List(String) =
+  match j of
+    JObj(ps) =>
+      match obj_get(ps, "tiles") of
+        Some(JArr(xs)) => json_strings(xs)
+        _ => Nil
+    _ => Nil
+
+fn tile_count(xs : List(String)) : Int =
+  match xs of
+    Nil => 0
+    Cons(_, rest) => 1 + tile_count(rest)
+
+-- Join a base directory and a relative path, keeping the path bare when the base
+-- is the current directory so the lineage graph names `summary.json`, not
+-- `./summary.json`.
+fn join(base : String, rel : String) : String =
+  if str_eq(base, ".") then
+    rel
+  else
+    concat(base, concat("/", rel))
+
+fn tile_path(base : String, name : String) : String =
+  join(base, concat("tiles/", concat(name, ".gray")))
+
+fn tile_summary(name : String, n : Int, t : Tally) : Json =
+  JObj([
+      ("name", JStr(name)),
+      ("count", JInt(n)),
+      ("above", JInt(t.above)),
+      ("sum", JInt(t.sum)),
+      ("histogram", JArr([JInt(t.b0), JInt(t.b1), JInt(t.b2), JInt(t.b3)])),
+    ])
+
+-- Read each tile's bytes and summarize it, threading the running totals. Returns
+-- the per-tile JSON list and the aggregate (byte count, above-threshold, sum).
+fn process_tiles(
+  base : String,
+  thr : Int,
+  names : List(String)
+) : !{FileSystem} (List(Json), Int, Int, Int) =
+  match names of
+    Nil => (Nil, 0, 0, 0)
+    Cons(name, rest) =>
+      let bs = read_bytes(tile_path(base, name))
+      let n = bytes_length(bs)
+      let t = tally_bytes(bs, 0, n, thr, empty_tally())
+      let (rest_js, c, a, s) = process_tiles(base, thr, rest)
+      (Cons(tile_summary(name, n, t), rest_js), c + n, a + t.above, s + t.sum)
+
+fn read_config(base : String) : !{FileSystem} Json =
+  match decode(read_file(join(base, "config.json"))) of
+    Ok(j) => j
+    Err(_) => JNull
+
+fn main() : !{IO} Unit =
+  let base =
+    if file_exists("config.json") then
+      "."
+    else
+      "examples/lineage_tiles"
+  let cfg = read_config(base)
+  let thr = cfg_threshold(cfg)
+  let names = cfg_tiles(cfg)
+  let (tile_js, total_count, total_above, total_sum) =
+    process_tiles(base, thr, names)
+  let summary = JObj([
+      ("threshold", JInt(thr)),
+      ("tiles", JArr(tile_js)),
+      (
+          "total",
+          JObj([
+              ("count", JInt(total_count)),
+              ("above", JInt(total_above)),
+              ("sum", JInt(total_sum)),
+            ]),
+        ),
+    ])
+  write_file(join(base, "summary.json"), encode(summary))
+  println(
+      "tiles={tile_count(names)} bytes={total_count} above={total_above} sum={total_sum}",
+    )

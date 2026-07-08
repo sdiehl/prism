@@ -1,6 +1,6 @@
--- A `without alloc` function that builds a fresh constructor is rejected: `Box(x)`
+-- An `@ noalloc` function that builds a fresh constructor is rejected: `Box(x)`
 -- allocates a cell with no reuse token to spend, so the zero-allocation
 -- certificate cannot hold.
 type Box = Box(Int)
 
-fn fresh(x : Int) : Box without alloc = Box(x)
+fn fresh(x : Int) : Box @ noalloc = Box(x)

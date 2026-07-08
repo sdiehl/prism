@@ -2,6 +2,11 @@
 // identifiers lex as [a-z_][A-Za-z0-9_]* or [A-Z][A-Za-z0-9_]*, so no source
 // program can contain `@` or `#` in a name, and `_D`-prefixed dictionary
 // constructors cannot clash because user constructors must start uppercase.
+//
+// `@` is now also a surface token (the usage-row sigil, `T @ noalloc`). That
+// does not weaken the scheme: unforgeability rests on the identifier charset,
+// not on `@` being unlexable, and the identifier rule above must never admit
+// `@`. A mangled name like `op@f@n` remains unspellable as a source name.
 
 pub const ENTRY_POINT: &str = "main";
 
@@ -53,7 +58,19 @@ pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random
 // capability, shipped in the `Concurrent` stdlib, so it is an ordinary effect and
 // no longer reserved.)
 pub const PREEMPT_EFFECT: &str = "Preempt";
-pub const RESERVED_SEAM_EFFECTS: &[&str] = &[PREEMPT_EFFECT];
+// The boundary capabilities that are reserved but unshipped: `Net` (network)
+// and `Entropy` (real randomness beyond the replayable `Random`). Reserving the
+// effect names now means no package can give them an incompatible meaning
+// before their capability protocols (and provenance event kinds) are designed;
+// `Process` is deliberately absent because its observation label is already
+// live. Each entry carries the reason its rejection diagnostic names.
+pub const NET_EFFECT: &str = "Net";
+pub const ENTROPY_EFFECT: &str = "Entropy";
+pub const RESERVED_SEAM_EFFECTS: &[(&str, &str)] = &[
+    (PREEMPT_EFFECT, "the concurrency preemption seam"),
+    (NET_EFFECT, "the network boundary capability"),
+    (ENTROPY_EFFECT, "the entropy boundary capability"),
+];
 
 // The `Concurrent` scheduler entry points. `run_cooperative` is the policy-neutral
 // wrap that the `--scheduler` flag retargets; `run_async` (FIFO) and `run_lifo`
@@ -110,8 +127,10 @@ pub const FOREVER: &str = "forever";
 // calls to by name while lowering surface sugar: `run_io` is the default IO world
 // handler that `wrap_main_world` wraps `main` in; `force` is the `?.`/`??` Option
 // forcer; `guard`/`succeeds` are list-comprehension qualifier tests; `scollect`
-// collects a comprehension's `emit`s into a list; `concat_map` flattens a mapped
-// stream; `emit` is the `Stream` effect op a comprehension head performs; and
+// collects a comprehension's `emit`s into a list; `smap` maps a function over a
+// stream, the fusing collector a guard-free comprehension lowers through;
+// `concat_map` flattens a mapped stream; `emit` is the `Stream` effect op a
+// comprehension head performs; and
 // `str_escape` renders a `String` as a quoted literal in a derived `Show`. Each is
 // a compiler<->prelude string contract with no other home, so the drift-guard test
 // pins every one to its prelude definition, exactly as the loop drivers above are
@@ -121,6 +140,7 @@ pub const FORCE_FN: &str = "force";
 pub const GUARD_FN: &str = "guard";
 pub const SUCCEEDS_FN: &str = "succeeds";
 pub const SCOLLECT_FN: &str = "scollect";
+pub const SMAP_FN: &str = "smap";
 pub const CONCAT_MAP_FN: &str = "concat_map";
 pub const EMIT_OP: &str = "emit";
 pub const STR_ESCAPE_FN: &str = "str_escape";
@@ -169,6 +189,11 @@ pub const NUM_FROMINT_METHOD: &str = "from_int";
 pub const ENCODE_METHOD: &str = "encode";
 pub const DECODE_METHOD: &str = "decode";
 pub const ARBITRARY_METHOD: &str = "arbitrary";
+// The `Stable` class's sole method: a per-type constant string, the type's shape
+// contract digest. A derived `Stable` instance's body is this digest injected by
+// the compiler from the one shape-digest computation (`core::contract_digest`), so
+// ordinary code never hand-threads a magic digest into the wire envelope.
+pub const SHAPE_DIGEST_METHOD: &str = "shape_digest_of";
 // The codec combinators a derived `Serialize` body threads a `Bytes` through:
 // the encoder appends a constructor tag and joins field encodings, the decoder
 // peels a tag off the front. Their bodies live in the wire library (built
@@ -178,6 +203,16 @@ pub const WIRE_TAG: &str = "wire_tag";
 pub const WIRE_CAT: &str = "wire_cat";
 pub const WIRE_EMPTY: &str = "wire_empty";
 pub const WIRE_GET_TAG: &str = "wire_get_tag";
+pub const WIRE_IS_EMPTY: &str = "wire_is_empty";
+// The wire envelope helpers a `stable` block's generated frame functions thread a
+// value through: the explicit-digest value-frame encode/decode escape hatches (the
+// block already knows each rung's compiler-computed digest, so it passes it in),
+// and the digest-agnostic opener the ladder dispatch reads an older frame with.
+// Their bodies live in the wire library; these are the names the desugar and that
+// library agree on, one home rather than a bare string re-typed at each site.
+pub const WIRE_ENCODE_VALUE_WITH_DIGEST: &str = "wire_encode_value_with_digest";
+pub const WIRE_DECODE_VALUE_WITH_DIGEST: &str = "wire_decode_value_with_digest";
+pub const WIRE_OPEN_VALUE_ANY: &str = "wire_open_value_any";
 
 // The `stable`-block version ladder. A stable type
 // desugars to one frozen rung type per version and a set of plain adjacent
@@ -217,6 +252,22 @@ pub fn stable_downgrade(ty: &str, from: &str, to: &str) -> String {
 #[must_use]
 pub fn stable_decode_ladder(ty: &str) -> String {
     format!("decode_ladder_{ty}")
+}
+
+/// The generated current-rung frame encoder for a stable type.
+///
+/// Wraps a value in a `value` frame carrying the compiler-known current-rung
+/// contract digest, so user code stops hand-threading a magic digest string.
+#[must_use]
+pub fn stable_wire_encode(ty: &str) -> String {
+    format!("wire_encode_{ty}")
+}
+
+/// The generated current-rung frame decoder for a stable type: the inverse of
+/// `stable_wire_encode`, checking the current-rung digest before the body.
+#[must_use]
+pub fn stable_wire_decode(ty: &str) -> String {
+    format!("wire_decode_{ty}")
 }
 
 /// A converter's single parameter, the lowercased source rung tag (`V2` -> `v2`),
@@ -305,6 +356,28 @@ pub fn is_return_op(name: &str) -> bool {
 }
 
 pub const DICT_PREFIX: &str = "_D";
+
+#[must_use]
+pub fn dict_param(i: usize) -> String {
+    format!("_c{i}")
+}
+
+#[must_use]
+pub fn generated_param(i: usize) -> String {
+    format!("_p{i}")
+}
+
+pub const OUTPUT_PRINT_OP: &str = "out_print";
+pub const OUTPUT_PRINTLN_OP: &str = "out_println";
+
+#[must_use]
+pub const fn output_op(newline: bool) -> &'static str {
+    if newline {
+        OUTPUT_PRINTLN_OP
+    } else {
+        OUTPUT_PRINT_OP
+    }
+}
 
 // The module path encoded in a canonical name: everything before the final `.`
 // (an exported name like `Data.Map.insert`) or `@` (a private name like
@@ -396,6 +469,33 @@ pub fn var_effect(x: &str, n: u32) -> String {
 #[must_use]
 pub fn named_op(op: &str, inst: &str, n: u32) -> String {
     format!("{op}@{inst}@{n}")
+}
+
+// "op@inst@n" -> (op, inst); the tested inverse of `named_op`, recovering that a
+// core `do` targets a named handler instance's private operation rather than a
+// bare (globally handled or ambient) effect op. A `var` cell's `get@x@n`/
+// `set@x@n` share this three-part shape, so a caller that also cares about var
+// cells must try `parse_var_get`/`parse_var_set` first. The one home for the
+// inverse, so a diagnostic never re-parses the `@` layout at a use site.
+#[must_use]
+pub fn parse_named_op(name: &str) -> Option<(&str, &str)> {
+    let (op, rest) = name.split_once('@')?;
+    let (inst, tail) = rest.rsplit_once('@')?;
+    (!op.is_empty()
+        && !inst.is_empty()
+        && !tail.is_empty()
+        && tail.bytes().all(|b| b.is_ascii_digit()))
+    .then_some((op, inst))
+}
+
+// Whether a name was minted by the compiler rather than written in source. Every
+// synthesized name carries a sigil the identifier charset forbids (`@` mangling,
+// `#` reuse tokens, a `%` freshening lead; see the module header), so a name free
+// of all three is a source-level binding. Diagnostic passes use this to report a
+// program's own captures and skip lowering scratch (`t@n`, resume/state binders).
+#[must_use]
+pub fn is_synthesized(name: &str) -> bool {
+    name.contains(['@', '#', '%'])
 }
 
 #[must_use]
@@ -528,23 +628,6 @@ pub fn snapshot(n: u32) -> String {
     format!("snap@{n}")
 }
 
-const NOALLOC_PREFIX: &str = "noalloc@";
-
-// The top-level function a `without alloc { .. }` block lifts to. The `@` keeps
-// it out of the source-identifier namespace; the block's captured locals become
-// its parameters, and it carries the zero-allocation certificate.
-#[must_use]
-pub fn without_alloc_block(n: u32) -> String {
-    format!("{NOALLOC_PREFIX}{n}")
-}
-
-// Whether a name is a lifted `without alloc { .. }` block (so a diagnostic can
-// name it "block" rather than leak the synthetic function name).
-#[must_use]
-pub fn is_without_alloc_block(name: &str) -> bool {
-    name.starts_with(NOALLOC_PREFIX)
-}
-
 // Per-element binder for an `each` path step desugared to `map`.
 #[must_use]
 pub fn path_each(n: u32) -> String {
@@ -625,17 +708,18 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_var_get, is_var_runner, is_var_set, is_without_alloc_block, module_of, named_effect,
-        parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set, private,
-        sort_prim_kind, throw_op, var_effect, var_get, var_runner, var_set, without_alloc_block,
-        ScopedEscape, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
+        is_synthesized, is_var_get, is_var_runner, is_var_set, module_of, named_effect, named_op,
+        parse_named_op, parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set,
+        private, sort_prim_kind, throw_op, var_effect, var_get, var_runner, var_set, ScopedEscape,
+        ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
         DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER,
         GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS, INT_CMP, NUM_ADD_METHOD, NUM_FROMINT_METHOD,
         NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
         QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE,
-        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHOW_METHOD, SORT_BY_ORD_FN, SORT_FN,
-        SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG,
-        WIRE_TAG,
+        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN,
+        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT,
+        WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG,
+        WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
 
     // The capability wrappers and Replay drivers are required prelude names
@@ -717,6 +801,7 @@ mod tests {
             GUARD_FN,
             SUCCEEDS_FN,
             SCOLLECT_FN,
+            SMAP_FN,
             CONCAT_MAP_FN,
             STR_ESCAPE_FN,
         ] {
@@ -744,7 +829,7 @@ mod tests {
     #[test]
     fn library_hook_names_resolve_to_module_definitions() {
         let wire = include_str!("../lib/std/Wire.pr");
-        for m in [ENCODE_METHOD, DECODE_METHOD] {
+        for m in [ENCODE_METHOD, DECODE_METHOD, SHAPE_DIGEST_METHOD] {
             assert!(
                 wire.contains(&format!("{m} :")),
                 "class method `{m}` (names) has no `{m} :` signature in Wire.pr"
@@ -757,6 +842,21 @@ mod tests {
             assert!(
                 wire.contains(&format!("fn {f}(")),
                 "wire builder `{f}` (names) has no `fn {f}(` in Wire.pr"
+            );
+        }
+        // The envelope helpers a `stable` block's generated frame functions call by
+        // name: `wire_is_empty` (the trailing-byte check), the value-frame
+        // encode/decode, and the digest-agnostic opener the ladder dispatches with.
+        // Pin each to its Wire.pr definition, as the builders above are.
+        for f in [
+            WIRE_IS_EMPTY,
+            WIRE_ENCODE_VALUE_WITH_DIGEST,
+            WIRE_DECODE_VALUE_WITH_DIGEST,
+            WIRE_OPEN_VALUE_ANY,
+        ] {
+            assert!(
+                wire.contains(&format!("fn {f}(")),
+                "wire envelope helper `{f}` (names) has no `fn {f}(` in Wire.pr"
             );
         }
         assert!(
@@ -852,6 +952,25 @@ mod tests {
         assert_eq!(parse_scoped_escape("Eff@f@x"), None);
     }
 
+    // `parse_named_op` recovers a named handler instance's private op so a
+    // capture diagnostic can name the instance. Round-trip `named_op`, and pin
+    // that a bare op and a non-numeric tail miss. `is_synthesized` flags every
+    // mangled or freshened name and passes a plain source identifier.
+    #[test]
+    fn named_op_and_synthesized_predicates() {
+        for (op, inst, n) in [("get", "cell", 0u32), ("emit", "log", 3)] {
+            let name = named_op(op, inst, n);
+            assert_eq!(parse_named_op(&name), Some((op, inst)));
+            assert!(is_synthesized(&name));
+        }
+        assert_eq!(parse_named_op("ask"), None);
+        assert_eq!(parse_named_op("op@inst@x"), None);
+        for src in ["total", "helper", "_underscore", "Color"] {
+            assert!(!is_synthesized(src));
+        }
+        assert!(is_synthesized("t@7") && is_synthesized("reuse#s") && is_synthesized("%i$1"));
+    }
+
     // `module_of` is the inverse of `private`: the module of a private name is
     // whatever preceded the `@`. Round-trip both a root and a nested module, and
     // pin the two boundary behaviors (an exported `.`-name and a bare root name).
@@ -862,16 +981,6 @@ mod tests {
         }
         assert_eq!(module_of("Data.Map.insert"), "Data.Map");
         assert_eq!(module_of("bare"), "");
-    }
-
-    // `is_without_alloc_block` recognizes exactly the names `without_alloc_block`
-    // mints, and nothing else.
-    #[test]
-    fn without_alloc_block_round_trips() {
-        assert!(is_without_alloc_block(&without_alloc_block(0)));
-        assert!(is_without_alloc_block(&without_alloc_block(42)));
-        assert!(!is_without_alloc_block("noalloc"));
-        assert!(!is_without_alloc_block("plain"));
     }
 
     // `sort_prim_kind` maps each canonical primitive `Ord` instance to the tag

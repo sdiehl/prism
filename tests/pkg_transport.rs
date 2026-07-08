@@ -319,19 +319,13 @@ fn package_index_rows_name_the_hash_scheme() {
 }
 
 #[test]
-fn package_index_v1_rows_parse_as_current_scheme() {
+fn a_legacy_index_parses_to_no_rows() {
+    // The legacy index headers are gone: only the current header yields rows.
+    // Parsing stays tolerant (no rows rather than an error) because callers
+    // that need presence-versus-absence check the index artifact itself, but a
+    // legacy body can no longer smuggle rows in under an old scheme.
     let body = b"prism-pkg-index\tv1\nhttp\t2.0\ta3f9\n";
-    assert_eq!(
-        parse_index(body),
-        vec![IndexRow {
-            origin: "http".into(),
-            name: "http".into(),
-            tag: "2.0".into(),
-            scheme: HASH_SCHEME.into(),
-            kind: INDEX_KIND_NAMESPACE.into(),
-            root: "a3f9".into(),
-        }]
-    );
+    assert_eq!(parse_index(body), Vec::new());
 }
 
 #[test]
@@ -602,4 +596,234 @@ fn verify_closure_counts_the_user_objects() {
     // quad -> double, both user objects, both re-verify.
     let n = verify_closure(&src, std::slice::from_ref(&quad), &baseline).unwrap();
     assert!(n >= 2, "expected quad and double, verified {n}");
+}
+
+// -- transparency log: mutilation is loud, an empty file is uninitialized -------
+
+// A crash between file creation and the header write leaves a zero-byte log.
+// That state is uninitialized, not malformed: reads see an empty history and
+// the next publish writes the header and entry 0, healing it.
+#[test]
+fn empty_log_file_is_uninitialized_not_bricked() {
+    let tmp = TempDir::new("log-empty");
+    let path = tmp.join("log");
+    std::fs::write(&path, "").unwrap();
+    let log = Log::at(&path);
+    assert!(log.entries().unwrap().is_empty());
+    let seq = log
+        .append(
+            "github.com/prism-lang/http",
+            "http",
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "aaaa",
+        )
+        .unwrap();
+    assert_eq!(seq, 0);
+    assert_eq!(log.entries().unwrap().len(), 1);
+}
+
+// A crash after the header but before the first entry leaves a header-only
+// file; the next append must not write a second header.
+#[test]
+fn header_only_log_appends_without_a_second_header() {
+    let tmp = TempDir::new("log-header-only");
+    let path = tmp.join("log");
+    let log = Log::at(&path);
+    log.append(
+        "github.com/prism-lang/http",
+        "http",
+        "1.0",
+        HASH_SCHEME,
+        prism::pkg::trust::INDEX_KIND_SOURCE,
+        "aaaa",
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let header = text.lines().next().unwrap().to_string();
+    // Reconstruct the crashed state: header line only, then append again.
+    std::fs::write(&path, format!("{header}\n")).unwrap();
+    let seq = log
+        .append(
+            "github.com/prism-lang/geo",
+            "geo",
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "bbbb",
+        )
+        .unwrap();
+    assert_eq!(seq, 0);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        text.lines().filter(|l| *l == header).count(),
+        1,
+        "exactly one header line:\n{text}"
+    );
+    assert_eq!(log.entries().unwrap().len(), 1);
+}
+
+// A sequence hole is a loud error, never a silent renumbering. Deleting a line
+// from a chained log trips the chain check first (its own test covers that), so
+// the hole here is built chain-valid: each line commits the digest of the line
+// before it (read back through `head()`, which digests the last line) while the
+// sequence jumps from 0 to 2, exactly what a tamperer who re-chains after
+// removing an entry would produce. Density still catches it.
+#[test]
+fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
+    let tmp = TempDir::new("log-hole");
+    let path = tmp.join("log");
+    let header = "prism-pkg-log\tv5";
+    std::fs::write(&path, format!("{header}\n")).unwrap();
+    let log = Log::at(&path);
+    let d_header = log.head().unwrap().expect("header digests");
+    let line0 = format!(
+        "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa"
+    );
+    std::fs::write(&path, format!("{header}\n{line0}\n")).unwrap();
+    let d0 = log.head().unwrap().expect("line 0 digests");
+    let line2 = format!(
+        "2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\tprism-core-hash-v1\tsource-bundle\tcccc"
+    );
+    std::fs::write(&path, format!("{header}\n{line0}\n{line2}\n")).unwrap();
+    let err = log.entries().unwrap_err().to_string();
+    assert!(err.contains("sequence hole"), "unexpected error: {err}");
+    assert!(
+        log.append(
+            "github.com/prism-lang/x",
+            "late",
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            "dddd",
+        )
+        .is_err(),
+        "append into a holey log must refuse"
+    );
+}
+
+// A line that fits no known shape is evidence of corruption, not noise to skip:
+// skipping would desynchronize the numbering under the reader's feet.
+#[test]
+fn an_unrecognized_line_is_a_loud_error() {
+    let tmp = TempDir::new("log-garbage");
+    let path = tmp.join("log");
+    let log = Log::at(&path);
+    log.append(
+        "github.com/prism-lang/http",
+        "http",
+        "1.0",
+        HASH_SCHEME,
+        prism::pkg::trust::INDEX_KIND_SOURCE,
+        "aaaa",
+    )
+    .unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("not a log line\n");
+    std::fs::write(&path, text).unwrap();
+    let err = log.entries().unwrap_err().to_string();
+    assert!(err.contains("unrecognized line"), "unexpected error: {err}");
+}
+
+// -- transparency log: the hash chain ------------------------------------------
+
+// Content tampering with the sequence numbers intact is exactly what the density
+// check cannot see; the chain catches it because the edited line no longer
+// hashes to what its successor committed.
+#[test]
+fn editing_a_line_in_place_breaks_the_chain() {
+    let tmp = TempDir::new("log-chain-tamper");
+    let path = tmp.join("log");
+    let log = Log::at(&path);
+    for (name, root) in [("http", "aaaa"), ("geo", "bbbb"), ("tz", "cccc")] {
+        log.append(
+            "github.com/prism-lang/x",
+            name,
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            root,
+        )
+        .unwrap();
+    }
+    assert_eq!(log.entries().unwrap().len(), 3);
+    let text = std::fs::read_to_string(&path).unwrap();
+    // Rewrite the middle entry's root, keeping its seq and shape intact.
+    let edited = text.replace("bbbb", "beef");
+    assert_ne!(text, edited, "the edit must hit");
+    std::fs::write(&path, edited).unwrap();
+    let err = log.entries().unwrap_err().to_string();
+    assert!(err.contains("chain break"), "unexpected error: {err}");
+}
+
+// A cleanly truncated suffix is internally consistent, the one mutilation no
+// local check can see; the head is the value that makes it visible to anyone
+// who pinned the longer log's head.
+#[test]
+fn suffix_truncation_moves_the_chain_head() {
+    let tmp = TempDir::new("log-chain-head");
+    let path = tmp.join("log");
+    let log = Log::at(&path);
+    for (name, root) in [("http", "aaaa"), ("geo", "bbbb")] {
+        log.append(
+            "github.com/prism-lang/x",
+            name,
+            "1.0",
+            HASH_SCHEME,
+            prism::pkg::trust::INDEX_KIND_SOURCE,
+            root,
+        )
+        .unwrap();
+    }
+    let full_head = log.head().unwrap().expect("chained log has a head");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let kept: Vec<&str> = text.lines().take(2).collect(); // header + entry 0
+    std::fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+    assert_eq!(log.entries().unwrap().len(), 1, "truncated log still reads");
+    let short_head = log.head().unwrap().expect("still chained");
+    assert_ne!(full_head, short_head, "the head is the witness anchor");
+}
+
+// The unchained history formats (v1 through v4) are gone: a log under any old
+// header neither reads nor extends, and it has no chain head. The migration is
+// a fresh v5 log, never a reinterpretation of unverifiable history.
+#[test]
+fn a_legacy_log_is_rejected_outright() {
+    for legacy_header in ["prism-pkg-log\tv3", "prism-pkg-log\tv4"] {
+        let tmp = TempDir::new("log-legacy");
+        let path = tmp.join("log");
+        std::fs::write(
+            &path,
+            format!(
+                "{legacy_header}\n0\t1\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa\n"
+            ),
+        )
+        .unwrap();
+        let log = Log::at(&path);
+        let err = log.entries().unwrap_err().to_string();
+        assert!(
+            err.contains("unrecognized header"),
+            "unexpected error for {legacy_header}: {err}"
+        );
+        assert!(
+            log.head().unwrap().is_none(),
+            "a legacy log has no chain head"
+        );
+        let err = log
+            .append(
+                "github.com/prism-lang/x",
+                "geo",
+                "1.0",
+                HASH_SCHEME,
+                prism::pkg::trust::INDEX_KIND_SOURCE,
+                "bbbb",
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("unrecognized header"),
+            "unexpected error for {legacy_header}: {err}"
+        );
+    }
 }

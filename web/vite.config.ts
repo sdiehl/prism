@@ -6,9 +6,10 @@ import { defineConfig } from "vite";
 // the branching timelines (branch.html), the chaos counter (chaos.html), the
 // schedule map (schedule.html), the teleport demo (teleport.html plus its
 // receiver iframe teleport-recv.html), the content-addressed Merkle DAG
-// (merkle.html), and the incremental cell graph (incr.html). The static site
-// serves them at /play, /repl, /gallery, /scrub, /pendulum, /branch, /chaos,
-// /schedule, /teleport, /merkle, and /incr.
+// (merkle.html), the incremental cell graph (incr.html), and the shared cellular
+// universe (prism-world.html). The static site serves them at /play, /repl,
+// /gallery, /scrub, /pendulum, /branch, /chaos, /schedule, /teleport, /merkle,
+// /incr, and /world.
 export default defineConfig({
   base: "./",
   build: {
@@ -29,6 +30,7 @@ export default defineConfig({
         "teleport-recv": "teleport-recv.html",
         merkle: "merkle.html",
         incr: "incr.html",
+        world: "prism-world.html",
       },
     },
   },

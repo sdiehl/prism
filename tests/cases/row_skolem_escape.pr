@@ -1,0 +1,8 @@
+-- A closure created outside a row-polymorphic boundary cannot pin its effects
+-- onto the bound row: the body of `\(g) -> g(1)` performs `amb`'s instantiation,
+-- and checking it against `forall e0. ... -> Int ! {| e0}` would have to solve
+-- that outer row to the rigid `e0`, letting the skolem outlive its binder. The
+-- solver rejects the capture with a pointed error instead of leaking it.
+fn call_poly(h : forall e0. ((Int) -> Int ! {| amb}) -> Int ! {| e0}, f) = h(f)
+
+fn main() = println(call_poly(\(g) -> g(1), \(x) -> x + 41))

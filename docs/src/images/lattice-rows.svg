@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 236" role="img" aria-label="the effect row lattice: {IO, Ask} above {IO} and {Ask} above the empty row">
+<title>the effect row lattice: {IO, Ask} above {IO} and {Ask} above the empty row</title>
+<desc>A diamond. The join {IO, Ask} sits at the top, {IO} and {Ask} in the middle, and the empty row { } at the bottom. Sequencing joins upward by union; handling subtracts back down toward the pure bottom.</desc>
+<line x1="210" y1="56" x2="118" y2="104" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="210" y1="56" x2="302" y2="104" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="118" y1="132" x2="210" y2="180" stroke="#8a8f98" stroke-width="1.25"/>
+<line x1="302" y1="132" x2="210" y2="180" stroke="#8a8f98" stroke-width="1.25"/>
+<rect x="163" y="28" width="94" height="27" rx="7" fill="rgba(47, 158, 99, 0.12)" stroke="#2f9e63" stroke-width="1.25"/>
+<text x="210" y="42" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">{IO, Ask}</text>
+<rect x="90" y="104" width="55" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="118" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">{IO}</text>
+<rect x="270" y="104" width="63" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="302" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">{Ask}</text>
+<rect x="186" y="180" width="47" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="210" y="194" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">{ }</text>
+</svg>

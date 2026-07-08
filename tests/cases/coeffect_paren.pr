@@ -1,0 +1,3 @@
+-- A usage row attaches to atomic types only; after a function type's effect
+-- row it is refused with the parenthesized fix rather than a silent precedence.
+fn f(g : (Int) -> Int ! {IO} @ once, x : Int) : Int = g(x)

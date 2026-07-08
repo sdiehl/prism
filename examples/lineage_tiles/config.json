@@ -1,0 +1,4 @@
+{
+  "threshold": 128,
+  "tiles": ["north", "south", "delta"]
+}

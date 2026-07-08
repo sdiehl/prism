@@ -26,7 +26,7 @@ A vector of `a` with a type-level length `n`.
 
 ### `vempty`
 
-```prism,sig,h-f34e6f303d8a4d78de540905bd00b5eca1c9390fdb5faa0588afe81dc8670197
+```prism,sig,h-c7d3005db929db4b343b3e31b6afde8f05630d60c16ff442a403d45e236afc1d
 vempty : forall a. () -> Data.Vec.Vec(a, 0)
 ```
 
@@ -34,7 +34,7 @@ The empty vector, length `0`.
 
 ### `vsingle`
 
-```prism,sig,h-f5f0369d0ea2c8545f72cd88827bb67a9f269e973049bf9b8744eadd57d49270
+```prism,sig,h-6e89eed381da08ee9fe3319487ca933ba432e90f99a9e1156a946c105150e4c2
 vsingle : forall a. (a) -> Data.Vec.Vec(a, 1)
 ```
 
@@ -42,7 +42,7 @@ The one-element vector, length `1`.
 
 ### `vto_list`
 
-```prism,sig,h-08bc8183cf4759976588908338cd1ad4f6eb75fa08dbd05009b26166522c6579
+```prism,sig,h-8023a90574cbbeda33899928939899d74d25d0ccf100e81db4b41578b095ad46
 vto_list : forall a b. (Data.Vec.Vec(a, b)) -> List(a)
 ```
 
@@ -50,7 +50,7 @@ The underlying list, forgetting the static length.
 
 ### `vmap`
 
-```prism,sig,h-bc2b7bc4f55237abf9135bfb569b8606e17fc828aabbe794dfc907e3ce96e504
+```prism,sig,h-7b7632aaf1e96834bdd43880112b67a1e90c7475d0703e32aab7ff70db483a7b
 vmap : forall a b c. ((a) -> b, Data.Vec.Vec(a, c)) -> Data.Vec.Vec(b, c)
 ```
 
@@ -58,7 +58,7 @@ Apply `f` to every element, preserving the length.
 
 ### `vzip`
 
-```prism,sig,h-69d5e8f6c5782ebd0a5cdbb59d7da762fe8327a4a9c174a2c72b984474984c30
+```prism,sig,h-195446ba2eddaa10d3e9f2579e673b2ea1297a5ce9f1823e995234eaf431c94f
 vzip : forall a b c. (Data.Vec.Vec(a, b), Data.Vec.Vec(c, b)) -> Data.Vec.Vec((a, c), b)
 ```
 
@@ -70,7 +70,7 @@ vzip(vsingle(1), vempty())
 
 ### `vhead`
 
-```prism,sig,h-4cffd1db7362f379a35e6f24757e24377c992d256abd7f733c8c6af522649471
+```prism,sig,h-3aa41390f85176568317e6faa676d2d8a82062296a75873170bd1887b745a5a5
 vhead : forall a b. (Data.Vec.Vec(a, b)) -> a ! {Fail}
 ```
 

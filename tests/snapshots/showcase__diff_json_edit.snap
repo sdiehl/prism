@@ -1,0 +1,23 @@
+---
+source: tests/showcase.rs
+expression: "serde_json::to_string_pretty(&d).expect(\"serialize\")"
+---
+{
+  "format": "prism-source-diff-v1",
+  "behavioral": [
+    {
+      "name": "collatz_step",
+      "old": "fcd05d9a3e76dde016db457b7b540dae864cf9534b8cc0101584f034cd94e8c9",
+      "new": "6ecff682fe0721fd74a4ac42ed2646d245bff149461400df7bb9a6520829cd3d"
+    }
+  ],
+  "added": [],
+  "removed": [],
+  "text_only": [],
+  "dependents": [
+    "collatz_len",
+    "collatz_max",
+    "main"
+  ],
+  "unchanged": 0
+}

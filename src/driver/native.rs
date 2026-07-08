@@ -35,7 +35,10 @@ pub(super) fn cc_link(
     let sources = write_runtime_for(&rt_dir, runtime_profile)?;
     let libm_archive = write_libm_archive(&rt_dir)?;
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
+    let macos_min = env!("PRISM_MACOSX_DEPLOYMENT_TARGET");
     let olevel = format!("-O{}", cfg.backend_opt);
+    let macos_min_flag =
+        (!macos_min.is_empty()).then(|| format!("-mmacosx-version-min={macos_min}"));
     let rt_checks: &[&str] = if cfg.flags.rt_checks {
         &["-DPRISM_RT_DEBUG"]
     } else {
@@ -53,6 +56,7 @@ pub(super) fn cc_link(
             "-ffp-contract=off",
             "-Wno-override-module",
         ])
+        .args(macos_min_flag.iter().map(String::as_str))
         .args(rt_checks)
         .args(native_kont_frame_flags)
         .args(extra.split_whitespace())

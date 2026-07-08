@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/comp_map_once.pr
+---
+eval-source
+0
+1
+4
+9
+16
+=> ()

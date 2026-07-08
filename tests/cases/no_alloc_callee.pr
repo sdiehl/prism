@@ -1,8 +1,8 @@
--- The certificate covers the whole call tree: a `without alloc` function may
--- call only `fip`/`fbip`/`without alloc` functions. `top` calls `mk`, which is
+-- The certificate covers the whole call tree: an `@ noalloc` function may
+-- call only `fip`/`fbip`/`@ noalloc` functions. `top` calls `mk`, which is
 -- unannotated and allocates, so `top`'s guarantee cannot be trusted.
 type Box = Box(Int)
 
 fn mk(x : Int) : Box = Box(x)
 
-fn top(x : Int) : Box without alloc = mk(x)
+fn top(x : Int) : Box @ noalloc = mk(x)

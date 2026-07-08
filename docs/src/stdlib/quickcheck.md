@@ -40,7 +40,7 @@ The result of a property run: `Passed(n)` after `n` cases held, or `Failed(value
 
 ### `run_seeded`
 
-```prism,sig,h-4a544f283bb588468a56d482671a6c0ad4bac418d6e605bd292524d3b51d4c66
+```prism,sig,h-f290280e5568aeea5c49299c433f30ab8a0d5d0cba531f58677f1252dafa0afd
 run_seeded : forall e0 a. (U64, () -> a ! {Random, e0}) -> a ! {e0}
 ```
 
@@ -48,7 +48,7 @@ Run `action` with the `Random` effect served by a seeded SplitMix64 stream, so t
 
 ### `gen_run`
 
-```prism,sig,h-f2c884b89022f24e1528a2891427fd5d12d00bfe3e0b8dcdc6a9b3d4f532010b
+```prism,sig,h-bbc03f98f71b7d1cbd36265d971132775f29f2f998ccc14cc72394efd4ed2446
 gen_run : forall a. (Quickcheck.Gen(a), Int) -> a ! {Random}
 ```
 
@@ -56,7 +56,7 @@ Draw one value from `g` at the given size, performing `Random`.
 
 ### `gen_at`
 
-```prism,sig,h-75a5d5201bdd1be33e1b0ba122b7c11e2757b98c0347c0ec27146c71041cab4e
+```prism,sig,h-86d408c061ced97a8e5354e0ff8af8045a48d6f343ac6e6a726a6faed865d214
 gen_at : forall a. (Quickcheck.Gen(a), U64, Int) -> a
 ```
 
@@ -64,7 +64,7 @@ Draw a value from `g` deterministically off `seed` at `size`, no IO. This is the
 
 ### `gen_const`
 
-```prism,sig,h-65e6588ef6bfddfe39a04911adeb286d3526c60acffc80cc987e52078f831961
+```prism,sig,h-8f6fc853b174b6f7a2b7c582e175a2f7de82903afa2134f63fc3539800fdbe47
 gen_const : forall a. (a) -> Quickcheck.Gen(a)
 ```
 
@@ -72,7 +72,7 @@ The generator that ignores size and randomness and always yields `x`.
 
 ### `gen_map`
 
-```prism,sig,h-e10fc506e9d07191870eee6b9951d398e34be6e7261396f4986c9dfe935c7961
+```prism,sig,h-215d5397f401c5e612c77ce83faa9a4121feaceabd3dfbbea8e7ff7cbba53621
 gen_map : forall a b. ((a) -> b, Quickcheck.Gen(a)) -> Quickcheck.Gen(b)
 ```
 
@@ -80,7 +80,7 @@ Map `f` over every value a generator produces.
 
 ### `gen_map2`
 
-```prism,sig,h-e6f52b6819b2b1b1b522478109726ed54b45767cd36568e7dacb49068609a0bc
+```prism,sig,h-8f6f565e4499cd6079c007d34ba46938582e77703dcc942338f585d284647260
 gen_map2 : forall a b c. ((a, b) -> c, Quickcheck.Gen(a), Quickcheck.Gen(b)) -> Quickcheck.Gen(c)
 ```
 
@@ -88,7 +88,7 @@ Combine two generators with `f`, drawing both at the same size.
 
 ### `gen_bind`
 
-```prism,sig,h-445d1a548420bfc9d8a97f435cb8635ee09b9f734d0638217d043b782a71e004
+```prism,sig,h-cc38b74473e0c2a767e77dd6584b9f85558ce26b6e4bf0efa1b52671550737e9
 gen_bind : forall a b. (Quickcheck.Gen(a), (a) -> Quickcheck.Gen(b)) -> Quickcheck.Gen(b)
 ```
 
@@ -96,7 +96,7 @@ Monadic bind: draw an `a`, then draw from the generator `f` picks for it.
 
 ### `gen_sized`
 
-```prism,sig,h-77c99355eba2a226afc81901b253a5295d4bbd67f17f1aef0ce2e2da877910fd
+```prism,sig,h-be59c643ecf5dbf74ea08761d1c2a24c811e0727661bd903b32483f013468a54
 gen_sized : forall a. ((Int) -> Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -104,7 +104,7 @@ Build a generator that sees the current size, for recursive shapes that branch o
 
 ### `gen_resize`
 
-```prism,sig,h-bc442eec4eae60434101cb8c89601840bc8d94c6cb1222bbd96c378e06ff478b
+```prism,sig,h-7afc33cc61770abd460f49f8106a196786aee5e562728aa397d40df630b3668f
 gen_resize : forall a. (Int, Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -112,7 +112,7 @@ Run `g` at a fixed size, ignoring the ambient one (shrink a recursive position b
 
 ### `gen_choose`
 
-```prism,sig,h-433ed153e7b1996fce7695be02a8c8fd9df2ce0a9f8578870c4f634cb81f4a86
+```prism,sig,h-b4da079f993cc30006a807fb77088cc8d3c7fd7c2c0d7d56ffc3315b3678ab35
 gen_choose : forall a. (Quickcheck.Gen(a), List(Quickcheck.Gen(a))) -> Quickcheck.Gen(a)
 ```
 
@@ -120,7 +120,7 @@ Pick one of `g0`/`rest` uniformly, then draw from it (one arm per constructor, t
 
 ### `gen_one_of`
 
-```prism,sig,h-8f0f2ab1ee60ed9921b145801a84720ab35b9818fb6dc8d163d4c14a2c5fd8ff
+```prism,sig,h-eaf90324823ab63be67f613f9cd0fd63d02573cdeb6c3b79f8ce68aec9b086e4
 gen_one_of : forall a. (a, List(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -128,7 +128,7 @@ Pick one of the given values uniformly (`x0` or one of `rest`).
 
 ### `gen_int`
 
-```prism,sig,h-10bdc085a2916579f03f3bbe76e878a1046a51776c4e5d7d4332988b2cd75775
+```prism,sig,h-3810c4800038dc779901919b3b613e9fff5baaa2250f3260c5d31525c506751c
 gen_int : Quickcheck.Gen(Int)
 ```
 
@@ -136,7 +136,7 @@ Generator of `Int`, biased toward the edge cases (`0`, `1`, `-1`, and a full-wid
 
 ### `gen_i64`
 
-```prism,sig,h-beb9d8e78933daae1d0ccb7788dc487a18add9970960da9489eb204abe174874
+```prism,sig,h-2159d342ced58b973d7a27c35d1c6e9cdc18c76965a48e1413665d18d0b00b37
 gen_i64 : Quickcheck.Gen(I64)
 ```
 
@@ -144,7 +144,7 @@ Generator of `I64`, reusing the `Int` distribution.
 
 ### `gen_u64`
 
-```prism,sig,h-ff200f21e6a68b8a13536e544c8476d419e275d90816a81eec341ef46e695392
+```prism,sig,h-eb9a2e05e77f456ed6ab4091384197cbebb37335ea91a4282d72aa3522f02105
 gen_u64 : Quickcheck.Gen(U64)
 ```
 
@@ -152,7 +152,7 @@ Generator of `U64`, reusing the `Int` distribution (negatives wrap).
 
 ### `gen_bool`
 
-```prism,sig,h-c3be9ea25b941bf835aa3f0ab66c038aea8e4fbb82e5ae6e7357eec250adbc37
+```prism,sig,h-bc21a021f30005314deb5f26aefc87e41721284e222dcd154797f54f48d2b225
 gen_bool : Quickcheck.Gen(Bool)
 ```
 
@@ -160,7 +160,7 @@ Generator of `Bool`.
 
 ### `gen_float`
 
-```prism,sig,h-a8f6366608d28b37eaf19ede700909fe4d496726eda5269b0311144d89a06abe
+```prism,sig,h-3b6f6e68b382331adb8cf5e24026a3380f69d3dd9a86cb3cc1a8f7a5506ec0d1
 gen_float : Quickcheck.Gen(Float)
 ```
 
@@ -168,7 +168,7 @@ Generator of `Float`, including the nasty values (`+/-0`, `+/-inf`, `NaN`).
 
 ### `gen_char`
 
-```prism,sig,h-15b879c4a0b852584bd0c4265d1b54662091deb02c3429a1db33b8e60cb2e59e
+```prism,sig,h-74bb0e17b2f902b59dc5ca48c868e92967c580599452dc0f71de19620ab5af15
 gen_char : Quickcheck.Gen(Char)
 ```
 
@@ -176,7 +176,7 @@ Generator of a printable-ASCII `Char`.
 
 ### `gen_string`
 
-```prism,sig,h-978eaa05ab34bfa907aec411ce2a26ef35efd7374c148568e2883d8c030e4a0a
+```prism,sig,h-3a0cefc8eeac0ed5fa33fc9d9783afdb0f8574c29dd68bddb472138eb5775407
 gen_string : Quickcheck.Gen(String)
 ```
 
@@ -184,7 +184,7 @@ Generator of a printable-ASCII `String`, length bounded by size.
 
 ### `gen_list`
 
-```prism,sig,h-bc7943b5e2781a4e935418b6dbd43c5fa2e4909ef42fe1ea948f431cfbb60b0c
+```prism,sig,h-25bc39a79280a2163249989b1466179671e50ba944eb07d090417337afca1a22
 gen_list : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(List(a))
 ```
 
@@ -192,7 +192,7 @@ Generator of a `List(a)` whose length is bounded by size.
 
 ### `gen_option`
 
-```prism,sig,h-76e5aa7fe35f85f92ba72ea89f5ff6c40d720658c089f27f70d967a981db5a91
+```prism,sig,h-fab71a3571e316d6d3c1359be0c31e55b00a6e9a0bb2e24a2caac4c0ceda2a03
 gen_option : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(Option(a))
 ```
 
@@ -200,7 +200,7 @@ Generator of `Option(a)`: `None` a quarter of the time, else `Some`.
 
 ### `gen_pair`
 
-```prism,sig,h-0c74a995dcb2fdef3ce574d5a428f2f244a5551662d2507409220636964ae5ad
+```prism,sig,h-e5cda331c75a00acae130e9f01fe66ef8a9bc21f0e097d3542e855593dd0f651
 gen_pair : forall a b. (Quickcheck.Gen(a), Quickcheck.Gen(b)) -> Quickcheck.Gen((a, b))
 ```
 
@@ -208,7 +208,7 @@ Generator of a pair, both drawn at the same size.
 
 ### `gen_triple`
 
-```prism,sig,h-1e66870f2ead0c6a2a2fc9b4f9be160e560e6bb10b2a2c016b40d768a0127184
+```prism,sig,h-a401bb3df9b28c5625827dca88e09480651772e239947c402646e77958c23630
 gen_triple : forall a b c. (Quickcheck.Gen(a), Quickcheck.Gen(b), Quickcheck.Gen(c)) -> Quickcheck.Gen((a, b, c))
 ```
 
@@ -216,7 +216,7 @@ Generator of a triple, all drawn at the same size.
 
 ### `default_config`
 
-```prism,sig,h-25862d2b783213077528f72957da109eec2feaee233ffb507f585136d38f0449
+```prism,sig,h-e833751cbf33409c40d318967058b6783f4675007e7dd53d06f67177eac6aa35
 default_config : Quickcheck.Config
 ```
 
@@ -224,7 +224,7 @@ The default configuration: a fixed base seed, 100 cases, sizes up to 20.
 
 ### `check_with`
 
-```prism,sig,h-e3474805c134ce6ac107b33ef96feb0aa94a6e21629e8070f70b30ec762f9b90
+```prism,sig,h-eea9af21cde92e805f479f6a436f7b08a7041d1317faf48aeffacfe496dd1b02
 check_with : forall a. (Quickcheck.Config, Quickcheck.Gen(a), (a) -> Bool) -> Quickcheck.Outcome(a)
 ```
 
@@ -232,7 +232,7 @@ Run `prop` over `cfg.count` inputs from `gen`, returning the first counterexampl
 
 ### `quickcheck`
 
-```prism,sig,h-56dbac0f68b078d22ba0521e9356d3f18fe30c77ebea62cf8ce7d5a14b5321ed
+```prism,sig,h-b15c4212127a181937b9fadddbac140e574943518b4a12bc2a111f3dc289452c
 quickcheck : forall a. (Quickcheck.Gen(a), (a) -> Bool) -> Quickcheck.Outcome(a)
 ```
 
@@ -240,7 +240,7 @@ Run `prop` over the default configuration.
 
 ### `passed`
 
-```prism,sig,h-9858b9b02938ec0d0ecad6edefc714e7d4ad68b055d2ca5ba0582a491dabdd97
+```prism,sig,h-9aefbed0dc87f112e8eaef1a07fa582c4428f3fdb8dc465d8ec2dcd5d5ac8224
 passed : forall a. (Quickcheck.Outcome(a)) -> Bool
 ```
 
@@ -248,7 +248,7 @@ True when a run found no counterexample.
 
 ### `show_outcome`
 
-```prism,sig,h-16b3f664c5d24f31cbe700b2eacc59011c31af705af680ca0f9fc57171a10cb3
+```prism,sig,h-bfc4ce38dd8b1220876ce6e8f153624f33a900c0c33ccc35e8d8337818f58ea1
 show_outcome : forall a. (String, Quickcheck.Outcome(a)) -> String
 ```
 

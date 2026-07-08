@@ -1,0 +1,3 @@
+-- A word in usage position that is not in the reserved vocabulary is a hard
+-- error, never a warning: unknown facts must not accumulate meanings.
+fn f(x : Int @ fast) : Int = x

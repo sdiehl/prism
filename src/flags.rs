@@ -159,6 +159,13 @@ pub struct DynFlags {
     /// `PRISM_OPT_STATS` (default off): dump per-pass rewrite tick counts to
     /// stderr after the pipeline runs.
     pub opt_stats: bool,
+    /// `PRISM_TIME_COMPILE` (default off): emit one structured timing row per
+    /// compiler phase to stderr. The knob only records the intent; the CLI reads
+    /// it and installs the actual [`TimingSink`](crate::TimingSink) onto the
+    /// top-level compile's [`Config`](crate::Config), so an internal
+    /// re-elaboration (which builds its own [`from_env`](Self::from_env) config)
+    /// stays silent. Program stdout is unaffected; rows go only to stderr.
+    pub time_compile: bool,
     /// `PRISM_QUIET` (default off): silence the compiler-internal fallback
     /// warnings (fusion drift, free-monad fallback) on stderr.
     pub quiet: bool,
@@ -227,6 +234,7 @@ impl Default for DynFlags {
             native_kont_frames: false,
             dump_core: None,
             opt_stats: false,
+            time_compile: false,
             quiet: false,
             opt_level: OptLevel::default(),
             backend_opt: DEFAULT_BACKEND_OPT.into(),
@@ -259,6 +267,7 @@ impl DynFlags {
             native_kont_frames: env_present("PRISM_NATIVE_KONT_FRAMES"),
             dump_core: std::env::var_os("PRISM_DUMP_CORE"),
             opt_stats: env_present("PRISM_OPT_STATS"),
+            time_compile: env_bool("PRISM_TIME_COMPILE", false),
             quiet: env_present("PRISM_QUIET"),
             opt_level: std::env::var("PRISM_OPT_LEVEL")
                 .ok()

@@ -1,0 +1,36 @@
+import Wire (..)
+
+-- Decode a container back into its list, threading the read cursor: a byte peel is
+-- an O(1) offset bump with no slice, so the whole decode is one linear pass
+-- materializing the result, never a per-byte re-slice. Decode is total on a
+-- well-formed frame; the `Fail` arm is dead here but discharges the row so `main`
+-- stays pure.
+type Rec = Rec(Int, Int, Bool) deriving (Eq, Serialize)
+
+fn recs(n : Int, acc : List(Rec)) : List(Rec) =
+  if n == 0 then
+    acc
+  else
+    recs(n - 1, Cons(Rec(n, n * 2, true), acc))
+
+fn dec(bs : Bytes) : (List(Rec), Bytes) = decode(bs)
+
+fn count(xs : List(Rec)) : Int =
+  match xs of
+    Nil => 0
+    Cons(_, r) => 1 + count(r)
+
+-- The row is inferred (decode performs `Fail`); `caught` discharges it to a
+-- default so `main` stays pure, exactly as `wire_laws.pr` does.
+fn count_dec(bs : Bytes) : Int =
+  match dec(bs) of
+    (xs, _r) => count(xs)
+
+fn caught(action : () -> Int ! {Fail | e}) : Int =
+  handle action() with
+    final ctl fail() => 0 - 1
+    return r => r
+
+fn run(bs : Bytes) : Int = caught(\() -> count_dec(bs))
+
+fn main() : !{IO} Unit = println(show_int(run(encode(recs(__N__, Nil)))))

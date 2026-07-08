@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/rankn_relay.pr
 ---
 == tokens ==
@@ -254,13 +254,10 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@.kont.shadow.prism_main = private constant [11 x i8] c"prism_main\00"
-@.kont.shadow.prism_lam_0 = private constant [12 x i8] c"prism_lam_0\00"
-@.kont.shadow.prism_apply_1 = private constant [14 x i8] c"prism_apply_1\00"
-@prism_native_kont_table = constant [924 x i8] c"scheme  prism-core-hash-v1\0Abundle  c97fdbeac66456e944a0e1bf4b1a7e892da2737d65148e4f985a9287a634803f\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c97fdbeac66456e944a0e1bf4b1a7e892da2737d65148e4f985a9287a634803f\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  b07ce545539c49f40c97f15f1645f166c3b3e9f7fcffb082046515d68849d68b  main\0Afn      prism_pick  e31a1b726a6c92ed7b73c8149b2ccc063abebcdf58292187544b3b8bf24685b7  pick\0Afn      prism_relay  873a57e4ee5900e65106cb959a705fd1f0eb9dde7fe0518423bd40d9d0fb1031  relay\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1062 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  c97fdbeac66456e944a0e1bf4b1a7e892da2737d65148e4f985a9287a634803f\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c97fdbeac66456e944a0e1bf4b1a7e892da2737d65148e4f985a9287a634803f\0Aflag  stdlib-root  prism-core-hash-v1:b19c086306ab35f35445114d09249f5ec1907259e92ded3dfefece53dca24e83\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main b07ce545539c49f40c97f15f1645f166c3b3e9f7fcffb082046515d68849d68b main arity 0 slots abi-word[]\0Astate prism_pick e31a1b726a6c92ed7b73c8149b2ccc063abebcdf58292187544b3b8bf24685b7 pick arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_relay 873a57e4ee5900e65106cb959a705fd1f0eb9dde7fe0518423bd40d9d0fb1031 relay arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [924 x i8] c"scheme  prism-core-hash-v1\0Abundle  e8fa54f7dd7240b112e57ed7cd85d6196054fb182782a9de6eddaef48a31fc6e\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:e8fa54f7dd7240b112e57ed7cd85d6196054fb182782a9de6eddaef48a31fc6e\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  7d2a841ac3b6c1f898d714ee88bd5dc17e970a4469b483822919c0aff73750a7  main\0Afn      prism_pick  d45cf6f26d6d76e15d901f9e76e31d25cbd762b725113247b526aa7fae210156  pick\0Afn      prism_relay  900156fa4e1b3be0e73716e6f1a1873385885356cd6a7935a39d814741290905  relay\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1062 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  e8fa54f7dd7240b112e57ed7cd85d6196054fb182782a9de6eddaef48a31fc6e\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:e8fa54f7dd7240b112e57ed7cd85d6196054fb182782a9de6eddaef48a31fc6e\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main 7d2a841ac3b6c1f898d714ee88bd5dc17e970a4469b483822919c0aff73750a7 main arity 0 slots abi-word[]\0Astate prism_pick d45cf6f26d6d76e15d901f9e76e31d25cbd762b725113247b526aa7fae210156 pick arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_relay 900156fa4e1b3be0e73716e6f1a1873385885356cd6a7935a39d814741290905 relay arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol0 = private constant [11 x i8] c"prism_main\00"
-@.kont_hash0 = private constant [65 x i8] c"b07ce545539c49f40c97f15f1645f166c3b3e9f7fcffb082046515d68849d68b\00"
+@.kont_hash0 = private constant [65 x i8] c"7d2a841ac3b6c1f898d714ee88bd5dc17e970a4469b483822919c0aff73750a7\00"
 @.kont_name0 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
@@ -269,7 +266,6 @@ source_filename = "prism"
 ; Function Attrs: nounwind
 define i64 @prism_main() #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_main, i64 0)
   %t1 = call ptr @prism_alloc(i64 0)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
   store i64 0, ptr %t2, align 8
@@ -298,12 +294,8 @@ b2:                                               ; preds = %b1, %b0
   call void @prism_rc_dec(i64 %t16)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
-  call void @prism_native_kont_leave()
   ret i64 0
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_enter(ptr, i64) #0
 
 ; Function Attrs: nounwind
 declare ptr @prism_alloc(i64) #0
@@ -314,9 +306,6 @@ declare void @prism_rc_inc(i64) #0
 ; Function Attrs: nounwind
 define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_apply_1, i64 2)
-  call void @prism_native_kont_arg(i64 0, i64 %_clos)
-  call void @prism_native_kont_arg(i64 1, i64 %_a0)
   %_cp = inttoptr i64 %_clos to ptr
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
   %_tag = load i64, ptr %_tp, align 8
@@ -334,7 +323,6 @@ _dead:                                            ; preds = %entry
 
 _merge:                                           ; preds = %_lam0
   %_result = phi i64 [ %_r0, %_lam0 ]
-  call void @prism_native_kont_leave()
   ret i64 %_result
 }
 
@@ -348,19 +336,10 @@ declare void @prism_print_int(i64) #0
 declare void @prism_print_nl() #0
 
 ; Function Attrs: nounwind
-declare void @prism_native_kont_leave() #0
-
-; Function Attrs: nounwind
 define i64 @prism_lam_0(i64 %_p0) #0 {
 entry:
-  call void @prism_native_kont_enter(ptr @.kont.shadow.prism_lam_0, i64 1)
-  call void @prism_native_kont_arg(i64 0, i64 %_p0)
-  call void @prism_native_kont_leave()
   ret i64 %_p0
 }
-
-; Function Attrs: nounwind
-declare void @prism_native_kont_arg(i64, i64) #0
 
 ; Function Attrs: nounwind
 declare void @prism_apply_error() #0

@@ -56,7 +56,7 @@ fn pp_seq(c: &Comp, depth: usize, binder: Option<&str>) -> String {
     };
     match c {
         Comp::Bind(m, x, n) => {
-            let bx = (*x != "_").then_some(x.as_str());
+            let bx = (x.as_str() != "_").then_some(x.as_str());
             format!("{}\n{}", pp_seq(m, depth, bx), pp_seq(n, depth, binder))
         }
         Comp::If(v, t, e) => with_binder(format!(

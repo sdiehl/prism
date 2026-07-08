@@ -1,0 +1,203 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/no_alloc_region.pr
+---
+== tokens ==
+VOpen Fn Ident("tick_region") LParen Ident("base") Colon KwInt RParen Colon KwInt At Ident("noalloc") Eq Ident("base") Plus Ident("base") VSemi Fn Ident("tick") LParen Ident("n") Colon KwInt RParen Colon KwInt Eq VOpen Let Ident("base") Eq Ident("n") Plus Int(IntLit { value: 1, suffix: None }) VSemi Ident("tick_region") LParen Ident("base") RParen VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("tick") LParen Int(IntLit { value: 20, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "tick_region",
+            params: [
+                Param {
+                    name: "base",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Var(
+                            "base",
+                        ),
+                        span: 290..294,
+                    },
+                    Spanned {
+                        node: Var(
+                            "base",
+                        ),
+                        span: 297..301,
+                    },
+                ),
+                span: 290..301,
+            },
+            wheres: [],
+            no_alloc: true,
+            span: 245..301,
+        },
+        Decl {
+            name: "tick",
+            params: [
+                Param {
+                    name: "n",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "base",
+                    Spanned {
+                        node: Bin(
+                            Add,
+                            Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 341..342,
+                            },
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 345..346,
+                            },
+                        ),
+                        span: 341..346,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "tick_region",
+                                ),
+                                span: 349..360,
+                            },
+                            [
+                                Spanned {
+                                    node: Var(
+                                        "base",
+                                    ),
+                                    span: 361..365,
+                                },
+                            ],
+                        ),
+                        span: 349..366,
+                    },
+                ),
+                span: 330..366,
+            },
+            wheres: [],
+            span: 303..366,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "tick",
+                        ),
+                        span: 386..390,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 20,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 391..393,
+                        },
+                    ],
+                ),
+                span: 386..394,
+            },
+            wheres: [],
+            span: 368..394,
+        },
+    ],
+}
+
+== types ==
+tick_region : (Int) -> Int
+tick : (Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn tick_region(base) =
+  return base to t@0; return base to t@1; t@0 + t@1
+fn tick(n) =
+  return n to t@2; return 1 to t@3; t@2 + t@3 to base; return base to t@4; tick_region(t@4)
+fn main() =
+  return 20 to t@5; tick(t@5)
+
+== fbip (rc) ==
+fn tick_region(base) =
+  dup base to _; return base to t@0; return base to t@1; t@0 + t@1
+fn tick(n) =
+  return n to t@2; return 1 to t@3; t@2 + t@3 to base; return base to t@4; tick_region(t@4)
+fn main() =
+  return 20 to t@5; tick(t@5)
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [936 x i8] c"scheme  prism-core-hash-v1\0Abundle  f6cb0479dfcda47d88e665c1b86074251eacfc5dd9302b2c9e62b8c94d247dee\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:f6cb0479dfcda47d88e665c1b86074251eacfc5dd9302b2c9e62b8c94d247dee\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  095e48d46c5065cb0a00e2016831c4999cbc75ed0a8fb26823d1fda9da40d05b  main\0Afn      prism_tick  67c8e11d47e6aea42de211d9aa8c4e7be3aa5014a46ee9fdea2cbf4f7330f5e9  tick\0Afn      prism_tick_region  c6707a321d3a56a65e001bf573ffbc3a992c5255c1c4778a5c5c3bb58aa971f8  tick_region\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1074 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  f6cb0479dfcda47d88e665c1b86074251eacfc5dd9302b2c9e62b8c94d247dee\0Acompiler  0.8.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:f6cb0479dfcda47d88e665c1b86074251eacfc5dd9302b2c9e62b8c94d247dee\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main 095e48d46c5065cb0a00e2016831c4999cbc75ed0a8fb26823d1fda9da40d05b main arity 0 slots abi-word[]\0Astate prism_tick 67c8e11d47e6aea42de211d9aa8c4e7be3aa5014a46ee9fdea2cbf4f7330f5e9 tick arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_tick_region c6707a321d3a56a65e001bf573ffbc3a992c5255c1c4778a5c5c3bb58aa971f8 tick_region arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [11 x i8] c"prism_main\00"
+@.kont_hash0 = private constant [65 x i8] c"095e48d46c5065cb0a00e2016831c4999cbc75ed0a8fb26823d1fda9da40d05b\00"
+@.kont_name0 = private constant [5 x i8] c"main\00"
+@prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  ret i64 85
+}
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 42

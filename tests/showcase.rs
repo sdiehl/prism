@@ -118,8 +118,53 @@ fn pure_refactor_diffs_to_zero() {
     // comments, reformat. Every content hash holds, so the diff is exactly zero.
     let out = diff(COLLATZ, COLLATZ_REFACTOR);
     assert_eq!(
-        out, "diff: 0 changed, 0 added, 0 removed, 4 unchanged\ncone: 0 affected\n",
-        "a pure refactor must diff to zero behavioral changes"
+        out,
+        "diff: 0 changed, 0 added, 0 removed, 4 unchanged\n\
+         text-only: 3 respelled, behavior held (collatz_len, collatz_max, collatz_step)\n\
+         cone: 0 affected\n",
+        "a pure refactor is zero behavioral changes with the respellings named"
+    );
+}
+
+// The same two comparisons through the structured surface: the JSON carries the
+// behavioral/text-only split, is deterministic, and a logic edit lands in
+// `behavioral` with its dependents in the cone.
+#[test]
+fn source_diff_json_classifies_behavior_and_text() {
+    let d = prism::source_diff_on(
+        &with_prelude(COLLATZ),
+        &with_prelude(COLLATZ_REFACTOR),
+        &roots(),
+        &cfg(),
+    )
+    .expect("diff");
+    assert!(d.behavioral.is_empty() && d.added.is_empty() && d.removed.is_empty());
+    let respelled: Vec<&str> = d.text_only.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(respelled, ["collatz_len", "collatz_max", "collatz_step"]);
+    let once = serde_json::to_string(&d).unwrap();
+    let d2 = prism::source_diff_on(
+        &with_prelude(COLLATZ),
+        &with_prelude(COLLATZ_REFACTOR),
+        &roots(),
+        &cfg(),
+    )
+    .expect("diff");
+    assert_eq!(once, serde_json::to_string(&d2).unwrap(), "deterministic");
+
+    let e = prism::source_diff_on(
+        &with_prelude(COLLATZ),
+        &with_prelude(COLLATZ_EDIT),
+        &roots(),
+        &cfg(),
+    )
+    .expect("diff");
+    assert!(
+        e.behavioral.iter().any(|c| c.name == "collatz_step"),
+        "the logic edit is behavioral: {e:?}"
+    );
+    assert!(
+        e.dependents.iter().any(|n| n == "collatz_len"),
+        "dependents ride the cone: {e:?}"
     );
 }
 
@@ -365,5 +410,42 @@ fn attest_emits_the_green_identical_line() {
     assert!(
         root.len() == 64 && root.bytes().all(|b| b.is_ascii_hexdigit()),
         "root was {root:?}"
+    );
+}
+
+// -- committed goldens for the diff surface -------------------------------------
+
+// The three text shapes and the JSON projection, pinned as snapshots so any
+// change to the diff's wording, ordering, or serialization is a reviewed diff
+// against a committed golden rather than a silent drift.
+#[test]
+fn diff_text_refactor_golden() {
+    insta::assert_snapshot!("diff_text_refactor", diff(COLLATZ, COLLATZ_REFACTOR));
+}
+
+#[test]
+fn diff_text_edit_golden() {
+    insta::assert_snapshot!("diff_text_edit", diff(COLLATZ, COLLATZ_EDIT));
+}
+
+#[test]
+fn diff_text_add_remove_golden() {
+    let old = "fn keep(x : Int) : Int = x + 1\n\nfn gone(x : Int) : Int = x * 2\n\nfn main() : Int = keep(1) + gone(2)\n";
+    let new = "fn keep(x : Int) : Int = x + 1\n\nfn fresh(x : Int) : Int = x * 3\n\nfn main() : Int = keep(1) + fresh(2)\n";
+    insta::assert_snapshot!("diff_text_add_remove", diff(old, new));
+}
+
+#[test]
+fn diff_json_edit_golden() {
+    let d = prism::source_diff_on(
+        &with_prelude(COLLATZ),
+        &with_prelude(COLLATZ_EDIT),
+        &roots(),
+        &cfg(),
+    )
+    .expect("diff");
+    insta::assert_snapshot!(
+        "diff_json_edit",
+        serde_json::to_string_pretty(&d).expect("serialize")
     );
 }

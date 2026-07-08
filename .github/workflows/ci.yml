@@ -70,7 +70,6 @@ jobs:
       - name: C runtime warnings (-Werror)
         run: |
           for f in runtime/*.c; do
-            [ "$(basename "$f")" = prism_arena.c ] && continue
             echo "checking $f"
             ${PRISM_CC:-clang} -std=c11 -O2 -Werror -Wall -Wextra -Wpedantic -Wshadow \
               -Wstrict-prototypes -Wconversion -Wsign-conversion -Wcast-qual -Wcast-align \
@@ -80,10 +79,17 @@ jobs:
       - name: C runtime clang-tidy
         run: |
           for f in runtime/*.c; do
-            [ "$(basename "$f")" = prism_arena.c ] && continue
             echo "tidy $f"
             clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime
           done
+      # The arena allocator is standalone (not yet wired into codegen), so it
+      # carries its own self-test behind -DPRISM_ARENA_TEST. Build and run it so
+      # the create/alloc/reset/destroy paths stay honest even before wiring.
+      - name: C runtime arena self-test
+        run: |
+          ${PRISM_CC:-clang} -std=c11 -O2 -DPRISM_ARENA_TEST -Iruntime \
+            runtime/prism_arena.c -o /tmp/prism_arena_test
+          /tmp/prism_arena_test
 
   # The C-runtime sanitizer + structural-backstop parity re-runs, split off `test`
   # so they run in parallel instead of tailing it (free runners: wall-clock, not cost).
@@ -237,7 +243,7 @@ jobs:
         run: ./target/release/prism run --examples
 
       - name: Check package world
-        run: ./target/release/prism check-world packages --strict
+        run: ./target/release/prism pkg check-world packages --strict
 
   web:
     name: Web playground

@@ -163,6 +163,28 @@ pub(crate) fn run(examples: &[Example], roots: &[Root], base: &Path) -> Report {
     r
 }
 
+/// Run every runnable example and collect `(location, output)` for those that
+/// actually executed: a `Mode::Check` example defining `main`. Non-running
+/// examples (`no_run`, `ignore`, `compile_fail`, or an example with no `main`)
+/// and any that fail to run produce no entry, so a manifest records the output of
+/// doctests that ran, nothing more.
+pub(crate) fn ran_outputs(
+    examples: &[Example],
+    roots: &[Root],
+    base: &Path,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for ex in examples {
+        if ex.mode != Mode::Check {
+            continue;
+        }
+        if let Ok(lines) = actual_output(&ex.code, roots, base) {
+            out.push((ex.origin.clone(), lines.join("\n")));
+        }
+    }
+    out
+}
+
 /// Run one example as an implicit-`main` program and render its observable
 /// output as expectation lines: the `print` transcript if it printed anything,
 /// otherwise the result value. Each line is trailing-trimmed so it round-trips

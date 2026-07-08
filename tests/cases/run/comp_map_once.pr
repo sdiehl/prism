@@ -1,0 +1,15 @@
+-- A guard-free comprehension `[ e for x in s ]` lowers to `scollect(smap(s, ..))`,
+-- a fusing stream map, rather than handing `scollect` a first-class effectful
+-- thunk. Both evaluate the source `s` exactly once, before iteration, and emit the
+-- head left to right per element. `announce` prints once when the source
+-- expression is evaluated, so a single `eval-source` line witnesses the single
+-- evaluation; the mapped squares that follow witness the order.
+
+fn announce() =
+  println("eval-source")
+  srange(0, 5)
+
+fn main() =
+  let ys = [x * x for x in announce()]
+  for y in sof(ys) do
+    println((y : Int))

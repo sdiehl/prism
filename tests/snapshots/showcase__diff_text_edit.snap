@@ -1,0 +1,7 @@
+---
+source: tests/showcase.rs
+expression: "diff(COLLATZ, COLLATZ_EDIT)"
+---
+diff: 1 changed, 0 added, 0 removed, 0 unchanged
+  ~ collatz_step  fcd05d9a3e76dde0 -> 6ecff682fe0721fd
+cone: 3 affected (collatz_len, collatz_max, main)

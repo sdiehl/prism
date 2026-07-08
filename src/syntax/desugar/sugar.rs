@@ -8,7 +8,7 @@ use crate::error::TypeError;
 use crate::names;
 use crate::syntax::ast::{
     Arm, BinOp, Converter, Core, Expr, Marker, NodeId, Param, Pattern, PatternDecl, Rung, Spanned,
-    StableDecl, Sugar, S,
+    StableDecl, Sugar, Ty, S,
 };
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
@@ -100,6 +100,19 @@ const fn with_sentinel(l: usize, r: usize) -> S<Expr> {
 #[must_use]
 pub fn with_rest(rest: Option<S<Expr>>, l: usize, r: usize) -> S<Expr> {
     rest.unwrap_or_else(|| with_sentinel(l, r))
+}
+
+// A usage row spelling exactly `@ noalloc` at the root of a `fn` return
+// annotation is the declaration's allocation certificate, not part of the
+// type: strip it onto the flag at parse. Any other row (reserved facts, or
+// `noalloc` mixed with them) stays in the `Ty` so the checker rejects it with
+// the reserved-fact diagnostic at its own span.
+#[must_use]
+pub fn lift_noalloc(ret: Option<Ty>) -> (Option<Ty>, bool) {
+    match ret {
+        Some(Ty::Coeffect(inner, row)) if row.is_noalloc_only() => (Some(*inner), true),
+        other => (other, false),
+    }
 }
 
 // UFCS dot call: `recv.f(args)` becomes `f(recv, args)`. The callee's `synth`

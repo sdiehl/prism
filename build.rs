@@ -81,6 +81,29 @@ fn libm_files(manifest_dir: &str) -> Vec<(String, bool)> {
     out
 }
 
+fn macos_deployment_target(cc: &str) -> Option<String> {
+    if let Ok(target) = env::var("MACOSX_DEPLOYMENT_TARGET") {
+        if !target.trim().is_empty() {
+            return Some(target);
+        }
+    }
+    let output = Command::new(cc)
+        .args(["-###", "-x", "c", "/dev/null", "-o", "/tmp/prism-cc-probe"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stderr);
+    let marker = "apple-macosx";
+    let start = text.find(marker)? + marker.len();
+    let version: String = text[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let mut parts = version.split('.').filter(|s| !s.is_empty());
+    let major = parts.next()?;
+    let minor = parts.next().unwrap_or("0");
+    Some(format!("{major}.{minor}"))
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=src/syntax/grammar.lalrpop");
     lalrpop::process_root().unwrap();
@@ -114,6 +137,16 @@ fn main() {
         .and_then(|s| s.lines().next().map(str::trim).map(str::to_string))
         .unwrap_or_default();
     println!("cargo:rustc-env=PRISM_BUILD_CC_VERSION={cc_version}");
+    println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+    let macos_min = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        macos_deployment_target(&cc)
+    } else {
+        None
+    };
+    println!(
+        "cargo:rustc-env=PRISM_MACOSX_DEPLOYMENT_TARGET={}",
+        macos_min.as_deref().unwrap_or("")
+    );
 
     // Emit the embedded-runtime manifest for src/codegen/rt.rs. Generated for every
     // target (including wasm, which compiles rt.rs but not the C) so the include!
@@ -161,6 +194,9 @@ fn main() {
         // the native link step: an FMA fused on one platform and not another
         // breaks byte-for-byte float parity with the interpreter.
         rt.flag("-ffp-contract=off");
+        if let Some(min) = &macos_min {
+            rt.flag(format!("-mmacosx-version-min={min}"));
+        }
         for src in RUNTIME_SOURCES {
             rt.file(format!("{RUNTIME_DIR}/{src}"));
         }
@@ -191,6 +227,9 @@ fn main() {
             .flag("-ffp-contract=off")
             .flag("-include")
             .flag(&rename_hdr);
+        if let Some(min) = &macos_min {
+            libm_rt.flag(format!("-mmacosx-version-min={min}"));
+        }
         for (name, is_header) in &libm {
             if !is_header {
                 libm_rt.file(format!("{RUNTIME_DIR}/{name}"));

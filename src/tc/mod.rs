@@ -317,13 +317,12 @@ struct Tc<'a> {
     // and the non-nesting invariant enforceable by save/restore.
     cur_self: Option<SelfRef>,
     wanted: Vec<Wanted>,
-    // Numeric operands left ambiguous at an arithmetic/comparison operator: each
-    // (node id, span, operand type) is resolved in one pass at the end of the
-    // declaration (`resolve_all`), so a later use can fix the type to a
-    // fixed-width lane before the otherwise-`Int` default applies. The id keys
-    // the `fixed` record; the span blames a non-numeric operand. Symmetric in
-    // the two operands.
-    num_default: Vec<(NodeId, Span, Type)>,
+    // Numeric/comparison operands left ambiguous: each (node id, span, operand
+    // type, class) is resolved in one pass at the end of the declaration
+    // (`resolve_all`), so a later use can fix the type before the default or
+    // class obligation applies. `class` is `None` for arithmetic, or `Eq`/`Ord`
+    // for comparisons whose resolved ADTs must raise a dictionary obligation.
+    num_default: Vec<(NodeId, Span, Type, Option<&'static str>)>,
     // Unary-minus operands left ambiguous at synth: resolved in the same
     // `resolve_all` pass as `num_default`, but the signed lanes differ. Negation
     // spans `Int`/`I64`/`Float` (a leftover existential defaults to `Int`), while

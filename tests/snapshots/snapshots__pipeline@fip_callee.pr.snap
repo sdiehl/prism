@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fip_callee.pr
 ---
 == tokens ==
@@ -88,12 +88,10 @@ fn helper(x) =
   return x
 
 == fip ==
-Type Error: usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
-witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
+Type Error: usage check `fip` failed for function `use_it`: in `use_it`, call to `helper` is not certified `fip`, so bounded stack and zero allocation cannot be proven
    ╭─[ <source>:5:1 ]
    │
  5 │ fip fn use_it(x) = helper(x)
    │ ──────────────┬─────────────  
-   │               ╰─────────────── usage check `fip` failed for function `use_it`: may only call `fip` functions (bounded stack), but `use_it` calls `helper`
-witness: `helper` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack
+   │               ╰─────────────── usage check `fip` failed for function `use_it`: in `use_it`, call to `helper` is not certified `fip`, so bounded stack and zero allocation cannot be proven
 ───╯

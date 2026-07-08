@@ -1,1 +1,1 @@
-fn apply(f : (Int) -> Int, x : Int) : Int without alloc = f(x)
+fn apply(f : (Int) -> Int, x : Int) : Int @ noalloc = f(x)

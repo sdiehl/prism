@@ -1,0 +1,15 @@
+-- Behavior diff, pure refactor: functions reordered, parameters and locals
+-- renamed, comments and layout rewritten. No behavior moves, so `prism diff`
+-- against examples/diff_before.pr reports 0 changed and names the respellings.
+
+fn main() = println(total(10))
+
+fn total(bound : Int) : Int =
+  var running := 0
+  var k := 1
+  while k <= bound do
+    running := running + weight(k)
+    k := k + 1
+  running
+
+fn weight(x : Int) : Int = 3 * x + 1

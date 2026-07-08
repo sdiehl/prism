@@ -1,0 +1,5 @@
+type Box = Box(Int)
+
+fn wrap_region(n : Int) : Box @ noalloc = Box(n)
+
+fn wrap(n : Int) : Box = wrap_region(n)

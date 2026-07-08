@@ -99,9 +99,10 @@ fn recorded_argv_replays_when_command_line_differs() {
     assert!(rec.status.success(), "record exited non-zero: {rec:?}");
     let recorded_out = String::from_utf8(rec.stdout).expect("utf8");
 
-    // Replay: the live argv is `<bin> replay <prog> <trace>`, but replay serves
-    // the recorded Env observations instead of reading that command line.
+    // Replay: the live argv is `<bin> exec replay <prog> <trace>`, but replay
+    // serves the recorded Env observations instead of reading that command line.
     let rep = Command::new(bin)
+        .arg("exec")
         .arg("replay")
         .arg(&prog)
         .arg(&trace)

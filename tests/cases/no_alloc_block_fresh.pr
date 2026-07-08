@@ -1,8 +1,0 @@
--- A `without alloc <block>` that builds a fresh constructor is rejected the same
--- way a `without alloc` function is: the lifted region allocates a cell, and the
--- diagnostic names the block rather than the synthetic lifted function.
-type Box = Box(Int)
-
-fn wrap(n : Int) : Box = without alloc Box(n)
-
-fn main() : Int = 0

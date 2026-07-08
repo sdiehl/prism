@@ -1,0 +1,6 @@
+-- `Net` is a reserved boundary-capability name: declaring it is rejected so no
+-- program can give the future network capability a private meaning.
+effect Net
+  ctl fetch(String) : String
+
+fn main() : Int = 0

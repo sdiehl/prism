@@ -1,6 +1,7 @@
 pub use marginalia::Span;
 pub use num_bigint::BigInt;
 
+pub use crate::coeffect::CoeffectRow;
 use crate::kw;
 pub use crate::types::ty::Kind;
 
@@ -469,8 +470,8 @@ pub struct EffOp {
     pub grade: Grade,
 }
 
-// Several independent surface flags (`konst`, `replayable`, `no_alloc`, and which
-// spelling of it); a flat set of one-shot booleans, not a state machine.
+// Several independent surface flags (`konst`, `replayable`, `no_alloc`); a
+// flat set of one-shot booleans, not a state machine.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone)]
 pub struct Decl<P: Phase = Surface> {
@@ -494,26 +495,16 @@ pub struct Decl<P: Phase = Surface> {
     // must stay within the recordable capabilities plus the deterministic builtin
     // effects, so a record/replay handler can reproduce every observation.
     pub replayable: bool,
-    // The `without alloc` signature suffix: the function and its whole call tree
-    // must allocate no fresh heap cell. Checked over the reuse-lowered core with
-    // `fbip` semantics (no linearity or bounded-stack requirement), so this is
-    // the allocation-certificate spelling of the same usage check.
+    // The `@ noalloc` allocation certificate, written at the root of the return
+    // annotation and lifted off the type at parse: the function and its whole
+    // call tree must allocate no fresh heap cell. Checked over the reuse-lowered
+    // core with `fbip` semantics (no linearity or bounded-stack requirement).
     pub no_alloc: bool,
-    // Which surface spelling of that suffix the source used: `true` for the terser
-    // `\ alloc`, `false` for `without alloc`. Purely a formatter fidelity hint so a
-    // round-trip preserves the author's choice; the two spellings are semantically
-    // identical, so this is deliberately kept out of the `Debug` dump (an AST dump
-    // of `\ alloc` and `without alloc` is byte-identical, as it should be).
-    pub no_alloc_bs: bool,
     pub span: Span,
 }
 
 // `konst` is shown only when set, so a plain `fn` dumps identically to the
 // pre-constant form and a constant stands out.
-#[expect(
-    clippy::missing_fields_in_debug,
-    reason = "`no_alloc_bs` is a formatter display hint, deliberately omitted so a `\\ alloc` and a `without alloc` decl dump identically (they are the same declaration)"
-)]
 impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Decl<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Decl");
@@ -581,6 +572,13 @@ pub enum Ty {
     // argument for a `Nat`-kinded parameter. Only valid at a `Nat`-kinded
     // position; the kind check rejects it anywhere a type is wanted.
     Nat(u64),
+    // A usage row (`T @ noalloc`, `T @ {once, portable}`) attached to an atomic
+    // or parenthesized type; the compiler-internal name is the coeffect row. A
+    // row written at the root of a `fn` return annotation spelling exactly
+    // `@ noalloc` is lifted onto `Decl::no_alloc` at parse and never reaches
+    // here; every row that survives in a `Ty` is a reserved fact the checker
+    // rejects with a pointed diagnostic.
+    Coeffect(Box<Self>, CoeffectRow),
 }
 
 impl Ty {
@@ -596,7 +594,7 @@ impl Ty {
                     f(a);
                 }
             }
-            Self::Forall(_, b) => f(b),
+            Self::Forall(_, b) | Self::Coeffect(b, _) => f(b),
             Self::Fun(ps, row, ret) => {
                 for p in ps {
                     f(p);
@@ -633,7 +631,7 @@ impl Ty {
                     f(a);
                 }
             }
-            Self::Forall(_, b) => f(b),
+            Self::Forall(_, b) | Self::Coeffect(b, _) => f(b),
             Self::Fun(ps, row, ret) => {
                 for p in ps {
                     f(p);
@@ -776,13 +774,19 @@ impl BinOp {
 // downstream passes need no arm for it. `Phase` threads through `Expr`/
 // `HandlerArm` (and the structs holding them) so one set of definitions serves
 // both phases.
-pub trait Phase {
+pub trait Phase: Sized {
     // Payload of `Expr::Sugar` (the surface-only expression forms).
     type Sugar: Clone + std::fmt::Debug;
     // Payload of `HandlerArm::Sugar` (the three surface-only handler clauses).
     type Arm: Clone + std::fmt::Debug;
     // Payload of `Expr::Marker` (the parse-time markers).
     type Marker: Clone + std::fmt::Debug;
+
+    #[doc(hidden)]
+    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, f: &mut F);
+
+    #[doc(hidden)]
+    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F);
 }
 
 #[derive(Clone, Debug)]
@@ -799,11 +803,108 @@ impl Phase for Surface {
     type Sugar = Sugar<Self>;
     type Arm = SugarArm<Self>;
     type Marker = Marker;
+
+    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, f: &mut F) {
+        match s {
+            Sugar::NamedHandle(_, body, arms) => {
+                f(body);
+                for a in arms {
+                    a.each_child(f);
+                }
+            }
+            Sugar::VarDecl(_, v, b) => {
+                f(v);
+                f(b);
+            }
+            Sugar::Assign(_, v) | Sugar::OptChain(v, _) | Sugar::Probe(_, v) | Sugar::Return(v) => {
+                f(v);
+            }
+            Sugar::IndexAssign(recv, key, v) => {
+                f(recv);
+                f(key);
+                f(v);
+            }
+            Sugar::Throw(_, args) => {
+                for a in args {
+                    f(a);
+                }
+            }
+            Sugar::TryCatch(body, arms) => {
+                f(body);
+                for a in arms {
+                    f(&a.body);
+                }
+            }
+            Sugar::For(_, seq, quals, body) => {
+                f(seq);
+                for q in quals {
+                    q.each_child(f);
+                }
+                f(body);
+            }
+            Sugar::While(cond, body) => {
+                if let Some(cond) = cond {
+                    f(cond);
+                }
+                f(body);
+            }
+            Sugar::Comp(head, _, seq, quals) => {
+                f(head);
+                f(seq);
+                for q in quals {
+                    q.each_child(f);
+                }
+            }
+            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+                f(a);
+                f(b);
+            }
+            Sugar::Range(prefix, hi) => {
+                for a in prefix {
+                    f(a);
+                }
+                f(hi);
+            }
+            Sugar::ReadPath(base, steps) => {
+                f(base);
+                for s in steps {
+                    if let Some(e) = s.sub_expr() {
+                        f(e);
+                    }
+                }
+            }
+            Sugar::Break | Sugar::Continue => {}
+        }
+    }
+
+    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F) {
+        match a {
+            SugarArm::Fun(_, _, body) | SugarArm::Val(_, body) | SugarArm::Final(_, _, body) => {
+                f(body);
+            }
+        }
+    }
 }
 impl Phase for Core {
     type Sugar = Never;
     type Arm = Never;
     type Marker = Never;
+
+    #[expect(
+        clippy::uninhabited_references,
+        reason = "a `&Never` cannot be constructed; the empty match documents vacuity"
+    )]
+    fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, _f: &mut F) {
+        match *s {}
+    }
+
+    #[expect(
+        clippy::uninhabited_references,
+        reason = "a `&Never` cannot be constructed; the empty match documents vacuity"
+    )]
+    fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, _f: &mut F) {
+        match *a {}
+    }
 }
 
 // The default phase is `Surface`, so a bare `Expr`/`HandlerArm` (parser,
@@ -827,6 +928,15 @@ pub enum HandlerArm<P: Phase = Surface> {
     Op(String, Vec<String>, String, S<Expr<P>>),
     // The surface-only clauses. `P::Arm = Never` in core, so this is dead there.
     Sugar(P::Arm),
+}
+
+impl<P: Phase> HandlerArm<P> {
+    pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
+        match self {
+            Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
+            Self::Sugar(a) => P::each_arm_child(a, f),
+        }
+    }
 }
 
 // The surface-only expression forms, removed by desugar.
@@ -886,11 +996,6 @@ pub enum Sugar<P: Phase> {
     // `s.[ path ]`: read every focus the path selects into a `List`, the read
     // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
     ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),
-    // `without alloc { block }`: a scoped zero-allocation assertion. Desugar lifts
-    // the block to a synthetic top-level `without alloc` function taking the
-    // block's captured locals as parameters, replacing the block with a call, so
-    // the existing whole-call-tree allocation check covers the region.
-    WithoutAlloc(Box<S<Expr<P>>>),
 }
 
 // One step of an update path, read left to right. `Field(f)` descends into a
@@ -1005,6 +1110,91 @@ pub enum Expr<P: Phase = Surface> {
     Sugar(P::Sugar),
 }
 
+impl<P: Phase> Expr<P> {
+    /// Visit each directly-nested expression child.
+    ///
+    /// This is the single exhaustive statement of `Expr`'s structural children:
+    /// walkers that recurse through it cannot silently drop a new expression
+    /// variant, and adding a variant forces an update here rather than a quiet
+    /// miss at every hand-written `match`.
+    pub fn each_child(&self, f: &mut impl FnMut(&S<Self>)) {
+        match self {
+            Self::Bin(_, a, b) | Self::Let(_, a, b) | Self::Pipe(a, b) | Self::Index(a, b) => {
+                f(a);
+                f(b);
+            }
+            Self::Neg(a)
+            | Self::Lam(_, a)
+            | Self::FieldAccess(a, _)
+            | Self::Inst(a, _)
+            | Self::Ann(a, _)
+            | Self::Mask(_, a) => f(a),
+            Self::If(a, b, c) | Self::IndexSet(a, b, c) => {
+                f(a);
+                f(b);
+                f(c);
+            }
+            Self::Call(head, args) => {
+                f(head);
+                for a in args {
+                    f(a);
+                }
+            }
+            Self::Match(scrut, arms) => {
+                f(scrut);
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        f(g);
+                    }
+                    f(&a.body);
+                }
+            }
+            Self::List(items) | Self::Tuple(items) => {
+                for a in items {
+                    f(a);
+                }
+            }
+            Self::RecordCreate(_, fields) => {
+                for (_, value) in fields {
+                    f(value);
+                }
+            }
+            Self::RecordUpdate(base, _, fields) => {
+                f(base);
+                for (_, value) in fields {
+                    f(value);
+                }
+            }
+            Self::RecordUpdatePath(base, updates) => {
+                f(base);
+                for (steps, op) in updates {
+                    for step in steps {
+                        if let Some(e) = step.sub_expr() {
+                            f(e);
+                        }
+                    }
+                    f(op.expr());
+                }
+            }
+            Self::Handle(body, arms) => {
+                f(body);
+                for a in arms {
+                    a.each_child(f);
+                }
+            }
+            Self::Sugar(s) => P::each_sugar_child(s, f),
+            Self::Int(_)
+            | Self::Float(_)
+            | Self::Char(_)
+            | Self::Bool(_)
+            | Self::Unit
+            | Self::Str(_)
+            | Self::Var(_)
+            | Self::Marker(_) => {}
+        }
+    }
+}
+
 // Parse-time markers stuffed into the expression tree, all removed by desugar.
 // `With` is a standalone placeholder for a trailing `with` (rejected). `Try`
 // and `Interp` are call heads: `Try` marks `e?`, `Interp` marks an interpolated
@@ -1022,6 +1212,14 @@ pub enum Marker {
 pub enum Qualifier<P: Phase = Surface> {
     Guard(S<Expr<P>>),
     Bind(String, S<Expr<P>>),
+}
+
+impl<P: Phase> Qualifier<P> {
+    pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
+        match self {
+            Self::Guard(e) | Self::Bind(_, e) => f(e),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -17,7 +17,7 @@
  * intermediate is a subnormal scaled toward its leading digit (~2^1130) or
  * DBL_MAX's denominator (~2^1027), both well under the capacity; every mutator
  * aborts rather than silently truncate if that bound is ever exceeded. */
-#define PRISM_DTOA_LIMBS 48 /* 1536 bits; margin over the ~2^1130 worst case */
+#define PRISM_DTOA_LIMBS 128 /* margin for fixed precision up to f64's 2^-1074 tail */
 
 typedef struct {
     uint32_t w[PRISM_DTOA_LIMBS]; /* little-endian base-2^32 limbs */
@@ -156,6 +156,103 @@ static void dtoa_big_mul_pow10(DtoaBig *a, int k) {
         k -= PRISM_POW10_CHUNK_EXP;
     }
     if (k > 0) dtoa_big_mul_small(a, PRISM_POW10_SMALL[k]);
+}
+
+static void dtoa_big_add_small(DtoaBig *a, uint32_t x) {
+    uint64_t carry = x;
+    int i = 0;
+    while (carry) {
+        if (i >= a->n) {
+            if (i >= PRISM_DTOA_LIMBS) abort();
+            a->w[i] = 0;
+            a->n = i + 1;
+        }
+        uint64_t s = (uint64_t)a->w[i] + carry;
+        a->w[i] = (uint32_t)s;
+        carry = s >> 32;
+        i++;
+    }
+}
+
+static uint32_t dtoa_big_div_small(DtoaBig *a, uint32_t d) {
+    uint64_t rem = 0;
+    for (int i = a->n - 1; i >= 0; i--) {
+        uint64_t cur = (rem << 32) | a->w[i];
+        a->w[i] = (uint32_t)(cur / d);
+        rem = cur % d;
+    }
+    dtoa_big_norm(a);
+    return (uint32_t)rem;
+}
+
+static int dtoa_big_test_bit(const DtoaBig *a, int bit) {
+    int word = bit / 32, off = bit % 32;
+    return word < a->n && ((a->w[word] >> off) & 1u);
+}
+
+static int dtoa_big_any_bit_below(const DtoaBig *a, int bit) {
+    int full = bit / 32, off = bit % 32;
+    for (int i = 0; i < full && i < a->n; i++)
+        if (a->w[i] != 0) return 1;
+    if (full < a->n && off > 0) {
+        uint32_t mask = (1u << off) - 1u;
+        if ((a->w[full] & mask) != 0) return 1;
+    }
+    return 0;
+}
+
+static DtoaBig dtoa_big_shr(const DtoaBig *a, int bits) {
+    DtoaBig out = {{0}, 0};
+    int words = bits / 32, rem = bits % 32;
+    if (words >= a->n) return out;
+    out.n = a->n - words;
+    for (int i = 0; i < out.n; i++) {
+        uint32_t lo = a->w[i + words] >> rem;
+        uint32_t hi = 0;
+        if (rem && i + words + 1 < a->n) hi = a->w[i + words + 1] << (32 - rem);
+        out.w[i] = lo | hi;
+    }
+    dtoa_big_norm(&out);
+    return out;
+}
+
+static DtoaBig dtoa_big_div_pow2_round(const DtoaBig *num, int bits) {
+    DtoaBig q = dtoa_big_shr(num, bits);
+    if (bits <= 0) return q;
+    int half = dtoa_big_test_bit(num, bits - 1);
+    int sticky = dtoa_big_any_bit_below(num, bits - 1);
+    int odd = q.n > 0 && (q.w[0] & 1u);
+    if (half && (sticky || odd)) dtoa_big_add_small(&q, 1);
+    return q;
+}
+
+static int append_u32_dec(char *out, int o, uint32_t x, int width) {
+    char tmp[10];
+    int n = 0;
+    do {
+        tmp[n++] = (char)('0' + (x % 10));
+        x /= 10;
+    } while (x);
+    while (n < width) tmp[n++] = '0';
+    while (n > 0) out[o++] = tmp[--n];
+    return o;
+}
+
+static int dtoa_big_to_dec(const DtoaBig *a, char *out) {
+    if (a->n == 0) {
+        out[0] = '0';
+        return 1;
+    }
+    DtoaBig tmp = *a;
+    uint32_t chunks[180];
+    int nc = 0;
+    while (tmp.n > 0) {
+        if (nc >= (int)(sizeof chunks / sizeof chunks[0])) abort();
+        chunks[nc++] = dtoa_big_div_small(&tmp, PRISM_POW10_CHUNK);
+    }
+    int o = append_u32_dec(out, 0, chunks[nc - 1], 0);
+    for (int i = nc - 2; i >= 0; i--) o = append_u32_dec(out, o, chunks[i], 9);
+    return o;
 }
 
 /* Bit layout of an IEEE-754 double. */
@@ -466,10 +563,62 @@ long prism_fmod(long a, long b) { return prism_float_binop(a, b, prism_m_fmod); 
 long prism_show_float_prec(long f, long digits) {
     double d;
     memcpy(&d, &f, 8);
-    if (digits < 0) digits = 0;
-    char buf[64];
-    int k = snprintf(buf, sizeof buf, "%.*f", (int)digits, d);
-    if (k < 0) k = 0;
-    if (k >= (int)sizeof buf) k = (int)sizeof buf - 1;
-    return prism_str_lit(buf, k);
+    char out[PRISM_FLOAT_BUF];
+    if (isnan(d) || isinf(d)) {
+        int o = prism_fmt_float(d, out);
+        return prism_str_lit(out, o);
+    }
+
+    long requested = digits < 0 ? 0 : digits;
+    int neg = signbit(d);
+    double x = neg ? -d : d;
+
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
+    int be = (int)((bits >> PRISM_F64_MANT_BITS) & 0x7ff);
+    uint64_t frac = bits & (PRISM_F64_HIDDEN - 1);
+    uint64_t sig;
+    int e;
+    if (be == 0) {
+        sig = frac;
+        e = PRISM_F64_MIN_EXP;
+    } else {
+        sig = frac | PRISM_F64_HIDDEN;
+        e = be - PRISM_F64_EXP_BIAS;
+    }
+
+    DtoaBig q;
+    int scale = 0;
+    if (sig == 0) {
+        dtoa_big_set_u64(&q, 0);
+    } else if (e >= 0) {
+        dtoa_big_set_u64(&q, sig);
+        dtoa_big_shl(&q, e);
+    } else {
+        scale = requested < (long)(-e) ? (int)requested : -e;
+        DtoaBig num;
+        dtoa_big_set_u64(&num, sig);
+        dtoa_big_mul_pow10(&num, scale);
+        q = dtoa_big_div_pow2_round(&num, -e);
+    }
+
+    char dec[1600];
+    int nd = dtoa_big_to_dec(&q, dec);
+    int int_len = nd - scale;
+    int o = 0;
+    if (neg) out[o++] = '-';
+    if (int_len > 0) {
+        for (int i = 0; i < int_len && o < PRISM_FLOAT_BUF - 1; i++) {
+            out[o++] = i < nd ? dec[i] : '0';
+        }
+    } else if (o < PRISM_FLOAT_BUF - 1) {
+        out[o++] = '0';
+    }
+    if (requested > 0 && o < PRISM_FLOAT_BUF - 1) out[o++] = '.';
+    for (long i = 0; i < requested && o < PRISM_FLOAT_BUF - 1; i++) {
+        int pos = int_len + (int)i;
+        char c = (pos >= 0 && pos < nd) ? dec[pos] : '0';
+        out[o++] = c;
+    }
+    return prism_str_lit(out, o);
 }

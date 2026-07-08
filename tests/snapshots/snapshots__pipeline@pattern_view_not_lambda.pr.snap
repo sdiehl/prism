@@ -1,0 +1,311 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/pattern_view_not_lambda.pr
+---
+== tokens ==
+VOpen Type UIdent("Point") Eq UIdent("Point") LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace VSemi Fn Ident("diag") LParen Ident("p") Colon UIdent("Point") RParen Colon UIdent("Option") LParen KwInt RParen Eq VOpen If Ident("p") Dot Ident("x") EqEq Ident("p") Dot Ident("y") Then VOpen UIdent("Some") LParen Ident("p") Dot Ident("x") RParen VClose VSemi Else VOpen UIdent("None") VClose VClose VSemi Pattern UIdent("Diag") LParen Ident("n") RParen For UIdent("Point") Eq VOpen Ident("view") Ident("diag") VClose VSemi Fn Ident("f") LParen Ident("p") Colon UIdent("Point") RParen Colon KwInt Eq VOpen Match Ident("p") Of VOpen UIdent("Diag") LParen Ident("n") RParen FatArrow Ident("n") VSemi Ident("_") FatArrow Int(IntLit { value: 0, suffix: None }) VClose VClose VSemi Fn Ident("main") LParen RParen Colon KwUnit Eq Ident("println") LParen Ident("f") LParen UIdent("Point") LBrace Ident("x") Eq Int(IntLit { value: 1, suffix: None }) Comma Ident("y") Eq Int(IntLit { value: 1, suffix: None }) RBrace RParen RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Point",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Point",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "x",
+                                Int,
+                            ),
+                            (
+                                "y",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 246..283,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    patterns: [
+        PatternDecl {
+            name: "Diag",
+            params: [
+                "n",
+            ],
+            for_ty: "Point",
+            view: Spanned {
+                node: Var(
+                    "diag",
+                ),
+                span: 407..411,
+            },
+            make: None,
+            span: 372..411,
+        },
+    ],
+    fns: [
+        Decl {
+            name: "diag",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Point",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Option",
+                    [
+                        Int,
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: If(
+                    Spanned {
+                        node: Bin(
+                            Eq,
+                            Spanned {
+                                node: FieldAccess(
+                                    Spanned {
+                                        node: Var(
+                                            "p",
+                                        ),
+                                        span: 325..326,
+                                    },
+                                    "x",
+                                ),
+                                span: 325..328,
+                            },
+                            Spanned {
+                                node: FieldAccess(
+                                    Spanned {
+                                        node: Var(
+                                            "p",
+                                        ),
+                                        span: 332..333,
+                                    },
+                                    "y",
+                                ),
+                                span: 332..335,
+                            },
+                        ),
+                        span: 325..335,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "Some",
+                                ),
+                                span: 345..349,
+                            },
+                            [
+                                Spanned {
+                                    node: FieldAccess(
+                                        Spanned {
+                                            node: Var(
+                                                "p",
+                                            ),
+                                            span: 350..351,
+                                        },
+                                        "x",
+                                    ),
+                                    span: 350..353,
+                                },
+                            ],
+                        ),
+                        span: 345..354,
+                    },
+                    Spanned {
+                        node: Var(
+                            "None",
+                        ),
+                        span: 366..370,
+                    },
+                ),
+                span: 322..370,
+            },
+            wheres: [],
+            span: 285..370,
+        },
+        Decl {
+            name: "f",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Point",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "p",
+                        ),
+                        span: 445..446,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Diag",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 459..460,
+                                        },
+                                    ],
+                                ),
+                                span: 454..461,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 465..466,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Wild,
+                                span: 471..472,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 476..477,
+                            },
+                        },
+                    ],
+                ),
+                span: 439..477,
+            },
+            wheres: [],
+            span: 413..477,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 498..505,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "f",
+                                    ),
+                                    span: 506..507,
+                                },
+                                [
+                                    Spanned {
+                                        node: RecordCreate(
+                                            "Point",
+                                            [
+                                                (
+                                                    "x",
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 520..521,
+                                                    },
+                                                ),
+                                                (
+                                                    "y",
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 527..528,
+                                                    },
+                                                ),
+                                            ],
+                                        ),
+                                        span: 508..530,
+                                    },
+                                ],
+                            ),
+                            span: 506..531,
+                        },
+                    ],
+                ),
+                span: 498..532,
+            },
+            wheres: [],
+            span: 479..532,
+        },
+    ],
+}
+
+== types ==
+Type Error: `view` clause of pattern `Diag` must be a lambda, as in `view \(x) -> ...`
+    ╭─[ <source>:14:8 ]
+    │
+ 14 │   view diag
+    │        ──┬─  
+    │          ╰─── `view` clause of pattern `Diag` must be a lambda, as in `view \(x) -> ...`
+────╯

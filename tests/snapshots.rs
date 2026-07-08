@@ -166,6 +166,7 @@ fn deprecation_warnings() {
          fn f_cmp() : Bool = 1.0 <. 2.0 && 1.0 ==. 1.0\n\
          fn f_i64() : I64 = i64_mul(2i64, 3i64)\n\
          fn f_u64() : U64 = u64_add(1u64, 2u64)\n\
+         fn f_bytes() : String = string_of_bytes(array_empty())\n\
          fn main() : Unit = println(show(f_float()))\n",
     );
     let mut msgs: Vec<String> = prism::check(&src)

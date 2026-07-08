@@ -557,7 +557,7 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
             .collect();
         sim(&f.body, &mut env, sigs).map_err(|e| format!("{}: {e}", f.name))?;
         for (v, n) in &env {
-            if v != "_" && *n != 0 {
+            if v.as_str() != "_" && *n != 0 {
                 return Err(format!("{}: {v} ends with {n} tokens", f.name));
             }
         }
@@ -609,7 +609,7 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
             }
             sim(body, &mut env, sigs)?;
             for (x, n) in &env {
-                if x != "_" && *n != 0 {
+                if x.as_str() != "_" && *n != 0 {
                     return Err(format!("thunk capture {x} ends with {n} tokens"));
                 }
             }
@@ -623,7 +623,7 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
 }
 
 fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), String> {
-    if x == "_" {
+    if x.as_str() == "_" {
         return Ok(());
     }
     let e = env.entry(x).or_insert(0);
@@ -643,7 +643,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         Comp::Drop(Value::Var(x)) => consume(*x, 1, env),
         Comp::Bind(m, x, n) => {
             sim(m, env, sigs)?;
-            if *x != "_" {
+            if x.as_str() != "_" {
                 env.insert(*x, 1);
             }
             sim(n, env, sigs)
@@ -775,8 +775,8 @@ pub fn fip_annots(prog: &Program<CorePhase>) -> Fips {
     prog.fns
         .iter()
         .filter_map(|d| {
-            // `without alloc` is the allocation-certificate spelling of the
-            // `fbip` usage check: same zero-allocation check, no linearity or
+            // `@ noalloc` is the allocation-certificate spelling of the `fbip`
+            // usage check: same zero-allocation check, no linearity or
             // bounded-stack requirement.
             // An explicit `fip`/`fbip` keyword (the stronger discipline) wins.
             let want = match d.fip {
@@ -811,6 +811,216 @@ fn alloc_free_prim(name: &str) -> bool {
     )
 }
 
+// The number of concrete allocation witnesses reported per rejected function. A
+// body with many allocation sites yields a readable diagnostic listing the first
+// few in evaluation order; the remainder is summarized as a trailing count.
+const ALLOC_WITNESS_LIMIT: usize = 3;
+
+// A concrete reason an annotated body is not allocation-free, recorded in
+// evaluation order. Every rejection the allocation walk can raise maps to one of
+// these; the driver renders them into the user diagnostic. The set is exactly the
+// nodes that materialize a heap cell (`Ctor`/`Tuple`/`Closure`) or admit an
+// uncertified callee (`UncertifiedCall`/`IndirectCall`/`Builtin`); no other Core
+// node allocates under this check.
+enum AllocWitness {
+    // A fresh constructor cell built outside a `reuse` token.
+    Ctor(Sym),
+    // A fresh tuple cell.
+    Tuple,
+    // A closure cell for a materialized lambda/thunk value.
+    Closure,
+    // A call to a user function lacking the certificate the caller needs: a `fip`
+    // caller needs a `fip` callee, an `@ noalloc`/`fbip` caller needs either
+    // certificate. The callee may allocate inside the caller's call tree.
+    UncertifiedCall(Sym),
+    // An indirect call through a first-class function value: no callee
+    // certificate is available at the call site.
+    IndirectCall,
+    // A primitive/builtin outside the allocation-free allow-list.
+    Builtin(Sym),
+}
+
+// Collects up to `ALLOC_WITNESS_LIMIT` witnesses while counting the total, so the
+// diagnostic shows the first few in evaluation order and summarizes the rest.
+struct Witnesses {
+    seen: Vec<AllocWitness>,
+    total: usize,
+}
+
+impl Witnesses {
+    const fn new() -> Self {
+        Self {
+            seen: Vec::new(),
+            total: 0,
+        }
+    }
+
+    fn push(&mut self, w: AllocWitness) {
+        if self.seen.len() < ALLOC_WITNESS_LIMIT {
+            self.seen.push(w);
+        }
+        self.total += 1;
+    }
+
+    // Witnesses beyond the reported prefix, summarized as "and N more".
+    const fn extra(&self) -> usize {
+        self.total - self.seen.len()
+    }
+}
+
+// Record a witness for each fresh cell a value materializes. A bare constructor,
+// tuple, or thunk in any non-`reuse` position allocates; scalars and variables do
+// not. A value contributes a witness iff it would have failed the first-failure
+// check, so the accept/reject decision is unchanged.
+fn value_alloc(v: &Value, out: &mut Witnesses) {
+    match v {
+        Value::Ctor(name, ..) => out.push(AllocWitness::Ctor(*name)),
+        Value::Tuple(_) => out.push(AllocWitness::Tuple),
+        Value::Thunk(_) => out.push(AllocWitness::Closure),
+        _ => {}
+    }
+}
+
+// The argument of a `Comp::Reuse`: the head cell reuses a dropped token, so only
+// its fields can hide a fresh allocation.
+fn value_alloc_under_reuse(v: &Value, out: &mut Witnesses) {
+    match v {
+        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().for_each(|f| value_alloc(f, out)),
+        other => value_alloc(other, out),
+    }
+}
+
+// Walk an annotated body in evaluation order, recording every allocation witness
+// (bounded by the sink). `want` selects the callee-certificate rule: a `fip`
+// caller demands a `fip` callee; an `@ noalloc`/`fbip` caller accepts either
+// certificate. The traversal mirrors the accepting checker exactly, so a body is
+// rejected iff at least one witness is recorded.
+fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut Witnesses) {
+    match c {
+        Comp::Reuse(_, v) => value_alloc_under_reuse(v, out),
+        // Freeing the dropped cell is the allocation-free shell a `Reuse` in the
+        // body then spends; check the body like any other scope.
+        Comp::WithReuse { freed, body, .. } => {
+            value_alloc(freed, out);
+            comp_alloc(body, want, fips, users, out);
+        }
+        Comp::Call(g, args) => {
+            if users.contains(g) {
+                let ok = match want {
+                    Fip::Fip => matches!(fips.get(g), Some(Fip::Fip)),
+                    Fip::Fbip | Fip::No => matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)),
+                };
+                if !ok {
+                    out.push(AllocWitness::UncertifiedCall(*g));
+                }
+            } else if !alloc_free_prim(g.as_str()) {
+                out.push(AllocWitness::Builtin(*g));
+            }
+            for a in args {
+                value_alloc(a, out);
+            }
+        }
+        Comp::Bind(m, _, n) => {
+            comp_alloc(m, want, fips, users, out);
+            comp_alloc(n, want, fips, users, out);
+        }
+        Comp::If(_, t, e) => {
+            comp_alloc(t, want, fips, users, out);
+            comp_alloc(e, want, fips, users, out);
+        }
+        Comp::Case(_, arms) => arms
+            .iter()
+            .for_each(|(_, b)| comp_alloc(b, want, fips, users, out)),
+        Comp::Lam(_, b) | Comp::Mask(_, b) => comp_alloc(b, want, fips, users, out),
+        Comp::App(fbody, args) => {
+            comp_alloc(fbody, want, fips, users, out);
+            for a in args {
+                value_alloc(a, out);
+            }
+            out.push(AllocWitness::IndirectCall);
+        }
+        Comp::Prim(_, a, b) => {
+            value_alloc(a, out);
+            value_alloc(b, out);
+        }
+        // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
+        // only by `erase_local_vars` during effect lowering) is unreachable here;
+        // check its values for completeness.
+        Comp::Return(v)
+        | Comp::Force(v)
+        | Comp::Error(v)
+        | Comp::FloatBuiltin(_, v)
+        | Comp::Neg(_, v)
+        | Comp::Drop(v)
+        | Comp::RefNew(v)
+        | Comp::RefGet(v) => value_alloc(v, out),
+        Comp::RefSet(cell, v) => {
+            value_alloc(cell, out);
+            value_alloc(v, out);
+        }
+        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
+            for a in args {
+                value_alloc(a, out);
+            }
+        }
+        Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            comp_alloc(body, want, fips, users, out);
+            if let Some(rb) = return_body {
+                comp_alloc(rb, want, fips, users, out);
+            }
+            for op in ops {
+                comp_alloc(&op.body, want, fips, users, out);
+            }
+        }
+        Comp::Dup(_) => {}
+    }
+}
+
+// Render the recorded witnesses into the checker's message. The wrapper keeps the
+// "function `f` is marked `kw` but ..." shape the driver seam strips and reframes
+// (`fip`/`fbip` as a usage check, `@ noalloc` as an allocation certificate), so
+// the family stays consistent while every discipline gains the witness detail.
+fn render_alloc(want: Fip, fname: &str, w: &Witnesses) -> String {
+    let mut parts: Vec<String> = w.seen.iter().map(|wit| witness_clause(wit, want)).collect();
+    let extra = w.extra();
+    if extra > 0 {
+        parts.push(format!("and {extra} more"));
+    }
+    format!(
+        "function `{fname}` is marked `{}` but in `{fname}`, {}",
+        kw(want),
+        parts.join("; ")
+    )
+}
+
+fn witness_clause(w: &AllocWitness, want: Fip) -> String {
+    match w {
+        AllocWitness::Ctor(name) => format!("constructor `{name}` is built fresh outside `reuse`"),
+        AllocWitness::Tuple => "a tuple is built fresh outside `reuse`".to_string(),
+        AllocWitness::Closure => "a lambda is materialized as a fresh closure cell".to_string(),
+        AllocWitness::UncertifiedCall(callee) => match want {
+            Fip::Fip => format!(
+                "call to `{callee}` is not certified `fip`, so bounded stack and zero allocation cannot be proven"
+            ),
+            Fip::Fbip | Fip::No => {
+                format!("call to `{callee}` may allocate (`{callee}` has no zero-allocation certificate)")
+            }
+        },
+        AllocWitness::IndirectCall => {
+            "an indirect call through a first-class function value has no callee certificate"
+                .to_string()
+        }
+        AllocWitness::Builtin(name) => {
+            format!("primitive `{name}` is not on the allocation-free allow-list")
+        }
+    }
+}
+
 /// Verify every `fip`/`fbip`-annotated function over the reuse-lowered core.
 ///
 /// `fips` maps a function name to its annotation, `sigs` the borrow mask (a
@@ -840,7 +1050,11 @@ pub fn check_fip(
                 }
             }
         }
-        fip_comp(&f.body, want, f.name.as_str(), fips, users)?;
+        let mut witnesses = Witnesses::new();
+        comp_alloc(&f.body, want, fips, users, &mut witnesses);
+        if !witnesses.seen.is_empty() {
+            return Err(render_alloc(want, f.name.as_str(), &witnesses));
+        }
         if want == Fip::Fip {
             bounded_stack(f, core, users)?;
         }
@@ -1169,149 +1383,6 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
     }
 }
 
-fn fip_comp(
-    c: &Comp,
-    want: Fip,
-    fname: &str,
-    fips: &Fips,
-    users: &BTreeSet<Sym>,
-) -> Result<(), String> {
-    let recur = |c: &Comp| fip_comp(c, want, fname, fips, users);
-    let val = |v: &Value| fip_value(v, want, fname);
-    match c {
-        Comp::Reuse(_, v) => fip_value_under_reuse(v, want, fname),
-        // Freeing the dropped cell is the allocation-free shell a `Reuse` in the
-        // body then spends; check the body like any other scope.
-        Comp::WithReuse { freed, body, .. } => {
-            val(freed)?;
-            recur(body)
-        }
-        Comp::Call(g, args) => {
-            if users.contains(g) {
-                // `fbip` may call either discipline; `fip` may call only `fip`,
-                // because an `fbip` callee is allowed unbounded stack and would
-                // break the caller's bounded-stack guarantee.
-                let ok = match want {
-                    Fip::Fip => matches!(fips.get(g), Some(Fip::Fip)),
-                    Fip::Fbip | Fip::No => matches!(fips.get(g), Some(Fip::Fbip | Fip::Fip)),
-                };
-                if !ok {
-                    return Err(match want {
-                        Fip::Fip => format!(
-                            "a `fip` function may only call `fip` functions (bounded stack), but `{fname}` calls `{g}`\n\
-                             witness: `{g}` is not certified `fip`, so the caller cannot prove either zero allocation or bounded stack"
-                        ),
-                        Fip::Fbip | Fip::No => format!(
-                            "a `fbip` function may only call `fip`/`fbip` functions, but `{fname}` calls unannotated `{g}`\n\
-                             witness: `{g}` has no zero-allocation certificate, so it may allocate inside `{fname}`'s call tree"
-                        ),
-                    });
-                }
-            } else if !alloc_free_prim(g.as_str()) {
-                return Err(format!(
-                    "a `{}` function may only call allocation-free primitives, but `{fname}` calls `{g}`\n\
-                     witness: primitive/builtin `{g}` is not in the allocation-free allow-list",
-                    kw(want)
-                ));
-            }
-            args.iter().try_for_each(val)
-        }
-        Comp::Bind(m, _, n) => {
-            recur(m)?;
-            recur(n)
-        }
-        Comp::If(_, t, e) => {
-            recur(t)?;
-            recur(e)
-        }
-        Comp::Case(_, arms) => arms.iter().try_for_each(|(_, b)| recur(b)),
-        Comp::Lam(_, b) | Comp::Mask(_, b) => recur(b),
-        Comp::App(fbody, args) => {
-            recur(fbody)?;
-            args.iter().try_for_each(val)?;
-            Err(format!(
-                "function `{fname}` is marked `{}` but calls a first-class function value\n\
-                 witness: indirect calls have no callee certificate at this call site; call a named `fip`/`fbip` function directly or move the call outside the zero-allocation region",
-                kw(want)
-            ))
-        }
-        Comp::Prim(_, a, b) => {
-            val(a)?;
-            val(b)
-        }
-        Comp::Return(v)
-        | Comp::Force(v)
-        | Comp::Error(v)
-        | Comp::FloatBuiltin(_, v)
-        | Comp::Neg(_, v)
-        | Comp::Drop(v)
-        // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
-        // only by `erase_local_vars` during effect lowering) is unreachable here;
-        // check its values for completeness.
-        | Comp::RefNew(v)
-        | Comp::RefGet(v) => val(v),
-        Comp::RefSet(c, v) => {
-            val(c)?;
-            val(v)
-        }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
-            args.iter().try_for_each(val)
-        }
-        Comp::Handle {
-            body,
-            return_body,
-            ops,
-            ..
-        } => {
-            recur(body)?;
-            if let Some(rb) = return_body {
-                recur(rb)?;
-            }
-            ops.iter().try_for_each(|op| recur(&op.body))
-        }
-        Comp::Dup(_) => Ok(()),
-    }
-}
-
-// A value in any position other than directly under a reuse token: a bare
-// constructor or tuple here is a fresh allocation and fails the check. Thunks
-// allocate closure cells, so they fail the same way constructors/tuples do.
-fn fip_value(v: &Value, want: Fip, fname: &str) -> Result<(), String> {
-    match v {
-        Value::Ctor(name, ..) => Err(alloc_err(want, fname, name.as_str())),
-        Value::Tuple(_) => Err(alloc_err(want, fname, "tuple")),
-        Value::Thunk(_) => Err(closure_alloc_err(want, fname)),
-        _ => Ok(()),
-    }
-}
-
-// The constructor argument of a `Comp::Reuse`: the head reuses a dropped cell,
-// so it is allocation-free, but its fields may still hide a fresh allocation.
-fn fip_value_under_reuse(v: &Value, want: Fip, fname: &str) -> Result<(), String> {
-    match v {
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => {
-            fs.iter().try_for_each(|f| fip_value(f, want, fname))
-        }
-        other => fip_value(other, want, fname),
-    }
-}
-
-fn alloc_err(want: Fip, fname: &str, ctor: &str) -> String {
-    format!(
-        "function `{fname}` is marked `{}` but allocates a fresh `{ctor}` (no reuse token available)\n\
-         witness: `{ctor}` is constructed outside `reuse`, so it calls the allocator instead of spending a freed cell",
-        kw(want)
-    )
-}
-
-fn closure_alloc_err(want: Fip, fname: &str) -> String {
-    format!(
-        "function `{fname}` is marked `{}` but allocates a fresh closure (no reuse token available)\n\
-         witness: a lambda/thunk value must be materialized as a closure cell; call a named function directly or move the lambda outside the zero-allocation region",
-        kw(want)
-    )
-}
-
 const fn kw(f: Fip) -> &'static str {
     match f {
         Fip::Fip => "fip",
@@ -1519,8 +1590,10 @@ mod tests {
         };
         let err = check_fip(&core, &fbip_of(&f), &BTreeMap::new(), &users(&["make"]))
             .expect_err("fbip/without-alloc must reject closure allocation");
-        assert!(err.contains("allocates a fresh closure"), "{err}");
-        assert!(err.contains("lambda/thunk value"), "{err}");
+        assert!(
+            err.contains("a lambda is materialized as a fresh closure cell"),
+            "{err}"
+        );
     }
 
     #[test]

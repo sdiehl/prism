@@ -93,12 +93,14 @@ impl Tc<'_> {
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 let mut env2 = env.clone();
                 for (fname, fpat) in field_pats {
-                    let fi = info.fields.iter().position(|f| f == fname).ok_or_else(|| {
-                        TypeError::Other {
+                    let fi = info
+                        .fields
+                        .iter()
+                        .position(|f| f.as_str() == fname)
+                        .ok_or_else(|| TypeError::Other {
                             span,
                             msg: format!("unknown field {fname} on {ctor_name}"),
-                        }
-                    })?;
+                        })?;
                     let mut ft = info.args[fi].clone();
                     for (pn, t) in &tsubs {
                         ft = ft.subst_var(*pn, t);
@@ -159,8 +161,8 @@ impl Tc<'_> {
         let (info, fi) = self
             .ctors
             .values()
-            .filter(|c| c.type_name == ctor_name)
-            .find_map(|c| Some((c, c.fields.iter().position(|f| f == field)?)))
+            .filter(|c| c.type_name.as_str() == ctor_name)
+            .find_map(|c| Some((c, c.fields.iter().position(|f| f.as_str() == field)?)))
             .ok_or_else(|| TypeError::Other {
                 span,
                 msg: format!("no field `{field}` on type `{ctor_name}`"),

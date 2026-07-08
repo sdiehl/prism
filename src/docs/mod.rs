@@ -78,6 +78,13 @@ impl Generated {
     pub const fn example_count(&self) -> usize {
         self.examples.len()
     }
+
+    /// The `(source location, observable output)` of every doctest that ran, for
+    /// the docs manifest. Only runnable examples that executed contribute.
+    #[must_use]
+    pub fn ran_doctests(&self, roots: &[Root], base: &Path) -> Vec<(String, String)> {
+        doctest::ran_outputs(&self.examples, roots, base)
+    }
 }
 
 // A module ready to render: like `ModuleSource` but with its output slug fixed.
