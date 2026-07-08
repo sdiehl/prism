@@ -25,6 +25,9 @@ const WORLD_WORKER: &str = "prism-world-worker.ts";
 #[derive(Clone, Copy)]
 struct Resident {
     slug: &'static str,
+    // Listed on the gallery page. A resident can be built, wired, and reachable
+    // by URL while deliberately unlisted (the world resident currently is).
+    gallery: bool,
     route: &'static str,
     page: &'static str,
     script: &'static str,
@@ -39,6 +42,7 @@ struct Resident {
 const WEB_RESIDENTS: &[Resident] = &[
     Resident {
         slug: "scrubber",
+        gallery: true,
         route: "scrub",
         page: "scrubber.html",
         script: "scrubber.ts",
@@ -49,6 +53,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "pendulum",
+        gallery: true,
         route: "pendulum",
         page: "pendulum.html",
         script: "pendulum.ts",
@@ -59,6 +64,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "branch",
+        gallery: true,
         route: "branch",
         page: "branch.html",
         script: "branch.ts",
@@ -69,6 +75,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "chaos",
+        gallery: true,
         route: "chaos",
         page: "chaos.html",
         script: "chaos.ts",
@@ -79,6 +86,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "schedule",
+        gallery: true,
         route: "schedule",
         page: "schedule.html",
         script: "schedule.ts",
@@ -89,6 +97,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "teleport",
+        gallery: true,
         route: "teleport",
         page: "teleport.html",
         script: "teleport.ts",
@@ -106,6 +115,7 @@ const WEB_RESIDENTS: &[Resident] = &[
     },
     Resident {
         slug: "world",
+        gallery: false,
         route: "world",
         page: "prism-world.html",
         script: "prism-world.ts",
@@ -141,11 +151,18 @@ fn gallery_and_vite_wire_every_resident() {
     let vite = read(VITE_CONFIG);
 
     for resident in WEB_RESIDENTS {
-        assert_contains(
-            &gallery,
-            &format!("href=\"../{}/\"", resident.route),
-            resident.slug,
-        );
+        let gallery_link = format!("href=\"../{}/\"", resident.route);
+        if resident.gallery {
+            assert_contains(&gallery, &gallery_link, resident.slug);
+        } else {
+            // Unlisted is a decision, not an accident: the card must be absent,
+            // not merely unnoticed, so relisting is a deliberate flip here.
+            assert!(
+                !gallery.contains(&gallery_link),
+                "{} is marked unlisted but the gallery links it",
+                resident.slug
+            );
+        }
         assert_contains(
             &vite,
             &format!("{}: \"{}\"", resident.slug, resident.page),

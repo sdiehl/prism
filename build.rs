@@ -106,7 +106,14 @@ fn macos_deployment_target(cc: &str) -> Option<String> {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/syntax/grammar.lalrpop");
-    lalrpop::process_root().unwrap();
+    // Process the one grammar under `src/` rather than `process_root()`: the
+    // root walk descends into `target/`, where cargo's own temp files appear and
+    // vanish under a parallel build, and a file gone mid-walk aborts the build
+    // script. Scoping the walk to the source tree removes the race entirely.
+    lalrpop::Configuration::new()
+        .use_cargo_dir_conventions()
+        .process_dir("src")
+        .unwrap();
     // The target triple for the banner; TARGET is set by cargo for build scripts.
     println!(
         "cargo:rustc-env=PRISM_TARGET={}",
