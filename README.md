@@ -43,18 +43,18 @@ docker run ghcr.io/sdiehl/prism --help
 ```shell
 # Debian / Ubuntu
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_amd64.deb
-sudo apt install ./prism_0.8.0_amd64.deb
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.9.0/prism_0.9.0_amd64.deb
+sudo apt install ./prism_0.9.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.9.0/prism-0.9.0-1.x86_64.rpm
 
 # Arch
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.8.0/prism-0.8.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.9.0/prism-0.9.0-1-x86_64.pkg.tar.zst
 
 # Alpine
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.8.0/prism_0.8.0_x86_64.apk
-sudo apk add --allow-untrusted ./prism_0.8.0_x86_64.apk
+curl -LO https://github.com/sdiehl/prism/releases/download/v0.9.0/prism_0.9.0_x86_64.apk
+sudo apk add --allow-untrusted ./prism_0.9.0_x86_64.apk
 ```
 
 Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:

@@ -1,7 +1,7 @@
 {
   "compatibility": {
     "compiler_surfaces": [
-      "compiler=0.8.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false"
+      "compiler=0.9.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false"
     ],
     "dependencies_by_identity": {},
     "dependency_root_conflicts": {},
@@ -45,11 +45,11 @@
           "objects_written": 0
         },
         "compiler": {
-          "identity": "compiler=0.8.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;source-root=prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90;stdlib-root=prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false;",
+          "identity": "compiler=0.9.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;source-root=prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90;stdlib-root=prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;cek-spike=false;fuse=false;rt-checks=false;native-kont-frames=false;",
           "rows": [
             {
               "key": "compiler",
-              "value": "0.8.0"
+              "value": "0.9.0"
             },
             {
               "key": "hash-scheme",
