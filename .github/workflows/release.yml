@@ -240,7 +240,7 @@ jobs:
 
       # Collect every platform's tarball/checksum into dist/.
       - name: Download build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
