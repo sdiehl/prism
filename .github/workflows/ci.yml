@@ -161,7 +161,7 @@ jobs:
       # carries the source/toolchain fingerprint; the per-sha save key just lets
       # each run publish an updated snapshot.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-test-${{ runner.os }}-${{ github.sha }}
@@ -397,7 +397,7 @@ jobs:
       # do not overwrite each other's snapshots. The `mlir` tag makes these
       # markers distinct from the LLVM ones even were the dirs ever shared.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-mlir-${{ runner.os }}-${{ github.sha }}
@@ -468,7 +468,7 @@ jobs:
       # Per-shard gate-verdict cache: each shard owns a distinct key so the four
       # runs do not overwrite each other's snapshots.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-parity-${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
