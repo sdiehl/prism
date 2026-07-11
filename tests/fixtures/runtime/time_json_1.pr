@@ -1,0 +1,16 @@
+import Json (..)
+
+fn canon(s) =
+  match decode(s) of
+    Ok(j) => println(encode(j))
+    Err(e) => println(json_error_message(e))
+
+fn main() =
+  canon("42")
+  canon("-7")
+  canon("1.5")
+  canon("true")
+  canon("null")
+  canon("[1,2,3]")
+  canon("  \{ \"b\" : 1 , \"a\" : 2 , \"c\" : [ true , null ] \} ")
+  canon("\"tab\\tnewline\\n\"")

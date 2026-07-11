@@ -5,9 +5,12 @@ use marginalia::Span;
 use num_bigint::Sign;
 
 use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
-use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value};
+use super::cbpv::{
+    CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value,
+};
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
+use crate::kw;
 use crate::names::{
     self, dict_ctor, instance_method, DIV_MOD_METHOD, DIV_QUOT_METHOD, EQ_METHOD, NUM_ADD_METHOD,
     NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD,
@@ -22,6 +25,7 @@ use crate::types::{
     infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
     NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
+use crate::wired::Indexable;
 
 mod dict;
 mod match_compile;
@@ -49,6 +53,17 @@ struct Elab<'a> {
 }
 
 type Locals = BTreeMap<String, Option<Type>>;
+
+// The pointed error for the not-yet-lowered unboxed-values surface, shared by the
+// elaborator's exhaustive-match backstop. The typechecker rejects these first
+// (E1018); this only fires if that ordering ever changes.
+fn unboxed_unsupported(span: Span) -> Error {
+    crate::error::ErrKind::UnboxedUnsupported {
+        what: "values".into(),
+    }
+    .at(span)
+    .into()
+}
 
 fn row_mentions_effect(row: &EffRow, effect: &str) -> bool {
     match row {
@@ -92,6 +107,26 @@ impl Elab<'_> {
         names::elab_tmp(self.fresh.bump())
     }
 
+    // Lower a product literal: elaborate each element to a fresh bound variable in
+    // order, then return the product value `mk` builds from those variables.
+    // Shared by boxed tuples and unboxed tuples, which differ only in `mk`.
+    fn elab_product(
+        &mut self,
+        elems: &[S<Expr<CorePhase>>],
+        locals: &Locals,
+        mk: impl FnOnce(Vec<Value>) -> Value,
+    ) -> Result<Comp, Error> {
+        let mut binds = Vec::new();
+        let mut vals = Vec::new();
+        for elem in elems {
+            let c = self.elab(elem, locals)?;
+            let v = self.fresh();
+            binds.push((c, v.clone()));
+            vals.push(Value::Var(v.into()));
+        }
+        Ok(wrap_binds(binds, Comp::Return(mk(vals))))
+    }
+
     fn ctor(&self, name: &str) -> Option<&CtorInfo> {
         self.ctors.get(name)
     }
@@ -106,7 +141,7 @@ impl Elab<'_> {
         for (ctor_name, info) in self.ctors {
             if let Some(fi) = info.fields.iter().position(|f| f.as_str() == field) {
                 if hit.is_some() {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolveCommand(format!(
                         "field `{field}` is declared by more than one record; \
                          it cannot be resolved by name alone"
                     )));
@@ -114,7 +149,7 @@ impl Elab<'_> {
                 hit = Some((ctor_name, fi, info.args.len()));
             }
         }
-        hit.ok_or_else(|| Error::Resolve(format!("no record has field `{field}`")))
+        hit.ok_or_else(|| Error::ResolveCommand(format!("no record has field `{field}`")))
     }
 
     fn extract_field_of(scrut: Value, ctor: &str, fi: usize, n: usize, out: String) -> Comp {
@@ -123,13 +158,66 @@ impl Elab<'_> {
         Comp::Case(scrut, vec![(pat, Comp::Return(Value::Var(out.into())))])
     }
 
+    // Project the `fi`-th component out of a positional product (an unboxed record
+    // lowered to a tuple). A `Case` binding only that field and returning it
+    // reuses the product-destructuring RC and pattern machinery, so the projection
+    // is refcount-balanced by construction (the unbound fields drop, the bound one
+    // transfers out) exactly as a `let (_, x, _) = t` would be.
+    fn extract_tuple_field_of(scrut: Value, fi: usize, n: usize, out: String) -> Comp {
+        let binders = (0..n).map(|j| (j == fi).then(|| Sym::from(&out))).collect();
+        let pat = CorePat::Tuple(binders);
+        Comp::Case(scrut, vec![(pat, Comp::Return(Value::Var(out.into())))])
+    }
+
+    // An unboxed record lowers to a positional unboxed tuple in its type's field
+    // order (which its value always matches, since record types unify only at the
+    // same field order). Field names are erased into positions; projection
+    // recovers them by index.
+    fn elab_unboxed_record(
+        &mut self,
+        fields: &[(String, S<Expr<CorePhase>>)],
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let mut binds = Vec::new();
+        let mut vals = Vec::new();
+        for (_, elem) in fields {
+            let c = self.elab(elem, locals)?;
+            let v = self.fresh();
+            binds.push((c, v.clone()));
+            vals.push(Value::Var(v.into()));
+        }
+        Ok(wrap_binds(binds, Comp::Return(Value::UnboxedTuple(vals))))
+    }
+
+    // Field projection is a positional tuple `Case`: the type checker resolved the
+    // field to its index (in `unboxed_field`), so this reuses product
+    // destructuring and its refcount handling.
+    fn elab_unboxed_field(
+        &mut self,
+        id: NodeId,
+        recv: &S<Expr<CorePhase>>,
+        span: Span,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let Some(&(fi, n)) = self.checked.unboxed_field.get(&id) else {
+            return Err(unboxed_unsupported(span));
+        };
+        let ce = self.elab(recv, locals)?;
+        let ve = self.fresh();
+        let vf = self.fresh();
+        let extract = Self::extract_tuple_field_of(Value::Var(ve.clone().into()), fi, n, vf);
+        Ok(Comp::Bind(Box::new(ce), ve.into(), Box::new(extract)))
+    }
+
     // Name-based chain resolution for REPL re-elaboration, mirroring
     // `field_index_for`. Checked programs carry exact chains in `path_res`.
     fn path_chain_fallback(&self, path: &[PathStep<CorePhase>]) -> Result<Chain, Error> {
         path.iter()
             .map(|seg| {
                 let PathStep::Field(seg) = seg else {
-                    return Err(Error::Ice("optic path step survived desugaring".into()));
+                    return Err(Error::InternalInvariant(
+                        "optic path step survived desugaring".into(),
+                    ));
                 };
                 self.ctors
                     .iter()
@@ -137,7 +225,9 @@ impl Elab<'_> {
                         let fi = info.fields.iter().position(|f| f.as_str() == seg)?;
                         Some((cn.clone(), fi, info.args.len()))
                     })
-                    .ok_or_else(|| Error::Ice(format!("no constructor has field `{seg}`")))
+                    .ok_or_else(|| {
+                        Error::InternalInvariant(format!("no constructor has field `{seg}`"))
+                    })
             })
             .collect()
     }
@@ -189,7 +279,7 @@ impl Elab<'_> {
         let (cname, _, n) = items
             .first()
             .and_then(|(chain, _)| chain.first())
-            .ok_or_else(|| Error::Ice("empty record-update path".into()))?
+            .ok_or_else(|| Error::InternalInvariant("empty record-update path".into()))?
             .clone();
         let tag = self.ctors.get(&cname).map_or(0, |i| i.tag);
         let fields: Vec<String> = (0..n).map(|_| self.fresh()).collect();
@@ -207,7 +297,9 @@ impl Elab<'_> {
                 let term = group
                     .into_iter()
                     .next()
-                    .ok_or_else(|| Error::Ice("empty record-update path group".into()))?
+                    .ok_or_else(|| {
+                        Error::InternalInvariant("empty record-update path group".into())
+                    })?
                     .1;
                 vals[fi] = match term {
                     PathTerm::Set(v) => v,
@@ -316,8 +408,9 @@ impl Elab<'_> {
             _ => {
                 let cmp = if u { Builtin::U64Cmp } else { Builtin::I64Cmp };
                 let c = self.fresh();
-                let core_op = CoreOp::from_binop(op)
-                    .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+                let core_op = CoreOp::from_binop(op).ok_or_else(|| {
+                    Error::InternalInvariant(format!("`{op:?}` is not a primitive op"))
+                })?;
                 return Ok(Comp::Bind(
                     Box::new(Comp::StrBuiltin(cmp, args)),
                     c.clone().into(),
@@ -328,10 +421,8 @@ impl Elab<'_> {
         Ok(Comp::StrBuiltin(b, args))
     }
 
-    // The `Float` lane of the arithmetic and comparison operators, the exact
-    // target the dotted spellings already lower to, so a plain operator on
-    // `Float` and the dot spelling produce byte-identical Core. `%` is `fmod` (a
-    // two-argument builtin, not a `CoreOp`); the rest are float `CoreOp`s.
+    // The `Float` lane of the arithmetic and comparison operators. `%` is `fmod`
+    // (a two-argument builtin, not a `CoreOp`); the rest are float `CoreOp`s.
     fn float_bin(op: BinOp, va: &Value, vb: &Value) -> Result<Comp, Error> {
         if op == BinOp::Rem {
             return Ok(Comp::StrBuiltin(
@@ -350,7 +441,11 @@ impl Elab<'_> {
             BinOp::Le => CoreOp::Lef,
             BinOp::Gt => CoreOp::Gtf,
             BinOp::Ge => CoreOp::Gef,
-            _ => return Err(Error::Ice(format!("`{op:?}` is not a float numeric op"))),
+            _ => {
+                return Err(Error::InternalInvariant(format!(
+                    "`{op:?}` is not a float numeric op"
+                )))
+            }
         };
         Ok(Comp::Prim(core_op, va.clone(), vb.clone()))
     }
@@ -391,9 +486,9 @@ impl Elab<'_> {
         // monomorphic lane keeps the direct `Comp::Neg` node (byte-identical to
         // the surface negation, the target the `Num` negate method re-elaborates to).
         if let Some(ds) = self.dicts.get(&id).cloned() {
-            let d0 = ds
-                .first()
-                .ok_or_else(|| Error::Ice("empty dictionary set for unary minus".into()))?;
+            let d0 = ds.first().ok_or_else(|| {
+                Error::InternalInvariant("empty dictionary set for unary minus".into())
+            })?;
             let idx = self
                 .checked
                 .classes
@@ -403,7 +498,9 @@ impl Elab<'_> {
                         .iter()
                         .position(|(n, _)| n.as_str() == NUM_NEG_METHOD)
                 })
-                .ok_or_else(|| Error::Ice(format!("no `{NUM_NEG_METHOD}` method on class Num")))?;
+                .ok_or_else(|| {
+                    Error::InternalInvariant(format!("no `{NUM_NEG_METHOD}` method on class Num"))
+                })?;
             let call = self.method_invoke(Sym::from(NUM_CLASS), idx, d0, vec![operand])?;
             return Ok(Comp::Bind(Box::new(c), v.into(), Box::new(call)));
         }
@@ -450,10 +547,10 @@ impl Elab<'_> {
                 .classes
                 .get(&Sym::from(EQ_CLASS))
                 .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == EQ_METHOD))
-                .ok_or_else(|| Error::Ice("no `eq` method on class Eq".into()))?;
+                .ok_or_else(|| Error::InternalInvariant("no `eq` method on class Eq".into()))?;
             let d0 = ds
                 .first()
-                .ok_or_else(|| Error::Ice("no dictionary for `==`".into()))?;
+                .ok_or_else(|| Error::InternalInvariant("no dictionary for `==`".into()))?;
             (self.method_invoke(Sym::from(EQ_CLASS), idx, d0, args)?, ne)
         } else {
             match self.checked.fixed.get(&id).cloned() {
@@ -483,7 +580,7 @@ impl Elab<'_> {
                     if self.strict {
                         if let Some(t) = self.checked.span_types.get(&a.id) {
                             if !matches!(t, Type::Int | Type::Exist(_)) {
-                                return Err(Error::Ice(format!(
+                                return Err(Error::InternalInvariant(format!(
                                     "missing Eq dispatch record at {:?} for type {}",
                                     span,
                                     t.show()
@@ -491,8 +588,9 @@ impl Elab<'_> {
                             }
                         }
                     }
-                    let core_op = CoreOp::from_binop(op)
-                        .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+                    let core_op = CoreOp::from_binop(op).ok_or_else(|| {
+                        Error::InternalInvariant(format!("`{op:?}` is not a primitive op"))
+                    })?;
                     (
                         Comp::Prim(
                             core_op,
@@ -530,24 +628,22 @@ impl Elab<'_> {
         let va = self.fresh();
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
-        let ds = self
-            .dicts
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| Error::Ice("no dictionary for comparison operator".into()))?;
-        let d0 = ds
-            .first()
-            .ok_or_else(|| Error::Ice("empty dictionary set for comparison operator".into()))?;
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::InternalInvariant("no dictionary for comparison operator".into())
+        })?;
+        let d0 = ds.first().ok_or_else(|| {
+            Error::InternalInvariant("empty dictionary set for comparison operator".into())
+        })?;
         let idx = self
             .checked
             .classes
             .get(&Sym::from(ORD_CLASS))
             .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == ORD_METHOD))
-            .ok_or_else(|| Error::Ice("no `cmp` method on class Ord".into()))?;
+            .ok_or_else(|| Error::InternalInvariant("no `cmp` method on class Ord".into()))?;
         let cmp = self.method_invoke(Sym::from(ORD_CLASS), idx, d0, args)?;
         let r = self.fresh();
         let core_op = CoreOp::from_binop(op)
-            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+            .ok_or_else(|| Error::InternalInvariant(format!("`{op:?}` is not a primitive op")))?;
         let test = Comp::Bind(
             Box::new(cmp),
             r.clone().into(),
@@ -588,27 +684,28 @@ impl Elab<'_> {
         id: NodeId,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let (class, method) = Self::arith_method(op)
-            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a tower arithmetic op")))?;
+        let (class, method) = Self::arith_method(op).ok_or_else(|| {
+            Error::InternalInvariant(format!("`{op:?}` is not a tower arithmetic op"))
+        })?;
         let ca = self.elab(a, locals)?;
         let cb = self.elab(b, locals)?;
         let va = self.fresh();
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
-        let ds = self
-            .dicts
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| Error::Ice("no dictionary for arithmetic operator".into()))?;
-        let d0 = ds
-            .first()
-            .ok_or_else(|| Error::Ice("empty dictionary set for arithmetic operator".into()))?;
+        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+            Error::InternalInvariant("no dictionary for arithmetic operator".into())
+        })?;
+        let d0 = ds.first().ok_or_else(|| {
+            Error::InternalInvariant("empty dictionary set for arithmetic operator".into())
+        })?;
         let idx = self
             .checked
             .classes
             .get(&Sym::from(class))
             .and_then(|c| c.methods.iter().position(|(n, _)| n.as_str() == method))
-            .ok_or_else(|| Error::Ice(format!("no `{method}` method on class {class}")))?;
+            .ok_or_else(|| {
+                Error::InternalInvariant(format!("no `{method}` method on class {class}"))
+            })?;
         let call = self.method_invoke(Sym::from(class), idx, d0, args)?;
         Ok(Comp::Bind(
             Box::new(ca),
@@ -624,14 +721,13 @@ impl Elab<'_> {
     // lane's constant conversion; monomorphic literals never reach here.
     fn elab_from_int_lit(&mut self, lit: &IntLit, id: NodeId) -> Result<Comp, Error> {
         let int_comp = self.int_value(lit, id);
-        let ds = self
-            .dicts
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| Error::Ice("no dictionary for numeric literal".into()))?;
-        let d0 = ds
-            .first()
-            .ok_or_else(|| Error::Ice("empty dictionary set for numeric literal".into()))?;
+        let ds =
+            self.dicts.get(&id).cloned().ok_or_else(|| {
+                Error::InternalInvariant("no dictionary for numeric literal".into())
+            })?;
+        let d0 = ds.first().ok_or_else(|| {
+            Error::InternalInvariant("empty dictionary set for numeric literal".into())
+        })?;
         let idx = self
             .checked
             .classes
@@ -641,7 +737,9 @@ impl Elab<'_> {
                     .iter()
                     .position(|(n, _)| n.as_str() == NUM_FROMINT_METHOD)
             })
-            .ok_or_else(|| Error::Ice(format!("no `{NUM_FROMINT_METHOD}` method on class Num")))?;
+            .ok_or_else(|| {
+                Error::InternalInvariant(format!("no `{NUM_FROMINT_METHOD}` method on class Num"))
+            })?;
         let v = self.fresh();
         let call = self.method_invoke(
             Sym::from(NUM_CLASS),
@@ -663,6 +761,10 @@ impl Elab<'_> {
             Expr::Bool(b) => Comp::Return(Value::Bool(*b)),
             Expr::Unit => Comp::Return(Value::Unit),
             Expr::Str(s) => Comp::Return(Value::Str(s.clone())),
+            // Bare `Null` is the nullary nullable constructor (tag 0, no payload).
+            Expr::Var(x) if x == kw::CTOR_NULL && !locals.contains_key(x) => {
+                Comp::Return(Value::Ctor(x.clone().into(), kw::OR_NULL_TAG, vec![]))
+            }
             Expr::Var(x) => {
                 if locals.contains_key(x) {
                     Comp::Return(Value::Var(x.clone().into()))
@@ -671,7 +773,7 @@ impl Elab<'_> {
                 } else if self.dicts.contains_key(&e.id) {
                     self.constrained_value(x, e.id)?
                 } else if self.needs_dict(x) {
-                    return Err(Error::Ice(format!(
+                    return Err(Error::InternalInvariant(format!(
                         "no dict record for `{x}` at {:?}",
                         e.span
                     )));
@@ -681,7 +783,9 @@ impl Elab<'_> {
             }
             Expr::Inst(inner, _) => {
                 let Expr::Var(x) = &inner.node else {
-                    return Err(Error::Ice("instance application on a non-variable".into()));
+                    return Err(Error::InternalInvariant(
+                        "instance application on a non-variable".into(),
+                    ));
                 };
                 self.constrained_value(x, e.id)?
             }
@@ -739,12 +843,13 @@ impl Elab<'_> {
                 let args = vec![lhs_val.clone(), rhs_val.clone()];
                 let prim = match self.checked.fixed.get(&e.id).cloned() {
                     Some(ty @ (Type::I64 | Type::U64)) => self.fixed_bin(*op, &ty, args)?,
-                    // The tower brought `Float` onto the plain operators; lower to
-                    // the same float primitive the dotted spelling emits.
+                    // The tower brought `Float` onto the plain operators; lower to the
+                    // float primitive `CoreOp`.
                     Some(Type::Float) => Self::float_bin(*op, &lhs_val, &rhs_val)?,
                     _ => {
-                        let core_op = CoreOp::from_binop(*op)
-                            .ok_or_else(|| Error::Ice(format!("`{op:?}` is not a primitive op")))?;
+                        let core_op = CoreOp::from_binop(*op).ok_or_else(|| {
+                            Error::InternalInvariant(format!("`{op:?}` is not a primitive op"))
+                        })?;
                         Comp::Prim(core_op, lhs_val, rhs_val)
                     }
                 };
@@ -792,17 +897,13 @@ impl Elab<'_> {
                 let compiled = self.elab_arms(&vs, arms, locals, false)?;
                 Comp::Bind(Box::new(cs), vs.into(), Box::new(compiled))
             }
-            Expr::Tuple(elems) => {
-                let mut binds = Vec::new();
-                let mut vals = Vec::new();
-                for elem in elems {
-                    let c = self.elab(elem, locals)?;
-                    let v = self.fresh();
-                    binds.push((c, v.clone()));
-                    vals.push(Value::Var(v.into()));
-                }
-                wrap_binds(binds, Comp::Return(Value::Tuple(vals)))
-            }
+            Expr::UnboxedRecord(fields) => self.elab_unboxed_record(fields, locals)?,
+            Expr::UnboxedField(recv, _) => self.elab_unboxed_field(e.id, recv, e.span, locals)?,
+            Expr::Tuple(elems) => self.elab_product(elems, locals, Value::Tuple)?,
+            // An unboxed tuple lowers exactly like a boxed one; only its Core value
+            // node (and later its ABI) differs, so its observable behavior is
+            // identical.
+            Expr::UnboxedTuple(elems) => self.elab_product(elems, locals, Value::UnboxedTuple)?,
             Expr::List(elems) => {
                 let nil = Comp::Return(Value::Ctor(NIL.into(), 0, vec![]));
                 let mut acc = nil;
@@ -853,7 +954,7 @@ impl Elab<'_> {
                     let mut vals = Vec::new();
                     for opt in ordered {
                         let (c, v) = opt.ok_or_else(|| {
-                            Error::Ice(format!("missing field in record {ctor_name}"))
+                            Error::InternalInvariant(format!("missing field in record {ctor_name}"))
                         })?;
                         binds.push((c, v.clone()));
                         vals.push(Value::Var(v.into()));
@@ -902,7 +1003,8 @@ impl Elab<'_> {
                     body: Box::new(body_comp),
                     return_var,
                     return_body,
-                    ops,
+                    // Sole validating build; the checker already rejects dups (E5008).
+                    ops: CheckedHandler::new(ops).expect("checker rejects duplicate ops"),
                 }
             }
             Expr::RecordUpdate(base_expr, ctor_name, field_exprs) => {
@@ -1036,9 +1138,15 @@ impl Elab<'_> {
             }
             Expr::Inst(inner, _) => {
                 let Expr::Var(name) = &inner.node else {
-                    return Err(Error::Ice("instance application on a non-variable".into()));
+                    return Err(Error::InternalInvariant(
+                        "instance application on a non-variable".into(),
+                    ));
                 };
                 self.dict_call(name, f.id, vals, &mut binds)?
+            }
+            // `This(v)` is the unary nullable constructor (tag 1, one payload).
+            Expr::Var(name) if !locals.contains_key(name) && name == kw::CTOR_THIS => {
+                Comp::Return(Value::Ctor(name.clone().into(), kw::OR_THIS_TAG, vals))
             }
             Expr::Var(name) if !locals.contains_key(name) => {
                 if let Some(info) = self.ctor(name) {
@@ -1053,7 +1161,7 @@ impl Elab<'_> {
                     let v = vals
                         .into_iter()
                         .next()
-                        .ok_or_else(|| Error::Ice("empty print args".into()))?;
+                        .ok_or_else(|| Error::InternalInvariant("empty print args".into()))?;
                     match self.printable_ty(&args[0], locals) {
                         // A concrete or defaultable argument keeps the
                         // type-directed structural printer: byte-identical output,
@@ -1097,10 +1205,10 @@ impl Elab<'_> {
                     let v = vals
                         .into_iter()
                         .next()
-                        .ok_or_else(|| Error::Ice("empty display args".into()))?;
+                        .ok_or_else(|| Error::InternalInvariant("empty display args".into()))?;
                     self.display_comp(v, &args[0], locals)
                 } else if self.needs_dict(name) {
-                    return Err(Error::Ice(format!(
+                    return Err(Error::InternalInvariant(format!(
                         "no dict record for `{name}` at {:?}",
                         f.span
                     )));
@@ -1145,18 +1253,18 @@ impl Elab<'_> {
         key: &S<Expr<CorePhase>>,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let accessor = match self.checked.span_types.get(&recv.id) {
-            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "at_array",
-            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "at_hashmap",
-            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "at_list",
-            Some(Type::Str) => "at_byte",
-            other => {
-                return Err(Error::Ice(format!(
-                    "indexing receiver is not a known container at {:?}: {other:?}",
+        let accessor = self
+            .checked
+            .span_types
+            .get(&recv.id)
+            .and_then(Indexable::classify)
+            .map(Indexable::getter)
+            .ok_or_else(|| {
+                Error::InternalInvariant(format!(
+                    "indexing receiver is not a known container at {:?}",
                     recv.span
-                )))
-            }
-        };
+                ))
+            })?;
         let cr = self.elab(recv, locals)?;
         let vr = self.fresh();
         let ck = self.elab(key, locals)?;
@@ -1177,17 +1285,18 @@ impl Elab<'_> {
         val: &S<Expr<CorePhase>>,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let setter = match self.checked.span_types.get(&recv.id) {
-            Some(Type::Con(n, args)) if n.as_str() == "Array" && args.len() == 1 => "array_set",
-            Some(Type::Con(n, args)) if n.as_str() == "HashMap" && args.len() == 1 => "hm_insert",
-            Some(Type::Con(n, args)) if n.as_str() == LIST && args.len() == 1 => "list_set",
-            other => {
-                return Err(Error::Ice(format!(
-                    "indexed assignment target is not a writable container at {:?}: {other:?}",
+        let setter = self
+            .checked
+            .span_types
+            .get(&recv.id)
+            .and_then(Indexable::classify)
+            .and_then(Indexable::setter)
+            .ok_or_else(|| {
+                Error::InternalInvariant(format!(
+                    "indexed assignment target is not a writable container at {:?}",
                     recv.span
-                )))
-            }
-        };
+                ))
+            })?;
         let cr = self.elab(recv, locals)?;
         let vr = self.fresh();
         let ck = self.elab(key, locals)?;
@@ -1386,7 +1495,9 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             params = all;
         }
         let body = elab.elab(&d.body, &locals).map_err(|e| match e {
-            Error::Ice(m) => Error::Ice(format!("in `{}`: {m}", d.name)),
+            Error::InternalInvariant(m) => {
+                Error::InternalInvariant(format!("in `{}`: {m}", d.name))
+            }
             other => other,
         })?;
         fns.push(CoreFn {
@@ -1403,11 +1514,12 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         let info = checked
             .instances
             .get(&Sym::from(&inst.name))
-            .ok_or_else(|| Error::Ice(format!("no instance info for `{}`", inst.name)))?;
-        let class = checked
-            .classes
-            .get(&info.class)
-            .ok_or_else(|| Error::Ice(format!("no class info for `{}`", info.class)))?;
+            .ok_or_else(|| {
+                Error::InternalInvariant(format!("no instance info for `{}`", inst.name))
+            })?;
+        let class = checked.classes.get(&info.class).ok_or_else(|| {
+            Error::InternalInvariant(format!("no class info for `{}`", info.class))
+        })?;
         // Dict params: the declared context first (so method bodies' `_c{i}`
         // indices are unchanged), then one per superclass obligation.
         let nctx = info.context.len();
@@ -1420,7 +1532,9 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
                 .methods
                 .iter()
                 .find(|(n, _)| n.as_str() == m.name)
-                .ok_or_else(|| Error::Ice(format!("no class signature for `{}`", m.name)))?
+                .ok_or_else(|| {
+                    Error::InternalInvariant(format!("no class signature for `{}`", m.name))
+                })?
                 .1;
             let expected = sig.subst_var(class.param, &info.head);
             let doms = match &expected {

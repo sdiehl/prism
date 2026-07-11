@@ -44,7 +44,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
-use crate::core::HASH_SCHEME;
+use crate::core::{Digest, HASH_SCHEME};
 use crate::error::Error;
 use crate::flags::{DynFlags, SignMode};
 use crate::pkg::lock::{Lock, LockEntry};
@@ -70,7 +70,7 @@ const PACKAGE_SOURCE_LABEL_PREFIX: &str = "<package ";
 /// Fails if the Std pin uses a foreign hash scheme, or if the embedded standard
 /// library does not elaborate, a compiler bug.
 pub fn stdlib_root() -> Result<String, Error> {
-    Ok(crate::driver::stdlib_hash()?.root)
+    Ok(crate::driver::stdlib_hash()?.root.into_string())
 }
 
 /// Where a lockfile's Std pin stands against the standard library this compiler
@@ -142,7 +142,7 @@ pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error>
     let bytes = match store.get(pinned) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "prism.lock pins Std root {pinned}, but this compiler embeds {embedded} and no \
                  stdlib source bundle for {pinned} was found in {}",
                 store_root.display()
@@ -189,7 +189,7 @@ pub fn package_source_roots(
             DepSource::Hash(hex) => {
                 let entry = locked_dependency(lock, dep)?;
                 if entry.hash != *hex {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolvePackage(format!(
                         "dependency `{}` is pinned to {} in prism.lock but {} in prism.toml",
                         dep.name, entry.hash, hex
                     )));
@@ -205,13 +205,13 @@ pub fn package_source_roots(
                 let entry = locked_dependency(lock, dep)?;
                 let signed = signed_index_pointer(url, &dep.name, version, store_root, flags)?;
                 if signed.scheme != entry.scheme {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolvePackage(format!(
                         "signed index points {}@{} under scheme {}, but prism.lock pins {}",
                         dep.name, version, signed.scheme, entry.scheme
                     )));
                 }
                 if signed.root != entry.hash {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolvePackage(format!(
                         "signed index points {}@{} at {}, but prism.lock pins {}",
                         dep.name, version, signed.root, entry.hash
                     )));
@@ -230,13 +230,13 @@ pub fn package_source_roots(
 
 fn locked_dependency<'a>(lock: &'a Lock, dep: &Dependency) -> Result<&'a LockEntry, Error> {
     let entry = lock.get(&dep.name).ok_or_else(|| {
-        Error::Resolve(format!(
+        Error::ResolvePackage(format!(
             "dependency `{}` is not pinned in prism.lock; run `prism add` or update the lockfile",
             dep.name
         ))
     })?;
     if entry.source != dep.source {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "dependency `{}` source changed since prism.lock was written",
             dep.name
         )));
@@ -253,7 +253,7 @@ fn package_source_root(
     let bytes = match store.get(root) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "dependency `{name}` is pinned to {root}, but no source bundle for {root} was found \
                  in the package store"
             )));
@@ -262,7 +262,7 @@ fn package_source_root(
     };
     let got = blake3::hash(&bytes).to_hex().to_string();
     if got != root {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "dependency `{name}` source bundle hash mismatch: lock pins {root}, store contains {got}"
         )));
     }
@@ -292,7 +292,7 @@ pub fn signed_index_pointer(
 ) -> Result<IndexRow, Error> {
     let transport = DiskTransport::open(store_root)?;
     let artifact = transport.index_artifact()?.ok_or_else(|| {
-        Error::Resolve(format!(
+        Error::ResolvePackage(format!(
             "dependency `{name}` is a git package, but no signed package index was found"
         ))
     })?;
@@ -300,17 +300,17 @@ pub fn signed_index_pointer(
         Verdict::Valid { .. } => {}
         Verdict::Unsigned if flags.sign_mode == SignMode::Unsigned => {}
         Verdict::Unsigned => {
-            return Err(Error::Resolve(
+            return Err(Error::ResolvePackage(
                 "package index is unsigned; set PRISM_SIGN_MODE=unsigned only for local dev".into(),
             ));
         }
         Verdict::Invalid(msg) => {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "package index signature did not verify: {msg}"
             )));
         }
         Verdict::Unavailable(msg) => {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "package index signature unverifiable: {msg}"
             )));
         }
@@ -320,19 +320,19 @@ pub fn signed_index_pointer(
         .iter()
         .find(|row| row.origin == origin && row.name == name && row.tag == version)
         .ok_or_else(|| {
-            Error::Resolve(format!(
+            Error::ResolvePackage(format!(
                 "signed index has no pointer for {origin} {name}@{version}"
             ))
         })?;
     if row.scheme != HASH_SCHEME {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "signed index pointer for {origin} {name}@{version} uses foreign hash scheme {}; \
              this build speaks {}",
             row.scheme, HASH_SCHEME
         )));
     }
     if row.kind != INDEX_KIND_SOURCE {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "signed index pointer for {origin} {name}@{version} names artifact kind {}, \
              but dependency resolution requires {INDEX_KIND_SOURCE}",
             row.kind
@@ -353,5 +353,5 @@ pub fn signed_index_pointer(
 /// compiler bug.
 pub fn stdlib_baseline() -> Result<BTreeSet<String>, Error> {
     let h = crate::driver::stdlib_hash()?;
-    Ok(h.defs.values().cloned().collect())
+    Ok(h.defs.values().cloned().map(Digest::into_string).collect())
 }

@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/derive_stable_bad.pr
 ---
 == tokens ==
@@ -92,7 +92,7 @@ Program {
 }
 
 == types ==
-Type Error: cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
+[E6021] Type Error: cannot derive Stable for Config: field `on_fail` has type `(Unit) -> Unit`, which is not Stable. A frozen format cannot contain a value that is not itself serializable.
    ╭─[ <source>:3:67 ]
    │
  3 │ type Config = C { retry: Int, on_fail: (Unit) -> Unit } deriving (Stable)

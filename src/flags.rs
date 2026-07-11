@@ -18,7 +18,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::core::OptLevel;
-use crate::driver::{valid_backend_opt, Scheduler, BACKEND_OPT_LEVELS, DEFAULT_BACKEND_OPT};
+use crate::driver::{BackendOpt, Scheduler};
 
 /// The lowest rung of the effect-lowering cascade a compile is allowed to take.
 ///
@@ -130,12 +130,6 @@ pub struct DynFlags {
     /// A behaviorally transparent rewrite whose fast path leaves same-arity tail
     /// loops native.
     pub trampoline: bool,
-    /// `PRISM_CEK_SPIKE` (default off, and only readable when the `cek-spike`
-    /// cargo feature is compiled in): drive in-scope-resume whole-program handlers
-    /// with the experimental meta-kont CEK trampoline. Not yet validated against
-    /// masking, so it is fenced out of release builds by the feature gate and
-    /// never chosen for a program that uses `mask`.
-    pub cek_spike: bool,
     /// `PRISM_CORE_LINT` (default off): run Core Lint between optimization passes,
     /// panicking (naming the pass) if one produces ill-formed Core.
     pub core_lint: bool,
@@ -177,7 +171,7 @@ pub struct DynFlags {
     /// `PRISM_BACKEND_OPT` (default `"2"`): the LLVM-backend `-O` level a library
     /// entry point hands `cc` when the CLI does not pass `--backend-opt`. An
     /// invalid value is reported once here and falls back to the default.
-    pub backend_opt: String,
+    pub backend_opt: BackendOpt,
     /// `PRISM_NO_SPECIALIZE` (default off): turn off the `Specialize` Core pass.
     /// Presence-flagged, resolved into [`Config::disabled`](crate::Config::disabled).
     pub no_specialize: bool,
@@ -228,7 +222,6 @@ impl Default for DynFlags {
         Self {
             native_effects: true,
             trampoline: true,
-            cek_spike: false,
             core_lint: false,
             rt_checks: false,
             native_kont_frames: false,
@@ -237,7 +230,7 @@ impl Default for DynFlags {
             time_compile: false,
             quiet: false,
             opt_level: OptLevel::default(),
-            backend_opt: DEFAULT_BACKEND_OPT.into(),
+            backend_opt: BackendOpt::default(),
             no_specialize: false,
             fuse: false,
             scheduler: Scheduler::default(),
@@ -261,7 +254,6 @@ impl DynFlags {
         Self {
             native_effects: env_bool("PRISM_NATIVE_EFFECTS", true),
             trampoline: env_bool("PRISM_TRAMPOLINE", true),
-            cek_spike: cek_spike_from_env(),
             core_lint: env_present("PRISM_CORE_LINT"),
             rt_checks: env_present("PRISM_RT_CHECKS"),
             native_kont_frames: env_present("PRISM_NATIVE_KONT_FRAMES"),
@@ -327,18 +319,18 @@ fn effect_tier_from_env() -> EffectTier {
 // The LLVM-backend `-O` level from `PRISM_BACKEND_OPT`, validated against the
 // levels clang accepts. An out-of-range value is reported once and falls back to
 // the default rather than reaching `cc`.
-fn backend_opt_from_env() -> String {
-    match std::env::var("PRISM_BACKEND_OPT") {
-        Ok(s) if valid_backend_opt(&s) => s,
-        Ok(s) => {
-            eprintln!(
-                "ignoring invalid PRISM_BACKEND_OPT={s:?} (expected {}); using {DEFAULT_BACKEND_OPT}",
-                BACKEND_OPT_LEVELS.join(", ")
-            );
-            DEFAULT_BACKEND_OPT.into()
-        }
-        Err(_) => DEFAULT_BACKEND_OPT.into(),
-    }
+fn backend_opt_from_env() -> BackendOpt {
+    let Ok(s) = std::env::var("PRISM_BACKEND_OPT") else {
+        return BackendOpt::default();
+    };
+    BackendOpt::parse(&s).unwrap_or_else(|| {
+        eprintln!(
+            "ignoring invalid PRISM_BACKEND_OPT={s:?} (expected {}); using {}",
+            BackendOpt::levels(),
+            BackendOpt::default().as_str()
+        );
+        BackendOpt::default()
+    })
 }
 
 // An opt-out boolean flag: absent takes `default`; a falsey spelling (`0`,
@@ -357,17 +349,4 @@ fn env_bool(name: &str, default: bool) -> bool {
 // A presence flag: any value (even empty) is true, absent is false.
 fn env_present(name: &str) -> bool {
     std::env::var_os(name).is_some()
-}
-
-// The experimental CEK path is only reachable when its cargo feature is compiled
-// in; without the feature the env var is inert, so the unvalidated code can never
-// run in a release build.
-#[cfg(feature = "cek-spike")]
-fn cek_spike_from_env() -> bool {
-    env_bool("PRISM_CEK_SPIKE", false)
-}
-
-#[cfg(not(feature = "cek-spike"))]
-const fn cek_spike_from_env() -> bool {
-    false
 }

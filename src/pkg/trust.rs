@@ -142,7 +142,7 @@ impl From<TrustError> for crate::error::Error {
     fn from(e: TrustError) -> Self {
         match e {
             TrustError::Io(io) => Self::Io(io),
-            other => Self::Resolve(other.to_string()),
+            other => Self::ResolvePackage(other.to_string()),
         }
     }
 }
@@ -1121,7 +1121,7 @@ pub fn publish_cmd(
         tag: tag.to_string(),
         scheme: identity.scheme.to_string(),
         kind: identity.kind.to_string(),
-        root: identity.root,
+        root: identity.root.into_string(),
     };
     let receipt = publish(&dst, &log, row, &cfg.flags)?;
 

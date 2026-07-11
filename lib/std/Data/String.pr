@@ -77,26 +77,26 @@ pub fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
 pub fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
 
 -- | Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a
--- byte array (`up` selects upper- vs lower-casing).
-pub fn map_case(s, i, arr, up) =
+-- byte buffer (`up` selects upper- vs lower-casing).
+pub fn map_case(s, i, buf, up) =
   if i >= byte_len(s) then
-    arr
+    buf
   else
     let c = byte_at(s, i)
     map_case(
         s,
         i + 1,
-        array_push(arr, if up then to_upper_c(c) else to_lower_c(c)),
+        buf_push(buf, if up then to_upper_c(c) else to_lower_c(c)),
         up,
       )
 
 -- | ASCII upper-case of `s` (non-letters unchanged).
 pub fn to_upper(s : String) : String =
-  string_of_bytes(map_case(s, 0, array_empty(), true))
+  string_of_buf(map_case(s, 0, buf_empty(), true))
 
 -- | ASCII lower-case of `s` (non-letters unchanged).
 pub fn to_lower(s : String) : String =
-  string_of_bytes(map_case(s, 0, array_empty(), false))
+  string_of_buf(map_case(s, 0, buf_empty(), false))
 
 -- | Helper for `trim`: the first non-whitespace byte index at or after `i`.
 pub fn ltrim_idx(s, i) =
@@ -112,12 +112,12 @@ pub fn rtrim_idx(s, i) =
   else
     i
 
--- | Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `arr`.
-pub fn slice_bytes(s, lo, hi, arr) =
+-- | Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`.
+pub fn slice_bytes(s, lo, hi, buf) =
   if lo >= hi then
-    arr
+    buf
   else
-    slice_bytes(s, lo + 1, hi, array_push(arr, byte_at(s, lo)))
+    slice_bytes(s, lo + 1, hi, buf_push(buf, byte_at(s, lo)))
 
 -- | Strip leading and trailing ASCII whitespace.
 pub fn trim(s : String) : String =
@@ -126,7 +126,7 @@ pub fn trim(s : String) : String =
   if lo >= hi then
     ""
   else
-    string_of_bytes(slice_bytes(s, lo, hi, array_empty()))
+    string_of_buf(slice_bytes(s, lo, hi, buf_empty()))
 
 -- | The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 pub fn index_of_from(c, s, i) =

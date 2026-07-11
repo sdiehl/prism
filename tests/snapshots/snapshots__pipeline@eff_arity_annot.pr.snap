@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/eff_arity_annot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("consume") LParen Ident("f") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Emit") LParen KwInt Comma KwInt RParen RBrace RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("consume") LParen Ident("f") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Emit") LParen KwInt Comma KwInt RParen RBrace RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
 
 == ast ==
 Program {
@@ -27,7 +27,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..35,
+            span: 0..31,
         },
     ],
     errors: [],
@@ -76,10 +76,10 @@ Program {
                         suffix: None,
                     },
                 ),
-                span: 95..96,
+                span: 91..92,
             },
             wheres: [],
-            span: 37..96,
+            span: 33..92,
         },
         Decl {
             name: "main",
@@ -89,16 +89,16 @@ Program {
             constraints: [],
             body: Spanned {
                 node: Unit,
-                span: 110..112,
+                span: 106..108,
             },
             wheres: [],
-            span: 98..112,
+            span: 94..108,
         },
     ],
 }
 
 == types ==
-Type Error: in `consume`: effect `Emit` expects 1 type argument(s), got 2
+[E5000] Type Error: in `consume`: effect `Emit` expects 1 type argument(s), got 2
    ╭─[ <source>:4:1 ]
    │
  4 │ fn consume(f : (Unit) -> Unit ! {Emit(Int, Int)}) : Int = 0

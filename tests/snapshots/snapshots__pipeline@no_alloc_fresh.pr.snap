@@ -84,10 +84,11 @@ fresh : (Int) -> Box
 
 == core (cbpv) ==
 fn fresh(x) =
-  return x to t@0; return Box(t@0)
+  return x to t@0
+  return Box(t@0)
 
 == fip ==
-Type Error: allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
+[E1998] Type Error: allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
    ╭─[ <source>:6:1 ]
    │
  6 │ fn fresh(x : Int) : Box @ noalloc = Box(x)

@@ -6,11 +6,11 @@
 -- continuation handling for the Frame::Args case in `perform`.
 
 effect Reader
-  ctl ask(Unit) : Int
+  ask() : Int
 
 fn main() =
-  let bump = \(a) -> let x = ask(()) in \(b) -> x + a + b
+  let bump = \(a) -> let x = ask() in \(b) -> x + a + b
   println(handle bump(5)(7) with {
-    ask(u, k) => k(100),
+    ask() resume k => k(100),
     return r => r
   })

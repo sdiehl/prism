@@ -20,7 +20,7 @@ import Data.Map (..)
 -- `false` (a fault would be the failure).
 fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
   handle action() with
-    final ctl fail() => d
+    never fail() => d
     return r => r
 
 -- Typed decode wrappers so `decode`/`wire_decode_value_with_digest` resolve their

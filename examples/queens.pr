@@ -1,6 +1,6 @@
 effect Amb
-  ctl choose(Int) : Int
-  ctl reject(Unit) : Int
+  choose(Int) : Int
+  reject() : Int
 
 -- N-queens as pure nondeterminism, in the spirit of eff_amb.
 --
@@ -22,7 +22,7 @@ fn safe(c, dist, board) =
     Nil => true
     Cons(d, rest) => c /= d && abs(c - d) /= dist && safe(c, dist + 1, rest)
 
-fn place(row, board) : !{Amb} List(Int) =
+fn place(row, board) : List(Int) ! {Amb} =
   if row == n then
     board
   else
@@ -30,13 +30,13 @@ fn place(row, board) : !{Amb} List(Int) =
     if safe(c, 1, board) then
       place(row + 1, Cons(c, board))
     else
-      reject(())
+      reject()
       board
 
 fn solutions() =
   handle place(0, Nil) with
-    choose(m, k) => flatten(map(\(i) -> k(i), range(0, m)))
-    reject(u, k) => Nil
+    choose(m) resume k => flatten(map(\(i) -> k(i), range(0, m)))
+    reject() resume k => Nil
     return r => Cons(reverse(r), Nil)
 
 fn show_board(b) = concat("[", concat(str_join(", ", map(show_int, b)), "]"))

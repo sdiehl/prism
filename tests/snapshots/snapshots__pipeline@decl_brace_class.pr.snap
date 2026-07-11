@@ -1,13 +1,13 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/decl_brace_class.pr
 ---
 == tokens ==
 VOpen Class UIdent("Eq") LParen Ident("a") RParen LBrace Ident("eq") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwBool RBrace VClose
 
 == parse ==
-Parse Error: class bodies use layout: remove the braces and put each method on its own indented line
+[E7100] Parse Error: class bodies use layout: remove the braces and put each method on its own indented line
    ╭─[ <source>:1:13 ]
    │
  1 │ class Eq(a) {

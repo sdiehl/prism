@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/classes_unresolved.pr
 ---
 == tokens ==
@@ -154,7 +154,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: no instance for Eq2(Color)
+[E3012] Type Error: in `main`: no instance for Eq2(Color)
    ╭─[ <source>:9:13 ]
    │
  9 │ fn main() = eq2(Red, Blue)

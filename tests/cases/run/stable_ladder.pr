@@ -30,7 +30,7 @@ stable Empty {
 -- Discharge Fail to an explicit default so a fallible reader is a pure property.
 fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
   handle action() with
-    final ctl fail() => d
+    never fail() => d
     return r => r
 
 -- encode then decode returns the original current-rung value and consumes every

@@ -3,7 +3,8 @@ use std::fmt;
 use marginalia::Span;
 
 use super::Tc;
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
+use crate::kw;
 use crate::syntax::ast::{Arm, BigInt, Core, Expr, Pattern, S};
 
 // A guard that always matches: absent, or the literal `True`. Such an arm covers
@@ -180,6 +181,13 @@ impl Tc<'_> {
         match h {
             Head::Tuple(n) => Some(vec![Head::Tuple(*n)]),
             Head::Bool(_) => Some(vec![Head::Bool(false), Head::Bool(true)]),
+            // The wired-in nullable has exactly two constructors: the nullary
+            // `Null` and the unary `This`. They are not in the datatype table, so
+            // their sibling set is named directly (tag order `Null`, `This`).
+            Head::Ctor(name, _) if name == kw::CTOR_NULL || name == kw::CTOR_THIS => Some(vec![
+                Head::Ctor(kw::CTOR_NULL.to_string(), 0),
+                Head::Ctor(kw::CTOR_THIS.to_string(), 1),
+            ]),
             Head::Ctor(name, _) => {
                 let tname = &self.ctors.get(name)?.type_name;
                 let mut cs: Vec<(usize, Head)> = self
@@ -260,20 +268,17 @@ impl Tc<'_> {
         for arm in arms {
             let row = vec![self.lower_pat(&arm.pat.node)];
             if !self.useful(&matrix, &row) {
-                return Err(TypeError::Other {
-                    span: arm.pat.span,
-                    msg: "unreachable match arm".into(),
-                });
+                return Err(ErrKind::UnreachableMatchArm.at(arm.pat.span));
             }
             if irrefutable_guard(arm.guard.as_ref()) {
                 matrix.push(row);
             }
         }
         if let Some(w) = self.witness(&matrix, 1) {
-            return Err(TypeError::Other {
-                span,
-                msg: format!("non-exhaustive match: missing {}", w[0]),
-            });
+            return Err(ErrKind::NonExhaustiveMatch {
+                witness: w[0].to_string(),
+            }
+            .at(span));
         }
         Ok(())
     }

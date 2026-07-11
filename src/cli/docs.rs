@@ -31,7 +31,7 @@ pub fn mdbook_cmd(args: &[String]) -> CmdResult {
     print!("{book}");
     if !warnings.is_empty() && std::env::var_os("PRISM_MDBOOK_STRICT").is_some() {
         return Err((
-            Error::Codegen(format!(
+            Error::CodegenDocs(format!(
                 "{} doc block(s) did not type-check",
                 warnings.len()
             )),
@@ -89,7 +89,7 @@ pub fn docs_cmd(
         (g, roots, base, default_out, files)
     };
 
-    // The identity a manifest pins: the same source root and search path the build
+    // The identity a manifest records: the same source root and search path the build
     // and check-world use for this project/file (the stdlib book path carries no
     // package identity, so it emits no manifest). Best-effort: a bare directory
     // that is not a package has no build identity, so it simply gets no manifest.
@@ -135,7 +135,7 @@ pub fn docs_cmd(
                 eprintln!("{s}: out of date");
             }
             return Err((
-                Error::Codegen("docs are out of date; run `prism docs`".into()),
+                Error::CodegenDocs("docs are out of date; run `prism docs`".into()),
                 String::new(),
                 String::new(),
             ));
@@ -248,7 +248,7 @@ fn expect_result(doctests_ok: bool, accept: bool, expect: &crate::ExpectReport) 
         Ok(())
     } else {
         Err((
-            Error::Codegen("doctest failures".into()),
+            Error::CodegenDocs("doctest failures".into()),
             String::new(),
             String::new(),
         ))

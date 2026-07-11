@@ -1,0 +1,21 @@
+import Json (..)
+
+fn exact(s) =
+  match decode(s) of
+    Ok(j) => println(concat("ok ", encode(j)))
+    Err(e) => println("err")
+
+fn lossy(s) =
+  match decode_lossy(s) of
+    Ok(j) => println(concat("ok ", encode(j)))
+    Err(e) => println("err")
+
+fn main() =
+  exact("1")
+  exact("1.5")
+  exact("1.0")
+  exact("1e3")
+  exact("100000000000000000000000000000")
+  lossy("1.0")
+  lossy("1e3")
+  lossy("100000000000000000000000000000")

@@ -1,0 +1,145 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/handler_partial.pr
+---
+== tokens ==
+VOpen Effect UIdent("E") VOpen Ident("one") LParen RParen Colon KwInt VSemi Ident("two") LParen RParen Colon KwInt VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Handle Ident("one") LParen RParen Plus Ident("two") LParen RParen With LBrace Ident("one") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 1, suffix: None }) RParen Comma Return Ident("r") FatArrow Ident("r") RBrace RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "E",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "one",
+                    params: [],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "two",
+                    params: [],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 308..344,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 360..367,
+                    },
+                    [
+                        Spanned {
+                            node: Handle(
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "one",
+                                                    ),
+                                                    span: 375..378,
+                                                },
+                                                [],
+                                            ),
+                                            span: 375..380,
+                                        },
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "two",
+                                                    ),
+                                                    span: 383..386,
+                                                },
+                                                [],
+                                            ),
+                                            span: 383..388,
+                                        },
+                                    ),
+                                    span: 375..388,
+                                },
+                                [
+                                    Op(
+                                        "one",
+                                        [],
+                                        "k",
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "k",
+                                                    ),
+                                                    span: 418..419,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Int(
+                                                            IntLit {
+                                                                value: 1,
+                                                                suffix: None,
+                                                            },
+                                                        ),
+                                                        span: 420..421,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 418..422,
+                                        },
+                                    ),
+                                    Return(
+                                        "r",
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 440..441,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 368..445,
+                        },
+                    ],
+                ),
+                span: 360..446,
+            },
+            wheres: [],
+            span: 346..446,
+        },
+    ],
+}
+
+== types ==
+[E5011] Type Error: in `main`: handler for effect `E` is missing `two`; a handler must implement every operation of the effect it handles
+    ╭─[ <source>:10:11 ]
+    │
+ 10 │ ╭─▶   println(handle one() + two() with {
+    ┆ ┆   
+ 13 │ ├─▶   })
+    │ │          
+    │ ╰────────── in `main`: handler for effect `E` is missing `two`; a handler must implement every operation of the effect it handles
+────╯

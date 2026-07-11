@@ -1,0 +1,145 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/probe.pr
+---
+== tokens ==
+VOpen Fn Ident("main") LParen RParen Eq Probe StringLit("trace") Do Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Sugar(
+                    Probe(
+                        "trace",
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "println",
+                                    ),
+                                    span: 254..261,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 262..263,
+                                    },
+                                ],
+                            ),
+                            span: 254..264,
+                        },
+                    ),
+                ),
+                span: 237..264,
+            },
+            wheres: [],
+            span: 225..264,
+        },
+    ],
+}
+
+== types ==
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn main() =
+  return "trace" to t@0
+  probe_enabled(t@0) to t@3
+  if t@3 then
+    return 1 to t@1
+    print t@1 to t@2
+    print_nl
+  else
+    return ()
+
+== fbip (rc) ==
+fn main() =
+  return "trace" to t@0
+  probe_enabled(t@0) to t@3
+  if t@3 then
+    drop t@3
+    return 1 to t@1
+    print t@1 to t@2
+    drop t@2
+    print_nl
+  else
+    drop t@3
+    return ()
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@.str0 = private constant [6 x i8] c"trace\00"
+@prism_native_kont_table = constant [718 x i8] c"scheme  prism-core-hash-v1\0Abundle  a71f51ade63bdaa4fcf3a2a2c00fcd5dc61f815013214c73d293467c5465ab8e\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:a71f51ade63bdaa4fcf3a2a2c00fcd5dc61f815013214c73d293467c5465ab8e\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  a751c19b2babbfbf75d942f74347c012427055d76cb76f3b31e8b6a5b14b0bfd  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [788 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  a71f51ade63bdaa4fcf3a2a2c00fcd5dc61f815013214c73d293467c5465ab8e\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:a71f51ade63bdaa4fcf3a2a2c00fcd5dc61f815013214c73d293467c5465ab8e\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main a751c19b2babbfbf75d942f74347c012427055d76cb76f3b31e8b6a5b14b0bfd main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [11 x i8] c"prism_main\00"
+@.kont_hash0 = private constant [65 x i8] c"a751c19b2babbfbf75d942f74347c012427055d76cb76f3b31e8b6a5b14b0bfd\00"
+@.kont_name0 = private constant [5 x i8] c"main\00"
+@prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t0 = call i64 @prism_str_lit(ptr @.str0, i64 5)
+  %t1 = call i64 @prism_probe_enabled(i64 %t0)
+  %t3 = shl i64 %t1, 1
+  %t4 = or i64 %t3, 1
+  call void @prism_rc_dec(i64 %t0)
+  %t6 = icmp ne i64 %t4, 1
+  br i1 %t6, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t4)
+  call void @prism_print_int(i64 3)
+  call void @prism_rc_dec(i64 3)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+
+b1:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %t4)
+  ret i64 0
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_str_lit(ptr, i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_probe_enabled(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: ()

@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use super::super::cbpv::{Comp, CorePat, HandleOp, Value};
+use super::super::cbpv::{CheckedHandler, Comp, CorePat, HandleOp, Value};
 use super::super::traverse::Rewrite;
 use crate::names;
 use crate::sym::Sym;
@@ -169,7 +169,10 @@ impl Rewrite for Freshen<'_> {
                     body: body2,
                     return_var: rv,
                     return_body: rb,
-                    ops: ops2,
+                    // Renaming preserves each clause's operation name, so the
+                    // uniqueness invariant carries over from the input handler.
+                    ops: CheckedHandler::new(ops2)
+                        .expect("rename preserves handler operation names"),
                 }
             }
             Comp::WithReuse { token, freed, body } => {

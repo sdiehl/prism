@@ -1,45 +1,31 @@
--- Superclasses: a class may declare another class as a superclass with
--- `given`. Every instance then carries a resolved superclass dictionary, stored
--- as a leading field of its dict cell, and a `given Ord2(a)` constraint can
--- discharge an `Eq2(a)` obligation by projecting that field. The superclass
--- witness is found automatically from the instances in scope, so the instance
--- declaration does not repeat it.
---
--- Prints:
---   equal
---   less
---   greater
+-- Superclasses. A class may require another with `given`: every `Greet` type
+-- must already be `Nameable`, the way an interface extends another. Each
+-- instance then carries its superclass dictionary as a hidden leading field of
+-- its own, so a `given Greet(a)` function may call `name_of` (a `Nameable`
+-- method) with no `Nameable` constraint written: `Greet` entails it. Unlike
+-- inheritance, nothing is overridden or re-implemented; the `Greet` instance
+-- simply points at whichever `Nameable` witness is in scope, and the two kinds
+-- of evidence stay separate values.
 
-class Eq2(a)
-  eq2 : (a, a) -> Bool
+type Robot = MkRobot(Int)
 
-class Ord2(a) given Eq2(a)
-  cmp2 : (a, a) -> Int
+class Nameable(a)
+  name_of : (a) -> String
 
-instance eqInt2 : Eq2(Int)
-  fn eq2(x, y) = x == y
+class Greet(a) given Nameable(a)
+  greeting : (a) -> String
 
-instance ordInt2 : Ord2(Int)
-  fn cmp2(x, y) =
-    if x < y then
-      0 - 1
-    elif x > y then
-      1
-    else
-      0
+instance nameRobot : Nameable(Robot)
+  fn name_of(r) =
+    match r of
+      MkRobot(n) => concat("unit-", show_int(n))
 
--- Polymorphic over any Ord2(a). It calls cmp2 (its own method, taken from the
--- Ord2 dictionary parameter) AND eq2 (a superclass method, projected out of the
--- same dictionary). No Eq2 constraint is written: Ord2 entails it.
-fn describe(x : a, y : a) : String given Ord2(a) =
-  if eq2(x, y) then
-    "equal"
-  elif cmp2(x, y) < 0 then
-    "less"
-  else
-    "greater"
+instance greetRobot : Greet(Robot)
+  fn greeting(_r) = "beep boop"
 
-fn main() : !{IO} Unit =
-  println(describe(3, 3))
-  println(describe(3, 5))
-  println(describe(7, 2))
+-- One constraint, two capabilities: `greeting` is Greet's own method, and
+-- `name_of` is projected from the superclass field of the same dictionary.
+fn hail(x : a) : String given Greet(a) =
+  concat(name_of(x), concat(" says ", greeting(x)))
+
+fn main() = println(hail(MkRobot(7)))

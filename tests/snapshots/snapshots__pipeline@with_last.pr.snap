@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/with_last.pr
 ---
 == tokens ==
@@ -139,7 +139,7 @@ Program {
 }
 
 == types ==
-Type Error: `with` cannot be the last statement of a block: there is nothing for it to wrap
+[E6041] Type Error: `with` cannot be the last statement of a block: there is nothing for it to wrap
    ╭─[ <source>:5:3 ]
    │
  5 │   with x <- cps(1)

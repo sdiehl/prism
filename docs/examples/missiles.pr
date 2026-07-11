@@ -15,16 +15,16 @@
 --   joshua: 0 winning moves across every future
 
 effect Missiles
-  ctl launch(Int) : Unit
+  launch(Int) : Unit
 
 effect Warplan
-  ctl choose(Unit) : Bool
+  choose(Unit) : Bool
 
-fn first_strike() : !{Missiles} Int =
+fn first_strike() : Int ! {Missiles} =
   launch(100)
   1
 
-fn exchange(us_first : Bool) : !{Missiles} Int =
+fn exchange(us_first : Bool) : Int ! {Missiles} =
   if us_first then
     launch(100)
   else
@@ -34,17 +34,17 @@ fn exchange(us_first : Bool) : !{Missiles} Int =
 -- a strange game. the only winning move is not to play.
 fn war_games() : Int =
   handle first_strike() with
-    launch(_warheads, _k) => 0
+    launch(_warheads) resume _k => 0
     return moves => moves
 
 fn played(us_first : Bool) : Int =
   handle exchange(us_first) with
-    launch(_warheads, _k) => 0
+    launch(_warheads) resume _k => 0
     return moves => moves
 
 fn joshua() : Int =
   handle played(choose(())) with
-    choose(_u, k) => k(true) + k(false)
+    choose(_u) resume k => k(true) + k(false)
     return total => total
 
 fn main() =

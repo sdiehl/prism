@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use marginalia::Span;
 
 use super::{rw, synth_span, Cx, Vars};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::syntax::ast::{Arm, Core, Expr, PathOp, PathStep, Pattern, Sugar, S};
 use crate::syntax::desugar::{call, evar, lam1, sp, spat};
 use crate::{kw, names};
@@ -286,17 +286,11 @@ fn case_over(
         .and_then(|c| cx.ctor_total.get(c).copied());
     let mut arms = Vec::new();
     for (ctor, subs) in by_ctor {
-        let (arity, fields) =
-            cx.ctor_shapes
-                .get(&ctor)
-                .cloned()
-                .ok_or_else(|| TypeError::Other {
-                    span,
-                    msg: format!(
-                        "unknown constructor `{ctor}` in `{}{ctor}` path step",
-                        kw::QUESTION
-                    ),
-                })?;
+        let (arity, fields) = cx
+            .ctor_shapes
+            .get(&ctor)
+            .cloned()
+            .ok_or_else(|| ErrKind::UnknownPathCtor { ctor: ctor.clone() }.at(span))?;
         let binders: Vec<String> = (0..arity)
             .map(|_| names::path_each(cx.next.bump()))
             .collect();
@@ -309,21 +303,15 @@ fn case_over(
                 continue;
             };
             let PathStep::Field(f) = head else {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!(
-                        "`{}{ctor}` must be followed by one of its fields",
-                        kw::QUESTION
-                    ),
-                });
+                return Err(ErrKind::PathCtorNeedsField { ctor }.at(span));
             };
-            let idx = fields
-                .iter()
-                .position(|n| n == f)
-                .ok_or_else(|| TypeError::Other {
-                    span,
-                    msg: format!("constructor `{ctor}` has no field `{f}`"),
-                })?;
+            let idx = fields.iter().position(|n| n == f).ok_or_else(|| {
+                ErrKind::UnknownField {
+                    field: f.clone(),
+                    ctor: ctor.clone(),
+                }
+                .at(span)
+            })?;
             by_field.entry(idx).or_default().push((s[1..].to_vec(), op));
         }
         for (idx, fpaths) in by_field {
@@ -465,28 +453,23 @@ fn to_list_case(
     cx: &mut Cx,
     span: Span,
 ) -> Result<S<Expr>, TypeError> {
-    let (arity, fields) = cx
-        .ctor_shapes
-        .get(ctor)
-        .cloned()
-        .ok_or_else(|| TypeError::Other {
-            span,
-            msg: format!(
-                "unknown constructor `{ctor}` in `{}{ctor}` path step",
-                kw::QUESTION
-            ),
-        })?;
+    let (arity, fields) = cx.ctor_shapes.get(ctor).cloned().ok_or_else(|| {
+        ErrKind::UnknownPathCtor {
+            ctor: ctor.to_string(),
+        }
+        .at(span)
+    })?;
     let binders: Vec<String> = (0..arity)
         .map(|_| names::path_each(cx.next.bump()))
         .collect();
     let body = if let Some(PathStep::Field(f)) = rest.first() {
-        let idx = fields
-            .iter()
-            .position(|n| n == f)
-            .ok_or_else(|| TypeError::Other {
-                span,
-                msg: format!("constructor `{ctor}` has no field `{f}`"),
-            })?;
+        let idx = fields.iter().position(|n| n == f).ok_or_else(|| {
+            ErrKind::UnknownField {
+                field: f.clone(),
+                ctor: ctor.to_string(),
+            }
+            .at(span)
+        })?;
         to_list(evar(&binders[idx], synth_span(cx)), &rest[1..], cx, span)?
     } else if rest.is_empty() {
         // `?C` alone previews the whole matched constructor.
@@ -497,13 +480,10 @@ fn to_list_case(
         );
         sp(Expr::List(vec![rebuilt]), synth_span(cx))
     } else {
-        return Err(TypeError::Other {
-            span,
-            msg: format!(
-                "`{}{ctor}` must be followed by one of its fields",
-                kw::QUESTION
-            ),
-        });
+        return Err(ErrKind::PathCtorNeedsField {
+            ctor: ctor.to_string(),
+        }
+        .at(span));
     };
     let pat = spat(
         Pattern::Ctor(
@@ -556,14 +536,11 @@ fn conflict_check(ups: &[Path], span: Span) -> Result<(), TypeError> {
     for (i, (p, _)) in ups.iter().enumerate() {
         for (q, _) in &ups[i + 1..] {
             if is_prefix(p, q) || is_prefix(q, p) {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!(
-                        "conflicting update paths `{}` and `{}`",
-                        show_path(p),
-                        show_path(q)
-                    ),
-                });
+                return Err(ErrKind::ConflictingUpdatePaths {
+                    a: show_path(p),
+                    b: show_path(q),
+                }
+                .at(span));
             }
         }
     }

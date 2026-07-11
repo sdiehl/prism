@@ -11,6 +11,10 @@
 
 use serde_json::{json, to_string_pretty, Map, Value as J};
 
+use super::cbpv::CoreOp::{
+    Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
+    Sub, Subf,
+};
 use super::cbpv::{Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, Value};
 use crate::sym::Sym;
 
@@ -19,10 +23,6 @@ fn syms(ss: &[Sym]) -> J {
 }
 
 const fn op_name(op: CoreOp) -> &'static str {
-    use CoreOp::{
-        Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
-        Sub, Subf,
-    };
     match op {
         Add => "add",
         Sub => "sub",
@@ -68,6 +68,11 @@ fn value(v: &Value) -> J {
             json!({"v": "ctor", "name": n.as_str(), "tag": tag, "args": values(args)})
         }
         Value::Tuple(args) => json!({"v": "tuple", "args": values(args)}),
+        Value::UnboxedTuple(args) => json!({"v": "utuple", "args": values(args)}),
+        Value::UnboxedRecord(fs) => json!({
+            "v": "urecord",
+            "fields": fs.iter().map(|(n, x)| json!({"name": n.as_str(), "val": value(x)})).collect::<Vec<_>>(),
+        }),
     }
 }
 
@@ -153,6 +158,9 @@ fn comp(c: &Comp) -> J {
         }
         Comp::Neg(lane, v) => {
             json!({"c": "neg", "lane": format!("{lane:?}"), "v": value(v)})
+        }
+        Comp::UnboxedProject(v, field) => {
+            json!({"c": "uproject", "v": value(v), "field": field.as_str()})
         }
         Comp::StrBuiltin(b, args) => {
             json!({"c": "strBuiltin", "name": format!("{b:?}"), "args": values(args)})

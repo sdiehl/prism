@@ -6,18 +6,23 @@
 use logos::Logos;
 use wasm_bindgen::prelude::*;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::io;
 use std::path::Path;
+
+use serde_json::Value;
 
 use crate::lex::highlight::tok_class;
 use crate::lex::Token;
-use crate::resolve::default_roots;
+use crate::resolve::{default_roots, Root};
 use crate::{
     check, example_program, format as fmt_src, interpret, namespace_identity,
     off_platform_builtins, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
     SuspendResult,
 };
+use line_col;
+use HASH_PREFIX_HEX;
 
 // The web host owns the effects. A browser can serve more of them than it might
 // seem: `print` is buffered and `read_line` host-fed, the `Random` capability is
@@ -242,10 +247,11 @@ pub fn world_source() -> String {
 }
 
 /// The content hash of a law's `step` function, the identity the resident shows
-/// as its law hash. It is the compiler's own Merkle hash of the elaborated Core,
-/// so it moves when and only when the rule's behaviour moves, and is independent
-/// of the grid the law runs on. Returns `error: ...` for an unknown law or a
-/// front-end failure.
+/// as its law hash.
+///
+/// It is the compiler's own Merkle hash of the elaborated Core, so it moves when
+/// and only when the rule's behaviour moves, and is independent of the grid the
+/// law runs on. Returns `error: ...` for an unknown law or a front-end failure.
 #[wasm_bindgen]
 #[must_use]
 pub fn world_law_hash(law: &str) -> String {
@@ -261,31 +267,28 @@ pub fn world_law_hash(law: &str) -> String {
         Ok(v) => v,
         Err(_) => return "error: could not read namespace export".to_string(),
     };
-    let hash = doc
-        .get("defs")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|defs| {
-            defs.iter().find_map(|d| {
-                let name = d
-                    .pointer("/meta/name")
-                    .and_then(serde_json::Value::as_str)?;
-                if name == step {
-                    d.get("hash").and_then(serde_json::Value::as_str)
-                } else {
-                    None
-                }
-            })
-        });
-    match hash {
-        Some(h) => h[..h.len().min(crate::core::HASH_PREFIX_HEX)].to_string(),
-        None => format!("error: law '{law}' has no '{step}' definition"),
-    }
+    let hash = doc.get("defs").and_then(Value::as_array).and_then(|defs| {
+        defs.iter().find_map(|d| {
+            let name = d.pointer("/meta/name").and_then(Value::as_str)?;
+            if name == step {
+                d.get("hash").and_then(Value::as_str)
+            } else {
+                None
+            }
+        })
+    });
+    hash.map_or_else(
+        || format!("error: law '{law}' has no '{step}' definition"),
+        |h| h[..h.len().min(HASH_PREFIX_HEX)].to_string(),
+    )
 }
 
 /// Evolve a seed grid under a law for `ticks` generations and return the whole
-/// trajectory. Each output line is one tick, `<state-hash> <bits>`: the blake3
-/// digest of the canonical grid encoding (see `examples/world.pr`) and the raw
-/// row-major 0/1 string. Line 0 is the seed itself, so its hash is the seed hash.
+/// trajectory.
+///
+/// Each output line is one tick, `<state-hash> <bits>`: the blake3 digest of the
+/// canonical grid encoding (see `examples/world.pr`) and the raw row-major 0/1
+/// string. Line 0 is the seed itself, so its hash is the seed hash.
 ///
 /// `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
 /// so the seed is data too); `law` selects the step function. Because `trace` is
@@ -383,7 +386,7 @@ pub fn teleport_source() -> String {
     TELEPORT_SRC.to_string()
 }
 
-fn teleport_roots() -> Vec<crate::resolve::Root> {
+fn teleport_roots() -> Vec<Root> {
     default_roots(Path::new("."))
 }
 
@@ -395,8 +398,10 @@ fn teleport_roots() -> Vec<crate::resolve::Root> {
 #[wasm_bindgen]
 #[must_use]
 pub fn teleport_bundle() -> String {
-    namespace_identity(&teleport_full(), &teleport_roots())
-        .map_or_else(|e| format!("error: {e}"), |identity| identity.root)
+    namespace_identity(&teleport_full(), &teleport_roots()).map_or_else(
+        |e| format!("error: {e}"),
+        |identity| identity.root.into_string(),
+    )
 }
 
 /// The machine-step budget to pass [`teleport_prefix`]/[`teleport_suspend`] to
@@ -426,7 +431,7 @@ pub fn teleport_cuts() -> Vec<u32> {
 #[must_use]
 pub fn teleport_prefix(steps: u32) -> String {
     let mut out: Vec<u8> = Vec::new();
-    let mut input = std::io::empty();
+    let mut input = io::empty();
     match suspend_on(
         &teleport_full(),
         &teleport_roots(),
@@ -450,7 +455,7 @@ pub fn teleport_prefix(steps: u32) -> String {
 #[must_use]
 pub fn teleport_suspend(steps: u32) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
-    let mut input = std::io::empty();
+    let mut input = io::empty();
     match suspend_on(
         &teleport_full(),
         &teleport_roots(),
@@ -476,7 +481,7 @@ pub fn teleport_suspend(steps: u32) -> Vec<u8> {
 #[must_use]
 pub fn teleport_resume(bytes: &[u8]) -> String {
     let mut out: Vec<u8> = Vec::new();
-    let mut input = std::io::empty();
+    let mut input = io::empty();
     match resume_on(
         &teleport_full(),
         &teleport_roots(),
@@ -559,8 +564,8 @@ pub fn diagnostics(src: &str) -> String {
         }
         let s = raw_s.saturating_sub(pre).min(user.len());
         let end = raw_e.saturating_sub(pre).max(s + 1).min(user.len()).max(s);
-        let (line, col) = crate::error::line_col(user, s);
-        let (eline, ecol) = crate::error::line_col(user, end);
+        let (line, col) = line_col(user, s);
+        let (eline, ecol) = line_col(user, end);
         Some(format!(
             r#"{{"s":{s},"e":{end},"line":{line},"col":{col},"endLine":{eline},"endCol":{ecol},"kind":"{}","msg":"{}"}}"#,
             json_escape(kind),
@@ -642,10 +647,10 @@ pub fn hash_defs(src: &str) -> String {
     };
     let names_of = |doc: &serde_json::Value| -> Vec<String> {
         doc.get("defs")
-            .and_then(serde_json::Value::as_array)
+            .and_then(Value::as_array)
             .map(|a| {
                 a.iter()
-                    .filter_map(|d| d.pointer("/meta/name").and_then(serde_json::Value::as_str))
+                    .filter_map(|d| d.pointer("/meta/name").and_then(Value::as_str))
                     .map(str::to_owned)
                     .collect()
             })
@@ -664,33 +669,30 @@ pub fn hash_defs(src: &str) -> String {
         Ok(v) => v,
         Err(e) => return err(&e),
     };
-    let Some(defs) = doc.get("defs").and_then(serde_json::Value::as_array) else {
+    let Some(defs) = doc.get("defs").and_then(Value::as_array) else {
         return err("namespace export had no defs");
     };
     // The namespace export lists a definition's dependencies by content hash
     // (names erased), so a hash -> name index over every definition, prelude
     // included, turns those edges back into the names the graph draws.
-    let name_by_hash: std::collections::HashMap<&str, &str> = defs
+    let name_by_hash: HashMap<&str, &str> = defs
         .iter()
         .filter_map(|d| Some((d.get("hash")?.as_str()?, d.pointer("/meta/name")?.as_str()?)))
         .collect();
     let mut out: Vec<serde_json::Value> = Vec::new();
     for d in defs {
-        let name = match d.pointer("/meta/name").and_then(serde_json::Value::as_str) {
+        let name = match d.pointer("/meta/name").and_then(Value::as_str) {
             Some(n) if !prelude.contains(n) => n,
             _ => continue,
         };
-        let hash = d
-            .get("hash")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let short = &hash[..hash.len().min(crate::core::HASH_PREFIX_HEX)];
+        let hash = d.get("hash").and_then(Value::as_str).unwrap_or_default();
+        let short = &hash[..hash.len().min(HASH_PREFIX_HEX)];
         let mut dep_names: Vec<&str> = d
             .pointer("/anon/deps")
-            .and_then(serde_json::Value::as_array)
+            .and_then(Value::as_array)
             .map(|a| {
                 a.iter()
-                    .filter_map(serde_json::Value::as_str)
+                    .filter_map(Value::as_str)
                     .filter_map(|h| name_by_hash.get(h).copied())
                     .filter(|n| !prelude.contains(*n))
                     .collect()
@@ -700,7 +702,7 @@ pub fn hash_defs(src: &str) -> String {
         dep_names.dedup();
         out.push(serde_json::json!({ "name": name, "hash": short, "deps": dep_names }));
     }
-    serde_json::Value::Array(out).to_string()
+    Value::Array(out).to_string()
 }
 
 // The memo nodes of the incremental demand graph, in the order the demo lists
@@ -708,6 +710,99 @@ pub fn hash_defs(src: &str) -> String {
 // program the export builds so the two never drift.
 const INCR_MEMOS: &[&str] = &["total", "peak", "scaled", "alert", "board"];
 const INCR_RESIDENT_SRC: &str = include_str!("../examples/incr_resident.pr");
+const INCR_STEP_MARKER: &str = "STEP\n";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IncrNodeState {
+    Changed,
+    Unchanged,
+    Cached,
+    Recomputed,
+    Cutoff,
+}
+
+impl IncrNodeState {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Changed => "changed",
+            Self::Unchanged => "unchanged",
+            Self::Cached => "cached",
+            Self::Recomputed => "recomputed",
+            Self::Cutoff => "cutoff",
+        }
+    }
+}
+
+enum IncrTraceRow<'a> {
+    Fired(&'a str),
+    Previous(&'a str, i64),
+    Value(&'a str, i64),
+}
+
+fn parse_incr_row(line: &str) -> Result<IncrTraceRow<'_>, &'static str> {
+    let (tag, body) = line
+        .split_once(':')
+        .ok_or("incremental trace row has no tag")?;
+    match tag {
+        "f" if !body.is_empty() => Ok(IncrTraceRow::Fired(body)),
+        "p" => {
+            let (name, value) = body
+                .split_once('=')
+                .ok_or("incremental value row has no separator")?;
+            let value = value
+                .parse()
+                .map_err(|_| "incremental value is not an integer")?;
+            Ok(IncrTraceRow::Previous(name, value))
+        }
+        "v" => {
+            let (name, value) = body
+                .split_once('=')
+                .ok_or("incremental value row has no separator")?;
+            let value = value
+                .parse()
+                .map_err(|_| "incremental value is not an integer")?;
+            Ok(IncrTraceRow::Value(name, value))
+        }
+        _ => Err("unknown incremental trace row"),
+    }
+}
+
+struct IncrTrace<'a> {
+    fired: HashSet<&'a str>,
+    previous: HashMap<&'a str, i64>,
+    values: HashMap<&'a str, i64>,
+}
+
+fn parse_incr_trace(term: &str) -> Result<IncrTrace<'_>, &'static str> {
+    let (previous_rows, step_rows) = term
+        .split_once(INCR_STEP_MARKER)
+        .ok_or("incremental trace has no step marker")?;
+    let mut trace = IncrTrace {
+        fired: HashSet::new(),
+        previous: HashMap::new(),
+        values: HashMap::new(),
+    };
+    for line in previous_rows.lines().filter(|line| !line.is_empty()) {
+        let IncrTraceRow::Previous(name, value) = parse_incr_row(line)? else {
+            return Err("non-previous row before incremental step marker");
+        };
+        trace.previous.insert(name, value);
+    }
+    for line in step_rows.lines().filter(|line| !line.is_empty()) {
+        match parse_incr_row(line)? {
+            IncrTraceRow::Fired(name) => {
+                trace.fired.insert(name);
+            }
+            IncrTraceRow::Value(name, value) => {
+                trace.values.insert(name, value);
+            }
+            IncrTraceRow::Previous(_, _) => {
+                return Err("previous row after incremental step marker");
+            }
+        }
+    }
+    Ok(trace)
+}
 
 fn incr_resident_source(pa: i64, pb: i64, pc: i64, na: i64, nb: i64, nc: i64) -> String {
     let replacements = [
@@ -747,7 +842,7 @@ pub fn incr_run(payload: &str) -> String {
     };
     let read = |o: Option<&serde_json::Value>, k: &str| {
         o.and_then(|v| v.get(k))
-            .and_then(serde_json::Value::as_i64)
+            .and_then(Value::as_i64)
             .unwrap_or(0)
     };
     let next = doc.get("next");
@@ -768,55 +863,35 @@ pub fn incr_run(payload: &str) -> String {
         Ok(r) => r.term,
         Err(e) => return fail(&format!("{e}")),
     };
-    let step = term.split("STEP\n").nth(1).unwrap_or_default();
-    let mut fired: HashSet<&str> = HashSet::new();
-    let mut prev_val: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
-    let mut next_val: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
-    for line in step.lines() {
-        if let Some(n) = line.strip_prefix("f:") {
-            fired.insert(n);
-        } else if let Some(kv) = line.strip_prefix("v:") {
-            if let Some((k, v)) = kv.split_once('=') {
-                if let Ok(n) = v.parse() {
-                    next_val.insert(k, n);
-                }
-            }
-        }
-    }
-    for line in term.split("STEP\n").next().unwrap_or_default().lines() {
-        if let Some(kv) = line.strip_prefix("p:") {
-            if let Some((k, v)) = kv.split_once('=') {
-                if let Ok(n) = v.parse() {
-                    prev_val.insert(k, n);
-                }
-            }
-        }
-    }
+    let trace = match parse_incr_trace(&term) {
+        Ok(trace) => trace,
+        Err(message) => return fail(message),
+    };
 
     let src_names = [("a", na, pa), ("b", nb, pb), ("c", nc, pc)];
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     for (name, nv, pv) in src_names {
         let state = if cold || nv == pv {
-            "unchanged"
+            IncrNodeState::Unchanged
         } else {
-            "changed"
+            IncrNodeState::Changed
         };
-        nodes.push(serde_json::json!({ "name": name, "value": nv, "state": state }));
+        nodes.push(serde_json::json!({ "name": name, "value": nv, "state": state.label() }));
     }
     for &m in INCR_MEMOS {
-        let value = next_val.get(m).copied().unwrap_or(0);
+        let value = trace.values.get(m).copied().unwrap_or(0);
         let state = if cold {
-            "recomputed"
-        } else if fired.contains(m) {
-            if prev_val.get(m) == next_val.get(m) {
-                "cutoff"
+            IncrNodeState::Recomputed
+        } else if trace.fired.contains(m) {
+            if trace.previous.get(m) == trace.values.get(m) {
+                IncrNodeState::Cutoff
             } else {
-                "recomputed"
+                IncrNodeState::Recomputed
             }
         } else {
-            "cached"
+            IncrNodeState::Cached
         };
-        nodes.push(serde_json::json!({ "name": m, "value": value, "state": state }));
+        nodes.push(serde_json::json!({ "name": m, "value": value, "state": state.label() }));
     }
     serde_json::json!({ "nodes": nodes }).to_string()
 }

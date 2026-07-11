@@ -9,9 +9,9 @@ use super::diagnostics::{free_monad_warning, genuine_eff};
 use super::runtime::{ctor_pat, ebind_fn, epure, qapply_fn, synth_ctor};
 use super::walk::handle_escapes;
 use super::{
-    flow, Lowered, Lowerer, ResumeMode, DONE_TAG, EBIND, EFF, EOP, EPURE, ERESUME, MORE_TAG,
-    OP_TAG, PURE_TAG, QAPPLY, RESUME_OP_ID, RESUME_TAG, SDONE, SMORE, STEP, TQ, TQCONS, TQCONS_TAG,
-    TQNIL, TQNIL_TAG,
+    flow, EarlyExitMode, Lowered, Lowerer, MonadicScope, ResumeMode, DONE_TAG, EBIND, EFF, EOP,
+    EPURE, ERESUME, MORE_TAG, OP_TAG, PURE_TAG, QAPPLY, RESUME_TAG, SDONE, SMORE, STEP, TQ, TQCONS,
+    TQCONS_TAG, TQNIL, TQNIL_TAG,
 };
 use crate::core::builtins::Builtin;
 use crate::core::cbpv::{Comp, Core, CoreFn, CoreOp, Value};
@@ -58,7 +58,7 @@ impl Lowerer {
     // and flow cannot drift. Whole-program mode drives every handler
     // open-style for uniformity.
     pub(super) fn is_open(&self, c: &Comp) -> bool {
-        if self.full {
+        if self.scope.is_whole() {
             return true;
         }
         let Comp::Handle {
@@ -192,16 +192,11 @@ impl Lowerer {
                     .map(|(p, b)| Ok((p.clone(), self.mon(b)?)))
                     .collect::<Result<_, TypeError>>()?,
             ),
-            // A resume inside a native (`{n}@region`) or CEK clause body: `resume`
-            // is bound to the op's captured continuation queue `q`, so applying it
-            // reifies to an Eff value the driver loop can inspect. The two backends
-            // build the argument identically and differ only in the ctor emitted:
-            //   Native -> `EResume(queue, value)`, which the `{n}@region` loop drives
-            //     by tail-calling itself on `qApply(queue, value)`. Eligibility puts
-            //     this in tail position, so the `EResume` is the clause's result.
-            //   CekOp  -> `EOp(RESUME_OP_ID, 0, (queue, value), unit)`, whose
-            //     post-resume work the surrounding `ebind` snocs onto the op's queue,
-            //     so a non-tail or multishot resume runs on the same musttail loop.
+            // A resume inside a native (`{n}@region`) clause body: `resume` is
+            // bound to the op's captured continuation queue `q`, so applying it
+            // reifies to `EResume(queue, value)`, which the `{n}@region` loop drives
+            // by tail-calling itself on `qApply(queue, value)`. Eligibility puts
+            // this in tail position, so the `EResume` is the clause's result.
             Comp::App(f, args) if self.resume != ResumeMode::Off && self.is_resume_app(f) => {
                 let Comp::Force(Value::Var(q)) = f.as_ref() else {
                     unreachable!("is_resume_app matched a non-Force(Var)")
@@ -219,16 +214,6 @@ impl Lowerer {
                     ResumeMode::Native => {
                         Value::Ctor(ERESUME.into(), RESUME_TAG, vec![Value::Var(*q), arg])
                     }
-                    ResumeMode::CekOp => Value::Ctor(
-                        EOP.into(),
-                        OP_TAG,
-                        vec![
-                            Value::Int(RESUME_OP_ID),
-                            Value::Int(0),
-                            Value::Tuple(vec![Value::Var(*q), arg]),
-                            Value::Unit,
-                        ],
-                    ),
                     ResumeMode::Off => unreachable!("guarded by resume != Off"),
                 };
                 Comp::Return(reified)
@@ -238,7 +223,7 @@ impl Lowerer {
             Comp::App(f, args) if self.is_resume_app(f) => Comp::App(f.clone(), args.clone()),
             // In whole-program mode every closure body is monadic, so any
             // dynamic application already yields an Eff value.
-            Comp::App(f, args) if self.full => Comp::App(
+            Comp::App(f, args) if self.scope.is_whole() => Comp::App(
                 Box::new(self.mon_head(f)?),
                 args.iter()
                     .map(|a| self.mon_value(a))
@@ -270,10 +255,14 @@ impl Lowerer {
                     args.iter()
                         .map(|a| self.mon_value(a))
                         .collect::<Result<_, TypeError>>()?;
-                let arity = self.arities.get(g).copied().ok_or_else(|| TypeError::Ice {
-                    msg: format!("effectful call to unknown function `{g}`"),
-                })?;
-                let partial = self.full && args.len() < arity;
+                let arity =
+                    self.arities
+                        .get(g)
+                        .copied()
+                        .ok_or_else(|| TypeError::InternalInvariant {
+                            msg: format!("effectful call to unknown function `{g}`"),
+                        })?;
+                let partial = self.scope.is_whole() && args.len() < arity;
                 let call = Comp::Call(*g, args);
                 if partial {
                     let v = self.fresh("p");
@@ -298,7 +287,7 @@ impl Lowerer {
     // Whole-program mode rewrites every thunk so its body is monadic. Outside
     // that mode values pass through untouched.
     pub(super) fn mon_value(&mut self, v: &Value) -> Result<Value, TypeError> {
-        if !self.full {
+        if !self.scope.is_whole() {
             return Ok(v.clone());
         }
         Ok(match v {
@@ -457,11 +446,11 @@ impl Lowerer {
         // the two sub-lowerings. Save them so any bail restores the whole-program
         // state `monadic_set` chose, which the fallback then uses unchanged.
         let saved_eff = std::mem::take(&mut self.eff);
-        let saved_full = self.full;
-        let restore = |me: &mut Self, eff: BTreeSet<Sym>, full: bool| {
+        let saved_scope = self.scope;
+        let restore = |me: &mut Self, eff: BTreeSet<Sym>, scope: MonadicScope| {
             me.eff = eff;
-            me.full = full;
-            me.early = false;
+            me.scope = scope;
+            me.early = EarlyExitMode::Continue;
             me.generated.clear();
         };
 
@@ -477,22 +466,22 @@ impl Lowerer {
                 .collect(),
         };
         self.eff = genuine_eff(&self.latent);
-        self.full = false;
-        self.early = false;
+        self.scope = MonadicScope::Selective;
+        self.early = EarlyExitMode::Continue;
         let (fused, early) = if let Some(c) = self.try_lower_ev(&rest) {
-            (c, false)
+            (c, EarlyExitMode::Continue)
         } else if let Some(c) = self.try_lower_state(&rest) {
             (c, self.early)
         } else {
-            restore(self, saved_eff, saved_full);
+            restore(self, saved_eff, saved_scope);
             return Ok(None);
         };
 
         // Free-monad the region, full-style: a uniform monadic convention within
         // it so the escaping closure's dynamic applies all agree.
         self.eff.clone_from(&region);
-        self.full = true;
-        self.early = false;
+        self.scope = MonadicScope::WholeProgram;
+        self.early = EarlyExitMode::Continue;
         self.generated.clear();
         let region_fns: Vec<&CoreFn> = core
             .fns
@@ -518,7 +507,7 @@ impl Lowerer {
         // back to whole-program monadification rather than miscompiling.
         let refs: Vec<&CoreFn> = fns.iter().collect();
         if check_convention_boundaries(&fns, &refs, &full_style, true, &entries).is_err() {
-            restore(self, saved_eff, saved_full);
+            restore(self, saved_eff, saved_scope);
             return Ok(None);
         }
 
@@ -529,7 +518,7 @@ impl Lowerer {
         ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
         ctors.insert(TQNIL.into(), synth_ctor(TQ, TQNIL_TAG, 0));
         ctors.insert(TQCONS.into(), synth_ctor(TQ, TQCONS_TAG, 2));
-        if early {
+        if early.short_circuits() {
             ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
             ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
         }

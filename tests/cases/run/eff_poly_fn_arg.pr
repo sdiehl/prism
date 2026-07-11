@@ -6,10 +6,10 @@
 -- check and run.
 
 effect Tag
-  ctl fresh(Unit) : Int
+  fresh() : Int
 
 -- Polymorphic in `a`, effectful in `Tag`: this is the shape that triggered it.
-fn tag(x) : !{Tag} (Int, a) = (fresh(()), x)
+fn tag(x) : (Int, a) ! {Tag} = (fresh(), x)
 
 fn map_eff(f, xs) =
   match xs of
@@ -19,7 +19,7 @@ fn map_eff(f, xs) =
 fn run_tags(action) =
   let go =
     handle action() with
-      fresh(_u, k) => \(n) -> k(n)(n + 1)
+      fresh() resume k => \(n) -> k(n)(n + 1)
       return r => \(_n) -> r
   go(0)
 

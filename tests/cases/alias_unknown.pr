@@ -1,5 +1,5 @@
 effect Tick
-  ctl tick(Unit) : Int
+  tick(Unit) : Int
 
 alias App = {Tick, Missing}
 

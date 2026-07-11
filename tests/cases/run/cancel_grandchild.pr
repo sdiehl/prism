@@ -5,30 +5,30 @@
 
 import Concurrent (..)
 
-fn gkid_loop() : !{Async(Int), IO} Int =
+fn gkid_loop() : Int ! {Async(Int), IO} =
   yield(())
   gkid_loop()
 
-fn gkid_body() : !{Async(Int), IO} Int =
+fn gkid_body() : Int ! {Async(Int), IO} =
   println("grandchild: running")
   gkid_loop()
 
-fn gkid() : !{Async(Int), IO} Int =
+fn gkid() : Int ! {Async(Int), IO} =
   on_cancel(\() -> println("grandchild finalizer ran"), gkid_body)
 
-fn child_loop() : !{Async(Int), IO} Int =
+fn child_loop() : Int ! {Async(Int), IO} =
   yield(())
   child_loop()
 
-fn child_body() : !{Async(Int), IO} Int =
+fn child_body() : Int ! {Async(Int), IO} =
   let g = fork(gkid)
   println("child: running")
   child_loop()
 
-fn child() : !{Async(Int), IO} Int =
+fn child() : Int ! {Async(Int), IO} =
   on_cancel(\() -> println("child finalizer ran"), child_body)
 
-fn scene() : !{Async(Int), IO} Int =
+fn scene() : Int ! {Async(Int), IO} =
   let c = fork(child)
   yield(())
   yield(())

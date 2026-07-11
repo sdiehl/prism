@@ -1,6 +1,10 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
 pub use marginalia::Span;
 pub use num_bigint::BigInt;
 
+use crate::coeffect::CoeffectFact;
 pub use crate::coeffect::CoeffectRow;
 use crate::kw;
 pub use crate::types::ty::Kind;
@@ -18,8 +22,8 @@ pub struct IntLit {
     pub suffix: Suffix,
 }
 
-impl std::fmt::Display for IntLit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for IntLit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self.suffix {
             Suffix::None => "",
             Suffix::I64 => "i64",
@@ -87,8 +91,8 @@ impl<T> Spanned<T> {
     clippy::missing_fields_in_debug,
     reason = "`id` is node identity, deliberately omitted so AST dumps are stable"
 )]
-impl<T: std::fmt::Debug> std::fmt::Debug for Spanned<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: fmt::Debug> fmt::Debug for Spanned<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Spanned");
         d.field("node", &self.node).field("span", &self.span);
         if self.synth {
@@ -119,15 +123,15 @@ pub struct Program<P: Phase = Surface> {
     pub imports: Vec<ImportDecl>,
     // Top-level names marked `pub`. Visibility lives here, off the decls, so an
     // AST dump of a `pub`-free program is byte-identical to one without modules.
-    pub exports: std::collections::BTreeSet<String>,
+    pub exports: BTreeSet<String>,
     // Type names marked `opaque`: exported by name but with their constructors
     // hidden outside the defining module. A subset of `exports`.
-    pub opaques: std::collections::BTreeSet<String>,
+    pub opaques: BTreeSet<String>,
     // Definitions carrying a `deprecated "suggestion"` annotation, keyed by the
     // surface name, mapping to the author's replacement suggestion. Off the decls
     // (like `exports`), so an AST dump of an annotation-free program is unchanged.
     // A use of one of these names warns at compile time (see `resolve::lints`).
-    pub deprecated: std::collections::BTreeMap<String, String>,
+    pub deprecated: BTreeMap<String, String>,
 }
 
 // The visibility of a top-level item: private (default), `pub` (exported
@@ -151,8 +155,8 @@ pub enum Fip {
 
 // `patterns`, `imports`, and `exports` are omitted from the debug dump when
 // empty, matching the derived output for import-free, pattern-free programs.
-impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Program<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<P: Phase + fmt::Debug> fmt::Debug for Program<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Program");
         if !self.imports.is_empty() {
             d.field("imports", &self.imports);
@@ -362,6 +366,27 @@ pub struct Ctor {
     pub fields: Option<Vec<(String, Ty)>>,
 }
 
+/// How a constructor addresses its fields: positional or record.
+///
+/// `Positional` carries the arg types (indexed); `Record` the named fields.
+/// Recovered once from `fields` being absent or present, so no site re-tests
+/// `fields.is_some()` to rediscover the case.
+#[derive(Debug)]
+pub enum CtorShape<'a> {
+    Positional(&'a [Ty]),
+    Record(&'a [(String, Ty)]),
+}
+
+impl Ctor {
+    #[must_use]
+    pub fn shape(&self) -> CtorShape<'_> {
+        self.fields.as_ref().map_or_else(
+            || CtorShape::Positional(&self.args),
+            |fields| CtorShape::Record(fields),
+        )
+    }
+}
+
 // A `stable` block: a datatype's frozen version history plus the converters
 // between adjacent rungs. Desugared in `syntax/desugar/stable.rs` to the frozen rung record
 // types, the current rung under the bare type name, the generated and
@@ -430,35 +455,88 @@ pub struct EffectDecl {
 }
 
 // The resumption multiplicity an effect operation permits its handler clauses,
-// a three-point lattice ordered `Zero < One < Many` (the derived variant order,
-// so `<=` is the typing rule "clause grade at most op grade"). Declared per op;
-// the surface prefixes are `final ctl` (Zero), `fun` (One), and bare `ctl`
-// (Many). `Many` is the default so every existing declaration keeps its meaning.
+// a three-point lattice ordered `Never < Once < Many` (the derived variant
+// order, so `<=` is the typing rule "clause grade at most op grade"). Declared
+// per op; the surface prefixes are `never`, `once`, and `many`, the same words
+// the value multiplicity lattice uses. `Many` is the default (unmarked op), so a
+// bare declaration and every existing effect keeps the most general meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Grade {
-    // `final ctl`: the clause never resumes; the continuation is dropped.
-    Zero,
-    // `fun`: the clause resumes exactly once, in tail position (no capture).
-    One,
-    // `ctl`: the clause may capture the continuation and resume any number of
+    // `never`: the clause never resumes; the continuation is dropped.
+    Never,
+    // `once`: the clause resumes exactly once, in tail position (no capture).
+    // On an operation this is stronger than the affine value-side `once`: it is
+    // exactly-once-in-tail, which is what the direct-call lowering exploits.
+    Once,
+    // `many`: the clause may capture the continuation and resume any number of
     // times. The default and the most general grade.
     #[default]
     Many,
 }
 
 impl Grade {
-    // The surface keyword phrase for this grade, spelled from the canonical `kw`
-    // tokens, used by the formatter and the doc generator so the printed op
-    // declaration round-trips through the parser.
+    // The grade-only word (`never`); `once` and `many` share their spelling with
+    // the value multiplicity lattice, so renaming a coeffect word renames the
+    // grade word too and the shared-lattice claim stays true in code.
+    pub const NEVER: &'static str = "never";
+
+    // The surface word for this grade, used by the formatter and the doc
+    // generator so a printed op declaration round-trips through the parser.
+    // `Many` is the default and prints bare; callers that emit a prefix suppress
+    // it for `Many` (see `is_default`).
     #[must_use]
-    pub fn keyword(self) -> String {
+    pub const fn word(self) -> &'static str {
         match self {
-            Self::Zero => format!("{} {}", kw::FINAL, kw::CTL),
-            Self::One => kw::FUN.to_string(),
-            Self::Many => kw::CTL.to_string(),
+            Self::Never => Self::NEVER,
+            Self::Once => CoeffectFact::Once.name(),
+            Self::Many => CoeffectFact::Many.name(),
+        }
+    }
+
+    // Whether this is the unmarked default (`Many`), which is written with no
+    // prefix at all.
+    #[must_use]
+    pub fn is_default(self) -> bool {
+        self == Self::Many
+    }
+
+    // A leading op/clause word parsed as a grade; `None` if the word names no
+    // grade (the grammar turns that into a pointed error).
+    #[must_use]
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            _ if word == Self::NEVER => Some(Self::Never),
+            _ if word == CoeffectFact::Once.name() => Some(Self::Once),
+            _ if word == CoeffectFact::Many.name() => Some(Self::Many),
+            _ => None,
+        }
+    }
+
+    // The frozen digest tag for effect shape encoding, decoupled from `word` so a
+    // later respelling of the surface keyword can never move an effect shape
+    // digest again. Only a non-default grade is ever emitted (see `shape.rs`), so
+    // every ungraded op keeps its digest; the internal control effects
+    // (`Break`/`Continue`/`Fail`/`Return`) are declared `Never`, so their tag is
+    // committed in the stdlib root. These tags were reseated once, at this
+    // rename, from the retired spelling to the grade words below, moving the root
+    // deliberately; from here they are frozen.
+    #[must_use]
+    pub const fn digest_tag(self) -> &'static str {
+        match self {
+            Self::Never => GRADE_TAG_NEVER,
+            Self::Once => GRADE_TAG_ONCE,
+            Self::Many => GRADE_TAG_MANY,
         }
     }
 }
+
+// Frozen effect-shape digest tags for the grades, one canonical home. These are
+// content hashes' input, so their spelling is opaque and their stability is what
+// matters; do not respell them. `MANY` is never emitted (the default is
+// suppressed), but is frozen for completeness.
+pub const GRADE_TAG_NEVER: &str = "never";
+pub const GRADE_TAG_ONCE: &str = "once";
+pub const GRADE_TAG_MANY: &str = "many";
 
 #[derive(Clone, Debug)]
 pub struct EffOp {
@@ -505,8 +583,8 @@ pub struct Decl<P: Phase = Surface> {
 
 // `konst` is shown only when set, so a plain `fn` dumps identically to the
 // pre-constant form and a constant stands out.
-impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Decl<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<P: Phase + fmt::Debug> fmt::Debug for Decl<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Decl");
         d.field("name", &self.name)
             .field("params", &self.params)
@@ -564,6 +642,13 @@ pub enum Ty {
     Fun(Vec<Self>, Row, Box<Self>),
     Con(String, Vec<Self>),
     Tuple(Vec<Self>),
+    // Unboxed product types, written with the `#` sigil: `#(a, b)` is an unboxed
+    // tuple and `#{ x : a, y : b }` an unboxed record. Their runtime representation
+    // is `Repr::Product`, so they move without a heap cell. Distinct from the boxed
+    // `Tuple` above (whose representation is `Repr::Value`); the field names of an
+    // `UnboxedRecord` are part of its identity and are kept in written order.
+    UnboxedTuple(Vec<Self>),
+    UnboxedRecord(Vec<(String, Self)>),
     // A `{ E, .. | r }` effect-row literal written in type-argument position, the
     // argument for a `Row`-kinded parameter (`Cmd(Int, {IO})`). Only valid at a
     // `Row`-kinded position; the kind check rejects it anywhere a type is wanted.
@@ -589,9 +674,17 @@ impl Ty {
     /// hand-written `match`.
     pub fn each_child(&self, f: &mut impl FnMut(&Self)) {
         match self {
-            Self::App(_, args) | Self::Con(_, args) | Self::Tuple(args) => {
+            Self::App(_, args)
+            | Self::Con(_, args)
+            | Self::Tuple(args)
+            | Self::UnboxedTuple(args) => {
                 for a in args {
                     f(a);
+                }
+            }
+            Self::UnboxedRecord(fields) => {
+                for (_, t) in fields {
+                    f(t);
                 }
             }
             Self::Forall(_, b) | Self::Coeffect(b, _) => f(b),
@@ -626,9 +719,17 @@ impl Ty {
     /// Mutable counterpart of [`Ty::each_child`].
     pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut Self)) {
         match self {
-            Self::App(_, args) | Self::Con(_, args) | Self::Tuple(args) => {
+            Self::App(_, args)
+            | Self::Con(_, args)
+            | Self::Tuple(args)
+            | Self::UnboxedTuple(args) => {
                 for a in args {
                     f(a);
+                }
+            }
+            Self::UnboxedRecord(fields) => {
+                for (_, t) in fields {
+                    f(t);
                 }
             }
             Self::Forall(_, b) | Self::Coeffect(b, _) => f(b),
@@ -718,16 +819,6 @@ pub enum BinOp {
     Ge,
     And,
     Or,
-    Addf,
-    Subf,
-    Mulf,
-    Divf,
-    Eqf,
-    Nef,
-    Ltf,
-    Lef,
-    Gtf,
-    Gef,
     // Exponentiation, one operator over Int and Float. Unlike the other
     // arithmetic ops it has no single primitive: elaboration lowers it to an
     // integer or floating power call by the operand types, promoting a mixed pair
@@ -753,16 +844,6 @@ impl BinOp {
             Self::Ge => kw::GE,
             Self::And => kw::AMP_AMP,
             Self::Or => kw::PIPE_PIPE,
-            Self::Addf => kw::PLUS_DOT,
-            Self::Subf => kw::MINUS_DOT,
-            Self::Mulf => kw::STAR_DOT,
-            Self::Divf => kw::SLASH_DOT,
-            Self::Eqf => kw::EQ_DOT,
-            Self::Nef => kw::NE_DOT,
-            Self::Ltf => kw::LT_DOT,
-            Self::Lef => kw::LE_DOT,
-            Self::Gtf => kw::GT_DOT,
-            Self::Gef => kw::GE_DOT,
             Self::Pow => kw::CARET,
         }
     }
@@ -776,11 +857,11 @@ impl BinOp {
 // both phases.
 pub trait Phase: Sized {
     // Payload of `Expr::Sugar` (the surface-only expression forms).
-    type Sugar: Clone + std::fmt::Debug;
+    type Sugar: Clone + fmt::Debug;
     // Payload of `HandlerArm::Sugar` (the three surface-only handler clauses).
-    type Arm: Clone + std::fmt::Debug;
+    type Arm: Clone + fmt::Debug;
     // Payload of `Expr::Marker` (the parse-time markers).
-    type Marker: Clone + std::fmt::Debug;
+    type Marker: Clone + fmt::Debug;
 
     #[doc(hidden)]
     fn each_sugar_child<F: FnMut(&S<Expr<Self>>)>(s: &Self::Sugar, f: &mut F);
@@ -879,7 +960,7 @@ impl Phase for Surface {
 
     fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F) {
         match a {
-            SugarArm::Fun(_, _, body) | SugarArm::Val(_, body) | SugarArm::Final(_, _, body) => {
+            SugarArm::Once(_, _, body) | SugarArm::Val(_, body) | SugarArm::Never(_, _, body) => {
                 f(body);
             }
         }
@@ -911,15 +992,15 @@ impl Phase for Core {
 // formatter, resolver, the desugar input) means the full sugar-bearing AST.
 pub type SExpr = S<Expr<Surface>>;
 
-// Surface-only handler clauses, all rewritten to `Op` by desugar. `Fun` is
-// tail-resumptive (`fun op(x) => e` is `op(x, k) => k(e)`). `Val` is an
+// Surface-only handler clauses, all rewritten to `Op` by desugar. `Once` is
+// tail-resumptive (`once op(x) => e` is `op(x, k) => k(e)`). `Val` is an
 // install-time constant (`val v = e` binds e once before the handler, each `v()`
-// resumes with it). `Final` never resumes (`final ctl op(x) => e` discards k).
+// resumes with it). `Never` never resumes (`never op(x) => e` discards k).
 #[derive(Clone, Debug)]
 pub enum SugarArm<P: Phase> {
-    Fun(String, Vec<String>, S<Expr<P>>),
+    Once(String, Vec<String>, S<Expr<P>>),
     Val(String, S<Expr<P>>),
-    Final(String, Vec<String>, S<Expr<P>>),
+    Never(String, Vec<String>, S<Expr<P>>),
 }
 
 #[derive(Clone, Debug)]
@@ -1081,6 +1162,12 @@ pub enum Expr<P: Phase = Surface> {
     List(Vec<S<Self>>),
     Tuple(Vec<S<Self>>),
     FieldAccess(Box<S<Self>>, String),
+    // Unboxed product values, the `#` sigil forms: `#(a, b)` builds an unboxed
+    // tuple, `#{ x = a, y = b }` an unboxed record (anonymous, structural, unlike
+    // the nominal `RecordCreate`), and `e.#field` projects an unboxed record field.
+    UnboxedTuple(Vec<S<Self>>),
+    UnboxedRecord(Vec<(String, S<Self>)>),
+    UnboxedField(Box<S<Self>>, String),
     RecordCreate(String, Vec<(String, S<Self>)>),
     RecordUpdate(Box<S<Self>>, String, Vec<(String, S<Self>)>),
     // `{ base | a.b.c = v, xs.each ~ f }`: nested functional update along paths
@@ -1126,6 +1213,7 @@ impl<P: Phase> Expr<P> {
             Self::Neg(a)
             | Self::Lam(_, a)
             | Self::FieldAccess(a, _)
+            | Self::UnboxedField(a, _)
             | Self::Inst(a, _)
             | Self::Ann(a, _)
             | Self::Mask(_, a) => f(a),
@@ -1149,12 +1237,12 @@ impl<P: Phase> Expr<P> {
                     f(&a.body);
                 }
             }
-            Self::List(items) | Self::Tuple(items) => {
+            Self::List(items) | Self::Tuple(items) | Self::UnboxedTuple(items) => {
                 for a in items {
                     f(a);
                 }
             }
-            Self::RecordCreate(_, fields) => {
+            Self::RecordCreate(_, fields) | Self::UnboxedRecord(fields) => {
                 for (_, value) in fields {
                     f(value);
                 }
@@ -1239,8 +1327,8 @@ pub struct Arm<P: Phase = Surface> {
 
 // An absent guard is omitted from the debug dump, matching the derived
 // output for guard-free arms.
-impl<P: Phase + std::fmt::Debug> std::fmt::Debug for Arm<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<P: Phase + fmt::Debug> fmt::Debug for Arm<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Arm");
         d.field("pat", &self.pat);
         if let Some(g) = &self.guard {

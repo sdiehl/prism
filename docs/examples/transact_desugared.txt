@@ -5,5 +5,5 @@ transact body else fallback
   ==>
 let saved = snapshot of each live var
 handle body with
-  final ctl fail(_) => restore each var from saved, then fallback
+  never fail(_) => restore each var from saved, then fallback
   return r => r

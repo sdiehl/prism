@@ -70,7 +70,7 @@ pub struct Lock {
 }
 
 impl Lock {
-    /// Pin the standard library to `root`, the fold over the embedded stdlib. A
+    /// Check the standard library to `root`, the fold over the embedded stdlib. A
     /// build can then detect that its compiler ships a different Std than the one
     /// the lock was resolved against ([`crate::pkg::std_pin_status`]).
     pub fn pin_std(&mut self, root: String) {
@@ -115,13 +115,13 @@ impl Lock {
             match self.std_scheme() {
                 Some(HASH_SCHEME) => {}
                 Some(scheme) => {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolvePackage(format!(
                         "prism.lock pins Std root {pinned} under foreign hash scheme {scheme}; \
                          this build speaks {HASH_SCHEME}"
                     )));
                 }
                 None => {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolvePackage(format!(
                         "prism.lock pins Std root {pinned} without a hash scheme; this build \
                          speaks {HASH_SCHEME}"
                     )));
@@ -130,7 +130,7 @@ impl Lock {
         }
         for entry in &self.entries {
             if entry.scheme != HASH_SCHEME {
-                return Err(Error::Resolve(format!(
+                return Err(Error::ResolvePackage(format!(
                     "prism.lock pins dependency `{}` under foreign hash scheme {}; this build \
                      speaks {HASH_SCHEME}",
                     entry.name, entry.scheme
@@ -149,7 +149,7 @@ impl Lock {
         let mut lines = text.lines();
         let header = lines.next();
         if header != Some(LOCK_HEADER_V1) && header != Some(LOCK_HEADER) {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "prism.lock: missing or unrecognized header (expected {LOCK_HEADER:?})"
             )));
         }
@@ -243,7 +243,7 @@ fn parse_row(header: Option<&str>, line: &str) -> Result<LockEntry, Error> {
             hash: (*hash).to_string(),
             source: parse_source_field(source)?,
         }),
-        _ => Err(Error::Resolve(format!(
+        _ => Err(Error::ResolvePackage(format!(
             "prism.lock: malformed row (want name{FIELD_SEP:?}scheme{FIELD_SEP:?}hash{FIELD_SEP:?}source): {line:?}"
         ))),
     }
@@ -260,7 +260,7 @@ fn parse_source_field(field: &str) -> Result<DepSource, Error> {
             version: (*version).to_string(),
         }),
         (SRC_HASH, [hex]) => Ok(DepSource::Hash((*hex).to_string())),
-        _ => Err(Error::Resolve(format!(
+        _ => Err(Error::ResolvePackage(format!(
             "prism.lock: unrecognized source field {field:?}"
         ))),
     }
@@ -270,7 +270,7 @@ fn parse_source_field(field: &str) -> Result<DepSource, Error> {
 // at which token.
 fn reject_separators(field: &str) -> Result<(), Error> {
     if field.contains(FIELD_SEP) || field.contains(TOKEN_SEP) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "prism.lock: field {field:?} contains a separator character"
         )));
     }

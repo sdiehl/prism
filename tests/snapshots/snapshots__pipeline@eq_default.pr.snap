@@ -325,19 +325,94 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn eqp(x, y) =
-  return x to t@0; return y to t@1; t@0 == t@1
+  return x to t@0
+  return y to t@1
+  t@0 == t@1
 fn ltp(x, y) =
-  return x to t@2; return y to t@3; t@2 < t@3
+  return x to t@2
+  return y to t@3
+  t@2 < t@3
 fn main() =
-  return 1 to t@4; return 1 to t@5; t@4 == t@5 to t@6; show_bool(t@6) to t@7; prints t@7 to t@8; print_nl to _; return "a" to t@9; return "b" to t@10; str_eq(t@9, t@10) to t@11; show_bool(t@11) to t@12; prints t@12 to t@13; print_nl to _; return 1 to t@14; return 2 to t@15; t@14 ==. t@15 to t@16; show_bool(t@16) to t@17; prints t@17 to t@18; print_nl to _; return 2 to t@19; return 2 to t@20; eqp(t@19, t@20) to t@21; show_bool(t@21) to t@22; prints t@22 to t@23; print_nl to _; return 1 to t@24; return 2 to t@25; ltp(t@24, t@25) to t@26; show_bool(t@26) to t@27; prints t@27 to t@28; print_nl
+  return 1 to t@4
+  return 1 to t@5
+  t@4 == t@5 to t@6
+  show_bool(t@6) to t@7
+  prints t@7 to t@8
+  print_nl
+  return "a" to t@9
+  return "b" to t@10
+  str_eq(t@9, t@10) to t@11
+  show_bool(t@11) to t@12
+  prints t@12 to t@13
+  print_nl
+  return 1 to t@14
+  return 2 to t@15
+  t@14 ==. t@15 to t@16
+  show_bool(t@16) to t@17
+  prints t@17 to t@18
+  print_nl
+  return 2 to t@19
+  return 2 to t@20
+  eqp(t@19, t@20) to t@21
+  show_bool(t@21) to t@22
+  prints t@22 to t@23
+  print_nl
+  return 1 to t@24
+  return 2 to t@25
+  ltp(t@24, t@25) to t@26
+  show_bool(t@26) to t@27
+  prints t@27 to t@28
+  print_nl
 
 == fbip (rc) ==
 fn eqp(x, y) =
-  return x to t@0; return y to t@1; t@0 == t@1
+  return x to t@0
+  return y to t@1
+  t@0 == t@1
 fn ltp(x, y) =
-  return x to t@2; return y to t@3; t@2 < t@3
+  return x to t@2
+  return y to t@3
+  t@2 < t@3
 fn main() =
-  return 1 to t@4; return 1 to t@5; t@4 == t@5 to t@6; show_bool(t@6) to t@7; prints t@7 to t@8; drop t@8 to _; print_nl to _; drop _ to _; return "a" to t@9; return "b" to t@10; str_eq(t@9, t@10) to t@11; show_bool(t@11) to t@12; prints t@12 to t@13; drop t@13 to _; print_nl to _; drop _ to _; return 1 to t@14; return 2 to t@15; t@14 ==. t@15 to t@16; show_bool(t@16) to t@17; prints t@17 to t@18; drop t@18 to _; print_nl to _; drop _ to _; return 2 to t@19; return 2 to t@20; eqp(t@19, t@20) to t@21; show_bool(t@21) to t@22; prints t@22 to t@23; drop t@23 to _; print_nl to _; drop _ to _; return 1 to t@24; return 2 to t@25; ltp(t@24, t@25) to t@26; show_bool(t@26) to t@27; prints t@27 to t@28; drop t@28 to _; print_nl
+  return 1 to t@4
+  return 1 to t@5
+  t@4 == t@5 to t@6
+  show_bool(t@6) to t@7
+  prints t@7 to t@8
+  drop t@8
+  print_nl
+  drop _
+  return "a" to t@9
+  return "b" to t@10
+  str_eq(t@9, t@10) to t@11
+  show_bool(t@11) to t@12
+  prints t@12 to t@13
+  drop t@13
+  print_nl
+  drop _
+  return 1 to t@14
+  return 2 to t@15
+  t@14 ==. t@15 to t@16
+  show_bool(t@16) to t@17
+  prints t@17 to t@18
+  drop t@18
+  print_nl
+  drop _
+  return 2 to t@19
+  return 2 to t@20
+  eqp(t@19, t@20) to t@21
+  show_bool(t@21) to t@22
+  prints t@22 to t@23
+  drop t@23
+  print_nl
+  drop _
+  return 1 to t@24
+  return 2 to t@25
+  ltp(t@24, t@25) to t@26
+  show_bool(t@26) to t@27
+  prints t@27 to t@28
+  drop t@28
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
@@ -346,8 +421,8 @@ source_filename = "prism"
 @.fmts = private constant [3 x i8] c"%s\00"
 @.str0 = private constant [2 x i8] c"a\00"
 @.str1 = private constant [2 x i8] c"b\00"
-@prism_native_kont_table = constant [918 x i8] c"scheme  prism-core-hash-v1\0Abundle  899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_eqp  3b9d85bde6d670a6183d8536d17d0239143b5bb578d1656b5f05d400b64ef98f  eqp\0Afn      prism_ltp  e4cd603a24aaf2db80050eef4f39634583f785c1425d6f32ed03ed7b81137b14  ltp\0Afn      prism_main  1f177d94150b0c3eaa3162c11edf2bd9c0aed6cb971d303835bdf2ce849eb040  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1084 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_eqp 3b9d85bde6d670a6183d8536d17d0239143b5bb578d1656b5f05d400b64ef98f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_ltp e4cd603a24aaf2db80050eef4f39634583f785c1425d6f32ed03ed7b81137b14 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 1f177d94150b0c3eaa3162c11edf2bd9c0aed6cb971d303835bdf2ce849eb040 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [896 x i8] c"scheme  prism-core-hash-v1\0Abundle  899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_eqp  3b9d85bde6d670a6183d8536d17d0239143b5bb578d1656b5f05d400b64ef98f  eqp\0Afn      prism_ltp  e4cd603a24aaf2db80050eef4f39634583f785c1425d6f32ed03ed7b81137b14  ltp\0Afn      prism_main  1f177d94150b0c3eaa3162c11edf2bd9c0aed6cb971d303835bdf2ce849eb040  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1062 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:899f4ce9ed9529e021daa2f48c131ebd6265b2d400c743c724285aeb60714f5f\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_eqp 3b9d85bde6d670a6183d8536d17d0239143b5bb578d1656b5f05d400b64ef98f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_ltp e4cd603a24aaf2db80050eef4f39634583f785c1425d6f32ed03ed7b81137b14 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 1f177d94150b0c3eaa3162c11edf2bd9c0aed6cb971d303835bdf2ce849eb040 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash2 = private constant [65 x i8] c"1f177d94150b0c3eaa3162c11edf2bd9c0aed6cb971d303835bdf2ce849eb040\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"

@@ -1,19 +1,19 @@
 effect St
-  ctl rd(Unit) : Int
-  ctl wr(Int) : Unit
+  rd() : Int
+  wr(Int) : Unit
 
-fn spin(k : Int) : !{St} Int =
-  if rd(()) < k then
-    wr(rd(()) + 1)
+fn spin(k : Int) : Int ! {St} =
+  if rd() < k then
+    wr(rd() + 1)
     spin(k)
   else
-    rd(())
+    rd()
 
 fn run(k : Int) : Int =
   let f =
     handle spin(k) with
-      rd(u, r) => \(s) -> r(s)(s)
-      wr(v, r) => \(_s) -> r(())(v)
+      rd() resume r => \(s) -> r(s)(s)
+      wr(v) resume r => \(_s) -> r(())(v)
       return x => \(_s) -> x
   f(0)
 

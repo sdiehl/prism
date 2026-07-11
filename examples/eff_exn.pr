@@ -1,5 +1,5 @@
 effect Exn
-  ctl raise(Int) : Int
+  raise(Int) : Int
 
 -- Exceptions as an effect: raise and catch.
 --
@@ -8,20 +8,20 @@ effect Exn
 -- checked() raises deep inside a helper, far from the catching handler: the
 -- effect propagates across calls and is discharged where the handle sits.
 
-fn safe_div(n, d) : !{Exn} Int =
+fn safe_div(n, d) : Int ! {Exn} =
   if d == 0 then
     raise(0 - 1)
   else
     n / d
 
-fn checked(n) : !{Exn} Int =
+fn checked(n) : Int ! {Exn} =
   let a = safe_div(100, n)
   let b = safe_div(a, n - 5)
   a + b
 
 fn attempt(n) =
   handle checked(n) with
-    raise(code, k) => code
+    raise(code) resume k => code
     return r => r
 
 fn main() =

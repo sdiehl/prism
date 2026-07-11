@@ -1,0 +1,8 @@
+import Data.Tensor (..)
+
+fn main() =
+  var t := from_list([2, 3], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+  t[0, 1] := 4.0
+  -- Transpose by axis name: a stride permutation, no data movement.
+  let u = transpose(t, "0", "1")
+  println(u[1, 0])

@@ -1,0 +1,10 @@
+-- Negative case: a `once` op resumed in non-tail position (`k(1) + 1`) must be
+-- rejected because `once` promises exactly-once resumption in tail position.
+effect Ask
+  once ask() : Int
+
+fn main() =
+  println(handle ask() + 5 with {
+    ask() resume k => k(1) + 1,
+    return r => r
+  })

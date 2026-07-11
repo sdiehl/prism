@@ -16,7 +16,7 @@ pub fn singleton(x) = Cons(x, Nil)
 pub fn is_nil(xs) =
   match xs of
     Nil => true
-    Cons(x, rest) => false
+    Cons(_x, _rest) => false
 
 -- | The first element as `Some`, or `None` when the list is empty.
 pub fn head(xs) =

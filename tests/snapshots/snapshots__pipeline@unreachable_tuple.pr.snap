@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/unreachable_tuple.pr
 ---
 == tokens ==
@@ -203,7 +203,7 @@ Program {
 }
 
 == types ==
-Type Error: in `pick`: unreachable match arm
+[E4000] Type Error: in `pick`: unreachable match arm
    ╭─[ <source>:6:5 ]
    │
  6 │     _ => 4

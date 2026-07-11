@@ -1,6 +1,6 @@
 error NotFound(String)
 
-fn lookup(k : String) : !{NotFound} Int =
+fn lookup(k : String) : Int ! {NotFound} =
   if k == "a" then
     1
   else

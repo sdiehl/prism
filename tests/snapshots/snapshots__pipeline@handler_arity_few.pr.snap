@@ -1,0 +1,140 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/handler_arity_few.pr
+---
+== tokens ==
+VOpen Effect UIdent("Pair") VOpen Ident("pair") LParen KwInt Comma KwInt RParen Colon KwInt VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Handle Ident("pair") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen With LBrace Ident("pair") LParen Ident("a") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("a") RParen Comma Return Ident("r") FatArrow Ident("r") RBrace RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Pair",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "pair",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 227..261,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 277..284,
+                    },
+                    [
+                        Spanned {
+                            node: Handle(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "pair",
+                                            ),
+                                            span: 292..296,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 1,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 297..298,
+                                            },
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 2,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 300..301,
+                                            },
+                                        ],
+                                    ),
+                                    span: 292..302,
+                                },
+                                [
+                                    Op(
+                                        "pair",
+                                        [
+                                            "a",
+                                        ],
+                                        "k",
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "k",
+                                                    ),
+                                                    span: 334..335,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "a",
+                                                        ),
+                                                        span: 336..337,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 334..338,
+                                        },
+                                    ),
+                                    Return(
+                                        "r",
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 356..357,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 285..361,
+                        },
+                    ],
+                ),
+                span: 277..362,
+            },
+            wheres: [],
+            span: 263..362,
+        },
+    ],
+}
+
+== types ==
+[E5010] Type Error: in `main`: handler clause for `pair` binds 1 parameter(s) besides the continuation, but the operation declares 2
+   ╭─[ <source>:9:25 ]
+   │
+ 9 │     pair(a) resume k => k(a),
+   │                         ──┬─  
+   │                           ╰─── in `main`: handler clause for `pair` binds 1 parameter(s) besides the continuation, but the operation declares 2
+───╯

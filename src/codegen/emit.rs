@@ -5,19 +5,19 @@
 //! merges control flow with phi nodes, MLIR with block arguments, abstracted
 //! as `jump_merge`/`open_merge`.
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(feature = "mlir")]
 use std::fmt::Write;
 use std::slice;
 
-use super::abi::{idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
+use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
+use super::dispatch::partial_app_body;
+use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
-use crate::core::builtins::{builtin, Builtin, BuiltinKind, FloatOp};
+use crate::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
 use crate::core::effect_lower::EOP;
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
 use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
-use crate::names::{closure_cap, closure_rem};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
 
@@ -26,7 +26,7 @@ use crate::types::CtorInfo;
 type Regs = BTreeMap<Sym, String>;
 
 #[derive(Clone)]
-enum LamBody {
+pub(super) enum LamBody {
     // An ordinary closure.
     Core(Comp),
     // A curry adapter for under-application. Once saturated with its remaining
@@ -36,11 +36,11 @@ enum LamBody {
 }
 
 #[derive(Clone)]
-struct LamInfo {
-    tag: usize,
-    params: Vec<Sym>,
-    free_vars: Vec<Sym>,
-    body: LamBody,
+pub(super) struct LamInfo {
+    pub(super) tag: usize,
+    pub(super) params: Vec<Sym>,
+    pub(super) free_vars: Vec<Sym>,
+    pub(super) body: LamBody,
 }
 
 // TRMC (tail recursion modulo constructor / addition). A function whose
@@ -69,236 +69,16 @@ struct TrmcCtx {
     extra: String,
 }
 
-#[derive(Default)]
-pub(super) struct Buf {
-    tmp: usize,
-    blk: usize,
-    pub(super) cur: String,
-    pub(super) body: String,
-}
-
-impl Buf {
-    pub(super) fn tmp(&mut self) -> String {
-        let r = format!("%t{}", self.tmp);
-        self.tmp += 1;
-        r
-    }
-
-    fn label(&mut self) -> String {
-        let l = format!("b{}", self.blk);
-        self.blk += 1;
-        l
-    }
-
-    #[cfg(feature = "mlir")]
-    pub(super) fn line(&mut self, s: &str) {
-        writeln!(self.body, "  {s}").unwrap();
-    }
-
-    #[cfg(feature = "mlir")]
-    pub(super) fn open(&mut self, text: &str, label: &str) {
-        writeln!(self.body, "{text}").unwrap();
-        self.cur = label.to_string();
-    }
-
-    fn reset(&mut self) {
-        self.tmp = 0;
-        self.blk = 0;
-        self.body.clear();
-    }
-}
-
-// The integer machine ops a backend renders. An enum (not a string) so each
-// backend's match is exhaustive and an unknown op is unrepresentable, never a
-// codegen panic.
-#[derive(Clone, Copy)]
-pub(super) enum IntOp {
-    Add,
-    Sub,
-    And,
-    Or,
-    Shl,
-    Ashr,
-}
-
-impl IntOp {
-    // Only the textual MLIR backend renders the mnemonic; the LLVM backend
-    // matches the variant directly into an inkwell builder call.
-    #[cfg(feature = "mlir")]
-    pub(super) const fn mnemonic(self) -> &'static str {
-        match self {
-            Self::Add => "add",
-            Self::Sub => "sub",
-            Self::And => "and",
-            Self::Or => "or",
-            Self::Shl => "shl",
-            Self::Ashr => "ashr",
-        }
-    }
-}
-
-// The six-way ordered comparison, backend- and lane-agnostic: the int-vs-float
-// predicate spelling (signed `slt` vs ordered `olt`) is a rendering concern the
-// backend resolves, so int and float comparisons share one enum and one
-// exhaustive match at each call site.
-#[derive(Clone, Copy)]
-pub(super) enum Cmp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-impl Cmp {
-    // MLIR spells the predicate as a quoted string; LLVM matches the variant
-    // into an inkwell `IntPredicate`/`FloatPredicate` directly.
-    #[cfg(feature = "mlir")]
-    pub(super) const fn icmp_pred(self) -> &'static str {
-        match self {
-            Self::Eq => "eq",
-            Self::Ne => "ne",
-            Self::Lt => "slt",
-            Self::Le => "sle",
-            Self::Gt => "sgt",
-            Self::Ge => "sge",
-        }
-    }
-
-    #[cfg(feature = "mlir")]
-    pub(super) const fn fcmp_pred(self) -> &'static str {
-        match self {
-            Self::Eq => "oeq",
-            Self::Ne => "une",
-            Self::Lt => "olt",
-            Self::Le => "ole",
-            Self::Gt => "ogt",
-            Self::Ge => "oge",
-        }
-    }
-}
-
-// The float binary machine ops a backend renders, same shape as `IntOp`.
-#[derive(Clone, Copy)]
-pub(super) enum FloatBinOp {
-    Fadd,
-    Fsub,
-    Fmul,
-    Fdiv,
-}
-
-impl FloatBinOp {
-    #[cfg(feature = "mlir")]
-    pub(super) const fn mnemonic(self) -> &'static str {
-        match self {
-            Self::Fadd => "fadd",
-            Self::Fsub => "fsub",
-            Self::Fmul => "fmul",
-            Self::Fdiv => "fdiv",
-        }
-    }
-}
-
-// The unary float intrinsics a backend renders. The base name is shared by both
-// backends (LLVM forms `llvm.{name}.f64`, MLIR forms `llvm.intr.{name}`), so it
-// is not gated on the MLIR feature. Only the exact, correctly-rounded ops live
-// here (floor/ceil/round/trunc/sqrt/fabs): every IEEE-754 platform computes them
-// identically, so they need no owned implementation. Transcendentals do not
-// appear -- platform intrinsics would call the divergent system libm, so they
-// route through the owned `prism_m_*` runtime calls instead (see the
-// `Comp::FloatBuiltin` lowering and `FloatOp::runtime_sym`).
-#[derive(Clone, Copy)]
-pub(super) enum FloatIntrinsic {
-    Floor,
-    Ceil,
-    Round,
-    Trunc,
-    Sqrt,
-    Fabs,
-}
-
-impl FloatIntrinsic {
-    pub(super) const fn name(self) -> &'static str {
-        match self {
-            Self::Floor => "floor",
-            Self::Ceil => "ceil",
-            // LLVM `llvm.round.f64` and MLIR `llvm.intr.round` are round-half-away
-            // -from-zero, matching Rust `f64::round` in the interpreter.
-            Self::Round => "round",
-            Self::Trunc => "trunc",
-            Self::Sqrt => "sqrt",
-            Self::Fabs => "fabs",
-        }
-    }
-}
-
-pub(super) trait Isa {
-    fn const_int(&self, b: &mut Buf, n: i64) -> String;
-    fn const_float(&self, b: &mut Buf, f: f64) -> String;
-    fn fresh_zero(&self, b: &mut Buf) -> String;
-    fn str_lit(&self, b: &mut Buf, dst: &str, idx: usize, len: usize);
-    fn bin(&self, b: &mut Buf, dst: &str, op: IntOp, x: &str, y: &str);
-    fn fbin(&self, b: &mut Buf, dst: &str, op: FloatBinOp, x: &str, y: &str);
-    fn icmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str);
-    fn fcmp(&self, b: &mut Buf, dst: &str, pred: Cmp, x: &str, y: &str);
-    fn zext(&self, b: &mut Buf, dst: &str, c: &str);
-    fn sitofp(&self, b: &mut Buf, dst: &str, v: &str);
-    // Saturating float -> signed i64 (clamps to i64::MIN/MAX, NaN -> 0). The
-    // pinned float-to-int semantics, matching the interpreter's `f as i64`; plain
-    // `fptosi` is undefined out of range and would diverge the backends.
-    fn fptosi_sat(&self, b: &mut Buf, dst: &str, v: &str);
-    fn cast_i2f(&self, b: &mut Buf, dst: &str, v: &str);
-    fn cast_f2i(&self, b: &mut Buf, dst: &str, v: &str);
-    fn f_intrinsic(&self, b: &mut Buf, dst: &str, op: FloatIntrinsic, a: &str);
-    // A call into the owned vendored libm: `sym` is an `f64 -> f64` symbol
-    // (`prism_m_*`), taking and returning a native double. The MLIR backend needs
-    // the symbol declared once (`declare_f`); the LLVM backend declares on use.
-    fn f_call1(&self, b: &mut Buf, dst: &str, sym: &str, a: &str);
-    // Emit a module-level declaration for an `f64 -> f64` runtime symbol. A no-op
-    // where the backend declares functions on first use (LLVM/inkwell).
-    fn declare_f(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str);
-    fn fneg(&self, b: &mut Buf, dst: &str, x: &str);
-    fn inttoptr(&self, b: &mut Buf, dst: &str, v: &str);
-    fn ptrtoint(&self, b: &mut Buf, dst: &str, p: &str);
-    fn alloca_word(&self, b: &mut Buf, dst: &str);
-    fn gep(&self, b: &mut Buf, dst: &str, p: &str, off: i64);
-    fn load(&self, b: &mut Buf, dst: &str, p: &str);
-    fn store(&self, b: &mut Buf, v: &str, p: &str);
-    fn call(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
-    fn call_ptr(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
-    fn call_void(&self, b: &mut Buf, f: &str, args: &[String]);
-    fn musttail_call(&self, b: &mut Buf, dst: &str, f: &str, args: &[String]);
-    fn printf_str(&self, b: &mut Buf, p: &str);
-    fn jump(&self, b: &mut Buf, l: &str);
-    fn cond_br(&self, b: &mut Buf, c: &str, lt: &str, lf: &str);
-    fn switch(&self, b: &mut Buf, v: &str, default: &str, cases: &[(i64, String)]);
-    fn unreachable(&self, b: &mut Buf);
-    fn ret(&self, b: &mut Buf, v: &str);
-    fn open_entry(&self, b: &mut Buf);
-    fn open_block(&self, b: &mut Buf, l: &str);
-    fn jump_merge(&self, b: &mut Buf, l: &str, v: &str);
-    fn open_merge(&self, b: &mut Buf, l: &str, dst: &str, preds: &[(String, String)]);
-    fn fn_define(&self, name: &str, params: &[String]) -> String;
-    fn fn_close(&self) -> String;
-    fn prelude(&self, out: &mut String, seen: &mut BTreeSet<String>);
-    // Declares `sym` once: a backend that emits text (MLIR) must not re-declare a
-    // symbol the prelude or an earlier use already wrote, or the module fails to
-    // verify. `seen` tracks what has been declared.
-    fn declare(&self, out: &mut String, seen: &mut BTreeSet<String>, sym: &str, arity: usize);
-    fn str_global(&self, out: &mut String, idx: usize, s: &str);
-}
-
-struct Cg<'a, I> {
-    isa: &'a I,
+pub(super) struct Cg<'a, I> {
+    pub(super) isa: &'a I,
     b: Buf,
     cur_arity: usize,
     ctors: &'a BTreeMap<String, CtorInfo>,
     fn_arities: BTreeMap<String, usize>,
-    lams: Vec<LamInfo>,
+    pub(super) lams: Vec<LamInfo>,
     // Curry adapters memoized by (target lam, supplied arg count), so dispatch
     // planning and emission agree on adapter tags.
-    adapters: BTreeMap<(usize, usize), usize>,
+    pub(super) adapters: BTreeMap<(usize, usize), usize>,
     strs: Vec<String>,
     used_rt: BTreeMap<String, usize>,
     // Owned-libm transcendentals actually called (the `prism_m_*` symbols). These
@@ -308,7 +88,7 @@ struct Cg<'a, I> {
     // Arities at which `prism_apply_n` is actually called. A 0-arg `App` (and any
     // arity with no matching lambda) still needs the function emitted, or it is
     // an undefined symbol at link time.
-    used_apply: BTreeSet<usize>,
+    pub(super) used_apply: BTreeSet<usize>,
     trmc: Option<TrmcCtx>,
 }
 
@@ -495,7 +275,15 @@ impl<'a, I: Isa> Cg<'a, I> {
                 Comp::Lam(params, body) => self.alloc_closure(regs, params, body),
                 _ => Err("unsupported thunk form (non-lam)".into()),
             },
-            Value::Tuple(fields) => {
+            // A locally-constructed-and-projected unboxed product is scalarized
+            // away by the optimizer (case-of-known-product), so it never reaches
+            // codegen: that is the zero-cell win. One that escapes across a
+            // non-inlined boundary survives to here; until true cross-boundary
+            // flattening (product-in-registers), it is boxed exactly like a tuple,
+            // which keeps observable behavior identical (only the layout, not the
+            // semantics, differs). `UnboxedRecord` never reaches codegen: a record
+            // lowers positionally to `UnboxedTuple` at elaboration.
+            Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
                 let fvs = self.values(regs, fields)?;
                 Ok(self.alloc_obj(0, &fvs))
             }
@@ -508,6 +296,9 @@ impl<'a, I: Isa> Cg<'a, I> {
                     self.isa.call_void(&mut self.b, rt::EFFOP_ALLOC, &[]);
                 }
                 Ok(obj)
+            }
+            Value::UnboxedRecord(_) => {
+                Err("unboxed record value reached codegen; records lower positionally".into())
             }
         }
     }
@@ -715,6 +506,9 @@ impl<'a, I: Isa> Cg<'a, I> {
                 regs,
                 &Comp::StrBuiltin(Builtin::I64Sub, vec![Value::I64(0), v.clone()]),
             ),
+            Comp::UnboxedProject(_, _) => Err(
+                "codegen: unboxed record projection is not implemented for the native ABI".into(),
+            ),
             Comp::Do(op, _) => Err(format!(
                 "effect `{op}` reached codegen unlowered: it is performed outside any lexical \
                  `handle`, which the local free-monad lowering cannot translate. Perform it \
@@ -742,22 +536,23 @@ impl<'a, I: Isa> Cg<'a, I> {
                 if !matches!(builtin(b.name()), Some((_, BuiltinKind::Str))) {
                     self.used_rt.insert(sym.clone(), args.len());
                 }
-                let (imm_args, float_args, imm_res) = b.abi();
+                let abi = b.abi();
                 let mut avs = Vec::new();
                 let mut owned = Vec::new();
                 for (i, a) in args.iter().enumerate() {
                     let v = self.value(regs, a)?;
-                    avs.push(if imm_args.contains(&i) {
-                        self.untag(&v)
-                    } else if float_args.contains(&i) {
-                        self.unbox(&v)
-                    } else {
-                        v.clone()
+                    avs.push(match abi.arg(i) {
+                        AbiArg::Immediate => self.untag(&v),
+                        AbiArg::BoxedFloat => self.unbox(&v),
+                        AbiArg::Raw => v.clone(),
                     });
                     owned.push(v);
                 }
                 let t = self.dst(|i, b, d| i.call(b, d, &sym, &avs));
-                let out = if imm_res { self.retag(&t) } else { t };
+                let out = match abi.result() {
+                    AbiResult::Raw => t,
+                    AbiResult::RetagImmediate => self.retag(&t),
+                };
                 for v in owned {
                     self.rc_dec(&v);
                 }
@@ -1023,8 +818,8 @@ impl<'a, I: Isa> Cg<'a, I> {
             let mut cases: Vec<(i64, String)> = Vec::new();
             for (i, (pat, _)) in arms.iter().enumerate() {
                 if let CorePat::Ctor(name, _) = pat {
-                    if let Some(info) = self.ctors.get(name.as_str()) {
-                        cases.push((idx64(info.tag), arm_lbls[i].clone()));
+                    if let Some(tag) = ctor_tag(self.ctors, name.as_str()) {
+                        cases.push((idx64(tag), arm_lbls[i].clone()));
                     }
                 }
             }
@@ -1345,188 +1140,16 @@ impl<'a, I: Isa> Cg<'a, I> {
     }
 }
 
-impl<I: Isa> Cg<'_, I> {
-    // Tag of the curry adapter that under-applies `target` (arity m, with
-    // `target_fvs` captured free vars) to `n` arguments: a lambda of arity m-n
-    // capturing target_fvs+n values. Allocated on first request and memoized so
-    // planning and emission resolve the same tag.
-    fn curry_adapter(&mut self, target: usize, target_fvs: usize, n: usize) -> usize {
-        if let Some(&tag) = self.adapters.get(&(target, n)) {
-            return tag;
-        }
-        let tag = self.lams.len();
-        let m = self.lams[target].params.len();
-        let free_vars = (0..target_fvs + n)
-            .map(|i| Sym::new(&closure_cap(i)))
-            .collect();
-        let params = (0..m - n).map(|i| Sym::new(&closure_rem(i))).collect();
-        self.lams.push(LamInfo {
-            tag,
-            params,
-            free_vars,
-            body: LamBody::Curry { target },
-        });
-        self.adapters.insert((target, n), tag);
-        tag
-    }
-
-    // Register (without emitting) the curry adapters and follow-on apply arities
-    // a `prism_apply_n` dispatcher will reference. Stateful backends realize each
-    // function on first emission, so this must reach a fixpoint before any lambda
-    // body is emitted. Applying zero arguments is the identity on the closure
-    // (see `apply_dispatch`), so n == 0 needs no adapter; skipping it also keeps
-    // the fixpoint finite, since an n == 0 under-application would mint a
-    // same-arity adapter that regenerates forever. Every other adapter has arity
-    // m - n < m, so the chain of adapters-of-adapters strictly shrinks.
-    // Every lambda arity plus every arity an `App` actually calls. The planning
-    // fixpoint and the final dispatcher emission both iterate exactly this set.
-    fn apply_arities(&self) -> BTreeSet<usize> {
-        let mut a: BTreeSet<usize> = self.lams.iter().map(|l| l.params.len()).collect();
-        a.extend(self.used_apply.iter().copied());
-        a
-    }
-
-    fn plan_dispatch(&mut self, n: usize) {
-        if n == 0 {
-            return;
-        }
-        for tag in 0..self.lams.len() {
-            let m = self.lams[tag].params.len();
-            let fvs = self.lams[tag].free_vars.len();
-            match m.cmp(&n) {
-                Ordering::Greater => {
-                    self.curry_adapter(tag, fvs, n);
-                }
-                Ordering::Less => {
-                    self.used_apply.insert(n - m);
-                }
-                Ordering::Equal => {}
-            }
-        }
-    }
-
-    // One `prism_apply_n` dispatcher, total over every lambda tag, dispatching
-    // per the lambda's parameter count m against the n supplied args: exact
-    // (m == n, call it), under (m > n, build a curry adapter closure of arity
-    // m-n), or over (m < n, call with the first m then apply the remaining n-m to
-    // the result). All adapters and follow-on apply arities must already be
-    // planned (see `plan_dispatch`), so this never grows `lams` and references
-    // only emitted functions. Applying zero arguments only ever lands on an
-    // arity-0 thunk, so for n == 0 the sole reachable case is m == 0;
-    // positive-arity tags route to `_dead` like any non-applicable value.
-    fn apply_dispatch(&mut self, n: usize) -> String {
-        let lams: Vec<LamInfo> = self
-            .lams
-            .iter()
-            .filter(|l| n > 0 || l.params.is_empty())
-            .cloned()
-            .collect();
-        let mut params = vec!["%_clos".to_string()];
-        params.extend((0..n).map(|i| format!("%_a{i}")));
-        let header = self.isa.fn_define(&format!("prism_apply_{n}"), &params);
-
-        let mut b = Buf::default();
-        self.isa.open_entry(&mut b);
-
-        self.isa.inttoptr(&mut b, "%_cp", "%_clos");
-        self.isa.gep(&mut b, "%_tp", "%_cp", TAG_OFF);
-        self.isa.load(&mut b, "%_tag", "%_tp");
-
-        if lams.is_empty() {
-            self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
-            self.isa.unreachable(&mut b);
-            return format!("{header}{}{}", b.body, self.isa.fn_close());
-        }
-
-        let cases: Vec<(i64, String)> = lams
-            .iter()
-            .map(|l| (idx64(l.tag), format!("_lam{}", l.tag)))
-            .collect();
-        self.isa.switch(&mut b, "%_tag", "_dead", &cases);
-        self.isa.open_block(&mut b, "_dead");
-        self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
-        self.isa.unreachable(&mut b);
-
-        let mut preds: Vec<(String, String)> = Vec::new();
-        for lam in &lams {
-            let tag = lam.tag;
-            let m = lam.params.len();
-            let fvs = lam.free_vars.len();
-            self.isa.open_block(&mut b, &format!("_lam{tag}"));
-
-            let mut captured: Vec<String> = Vec::new();
-            for i in 0..fvs {
-                let fp = format!("%_fp{tag}_{i}");
-                let fv = format!("%_fv{tag}_{i}");
-                let off = HDR_BYTES + idx64(i) * WORD_BYTES;
-                self.isa.gep(&mut b, &fp, "%_cp", off);
-                self.isa.load(&mut b, &fv, &fp);
-                captured.push(fv);
-            }
-            let args: Vec<String> = (0..n).map(|i| format!("%_a{i}")).collect();
-            let r = format!("%_r{tag}");
-
-            match m.cmp(&n) {
-                Ordering::Equal => {
-                    let mut call_args = captured;
-                    call_args.extend(args);
-                    self.isa
-                        .call(&mut b, &r, &format!("prism_lam_{tag}"), &call_args);
-                }
-                Ordering::Greater => {
-                    // Under-application: capture (fvs ++ args) into an adapter
-                    // closure expecting the remaining m-n. The fvs are still owned
-                    // by `%_clos` (the caller drops it after this apply), so dup
-                    // them; the args were handed to us and move in.
-                    let adapter = self.curry_adapter(tag, fvs, n);
-                    let mut fields = captured;
-                    for fv in &fields {
-                        self.isa.call_void(&mut b, rt::RC_INC, slice::from_ref(fv));
-                    }
-                    fields.extend(args);
-                    let nf = self.isa.const_int(&mut b, idx64(fields.len()));
-                    let cp = format!("%_ac{tag}");
-                    self.isa
-                        .call_ptr(&mut b, &cp, rt::ALLOC, slice::from_ref(&nf));
-                    let tp = format!("%_atp{tag}");
-                    self.isa.gep(&mut b, &tp, &cp, TAG_OFF);
-                    let tv = self.isa.const_int(&mut b, idx64(adapter));
-                    self.isa.store(&mut b, &tv, &tp);
-                    for (i, fld) in fields.iter().enumerate() {
-                        let off = HDR_BYTES + idx64(i) * WORD_BYTES;
-                        let fp = format!("%_afp{tag}_{i}");
-                        self.isa.gep(&mut b, &fp, &cp, off);
-                        self.isa.store(&mut b, fld, &fp);
-                    }
-                    self.isa.ptrtoint(&mut b, &r, &cp);
-                }
-                Ordering::Less => {
-                    // Over-application: ANF saturates every call, so a closure
-                    // receiving more args than its arity is a lowering bug. The
-                    // interpreter traps this shape (`eval`, the differential
-                    // oracle); trap identically here rather than implement the
-                    // extra application, which would silently fork native
-                    // semantics from the oracle on a shape neither should see.
-                    self.isa.call_void(&mut b, rt::APPLY_ERROR, &[]);
-                    self.isa.unreachable(&mut b);
-                    continue;
-                }
-            }
-            self.isa.jump_merge(&mut b, "_merge", &r);
-            preds.push((r, format!("_lam{tag}")));
-        }
-        // Every arm may have trapped (each lambda's arity below n): the merge
-        // block then has no predecessors and must not be emitted.
-        if preds.is_empty() {
-            return format!("{header}{}{}", b.body, self.isa.fn_close());
-        }
-        self.isa.open_merge(&mut b, "_merge", "%_result", &preds);
-        self.isa.ret(&mut b, "%_result");
-        format!("{header}{}{}", b.body, self.isa.fn_close())
-    }
-}
-
-pub(super) fn emit_with<I: Isa>(
+/// Lowers fully prepared Core through an external instruction backend.
+///
+/// The shared walker owns evaluation order, representation, reference counting,
+/// and tail-call lowering. The [`Isa`] implementation only spells instructions.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the lowered Core violates a code-generation
+/// invariant or the backend cannot emit a required construct.
+pub fn emit_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1628,27 +1251,6 @@ pub(super) fn escape_str(s: &str) -> String {
     escaped
 }
 
-fn partial_app_body(name: &str, n_given: usize, arity: usize) -> (Vec<Sym>, Vec<Sym>, Comp) {
-    let cap_names: Vec<Sym> = (0..n_given).map(|i| Sym::new(&closure_cap(i))).collect();
-    let rem_names: Vec<Sym> = (0..arity - n_given)
-        .map(|i| Sym::new(&closure_rem(i)))
-        .collect();
-    let call_args = cap_names
-        .iter()
-        .chain(rem_names.iter())
-        .map(|n| Value::Var(*n))
-        .collect();
-    let mut body = Comp::Call(name.into(), call_args);
-    for cn in &cap_names {
-        body = Comp::Bind(
-            Box::new(Comp::Dup(Value::Var(*cn))),
-            "_".into(),
-            Box::new(body),
-        );
-    }
-    (cap_names, rem_names, body)
-}
-
 /// Runtime declares for the string builtins, in table order: each is a
 /// `(symbol, arity)` pair taking and returning `i64`.
 #[cfg(feature = "mlir")]
@@ -1700,7 +1302,7 @@ mod tests {
 
     // `Builtin::abi` is exhaustive (no wildcard), so the compiler already forces
     // every variant to declare its convention and rejects a symbol that no
-    // `Builtin` produces. This pins the remaining well-formedness invariant the
+    // `Builtin` produces. This checks the remaining well-formedness invariant the
     // type system cannot: every tagged arg index stays within the builtin's
     // arity and no arg is both immediate and float, so re-arity-ing a builtin
     // trips here rather than mis-tagging a call at runtime.
@@ -1712,16 +1314,10 @@ mod tests {
             }
             let b =
                 Builtin::from_name(name).expect("str builtin in BUILTINS has no Builtin variant");
-            let (imm, float, _) = b.abi();
-            for i in imm {
-                assert!(
-                    !float.contains(i),
-                    "{name} arg {i} is both immediate and float"
-                );
-            }
-            for i in imm.iter().chain(float) {
-                assert!(*i < arity, "{name} tags arg {i} but arity is {arity}");
-            }
+            assert!(
+                b.abi().args_within(arity),
+                "{name} tags an argument beyond arity {arity}"
+            );
         }
     }
 }

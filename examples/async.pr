@@ -18,13 +18,13 @@ import Concurrent (..)
 
 -- A fiber that announces itself, yields so the other fiber can run, then finishes
 -- with a value. Fibers may perform IO.
-fn worker(name : String, v : Int) : !{Async(Int), IO} Int =
+fn worker(name : String, v : Int) : Int ! {Async(Int), IO} =
   println("{name}: start")
   yield(())
   println("{name}: resume, returning {v}")
   v
 
-fn scene() : !{Async(Int), IO} Int =
+fn scene() : Int ! {Async(Int), IO} =
   let a = fork(\() -> worker("A", 20))
   let b = fork(\() -> worker("B", 22))
   await(a) + await(b)

@@ -1,6 +1,6 @@
 effect Emit(a)
-  ctl emit(a) : Unit
+  emit(a) : Unit
 
-fn bad() : !{Emit(String)} Unit = emit(1)
+fn bad() : Unit ! {Emit(String)} = emit(1)
 
 fn main() = ()

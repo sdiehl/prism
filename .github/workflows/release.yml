@@ -240,7 +240,7 @@ jobs:
 
       # Collect every platform's tarball/checksum into dist/.
       - name: Download build artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -258,7 +258,7 @@ jobs:
         run: ./scripts/release-hashes.sh dist
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.tar.gz
 
@@ -276,7 +276,7 @@ jobs:
           fi
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
@@ -323,7 +323,7 @@ jobs:
 
       - name: Bump Homebrew formula
         if: steps.tap.outputs.enabled == 'true'
-        uses: mislav/bump-homebrew-formula-action@v3
+        uses: mislav/bump-homebrew-formula-action@v4
         with:
           formula-name: prism
           homebrew-tap: sdiehl/homebrew-prism

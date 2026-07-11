@@ -3,9 +3,8 @@
 //! A read-only scope walk over the resolved surface program, run regardless of
 //! whether name canonicalization fired (it only does for multi-module builds).
 //! It warns when a local binding is never used, or shadows one already in scope,
-//! and when a use references a deprecated definition (a name carrying the surface
-//! `deprecated "..."` annotation, or a tower-superseded compiler builtin or float
-//! dot-operator; see `crate::deprecated`).
+//! and when a use references a definition carrying the surface `deprecated "..."`
+//! annotation.
 //!
 //! Two filters keep the output signal: a binding whose name starts with `_` is
 //! exempt (the conventional "intentionally unused" marker), and only bindings and
@@ -18,10 +17,8 @@ use std::collections::BTreeMap;
 
 use marginalia::Span;
 
-use crate::deprecated::{builtin_replacement, operator_replacement};
 use crate::syntax::ast::{
-    BinOp, CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
-    S,
+    CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface, S,
 };
 use crate::tc::Warning;
 
@@ -100,33 +97,15 @@ impl Lints {
         }
     }
 
-    // Warn when `name` names a deprecated definition. A local binding shadows the
-    // deprecation (it is a different definition), so only free names are checked;
-    // the annotation suggestion wins over the builtin table when both match.
+    // Warn when `name` names a definition carrying the surface `deprecated "..."`
+    // annotation. A local binding shadows the deprecation (it is a different
+    // definition), so only free names are checked.
     fn dep_name(&mut self, name: &str, span: Span) {
         if !self.in_user(span) || self.scope.iter().any(|b| b.name == name) {
             return;
         }
         if let Some(msg) = self.deprecated.get(name) {
             let msg = format!("`{name}` is deprecated: {msg}");
-            self.warnings.push(Warning { span, msg });
-        } else if let Some(repl) = builtin_replacement(name) {
-            let msg = format!("`{name}` is deprecated; use `{repl}` instead");
-            self.warnings.push(Warning { span, msg });
-        }
-    }
-
-    // Warn when `op` is a deprecated float dot-operator, naming the tower spelling.
-    fn dep_op(&mut self, op: BinOp, span: Span) {
-        if !self.in_user(span) {
-            return;
-        }
-        if let Some(repl) = operator_replacement(op) {
-            let msg = format!(
-                "the `{}` operator is deprecated; use `{}` instead",
-                op.spelling(),
-                repl.spelling()
-            );
             self.warnings.push(Warning { span, msg });
         }
     }
@@ -198,7 +177,7 @@ impl Lints {
             HandlerArm::Return(_, b)
             | HandlerArm::Op(_, _, _, b)
             | HandlerArm::Sugar(
-                SugarArm::Fun(_, _, b) | SugarArm::Final(_, _, b) | SugarArm::Val(_, b),
+                SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
             ) => b,
         };
         self.expr(body);
@@ -342,12 +321,7 @@ impl Lints {
                     self.pop_to(base);
                 }
             }
-            Expr::Bin(op, a, b) => {
-                self.dep_op(*op, e.span);
-                self.expr(a);
-                self.expr(b);
-            }
-            Expr::Pipe(a, b) => {
+            Expr::Bin(_, a, b) | Expr::Pipe(a, b) => {
                 self.expr(a);
                 self.expr(b);
             }
@@ -362,12 +336,13 @@ impl Lints {
                     self.expr(a);
                 }
             }
-            Expr::List(es) | Expr::Tuple(es) => {
+            Expr::List(es) | Expr::Tuple(es) | Expr::UnboxedTuple(es) => {
                 for x in es {
                     self.expr(x);
                 }
             }
             Expr::FieldAccess(b, _)
+            | Expr::UnboxedField(b, _)
             | Expr::Inst(b, _)
             | Expr::Ann(b, _)
             | Expr::Mask(_, b)
@@ -383,7 +358,7 @@ impl Lints {
                 self.expr(key);
                 self.expr(val);
             }
-            Expr::RecordCreate(_, fs) => {
+            Expr::RecordCreate(_, fs) | Expr::UnboxedRecord(fs) => {
                 for (_, v) in fs {
                     self.expr(v);
                 }

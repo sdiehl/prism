@@ -38,10 +38,10 @@ alias State = List(Msg)
 -- The fiber effect: fork a worker, yield (a scheduling AND interleaving point),
 -- and send/recv over the one shared channel. Discharged by `run_chaos`.
 effect Chaos
-  ctl fork(() -> Unit ! {Chaos}) : Unit
-  ctl yield(Unit) : Unit
-  ctl send(Msg) : Unit
-  ctl recv(Unit) : Msg
+  fork(() -> Unit ! {Chaos}) : Unit
+  yield(Unit) : Unit
+  send(Msg) : Unit
+  recv() : Msg
 
 -- One reified fiber step, exactly as std's Concurrent does it: the handler turns
 -- each effect into a command plus the continuation that resumes it, so the
@@ -57,19 +57,19 @@ type Cmd
 -- Reify the root fiber (the collector): its return value is the run's result.
 fn step_root(body : () -> State ! {Chaos}) : Cmd =
   handle body() with
-    fork(child, k) => Forked(child, \() -> k(()))
-    yield(u, k) => Yielded(\() -> k(()))
-    send(v, k) => Sent(v, \() -> k(()))
-    recv(u, k) => Recved(k)
+    fork(child) resume k => Forked(child, \() -> k(()))
+    yield(u) resume k => Yielded(\() -> k(()))
+    send(v) resume k => Sent(v, \() -> k(()))
+    recv() resume k => Recved(k)
     return r => Finished(r)
 
 -- Reify a worker fiber: it returns Unit, so its completion is just `Exited`.
 fn step_worker(body : () -> Unit ! {Chaos}) : Cmd =
   handle body() with
-    fork(child, k) => Forked(child, \() -> k(()))
-    yield(u, k) => Yielded(\() -> k(()))
-    send(v, k) => Sent(v, \() -> k(()))
-    recv(u, k) => Recved(k)
+    fork(child) resume k => Forked(child, \() -> k(()))
+    yield(u) resume k => Yielded(\() -> k(()))
+    send(v) resume k => Sent(v, \() -> k(()))
+    recv() resume k => Recved(k)
     return r => Exited
 
 -- A runnable fiber in the queue: its scheduler id and the thunk that runs it to
@@ -177,17 +177,17 @@ fn interpret(tid : Int, cmd : Cmd, s : Sched) : (State, List(Int)) =
 -- many interleaving points, then send its (id, value). The value depends only on
 -- the worker's own id, never on any other fiber, so it is the same under every
 -- schedule; only WHEN it is computed relative to the others varies.
-fn compute(i : Int, acc : Int, iters : Int) : !{Chaos} Int =
+fn compute(i : Int, acc : Int, iters : Int) : Int ! {Chaos} =
   if iters <= 0 then
     acc
   else
     yield(())
     compute(i, mod(acc * 31 + i * 7 + iters, modulus), iters - 1)
 
-fn worker(i : Int) : !{Chaos} Unit = send((i, compute(i, i, work_iters)))
+fn worker(i : Int) : Unit ! {Chaos} = send((i, compute(i, i, work_iters)))
 
 -- Fork workers 1..n.
-fn spawn(i : Int, n : Int) : !{Chaos} Unit =
+fn spawn(i : Int, n : Int) : Unit ! {Chaos} =
   if i > n then
     ()
   else
@@ -212,13 +212,13 @@ fn sort_msgs(xs : State) : State =
 
 -- The collector (root fiber): receive one message per worker, then sort. Because
 -- it sorts, the result cannot see the order the messages arrived in.
-fn collect(remaining : Int, acc : State) : !{Chaos} State =
+fn collect(remaining : Int, acc : State) : State ! {Chaos} =
   if remaining <= 0 then
     sort_msgs(acc)
   else
-    collect(remaining - 1, Cons(recv(()), acc))
+    collect(remaining - 1, Cons(recv(), acc))
 
-fn root(n : Int) : !{Chaos} State =
+fn root(n : Int) : State ! {Chaos} =
   spawn(1, n)
   collect(n, Nil)
 

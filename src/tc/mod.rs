@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
@@ -186,6 +186,11 @@ pub struct Checked {
     pub decls: Vec<DeclInfo>,
     pub eff_ops: BTreeMap<String, EffOpInfo>,
     pub field_res: BTreeMap<NodeId, (String, usize, usize)>,
+    // For an unboxed record projection (`e.#field`): the field's index in the
+    // record's type field order, and the record arity. Elaboration lowers the
+    // projection to a positional tuple `Case` from this, so it reuses the same RC
+    // and pattern machinery as any product destructuring.
+    pub unboxed_field: BTreeMap<NodeId, (usize, usize)>,
     pub path_res: PathRes,
     pub fixed: BTreeMap<NodeId, Type>,
     pub span_types: BTreeMap<NodeId, Type>,
@@ -229,8 +234,8 @@ impl TcErr {
     // Attach a span: mismatches become located errors, ICEs pass through.
     fn at(self, span: Span) -> TypeError {
         match self {
-            Self::Fail(msg) | Self::Keep(msg) => TypeError::Other { span, msg },
-            Self::Ice(msg) => TypeError::Ice { msg },
+            Self::Fail(msg) | Self::Keep(msg) => TypeError::TypeFailure { span, msg },
+            Self::Ice(msg) => TypeError::InternalInvariant { msg },
         }
     }
 
@@ -248,13 +253,13 @@ impl TcErr {
         match self {
             Self::Fail(_) => fallback,
             Self::Keep(msg) => match fallback.span() {
-                Some(&span) => TypeError::Other { span, msg },
-                None => TypeError::Other {
+                Some(&span) => TypeError::TypeFailure { span, msg },
+                None => TypeError::TypeFailure {
                     span: Span::default(),
                     msg,
                 },
             },
-            Self::Ice(msg) => TypeError::Ice { msg },
+            Self::Ice(msg) => TypeError::InternalInvariant { msg },
         }
     }
 }
@@ -302,10 +307,18 @@ struct Tc<'a> {
     data: &'a BTreeMap<String, DataInfo>,
     eff_ops: &'a BTreeMap<String, EffOpInfo>,
     field_res: BTreeMap<NodeId, (String, usize, usize)>,
+    unboxed_field: BTreeMap<NodeId, (usize, usize)>,
     path_res: PathRes,
     fixed: BTreeMap<NodeId, Type>,
     span_types: BTreeMap<NodeId, Type>,
     pending: Vec<(NodeId, Type)>,
+    // Each `This(e)` site, with the span of the whole expression and the element
+    // type synthesized for `e`. After inference solves every existential, the
+    // element is zonked and checked to have a non-null, single-word representation
+    // (`is_or_null_element`), so `OrNull` formed by inference is held to the same
+    // soundness rule as a written `OrNull(a)` annotation. `Null` needs no entry:
+    // it is the null word for any element.
+    or_null_sites: Vec<(Span, Type)>,
     classes: &'a BTreeMap<Sym, ClassInfo>,
     instances: &'a BTreeMap<Sym, InstInfo>,
     inst_keys: &'a InstKeys,
@@ -392,6 +405,52 @@ fn concrete_effects(ty: &Type) -> Effects {
     }
 }
 
+// The function's parameter types and inferred effect row, peeling quantifiers.
+// `None` for a non-function type (a plain value binds no row). Shares the
+// quantifier peel with `concrete_effects` but returns the whole signature, so
+// the open-tail case can be distinguished from a closed empty one.
+fn fn_sig(ty: &Type) -> Option<(&[Type], &EffRow, &Type)> {
+    let mut t = ty;
+    while let Type::Forall(_, b) | Type::RowForall(_, b) = t {
+        t = b;
+    }
+    match t {
+        Type::Fun(doms, row, ret) => Some((doms, row, ret)),
+        _ => None,
+    }
+}
+
+// Whether a `borrow`-taking function's effect row proves it cannot suspend or
+// capture across the borrowed argument. Inference generalizes even a pure
+// function to an open row (`{| e}`) so it fits any effect context, so requiring
+// a literally empty row would reject every borrow. The safe cases: the row has
+// no concrete labels (checked by the caller) and its tail is either closed, or a
+// fresh generalization variable that occurs nowhere in the function's interface
+// (neither a parameter nor the result type). A tail variable shared with a
+// parameter's row means the body forwards that higher-order argument's effects;
+// one shared with the result means it returns a computation carrying them. Both
+// can suspend, so neither is a proof of purity.
+//
+// This structural rule uses the generalized scheme because declarations do not
+// yet retain the body's principal, closed effect witness. Once that witness is
+// available, the check can consume it directly.
+fn borrow_row_is_pure(doms: &[Type], ret: &Type, row: &EffRow) -> bool {
+    match row.tail() {
+        EffRow::Empty => true,
+        EffRow::Var(v) => {
+            let mut iface_rows = BTreeSet::new();
+            for dom in doms {
+                env::collect_row_vars(dom, &mut iface_rows);
+            }
+            env::collect_row_vars(ret, &mut iface_rows);
+            !iface_rows.contains(v)
+        }
+        // An unsolved existential tail is not a generalization variable and is
+        // not a proof of purity.
+        EffRow::Exist(_) | EffRow::Extend(..) => false,
+    }
+}
+
 // A top-level constant must be effect-free: its initializer runs once at load
 // with no handler in scope. The effects are the body's principal inferred row
 // (its `konst` body is checked under a fresh ambient row whose labels are read
@@ -399,14 +458,11 @@ fn concrete_effects(ty: &Type) -> Effects {
 pub(super) fn require_pure_konst(d: &Decl<Core>, effs: &Effects) -> Result<(), TypeError> {
     if !effs.is_empty() {
         let list: Vec<String> = effs.iter().map(Sym::to_string).collect();
-        return Err(TypeError::Other {
-            span: d.body.span,
-            msg: format!(
-                "top-level constant `{}` must be effect-free; it performs {}",
-                d.name,
-                list.join(", ")
-            ),
-        });
+        return Err(ErrKind::KonstNotPure {
+            name: d.name.clone(),
+            effects: list.join(", "),
+        }
+        .at(d.body.span));
     }
     Ok(())
 }
@@ -426,25 +482,40 @@ fn finalize_fn(
     // Real under-coverage is caught downstream by `reconcile_effects` (lowered
     // ops vs the row) and the parity oracle.
     let inferred = concrete_effects(&ty);
-    if d.params.iter().any(|p| p.borrow) && !inferred.is_empty() {
-        let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
-        return Err(TypeError::Other {
-            span: d.span,
-            msg: format!(
-                "`{}` has a `borrow` parameter but is not pure; it performs {}",
-                d.name,
-                list.join(", ")
-            ),
-        });
+    if d.params.iter().any(|p| p.borrow) {
+        // The RC calling convention retains ownership of a borrowed argument
+        // across the call, so a `borrow`-taking function must be provably pure.
+        // Concrete labels are the obvious failure; an effect-polymorphic tail
+        // shared with a parameter (the body forwards a higher-order argument's
+        // effects, which can suspend) is the subtle one. A fresh generalization
+        // tail is fine, so pure functions still typecheck.
+        if !inferred.is_empty() {
+            let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
+            return Err(ErrKind::BorrowNotPure {
+                name: d.name.clone(),
+                effects: list.join(", "),
+            }
+            .at(d.span));
+        }
+        if let Some((doms, row, ret)) = fn_sig(&ty) {
+            if !borrow_row_is_pure(doms, ret, row) {
+                return Err(ErrKind::BorrowRowNotClosed {
+                    name: d.name.clone(),
+                    row: row.show(),
+                }
+                .at(d.span));
+            }
+        }
     }
     if let Some(declared) = &d.eff {
         let declared_set: BTreeSet<Sym> = declared.iter().map(|l| Sym::from(&l.name)).collect();
         for eff in &inferred {
             if !declared_set.contains(eff) {
-                return Err(TypeError::Other {
-                    span: d.body.span,
-                    msg: format!("in `{}`: effect `{eff}` not declared in annotation", d.name),
-                });
+                return Err(ErrKind::UndeclaredEffect {
+                    name: d.name.clone(),
+                    eff: eff.to_string(),
+                }
+                .at(d.body.span));
             }
         }
         // The reverse direction is sound (a pure body satisfies an effectful
@@ -493,27 +564,25 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             continue;
         }
         if d.params.iter().any(|p| p.ty.is_none()) || d.ret.is_none() {
-            return Err(TypeError::Other {
-                span: d.span,
-                msg: format!(
-                    "`{}` has a where clause and needs full parameter and return type annotations",
-                    d.name
-                ),
-            });
+            return Err(ErrKind::WhereClauseNeedsAnnotations {
+                name: d.name.clone(),
+            }
+            .at(d.span));
         }
         let mut cs = Vec::new();
         for c in &d.constraints {
             if !classes.contains_key(&Sym::from(&c.class)) {
-                return Err(TypeError::Other {
-                    span: c.span,
-                    msg: format!("unknown class {}", c.class),
-                });
+                return Err(ErrKind::UnknownClass {
+                    class: c.class.clone(),
+                }
+                .at(c.span));
             }
             cs.push((Sym::from(&c.class), env::convert_data(&c.ty)));
         }
         constrained.insert(Sym::from(&d.name), (env::fn_stub(d, &data), cs));
     }
     let field_res;
+    let unboxed_field;
     let path_res;
     let fixed;
     let span_types;
@@ -528,10 +597,12 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             data: &data,
             eff_ops: &eff_ops,
             field_res: BTreeMap::new(),
+            unboxed_field: BTreeMap::new(),
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            or_null_sites: Vec::new(),
             classes: &classes,
             instances: &instances,
             inst_keys: &inst_keys,
@@ -607,7 +678,10 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                 &classes[&Sym::from(&inst.class)],
             )?;
         }
+        // Every `This(e)` element is now zonked; hold each to the non-null rule.
+        tc.check_or_null_sites()?;
         field_res = tc.field_res;
+        unboxed_field = tc.unboxed_field;
         path_res = tc.path_res;
         fixed = tc.fixed;
         span_types = tc.span_types;
@@ -630,6 +704,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         data,
         ctors,
         field_res,
+        unboxed_field,
         path_res,
         fixed,
         span_types,
@@ -691,10 +766,12 @@ fn infer_expr_full(
         data: &checked.data,
         eff_ops: &checked.eff_ops,
         field_res: BTreeMap::new(),
+        unboxed_field: BTreeMap::new(),
         path_res: PathRes::new(),
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
         pending: Vec::new(),
+        or_null_sites: Vec::new(),
         classes: &checked.classes,
         instances: &checked.instances,
         inst_keys: &checked.inst_keys,

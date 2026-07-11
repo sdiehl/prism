@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/rankn_effect_poly.pr
 ---
 == tokens ==
-VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("runEff") LParen Ident("k") Colon Forall Ident("e") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e") RBrace RParen Colon Bang LBrace UIdent("IO") RBrace KwInt Eq Ident("apply_io") LParen Ident("k") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("runEff") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose
+VOpen Fn Ident("apply_io") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace RParen Colon KwInt Bang LBrace UIdent("IO") RBrace Eq Ident("g") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("runEff") LParen Ident("k") Colon Forall Ident("e") Dot LParen KwInt RParen Arrow KwInt Bang LBrace Bar Ident("e") RBrace RParen Colon KwInt Bang LBrace UIdent("IO") RBrace Eq Ident("apply_io") LParen Ident("k") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("runEff") LParen Lambda LParen Ident("x") RParen Arrow Ident("x") Plus Int(IntLit { value: 41, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -59,7 +59,7 @@ Program {
                         node: Var(
                             "g",
                         ),
-                        span: 341..342,
+                        span: 342..343,
                     },
                     [
                         Spanned {
@@ -69,14 +69,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 343..344,
+                            span: 344..345,
                         },
                     ],
                 ),
-                span: 341..345,
+                span: 342..346,
             },
             wheres: [],
-            span: 290..345,
+            span: 290..346,
         },
         Decl {
             name: "runEff",
@@ -124,21 +124,21 @@ Program {
                         node: Var(
                             "apply_io",
                         ),
-                        span: 407..415,
+                        span: 409..417,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "k",
                             ),
-                            span: 416..417,
+                            span: 418..419,
                         },
                     ],
                 ),
-                span: 407..418,
+                span: 409..420,
             },
             wheres: [],
-            span: 347..418,
+            span: 348..420,
         },
         Decl {
             name: "main",
@@ -152,7 +152,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 432..439,
+                        span: 434..441,
                     },
                     [
                         Spanned {
@@ -161,7 +161,7 @@ Program {
                                     node: Var(
                                         "runEff",
                                     ),
-                                    span: 440..446,
+                                    span: 442..448,
                                 },
                                 [
                                     Spanned {
@@ -181,7 +181,7 @@ Program {
                                                         node: Var(
                                                             "x",
                                                         ),
-                                                        span: 455..456,
+                                                        span: 457..458,
                                                     },
                                                     Spanned {
                                                         node: Int(
@@ -190,24 +190,24 @@ Program {
                                                                 suffix: None,
                                                             },
                                                         ),
-                                                        span: 459..461,
+                                                        span: 461..463,
                                                     },
                                                 ),
-                                                span: 455..461,
+                                                span: 457..463,
                                             },
                                         ),
-                                        span: 447..461,
+                                        span: 449..463,
                                     },
                                 ],
                             ),
-                            span: 440..462,
+                            span: 442..464,
                         },
                     ],
                 ),
-                span: 432..463,
+                span: 434..465,
             },
             wheres: [],
-            span: 420..463,
+            span: 422..465,
         },
     ],
 }
@@ -219,26 +219,47 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn apply_io(g) =
-  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+  return 1 to t@0
+  return g to t@1
+  (force t@1)(t@0)
 fn runEff(k) =
-  return k to t@2; apply_io(t@2)
+  return k to t@2
+  apply_io(t@2)
 fn main() =
-  return thunk { \x. return x to t@3; return 41 to t@4; t@3 + t@4 } to t@5; runEff(t@5) to t@6; print t@6 to t@7; print_nl
+  thunk { \x.
+    return x to t@3
+    return 41 to t@4
+    t@3 + t@4
+  } to t@5
+  runEff(t@5) to t@6
+  print t@6 to t@7
+  print_nl
 
 == fbip (rc) ==
 fn apply_io(g) =
-  return 1 to t@0; return g to t@1; (force t@1)(t@0)
+  return 1 to t@0
+  return g to t@1
+  (force t@1)(t@0)
 fn runEff(k) =
-  return k to t@2; apply_io(t@2)
+  return k to t@2
+  apply_io(t@2)
 fn main() =
-  return thunk { \x. return x to t@3; return 41 to t@4; t@3 + t@4 } to t@5; runEff(t@5) to t@6; print t@6 to t@7; drop t@7 to _; print_nl
+  thunk { \x.
+    return x to t@3
+    return 41 to t@4
+    t@3 + t@4
+  } to t@5
+  runEff(t@5) to t@6
+  print t@6 to t@7
+  drop t@7
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [934 x i8] c"scheme  prism-core-hash-v1\0Abundle  bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply_io  fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5  apply_io\0Afn      prism_main  a33b36931d0308070bc1ef2d6850e8ab385e9a94b985bc5a7e5df01063c1ab4c  main\0Afn      prism_runEff  9e371f94efced8875ccccfd10708998dc0bda5e8a783e1cfd04466b6cc5939ed  runEff\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1072 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply_io fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5 apply_io arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main a33b36931d0308070bc1ef2d6850e8ab385e9a94b985bc5a7e5df01063c1ab4c main arity 0 slots abi-word[]\0Astate prism_runEff 9e371f94efced8875ccccfd10708998dc0bda5e8a783e1cfd04466b6cc5939ed runEff arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [912 x i8] c"scheme  prism-core-hash-v1\0Abundle  bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply_io  fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5  apply_io\0Afn      prism_main  a33b36931d0308070bc1ef2d6850e8ab385e9a94b985bc5a7e5df01063c1ab4c  main\0Afn      prism_runEff  9e371f94efced8875ccccfd10708998dc0bda5e8a783e1cfd04466b6cc5939ed  runEff\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1050 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:bab6192e45293615c3e7e0cf410635e5a933d3be457bdbbea85a881f11beca9c\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply_io fb0aeaaee968f6ad31375e17db6cb879fbdea6dca42a21930d61171044d9afb5 apply_io arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main a33b36931d0308070bc1ef2d6850e8ab385e9a94b985bc5a7e5df01063c1ab4c main arity 0 slots abi-word[]\0Astate prism_runEff 9e371f94efced8875ccccfd10708998dc0bda5e8a783e1cfd04466b6cc5939ed runEff arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash1 = private constant [65 x i8] c"a33b36931d0308070bc1ef2d6850e8ab385e9a94b985bc5a7e5df01063c1ab4c\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"

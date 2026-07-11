@@ -121,20 +121,29 @@ main : () -> Unit ! {IO}
 fn mkid() =
   return thunk { \x. return x }
 fn main() =
-  return 7 to t@0; mkid() to t@1; (force t@1)(t@0) to t@2; print t@2 to t@3; print_nl
+  return 7 to t@0
+  mkid() to t@1
+  (force t@1)(t@0) to t@2
+  print t@2 to t@3
+  print_nl
 
 == fbip (rc) ==
 fn mkid() =
   return thunk { \x. return x }
 fn main() =
-  return 7 to t@0; mkid() to t@1; (force t@1)(t@0) to t@2; print t@2 to t@3; drop t@3 to _; print_nl
+  return 7 to t@0
+  mkid() to t@1
+  (force t@1)(t@0) to t@2
+  print t@2 to t@3
+  drop t@3
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [831 x i8] c"scheme  prism-core-hash-v1\0Abundle  1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  7617b9e67c2c8a9a57f70016153cc41da024c4612333b7d4c5ea5c8f5d5203a2  main\0Afn      prism_mkid  ad95512c017cd225bed6d9b47bf7e9db03ae98283d52e53f8a1cf0f01e57f950  mkid\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [922 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main 7617b9e67c2c8a9a57f70016153cc41da024c4612333b7d4c5ea5c8f5d5203a2 main arity 0 slots abi-word[]\0Astate prism_mkid ad95512c017cd225bed6d9b47bf7e9db03ae98283d52e53f8a1cf0f01e57f950 mkid arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [809 x i8] c"scheme  prism-core-hash-v1\0Abundle  1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_main  7617b9e67c2c8a9a57f70016153cc41da024c4612333b7d4c5ea5c8f5d5203a2  main\0Afn      prism_mkid  ad95512c017cd225bed6d9b47bf7e9db03ae98283d52e53f8a1cf0f01e57f950  mkid\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [900 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:1147a3e97be372cd3ec4865d77ac05717f1494e6d7bee9e97d109aa6ac65666b\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main 7617b9e67c2c8a9a57f70016153cc41da024c4612333b7d4c5ea5c8f5d5203a2 main arity 0 slots abi-word[]\0Astate prism_mkid ad95512c017cd225bed6d9b47bf7e9db03ae98283d52e53f8a1cf0f01e57f950 mkid arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol0 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash0 = private constant [65 x i8] c"7617b9e67c2c8a9a57f70016153cc41da024c4612333b7d4c5ea5c8f5d5203a2\00"
 @.kont_name0 = private constant [5 x i8] c"main\00"

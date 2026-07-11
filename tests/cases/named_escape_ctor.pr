@@ -1,11 +1,11 @@
 -- A named handler instance must not escape inside a data value. The tuple would
 -- carry a closure performing `f`'s private op out of `f`'s `with` block.
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 fn leak() : (Unit, (Unit) -> Int) =
   with f <- handler
-    ask(k) => k(5)
+    ask() resume k => k(5)
     return r => r
   ((), \(u) -> f.ask())
 

@@ -66,7 +66,9 @@ impl BuildLineage {
             .stdlib
             .as_ref()
             .map(|root| lineage_root(RootRole::Stdlib, root))
-            .ok_or_else(|| Error::Resolve("lineage: build roots do not include Std".into()))?;
+            .ok_or_else(|| {
+                Error::ResolveLineage("lineage: build roots do not include Std".into())
+            })?;
         let packages = identity
             .packages
             .iter()
@@ -109,8 +111,8 @@ impl BuildLineage {
             },
             "compiler": {
                 "identity": self.compiler.fingerprint(),
-                "rows": self.compiler.rows().into_iter().map(|(key, value)| {
-                    json!({ "key": key, "value": value })
+                "rows": self.compiler.rows().into_iter().map(|row| {
+                    json!({ "key": row.field.label(), "value": row.value })
                 }).collect::<Vec<_>>(),
             },
             "artifacts": self.artifacts.iter().map(|artifact| {
@@ -243,7 +245,7 @@ fn assemble(
 /// fails to decode.
 pub(crate) fn from_v1(value: &Value) -> Result<LineageGraph, Error> {
     if value.get("format").and_then(Value::as_str) != Some(LINEAGE_FORMAT) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "lineage: not a {LINEAGE_FORMAT} document"
         )));
     }
@@ -282,9 +284,9 @@ pub(crate) fn compiler_payload_of(identity: &ArtifactIdentity) -> CompilerPayloa
         rows: identity
             .rows()
             .into_iter()
-            .map(|(key, value)| CompilerRow {
-                key: key.to_string(),
-                value,
+            .map(|row| CompilerRow {
+                key: row.field.label().to_string(),
+                value: row.value,
             })
             .collect(),
     }
@@ -299,7 +301,7 @@ pub(crate) fn source_lineage_root(source: &NamespaceIdentity) -> LineageRoot {
         origin: None,
         artifact_kind: source.kind.to_string(),
         scheme: source.scheme.to_string(),
-        root: source.root.clone(),
+        root: source.root.clone().into_string(),
     }
 }
 
@@ -359,12 +361,13 @@ pub fn write_sidecar(artifact: &Path, lineage: &BuildLineage) -> Result<PathBuf,
 pub fn read_lineage(file: &Path) -> Result<LineageGraph, Error> {
     let path = sidecar_of(file);
     let text = fs::read_to_string(&path).map_err(Error::Io)?;
-    let value = serde_json::from_str::<Value>(&text).map_err(|e| Error::Resolve(e.to_string()))?;
+    let value =
+        serde_json::from_str::<Value>(&text).map_err(|e| Error::ResolveLineage(e.to_string()))?;
     match value.get("format").and_then(Value::as_str) {
         Some(LINEAGE_GRAPH_FORMAT) => serde_json::from_str::<LineageGraph>(&text)
-            .map_err(|e| Error::Resolve(format!("{}: {e}", path.display()))),
+            .map_err(|e| Error::ResolveLineage(format!("{}: {e}", path.display()))),
         Some(LINEAGE_FORMAT) => from_v1(&value),
-        other => Err(Error::Resolve(format!(
+        other => Err(Error::ResolveLineage(format!(
             "{} is not a lineage graph (format {})",
             path.display(),
             other.unwrap_or("<missing>")

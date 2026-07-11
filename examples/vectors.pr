@@ -49,7 +49,7 @@ instance l1 : Norm(Vec3)
 -- Euclidean length is the canonical Norm, so a bare norm(u) means the L2 norm.
 canonical Norm(Vec3) = l2
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let u = V(1.0, 2.0, 2.0)
   let v = V(3.0, 0.0, 4.0)
   println("u = {u}")

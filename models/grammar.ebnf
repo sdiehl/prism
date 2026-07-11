@@ -94,9 +94,9 @@ fundecl   ->  [ "replayable" ] [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ]
                 -- a usage row spelling exactly "@ noalloc" at the root of the
                 -- return annotation is the declaration's allocation certificate
 param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
-retann    ->  ":" "!" "{" [ label , ... ] "}" type
-           |  ":" "!" type
-           |  ":" type
+retann    ->  ":" type [ decleff ]              -- result first, e.g. `: Int ! {State}`
+decleff   ->  "!" "{" [ label , ... ] "}"       -- the declaration's effect row (closed)
+           |  "!"                                -- an explicit empty effect row
 given     ->  "given" constraint , ...
 constraint -> conid "(" type ")"
 wheres    ->  "where" "{" { varid "=" expr } "}"
@@ -244,7 +244,7 @@ fieldpat ->  varid "=" pattern  |  ".."
 handler   ->  "{" hclause , ... "}"  |  hclause { hclause }   -- braces or layout
 
 hclause   ->  "return" varid "=>" expr                 -- result transform
-           |  varid "(" [ varid , ... ] "," varid ")" "=>" expr  -- op, last arg is resume
+           |  varid "(" [ varid , ... ] ")" "resume" varid "=>" expr  -- multishot op: continuation after `resume`
            |  "fun" varid "(" [ varid , ... ] ")" "=>" expr      -- tail-resumptive sugar
            |  "final" "ctl" varid "(" [ varid , ... ] ")" "=>" expr  -- non-resumable
            |  "val" varid "=" expr                     -- install-time constant

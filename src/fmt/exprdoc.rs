@@ -32,11 +32,10 @@ use marginalia::pretty::{
     softline, space, text, Doc,
 };
 
+use super::breaks::wants_break;
+use super::call::{call_shape, callee_parens, dot_recv_parens, is_with_call, CallShape};
 use super::ops::{binop_prec, needs_left_paren, needs_right_paren, neg_operand_needs_paren};
-use super::{
-    call_shape, callee_parens, dot_recv_parens, is_with_call, wants_break, CallShape, Fmt, Mode,
-    INDENT, LINE_WIDTH,
-};
+use super::{Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::kw;
 use crate::syntax::ast::{BinOp, Expr, S};
 
@@ -156,7 +155,7 @@ impl Fmt<'_> {
             ])),
             Expr::Index(recv, key) => {
                 let recv_d = paren_doc(callee_parens(&recv.node), self.expr_doc(recv, base)?);
-                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                let key_s = self.index_key_inline(key)?;
                 Some(concat([recv_d, text(format!("[{key_s}]"))]))
             }
             // A record nested in a value position (a call argument, an operand)

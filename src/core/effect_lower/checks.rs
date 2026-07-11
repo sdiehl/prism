@@ -71,7 +71,7 @@ fn check_tails(fname: &str, c: &Comp, arities: &BTreeMap<&str, usize>) -> Result
             if g.as_str() != ENTRY_POINT && arities.get(g.as_str()) == Some(&args.len()) => {}
         Comp::App(..) | Comp::Error(_) => {}
         other => {
-            return Err(TypeError::Ice {
+            return Err(TypeError::InternalInvariant {
                 msg: format!(
                     "monadification: `{fname}` tail is not Eff-shaped: {}",
                     other.kind()

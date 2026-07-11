@@ -7,7 +7,7 @@ input_file: tests/cases/coeffect_conflict.pr
 VOpen Fn Ident("f") LParen Ident("x") Colon KwInt At LBrace Ident("once") Comma Ident("many") RBrace RParen Colon KwInt Eq Ident("x") VClose
 
 == parse ==
-Parse Error: usage facts `once` and `many` contradict each other (same axis)
+[E7100] Parse Error: usage facts `once` and `many` contradict each other (same axis)
    ╭─[ <source>:3:10 ]
    │
  3 │ fn f(x : Int @ {once, many}) : Int = x

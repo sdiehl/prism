@@ -1,6 +1,6 @@
 effect State
-  ctl get(Unit) : Int
-  ctl put(Int) : Unit
+  get() : Int
+  put(Int) : Unit
 
 -- Algebraic State by parameter passing.
 --
@@ -12,22 +12,22 @@ effect State
 -- row is inferred and discharged at the handler, so the same ops could be
 -- reinterpreted (logging, bounding) without touching counter.
 
-fn tick() : !{State} Int =
-  let n = get(())
+fn tick() : Int ! {State} =
+  let n = get()
   put(n + 1)
   n
 
-fn counter() : !{State} Int =
+fn counter() : Int ! {State} =
   tick()
   tick()
   tick()
-  get(())
+  get()
 
 fn run_counter(init) =
   let f =
     handle counter() with
-      get(u, k) => \(s) -> k(s)(s)
-      put(s2, k) => \(_s) -> k(())(s2)
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
       return r => \(_s) -> r
   f(init)
 

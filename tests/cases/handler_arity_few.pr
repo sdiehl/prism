@@ -1,0 +1,11 @@
+-- A handler clause binds exactly the operation's declared parameter count
+-- besides the continuation. `pair` declares two, this clause binds one, so it
+-- is rejected: the too-few direction, the mirror of `handler_arity.pr`.
+effect Pair
+  pair(Int, Int) : Int
+
+fn main() =
+  println(handle pair(1, 2) with {
+    pair(a) resume k => k(a),
+    return r => r
+  })

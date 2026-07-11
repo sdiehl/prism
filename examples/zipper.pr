@@ -38,12 +38,12 @@ fn set_leaf(z : Zipper, n : Int) : Zipper =
     Zip(Leaf(_), c) => Zip(Leaf(n), c)
     _ => z
 
-fn to_top(z : Zipper) : ! Tree =
+fn to_top(z : Zipper) : Tree =
   match z of
     Zip(t, Top) => t
     _ => to_top(go_up(z))
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let t = Branch(Branch(Leaf(1), Leaf(2)), Branch(Leaf(3), Leaf(4)))
   -- descend right then left to the Leaf(3), edit it, then zip back up
   let z = set_leaf(go_left(go_right(Zip(t, Top))), 99)

@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/alias_unknown.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Tick") VOpen Ctl Ident("tick") LParen KwUnit RParen Colon KwInt VClose VSemi Alias UIdent("App") Eq LBrace UIdent("Tick") Comma UIdent("Missing") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+VOpen Effect UIdent("Tick") VOpen Ident("tick") LParen KwUnit RParen Colon KwInt VClose VSemi Alias UIdent("App") Eq LBrace UIdent("Tick") Comma UIdent("Missing") RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..34,
+            span: 0..30,
         },
     ],
     errors: [],
@@ -40,7 +40,7 @@ Program {
                     args: [],
                 },
             ],
-            span: 36..63,
+            span: 32..59,
         },
     ],
     classes: [],
@@ -58,7 +58,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 77..84,
+                        span: 73..80,
                     },
                     [
                         Spanned {
@@ -68,20 +68,20 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 85..86,
+                            span: 81..82,
                         },
                     ],
                 ),
-                span: 77..87,
+                span: 73..83,
             },
             wheres: [],
-            span: 65..87,
+            span: 61..83,
         },
     ],
 }
 
 == types ==
-Type Error: unknown effect `Missing` in alias `App`
+[E6005] Type Error: unknown effect `Missing` in alias `App`
    ╭─[ <source>:4:1 ]
    │
  4 │ alias App = {Tick, Missing}

@@ -45,10 +45,10 @@ import Wire (..)
 -- function, not a fresh lambda at the perform site: a literal lambda there severs
 -- that tie).
 pub effect IncrRaw
-  ctl incr_input(Bytes) : String
-  ctl incr_get(String) : Bytes
-  ctl incr_set(String, Bytes) : Unit
-  ctl incr_memo(() -> Bytes ! {IncrRaw | e}) : String
+  incr_input(Bytes) : String
+  incr_get(String) : Bytes
+  incr_set(String, Bytes) : Unit
+  incr_memo(() -> Bytes ! {IncrRaw | e}) : String
 
 -- Compose an encoder after a thunk, preserving the thunk's effect row so the
 -- erased `() -> Bytes` still carries `{IncrRaw | e}` out to the perform site.
@@ -263,13 +263,13 @@ fn do_get(s : St(e), key : String) : (St(e), Bytes) =
 fn run_thunk(s : St(e), action : () -> a ! {IncrRaw | e}) : (St(e), a) =
   let f =
     handle action() with
-      incr_input(bytes, k) =>
+      incr_input(bytes) resume k =>
         \(st) -> let (st2, key) = reg_input(st, bytes) in k(key)(st2)
-      incr_memo(th, k) =>
+      incr_memo(th) resume k =>
         \(st) -> let (st2, key) = reg_memo(st, th) in k(key)(st2)
-      incr_set(key, bytes, k) =>
+      incr_set(key, bytes) resume k =>
         \(st) -> let st2 = do_set(st_close_prefix(st), key, bytes) in k(())(st2)
-      incr_get(key, k) =>
+      incr_get(key) resume k =>
         \(st) -> let (st2, v) = do_get(st_close_prefix(st), key) in k(v)(st2)
       return x => \(st) -> (st, x)
   f(s)
@@ -449,7 +449,7 @@ fn snap_decode(body : String) : Map(String, Warm) =
 
 fn snap_try(body) =
   handle snap_decode(body) with
-    final ctl fail() => map_empty
+    never fail() => map_empty
     return m => m
 
 -- The header pins the format name, version, caller tag, and a `blake3` digest of
@@ -914,16 +914,16 @@ fn t_run_thunk(
 ) : (TSt(e), a) =
   let f =
     handle action() with
-      incr_input(bytes, k) =>
+      incr_input(bytes) resume k =>
         \(st) -> let (st2, key) = t_reg_input(st, bytes) in k(key)(st2)
-      incr_memo(th, k) =>
+      incr_memo(th) resume k =>
         \(st) -> let (st2, key) = t_reg_memo(st, th) in k(key)(st2)
-      incr_set(key, bytes, k) =>
+      incr_set(key, bytes) resume k =>
         \(st) -> let st2 = t_do_set(t_close_prefix(st), key, bytes) in k(())(st2)
-      incr_get(key, k) =>
+      incr_get(key) resume k =>
         \(st) -> let (st2, v) = t_do_get(t_close_prefix(st), key) in k(v)(st2)
-      out_println(x, k) => \(st) -> k(())(t_capture(st, FPrintln(x)))
-      out_print(x, k) => \(st) -> k(())(t_capture(st, FPrint(x)))
+      out_println(x) resume k => \(st) -> k(())(t_capture(st, FPrintln(x)))
+      out_print(x) resume k => \(st) -> k(())(t_capture(st, FPrint(x)))
       return x => \(st) -> (st, x)
   f(s)
 
@@ -1056,7 +1056,7 @@ fn t_snap_decode(body : String) : Map(String, TWarm) =
 
 fn t_snap_try(body) =
   handle t_snap_decode(body) with
-    final ctl fail() => map_empty
+    never fail() => map_empty
     return m => m
 
 fn t_snap_header(tag, body) =

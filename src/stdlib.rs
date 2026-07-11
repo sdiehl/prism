@@ -25,6 +25,12 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Monad", include_str!("../lib/std/Data/Monad.pr")),
     ("Data.Checked", include_str!("../lib/std/Data/Checked.pr")),
     ("Data.Vec", include_str!("../lib/std/Data/Vec.pr")),
+    ("Data.Tensor", include_str!("../lib/std/Data/Tensor.pr")),
+    (
+        "Data.FlatArray",
+        include_str!("../lib/std/Data/FlatArray.pr"),
+    ),
+    ("Teleport", include_str!("../lib/std/Teleport.pr")),
     ("Replay", include_str!("../lib/std/Replay.pr")),
     ("Concurrent", include_str!("../lib/std/Concurrent.pr")),
     ("Quickcheck", include_str!("../lib/std/Quickcheck.pr")),

@@ -6,14 +6,14 @@
 -- | True when the result is `Ok`.
 pub fn is_ok(r) =
   match r of
-    Ok(x) => true
-    Err(e) => false
+    Ok(_x) => true
+    Err(_e) => false
 
 -- | True when the result is `Err`.
 pub fn is_err(r) =
   match r of
-    Ok(x) => false
-    Err(e) => true
+    Ok(_x) => false
+    Err(_e) => true
 
 -- | Apply `f` to the `Ok` value, leaving an `Err` untouched.
 pub fn map_result(f, r) =
@@ -32,7 +32,7 @@ pub fn and_then_result(f, r) =
 pub fn result_or(d, r) =
   match r of
     Ok(x) => x
-    Err(e) => d
+    Err(_e) => d
 
 -- | Convert an `Option` to a `Result`, using `err` in place of `None`.
 pub fn ok_of_option(err, o) =
@@ -44,4 +44,4 @@ pub fn ok_of_option(err, o) =
 pub fn option_of_result(r) =
   match r of
     Ok(x) => Some(x)
-    Err(e) => None
+    Err(_e) => None

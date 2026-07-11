@@ -102,6 +102,17 @@ extern void *mi_calloc(size_t, size_t);
  * -copy discipline apply to it unchanged. */
 #define PRISM_BUF_TAG 0x42554600L
 
+/* A typed buffer cell { rc, tag=PRISM_TBUF_TAG, arity, len, words... }: a
+ * contiguous region of raw 8-byte words (a double or fixed-width integer by bit
+ * pattern) held inline after a length word, the flat storage under the tensor
+ * library. arity is the payload word count (the length word plus one word per
+ * element); the element count lives in the first payload word. Like strings,
+ * bignums, and byte buffers, the tag tells prism_rc_dec and prism_reuse_token not
+ * to recurse into the payload (raw words are not child cells), so Perceus
+ * reference counting, the leak balance, and the rc==1 in-place / shared-copy
+ * discipline apply to it unchanged. */
+#define PRISM_TBUF_TAG 0x54425546L
+
 /* Unicode scalar-value bounds. The interpreter's show_char is char::from_u32,
  * which admits U+0000..U+D7FF and U+E000..U+10FFFF, rejecting the UTF-16
  * surrogate range and anything past the last code point; a rejected value shows
@@ -109,6 +120,46 @@ extern void *mi_calloc(size_t, size_t);
 #define PRISM_CP_MAX 0x10FFFFL
 #define PRISM_SURROGATE_LO 0xD800L
 #define PRISM_SURROGATE_HI 0xDFFFL
+
+/* The size in bytes of one heap word (a long, per the LP64 assertion below). */
+#define PRISM_WORD_BYTES 8
+
+/* Checked length and capacity arithmetic. C signed overflow is undefined
+ * behavior, and an overflowed size handed to an allocator under-allocates and
+ * corrupts the heap, so every length, capacity, and byte-count computation
+ * that could leave the long domain goes through these helpers; the policy on
+ * overflow matches prism_alloc's, an immediate abort rather than a value the
+ * callee cannot repair. */
+static inline long prism_ckd_ladd(long a, long b) {
+    long r;
+    if (__builtin_add_overflow(a, b, &r)) abort();
+    return r;
+}
+
+static inline long prism_ckd_lmul(long a, long b) {
+    long r;
+    if (__builtin_mul_overflow(a, b, &r)) abort();
+    return r;
+}
+
+/* A nonnegative long as a size_t; a negative length or count is a caller bug. */
+static inline size_t prism_ckd_size(long n) {
+    if (n < 0) abort();
+    return (size_t)n;
+}
+
+/* A word count as a malloc byte count, sign and multiply both checked. */
+static inline size_t prism_ckd_words_bytes(long n_words) {
+    size_t bytes;
+    if (__builtin_mul_overflow(prism_ckd_size(n_words), (size_t)PRISM_WORD_BYTES, &bytes)) abort();
+    return bytes;
+}
+
+/* Doubling capacity growth over a module's floor: the floor when below it,
+ * otherwise twice the current capacity, checked. */
+static inline long prism_ckd_grow(long cap, long floor_cap) {
+    return cap < floor_cap ? floor_cap : prism_ckd_lmul(cap, 2);
+}
 
 _Static_assert(sizeof(void *) == 8 && sizeof(long) == 8, "prism runtime assumes LP64");
 

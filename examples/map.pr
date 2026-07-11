@@ -4,7 +4,7 @@
 -- tree is generic over any orderable key (Int and String here) with no
 -- comparator threaded by hand. Set(k) is just Map(k, Unit).
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let m = map_from_list([(3, 30), (1, 10), (2, 20), (5, 50), (4, 40)])
   println(map_size(m))
   println(unwrap_or(0, map_lookup(4, m)))

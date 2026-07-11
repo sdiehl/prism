@@ -16,7 +16,7 @@ pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
     if out.status.success() {
         Ok(out.stdout)
     } else {
-        Err(Error::Codegen(format!(
+        Err(Error::CodegenBackend(format!(
             "attest: {} exited with {}",
             bin.display(),
             out.status
@@ -36,7 +36,7 @@ pub(super) fn cc_link(
     let libm_archive = write_libm_archive(&rt_dir)?;
     let extra = env::var("PRISM_CC_FLAGS").unwrap_or_default();
     let macos_min = env!("PRISM_MACOSX_DEPLOYMENT_TARGET");
-    let olevel = format!("-O{}", cfg.backend_opt);
+    let olevel = format!("-O{}", cfg.backend_opt.as_str());
     let macos_min_flag =
         (!macos_min.is_empty()).then(|| format!("-mmacosx-version-min={macos_min}"));
     let rt_checks: &[&str] = if cfg.flags.rt_checks {
@@ -66,7 +66,7 @@ pub(super) fn cc_link(
         .arg("-o")
         .arg(out)
         .output()
-        .map_err(|e| Error::Codegen(format!("running {cc}: {e} (is clang installed?)")));
+        .map_err(|e| Error::CodegenBackend(format!("running {cc}: {e} (is clang installed?)")));
     let _ = fs::remove_dir_all(&rt_dir);
     let cc_out = res?;
     if cc_out.status.success() {
@@ -85,7 +85,7 @@ pub(super) fn ir_failure(tool: &str, ir: &Path, stderr: &[u8]) -> Error {
     let _ = fs::copy(ir, &kept);
     let text = String::from_utf8_lossy(stderr);
     let head: Vec<&str> = text.lines().take(8).collect();
-    Error::Codegen(format!(
+    Error::CodegenBackend(format!(
         "{tool} rejected generated IR, kept at {}:\n{}",
         kept.display(),
         head.join("\n")

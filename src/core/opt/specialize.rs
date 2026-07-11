@@ -9,10 +9,10 @@
 //! effect is that typeclass dispatch on a known instance becomes a direct,
 //! inlinable call. Parity-safe by construction and gated by the parity oracle.
 //!
-//! Scope (first slice): instances whose dictionary builder is nullary
-//! (context-free, e.g. `Show Int`, `Eq Int`, a user instance with no
+//! Specialization applies to instances whose dictionary builder is nullary
+//! (context-free, e.g. `Show Int`, `Eq Int`, or a user instance with no
 //! superclass). An instance with a superclass context (`Ord` needs `Eq`) takes
-//! its context dictionaries as builder parameters and is left generic for now.
+//! its context dictionaries as builder parameters and remains generic.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -307,15 +307,12 @@ fn dce(c: &Comp, builders: &BTreeMap<Sym, Vec<Value>>) -> Comp {
             body: Box::new(dce(body, builders)),
             return_var: *return_var,
             return_body: return_body.as_ref().map(|b| Box::new(dce(b, builders))),
-            ops: ops
-                .iter()
-                .map(|o| HandleOp {
-                    name: o.name,
-                    params: o.params.clone(),
-                    resume: o.resume,
-                    body: dce(&o.body, builders),
-                })
-                .collect(),
+            ops: ops.rebuild(|o| HandleOp {
+                name: o.name,
+                params: o.params.clone(),
+                resume: o.resume,
+                body: dce(&o.body, builders),
+            }),
         },
         Comp::Mask(es, b) => Comp::Mask(es.clone(), Box::new(dce(b, builders))),
         Comp::WithReuse { token, freed, body } => Comp::WithReuse {
@@ -439,20 +436,17 @@ impl Rewrite for Subst<'_> {
                         return_body.as_ref().map(|b| Box::new(self.comp(b, s))),
                     ),
                 };
-                let ops = ops
-                    .iter()
-                    .map(|o| {
-                        let mut bound = o.params.clone();
-                        bound.push(o.resume);
-                        let (ren, s2) = self.enter(s, &bound);
-                        HandleOp {
-                            name: o.name,
-                            params: o.params.iter().map(|p| ren1(&ren, p)).collect(),
-                            resume: ren1(&ren, &o.resume),
-                            body: self.comp(&o.body, &s2),
-                        }
-                    })
-                    .collect();
+                let ops = ops.rebuild(|o| {
+                    let mut bound = o.params.clone();
+                    bound.push(o.resume);
+                    let (ren, s2) = self.enter(s, &bound);
+                    HandleOp {
+                        name: o.name,
+                        params: o.params.iter().map(|p| ren1(&ren, p)).collect(),
+                        resume: ren1(&ren, &o.resume),
+                        body: self.comp(&o.body, &s2),
+                    }
+                });
                 Comp::Handle {
                     body,
                     return_var: rv,

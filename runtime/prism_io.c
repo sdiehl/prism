@@ -150,17 +150,21 @@ long prism_prim_rand(void) {
  * ops. Both are recorded trace entries (the interpreter observes each), so a
  * time-reading program replays byte-identically. The monotonic origin is a fixed
  * but unspecified point, so only differences of monotonic reads are meaningful;
- * the wall reading is nanoseconds since the Unix epoch (UTC). */
+ * the wall reading is nanoseconds since the Unix epoch (UTC). The scale to
+ * nanoseconds is checked: a reading past the 63-bit horizon (year 2262 for the
+ * wall clock) aborts rather than committing signed-overflow UB. */
+#define PRISM_NS_PER_SEC 1000000000L
+
 long prism_prim_wall_now(void) {
     struct timespec ts = {0, 0};
     (void)clock_gettime(CLOCK_REALTIME, &ts);
-    return (long)ts.tv_sec * 1000000000L + (long)ts.tv_nsec;
+    return prism_ckd_ladd(prism_ckd_lmul((long)ts.tv_sec, PRISM_NS_PER_SEC), (long)ts.tv_nsec);
 }
 
 long prism_prim_mono_now(void) {
     struct timespec ts = {0, 0};
     (void)clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long)ts.tv_sec * 1000000000L + (long)ts.tv_nsec;
+    return prism_ckd_ladd(prism_ckd_lmul((long)ts.tv_sec, PRISM_NS_PER_SEC), (long)ts.tv_nsec);
 }
 
 /* OS surface. getenv/arg return a fresh counted string cell (empty when

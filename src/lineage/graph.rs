@@ -54,7 +54,7 @@ const BACKEND_LLVM: &str = "llvm";
 const BACKEND_MLIR: &str = "mlir";
 // Node-kind discriminants, matching the `rename_all = "kebab-case"` serde tags on
 // `NodeKind`. Defined once here and echoed by `NodeKind::tag`; the round-trip is
-// pinned by a unit test so a rename cannot silently drift.
+// guarded by a unit test so a rename cannot silently drift.
 const NODE_REQUEST: &str = "request";
 const NODE_SOURCE_ROOT: &str = "source-root";
 const NODE_STDLIB_ROOT: &str = "stdlib-root";
@@ -64,7 +64,7 @@ const NODE_ARTIFACT: &str = "artifact";
 const NODE_DIAGNOSTIC: &str = "diagnostic";
 const NODE_CACHE_SUMMARY: &str = "cache-summary";
 // Run-lineage node kinds. Same family, same one-home discipline as the build
-// kinds above; the round-trip against the serde discriminants is pinned by the
+// kinds above; the round-trip against the serde discriminants is guarded by the
 // same unit test.
 const NODE_TRACE: &str = "trace";
 const NODE_ARGV: &str = "argv";
@@ -74,7 +74,7 @@ const NODE_STDOUT: &str = "stdout";
 const NODE_FILE_WRITE: &str = "file-write";
 // World-lineage node kinds: the timeline export the PRISM WORLD resident emits.
 // Same family, same one-home discipline; the round-trip against the serde
-// discriminants is pinned by the same unit test. The web emitter mirrors these
+// discriminants is guarded by the same unit test. The web emitter mirrors these
 // exact spellings (web/src/prism-world.ts names this file as their one home).
 const NODE_WORLD_LAW: &str = "world-law";
 const NODE_WORLD_STATE: &str = "world-state";
@@ -85,7 +85,7 @@ const NODE_WORLD_FORK: &str = "world-fork";
 const NODE_DOCS_GENERATOR: &str = "docs-generator";
 const NODE_DOCTEST: &str = "doctest";
 // Write-mode discriminants, matching the `rename_all = "kebab-case"` tags on
-// `WriteMode` and echoed by `WriteMode::tag`; the same unit test pins the round-trip.
+// `WriteMode` and echoed by `WriteMode::tag`; the same unit test checks the round-trip.
 const WRITE_MODE_WRITE: &str = "write";
 const WRITE_MODE_APPEND: &str = "append";
 const WRITE_MODE_REMOVE: &str = "remove";
@@ -659,7 +659,7 @@ impl LineageGraph {
     /// # Errors
     /// Fails only if JSON serialization fails.
     pub fn to_json_string(&self) -> Result<String, Error> {
-        serde_json::to_string_pretty(self).map_err(|e| Error::Resolve(e.to_string()))
+        serde_json::to_string_pretty(self).map_err(|e| Error::ResolveLineage(e.to_string()))
     }
 
     /// Lift a build-lineage-v1 sidecar value into the typed graph.
@@ -692,9 +692,9 @@ impl LineageGraph {
             .filter(|node| matches!(node.kind, NodeKind::Request(_)));
         let first = requests
             .next()
-            .ok_or_else(|| Error::Resolve("lineage: graph has no request node".into()))?;
+            .ok_or_else(|| Error::ResolveLineage("lineage: graph has no request node".into()))?;
         if requests.next().is_some() {
-            return Err(Error::Resolve(
+            return Err(Error::ResolveLineage(
                 "lineage: graph has more than one request node".into(),
             ));
         }
@@ -791,11 +791,11 @@ impl LineageGraph {
         let mut matches = self.nodes.iter().filter(|node| {
             matches!(node.kind, NodeKind::WorldState(_)) && node.id.0.starts_with(id)
         });
-        let first = matches
-            .next()
-            .ok_or_else(|| Error::Resolve(format!("lineage why: no world state named `{id}`")))?;
+        let first = matches.next().ok_or_else(|| {
+            Error::ResolveLineage(format!("lineage why: no world state named `{id}`"))
+        })?;
         if matches.next().is_some() {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "lineage why: `{id}` is an ambiguous state prefix"
             )));
         }
@@ -874,7 +874,7 @@ pub(crate) fn decode_field<T: for<'de> Deserialize<'de>>(
     field: &str,
 ) -> Result<T, Error> {
     serde_json::from_value(value[field].clone())
-        .map_err(|e| Error::Resolve(format!("lineage: field `{field}`: {e}")))
+        .map_err(|e| Error::ResolveLineage(format!("lineage: field `{field}`: {e}")))
 }
 
 // Merge nodes that share a digest, pin a run-to-run order over both nodes and
@@ -982,7 +982,7 @@ pub(crate) fn recompute_digest(scheme: &str, bytes: &[u8]) -> Result<String, Err
     match scheme {
         ARTIFACT_DIGEST_SCHEME => Ok(blake3::hash(bytes).to_hex().to_string()),
         EVENT_HASH_SCHEME => Ok(provenance::sha256_hex(bytes)),
-        other => Err(Error::Resolve(format!(
+        other => Err(Error::ResolveLineage(format!(
             "lineage verify: unknown digest scheme `{other}`"
         ))),
     }

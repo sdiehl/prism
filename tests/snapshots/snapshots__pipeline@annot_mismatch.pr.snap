@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/annot_mismatch.pr
 ---
 == tokens ==
@@ -56,7 +56,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: type mismatch: expected String, got Int
+[E1998] Type Error: in `main`: type mismatch: expected String, got Int
    ╭─[ <source>:1:22 ]
    │
  1 │ fn main() = println((1 : String))

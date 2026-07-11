@@ -1,5 +1,5 @@
 effect Out
-  ctl out(Int) : Unit
+  out(Int) : Unit
 
 class Rank(a)
   rank : (a) -> Int
@@ -14,15 +14,15 @@ instance rankBool : Rank(Bool)
     else
       0
 
-fn out_rank(x : a) : !{Out} Unit given Rank(a) = out(rank(x))
+fn out_rank(x : a) : Unit ! {Out} given Rank(a) = out(rank(x))
 
-fn work() : !{Out} Int =
+fn work() : Int ! {Out} =
   out_rank(4)
   out_rank(true)
   rank(7)
 
 fn main() =
   println(handle work() with {
-    out(n, k) => let _ = println(n) in k(()),
+    out(n) resume k => let _ = println(n) in k(()),
     return r => r
   })

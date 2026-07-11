@@ -13,7 +13,7 @@ use std::path::Path;
 
 use crate::core::fbip::borrow_sigs;
 use crate::core::{
-    captures, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse, CoreFn, DepGraph,
+    captures, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse, CoreFn, DepGraph, Digest,
     HASH_SCHEME,
 };
 use crate::error::Error;
@@ -31,15 +31,16 @@ use crate::codegen::emit_mlir;
 use crate::codegen::{emit_llvm_with_native_kont_table, native_kont_state_map};
 
 #[cfg(feature = "native")]
-use super::compiled;
+use super::build::compiled;
 use super::identity::namespace_root_of;
 #[cfg(feature = "native")]
 use super::identity::{
     native_kont_table_for_with_rows, native_kont_table_of, NativeKontIdentityRows,
 };
+use super::report::types_section;
 use super::{
     check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
-    strip_prelude, types_section, Config, WireKind, NAMESPACE_FORMAT,
+    strip_prelude, Config, WireKind, NAMESPACE_FORMAT,
 };
 
 /// Format tag shared by all three usage-summary projections (`usage-summary`,
@@ -49,8 +50,8 @@ use super::{
 const USAGE_SUMMARY_FORMAT: &str = "prism-usage-summary-v1";
 // The canonical cell tokens the usage summary reports for a definition, shared by
 // every projection so the three can never disagree. `noalloc`/`discipline` come
-// from these fixed sets; the TSV bytes are pinned by tests, so the values are
-// load-bearing and defined once here.
+// from these fixed sets; the TSV bytes are guarded by tests, so the values are
+// part of the output contract and defined once here.
 const USAGE_NOALLOC_YES: &str = "yes";
 const USAGE_NOALLOC_NO: &str = "no";
 const USAGE_DISCIPLINE_NONE: &str = "-";
@@ -132,7 +133,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             }
             #[cfg(not(feature = "native"))]
             {
-                Err(Error::Codegen(
+                Err(Error::CodegenDump(
                     "dump native-kont-table requires the native feature".to_string(),
                 ))
             }
@@ -151,7 +152,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             }
             #[cfg(not(feature = "native"))]
             {
-                Err(Error::Codegen(
+                Err(Error::CodegenDump(
                     "dump native-kont-state-map requires the native feature".to_string(),
                 ))
             }
@@ -231,7 +232,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                     let mut deps: Vec<&str> = graph
                         .direct_deps(**name)
                         .iter()
-                        .filter_map(|d| hashes.get(d).map(String::as_str))
+                        .filter_map(|d| hashes.get(d).map(Digest::as_str))
                         .collect();
                     deps.sort_unstable();
                     serde_json::json!({
@@ -247,7 +248,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             // a Merkle fold over the sorted `name -> content-hash` entries (the
             // same fold `stdlib_hash` uses), so the digest moves under any content
             // change and is checkable before the body is read.
-            let contract = namespace_root_of(&hashes);
+            let contract = namespace_root_of(&program, &checked, &core)?;
             let doc = serde_json::json!({
                 "envelope": {
                     "scheme": HASH_SCHEME,
@@ -374,14 +375,14 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 &native_kont_table,
                 cfg.flags.native_kont_frames,
             )
-            .map_err(Error::Codegen)
+            .map_err(Error::CodegenDump)
         }
         #[cfg(feature = "mlir")]
         "mlir" => {
             let (_, core, ctors) = compiled(src, roots, cfg)?;
-            emit_mlir(&core, &ctors).map_err(Error::Codegen)
+            emit_mlir(&core, &ctors).map_err(Error::CodegenDump)
         }
-        other => Err(Error::Codegen(format!("unknown phase {other}"))),
+        other => Err(Error::CodegenDump(format!("unknown phase {other}"))),
     }
 }
 
@@ -503,7 +504,7 @@ fn usage_rows(
 // The TSV projection behind `dump usage-summary`: one tab-separated line per
 // definition. The header names the format and the whole-program lowering `tier`;
 // tier is a whole-program cost decision, so it heads the table rather than
-// repeating on every line. These bytes are pinned by tests; do not reshape them.
+// repeating on every line. These bytes are guarded by tests; do not reshape them.
 fn usage_summary_tsv(rows: &[UsageRow], tier: &str) -> String {
     let mut out = String::new();
     writeln!(out, "# {USAGE_SUMMARY_FORMAT}\ttier={tier}").unwrap();
@@ -519,7 +520,7 @@ fn usage_summary_tsv(rows: &[UsageRow], tier: &str) -> String {
     out
 }
 
-// The markdown projection behind `dump usage-summary-md`: an H1 title line carrying
+// The markdown projection behind `dump usage-summary-md`: a title line carrying
 // the format id and tier, then a pipe table. Cells are unpadded and single-spaced
 // so the bytes are trivially stable, and every cell escapes `|` (an effect row may
 // carry a `{X | e}` tail) so the table never breaks.

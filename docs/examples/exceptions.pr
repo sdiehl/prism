@@ -1,56 +1,54 @@
--- Exceptions tour, four idioms from fatal to fully recoverable.
+-- Failure, four idioms from a defaulted lookup to a custom throw, over the
+-- everyday shape: reaching into chains of things that can fail.
 --
--- 1. Built-in Exn row: `error(code)` aborts the process, uncatchable. Any
---    caller carries `!{Exn}`. checked_div sees only safe input here.
--- 2. `?` propagation over Result: `half(n)?` unwraps Ok and short-circuits
---    the chain on the first Err. report matches the outcome at the boundary.
--- 3. Recovery is a plain match on Ok/Err (or result_or for a default).
--- 4. Custom exception effect via a `final ctl` clause: abort never resumes,
---    the continuation is discarded, and the clause's value becomes the
---    result. Cheap throws, no Result plumbing in the throwing code.
+-- 1. Indexing performs `Fail`, not `Option`: `users[i]` and `scores[j]` each
+--    may miss, the misses flow through the chain as one row, and `?? d`
+--    supplies the default at the end. TypeScript's `a?.[i] ?? d`, with the
+--    partiality in the type instead of a null.
+-- 2. `?` propagates over `Result`: each step unwraps `Ok` and short-circuits
+--    the function on the first `Err`, exactly Rust's `?`.
+-- 3. The boundary is a plain match on `Ok`/`Err`.
+-- 4. A custom non-resumable effect: `abort` never resumes, the continuation is
+--    discarded, and the clause's value becomes the result. Cheap throws, with
+--    no Result plumbing inside the throwing code.
 --
 -- Expected output:
---   42
---   3
---   odd
---   3
+--   71
 --   0
+--   ada scored 92
+--   gus has no scores
+--   no user zoe
 --   pass
---   fail
 --   invalid: negative
---   invalid: too big
 
-fn checked_div(n, d) : !{Exn} Int =
-  if d == 0 then
-    error(1)
-  else
-    n / d
+type User = MkUser { name: String, scores: List(Int) }
 
-fn half(n) =
-  if even(n) then
-    Ok(n / 2)
-  else
-    Err("odd")
+fn lookup_user(users : List(User), want : String) : Result(User, String) =
+  match find(\(u) -> u.name == want, users) of
+    Some(u) => Ok(u)
+    None => Err(concat("no user ", want))
 
-fn quarter(n) =
-  let h = half(n)?
-  let q = half(h)?
-  Ok(q)
+fn top_score(u : User) : Result(Int, String) =
+  match u.scores of
+    Nil => Err(concat(u.name, " has no scores"))
+    Cons(s, _) => Ok(s)
 
-fn report(r : Result(Int, String)) =
+-- Two failable steps, one `?` each: the first Err returns from `headline`
+-- immediately, so the happy path reads straight down.
+fn headline(users : List(User), want : String) : Result(String, String) =
+  let u = lookup_user(users, want)?
+  let s = top_score(u)?
+  Ok(concat(u.name, concat(" scored ", show_int(s))))
+
+fn report(r : Result(String, String)) =
   match r of
-    Ok(v) => println(v)
+    Ok(line) => println(line)
     Err(e) => println(e)
 
-fn quarter_or_zero(n) =
-  match quarter(n) of
-    Ok(v) => v
-    Err(_) => 0
-
 effect Abort
-  ctl abort(String) : Unit
+  abort(String) : Unit
 
-fn grade(n) : !{Abort} String =
+fn grade(n : Int) : String ! {Abort} =
   if n < 0 then
     abort("negative")
   if n > 100 then
@@ -60,18 +58,24 @@ fn grade(n) : !{Abort} String =
   else
     "fail"
 
-fn safe_grade(n) =
+fn safe_grade(n : Int) : String =
   handle grade(n) with
-    final ctl abort(msg) => concat("invalid: ", msg)
+    never abort(msg) => concat("invalid: ", msg)
     return r => r
 
 fn main() =
-  println(checked_div(84, 2))
-  report(quarter(12))
-  report(quarter(6))
-  println(quarter_or_zero(12))
-  println(quarter_or_zero(6))
+  let users = [
+      MkUser { name = "ada", scores = [92, 71] },
+      MkUser { name = "gus", scores = [] },
+    ]
+  -- 1: a chain of failable lookups, defaulted once at the end. The second
+  -- line misses at the first hop and the whole chain yields the default.
+  println((users[0].scores)[1] ?? 0)
+  println((users[5].scores)[0] ?? 0)
+  -- 2 and 3: `?`-propagated Results, matched once at the boundary.
+  report(headline(users, "ada"))
+  report(headline(users, "gus"))
+  report(headline(users, "zoe"))
+  -- 4: the custom throw.
   println(safe_grade(72))
-  println(safe_grade(40))
   println(safe_grade(0 - 5))
-  println(safe_grade(200))

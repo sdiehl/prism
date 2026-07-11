@@ -1,8 +1,27 @@
 use std::collections::BTreeSet;
+use std::ops::Deref;
 
 use super::{Entry, Env, Tc, TcErr};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label, Type};
+
+/// A `Type` with every solved metavariable already resolved (see `Tc::zonk`).
+///
+/// Scheme construction in `generalize_zonked` relies on this: it enumerates the
+/// free existentials and rigid variables of its input and renames them
+/// structurally, which is only correct once no unsolved metavariable stands in
+/// for a type it would otherwise have to look through. Making "already zonked"
+/// a type-level fact means that work-doer cannot be handed a raw, unresolved
+/// `Type`. Constructed only at the zonk boundary (`Tc::zonk`); `Deref` gives
+/// read access to the wrapped `Type`.
+pub(super) struct Zonked(pub Type);
+
+impl Deref for Zonked {
+    type Target = Type;
+    fn deref(&self) -> &Type {
+        &self.0
+    }
+}
 
 impl Tc<'_> {
     // Per-declaration reset keeps the pinned `var` state existentials live;
@@ -234,6 +253,13 @@ impl Tc<'_> {
         }
     }
 
+    /// The zonk boundary: resolve every solved metavariable in `t` and package
+    /// the result as a `Zonked`, the one witness that this `Type` may be treated
+    /// as fully resolved. The only constructor of `Zonked`.
+    pub(super) fn zonk(&self, t: &Type) -> Zonked {
+        Zonked(self.apply(t))
+    }
+
     pub(super) fn apply(&self, t: &Type) -> Type {
         match t {
             Type::Exist(v) => self
@@ -250,6 +276,13 @@ impl Tc<'_> {
             Type::App(h, a) => Type::app(self.apply(h), self.apply(a)),
             Type::Con(n, ps) => Type::Con(*n, ps.iter().map(|p| self.apply(p)).collect()),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.apply(t)).collect()),
+            Type::UnboxedTuple(ts) => {
+                Type::UnboxedTuple(ts.iter().map(|t| self.apply(t)).collect())
+            }
+            Type::UnboxedRecord(fs) => {
+                Type::UnboxedRecord(fs.iter().map(|(n, t)| (*n, self.apply(t))).collect())
+            }
+            Type::OrNull(a) => Type::OrNull(Box::new(self.apply(a))),
             Type::Row(r) => Type::Row(self.apply_row(r)),
             other => other.clone(),
         }
@@ -379,7 +412,15 @@ impl Tc<'_> {
     }
 
     pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
-        let t = self.apply(ty);
+        let t = self.zonk(ty);
+        self.generalize_zonked(env, &t)
+    }
+
+    // The scheme builder proper. It only accepts a `Zonked`, so the free-variable
+    // enumeration and structural renaming below can never be handed a type whose
+    // meaning still hides behind an unsolved metavariable.
+    fn generalize_zonked(&self, env: &Env, zt: &Zonked) -> (Type, Renames) {
+        let t: &Type = zt;
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
         // One zonk per env binding feeds the existential, row-existential, and
@@ -412,7 +453,7 @@ impl Tc<'_> {
         // polymorphic function has no existentials, so its variables are named
         // `a, b, ...` left to right, exactly as the all-existential path named them.
         let mut rigid_seen = Vec::new();
-        free_type_vars_ordered(&t, &mut rigid_seen);
+        free_type_vars_ordered(t, &mut rigid_seen);
         let mut rigids = Vec::new();
         for v in rigid_seen.into_iter().filter(|v| !env_tvars.contains(v)) {
             let name = var_name(names.len());
@@ -427,7 +468,7 @@ impl Tc<'_> {
             exists: mapping,
             rigids,
         };
-        let mut out = renames.apply(&t);
+        let mut out = renames.apply(t);
         let mut row_exs = BTreeSet::new();
         out.free_exist_row(&mut row_exs);
         // `env_row_exs` was already accumulated in the single env walk above.
@@ -548,6 +589,18 @@ fn avoid_forall_capture(t: &Type, target_names: &BTreeSet<Sym>) -> Type {
                 .map(|item| avoid_forall_capture(item, target_names))
                 .collect(),
         ),
+        Type::UnboxedTuple(items) => Type::UnboxedTuple(
+            items
+                .iter()
+                .map(|item| avoid_forall_capture(item, target_names))
+                .collect(),
+        ),
+        Type::UnboxedRecord(fs) => Type::UnboxedRecord(
+            fs.iter()
+                .map(|(n, t)| (*n, avoid_forall_capture(t, target_names)))
+                .collect(),
+        ),
+        Type::OrNull(a) => Type::OrNull(Box::new(avoid_forall_capture(a, target_names))),
         Type::Row(row) => Type::Row(row.map_args(&|arg| avoid_forall_capture(arg, target_names))),
         other => other.clone(),
     }
@@ -580,15 +633,21 @@ fn collect_type_names(t: &Type, out: &mut BTreeSet<Sym>) {
             row.for_each_arg(&mut |arg| collect_type_names(arg, out));
             collect_type_names(ret, out);
         }
-        Type::Con(_, params) | Type::Tuple(params) => {
+        Type::Con(_, params) | Type::Tuple(params) | Type::UnboxedTuple(params) => {
             for param in params {
                 collect_type_names(param, out);
+            }
+        }
+        Type::UnboxedRecord(fs) => {
+            for (_, t) in fs {
+                collect_type_names(t, out);
             }
         }
         Type::App(head, arg) => {
             collect_type_names(head, out);
             collect_type_names(arg, out);
         }
+        Type::OrNull(a) => collect_type_names(a, out),
         Type::Row(row) => row.for_each_arg(&mut |arg| collect_type_names(arg, out)),
         _ => {}
     }
@@ -616,15 +675,21 @@ fn free_type_vars_ordered(t: &Type, out: &mut Vec<Sym>) {
             free_type_vars_ordered(r, out);
             row.for_each_arg(&mut |a| free_type_vars_ordered(a, out));
         }
-        Type::Con(_, ps) | Type::Tuple(ps) => {
+        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
             for p in ps {
                 free_type_vars_ordered(p, out);
+            }
+        }
+        Type::UnboxedRecord(fs) => {
+            for (_, t) in fs {
+                free_type_vars_ordered(t, out);
             }
         }
         Type::App(h, a) => {
             free_type_vars_ordered(h, out);
             free_type_vars_ordered(a, out);
         }
+        Type::OrNull(a) => free_type_vars_ordered(a, out),
         Type::Row(r) => r.for_each_arg(&mut |a| free_type_vars_ordered(a, out)),
         _ => {}
     }

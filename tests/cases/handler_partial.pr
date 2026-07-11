@@ -1,0 +1,13 @@
+-- A handler must implement every operation of each effect it handles. Row
+-- discharge is effect-granular: an op-granular subset would remove the whole
+-- effect from the body's row while the unimplemented operation escapes past
+-- its own handler. Partial handlers with a residual row are a future design.
+effect E
+  one() : Int
+  two() : Int
+
+fn main() =
+  println(handle one() + two() with {
+    one() resume k => k(1),
+    return r => r
+  })

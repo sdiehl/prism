@@ -11,23 +11,25 @@ mod json;
 pub mod opt;
 mod pretty;
 pub mod shape;
+pub mod simd;
 pub mod tailrec;
 pub mod traverse;
 
 pub use cbpv::{
-    reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, ElaboratedCore, HandleOp, IoOp,
-    LoweredCore, NegLane, Value,
+    reachable_fns, CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, ElaboratedCore, HandleOp,
+    IoOp, LoweredCore, NegLane, Value,
 };
 pub use effect_lower::lower as lower_effects;
 pub use effect_lower::strategy as effect_strategy;
-pub use effect_lower::{OpGrades, EFFECT_TIERS};
+pub use effect_lower::{EffectStrategy, OpGrades, EFFECT_TIERS};
 pub use elaborate::{builtin_arities, elaborate, elaborate_expr, konst_fns};
 pub use fbip::{
     balanced, check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Fips,
 };
 pub use graph::DepGraph;
+pub(crate) use hash::hex as hash_str;
 pub use hash::{
-    hash_group, hash_program, root as hash_root, scc_groups, shallow_hashes, Hashes,
+    hash_group, hash_program, root as hash_root, scc_groups, shallow_hashes, Digest, Hashes,
     HASH_PREFIX_HEX, SCHEME as HASH_SCHEME,
 };
 pub use json::core_to_json;

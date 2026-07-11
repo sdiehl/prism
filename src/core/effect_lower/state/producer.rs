@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::super::evidence::{resume_set, strip_resume};
 use super::super::flow::{self, Loc};
-use super::super::Lowerer;
+use super::super::{Lowerer, StateAnswerMode};
 use crate::core::cbpv::{Comp, Value};
 use crate::core::fv;
 use crate::sym::Sym;
@@ -73,14 +73,14 @@ impl Lowerer {
                         // mode the threaded call yields the accumulator, not the
                         // semantic value, so fall back rather than miscompile. In
                         // writer mode the result is genuinely unit (kept as today).
-                        None if self.state_mode => return None,
+                        None if self.state_answer == StateAnswerMode::Producer => return None,
                         None => Comp::Bind(Box::new(Comp::Return(Value::Unit)), *x, Box::new(tn)),
                     }
                 } else {
                     tn
                 };
                 // In early mode the producer stops once a stake yields SDone.
-                let tn = if self.early {
+                let tn = if self.early.short_circuits() {
                     self.step_guard(st2, tn)
                 } else {
                     tn
@@ -185,7 +185,7 @@ impl Lowerer {
         }
     }
 
-    // Thread a forwarding handle `handle s(()) with fun op(x) => <re-emit>`. The
+    // Thread a forwarding handle `handle s(()) with once op(x) => <re-emit>`. The
     // clause is tail-resumptive (its `resume` carries the re-emit's result), so
     // stripping resume leaves a body that re-emits to the outer evidence;
     // threading that body builds the source's evidence `\(x.., acc) -> acc'`,
@@ -208,7 +208,7 @@ impl Lowerer {
         else {
             return None;
         };
-        let [clause] = ops.as_slice() else {
+        let [clause] = ops.arms() else {
             return None;
         };
         if !evs.contains_key(&clause.name) || !is_id_return(*return_var, return_body.as_deref()) {

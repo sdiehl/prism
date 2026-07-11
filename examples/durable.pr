@@ -37,7 +37,7 @@ fn draw(total, stop, done, acc) =
   if done > total then
     acc
   else
-    let r = rng_rand(())
+    let r = rng_rand()
     let acc2 = acc + r
     crash_if(stop, done)
     println("step {done}: running sum mod 97 = {mod(acc2, 97)}")

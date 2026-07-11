@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/pattern_no_catchall.pr
 ---
 == tokens ==
@@ -266,7 +266,7 @@ Program {
 }
 
 == types ==
-Type Error: match through view pattern `Diag` is never exhaustive: add a catchall arm
+[E6040] Type Error: match through view pattern `Diag` is never exhaustive: add a catchall arm
    ╭─[ <source>:8:5 ]
    │
  8 │     Diag(n) => n

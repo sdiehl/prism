@@ -28,7 +28,7 @@ fn hash_ints(xs : List(Int)) : U64 =
     Nil => to_u64(1469598103934665603)
     Cons(b, rest) => xorshift(u64_xor(hash_ints(rest), to_u64(b)))
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let a = to_i64(12)
   let b = to_i64(10)
   println(int_of_i64(i64_and(a, b)))

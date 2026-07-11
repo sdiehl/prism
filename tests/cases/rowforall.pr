@@ -1,5 +1,5 @@
-fn apply_io(g : (Int) -> Int ! {IO}) : !{IO} Int = g(1)
+fn apply_io(g : (Int) -> Int ! {IO}) : Int ! {IO} = g(1)
 
-fn use_pure(h : forall e. (Int) -> Int ! {| e}) : !{IO} Int = apply_io(h)
+fn use_pure(h : forall e. (Int) -> Int ! {| e}) : Int ! {IO} = apply_io(h)
 
 fn main() = println(use_pure(\(x) -> x + 41))

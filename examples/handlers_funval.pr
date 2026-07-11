@@ -1,6 +1,6 @@
--- `fun` and `val` handler clauses, pure desugaring sugar.
+-- `once` and `val` handler clauses, pure desugaring sugar.
 --
--- `fun op(x) => e` is a tail-resumptive clause, identical to
+-- `once op(x) => e` is a tail-resumptive clause, identical to
 -- `op(x, k) => k(e)`, resuming exactly once with e. `val v = e` is an
 -- install-time constant: e runs once when the handler installs (its effects
 -- land on the installer, not the handled block) and every v() returns it.
@@ -12,24 +12,24 @@
 --   70      (tag 0 + width(3) + width(4), each * 10)
 
 effect App
-  ctl name() : String
-  ctl tag() : Int
-  ctl width(Int) : Int
-  ctl log(String) : Unit
+  name() : String
+  tag() : Int
+  width(Int) : Int
+  log(String) : Unit
 
-fn render() : !{App} Int =
+fn render() : Int ! {App} =
   log(name())
   log("ready")
   tag() + width(3) + width(4)
 
-fn run_app() : !{IO} Int =
+fn run_app() : Int ! {IO} =
   handle render() with
     val name = "prism"
     val tag =
       println(999)
       0
-    fun width(w) => w * 10
-    log(s, k) =>
+    once width(w) => w * 10
+    log(s) resume k =>
       println(s)
       k(())
     return r => r

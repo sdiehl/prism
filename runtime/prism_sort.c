@@ -36,13 +36,16 @@ static int prism_sort_cmp(long kind, long a, long b) {
 }
 
 /* Stable bottom-up merge sort of `src` (length n), ping-ponging with `buf`;
- * returns whichever buffer holds the sorted result. */
-static long *prism_msort(long *src, long *buf, long n, long kind) {
-    for (long w = 1; w < n; w *= 2) {
-        for (long i = 0; i < n; i += 2 * w) {
-            long mid = i + w < n ? i + w : n;
-            long hi = i + 2 * w < n ? i + 2 * w : n;
-            long a = i, b = mid, k = i;
+ * returns whichever buffer holds the sorted result. The width and index
+ * arithmetic runs in size_t: a list of n cells occupies at least 4n words, so
+ * n (and hence 2*w) sits far below SIZE_MAX and the unsigned doubling cannot
+ * wrap, where the previous signed forms were undefined at the same extremes. */
+static long *prism_msort(long *src, long *buf, size_t n, long kind) {
+    for (size_t w = 1; w < n; w *= 2) {
+        for (size_t i = 0; i < n; i += 2 * w) {
+            size_t mid = i + w < n ? i + w : n;
+            size_t hi = i + 2 * w < n ? i + 2 * w : n;
+            size_t a = i, b = mid, k = i;
             while (a < mid && b < hi)
                 buf[k++] = prism_sort_cmp(kind, src[b], src[a]) < 0 ? src[b++] : src[a++];
             while (a < mid) buf[k++] = src[a++];
@@ -69,23 +72,23 @@ static unsigned long prism_sort_key(long kind, long h) {
 
 /* Stable LSD radix sort (eight byte passes) of `heads` by parallel `keys`. Eight
  * passes is even, so the sorted result lands back in `heads`/`keys`. */
-static void prism_radix(long *heads, unsigned long *keys, long n) {
-    long *th = malloc((size_t)n * sizeof(long));
-    unsigned long *tk = malloc((size_t)n * sizeof(unsigned long));
+static void prism_radix(long *heads, unsigned long *keys, size_t n) {
+    long *th = malloc(n * sizeof(long));
+    unsigned long *tk = malloc(n * sizeof(unsigned long));
     if (!th || !tk) abort();
     long *sh = heads, *dh = th;
     unsigned long *sk = keys, *dk = tk;
     for (int shift = 0; shift < 64; shift += 8) {
-        long count[256] = {0};
-        for (long i = 0; i < n; i++) count[(sk[i] >> shift) & 0xff]++;
-        long sum = 0;
+        size_t count[256] = {0};
+        for (size_t i = 0; i < n; i++) count[(sk[i] >> shift) & 0xff]++;
+        size_t sum = 0;
         for (int b = 0; b < 256; b++) {
-            long c = count[b];
+            size_t c = count[b];
             count[b] = sum;
             sum += c;
         }
-        for (long i = 0; i < n; i++) {
-            long pos = count[(sk[i] >> shift) & 0xff]++;
+        for (size_t i = 0; i < n; i++) {
+            size_t pos = count[(sk[i] >> shift) & 0xff]++;
             dh[pos] = sh[i];
             dk[pos] = sk[i];
         }
@@ -111,15 +114,19 @@ static void prism_radix(long *heads, unsigned long *keys, long n) {
  * the input spine, so no constructor layout is baked in here. */
 long prism_sort_prim(long kind, long list) {
     kind >>= 1; /* untag the small-int kind */
-    long n = 0;
+    /* The spine length counts in size_t: a list of n cells occupies at least
+     * 4n words, so the count sits far below SIZE_MAX and cannot wrap where a
+     * signed counter would be undefined; it also feeds mallocs directly. */
+    size_t n = 0;
     for (long q = list; !(q & 1) && q && ((long *)q)[PRISM_ARITY_W] == 2;
          q = ((long *)q)[PRISM_HDR_WORDS + 1])
         n++;
 
-    long *cells = n ? malloc((size_t)n * sizeof(long)) : NULL;
-    long *heads = n ? malloc((size_t)n * sizeof(long)) : NULL;
+    long *cells = n ? malloc(n * sizeof(long)) : NULL;
+    long *heads = n ? malloc(n * sizeof(long)) : NULL;
     if (n && (!cells || !heads)) abort();
-    long cons_tag = 0, i = 0, p = list, unique = 1;
+    long cons_tag = 0, p = list, unique = 1;
+    size_t i = 0;
     while (!(p & 1) && p && ((long *)p)[PRISM_ARITY_W] == 2) {
         long *cell = (long *)p;
         if (i == 0) cons_tag = cell[PRISM_TAG_W];
@@ -133,15 +140,15 @@ long prism_sort_prim(long kind, long list) {
 
     if (n > 1) {
         if (kind == 0) {
-            long *buf = malloc((size_t)n * sizeof(long));
+            long *buf = malloc(n * sizeof(long));
             if (!buf) abort();
             long *res = prism_msort(heads, buf, n, kind);
-            if (res != heads) memcpy(heads, res, (size_t)n * sizeof(long));
+            if (res != heads) memcpy(heads, res, n * sizeof(long));
             free(buf);
         } else {
-            unsigned long *keys = malloc((size_t)n * sizeof(unsigned long));
+            unsigned long *keys = malloc(n * sizeof(unsigned long));
             if (!keys) abort();
-            for (long j = 0; j < n; j++) keys[j] = prism_sort_key(kind, heads[j]);
+            for (size_t j = 0; j < n; j++) keys[j] = prism_sort_key(kind, heads[j]);
             prism_radix(heads, keys, n);
             free(keys);
         }
@@ -149,14 +156,14 @@ long prism_sort_prim(long kind, long list) {
 
     long ret;
     if (unique) {
-        for (long j = 0; j < n; j++) ((long *)cells[j])[PRISM_HDR_WORDS + 0] = heads[j];
+        for (size_t j = 0; j < n; j++) ((long *)cells[j])[PRISM_HDR_WORDS + 0] = heads[j];
         prism_rc_inc(list);
         ret = list;
     } else {
         long *nil = prism_alloc(0);
         nil[PRISM_TAG_W] = nil_tag;
         long acc = (long)nil;
-        for (long j = n - 1; j >= 0; j--) {
+        for (size_t j = n; j-- > 0;) {
             prism_rc_inc(heads[j]);
             long *c = prism_alloc(2);
             c[PRISM_TAG_W] = cons_tag;

@@ -20,7 +20,7 @@
 --
 -- Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all
 -- its descendants; each is stopped at its next suspension point (`yield`,
--- `await`, `send`, `recv`), never mid-step, and unwinds through its `final ctl`
+-- `await`, `send`, `recv`), never mid-step, and unwinds through its `never`
 -- finalizers so every resource is released exactly once. Wrap a resource with
 -- `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's
 -- awaiters observe it through `try_await` (which yields `Was_Cancelled` rather
@@ -46,16 +46,16 @@ import Data.List (append)
 -- bottom return `b`); `run_async` absorbs the whole effect, so none of the cancel
 -- machinery surfaces in a fiber's row.
 pub effect Async(a)
-  ctl fork(() -> a ! {Async(a) | e}) : Fiber
-  ctl poll_yield(Unit) : Signal
-  ctl poll_await(Fiber) : Wake(a)
-  ctl cancel(Fiber) : Unit
-  ctl channel(Unit) : Chan
-  ctl bounded(Int) : Chan
-  ctl poll_send(Chan, a) : Signal
-  ctl poll_recv(Chan) : Wake(a)
-  ctl kill(Unit) : b
-  ctl vanished(Unit) : b
+  fork(() -> a ! {Async(a) | e}) : Fiber
+  poll_yield() : Signal
+  poll_await(Fiber) : Wake(a)
+  cancel(Fiber) : Unit
+  channel() : Chan
+  bounded(Int) : Chan
+  poll_send(Chan, a) : Signal
+  poll_recv(Chan) : Wake(a)
+  never kill() : b
+  never vanished() : b
 
 -- | A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
 pub type Fiber = Fiber(Int)
@@ -78,34 +78,34 @@ pub type Outcome(a) = Completed(a) | Was_Cancelled
 
 -- | Reschedule the current fiber. A cooperative yield point; also a cancellation
 -- point (a cancelled fiber unwinds here instead of resuming).
-pub fn yield(u : Unit) : !{Async(a)} Unit =
-  match poll_yield(()) of
+pub fn yield(_u : Unit) : Unit ! {Async(a)} =
+  match poll_yield() of
     Go => ()
-    Stop => kill(())
+    Stop => kill()
 
 -- | Block until fiber `f` finishes, returning its result. If `f` was cancelled,
 -- this raises the in-scheduler `vanished` signal (observe it with `try_await`);
 -- if the waiting fiber is itself cancelled, it unwinds here.
-pub fn await(f : Fiber) : !{Async(a)} a =
+pub fn await(f : Fiber) : a ! {Async(a)} =
   match poll_await(f) of
     Arrived(v) => v
-    Gone => vanished(())
-    Halt => kill(())
+    Gone => vanished()
+    Halt => kill()
 
 -- | Send `v` on channel `c`. On a bounded channel a full buffer parks the sender
 -- until a receiver drains it; a cancellation delivered while parked unwinds here.
-pub fn send(c : Chan, v : a) : !{Async(a)} Unit =
+pub fn send(c : Chan, v : a) : Unit ! {Async(a)} =
   match poll_send(c, v) of
     Go => ()
-    Stop => kill(())
+    Stop => kill()
 
 -- | Receive a value from channel `c`, parking until one is available. A
 -- cancellation delivered while parked unwinds here.
-pub fn recv(c : Chan) : !{Async(a)} a =
+pub fn recv(c : Chan) : a ! {Async(a)} =
   match poll_recv(c) of
     Arrived(v) => v
-    Gone => kill(())
-    Halt => kill(())
+    Gone => kill()
+    Halt => kill()
 
 -- | Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup`
 -- once before the cancellation propagates outward. This is a forwarding handler:
@@ -117,18 +117,18 @@ pub fn on_cancel(
   body : () -> r ! {Async(a) | e}
 ) : r =
   handle body() with
-    fork(child, k) => k(fork(child))
-    poll_yield(u, k) => k(poll_yield(()))
-    poll_await(f, k) => k(poll_await(f))
-    cancel(f, k) => k(cancel(f))
-    channel(u, k) => k(channel(()))
-    bounded(n, k) => k(bounded(n))
-    poll_send(c, v, k) => k(poll_send(c, v))
-    poll_recv(c, k) => k(poll_recv(c))
-    final ctl vanished(u) => vanished(())
-    final ctl kill(u) =>
+    fork(child) resume k => k(fork(child))
+    poll_yield() resume k => k(poll_yield())
+    poll_await(f) resume k => k(poll_await(f))
+    cancel(f) resume k => k(cancel(f))
+    channel() resume k => k(channel())
+    bounded(n) resume k => k(bounded(n))
+    poll_send(c, v) resume k => k(poll_send(c, v))
+    poll_recv(c) resume k => k(poll_recv(c))
+    never vanished() => vanished()
+    never kill() =>
       cleanup()
-      kill(())
+      kill()
     return r => r
 
 -- | Await fiber `f`, observing cancellation as a value instead of a signal:
@@ -137,16 +137,16 @@ pub fn on_cancel(
 -- `vanished` signal `await` raises for a cancelled target.
 pub fn try_await(f : Fiber) : Outcome(a) =
   handle Completed(await(f)) with
-    fork(child, k) => k(fork(child))
-    poll_yield(u, k) => k(poll_yield(()))
-    poll_await(g, k) => k(poll_await(g))
-    cancel(g, k) => k(cancel(g))
-    channel(u, k) => k(channel(()))
-    bounded(n, k) => k(bounded(n))
-    poll_send(c, v, k) => k(poll_send(c, v))
-    poll_recv(c, k) => k(poll_recv(c))
-    final ctl kill(u) => kill(())
-    final ctl vanished(u) => Was_Cancelled
+    fork(child) resume k => k(fork(child))
+    poll_yield() resume k => k(poll_yield())
+    poll_await(g) resume k => k(poll_await(g))
+    cancel(g) resume k => k(cancel(g))
+    channel() resume k => k(channel())
+    bounded(n) resume k => k(bounded(n))
+    poll_send(c, v) resume k => k(poll_send(c, v))
+    poll_recv(c) resume k => k(poll_recv(c))
+    never kill() => kill()
+    never vanished() => Was_Cancelled
     return r => r
 
 -- One reified step of a fiber, over the fiber effect row `e`. The captured
@@ -165,30 +165,30 @@ type Cmd(a, e : Row)
   | Finished(a)
 
 -- Run a fiber body to its next effect, reifying that effect as a command. The
--- three `final ctl` clauses catch the fiber's terminal control signals when they
+-- three `never` clauses catch the fiber's terminal control signals when they
 -- reach its top: `kill`/`vanished` (a completed cancellation unwind) and an
 -- unhandled `fail()` (a fiber failure, which makes the nursery fail-fast).
 fn step(body : () -> a ! {Async(a) | e}) : Cmd(a, e) =
   handle body() with
-    fork(child, k) => Forked(k, child)
-    poll_yield(u, k) => Yielded(k)
-    poll_await(f, k) =>
+    fork(child) resume k => Forked(k, child)
+    poll_yield() resume k => Yielded(k)
+    poll_await(f) resume k =>
       match f of
         Fiber(fid) => Awaited(fid, k)
-    cancel(f, k) =>
+    cancel(f) resume k =>
       match f of
         Fiber(fid) => Cancelling(fid, k)
-    channel(u, k) => Opened(k)
-    bounded(cap, k) => OpenedCap(cap, k)
-    poll_send(c, v, k) =>
+    channel() resume k => Opened(k)
+    bounded(cap) resume k => OpenedCap(cap, k)
+    poll_send(c, v) resume k =>
       match c of
         Chan(cid) => Sent(cid, v, k)
-    poll_recv(c, k) =>
+    poll_recv(c) resume k =>
       match c of
         Chan(cid) => Recving(cid, k)
-    final ctl kill(u) => Died
-    final ctl vanished(u) => Died
-    final ctl fail() => Failed
+    never kill() => Died
+    never vanished() => Died
+    never fail() => Failed
     return r => Finished(r)
 
 -- A runnable fiber: its id plus two resume thunks. `go` resumes it normally;
@@ -720,10 +720,10 @@ pub fn scope(tasks : List(() -> a ! {Async(a) | e})) : List(a) =
 -- `run_clock` serves every op from the virtual counter (deterministic tests);
 -- `Time.run_clock_real` serves `wall_now`/`mono_now` from the recorded OS clock.
 pub effect Clock
-  ctl now(Unit) : Int
-  ctl sleep(Int) : Unit
-  ctl wall_now(Unit) : Int
-  ctl mono_now(Unit) : Int
+  now() : Int
+  sleep(Int) : Unit
+  wall_now() : Int
+  mono_now() : Int
 
 -- | Run `action` against a logical clock starting at 0, returning its result.
 -- `now()` reads the current time; `sleep(d)` advances it by `d`. Time is a pure
@@ -732,9 +732,9 @@ pub effect Clock
 pub fn run_clock(action : () -> a ! {Clock | e}) : a =
   let g =
     handle action() with
-      now(u, k) => \(t) -> k(t)(t)
-      sleep(d, k) => \(t) -> k(())(t + d)
-      wall_now(u, k) => \(t) -> k(t)(t)
-      mono_now(u, k) => \(t) -> k(t)(t)
-      return r => \(t) -> r
+      now() resume k => \(t) -> k(t)(t)
+      sleep(d) resume k => \(t) -> k(())(t + d)
+      wall_now() resume k => \(t) -> k(t)(t)
+      mono_now() resume k => \(t) -> k(t)(t)
+      return r => \(_t) -> r
   g(0)

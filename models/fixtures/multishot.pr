@@ -1,8 +1,8 @@
 effect Coin
-  ctl coin(Unit) : Bool
+  coin() : Bool
 
-fn prog() : !{Coin} Int =
-  let x = coin(())
+fn prog() : Int ! {Coin} =
+  let x = coin()
   if x then
     1
   else
@@ -10,5 +10,5 @@ fn prog() : !{Coin} Int =
 
 fn main() : Int =
   handle prog() with
-    coin(u, k) => k(true) + k(false)
+    coin() resume k => k(true) + k(false)
     return r => r

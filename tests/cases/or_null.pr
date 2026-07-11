@@ -1,0 +1,16 @@
+-- `OrNull(a)` is a wired-in non-allocating nullable: `Null` is the empty word and
+-- `This(v)` carries a present `a`. Its element type must be non-null and
+-- single-word (a heap type or tagged scalar), so `Null` can never collide with a
+-- present value. It lowers to the ordinary tagged-constructor machinery, so the
+-- interpreter and native backends agree.
+fn find(hit : Bool) : OrNull(Int) =
+  match hit of
+    true => This(7)
+    false => Null
+
+fn unwrap_or(o : OrNull(Int), d : Int) : Int =
+  match o of
+    Null => d
+    This(n) => n
+
+fn main() : Int = unwrap_or(find(true), 0) + unwrap_or(find(false), 100)

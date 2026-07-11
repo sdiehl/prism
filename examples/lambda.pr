@@ -6,7 +6,7 @@
 -- evaluates the body with the argument pushed onto the closure's own env.
 --
 -- A malformed term (an index past the end of env, or applying something that is
--- not a closure) SIGNALS the Scope effect. Its handler is a `final ctl`: it
+-- not a closure) SIGNALS the Scope effect. Its handler is a `never`: it
 -- drops the continuation and aborts to a fixed message, so failure escapes the
 -- recursion instead of threading an error up through every return.
 --
@@ -20,14 +20,14 @@ type Term = Var(Int) | Lam(Term) | App(Term, Term)
 type Val = Clo(Term, List(Val))
 
 effect Scope
-  ctl bad(Int) : Val
+  bad(Int) : Val
 
-fn lookup(env, i) : !{Scope} Val =
+fn lookup(env, i) : Val ! {Scope} =
   match nth(i, env) of
     Some(v) => v
     None => bad(i)
 
-fn eval(env, t) : !{Scope} Val =
+fn eval(env, t) : Val ! {Scope} =
   match t of
     Var(i) => lookup(env, i)
     Lam(b) => Clo(b, env)
@@ -44,7 +44,7 @@ fn describe(v) =
 
 fn run(t) =
   handle describe(eval(Nil, t)) with
-    final ctl bad(_) => "oops"
+    never bad(_) => "oops"
     return r => r
 
 fn main() =

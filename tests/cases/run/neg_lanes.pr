@@ -2,13 +2,13 @@
 -- boundary values. The whole program must produce byte-identical output on the
 -- interpreter and both native backends.
 
-fn negi(x) : ! Int = -x
+fn negi(x) : Int = -x
 
-fn negf(x) : ! Float = -x
+fn negf(x) : Float = -x
 
-fn negw(x) : ! I64 = -x
+fn negw(x) : I64 = -x
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   -- Int lane: exact bignum negation.
   println(-5)
   println(negi(7))

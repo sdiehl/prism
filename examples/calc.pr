@@ -6,7 +6,7 @@
 --
 -- Input fixture (calc.in): + 5, * 3, - 1, q  ->  5, 15, 14, 14.
 
-fn step(acc, op, n) : ! Int =
+fn step(acc, op, n) : Int =
   if str_eq(op, "+") then
     acc + n
   elif str_eq(op, "-") then
@@ -18,7 +18,7 @@ fn step(acc, op, n) : ! Int =
   else
     acc
 
-fn repl(acc) : !{IO, Console} Int =
+fn repl(acc) : Int ! {IO, Console} =
   let line = read_line()
   if str_eq(line, "q") || str_eq(line, "") then
     println(acc)
@@ -30,6 +30,6 @@ fn repl(acc) : !{IO, Console} Int =
     println(acc2)
     repl(acc2)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   repl(0)
   ()

@@ -1,14 +1,14 @@
 effect KvV1
-  ctl get_v1(Int) : Int
-  ctl put_v1(Int, Int) : Unit
+  get_v1(Int) : Int
+  put_v1(Int, Int) : Unit
 
 effect KvV2
-  ctl get_v2(Int) : Option(Int)
-  ctl put_v2(Int, Int) : Unit
+  get_v2(Int) : Option(Int)
+  put_v2(Int, Int) : Unit
 
 effect KvV3
-  ctl get_v3(Int) : Option(Int)
-  ctl put_v3(Int, Int, Int) : Unit
+  get_v3(Int) : Option(Int)
+  put_v3(Int, Int, Int) : Unit
 
 -- Protocols evolve through handlers, the way frozen formats evolve through
 -- converters. An effect signature is a versioned wire protocol and a handler is
@@ -28,8 +28,8 @@ fn absent_v1() : Int = 0 - 1
 fn serve_v2(action) =
   let f =
     handle action() with
-      get_v2(key, k) => \(m) -> k(map_lookup(key, m))(m)
-      put_v2(key, value, k) => \(m) -> k(())(map_insert(key, value, m))
+      get_v2(key) resume k => \(m) -> k(map_lookup(key, m))(m)
+      put_v2(key, value) resume k => \(m) -> k(())(map_insert(key, value, m))
       return r => \(_m) -> r
   f(map_empty)
 
@@ -38,8 +38,9 @@ fn serve_v2(action) =
 fn serve_v3(action) =
   let f =
     handle action() with
-      get_v3(key, k) => \(m) -> k(map_lookup(key, m))(m)
-      put_v3(key, value, ttl, k) => \(m) -> k(())(map_insert(key, value, m))
+      get_v3(key) resume k => \(m) -> k(map_lookup(key, m))(m)
+      put_v3(key, value, ttl) resume k =>
+        \(m) -> k(())(map_insert(key, value, m))
       return r => \(_m) -> r
   f(map_empty)
 
@@ -47,11 +48,11 @@ fn serve_v3(action) =
 -- everything V2 (the whole ambient rest-of-row) forwards out untouched.
 fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) =
   handle action() with
-    get_v1(key, k) =>
+    get_v1(key) resume k =>
       match get_v2(key) of
         Some(v) => k(v)
         None => k(absent_v1())
-    put_v1(key, value, k) =>
+    put_v1(key, value) resume k =>
       put_v2(key, value)
       k(())
     return r => r
@@ -59,14 +60,14 @@ fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) =
 -- Rung two: V2 in terms of V3. put gains a ttl; V2's permanence is ttl 0.
 fn adapt_v2_to_v3(action : () -> a ! {KvV2 | e}) =
   handle action() with
-    get_v2(key, k) => k(get_v3(key))
-    put_v2(key, value, k) =>
+    get_v2(key) resume k => k(get_v3(key))
+    put_v2(key, value) resume k =>
       put_v3(key, value, 0)
       k(())
     return r => r
 
 -- Old client, written once against V1. It never changes again.
-fn client_v1() : !{KvV1} Int =
+fn client_v1() : Int ! {KvV1} =
   put_v1(1, 100)
   put_v1(2, 200)
   let a = get_v1(1)
@@ -74,7 +75,7 @@ fn client_v1() : !{KvV1} Int =
   a + b
 
 -- The same behaviour a programmer would write natively against V2.
-fn client_v2() : !{KvV2} Int =
+fn client_v2() : Int ! {KvV2} =
   put_v2(1, 100)
   put_v2(2, 200)
   let a =

@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::escape::{escapes, free_resume};
-use super::{rw, Binding, Vars};
-use crate::error::TypeError;
+use super::{rw, Binding, InstanceOps, Vars};
+use crate::error::{ErrKind, TypeError};
 use crate::names::{self, CONT};
 use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, SugarArm, Ty, S};
 use crate::syntax::desugar::{call, evar, sp, Cx};
@@ -57,69 +57,108 @@ fn check_grade(op: &str, clause: Grade, span: Span, cx: &Cx) -> Result<(), TypeE
         return Ok(());
     }
     let did = match clause {
-        Grade::Zero => unreachable!("Zero is the least grade, never exceeds a declared grade"),
-        Grade::One => "this clause resumes the continuation",
+        Grade::Never => unreachable!("Never is the least grade, never exceeds a declared grade"),
+        Grade::Once => "this clause resumes the continuation",
         Grade::Many => "this clause may resume the continuation more than once",
     };
     let limit = match declared {
-        Grade::Zero => "which never resumes",
-        Grade::One => "which resumes exactly once, in tail position",
+        Grade::Never => "which never resumes",
+        Grade::Once => "which resumes exactly once, in tail position",
         Grade::Many => unreachable!("Many is the greatest grade, nothing exceeds it"),
     };
-    Err(TypeError::Other {
-        span,
-        msg: format!(
-            "handler clause for `{op}` exceeds its declared grade `{}` ({limit}): {did}",
-            declared.keyword()
-        ),
-    })
+    Err(ErrKind::HandlerGradeExceeded {
+        op: op.to_string(),
+        grade: declared.word().to_string(),
+        limit: limit.to_string(),
+        did: did.to_string(),
+    }
+    .at(span))
 }
 
-// The grade of a bare `ctl` clause, read from how its body uses the continuation
-// binder `k`. A single direct tail application is `One`; no use is `Zero`;
-// anything else (more than one application, `k` used as a plain value, or `k`
-// applied under a nested lambda whose call count is unknown) is `Many`. This is
-// the same single-shot classification `effect_lower::erase_var` recomputes over
-// Core, run here as the up-front check; it is conservative, so a clause it
-// cannot prove single-shot is `Many` and a stricter declared grade rejects it.
+// The grade of a bare (keyword-free) clause, read from how its body uses the
+// continuation binder `k`. A single direct tail application is `Once`; no use is
+// `Never`; anything else (more than one application, `k` used as a plain value,
+// `k` applied under a nested lambda whose call count is unknown, or `k` resumed
+// in non-tail position) is `Many`. This is the same single-shot classification
+// `effect_lower::erase_var` recomputes over Core, run here as the up-front
+// check; it is conservative, so a clause it cannot prove to be a single tail
+// resume is `Many` and a stricter declared grade rejects it. The clause body
+// starts in tail position.
 fn bare_ctl_grade(body: &S<Expr<Core>>, k: &str) -> Grade {
     let mut direct = 0usize;
     let mut escaped = false;
-    scan_k(body, k, false, &mut direct, &mut escaped);
+    scan_k(body, k, false, true, &mut direct, &mut escaped);
     if escaped || direct > 1 {
         Grade::Many
     } else if direct == 1 {
-        Grade::One
+        Grade::Once
     } else {
-        Grade::Zero
+        Grade::Never
     }
 }
 
 // Classify every occurrence of `k` in `e`: a direct call head at lambda depth
-// zero is a tail resume (counted); anything else is an escape. `under` tracks
-// whether the subtree sits inside a lambda, where the call count is unknown.
-// Core phase carries no `Sugar`, so this covers every residual `Expr` variant.
-fn scan_k(e: &S<Expr<Core>>, k: &str, under: bool, direct: &mut usize, escaped: &mut bool) {
+// zero in tail position is a tail resume (counted); anything else is an escape.
+// `under` tracks whether the subtree sits inside a lambda, where the call count
+// is unknown. `tail` tracks whether the subtree sits in tail position, since
+// `once` promises exactly-one resume in tail position: a resume that is an
+// operand of some enclosing computation (non-tail) is not that single tail
+// resume and forces `Many`. Core phase carries no `Sugar`, so this covers every
+// residual `Expr` variant.
+fn scan_k(
+    e: &S<Expr<Core>>,
+    k: &str,
+    under: bool,
+    tail: bool,
+    direct: &mut usize,
+    escaped: &mut bool,
+) {
     match &e.node {
         Expr::Var(n) if n == k => *escaped = true,
         Expr::Call(h, args) => {
             if matches!(&h.node, Expr::Var(n) if n == k) {
-                if under {
+                // Under a lambda the call count is unknown; in non-tail position
+                // the resume is not the single tail resume `once` promises.
+                // Either way it escapes the counted-tail-resume case.
+                if under || !tail {
                     *escaped = true;
                 } else {
                     *direct += 1;
                 }
             } else {
-                scan_k(h, k, under, direct, escaped);
+                scan_k(h, k, under, false, direct, escaped);
             }
             for a in args {
-                scan_k(a, k, under, direct, escaped);
+                scan_k(a, k, under, false, direct, escaped);
             }
         }
-        Expr::Lam(_, b) => scan_k(b, k, true, direct, escaped),
+        Expr::Lam(_, b) => scan_k(b, k, true, false, direct, escaped),
+        // Tail position flows to the branch results; the scrutinee/condition and
+        // the let-bound value are always non-tail.
+        Expr::If(c, t, el) => {
+            scan_k(c, k, under, false, direct, escaped);
+            scan_k(t, k, under, tail, direct, escaped);
+            scan_k(el, k, under, tail, direct, escaped);
+        }
+        Expr::Let(_, v, b) => {
+            scan_k(v, k, under, false, direct, escaped);
+            scan_k(b, k, under, tail, direct, escaped);
+        }
+        Expr::Match(scrut, arms) => {
+            scan_k(scrut, k, under, false, direct, escaped);
+            for a in arms {
+                if let Some(g) = &a.guard {
+                    scan_k(g, k, under, false, direct, escaped);
+                }
+                scan_k(&a.body, k, under, tail, direct, escaped);
+            }
+        }
+        // Every other form (Bin, Neg, Tuple, records, index, ...) puts its
+        // children in non-tail position: a resume there is an operand, not a
+        // tail call.
         _ => e
             .node
-            .each_child(&mut |child| scan_k(child, k, under, direct, escaped)),
+            .each_child(&mut |child| scan_k(child, k, under, false, direct, escaped)),
     }
 }
 
@@ -129,19 +168,14 @@ fn check_resumable(op: &str, span: Span, cx: &Cx) -> Result<(), TypeError> {
         .get(op)
         .is_some_and(|(_, ps, sig)| poly_ret(sig, ps))
     {
-        return Err(TypeError::Other {
-            span,
-            msg: format!(
-                "op `{op}` has a polymorphic return type and can only be handled by `final ctl`"
-            ),
-        });
+        return Err(ErrKind::OpPolymorphicReturn { op: op.to_string() }.at(span));
     }
     Ok(())
 }
 
-// Lower handler arm sugar. `fun op(ps) => e` is tail-resumptive for `op(ps, k)
+// Lower handler arm sugar. `once op(ps) => e` is tail-resumptive for `op(ps, k)
 // => k(e)`. `val v = e` binds e once before the handler installs, and each `v()`
-// in the handled block resumes with it. `final ctl op(ps) => e` never resumes,
+// in the handled block resumes with it. `never op(ps) => e` never resumes,
 // so a free `resume` is a targeted error and the hygienic CONT binder goes
 // unused, discarding the captured continuation.
 pub(super) fn rw_arms(
@@ -166,14 +200,14 @@ pub(super) fn rw_arms(
                 }
                 env2.insert(k.clone(), Binding::Local);
                 let body2 = rw(body, &env2, cx)?;
-                // A bare `ctl` clause's grade is read from how it uses `k`.
+                // A bare (keyword-free) clause's grade is read from how it uses `k`.
                 check_grade(op, bare_ctl_grade(&body2, k), body.span, cx)?;
                 HandlerArm::Op(op.clone(), ps.clone(), k.clone(), body2)
             }
-            HandlerArm::Sugar(SugarArm::Fun(op, ps, body)) => {
+            HandlerArm::Sugar(SugarArm::Once(op, ps, body)) => {
                 check_resumable(op, body.span, cx)?;
-                // `fun` resumes exactly once, in tail position: grade One.
-                check_grade(op, Grade::One, body.span, cx)?;
+                // `once` resumes exactly once, in tail position: grade Once.
+                check_grade(op, Grade::Once, body.span, cx)?;
                 let mut env2 = env.clone();
                 for p in ps {
                     env2.insert(p.clone(), Binding::Local);
@@ -186,7 +220,7 @@ pub(super) fn rw_arms(
             HandlerArm::Sugar(SugarArm::Val(v, init)) => {
                 check_resumable(v, init.span, cx)?;
                 // `val` resumes once with an install-time constant: grade One.
-                check_grade(v, Grade::One, init.span, cx)?;
+                check_grade(v, Grade::Once, init.span, cx)?;
                 let init2 = rw(init, env, cx)?;
                 let tmp = names::val_tmp(cx.next.bump());
                 let is = init2.span;
@@ -194,14 +228,11 @@ pub(super) fn rw_arms(
                 let resume = call(evar(CONT, Span::empty(is.start)), vec![evar(&tmp, is)], is);
                 HandlerArm::Op(v.clone(), Vec::new(), CONT.into(), resume)
             }
-            HandlerArm::Sugar(SugarArm::Final(op, ps, body)) => {
+            HandlerArm::Sugar(SugarArm::Never(op, ps, body)) => {
                 if let Some(bad) = free_resume(body, false) {
-                    return Err(TypeError::Other {
-                        span: bad,
-                        msg: "final ctl clause cannot resume".into(),
-                    });
+                    return Err(ErrKind::NeverClauseResumes.at(bad));
                 }
-                // `final ctl` never resumes (grade Zero), the least grade, so it
+                // `never` never resumes (grade Never), the least grade, so it
                 // satisfies any declared grade with no further check.
                 let mut env2 = env.clone();
                 for p in ps {
@@ -225,7 +256,7 @@ const fn arm_op(a: &HandlerArm) -> Option<&String> {
         HandlerArm::Return(..) => None,
         HandlerArm::Op(op, ..)
         | HandlerArm::Sugar(
-            SugarArm::Fun(op, ..) | SugarArm::Final(op, ..) | SugarArm::Val(op, ..),
+            SugarArm::Once(op, ..) | SugarArm::Never(op, ..) | SugarArm::Val(op, ..),
         ) => Some(op),
     }
 }
@@ -235,11 +266,11 @@ fn rename_arm(a: HandlerArm, ops: &BTreeMap<String, String>) -> HandlerArm {
     match a {
         HandlerArm::Return(x, b) => HandlerArm::Return(x, b),
         HandlerArm::Op(op, ps, k, b) => HandlerArm::Op(m(op), ps, k, b),
-        HandlerArm::Sugar(SugarArm::Fun(op, ps, b)) => {
-            HandlerArm::Sugar(SugarArm::Fun(m(op), ps, b))
+        HandlerArm::Sugar(SugarArm::Once(op, ps, b)) => {
+            HandlerArm::Sugar(SugarArm::Once(m(op), ps, b))
         }
-        HandlerArm::Sugar(SugarArm::Final(op, ps, b)) => {
-            HandlerArm::Sugar(SugarArm::Final(m(op), ps, b))
+        HandlerArm::Sugar(SugarArm::Never(op, ps, b)) => {
+            HandlerArm::Sugar(SugarArm::Never(m(op), ps, b))
         }
         HandlerArm::Sugar(SugarArm::Val(op, b)) => HandlerArm::Sugar(SugarArm::Val(m(op), b)),
     }
@@ -265,10 +296,11 @@ pub(super) fn rw_named(
     let mut decl_ops = Vec::new();
     for op in arms.iter().filter_map(arm_op) {
         let Some((src_eff, src_params, sig)) = cx.op_sigs.get(op) else {
-            return Err(TypeError::Other {
-                span,
-                msg: format!("unknown effect operation `{op}` in handler `{f}`"),
-            });
+            return Err(ErrKind::UnknownHandlerOp {
+                op: op.clone(),
+                handler: f.to_string(),
+            }
+            .at(span));
         };
         // All handled ops must come from one effect: the private EffectDecl below
         // records a single `eff_params`, so mixing effects would leave later ops'
@@ -279,13 +311,12 @@ pub(super) fn rw_named(
                 eff_params.clone_from(src_params);
             }
             Some(prev) if prev != src_eff => {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!(
-                        "handler `{f}` mixes operations from effects `{prev}` and `{src_eff}`; \
-                         a named handler must handle a single effect"
-                    ),
-                });
+                return Err(ErrKind::HandlerMixesEffects {
+                    handler: f.to_string(),
+                    first: prev.clone(),
+                    second: src_eff.clone(),
+                }
+                .at(span));
             }
             Some(_) => {}
         }
@@ -301,10 +332,10 @@ pub(super) fn rw_named(
         ops.insert(op.clone(), mangled);
     }
     let Some(eff) = eff else {
-        return Err(TypeError::Other {
-            span,
-            msg: format!("handler `{f}` must handle at least one operation"),
-        });
+        return Err(ErrKind::HandlerNoOps {
+            handler: f.to_string(),
+        }
+        .at(span));
     };
     let eff_name = names::named_effect(&eff, f, n);
     for op in &decl_ops {
@@ -322,14 +353,14 @@ pub(super) fn rw_named(
     let renamed: Vec<HandlerArm> = arms.iter().cloned().map(|a| rename_arm(a, &ops)).collect();
     let (arms2, vals) = rw_arms(&renamed, env, cx)?;
     let mut env2 = env.clone();
-    env2.insert(f.into(), Binding::Inst(ops.clone()));
+    env2.insert(f.into(), Binding::Instance(InstanceOps::from_names(&ops)));
     let body2 = rw(body, &env2, cx)?;
     let opset: BTreeSet<String> = ops.into_values().collect();
     if let Some(bad) = escapes(&body2, &opset, &cx.ctors, &mut BTreeSet::new()) {
-        return Err(TypeError::Other {
-            span: bad,
-            msg: format!("handler instance `{f}` escapes its `with` block: the value here is a function that still performs `{f}`'s operations after its handler is gone"),
-        });
+        return Err(ErrKind::HandlerEscapes {
+            handler: f.to_string(),
+        }
+        .at(bad));
     }
     let handled = sp(Expr::Handle(Box::new(body2), arms2), span);
     Ok(wrap_vals(vals, handled, span))

@@ -23,7 +23,7 @@ fn tally(m : HashMap(Int), ws : List(String)) : HashMap(Int) =
     Nil => m
     Cons(w, rest) => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let phrase = "  hello, Prism  "
   let clean = trim(phrase)
   println(concat("trim:        [", concat(clean, "]")))

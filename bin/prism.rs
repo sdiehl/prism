@@ -145,13 +145,16 @@ enum Cmd {
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
     ///
-    /// Two source revisions (a `.pr` file, directory, or `prism.toml`) diff by
-    /// Core hash; two `.plineage` sidecars diff by logical key.
+    /// With no revisions, diff the enclosing project's Git HEAD against the
+    /// working tree. Two source revisions (a `.pr` file, directory, or
+    /// `prism.toml`) diff by Core hash; two `.plineage` sidecars by logical key.
     Diff {
-        /// The old revision, or a `.plineage` sidecar
-        old: PathBuf,
-        /// The new revision, or a `.plineage` sidecar
-        new: PathBuf,
+        /// The old revision, or a `.plineage` sidecar (requires NEW)
+        #[arg(requires = "new")]
+        old: Option<PathBuf>,
+        /// The new revision, or a `.plineage` sidecar (requires OLD)
+        #[arg(requires = "old")]
+        new: Option<PathBuf>,
         /// Print the sidecar diff as JSON (lineage sidecars only)
         #[arg(long)]
         json: bool,
@@ -434,14 +437,14 @@ fn main() -> ExitCode {
         }
     }
     if let Some(s) = &cli.backend_opt {
-        if !prism::valid_backend_opt(s) {
+        let Some(level) = prism::BackendOpt::parse(s) else {
             eprintln!(
                 "invalid backend optimization level `--backend-opt {s}` (expected {})",
-                prism::BACKEND_OPT_LEVELS.join(", ")
+                prism::BackendOpt::levels()
             );
             return ExitCode::FAILURE;
-        }
-        cfg.backend_opt.clone_from(s);
+        };
+        cfg.backend_opt = level;
     }
     if let Some(s) = &cli.scheduler {
         let Some(sched) = prism::Scheduler::parse(s) else {
@@ -508,7 +511,7 @@ fn main() -> ExitCode {
         // runtime's `fatal: <msg>` on stderr, exit 1), so a faulting program is
         // byte-identical across backends; compile-time errors keep the
         // span-annotated diagnostic report.
-        Err((Error::Runtime(msg), _, _)) => {
+        Err((Error::RuntimeEvaluation(msg), _, _)) => {
             eprintln!("fatal: {msg}");
             ExitCode::FAILURE
         }
@@ -530,26 +533,30 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             args,
         } => match (file, examples) {
             (Some(_), Some(_)) => Err((
-                Error::Resolve("`prism run` accepts either FILE or `--examples`, not both".into()),
+                Error::ResolveCommand(
+                    "`prism run` accepts either FILE or `--examples`, not both".into(),
+                ),
                 String::new(),
                 "run".into(),
             )),
             (None, None) => Err((
-                Error::Resolve("`prism run` requires FILE or `--examples`".into()),
+                Error::ResolveCommand("`prism run` requires FILE or `--examples`".into()),
                 String::new(),
                 "run".into(),
             )),
             (None, Some(dir)) => {
                 if record.is_some() {
                     return Err((
-                        Error::Resolve("`--record` cannot be combined with `--examples`".into()),
+                        Error::ResolveCommand(
+                            "`--record` cannot be combined with `--examples`".into(),
+                        ),
                         String::new(),
                         dir.display().to_string(),
                     ));
                 }
                 if !args.is_empty() {
                     return Err((
-                        Error::Resolve(
+                        Error::ResolveCommand(
                             "program arguments cannot be combined with `--examples`".into(),
                         ),
                         String::new(),
@@ -584,7 +591,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             let start = path.canonicalize().unwrap_or(path);
             let manifest = prism::project::find_manifest(&start).ok_or_else(|| {
                 (
-                    Error::Resolve(
+                    Error::ResolveCommand(
                         "no prism.toml found: `prism build` compiles a project; \
                          compile a single file with `prism <file.pr>`"
                             .into(),
@@ -598,7 +605,9 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         Cmd::Clean { path } => cli::clean_cmd(&path),
         Cmd::Check { file } => cli::check_cmd(file.as_deref(), cfg),
         Cmd::Dump { phase, file } => cli::dump_cmd(&phase, &file, cfg),
-        Cmd::Diff { old, new, json } => cli::lineage::diff_cmd(&old, &new, json, cfg),
+        Cmd::Diff { old, new, json } => {
+            cli::lineage::diff_cmd(old.as_deref(), new.as_deref(), json, cfg)
+        }
         Cmd::Report { file } => cli::report_cmd(&file, cfg),
         Cmd::Repl { no_banner } => {
             prism::repl::repl(!no_banner);

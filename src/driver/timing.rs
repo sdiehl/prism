@@ -27,6 +27,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+#[cfg(feature = "native")]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,6 +48,9 @@ const SRC_KIND: &str = "src";
 ///
 /// Lexing and parsing are one driver call (`parse`), so they are one honest
 /// `parse` row rather than a faked split.
+// The row schema names every compile phase; a wasm build constructs no LLVM/cc
+// phase, so those variants are legitimately unbuilt there, not dead.
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Parse,
@@ -99,6 +103,7 @@ impl CacheStatus {
 }
 
 /// The artifact kinds a row can name, in the `in=`/`out=` keys.
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ArtifactKind {
     /// The elaborated (pre-optimizer) Core root, a phase's compiled identity.
@@ -119,6 +124,7 @@ impl ArtifactKind {
 /// The trailing `k=v` count keys. Only counts that are real and already cheap to
 /// obtain at a phase are emitted; the family names the full vocabulary a reader
 /// may encounter.
+#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CountKey {
     Defs,
@@ -298,6 +304,7 @@ pub(crate) fn timed<T>(
 /// The `emit.llvm` row's tail: the size and content digest of the emitted LLVM
 /// bitcode. Best-effort, since it runs only under the flag: a bitcode file that
 /// cannot be read yields a bare tail rather than an error.
+#[cfg(feature = "native")]
 pub(crate) fn llvm_artifact(bitcode: &Path) -> RowExtras {
     std::fs::read(bitcode).map_or_else(
         |_| RowExtras::default(),

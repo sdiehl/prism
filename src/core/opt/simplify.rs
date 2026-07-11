@@ -79,7 +79,10 @@ struct Simplifier {
 // case-of-known-constructor) or a trivial value (enables copy-propagation). A
 // thunk is not tracked, since inlining it could duplicate work.
 const fn known(v: &Value) -> bool {
-    matches!(v, Value::Ctor(..) | Value::Tuple(_)) || trivial(v)
+    matches!(
+        v,
+        Value::Ctor(..) | Value::Tuple(_) | Value::UnboxedTuple(_)
+    ) || trivial(v)
 }
 
 const fn trivial(v: &Value) -> bool {
@@ -133,7 +136,13 @@ fn pat_match(pat: &CorePat, kv: &Value) -> Option<Vec<(Sym, Value)>> {
         {
             Some(fields_binds(binders, fields))
         }
-        (CorePat::Tuple(binders), Value::Tuple(fields)) if binders.len() == fields.len() => {
+        // A boxed or unboxed tuple both match a tuple pattern positionally; an
+        // unboxed record lowers to `UnboxedTuple` + a tuple-pattern `Case`, so
+        // fusing this pair scalarizes a locally-projected unboxed product away
+        // (it never reaches codegen as a heap value).
+        (CorePat::Tuple(binders), Value::Tuple(fields) | Value::UnboxedTuple(fields))
+            if binders.len() == fields.len() =>
+        {
             Some(fields_binds(binders, fields))
         }
         _ => None,
@@ -145,7 +154,7 @@ fn pat_match(pat: &CorePat, kv: &Value) -> Option<Vec<(Sym, Value)>> {
 // first.
 fn resolve(scrut: &Value, env: &Env) -> Option<Value> {
     match scrut {
-        Value::Ctor(..) | Value::Tuple(_) => Some(scrut.clone()),
+        Value::Ctor(..) | Value::Tuple(_) | Value::UnboxedTuple(_) => Some(scrut.clone()),
         _ if trivial(scrut) && !matches!(scrut, Value::Var(_)) => Some(scrut.clone()),
         Value::Var(x) => match env.get(x) {
             Some(v) if !matches!(v, Value::Var(_)) => Some(v.clone()),
@@ -429,20 +438,17 @@ impl Rewrite for Simplifier {
                     let e = narrow(env, &return_var.iter().copied().collect::<Vec<_>>());
                     Box::new(self.comp(b, &e))
                 });
-                let ops2 = ops
-                    .iter()
-                    .map(|o| {
-                        let mut bs = o.params.clone();
-                        bs.push(o.resume);
-                        let e = narrow(env, &bs);
-                        HandleOp {
-                            name: o.name,
-                            params: o.params.clone(),
-                            resume: o.resume,
-                            body: self.comp(&o.body, &e),
-                        }
-                    })
-                    .collect();
+                let ops2 = ops.rebuild(|o| {
+                    let mut bs = o.params.clone();
+                    bs.push(o.resume);
+                    let e = narrow(env, &bs);
+                    HandleOp {
+                        name: o.name,
+                        params: o.params.clone(),
+                        resume: o.resume,
+                        body: self.comp(&o.body, &e),
+                    }
+                });
                 Comp::Handle {
                     body: body2,
                     return_var: *return_var,

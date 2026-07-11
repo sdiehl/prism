@@ -1,0 +1,8 @@
+effect St
+  put(Int) : Unit
+
+fn main() =
+  println(handle put(1) with {
+    put(a, b) resume k => k(()),
+    return r => 9
+  })

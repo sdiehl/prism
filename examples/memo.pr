@@ -1,6 +1,6 @@
 effect Memo
-  ctl recall(Int) : Option(Int)
-  ctl store(Int, Int) : Unit
+  recall(Int) : Option(Int)
+  store(Int, Int) : Unit
 
 -- Memoization as an effect, bolted on from the outside.
 --
@@ -16,7 +16,7 @@ effect Memo
 -- without a single change to its logic, and the same body would run un-cached
 -- under a handler that always answered recall with None.
 
-fn fib(n) : !{Memo} Int =
+fn fib(n) : Int ! {Memo} =
   match recall(n) of
     Some(v) => v
     None =>
@@ -31,9 +31,9 @@ fn fib(n) : !{Memo} Int =
 fn run_fib(n) =
   let f =
     handle fib(n) with
-      recall(key, k) => \(m) -> k(map_lookup(key, m))(m)
-      store(key, value, k) => \(m) -> k(())(map_insert(key, value, m))
+      recall(key) resume k => \(m) -> k(map_lookup(key, m))(m)
+      store(key, value) resume k => \(m) -> k(())(map_insert(key, value, m))
       return r => \(_m) -> r
   f(map_empty)
 
-fn main() : !{IO} Unit = println(run_fib(30))
+fn main() : Unit ! {IO} = println(run_fib(30))

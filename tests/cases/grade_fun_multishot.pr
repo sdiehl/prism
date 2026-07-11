@@ -1,11 +1,11 @@
--- A `fun` operation (grade One) resumes exactly once. A bare-ctl clause that
+-- A `once` operation (grade Once) resumes exactly once. A bare clause that
 -- resumes `poll` twice exceeds the declared grade and is rejected.
 effect Poll
-  fun poll(Unit) : Int
+  once poll() : Int
 
-fn use_it() : !{Poll} Int = poll(())
+fn use_it() : Int ! {Poll} = poll()
 
 fn main() =
   handle use_it() with
-    poll(u, k) => k(1) + k(2)
+    poll() resume k => k(1) + k(2)
     return r => r

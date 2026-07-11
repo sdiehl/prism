@@ -1,51 +1,48 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
-#[cfg(feature = "mlir")]
-use std::fs;
+use std::collections::BTreeMap;
 use std::path::Path;
-#[cfg(feature = "mlir")]
-use std::process::Command;
+use std::sync::OnceLock;
 
-#[cfg(feature = "mlir")]
-use crate::codegen::emit_mlir;
-#[cfg(feature = "native")]
-use crate::codegen::rt::RuntimeProfile;
-#[cfg(feature = "native")]
-use crate::codegen::{emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table};
-#[cfg(feature = "native")]
-use crate::core::effect_lower::residual_effects;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::{
-    balanced, elaborate, fip_annots, hash_program, hash_root, insert_rc, lower_effects, pp_core,
-    pp_core_pretty, reuse, run_opt, run_opt_spec, Comp, Core, CorePass, DepGraph, ElaboratedCore,
-    LoweredCore, OpGrades, OptLevel, PassSpec, Value, HASH_SCHEME,
+    balanced, fip_annots, hash_program, hash_root, insert_rc, lower_effects, pp_core_pretty, reuse,
+    run_opt, run_opt_spec, Comp, Core, DepGraph, Digest, EffectStrategy, ElaboratedCore,
+    LoweredCore, OpGrades, Value, HASH_SCHEME,
 };
 use crate::error::{Error, TypeError};
-use crate::eval::{run, Rv};
-use crate::flags::DynFlags;
-use crate::lex::lex;
-#[cfg(feature = "native")]
-use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
-use crate::resolve::{default_roots, resolve_modules_in, Root};
+use crate::resolve::{default_roots, Root};
 use crate::store::coherence::{self, CoherenceError};
 use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
-use crate::syntax::desugar::desugar;
-use crate::types::{check as typecheck, show_effects, Checked, CtorInfo};
+use crate::types::{show_effects, show_type_with_effects, Checked, CtorInfo};
 
 mod artifact;
+mod build;
+mod config;
+mod diff;
 mod dump;
 mod execution;
 mod front;
 mod identity;
 #[cfg(feature = "native")]
 mod native;
+mod query;
+mod report;
 mod timing;
 mod verify;
-pub use artifact::ArtifactIdentity;
+pub use artifact::{ArtifactField, ArtifactIdentity, ArtifactRow};
+pub use build::rc_balanced;
+#[cfg(feature = "native")]
+pub use build::{build, build_at, build_on, build_on_report, emit_ir, NativeBuildReport};
+#[cfg(feature = "mlir")]
+pub use build::{build_mlir, build_mlir_at, build_mlir_on};
+pub use config::{BackendOpt, Config, Scheduler};
+pub use diff::{
+    diff_on, source_diff_on, DiffChangedDef, DiffNamedDef, SourceDiff, SOURCE_DIFF_FORMAT,
+};
+pub(crate) use diff::{diff_on_roots, render_source_diff, source_diff_on_roots};
 pub use dump::{dump, dump_at, dump_on};
 pub use execution::{
     debug_on, interpret, interpret_at, interpret_io_at, interpret_io_on, interpret_io_on_with_args,
@@ -54,24 +51,18 @@ pub use execution::{
     SuspendResult, STEP_RULER_FORMAT,
 };
 use front::{run_front, Front, FrontOpts};
+pub(crate) use identity::stdlib_driver_src;
 pub use identity::{
     namespace_identity, namespace_root, public_surface, stdlib_hash, NamespaceIdentity, PublicDef,
     StdlibHash,
 };
 #[cfg(feature = "native")]
-use identity::{
-    native_kont_table_for, native_kont_table_for_with_rows, native_kont_table_of,
-    NativeKontIdentityRows,
-};
-pub(crate) use identity::{stdlib_driver_src, BuildIdentity, BuildRoot};
-#[cfg(feature = "native")]
-use native::cc_link;
-#[cfg(feature = "mlir")]
-use native::ir_failure;
+pub(crate) use identity::{BuildIdentity, BuildRoot};
+pub use query::query_on;
+pub use report::{report, report_at, report_on, shape_digests_of};
 pub use timing::TimingSink;
 #[cfg(feature = "native")]
 pub use verify::attest_on;
-use verify::{fip_check, replayable_check};
 
 pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
@@ -190,56 +181,6 @@ impl EnvelopeHeader {
     }
 }
 
-/// Which cooperative scheduler `run_cooperative` resolves to (the `--scheduler`
-/// flag).
-///
-/// `run_async` and `run_lifo` name a specific policy directly and are never
-/// retargeted, so the flag only picks the default wrap, never the semantics of a
-/// program that pins its own scheduler.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Scheduler {
-    /// FIFO round-robin: `run_cooperative` stays its default alias for `run_async`.
-    #[default]
-    Cooperative,
-    /// LIFO depth-first: retarget `run_cooperative` to `run_lifo`.
-    Lifo,
-}
-
-impl Scheduler {
-    /// Parse a `--scheduler` value: `cooperative`/`fifo`, or `lifo`.
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "cooperative" | "fifo" => Some(Self::Cooperative),
-            "lifo" => Some(Self::Lifo),
-            _ => None,
-        }
-    }
-
-    /// The `Concurrent` entry `run_cooperative` retargets to, or `None` when the
-    /// default (`run_async`) already is the choice and no rewrite is needed.
-    #[must_use]
-    const fn retarget(self) -> Option<&'static str> {
-        match self {
-            Self::Cooperative => None,
-            Self::Lifo => Some(crate::names::RUN_LIFO),
-        }
-    }
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Cooperative => "cooperative",
-            Self::Lifo => "lifo",
-        }
-    }
-}
-
-/// The backend optimization levels clang accepts via `-O`: the single source of
-/// truth shared by the `--backend-opt` flag and the `PRISM_BACKEND_OPT` env knob.
-pub const BACKEND_OPT_LEVELS: [&str; 6] = ["0", "1", "2", "3", "s", "z"];
-/// Backend level used when neither the flag nor the env var picks one.
-pub const DEFAULT_BACKEND_OPT: &str = "2";
 #[cfg(feature = "native")]
 const NATIVE_KONT_FRAME_FLAGS: [&str; 4] = [
     "-DPRISM_NATIVE_KONT_FRAMES",
@@ -248,91 +189,6 @@ const NATIVE_KONT_FRAME_FLAGS: [&str; 4] = [
     "-fno-optimize-sibling-calls",
 ];
 
-/// Whether `s` is a backend level clang understands; both entry paths validate
-/// against this so a bad `--backend-opt` or `PRISM_BACKEND_OPT` never reaches `cc`.
-#[must_use]
-pub fn valid_backend_opt(s: &str) -> bool {
-    BACKEND_OPT_LEVELS.contains(&s)
-}
-
-#[derive(Clone, Debug)]
-pub struct Config {
-    /// The Core-to-Core optimization level (the CLI `-O` flag; default `O1`).
-    pub opt: OptLevel,
-    /// An explicit ordered pass list (the CLI `--passes` flag) that overrides
-    /// `opt` when present. The two are mutually exclusive at the CLI.
-    pub passes: Option<PassSpec>,
-    /// The LLVM-backend optimization level handed to `cc` as `-O<level>` (the
-    /// `--backend-opt` flag; default `"2"`). Tunes clang's own pipeline over the
-    /// emitted bitcode, distinct from the Core-to-Core `opt` above.
-    pub backend_opt: String,
-    /// Core passes the caller turned off (the `--no-<pass>` flags), filtered out
-    /// of whatever pipeline `opt`/`passes` selects.
-    pub disabled: Vec<CorePass>,
-    /// Which cooperative scheduler `run_cooperative` binds to (the `--scheduler`
-    /// flag; default cooperative/FIFO).
-    pub scheduler: Scheduler,
-    /// The environment-derived compiler behavior knobs (effect backends, Core
-    /// Lint, dumps). Read once from the process environment and threaded into the
-    /// effect lowerer and optimizer, so no pass reads the environment itself.
-    pub flags: DynFlags,
-    /// The per-compile timing sink, present only when the CLI installs it for a
-    /// top-level `--time-compile`/`PRISM_TIME_COMPILE` compile. Absent on every
-    /// [`Config::from_env`] the internal re-elaboration helpers build, so those
-    /// silent compiles never emit timing rows. When absent, the timing wrappers
-    /// compile away to a bare call, so the feature is zero-cost off.
-    pub timing: Option<TimingSink>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            opt: OptLevel::default(),
-            passes: None,
-            backend_opt: DEFAULT_BACKEND_OPT.into(),
-            disabled: Vec::new(),
-            scheduler: Scheduler::default(),
-            flags: DynFlags::default(),
-            timing: None,
-        }
-    }
-}
-
-impl Config {
-    /// The configuration implied by the process environment: the `PRISM_OPT_LEVEL`,
-    /// `PRISM_BACKEND_OPT`, and `PRISM_NO_SPECIALIZE` escape hatches resolved into a
-    /// value, everything else defaulted. The library entry points use this so a
-    /// bare `prism::build` still honors the env knobs; the CLI starts here and
-    /// overrides with its explicit flags.
-    #[must_use]
-    pub fn from_env() -> Self {
-        // The environment is read once, into `DynFlags`; the Config-level fields
-        // are projected out of it (the CLI later overrides them with its flags).
-        let flags = DynFlags::from_env();
-        let mut disabled = Vec::new();
-        if flags.no_specialize {
-            disabled.push(CorePass::Specialize);
-        }
-        Self {
-            opt: flags.opt_level,
-            passes: None,
-            backend_opt: flags.backend_opt.clone(),
-            disabled,
-            scheduler: flags.scheduler,
-            flags,
-            // A timing sink is never installed from the environment: it is a
-            // property of a top-level CLI compile, so only the CLI attaches one.
-            // This is what keeps the internal re-elaboration helpers silent.
-            timing: None,
-        }
-    }
-
-    /// Structured identity for behavior-affecting compiler artifacts.
-    #[must_use]
-    pub fn artifact_identity_for(&self, backend: &str) -> ArtifactIdentity {
-        ArtifactIdentity::from_config(self, backend)
-    }
-}
 #[must_use]
 pub fn with_prelude(src: &str) -> String {
     format!("{PRELUDE}\n{src}")
@@ -450,6 +306,20 @@ pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, E
     Ok(run_front(src, roots, cfg, FrontOpts::CHECK)?.into_checked())
 }
 
+/// The public validity verdict behind `prism check`.
+///
+/// Type-checks, elaborates, and runs every semantic validator (fip / replayable /
+/// effect reconciliation), so a program `check` accepts is one `build` also
+/// accepts. Unlike [`check_on_in`] (the type-only surface used by `dump`,
+/// `report`, and the snapshot oracle), this agrees with the full compile path on
+/// validity.
+///
+/// # Errors
+/// Fails on lex, parse, module, type, or semantic-validator errors.
+pub fn check_validated_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
+    Ok(run_front(src, roots, cfg, FrontOpts::CHECK_VALIDATED)?.into_checked())
+}
+
 // Unused-binding and shadowed-name lints over the resolved surface program,
 // scoped to the user's own source (the prepended prelude is excluded by offset).
 fn lint_surface(src: &str, prog: &Program) -> Vec<crate::tc::Warning> {
@@ -494,7 +364,11 @@ fn frontend(
 /// # Errors
 /// Fails on any front-end error or a store filesystem error.
 pub fn commit_to_store(src: &str, roots: &[Root], cfg: &Config) -> Result<CommitStats, Error> {
-    let (program, checked, core) = elaborated(src, roots)?;
+    // Validate before committing: the store must never persist a definition
+    // carrying an fbip / noalloc / replayable claim the build path would reject.
+    // Validation is side-effect-free on the pre-optimizer Core, so the committed
+    // identity is byte-identical to the unvalidated identity surface.
+    let (program, checked, core) = elaborated_validated(src, roots)?;
     store_commit(&program, &checked, &core, cfg)
 }
 
@@ -519,7 +393,7 @@ fn store_commit(
                 Sym::new(&d.name),
                 DefMeta {
                     name: d.name.clone(),
-                    ty: format!("{} ! {}", d.ty.show(), show_effects(&d.effects)),
+                    ty: show_type_with_effects(&d.ty, &d.effects),
                     doc: String::new(),
                 },
             )
@@ -535,7 +409,9 @@ fn store_commit(
     coherence::commit_canonical(&store, &program.instances, &program.canonicals, &hashes).map_err(
         |e| match e {
             CoherenceError::Io(io) => Error::Io(io),
-            CoherenceError::Conflict { span, msg } => Error::Type(TypeError::Other { span, msg }),
+            CoherenceError::Conflict { span, msg } => {
+                Error::Type(TypeError::TypeFailure { span, msg })
+            }
         },
     )?;
     let stats = store::commit_program(&store, core, &hashes, &hash_metas, &graph, &metas)?;
@@ -590,6 +466,23 @@ fn elaborated(
     run_front(src, roots, &Config::default(), FrontOpts::IDENTITY).map(Front::into_elaborated)
 }
 
+// The identity surface, additionally validated: same byte-identical pre-optimizer
+// Core as `elaborated`, but only after every semantic validator passes. The store
+// commit path uses this so a persisted definition never carries a claim the build
+// path would reject.
+fn elaborated_validated(
+    src: &str,
+    roots: &[Root],
+) -> Result<(Program<CorePhase>, Checked, ElaboratedCore), Error> {
+    run_front(
+        src,
+        roots,
+        &Config::default(),
+        FrontOpts::IDENTITY_VALIDATED,
+    )
+    .map(Front::into_elaborated)
+}
+
 // Shared front-end and rc-balance ICE check for the interpreter entries. The
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
@@ -599,7 +492,7 @@ fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<ElaboratedCo
     let (lowered, _, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
     emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
-        .map_err(|e| Error::Codegen(format!("ICE: rc imbalance: {e}")))?;
+        .map_err(|e| Error::CodegenBackend(format!("ICE: rc imbalance: {e}")))?;
     Ok(core)
 }
 
@@ -692,13 +585,13 @@ fn emit_lower_warning(src: &str, warning: Option<&str>, quiet: bool) {
 ///
 /// A performance classification of how its effects compile (`pure`, `evidence`,
 /// `state-fusion`, `local-partial`, `whole-program-free-monad`,
-/// `selective-free-monad`). A perf snapshot pins this per corpus program so a
+/// `selective-free-monad`). A perf snapshot records this per corpus program so a
 /// silent regression onto the slow free-monad path surfaces as a reviewable diff.
 /// `full` carries the prelude.
 ///
 /// # Errors
 /// Fails on front-end errors.
-pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Error> {
+pub fn effect_strategy_full(full: &str, base: &Path) -> Result<EffectStrategy, Error> {
     effect_strategy_on(full, base, &Config::from_env())
 }
 
@@ -710,7 +603,7 @@ pub fn effect_strategy_full(full: &str, base: &Path) -> Result<&'static str, Err
 ///
 /// # Errors
 /// Fails on front-end errors.
-pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<&'static str, Error> {
+pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<EffectStrategy, Error> {
     let (_, checked, core) = frontend(full, &default_roots(base), cfg)?;
     Ok(crate::core::effect_strategy(
         &core,
@@ -802,7 +695,16 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
     fn scan_val(v: &Value, out: &mut Vec<&'static str>) {
         match v {
             Value::Thunk(c) => scan_comp(c, out),
-            Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().for_each(|f| scan_val(f, out)),
+            Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
+                for f in fs {
+                    scan_val(f, out);
+                }
+            }
+            Value::UnboxedRecord(fs) => {
+                for (_, f) in fs {
+                    scan_val(f, out);
+                }
+            }
             _ => {}
         }
     }
@@ -819,6 +721,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
             | Comp::Error(v)
             | Comp::FloatBuiltin(_, v)
             | Comp::Neg(_, v)
+            | Comp::UnboxedProject(v, _)
             | Comp::Dup(v)
             | Comp::Drop(v)
             | Comp::Reuse(_, v)
@@ -898,10 +801,18 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 }
 
 // Core function names contributed by the prelude alone, used to elide it from a
-// snippet's IR dump.
+// snippet's IR dump. The prelude is a compile-time constant and its function
+// names do not depend on any environment knob, so the set is memoized once per
+// process rather than re-elaborating the prelude on every dump.
 fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
+    static CACHE: OnceLock<std::collections::HashSet<Sym>> = OnceLock::new();
+    if let Some(cached) = CACHE.get() {
+        return Ok(cached.clone());
+    }
     let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")), &Config::from_env())?;
-    Ok(core.0.fns.into_iter().map(|f| f.name).collect())
+    let names: std::collections::HashSet<Sym> = core.0.fns.into_iter().map(|f| f.name).collect();
+    let _ = CACHE.set(names.clone());
+    Ok(names)
 }
 
 // Drop the prelude's functions from a core dump, leaving only the snippet's own
@@ -916,339 +827,6 @@ fn strip_prelude(core: Core, prelude: &std::collections::HashSet<Sym>) -> Core {
             .collect(),
     }
 }
-#[cfg(feature = "native")]
-fn compiled(
-    src: &str,
-    roots: &[Root],
-    cfg: &Config,
-) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>), Error> {
-    let (checked, lowered, ctors, sigs) = lowered_core(src, roots, cfg)?;
-    residual_effects(&lowered).map_err(Error::Ice)?;
-    Ok((
-        checked,
-        LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
-        ctors,
-    ))
-}
-
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when linking with cc fails.
-#[cfg(feature = "native")]
-pub fn build(src: &str, out: &Path) -> Result<(), Error> {
-    build_at(src, Path::new("."), out)
-}
-
-/// Like [`build`], resolving any module imports relative to `base`.
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when linking with cc fails.
-#[cfg(feature = "native")]
-pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    build_on(src, &default_roots(base), out, &Config::from_env())
-}
-
-#[cfg(feature = "native")]
-fn require_main(checked: &Checked) -> Result<(), Error> {
-    if checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
-        Ok(())
-    } else {
-        Err(Error::Codegen("no main function to build".into()))
-    }
-}
-
-/// Facts reported by a successful native build.
-#[cfg(feature = "native")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct NativeBuildReport {
-    /// Store commit statistics when `PRISM_STORE` is enabled.
-    pub store: Option<CommitStats>,
-}
-
-/// Like [`build_at`], but against an explicit module search path (a project's
-/// source root, its path dependencies, and the stdlib).
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when linking with cc fails.
-#[cfg(feature = "native")]
-pub fn build_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(), Error> {
-    build_on_report(src, roots, out, cfg).map(|_| ())
-}
-
-/// Like [`build_on`], returning the cache facts the build observed.
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, store failure, or when linking
-/// with cc fails.
-#[cfg(feature = "native")]
-pub fn build_on_report(
-    src: &str,
-    roots: &[Root],
-    out: &Path,
-    cfg: &Config,
-) -> Result<NativeBuildReport, Error> {
-    let (checked, core, ctors) = compiled(src, roots, cfg)?;
-    require_main(&checked)?;
-    let native_kont_table = native_kont_table_for(src, roots, cfg)?;
-    let bc = out.with_extension("bc");
-    timing::timed_res(
-        cfg.timing.as_ref(),
-        timing::Phase::EmitLlvm,
-        "",
-        || {
-            emit_llvm_bc_with_native_kont_table(
-                &core,
-                &ctors,
-                &native_kont_table,
-                cfg.flags.native_kont_frames,
-                &bc,
-            )
-            .map_err(Error::Codegen)
-        },
-        |()| timing::llvm_artifact(&bc),
-    )?;
-    timing::timed_res(
-        cfg.timing.as_ref(),
-        timing::Phase::CcLink,
-        "",
-        || cc_link(&bc, out, cfg, RuntimeProfile::NativeBackend),
-        |()| timing::RowExtras::default(),
-    )?;
-    // A successful build populates the store when the knob is on. Re-elaboration
-    // is cheap relative to codegen and only happens under the opt-in flag; the
-    // store is a cache, so a failure here would not invalidate the build (but is
-    // surfaced rather than swallowed).
-    let store = if cfg.flags.store {
-        Some(commit_to_store(src, roots, cfg)?)
-    } else {
-        None
-    };
-    Ok(NativeBuildReport { store })
-}
-
-/// # Errors
-/// Fails on front-end errors or codegen failure.
-#[cfg(feature = "native")]
-pub fn emit_ir(src: &str) -> Result<String, Error> {
-    let roots = default_roots(Path::new("."));
-    let cfg = Config::from_env();
-    let (_, core, ctors) = compiled(src, &roots, &cfg)?;
-    let native_kont_table =
-        native_kont_table_for_with_rows(src, &roots, &cfg, NativeKontIdentityRows::Portable)?;
-    emit_llvm_with_native_kont_table(
-        &core,
-        &ctors,
-        &native_kont_table,
-        cfg.flags.native_kont_frames,
-    )
-    .map_err(Error::Codegen)
-}
-
-/// # Errors
-/// Fails on front-end errors or an unbalanced rc insertion.
-pub fn rc_balanced(src: &str) -> Result<(), Error> {
-    let (_, lowered, _, sigs) =
-        lowered_core(src, &default_roots(Path::new(".")), &Config::from_env())?;
-    balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs).map_err(Error::Codegen)
-}
-
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
-#[cfg(feature = "mlir")]
-pub fn build_mlir(src: &str, out: &Path) -> Result<(), Error> {
-    build_mlir_at(src, Path::new("."), out)
-}
-
-/// Like [`build_mlir`], resolving any module imports relative to `base`.
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
-#[cfg(feature = "mlir")]
-pub fn build_mlir_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
-    build_mlir_on(src, &default_roots(base), out, &Config::from_env())
-}
-
-/// Like [`build_mlir_at`], but against an explicit module search path.
-///
-/// # Errors
-/// Fails on front-end errors, codegen failure, or when the MLIR toolchain fails.
-#[cfg(feature = "mlir")]
-pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Result<(), Error> {
-    let (checked, core, ctors) = compiled(src, roots, cfg)?;
-    require_main(&checked)?;
-    let mlir_text = emit_mlir(&core, &ctors).map_err(Error::Codegen)?;
-    let mlir_file = out.with_extension("mlir");
-    fs::write(&mlir_file, &mlir_text)?;
-
-    let ll_file = out.with_extension("ll");
-    let translate_out = Command::new("mlir-translate")
-        .arg("--mlir-to-llvmir")
-        .arg(&mlir_file)
-        .output()
-        .map_err(|e| {
-            Error::Codegen(format!(
-                "mlir-translate: {e} (is mlir-translate installed?)"
-            ))
-        })?;
-    if !translate_out.status.success() {
-        return Err(ir_failure(
-            "mlir-translate",
-            &mlir_file,
-            &translate_out.stderr,
-        ));
-    }
-    fs::write(&ll_file, &translate_out.stdout)?;
-
-    let res = cc_link(&ll_file, out, cfg, RuntimeProfile::HostOracle);
-    let _ = fs::remove_file(&mlir_file);
-    res
-}
-
-fn types_section(checked: &Checked) -> String {
-    let mut s = String::new();
-    for d in &checked.decls {
-        writeln!(s, "{} : {}", d.name, d.ty.show()).unwrap();
-    }
-    s
-}
-
-#[must_use]
-pub fn report(src: &str) -> String {
-    report_at(src, Path::new("."))
-}
-
-#[must_use]
-pub fn report_at(src: &str, base: &Path) -> String {
-    report_on(src, &default_roots(base), &Config::from_env())
-}
-
-/// Like [`report_at`], but against an explicit module search path.
-// `cfg` drives the native-only Core/codegen phases; on wasm those are compiled
-// out, so it is unused there.
-#[cfg_attr(not(feature = "native"), allow(unused_variables))]
-#[must_use]
-pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
-    // Render a phase failure with the same span-aware ariadne report the CLI
-    // shows for `run`/`build`/`check`, so `report` does not degrade to a bare
-    // message.
-    let render = |e: Error| e.render_plain(src, "<source>");
-    let mut out = String::new();
-    let tokens = match lex(src) {
-        Ok((t, _)) => t,
-        Err(e) => return render(e.into()),
-    };
-    let toks: Vec<String> = tokens.iter().map(|(_, t, _)| format!("{t:?}")).collect();
-    section(&mut out, "tokens", &toks.join(" "));
-
-    let ParseResult { program, .. } = match parse(src) {
-        Ok(r) => r,
-        Err(e) => {
-            section(&mut out, "parse", &render(e.into()));
-            return out;
-        }
-    };
-    section(&mut out, "ast", &format!("{program:#?}"));
-
-    let program = match resolve_modules_in(program, roots) {
-        Ok(p) => p,
-        Err(e) => {
-            section(&mut out, "resolve", &render(e));
-            return out;
-        }
-    };
-
-    let program = match desugar(program) {
-        Ok(p) => p,
-        Err(e) => {
-            section(&mut out, "types", &render(e.into()));
-            return out;
-        }
-    };
-    let checked = match typecheck(&program) {
-        Ok(c) => c,
-        Err(e) => {
-            section(&mut out, "types", &render(e.into()));
-            return out;
-        }
-    };
-    section(&mut out, "types", types_section(&checked).trim_end());
-
-    let core = match elaborate(&program, &checked) {
-        Ok(c) => ElaboratedCore(c),
-        Err(e) => {
-            section(&mut out, "core (cbpv)", &render(e));
-            return out;
-        }
-    };
-    section(&mut out, "core (cbpv)", pp_core(&core).trim_end());
-
-    if let Err(e) = fip_check(&program, &checked, &core) {
-        section(&mut out, "fip", &render(e));
-        return out;
-    }
-
-    if let Err(e) = replayable_check(&program, &checked) {
-        section(&mut out, "replayable", &render(e));
-        return out;
-    }
-
-    let sigs = borrow_sigs(&program);
-    section(
-        &mut out,
-        "fbip (rc)",
-        pp_core(&reuse(&insert_rc(&core, &sigs))).trim_end(),
-    );
-
-    #[cfg(feature = "native")]
-    match lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg) {
-        Ok((lowered, ctors, _)) => {
-            let hashes = hash_program(&core, &hash_meta(&checked, &sigs, &fip_annots(&program)));
-            match native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
-                .and_then(|native_kont_table| {
-                    emit_llvm_with_native_kont_table(
-                        &LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
-                        &ctors,
-                        &native_kont_table,
-                        cfg.flags.native_kont_frames,
-                    )
-                    .map_err(Error::Codegen)
-                }) {
-                Ok(ir) => section(&mut out, "llvm", strip_target(&ir).trim_end()),
-                Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
-            }
-        }
-        Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
-    }
-
-    match run(&core) {
-        Ok(r) => {
-            let outs: Vec<String> = r.out.iter().map(Rv::show).collect();
-            section(
-                &mut out,
-                "run",
-                &format!("output: [{}]\nresult: {}", outs.join(", "), r.value.show()),
-            );
-        }
-        Err(e) => section(&mut out, "run", &format!("error: {e}")),
-    }
-    out
-}
-
-/// The structural shape digest of every datatype and effect a source defines
-/// (prelude included), keyed by name, full-length.
-///
-/// This is the format-identity gate primitive: commit the digests a persisted
-/// type produces and a later edit that changes the wire layout (a new
-/// constructor, a reordered field, a changed component type) moves the digest and
-/// fails the committed golden, while a cosmetic edit leaves it untouched. A caller
-/// snapshots or asserts on the entries for the types it persists.
-///
-/// # Errors
-/// Fails if `src` does not parse, resolve, or type-check.
-pub fn shape_digests_of(src: &str) -> Result<BTreeMap<String, String>, Error> {
-    let (program, _, _) = frontend(src, &default_roots(Path::new(".")), &Config::from_env())?;
-    Ok(crate::core::shape_digests(&program.types, &program.effects))
-}
-
 // Out-of-Core elaboration inputs the content hash must commit to, keyed by
 // canonical symbol: the generalized type, the principal effect row, the
 // fip/fbip annotation, and the borrow mask. The last two affect
@@ -1270,6 +848,9 @@ pub(crate) fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap
             });
             (
                 sym,
+                // The content-hash meta must be a stable, complete rendering: it
+                // always spells the effect row (even when empty) so a change to the
+                // display flag `SHOW_EMPTY_EFFECT_ROW` can never move a hash.
                 format!(
                     "{} ! {} fip:{fip} borrow:{mask}",
                     d.ty.show(),
@@ -1291,404 +872,11 @@ pub(crate) fn core_root_digest(
     core: &Core,
 ) -> String {
     let meta = hash_meta(checked, &borrow_sigs(program), &fip_annots(program));
-    let entries: BTreeMap<String, String> = hash_program(core, &meta)
+    let entries: BTreeMap<String, Digest> = hash_program(core, &meta)
         .into_iter()
         .map(|(sym, hash)| (sym.as_str().to_string(), hash))
         .collect();
-    hash_root(&entries)
-}
-
-/// Answer a dependency-graph query over a program (prelude included), the
-/// read-only face of the codebase-as-a-database.
-///
-/// `kind` is one of `callers`
-/// (direct), `dependents` (the transitive Merkle closure, the exact set a change
-/// to `target` would force to re-check), `deps` (what `target` transitively
-/// depends on), or `uses-type` (definitions whose inferred type mentions the type
-/// named `target`).
-///
-/// # Errors
-/// Fails on front-end errors, an unknown `kind`, or a `target` that names no
-/// definition (or, for the graph queries, an ambiguous unqualified name).
-pub fn query_on(
-    kind: &str,
-    target: &str,
-    src: &str,
-    roots: &[Root],
-    cfg: &Config,
-) -> Result<String, Error> {
-    match kind {
-        "callers" | "dependents" | "deps" => {
-            let (_, _, core) = frontend(src, roots, cfg)?;
-            let graph = DepGraph::of(&core);
-            let sym = resolve_query_target(&graph, target)?;
-            let set = match kind {
-                "callers" => graph.direct_callers(sym),
-                "dependents" => graph.dependents(sym),
-                _ => graph.dependencies(sym),
-            };
-            let mut names: Vec<&str> = set.iter().map(|s| s.as_str()).collect();
-            names.sort_unstable();
-            let mut out = String::new();
-            writeln!(out, "{kind} of {} ({})", sym.as_str(), names.len()).unwrap();
-            for n in names {
-                writeln!(out, "  {n}").unwrap();
-            }
-            Ok(out)
-        }
-        "uses-type" => {
-            let checked = check_on(src, roots)?;
-            let mut hits: Vec<String> = checked
-                .decls
-                .iter()
-                .filter(|d| type_mentions(&d.ty.show(), target))
-                .map(|d| format!("  {} : {}", d.name, d.ty.show()))
-                .collect();
-            hits.sort_unstable();
-            hits.dedup();
-            let mut out = String::new();
-            writeln!(out, "uses-type {target} ({})", hits.len()).unwrap();
-            out.push_str(&hits.join("\n"));
-            out.push('\n');
-            Ok(out)
-        }
-        other => Err(Error::Codegen(format!(
-            "unknown query {other}; try callers | dependents | deps | uses-type"
-        ))),
-    }
-}
-
-// One revision's per-definition hashes and dependency graph. `deep` is the
-// Merkle-substituted behavior identity (the regime `core-hash`, `namespace`, and
-// the store commit all share, over pre-optimizer elaborated Core); `shallow` is
-// each definition's own-content hash with dependencies by name, which attributes
-// a deep-hash move to the definition actually edited rather than to a ripple
-// through it (under the deep hash, editing one definition moves every transitive
-// dependent's hash too).
-struct Revision {
-    deep: crate::core::Hashes,
-    shallow: crate::core::Hashes,
-    graph: DepGraph,
-}
-
-fn program_hashes(src: &str, roots: &[Root]) -> Result<Revision, Error> {
-    let (program, checked, core) = elaborated(src, roots)?;
-    let meta = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
-    let deep = hash_program(&core, &meta);
-    let shallow = crate::core::shallow_hashes(&core, &meta);
-    let graph = DepGraph::of(&core);
-    Ok(Revision {
-        deep,
-        shallow,
-        graph,
-    })
-}
-
-// The prelude's own definition symbols, under the same pre-optimizer regime the
-// diff hashes both revisions with, so they can be filtered out: the prelude is
-// identical in both sources and would otherwise bury the user's own changes and
-// inflate the unchanged count.
-fn prelude_hash_names(roots: &[Root]) -> Result<std::collections::HashSet<Sym>, Error> {
-    let (_, _, core) = elaborated(PRELUDE, roots)?;
-    Ok(core.0.fns.into_iter().map(|f| f.name).collect())
-}
-
-/// A behavior diff between two revisions of a source.
-///
-/// Because every definition is content-addressed, two revisions diff
-/// *semantically*: match definitions by name, compare content hashes, and report
-/// what changed in behavior rather than in bytes. A pure refactor (renamed
-/// locals, renamed `var`s, reordered definitions, reformatting) leaves every
-/// hash fixed and so diffs to zero changed.
-///
-/// A real logic edit reports the exact set of definitions a developer *edited*
-/// (their own content moved, detected by the shallow hash) plus the dependents
-/// cone those edits affect (via [`DepGraph::dependents`] over the new revision).
-/// The split matters because the deep behavior hash is Merkle: editing one
-/// definition moves the hash of every transitive dependent, so a deep-hash
-/// comparison alone cannot tell the edit apart from its ripple. The shallow hash
-/// isolates the edit; the graph gives the blast radius.
-///
-/// This is store-independent: both sides are hashed in memory, so no
-/// `PRISM_STORE` and no on-disk commit are involved. Prelude definitions are
-/// filtered from both sides (they are identical in both and are not the subject
-/// of a diff).
-///
-/// # Errors
-/// Fails on any front-end error in either revision.
-/// One definition whose behavior hash moved between two revisions.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DiffChangedDef {
-    pub name: String,
-    pub old: String,
-    pub new: String,
-}
-
-/// One definition named by a hash on one side only, or held-but-respelled.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DiffNamedDef {
-    pub name: String,
-    pub hash: String,
-}
-
-/// The structured behavior diff between two source revisions.
-///
-/// Carries what moved behaviorally (deep hash), what was added or removed,
-/// which dependents sit in the edited set's cone, and, the classification only
-/// source text can see, which definitions changed spelling while the
-/// canonicalized hash held.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct SourceDiff {
-    pub format: &'static str,
-    pub behavioral: Vec<DiffChangedDef>,
-    pub added: Vec<DiffNamedDef>,
-    pub removed: Vec<DiffNamedDef>,
-    pub text_only: Vec<DiffNamedDef>,
-    pub dependents: Vec<String>,
-    pub unchanged: usize,
-}
-
-/// The format tag `SourceDiff` serializes under.
-pub const SOURCE_DIFF_FORMAT: &str = "prism-source-diff-v1";
-
-// Per-definition source slices, for the text-only classification: bare name to
-// the trimmed span text of each top-level function. Parse-only, no checking.
-fn decl_slices(src: &str) -> Result<std::collections::BTreeMap<String, String>, Error> {
-    let parsed = parse(src)?;
-    Ok(parsed
-        .program
-        .fns
-        .iter()
-        .filter_map(|d| {
-            let text = src.get(d.span.start..d.span.end)?;
-            Some((d.name.clone(), text.trim().to_string()))
-        })
-        .collect())
-}
-
-/// The structured diff behind `prism diff` over two source revisions.
-///
-/// # Errors
-/// Fails when either revision fails the frontend.
-pub fn source_diff_on(
-    old_src: &str,
-    new_src: &str,
-    roots: &[Root],
-    _cfg: &Config,
-) -> Result<SourceDiff, Error> {
-    let prelude = prelude_hash_names(roots)?;
-    let old = program_hashes(old_src, roots)?;
-    let new = program_hashes(new_src, roots)?;
-
-    let is_user = |s: &Sym| !prelude.contains(s);
-    let names = |hs: &crate::core::Hashes| -> BTreeSet<Sym> {
-        hs.keys().copied().filter(is_user).collect()
-    };
-    let old_names = names(&old.deep);
-    let new_names = names(&new.deep);
-
-    // A definition present in both revisions is *edited* when its own content
-    // moved (shallow hash), *unchanged* when its behavior held (deep hash), and
-    // otherwise only rippled by a dependency (it lands in the cone below, not
-    // here). Edited lines carry the deep (behavior) hashes, the identity that
-    // actually moved.
-    let mut changed: Vec<(Sym, String, String)> = Vec::new();
-    let mut unchanged = 0usize;
-    for sym in old_names.intersection(&new_names) {
-        if old.deep[sym] == new.deep[sym] {
-            unchanged += 1;
-        } else if old.shallow[sym] != new.shallow[sym] {
-            changed.push((*sym, old.deep[sym].clone(), new.deep[sym].clone()));
-        }
-    }
-    let mut added: Vec<(Sym, String)> = new_names
-        .difference(&old_names)
-        .map(|s| (*s, new.deep[s].clone()))
-        .collect();
-    let mut removed: Vec<(Sym, String)> = old_names
-        .difference(&new_names)
-        .map(|s| (*s, old.deep[s].clone()))
-        .collect();
-
-    // The dependents cone of the edited set over the new revision's graph: every
-    // user definition transitively affected by an edit. Edited and added
-    // definitions are reported on their own lines, so they are excluded from the
-    // cone, as is the prelude (which never depends on user code).
-    let edited: BTreeSet<Sym> = changed.iter().map(|(s, _, _)| *s).collect();
-    let added_set: BTreeSet<Sym> = added.iter().map(|(s, _)| *s).collect();
-    let mut cone: BTreeSet<Sym> = BTreeSet::new();
-    for sym in &edited {
-        cone.extend(new.graph.dependents(*sym));
-    }
-    cone.retain(|s| is_user(s) && !edited.contains(s) && !added_set.contains(s));
-
-    changed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-    added.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-    removed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-
-    // The classification hashes cannot see: a definition whose canonicalized
-    // hashes held on both sides but whose written text moved (a rename, a
-    // reformat, a comment). Only definitions visible in both parses classify;
-    // canonical (module-qualified) names match a parsed bare name by tail.
-    let old_text = decl_slices(old_src)?;
-    let new_text = decl_slices(new_src)?;
-    let bare = |s: &str| s.rsplit_once('.').map_or(s, |(_, t)| t).to_string();
-    let mut text_only: Vec<DiffNamedDef> = Vec::new();
-    for sym in old_names.intersection(&new_names) {
-        if old.deep[sym] != new.deep[sym] || old.shallow[sym] != new.shallow[sym] {
-            continue;
-        }
-        let key = bare(sym.as_str());
-        if let (Some(a), Some(b)) = (old_text.get(&key), new_text.get(&key)) {
-            if a != b {
-                text_only.push(DiffNamedDef {
-                    name: sym.as_str().to_string(),
-                    hash: new.deep[sym].clone(),
-                });
-            }
-        }
-    }
-    text_only.sort_by(|a, b| a.name.cmp(&b.name));
-
-    let mut dependents: Vec<String> = cone.iter().map(|s| s.as_str().to_string()).collect();
-    dependents.sort_unstable();
-
-    Ok(SourceDiff {
-        format: SOURCE_DIFF_FORMAT,
-        behavioral: changed
-            .into_iter()
-            .map(|(s, o, n)| DiffChangedDef {
-                name: s.as_str().to_string(),
-                old: o,
-                new: n,
-            })
-            .collect(),
-        added: added
-            .into_iter()
-            .map(|(s, h)| DiffNamedDef {
-                name: s.as_str().to_string(),
-                hash: h,
-            })
-            .collect(),
-        removed: removed
-            .into_iter()
-            .map(|(s, h)| DiffNamedDef {
-                name: s.as_str().to_string(),
-                hash: h,
-            })
-            .collect(),
-        text_only,
-        dependents,
-        unchanged,
-    })
-}
-
-/// The human behavior diff between two source revisions, rendered from
-/// [`source_diff_on`]'s structured result.
-///
-/// # Errors
-/// Fails when either revision fails the frontend.
-pub fn diff_on(
-    old_src: &str,
-    new_src: &str,
-    roots: &[Root],
-    cfg: &Config,
-) -> Result<String, Error> {
-    let d = source_diff_on(old_src, new_src, roots, cfg)?;
-
-    let short = |h: &str| h[..crate::core::HASH_PREFIX_HEX].to_string();
-    let mut out = String::new();
-    writeln!(
-        out,
-        "diff: {} changed, {} added, {} removed, {} unchanged",
-        d.behavioral.len(),
-        d.added.len(),
-        d.removed.len(),
-        d.unchanged,
-    )
-    .unwrap();
-    for c in &d.behavioral {
-        writeln!(
-            out,
-            "  ~ {}  {} -> {}",
-            c.name,
-            short(&c.old),
-            short(&c.new)
-        )
-        .unwrap();
-    }
-    for a in &d.added {
-        writeln!(out, "  + {}  {}", a.name, short(&a.hash)).unwrap();
-    }
-    for r in &d.removed {
-        writeln!(out, "  - {}  {}", r.name, short(&r.hash)).unwrap();
-    }
-    // Spelling moved, behavior held: named so a pure refactor reads as exactly
-    // that, zero behavioral changes with the text movement accounted for.
-    if !d.text_only.is_empty() {
-        let names: Vec<&str> = d.text_only.iter().map(|t| t.name.as_str()).collect();
-        writeln!(
-            out,
-            "text-only: {} respelled, behavior held ({})",
-            names.len(),
-            names.join(", ")
-        )
-        .unwrap();
-    }
-    if d.dependents.is_empty() {
-        writeln!(out, "cone: 0 affected").unwrap();
-    } else {
-        writeln!(
-            out,
-            "cone: {} affected ({})",
-            d.dependents.len(),
-            d.dependents.join(", ")
-        )
-        .unwrap();
-    }
-    Ok(out)
-}
-
-// Resolve a query target name to a single definition, reporting no-match and
-// ambiguity as errors so the caller can qualify.
-fn resolve_query_target(graph: &DepGraph, target: &str) -> Result<Sym, Error> {
-    let mut candidates = graph.resolve(target);
-    match candidates.len() {
-        1 => Ok(candidates.remove(0)),
-        0 => Err(Error::Codegen(format!("no definition named `{target}`"))),
-        _ => {
-            candidates.sort_by_key(|s| s.as_str());
-            let list: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
-            Err(Error::Codegen(format!(
-                "`{target}` is ambiguous; qualify one of: {}",
-                list.join(", ")
-            )))
-        }
-    }
-}
-
-// Whether a shown type string mentions the type named `name` as a whole token,
-// so `List` matches `List(Int)` but not `Listable`.
-fn type_mentions(ty: &str, name: &str) -> bool {
-    ty.split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|tok| tok == name)
-}
-
-// The module's target triple and data layout are host-derived, so they differ
-// between machines. They are irrelevant to the snapshotted pipeline (clang
-// re-derives them at link time), so drop them from the dump.
-#[cfg(feature = "native")]
-fn strip_target(ir: &str) -> String {
-    ir.lines()
-        .filter(|l| !l.starts_with("target datalayout") && !l.starts_with("target triple"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn section(out: &mut String, title: &str, body: &str) {
-    writeln!(out, "== {title} ==").unwrap();
-    writeln!(out, "{body}").unwrap();
-    out.push('\n');
+    hash_root(&entries).into_string()
 }
 
 #[cfg(test)]
@@ -1702,7 +890,9 @@ mod envelope_tests {
     use crate::resolve::{Root, SourceBundleIdentity};
 
     #[cfg(feature = "native")]
-    use super::{default_roots, dump_on, native_kont_table_for, Config, HASH_SCHEME};
+    use super::identity::native_kont_table_for;
+    #[cfg(feature = "native")]
+    use super::{default_roots, dump_on, Config, HASH_SCHEME};
     use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
 
     const STORE_PKG_NAME: &str = "StorePkg";
@@ -1713,7 +903,7 @@ mod envelope_tests {
 
     /// The five-kind family: textual tags are distinct, varints are the distinct
     /// contiguous discriminants the binary codec will reuse, and `parse` inverts
-    /// `tag`. This pins the family so the text header and the future body cannot
+    /// `tag`. This checks the family so the text header and the future body cannot
     /// drift out of a shared ordering.
     #[test]
     fn kind_family_is_pinned() {

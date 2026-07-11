@@ -1,0 +1,8 @@
+-- Negative case: a borrow parameter with an open effect row must be rejected,
+-- because an unconstrained row tail is not a proof of purity and the RC calling
+-- convention needs a borrowed-parameter function to be provably pure.
+fn invoke(borrow x : Int, f : (Unit) -> Unit ! {| e}) : Int =
+  f(())
+  x
+
+fn main() = println(invoke(1, \(u) -> ()))

@@ -1,7 +1,8 @@
 use marginalia::Span;
 
 use super::{Env, Tc};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
+use crate::kw;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Pattern, S};
 use crate::types::ty::{EffRow, Kind, Type};
@@ -49,10 +50,7 @@ impl Tc<'_> {
             }
             Pattern::Int(lit) => {
                 if lit.suffix != ast::Suffix::None {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: "suffixed literal patterns are not supported; match on Int".into(),
-                    });
+                    return Err(ErrKind::SuffixedLiteralPattern.at(span));
                 }
                 self.equate(ty, &Type::Int).map_err(|e| e.at(span))?;
                 Ok(env.clone())
@@ -81,14 +79,12 @@ impl Tc<'_> {
                 Ok(env2)
             }
             Pattern::Record(ctor_name, field_pats, _spread) => {
-                let info = self
-                    .ctors
-                    .get(ctor_name)
-                    .cloned()
-                    .ok_or_else(|| TypeError::Other {
-                        span,
-                        msg: format!("unknown record constructor {ctor_name}"),
-                    })?;
+                let info = self.ctors.get(ctor_name).cloned().ok_or_else(|| {
+                    ErrKind::UnknownRecordConstructor {
+                        ctor_name: ctor_name.clone(),
+                    }
+                    .at(span)
+                })?;
                 let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 let mut env2 = env.clone();
@@ -97,9 +93,12 @@ impl Tc<'_> {
                         .fields
                         .iter()
                         .position(|f| f.as_str() == fname)
-                        .ok_or_else(|| TypeError::Other {
-                            span,
-                            msg: format!("unknown field {fname} on {ctor_name}"),
+                        .ok_or_else(|| {
+                            ErrKind::UnknownField {
+                                field: fname.clone(),
+                                ctor: ctor_name.clone(),
+                            }
+                            .at(span)
                         })?;
                     let mut ft = info.args[fi].clone();
                     for (pn, t) in &tsubs {
@@ -113,26 +112,44 @@ impl Tc<'_> {
                 }
                 Ok(env2)
             }
+            // `Null` / `This(x)` match a nullable. The scrutinee is unified with
+            // `OrNull(?a)`; `This(x)` binds `x` to the element, `Null` binds
+            // nothing. The element's non-null soundness was already fixed where the
+            // nullable was built, so the pattern does not re-check it.
+            Pattern::Ctor(name, subs) if name == kw::CTOR_NULL || name == kw::CTOR_THIS => {
+                let elem_ex = self.push_ex();
+                self.equate(ty, &Type::OrNull(Box::new(Type::Exist(elem_ex))))
+                    .map_err(|e| e.at(span))?;
+                let arity = usize::from(name == kw::CTOR_THIS);
+                if subs.len() != arity {
+                    return Err(ErrKind::CtorArity {
+                        name: name.clone(),
+                        expected: arity,
+                        got: subs.len(),
+                    }
+                    .at(span));
+                }
+                if let [sub] = subs.as_slice() {
+                    let elem = self.apply(&Type::Exist(elem_ex));
+                    self.check_pat(env, sub, &elem)
+                } else {
+                    Ok(env.clone())
+                }
+            }
             Pattern::Ctor(name, subs) => {
-                let info = self
-                    .ctors
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| TypeError::Other {
-                        span,
-                        msg: format!("unknown constructor {name}"),
+                let info =
+                    self.ctors.get(name).cloned().ok_or_else(|| {
+                        ErrKind::UnknownConstructor { name: name.clone() }.at(span)
                     })?;
                 let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 if subs.len() != info.args.len() {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!(
-                            "constructor {name} expects {} arguments, got {}",
-                            info.args.len(),
-                            subs.len()
-                        ),
-                    });
+                    return Err(ErrKind::CtorArity {
+                        name: name.clone(),
+                        expected: info.args.len(),
+                        got: subs.len(),
+                    }
+                    .at(span));
                 }
                 let mut env2 = env.clone();
                 for (sub, arg) in subs.iter().zip(&info.args) {
@@ -163,9 +180,12 @@ impl Tc<'_> {
             .values()
             .filter(|c| c.type_name.as_str() == ctor_name)
             .find_map(|c| Some((c, c.fields.iter().position(|f| f.as_str() == field)?)))
-            .ok_or_else(|| TypeError::Other {
-                span,
-                msg: format!("no field `{field}` on type `{ctor_name}`"),
+            .ok_or_else(|| {
+                ErrKind::NoFieldOnType {
+                    field: field.to_string(),
+                    ctor_name: ctor_name.to_string(),
+                }
+                .at(span)
             })?;
         let params = match ty {
             Type::Con(_, ps) => ps.clone(),

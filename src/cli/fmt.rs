@@ -53,7 +53,7 @@ pub fn fmt_cmd(paths: &[PathBuf], check: bool) -> CmdResult {
     }
     if needs_fmt {
         Err((
-            Error::Codegen("some files need formatting".into()),
+            Error::CodegenFormat("some files need formatting".into()),
             String::new(),
             String::new(),
         ))

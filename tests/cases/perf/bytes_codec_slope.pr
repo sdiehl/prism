@@ -14,5 +14,5 @@ fn hex_round(bs : Bytes) : Int =
     Some(out) => bytes_length(out)
     None => 0 - 1
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(show_int(hex_round(bytes_of_buf(buf_new(__N__, 65)))))

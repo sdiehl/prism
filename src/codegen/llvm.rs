@@ -16,7 +16,8 @@ use inkwell::values::{
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
 use super::abi::idx64;
-use super::emit::{emit_with, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
+use super::emit::emit_with_isa;
+use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::native_kont;
 use super::rt;
 use crate::core::{Core, LoweredCore};
@@ -892,7 +893,7 @@ fn with_module<T>(
 ) -> Result<T, String> {
     let ctx = Context::create();
     let isa = Inkwell::new(&ctx, native_kont_frames);
-    emit_with(&isa, core, ctors)?;
+    emit_with_isa(&isa, core, ctors)?;
     if let Some(table) = native_kont_table {
         isa.native_kont_table_global(core, table);
     }

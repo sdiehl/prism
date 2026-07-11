@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/named_escape_payload.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Effect UIdent("Store") VOpen Ctl Ident("save") LParen LParen KwUnit RParen Arrow KwInt RParen Colon KwUnit VClose VSemi Fn Ident("leak") LParen RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Ident("save") LParen Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("leak") LParen RParen VClose
+VOpen Effect UIdent("Ask") VOpen Ident("ask") LParen RParen Colon KwInt VClose VSemi Effect UIdent("Store") VOpen Ident("save") LParen LParen KwUnit RParen Arrow KwInt RParen Colon KwUnit VClose VSemi Fn Ident("leak") LParen RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Ident("save") LParen Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("leak") LParen RParen VClose
 
 == ast ==
 Program {
@@ -21,7 +21,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 309..337,
+            span: 309..333,
         },
         EffectDecl {
             name: "Store",
@@ -42,7 +42,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 339..384,
+            span: 335..376,
         },
     ],
     errors: [],
@@ -146,10 +146,10 @@ Program {
                         ],
                     ),
                 ),
-                span: 400..478,
+                span: 392..478,
             },
             wheres: [],
-            span: 386..478,
+            span: 378..478,
         },
         Decl {
             name: "main",
@@ -176,7 +176,7 @@ Program {
 }
 
 == types ==
-Type Error: in `leak`: handler instance `f` escapes its scope: a value here still performs `f`'s `Ask` operation after its handler is gone
+[E1998] Type Error: in `leak`: handler instance `f` escapes its scope: a value here still performs `f`'s `Ask` operation after its handler is gone
     ╭─[ <source>:15:8 ]
     │
  15 │   save(\(u) -> f.ask())

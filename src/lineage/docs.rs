@@ -85,7 +85,9 @@ impl DocsLineage {
             .stdlib
             .as_ref()
             .map(|root| lineage_root(RootRole::Stdlib, root))
-            .ok_or_else(|| Error::Resolve("lineage: docs roots do not include Std".into()))?;
+            .ok_or_else(|| {
+                Error::ResolveLineage("lineage: docs roots do not include Std".into())
+            })?;
         let packages = identity
             .packages
             .iter()
@@ -253,7 +255,7 @@ pub fn verify_manifest_identity(
         stored.nodes.iter().map(|node| &node.id).collect();
     for (label, id) in expected_identity_ids(&fresh) {
         if !stored_ids.contains(&id) {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "docs verify: {label} root moved since the manifest was written \
                  (current {} is not in the manifest)",
                 id.0
@@ -267,7 +269,7 @@ pub fn verify_manifest_identity(
 fn stored_request(stored: &LineageGraph) -> Result<BuildRequest, Error> {
     match &stored.request()?.kind {
         NodeKind::Request(request) => Ok(request.clone()),
-        _ => Err(Error::Resolve(
+        _ => Err(Error::ResolveLineage(
             "docs verify: manifest has no request node".into(),
         )),
     }

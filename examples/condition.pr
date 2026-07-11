@@ -2,7 +2,7 @@
 -- condition with `raise_cond(d)` without deciding how to recover; the enclosing
 -- handler picks the policy and the value it RESUMES with becomes the result of
 -- the signal (the "use-value" restart). One `checked_div` thus bends to whatever
--- restart is installed above it: resume to keep computing, or `final ctl` to
+-- restart is installed above it: resume to keep computing, or `never` to
 -- abort to a sentinel. A named instance reaches past an inner handler of the
 -- same effect to select a specific OUTER restart.
 --
@@ -12,10 +12,10 @@
 --   600
 
 effect Signal
-  ctl raise_cond(Int) : Int
+  raise_cond(Int) : Int
 
 -- Signals on a zero divisor and divides by whatever the handler resumes.
-fn checked_div(n, d) : !{Signal} Int =
+fn checked_div(n, d) : Int ! {Signal} =
   if d == 0 then
     n / raise_cond(d)
   else
@@ -24,13 +24,13 @@ fn checked_div(n, d) : !{Signal} Int =
 -- Policy (a): use-value restart. Resume with 1 so the quotient is just n.
 fn use_value(n) =
   handle checked_div(n, 0) with
-    raise_cond(_, k) => k(1)
+    raise_cond(_) resume k => k(1)
     return r => r
 
 -- Policy (b): abort restart. Drop the continuation, escape to a sentinel.
 fn abort_to(n) =
   handle checked_div(n, 0) with
-    final ctl raise_cond(_) => 0 - 1
+    never raise_cond(_) => 0 - 1
     return r => r
 
 -- A bare signal goes to the innermost handler (resumes 100); the same code also
@@ -38,10 +38,10 @@ fn abort_to(n) =
 -- restart (resumes 5). So this evaluates 2500 / 5 + 100.
 fn select_outer() =
   with outer <- handler
-    raise_cond(_, k) => k(5)
+    raise_cond(_) resume k => k(5)
     return r => r
   handle 2500 / outer.raise_cond(0) + raise_cond(0) with
-    raise_cond(_, k) => k(100)
+    raise_cond(_) resume k => k(100)
     return r => r
 
 fn main() =

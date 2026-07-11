@@ -16,7 +16,41 @@ use crate::provenance::CapEvent;
 use crate::resolve::{default_roots, Root};
 use serde::Serialize;
 
-use super::{namespace_identity, prepared_core, timing, Config};
+use super::{namespace_identity, prepared_core, stdlib_hash, timing, Config};
+
+// The version of the runtime semantics a snapshot is bound to. Bumped only when a
+// change to evaluation that a persisted continuation could observe (scheduler
+// mechanics, effect-runtime behavior) ships without moving code identity. Held
+// separate from the compiler version so a routine release does not needlessly
+// invalidate every snapshot.
+const RUNTIME_SEMANTICS_VERSION: &str = "1";
+
+// The semantic execution identity a continuation snapshot is bound to: code
+// identity (the namespace root), the standard-library root it links against, the
+// scheduler policy, and the runtime-semantics version. Optimization tier and
+// backend are deliberately excluded (tier parity proves them unobservable);
+// scheduler policy is included because it reorders concurrent execution, so a
+// suffix resumed under a different policy need not equal the uninterrupted run.
+// Folding all four into one digest means a resume under any changed input is
+// refused before a step runs: a snapshot taken under cooperative FIFO cannot be
+// resumed under LIFO.
+fn execution_bundle(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    let code = namespace_identity(src, roots)?.root;
+    let stdlib = stdlib_hash()?.root;
+    let entries = std::collections::BTreeMap::from([
+        ("code".to_string(), code),
+        ("stdlib".to_string(), stdlib),
+        (
+            "scheduler".to_string(),
+            crate::core::hash_str(cfg.scheduler.label()),
+        ),
+        (
+            "runtime".to_string(),
+            crate::core::hash_str(RUNTIME_SEMANTICS_VERSION),
+        ),
+    ]);
+    Ok(crate::core::hash_root(&entries).into_string())
+}
 
 /// # Examples
 /// ```
@@ -40,7 +74,7 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
 /// Fails on front-end errors or a runtime fault.
 pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
     let core = prepared_core(src, &default_roots(base), &Config::from_env())?;
-    run(&core).map_err(Error::Runtime)
+    run(&core).map_err(Error::RuntimeEvaluation)
 }
 
 /// Like [`interpret_at`], but streams `print` to `out_sink` and reads `input`.
@@ -99,7 +133,10 @@ pub fn interpret_io_on_with_args(
         cfg.timing.as_ref(),
         timing::Phase::Eval,
         "",
-        || crate::eval::run_io_with_args(&core, out_sink, input, args).map_err(Error::Runtime),
+        || {
+            crate::eval::run_io_with_args(&core, out_sink, input, args)
+                .map_err(Error::RuntimeEvaluation)
+        },
         |_| timing::RowExtras::default(),
     )
 }
@@ -136,7 +173,7 @@ pub fn record_on_with_args(
     let core = prepared_core(src, roots, cfg)?;
     let run =
         crate::eval::run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-            .map_err(Error::Runtime)?;
+            .map_err(Error::RuntimeEvaluation)?;
     Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
 }
 
@@ -177,7 +214,7 @@ pub fn record_run_on(
 ) -> Result<RecordedRun, Error> {
     let core = prepared_core(src, roots, cfg)?;
     let run = run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-        .map_err(Error::Runtime)?;
+        .map_err(Error::RuntimeEvaluation)?;
     Ok(RecordedRun {
         exit: run.exit,
         trace: trace::encode(&run.frames),
@@ -203,7 +240,7 @@ pub fn replay_run_on(
     cfg: &Config,
 ) -> Result<RecordedRun, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::Runtime)?;
+    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
     let mut empty = std::io::Cursor::new(Vec::new());
     let run = run_traced(
         &core,
@@ -215,7 +252,7 @@ pub fn replay_run_on(
             budget: None,
         },
     )
-    .map_err(Error::Runtime)?;
+    .map_err(Error::RuntimeReplay)?;
     Ok(RecordedRun {
         exit: run.exit,
         trace: trace::encode(&run.frames),
@@ -241,7 +278,7 @@ pub fn replay_on(
     cfg: &Config,
 ) -> Result<Option<i32>, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::Runtime)?;
+    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
     let mut empty = std::io::Cursor::new(Vec::new());
     let run = run_traced(
         &core,
@@ -253,7 +290,7 @@ pub fn replay_on(
             budget: None,
         },
     )
-    .map_err(Error::Runtime)?;
+    .map_err(Error::RuntimeReplay)?;
     Ok(run.exit)
 }
 
@@ -272,8 +309,8 @@ pub fn debug_on(
     cfg: &Config,
 ) -> Result<(), Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let frames = trace::decode(trace).map_err(Error::Runtime)?;
-    crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::Runtime)
+    let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
+    crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::RuntimeDebugger)
 }
 
 /// The versioned format tag heading a step-ruler rendering.
@@ -335,7 +372,8 @@ pub fn step_ruler_on(
     cfg: &Config,
 ) -> Result<StepRuler, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let (run, marks, total_steps) = run_ruler(&core, out_sink, input).map_err(Error::Runtime)?;
+    let (run, marks, total_steps) =
+        run_ruler(&core, out_sink, input).map_err(Error::RuntimeEvaluation)?;
     Ok(StepRuler {
         format: STEP_RULER_FORMAT,
         total_steps,
@@ -390,17 +428,16 @@ pub fn suspend_on(
     budget: usize,
     cfg: &Config,
 ) -> Result<SuspendResult, Error> {
-    let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
+    let bundle = execution_bundle(src, roots, cfg)?;
     let core = prepared_core(src, roots, cfg)?;
     let (checkpoint, marks) =
         crate::eval::run_suspending_ruled(&core, bundle, budget, out_sink, input)
-            .map_err(Error::Runtime)?;
+            .map_err(Error::RuntimeEvaluation)?;
     match checkpoint {
         crate::eval::Checkpoint::Done(run) => Ok(SuspendResult::Done(run.exit)),
         crate::eval::Checkpoint::Suspended(kont) => {
-            let bytes =
-                crate::eval::kont::encode_kont(&kont).map_err(|e| Error::Runtime(e.to_string()))?;
+            let bytes = crate::eval::kont::encode_kont(&kont)
+                .map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
             let cut = SuspendCut {
                 observations: marks.len(),
                 last: marks.into_iter().next_back().map(ruler_row),
@@ -427,7 +464,7 @@ const MAX_LINE_CUT_STEPS: usize = 8192;
 /// Fails on any front-end error or an evaluation fault before the program ends.
 pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<usize>, Error> {
     let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
+    let bundle = identity.root.into_string();
     let core = prepared_core(src, roots, cfg)?;
     // Build the global table once: it deep-clones every function body, so rebuilding
     // it per budget would make the scan quadratic in that clone.
@@ -438,7 +475,7 @@ pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<
         let mut input = std::io::Cursor::new(Vec::new());
         let checkpoint =
             crate::eval::run_suspending_in(&g, bundle.clone(), budget, &mut out, &mut input)
-                .map_err(Error::Runtime)?;
+                .map_err(Error::RuntimeEvaluation)?;
         let lines = out.iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
         while cuts.len() < lines {
             cuts.push(budget);
@@ -473,18 +510,19 @@ pub fn resume_on(
     cfg: &Config,
 ) -> Result<Option<i32>, Error> {
     let kont = crate::eval::kont::decode_kont(snapshot)
-        .map_err(|e| Error::Runtime(format!("resume: malformed snapshot: {e}")))?;
-    let identity = namespace_identity(src, roots)?;
-    let bundle = identity.root;
+        .map_err(|e| Error::RuntimeReplay(format!("resume: malformed snapshot: {e}")))?;
+    let bundle = execution_bundle(src, roots, cfg)?;
     if kont.bundle != bundle {
-        return Err(Error::Runtime(format!(
-            "resume: code-identity mismatch: this snapshot was captured against a \
-             different program (snapshot bundle {}, this program {})",
+        return Err(Error::RuntimeReplay(format!(
+            "resume: execution-identity mismatch: this snapshot was captured against a \
+             different program or under different behavior-bearing settings (code, standard \
+             library, scheduler policy, or runtime semantics); snapshot bundle {}, this run {}",
             kont.bundle, bundle
         )));
     }
     let core = prepared_core(src, roots, cfg)?;
-    let run = crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::Runtime)?;
+    let run =
+        crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::RuntimeReplay)?;
     Ok(run.exit)
 }
 

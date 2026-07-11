@@ -1,9 +1,9 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/interp_empty.pr
 ---
-Lexical Error: empty interpolation hole `{}` at line 2:24
+[E7001] Lexical Error: empty interpolation hole `{}` at line 2:24
    ╭─[ <source>:2:24 ]
    │
  2 │ fn main() = println("a {} b")

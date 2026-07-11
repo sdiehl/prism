@@ -302,7 +302,7 @@ Program {
 }
 
 == types ==
-Type Error: `view` clause of pattern `Diag` must be a lambda, as in `view \(x) -> ...`
+[E6015] Type Error: `view` clause of pattern `Diag` must be a lambda, as in `view \(x) -> ...`
     ╭─[ <source>:14:8 ]
     │
  14 │   view diag

@@ -44,6 +44,7 @@ pub(super) fn each_value<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Value)) {
         // body still performs another effect).
         | Comp::RefNew(v)
         | Comp::RefGet(v)
+        | Comp::UnboxedProject(v, _)
         | Comp::If(v, ..)
         | Comp::Case(v, _) => f(v),
         Comp::Prim(_, a, b) | Comp::RefSet(a, b) => {
@@ -103,6 +104,7 @@ pub(super) fn each_subcomp<'a>(c: &'a Comp, f: &mut impl FnMut(&'a Comp)) {
         | Comp::Error(_)
         | Comp::FloatBuiltin(..)
         | Comp::Neg(..)
+        | Comp::UnboxedProject(..)
         | Comp::Dup(_)
         | Comp::Drop(_)
         | Comp::Reuse(..)

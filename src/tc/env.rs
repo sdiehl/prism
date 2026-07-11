@@ -4,13 +4,15 @@ use marginalia::Span;
 
 use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
 use crate::core::builtins::{Builtin, FloatOp};
-use crate::error::TypeError;
+use crate::error::suggest;
+use crate::error::{ErrKind, TypeError};
+use crate::kw;
 use crate::lex::lex_raw;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
-use crate::types::ty::{EffRow, Kind, Label, Type};
+use crate::types::ty::{EffRow, Kind, Label, Type, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -37,12 +39,8 @@ impl<'a> Annot<'a> {
         row_ex: &'a mut BTreeMap<String, u32>,
         empty: &'a BTreeSet<String>,
     ) -> Self {
-        Self {
-            ty_ex,
-            row_ex,
-            rigid_ty: empty,
-            rigid_row: empty,
-        }
+        // No rigid variables: both rigid sets are the shared empty set.
+        Self::with_rigid(ty_ex, row_ex, empty, empty)
     }
 
     // Convert against a supplied rigid type-variable set (and a separate, usually
@@ -79,16 +77,39 @@ impl Tc<'_> {
                 }
                 self.check_annot_rows(r, span)
             }
+            // `OrNull(a)` is a wired-in unary type head, not a datatype. Enforce
+            // its arity and that the element has a non-null, single-word runtime
+            // representation (so the null word can never collide with a `This(v)`).
+            ast::Ty::Con(n, ts) if n == kw::TY_OR_NULL => {
+                no_polytype_args(ts, n, span)?;
+                let [elem] = ts.as_slice() else {
+                    return Err(ErrKind::TooManyTypeArgs {
+                        name: n.clone(),
+                        takes: 1,
+                        given: ts.len(),
+                    }
+                    .at(span));
+                };
+                if !or_null_ast_element_ok(elem) {
+                    return Err(ErrKind::OrNullBadElement {
+                        found: or_null_element_desc(elem),
+                    }
+                    .at(span));
+                }
+                self.check_annot_rows(elem, span)
+            }
             ast::Ty::Con(n, ts) => {
                 // Impredicativity is a structural property of the written type,
                 // independent of whether the head constructor is declared, so it
                 // is reported before the existence check.
                 no_polytype_args(ts, n, span)?;
                 let Some(info) = self.data.get(n) else {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("unknown type `{n}`"),
-                    });
+                    return Err(ErrKind::UnknownType { name: n.clone() }
+                        .at(span)
+                        .maybe_help(suggest::suggestion(
+                            n,
+                            self.data.keys().map(|k| names::bare_name(k)),
+                        )));
                 };
                 // Kind-check the application against the constructor's kind. The
                 // constructor's kind is the arrow `Kind::arrow(param_kinds)` (for
@@ -100,26 +121,45 @@ impl Tc<'_> {
                 let mut con_kind = Kind::arrow(&info.param_kinds);
                 for (i, arg) in ts.iter().enumerate() {
                     let Kind::Fun(dom, rest) = con_kind else {
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!(
-                                "`{n}` is applied to too many arguments: it takes {}, but {} were given",
-                                info.param_kinds.len(),
-                                ts.len()
-                            ),
-                        });
+                        return Err(ErrKind::TooManyTypeArgs {
+                            name: n.clone(),
+                            takes: info.param_kinds.len(),
+                            given: ts.len(),
+                        }
+                        .at(span));
                     };
-                    if let Some(actual) = syntactic_kind(arg) {
-                        if actual != *dom {
-                            return Err(TypeError::Other {
-                                span,
-                                msg: format!(
-                                    "kind mismatch: parameter {} of `{n}` has kind `{}`, but a `{}` was given",
-                                    i + 1,
-                                    dom.show(),
-                                    actual.show(),
-                                ),
-                            });
+                    // A `Row`- or `Nat`-kinded position is not merely "some type of
+                    // that kind": only a row literal or variable can be lowered as a
+                    // row, and only a dimension literal or variable as a `Nat`.
+                    // Anything else (an application, constructor, tuple, ...) has no
+                    // representation there and was silently erased to the empty row
+                    // or a fresh dimension before. A bare variable stays legal (its
+                    // kind is pinned by inference), so genuinely row/nat-polymorphic
+                    // uses still check.
+                    let mis = |actual: &str| {
+                        Err(ErrKind::KindMismatch {
+                            index: i + 1,
+                            name: n.clone(),
+                            expected: dom.show(),
+                            actual: actual.to_string(),
+                        }
+                        .at(span))
+                    };
+                    match &*dom {
+                        Kind::Row if !matches!(arg, ast::Ty::RowLit(_) | ast::Ty::Var(_)) => {
+                            return mis(&syntactic_kind(arg)
+                                .map_or_else(|| Kind::Type.show(), |k| k.show()));
+                        }
+                        Kind::Nat if !matches!(arg, ast::Ty::Nat(_) | ast::Ty::Var(_)) => {
+                            return mis(&syntactic_kind(arg)
+                                .map_or_else(|| Kind::Type.show(), |k| k.show()));
+                        }
+                        _ => {
+                            if let Some(actual) = syntactic_kind(arg) {
+                                if actual != *dom {
+                                    return mis(&actual.show());
+                                }
+                            }
                         }
                     }
                     con_kind = *rest;
@@ -152,22 +192,19 @@ impl Tc<'_> {
             match known {
                 Some(want) => {
                     if !l.args.is_empty() && l.args.len() != want {
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!(
-                                "effect `{}` expects {} type argument(s), got {}",
-                                l.name,
-                                want,
-                                l.args.len()
-                            ),
-                        });
+                        return Err(ErrKind::EffectArity {
+                            name: l.name.clone(),
+                            want,
+                            got: l.args.len(),
+                        }
+                        .at(span));
                     }
                 }
                 None if !is_builtin_effect(&l.name) => {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("unknown effect `{}`", l.name),
-                    });
+                    return Err(ErrKind::UnknownEffect {
+                        name: l.name.clone(),
+                    }
+                    .at(span));
                 }
                 None => {}
             }
@@ -213,9 +250,13 @@ impl Tc<'_> {
             // A `var` state cell reuses the pinned existential id it was desugared to;
             // see the canonical note on `ast::Ty::State`.
             ast::Ty::State(n) => Type::Exist(*n),
-            // Usage rows are rejected in desugar before any annotation reaches
-            // conversion; convert through the underlying type defensively.
-            ast::Ty::Coeffect(inner, _) => self.convert_annot(inner, a),
+            // A usage row that survives desugar is a wired closure-usage contract
+            // (`@ once` on a function type); carry it on the semantic type so
+            // subsumption can check it contravariantly. `@ noalloc` was already
+            // lifted to the fn certificate, and every other position was rejected.
+            ast::Ty::Coeffect(inner, row) => {
+                Type::Coeffect(Box::new(self.convert_annot(inner, a)), row.clone())
+            }
             ast::Ty::Forall(names, body) => {
                 let mut rows = BTreeSet::new();
                 ty_row_vars(body, &mut rows);
@@ -246,6 +287,13 @@ impl Tc<'_> {
                 self.convert_row(row, a),
                 self.convert_annot(r, a),
             ),
+            // `OrNull(a)` is a wired-in type head, not a datatype: one argument,
+            // lowered to the dedicated `OrNull` node. A non-unary spelling falls
+            // through to the ordinary constructor path so it fails as a bad
+            // application; the element-soundness check runs in the annotation pass.
+            ast::Ty::Con(n, args) if n == kw::TY_OR_NULL && args.len() == 1 => {
+                Type::OrNull(Box::new(self.convert_annot(&args[0], a)))
+            }
             ast::Ty::Con(n, args) => {
                 // A `Row`-kinded parameter position takes an effect row, not a
                 // type, so its argument is lowered as a row (`Cmd(a, e)`).
@@ -293,6 +341,14 @@ impl Tc<'_> {
             ast::Ty::Tuple(ts) => {
                 Type::Tuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
             }
+            ast::Ty::UnboxedTuple(ts) => {
+                Type::UnboxedTuple(ts.iter().map(|x| self.convert_annot(x, a)).collect())
+            }
+            ast::Ty::UnboxedRecord(fs) => Type::UnboxedRecord(
+                fs.iter()
+                    .map(|(n, x)| (Sym::from(n.as_str()), self.convert_annot(x, a)))
+                    .collect(),
+            ),
             ast::Ty::RowLit(row) => Type::Row(self.convert_row(row, a)),
             ast::Ty::Nat(n) => Type::Nat(*n),
         }
@@ -356,17 +412,49 @@ impl Tc<'_> {
 // the annotation rather than surfacing later as a leaked rigid variable.
 fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), TypeError> {
     if args.iter().any(|a| matches!(a, ast::Ty::Forall(..))) {
-        return Err(TypeError::Other {
-            span,
-            msg: format!(
-                "impredicative type: a polymorphic type cannot be a type argument to `{head}` \
-                 (a type parameter ranges over monomorphic types). Higher-rank types are \
-                 allowed as function arguments, results, and declared data fields; wrap the \
-                 polymorphic type in a data type with a polymorphic field to carry it here."
-            ),
-        });
+        return Err(ErrKind::ImpredicativeTypeArg {
+            head: head.to_string(),
+        }
+        .at(span));
     }
     Ok(())
+}
+
+// The AST dual of `types::is_or_null_element`: whether `t` is a written type whose
+// values occupy a single value word that is never the machine zero word. Heap
+// datatypes (any `Con`/`App`/`Tuple`) and the tagged scalars qualify; `Unit` is the
+// zero word, `Float`/`Char` are left out of this first cut, `OrNull` would make the
+// null word ambiguous, and a bare type variable could later be `Unit`, so all are
+// rejected. Keep this in lockstep with the `Type`-level predicate.
+fn or_null_ast_element_ok(t: &ast::Ty) -> bool {
+    match t {
+        // Tagged scalars (odd words) and heap datatypes, tuples, and applied
+        // datatype spines are all non-zero single words.
+        ast::Ty::Int
+        | ast::Ty::I64
+        | ast::Ty::U64
+        | ast::Ty::Bool
+        | ast::Ty::Str
+        | ast::Ty::Tuple(_)
+        | ast::Ty::App(..) => true,
+        // A user datatype qualifies, but a nested `OrNull` does not.
+        ast::Ty::Con(n, _) => n != kw::TY_OR_NULL,
+        _ => false,
+    }
+}
+
+// A short description of a rejected `OrNull` element, for the diagnostic.
+fn or_null_element_desc(t: &ast::Ty) -> String {
+    match t {
+        ast::Ty::Unit => "`Unit`".into(),
+        ast::Ty::Float => "`Float`".into(),
+        ast::Ty::Char => "`Char`".into(),
+        ast::Ty::Con(n, _) => format!("`{n}`"),
+        ast::Ty::Var(v) => format!("the type variable `{v}`"),
+        ast::Ty::UnboxedTuple(_) | ast::Ty::UnboxedRecord(_) => "an unboxed product".into(),
+        ast::Ty::Fun(..) => "a function type".into(),
+        _ => "that type".into(),
+    }
 }
 
 // The kind a written type argument commits to by its syntax alone: a `{..}` row
@@ -462,10 +550,15 @@ fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
             Box::new(saturate_cons(*r, data)),
         ),
         Type::Tuple(xs) => Type::Tuple(xs.into_iter().map(go).collect()),
+        Type::UnboxedTuple(xs) => Type::UnboxedTuple(xs.into_iter().map(go).collect()),
+        Type::UnboxedRecord(fs) => {
+            Type::UnboxedRecord(fs.into_iter().map(|(n, t)| (n, go(t))).collect())
+        }
         Type::App(h, a) => Type::App(
             Box::new(saturate_cons(*h, data)),
             Box::new(saturate_cons(*a, data)),
         ),
+        Type::OrNull(a) => Type::OrNull(Box::new(go(*a))),
         Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_cons(*b, data))),
         Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_cons(*b, data))),
         other => other,
@@ -510,6 +603,9 @@ pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
             data_row_rp(row, rp),
             convert_data_rp(r, rp),
         ),
+        ast::Ty::Con(n, args) if n == kw::TY_OR_NULL && args.len() == 1 => {
+            Type::OrNull(Box::new(convert_data_rp(&args[0], rp)))
+        }
         ast::Ty::Con(n, args) => Type::Con(
             Sym::from(n),
             args.iter().map(|x| convert_data_rp(x, rp)).collect(),
@@ -519,6 +615,14 @@ pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
             args.iter().map(|x| convert_data_rp(x, rp)).collect(),
         ),
         ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect()),
+        ast::Ty::UnboxedTuple(ts) => {
+            Type::UnboxedTuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect())
+        }
+        ast::Ty::UnboxedRecord(fs) => Type::UnboxedRecord(
+            fs.iter()
+                .map(|(n, x)| (Sym::from(n.as_str()), convert_data_rp(x, rp)))
+                .collect(),
+        ),
         ast::Ty::RowLit(row) => Type::Row(data_row_rp(row, rp)),
         ast::Ty::Nat(v) => Type::Nat(*v),
     }
@@ -568,15 +672,21 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
             }
             collect_type_vars(r, out);
         }
-        Type::Con(_, ps) | Type::Tuple(ps) => {
+        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
             for p in ps {
                 collect_type_vars(p, out);
+            }
+        }
+        Type::UnboxedRecord(fs) => {
+            for (_, t) in fs {
+                collect_type_vars(t, out);
             }
         }
         Type::App(h, a) => {
             collect_type_vars(h, out);
             collect_type_vars(a, out);
         }
+        Type::OrNull(a) => collect_type_vars(a, out),
         Type::Row(r) => r.for_each_arg(&mut |a| collect_type_vars(a, out)),
         _ => {}
     }
@@ -596,15 +706,21 @@ pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
             row.for_each_arg(&mut |a| collect_row_vars(a, out));
             collect_row_vars(r, out);
         }
-        Type::Con(_, ps) | Type::Tuple(ps) => {
+        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
             for p in ps {
                 collect_row_vars(p, out);
+            }
+        }
+        Type::UnboxedRecord(fs) => {
+            for (_, t) in fs {
+                collect_row_vars(t, out);
             }
         }
         Type::App(h, a) => {
             collect_row_vars(h, out);
             collect_row_vars(a, out);
         }
+        Type::OrNull(a) => collect_row_vars(a, out),
         Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
         Type::Row(r) => {
             if let EffRow::Var(v) = r.tail() {
@@ -833,12 +949,12 @@ const NON_ENUM_SIGS: &[(&str, &str)] = &[
 // at every call site, exactly like a surface function's inferred row. The
 // returned label list is the parsed row, checked by the signature-parsing tests.
 fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
-    let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::Ice {
+    let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::InternalInvariant {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
     })?;
     let ty = TypeSigParser::new()
         .parse(tokens)
-        .map_err(|e| TypeError::Ice {
+        .map_err(|e| TypeError::InternalInvariant {
             msg: format!("builtin `{name}` signature `{sig}`: {e:?}"),
         })?;
     let effs = sig_row(&ty);
@@ -929,6 +1045,28 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             ctors: vec![],
         },
     );
+    // `FloatBuf` is a built-in 0-parameter type: an unboxed buffer of raw f64
+    // words (`runtime/prism_tbuf.c`) with no surface constructors, manipulated
+    // only through the `tbuf_*` builtins. It is the flat storage under the stdlib
+    // tensor library.
+    data.insert(
+        FLOAT_BUF.to_string(),
+        DataInfo {
+            params: vec![],
+            param_kinds: vec![],
+            ctors: vec![],
+        },
+    );
+    // `IntBuf` is its i64-element sibling: the same raw-word storage cell,
+    // manipulated through the `ibuf_*` builtins with `I64` elements.
+    data.insert(
+        INT_BUF.to_string(),
+        DataInfo {
+            params: vec![],
+            param_kinds: vec![],
+            ctors: vec![],
+        },
+    );
     for dd in &prog.types {
         let kinds = normalize_kinds(&dd.params, &dd.param_kinds);
         // The `Row`-kinded parameters of this declaration; a field row that
@@ -1006,7 +1144,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 },
             );
             // A var in the return type but in no parameter is instantiated fresh
-            // per perform site. Desugar restricts such ops to final ctl arms.
+            // per perform site. Desugar restricts such ops to never arms.
             let mut pv = BTreeSet::new();
             for p in &params {
                 collect_type_vars(p, &mut pv);
@@ -1052,11 +1190,17 @@ fn max_state_ex(t: &Type, hi: &mut Option<u32>) {
             }
             max_state_ex(r, hi);
         }
-        Type::Con(_, ps) | Type::Tuple(ps) => {
+        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
             for p in ps {
                 max_state_ex(p, hi);
             }
         }
+        Type::UnboxedRecord(fs) => {
+            for (_, t) in fs {
+                max_state_ex(t, hi);
+            }
+        }
+        Type::OrNull(a) => max_state_ex(a, hi),
         _ => {}
     }
 }

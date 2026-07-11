@@ -1,0 +1,22 @@
+import Json (..)
+
+fn err_of(s) =
+  match decode(s) of
+    Ok(j) => println("UNEXPECTED OK")
+    Err(e) => println(json_error_message(e))
+
+fn deep(n, acc) =
+  if n <= 0 then
+    acc
+  else
+    deep(n - 1, concat("[", acc))
+
+fn main() =
+  err_of("[1,2")
+  err_of("\{\"a\":1,\}")
+  err_of("42 garbage")
+  err_of("[1, 2] extra")
+  err_of("\"unterminated")
+  err_of("nul")
+  err_of("")
+  err_of(deep(20000, ""))

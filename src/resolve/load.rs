@@ -208,7 +208,7 @@ impl Root {
                     {
                         Ok(None)
                     }
-                    Err(e) => Err(Error::Resolve(format!(
+                    Err(e) => Err(Error::ResolveModule(format!(
                         "cannot load module `{}`: {} ({})",
                         path.join("."),
                         e,
@@ -305,7 +305,7 @@ fn fetch_module(path: &[String], roots: &[Root]) -> Result<Program, Error> {
     for r in roots {
         let Some(src) = r.fetch(path)? else { continue };
         let program = parse(&src)
-            .map_err(|e| Error::Resolve(format!("in module `{dotted}`: {e}")))?
+            .map_err(|e| Error::ResolveModule(format!("in module `{dotted}`: {e}")))?
             .program;
         if program.imports.iter().any(|imp| imp.path == path) {
             self_collision = true;
@@ -313,7 +313,7 @@ fn fetch_module(path: &[String], roots: &[Root]) -> Result<Program, Error> {
         }
         return Ok(program);
     }
-    Err(Error::Resolve(if self_collision {
+    Err(Error::ResolveModule(if self_collision {
         format!(
             "module `{dotted}` resolves to a source file that imports itself: a file \
              named after the module it imports shadows the intended `{dotted}` \

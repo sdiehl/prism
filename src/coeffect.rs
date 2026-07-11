@@ -141,7 +141,10 @@ impl CoeffectFact {
     /// rejects as reserved.
     #[must_use]
     pub const fn is_wired(self) -> bool {
-        matches!(self, Self::Noalloc)
+        matches!(
+            self,
+            Self::Noalloc | Self::Once | Self::Portable | Self::Noescape
+        )
     }
 }
 
@@ -156,7 +159,7 @@ impl fmt::Display for CoeffectFact {
 /// Construction happens only through [`CoeffectRow::new`], which is where the
 /// set discipline (no duplicates, no same-axis contradictions, never empty) is
 /// enforced, so a row that exists is canonical by construction.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CoeffectRow {
     facts: Vec<CoeffectFact>,
 }
@@ -225,6 +228,50 @@ impl CoeffectRow {
     #[must_use]
     pub fn is_noalloc_only(&self) -> bool {
         self.facts == [CoeffectFact::Noalloc]
+    }
+
+    /// Whether every fact is a multiplicity (`once`/`many`), the usage contract a
+    /// closure-typed value may carry: `(T -> U) @ once`. Other axes (mobility,
+    /// escape) attach to a value through their own positions, not this one.
+    #[must_use]
+    pub fn is_multiplicity_only(&self) -> bool {
+        self.facts.iter().all(|f| f.axis() == Axis::Multiplicity)
+    }
+
+    /// Whether every fact is a closure-usage contract a function-typed value may
+    /// carry: a multiplicity (`once`/`many`) or a mobility (`portable`). These are
+    /// the axes checked at a closure boundary; `@ {once, portable}` is the mobile
+    /// single-use contract `teleport` requires.
+    #[must_use]
+    pub fn is_closure_contract(&self) -> bool {
+        self.facts
+            .iter()
+            .all(|f| matches!(f.axis(), Axis::Multiplicity | Axis::Mobility))
+    }
+
+    /// Whether this row claims `portable` (mobility): the closure may be moved to a
+    /// fresh runtime because its captures are all portable.
+    #[must_use]
+    pub fn is_portable(&self) -> bool {
+        self.facts.contains(&CoeffectFact::Portable)
+    }
+
+    /// Whether this row is exactly the scoped-token contract `@ noescape`: valid
+    /// on a domain of a function type (`(Builder @ noescape) -> a`), promising the
+    /// callback does not let that argument outlive the call.
+    #[must_use]
+    pub fn is_noescape_only(&self) -> bool {
+        self.facts == [CoeffectFact::Noescape]
+    }
+
+    /// The multiplicity this row claims, if it names one: `once` is stronger than
+    /// the default `many`. `None` when the row carries no multiplicity fact.
+    #[must_use]
+    pub fn multiplicity(&self) -> Option<CoeffectFact> {
+        self.facts
+            .iter()
+            .copied()
+            .find(|f| f.axis() == Axis::Multiplicity)
     }
 
     /// The first fact whose checker does not exist yet, if any: the one to

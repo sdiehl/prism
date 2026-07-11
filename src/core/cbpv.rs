@@ -50,16 +50,6 @@ impl CoreOp {
             BinOp::Le => Self::Le,
             BinOp::Gt => Self::Gt,
             BinOp::Ge => Self::Ge,
-            BinOp::Addf => Self::Addf,
-            BinOp::Subf => Self::Subf,
-            BinOp::Mulf => Self::Mulf,
-            BinOp::Divf => Self::Divf,
-            BinOp::Eqf => Self::Eqf,
-            BinOp::Nef => Self::Nef,
-            BinOp::Ltf => Self::Ltf,
-            BinOp::Lef => Self::Lef,
-            BinOp::Gtf => Self::Gtf,
-            BinOp::Gef => Self::Gef,
             // `And`/`Or` short-circuit and `Pow` lowers to a class method call;
             // none is a primitive core op.
             BinOp::And | BinOp::Or | BinOp::Pow => return None,
@@ -122,6 +112,15 @@ pub enum Value {
     Thunk(Box<Comp>),
     Ctor(Sym, usize, Vec<Self>),
     Tuple(Vec<Self>),
+    // Unboxed products: the same value semantics as `Tuple`/a record, but a
+    // representation that carries no heap cell (flattened into fields at the ABI).
+    // Their observable behavior is identical to the boxed forms, so the choice is
+    // invisible; only the runtime layout differs. `UnboxedRecord` (and the
+    // `UnboxedProject` computation) are reserved for a future named-field ABI;
+    // elaboration currently lowers a record positionally to `UnboxedTuple` and its
+    // projection to a product `Case`, so those two nodes are not yet constructed.
+    UnboxedTuple(Vec<Self>),
+    UnboxedRecord(Vec<(Sym, Self)>),
 }
 
 // The numeric lane a unary negation runs in. Unary minus elaborates to a
@@ -156,6 +155,80 @@ pub struct HandleOp {
     pub params: Vec<Sym>,
     pub resume: Sym,
     pub body: Comp,
+}
+
+/// A handler's operation clauses, with the by-construction guarantee that no two
+/// clauses name the same operation.
+///
+/// The surface allows an arbitrary clause list, so a duplicate `op` arm is
+/// representable there; the type checker rejects it (`E5008`). This newtype makes
+/// the invariant structural in Core: the only constructor from raw clauses,
+/// [`new`](Self::new), rejects a duplicate, so no consumer can be handed a
+/// handler with two clauses for one operation. That matters because the
+/// interpreter resolves clauses through a map (last wins) while the free-monad
+/// lowering builds a left-to-right cascade (first wins); with duplicates
+/// unrepresentable, the two can never diverge, and the effect-lowering tier stays
+/// unobservable. Clause order is preserved (the arms are a slice, not a map) so
+/// the content hash of an unchanged handler does not move.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CheckedHandler {
+    arms: Vec<HandleOp>,
+}
+
+impl CheckedHandler {
+    /// Build from raw clauses, rejecting a duplicate operation (returning the
+    /// offending op name). The single validating entry point; elaboration uses it
+    /// once, after the type checker has already rejected duplicates, so a failure
+    /// here is a compiler-invariant violation rather than a user error.
+    ///
+    /// # Errors
+    /// Returns the duplicated operation name if two clauses share it.
+    pub fn new(arms: Vec<HandleOp>) -> Result<Self, Sym> {
+        let mut seen = std::collections::BTreeSet::new();
+        for arm in &arms {
+            if !seen.insert(arm.name) {
+                return Err(arm.name);
+            }
+        }
+        Ok(Self { arms })
+    }
+
+    /// The clauses, in source order. `Deref` also exposes the slice API directly.
+    #[must_use]
+    pub fn arms(&self) -> &[HandleOp] {
+        &self.arms
+    }
+
+    /// Mutable clause access for in-place body rewrites that preserve the
+    /// operation set (and therefore the uniqueness invariant).
+    pub fn arms_mut(&mut self) -> &mut [HandleOp] {
+        &mut self.arms
+    }
+
+    /// Rebuild each clause, for Core-to-Core passes that transform bodies without
+    /// changing which operations are handled. The mapping preserves operation
+    /// names, so the uniqueness invariant carries over from `self`.
+    #[must_use]
+    pub fn rebuild(&self, f: impl FnMut(&HandleOp) -> HandleOp) -> Self {
+        Self {
+            arms: self.arms.iter().map(f).collect(),
+        }
+    }
+}
+
+impl std::ops::Deref for CheckedHandler {
+    type Target = [HandleOp];
+    fn deref(&self) -> &Self::Target {
+        &self.arms
+    }
+}
+
+impl<'a> IntoIterator for &'a CheckedHandler {
+    type Item = &'a HandleOp;
+    type IntoIter = std::slice::Iter<'a, HandleOp>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.arms.iter()
+    }
 }
 
 // A builtin IO operation that survives elaboration as a `Comp::Io`. The output
@@ -226,12 +299,16 @@ pub enum Comp {
     // negation lowers to a real sign-bit flip and the `Num` negate method can
     // reproduce it byte-for-byte.
     Neg(NegLane, Value),
+    // Project a named field out of an unboxed record value, returning it. The
+    // unboxed analogue of the single-constructor `Case` a boxed record field
+    // access lowers to; the field name selects the component.
+    UnboxedProject(Value, Sym),
     Do(Sym, Vec<Value>),
     Handle {
         body: Box<Self>,
         return_var: Option<Sym>,
         return_body: Option<Box<Self>>,
-        ops: Vec<HandleOp>,
+        ops: CheckedHandler,
     },
     Mask(Vec<Sym>, Box<Self>),
     StrBuiltin(Builtin, Vec<Value>),
@@ -285,6 +362,7 @@ impl Comp {
             Self::Case(..) => "Case",
             Self::FloatBuiltin(..) => "FloatBuiltin",
             Self::Neg(..) => "Neg",
+            Self::UnboxedProject(..) => "UnboxedProject",
             Self::Do(..) => "Do",
             Self::Handle { .. } => "Handle",
             Self::Mask(..) => "Mask",
@@ -445,7 +523,7 @@ mod tag_tests {
     // these strings, so a variant rename that also touched the tag method would
     // silently move every affected definition's hash; freezing the spelling here
     // turns that into a test failure instead. The method's own `match` is
-    // exhaustive, so a new variant cannot ship without a tag; this pins that tag.
+    // exhaustive, so a new variant cannot ship without a tag; this checks that tag.
     fn frozen<T: Copy>(table: &[(T, &str)], tag: impl Fn(T) -> &'static str) {
         let mut seen = BTreeSet::new();
         for &(variant, spelling) in table {
@@ -518,5 +596,34 @@ mod tag_tests {
             ],
             IoOp::kind,
         );
+    }
+}
+
+#[cfg(test)]
+mod checked_handler_tests {
+    use super::{CheckedHandler, Comp, HandleOp, Value};
+    use crate::sym::Sym;
+
+    fn arm(op: &str) -> HandleOp {
+        HandleOp {
+            name: Sym::new(op),
+            params: vec![],
+            resume: Sym::new("k"),
+            body: Comp::Return(Value::Unit),
+        }
+    }
+
+    // The invariant the newtype exists to enforce: a duplicate operation clause
+    // is unconstructable. This is what makes the effect-lowering tier
+    // unobservable for handlers, since no consumer can be handed two clauses for
+    // one operation to resolve differently.
+    #[test]
+    fn new_rejects_a_duplicate_operation() {
+        assert_eq!(
+            CheckedHandler::new(vec![arm("get"), arm("put"), arm("get")]),
+            Err(Sym::new("get"))
+        );
+        let ok = CheckedHandler::new(vec![arm("get"), arm("put")]).expect("distinct ops");
+        assert_eq!(ok.arms().len(), 2);
     }
 }

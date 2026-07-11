@@ -74,6 +74,7 @@ tests/cases/annot_effect_unused.pr: evidence
 tests/cases/effect_rows.pr: selective-free-monad
 tests/cases/effects.pr: selective-free-monad
 tests/cases/errors_unhandled.pr: selective-free-monad
+tests/cases/fail_unhandled.pr: selective-free-monad
 tests/cases/higher_eff.pr: whole-program-free-monad
 tests/cases/mask_tunnels_to_outer.pr: selective-free-monad
 tests/cases/multishot.pr: evidence
@@ -87,6 +88,7 @@ tests/cases/run/class_effects.pr: evidence
 tests/cases/run/combine_effects.pr: selective-free-monad
 tests/cases/run/comp_guard_dispatch.pr: whole-program-free-monad
 tests/cases/run/comp_guards.pr: whole-program-free-monad
+tests/cases/run/comp_in_annotated_row.pr: whole-program-free-monad
 tests/cases/run/comp_map_once.pr: state-fusion
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/default_or.pr: selective-free-monad
@@ -101,6 +103,7 @@ tests/cases/run/effop_tax.pr: evidence
 tests/cases/run/errors.pr: selective-free-monad
 tests/cases/run/fail_guard.pr: whole-program-free-monad
 tests/cases/run/final_ctl.pr: selective-free-monad
+tests/cases/run/flat_array.pr: selective-free-monad
 tests/cases/run/fold_chains.pr: state-fusion
 tests/cases/run/for_blocks.pr: evidence
 tests/cases/run/for_break.pr: whole-program-free-monad
@@ -135,6 +138,7 @@ tests/cases/run/stable_ladder.pr: whole-program-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion
 tests/cases/run/sugar_if.pr: evidence
+tests/cases/run/tensor.pr: selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr: whole-program-free-monad
 tests/cases/run/tuple_eq_ord.pr: selective-free-monad
 tests/cases/run/var_in_handler.pr: selective-free-monad

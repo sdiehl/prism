@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fail_unhandled.pr
 ---
 == tokens ==
-VOpen Fn Ident("must_not_fail") LParen RParen Colon Bang KwInt Eq VOpen Ident("guard") LParen False RParen VSemi Int(IntLit { value: 0, suffix: None }) VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("must_not_fail") LParen RParen RParen VClose
+VOpen Fn Ident("must_not_fail") LParen RParen Colon KwInt Eq VOpen Ident("guard") LParen False RParen VSemi Int(IntLit { value: 0, suffix: None }) VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("must_not_fail") LParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -21,9 +21,7 @@ Program {
             ret: Some(
                 Int,
             ),
-            eff: Some(
-                [],
-            ),
+            eff: None,
             constraints: [],
             body: Spanned {
                 node: Let(
@@ -34,18 +32,18 @@ Program {
                                 node: Var(
                                     "guard",
                                 ),
-                                span: 190..195,
+                                span: 188..193,
                             },
                             [
                                 Spanned {
                                     node: Bool(
                                         false,
                                     ),
-                                    span: 196..201,
+                                    span: 194..199,
                                 },
                             ],
                         ),
-                        span: 190..202,
+                        span: 188..200,
                     },
                     Spanned {
                         node: Int(
@@ -54,13 +52,13 @@ Program {
                                 suffix: None,
                             },
                         ),
-                        span: 205..206,
+                        span: 203..204,
                     },
                 ),
-                span: 190..206,
+                span: 188..204,
             },
             wheres: [],
-            span: 159..206,
+            span: 159..204,
         },
         Decl {
             name: "main",
@@ -74,7 +72,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 220..227,
+                        span: 218..225,
                     },
                     [
                         Spanned {
@@ -83,24 +81,24 @@ Program {
                                     node: Var(
                                         "must_not_fail",
                                     ),
-                                    span: 228..241,
+                                    span: 226..239,
                                 },
                                 [],
                             ),
-                            span: 228..243,
+                            span: 226..241,
                         },
                     ],
                 ),
-                span: 220..244,
+                span: 218..242,
             },
             wheres: [],
-            span: 208..244,
+            span: 206..242,
         },
     ],
 }
 
 == types ==
-Scope Error: in `must_not_fail`: unbound variable 'guard'
+[E2000] Scope Error: in `must_not_fail`: unbound variable 'guard'
    ╭─[ <source>:5:3 ]
    │
  5 │   guard(false)

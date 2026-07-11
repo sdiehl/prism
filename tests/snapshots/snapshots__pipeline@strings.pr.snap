@@ -383,19 +383,99 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn greet(name) =
-  return "hello " to t@0; return name to t@1; concat(t@0, t@1)
+  return "hello " to t@0
+  return name to t@1
+  concat(t@0, t@1)
 fn describe(n) =
-  return n to t@2; show_int(t@2) to t@3; return n to t@4; return 1 to t@5; t@4 == t@5 to t@6; if t@6 then (return " item") else (return " items") to t@7; concat(t@3, t@7)
+  return n to t@2
+  show_int(t@2) to t@3
+  return n to t@4
+  return 1 to t@5
+  t@4 == t@5 to t@6
+  if t@6 then
+    return " item"
+  else
+    return " items"
+  to t@7
+  concat(t@3, t@7)
 fn main() =
-  return "world" to t@8; greet(t@8) to t@9; prints t@9 to t@10; print_nl to _; return 1 to t@11; describe(t@11) to t@12; prints t@12 to t@13; print_nl to _; return 3 to t@14; describe(t@14) to t@15; prints t@15 to t@16; print_nl to _; return "a" to t@17; return "a" to t@18; str_eq(t@17, t@18) to t@19; show_bool(t@19) to t@20; prints t@20 to t@21; print_nl to _; return "prism" to t@22; str_len(t@22) to t@23; show_int(t@23) to t@24; prints t@24 to t@25; print_nl
+  return "world" to t@8
+  greet(t@8) to t@9
+  prints t@9 to t@10
+  print_nl
+  return 1 to t@11
+  describe(t@11) to t@12
+  prints t@12 to t@13
+  print_nl
+  return 3 to t@14
+  describe(t@14) to t@15
+  prints t@15 to t@16
+  print_nl
+  return "a" to t@17
+  return "a" to t@18
+  str_eq(t@17, t@18) to t@19
+  show_bool(t@19) to t@20
+  prints t@20 to t@21
+  print_nl
+  return "prism" to t@22
+  str_len(t@22) to t@23
+  show_int(t@23) to t@24
+  prints t@24 to t@25
+  print_nl
 
 == fbip (rc) ==
 fn greet(name) =
-  return "hello " to t@0; return name to t@1; concat(t@0, t@1)
+  return "hello " to t@0
+  return name to t@1
+  concat(t@0, t@1)
 fn describe(n) =
-  dup n to _; return n to t@2; show_int(t@2) to t@3; return n to t@4; return 1 to t@5; t@4 == t@5 to t@6; if t@6 then (drop t@6 to _; return " item") else (drop t@6 to _; return " items") to t@7; concat(t@3, t@7)
+  dup n
+  return n to t@2
+  show_int(t@2) to t@3
+  return n to t@4
+  return 1 to t@5
+  t@4 == t@5 to t@6
+  if t@6 then
+    drop t@6
+    return " item"
+  else
+    drop t@6
+    return " items"
+  to t@7
+  concat(t@3, t@7)
 fn main() =
-  return "world" to t@8; greet(t@8) to t@9; prints t@9 to t@10; drop t@10 to _; print_nl to _; drop _ to _; return 1 to t@11; describe(t@11) to t@12; prints t@12 to t@13; drop t@13 to _; print_nl to _; drop _ to _; return 3 to t@14; describe(t@14) to t@15; prints t@15 to t@16; drop t@16 to _; print_nl to _; drop _ to _; return "a" to t@17; return "a" to t@18; str_eq(t@17, t@18) to t@19; show_bool(t@19) to t@20; prints t@20 to t@21; drop t@21 to _; print_nl to _; drop _ to _; return "prism" to t@22; str_len(t@22) to t@23; show_int(t@23) to t@24; prints t@24 to t@25; drop t@25 to _; print_nl
+  return "world" to t@8
+  greet(t@8) to t@9
+  prints t@9 to t@10
+  drop t@10
+  print_nl
+  drop _
+  return 1 to t@11
+  describe(t@11) to t@12
+  prints t@12 to t@13
+  drop t@13
+  print_nl
+  drop _
+  return 3 to t@14
+  describe(t@14) to t@15
+  prints t@15 to t@16
+  drop t@16
+  print_nl
+  drop _
+  return "a" to t@17
+  return "a" to t@18
+  str_eq(t@17, t@18) to t@19
+  show_bool(t@19) to t@20
+  prints t@20 to t@21
+  drop t@21
+  print_nl
+  drop _
+  return "prism" to t@22
+  str_len(t@22) to t@23
+  show_int(t@23) to t@24
+  prints t@24 to t@25
+  drop t@25
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
@@ -409,8 +489,8 @@ source_filename = "prism"
 @.str4 = private constant [2 x i8] c"a\00"
 @.str5 = private constant [2 x i8] c"a\00"
 @.str6 = private constant [6 x i8] c"prism\00"
-@prism_native_kont_table = constant [932 x i8] c"scheme  prism-core-hash-v1\0Abundle  cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_describe  37e10c5510a7bd0b0b532e37b4be1c22d65e06ecb046c9d11a99a55e13bcc00a  describe\0Afn      prism_greet  95ef744f82c66aff1a88997e8799a5b2ec308571fa2c76d75b6887f17e7b904f  greet\0Afn      prism_main  6080a6e468a908ac8075496e416e9075d20647f50b82e8615532f83a907c0396  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1070 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_describe 37e10c5510a7bd0b0b532e37b4be1c22d65e06ecb046c9d11a99a55e13bcc00a describe arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_greet 95ef744f82c66aff1a88997e8799a5b2ec308571fa2c76d75b6887f17e7b904f greet arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 6080a6e468a908ac8075496e416e9075d20647f50b82e8615532f83a907c0396 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [910 x i8] c"scheme  prism-core-hash-v1\0Abundle  cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_describe  37e10c5510a7bd0b0b532e37b4be1c22d65e06ecb046c9d11a99a55e13bcc00a  describe\0Afn      prism_greet  95ef744f82c66aff1a88997e8799a5b2ec308571fa2c76d75b6887f17e7b904f  greet\0Afn      prism_main  6080a6e468a908ac8075496e416e9075d20647f50b82e8615532f83a907c0396  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1048 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:cabd56a68e2e17eac546199ef70ebd5c92c712f9156cc7f6053b5926b48bffaf\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_describe 37e10c5510a7bd0b0b532e37b4be1c22d65e06ecb046c9d11a99a55e13bcc00a describe arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_greet 95ef744f82c66aff1a88997e8799a5b2ec308571fa2c76d75b6887f17e7b904f greet arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 6080a6e468a908ac8075496e416e9075d20647f50b82e8615532f83a907c0396 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol0 = private constant [15 x i8] c"prism_describe\00"
 @.kont_hash0 = private constant [65 x i8] c"37e10c5510a7bd0b0b532e37b4be1c22d65e06ecb046c9d11a99a55e13bcc00a\00"
 @.kont_name0 = private constant [9 x i8] c"describe\00"

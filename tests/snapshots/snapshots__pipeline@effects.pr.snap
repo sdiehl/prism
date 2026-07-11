@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/effects.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Exn") VOpen Ctl Ident("raise") LParen KwInt RParen Colon KwInt VClose VSemi Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen KwUnit RParen Colon KwInt VClose VSemi Effect UIdent("State") VOpen Ctl Ident("get") LParen KwUnit RParen Colon KwInt VSemi Ctl Ident("put") LParen KwInt RParen Colon KwUnit VClose VSemi Fn Ident("catch_exn") LParen RParen Eq VOpen Handle Ident("raise") LParen Int(IntLit { value: 42, suffix: None }) RParen With VOpen Ident("raise") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("ask_example") LParen RParen Eq VOpen Handle Ident("ask") LParen LParen RParen RParen With VOpen Ident("ask") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 99, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("state_example") LParen RParen Eq VOpen Handle Let Ident("a") Eq Ident("get") LParen LParen RParen RParen In Let Ident("_") Eq Ident("put") LParen Ident("a") Plus Int(IntLit { value: 1, suffix: None }) RParen In Ident("get") LParen LParen RParen RParen With VOpen Ident("get") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 10, suffix: None }) RParen VSemi Ident("put") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen LParen RParen RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("a") Eq Ident("catch_exn") LParen RParen VSemi Let Ident("b") Eq Ident("ask_example") LParen RParen VSemi Let Ident("c") Eq Ident("state_example") LParen RParen VSemi Ident("println") LParen Ident("a") Plus Ident("b") Plus Ident("c") RParen VClose VClose
+VOpen Effect UIdent("Exn") VOpen Ident("raise") LParen KwInt RParen Colon KwInt VClose VSemi Effect UIdent("Ask") VOpen Ident("ask") LParen RParen Colon KwInt VClose VSemi Effect UIdent("State") VOpen Ident("get") LParen RParen Colon KwInt VSemi Ident("put") LParen KwInt RParen Colon KwUnit VClose VSemi Fn Ident("catch_exn") LParen RParen Eq VOpen Handle Ident("raise") LParen Int(IntLit { value: 42, suffix: None }) RParen With VOpen Ident("raise") LParen Ident("v") RParen Ident("resume") Ident("k") FatArrow Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("ask_example") LParen RParen Eq VOpen Handle Ident("ask") LParen RParen With VOpen Ident("ask") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 99, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("state_example") LParen RParen Eq VOpen Handle Let Ident("a") Eq Ident("get") LParen RParen In Let Ident("_") Eq Ident("put") LParen Ident("a") Plus Int(IntLit { value: 1, suffix: None }) RParen In Ident("get") LParen RParen With VOpen Ident("get") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 10, suffix: None }) RParen VSemi Ident("put") LParen Ident("v") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen LParen RParen RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("a") Eq Ident("catch_exn") LParen RParen VSemi Let Ident("b") Eq Ident("ask_example") LParen RParen VSemi Let Ident("c") Eq Ident("state_example") LParen RParen VSemi Ident("println") LParen Ident("a") Plus Ident("b") Plus Ident("c") RParen VClose VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..33,
+            span: 0..29,
         },
         EffectDecl {
             name: "Ask",
@@ -31,14 +31,12 @@ Program {
             ops: [
                 EffOp {
                     name: "ask",
-                    params: [
-                        Unit,
-                    ],
+                    params: [],
                     ret: Int,
                     grade: Many,
                 },
             ],
-            span: 35..67,
+            span: 31..55,
         },
         EffectDecl {
             name: "State",
@@ -46,9 +44,7 @@ Program {
             ops: [
                 EffOp {
                     name: "get",
-                    params: [
-                        Unit,
-                    ],
+                    params: [],
                     ret: Int,
                     grade: Many,
                 },
@@ -61,7 +57,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 69..125,
+            span: 57..101,
         },
     ],
     errors: [],
@@ -83,7 +79,7 @@ Program {
                                 node: Var(
                                     "raise",
                                 ),
-                                span: 153..158,
+                                span: 129..134,
                             },
                             [
                                 Spanned {
@@ -93,11 +89,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 159..161,
+                                    span: 135..137,
                                 },
                             ],
                         ),
-                        span: 153..162,
+                        span: 129..138,
                     },
                     [
                         Op(
@@ -110,7 +106,7 @@ Program {
                                 node: Var(
                                     "v",
                                 ),
-                                span: 187..188,
+                                span: 169..170,
                             },
                         ),
                         Return(
@@ -119,15 +115,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 205..206,
+                                span: 187..188,
                             },
                         ),
                     ],
                 ),
-                span: 146..206,
+                span: 122..188,
             },
             wheres: [],
-            span: 127..206,
+            span: 103..188,
         },
         Decl {
             name: "ask_example",
@@ -143,23 +139,16 @@ Program {
                                 node: Var(
                                     "ask",
                                 ),
-                                span: 236..239,
+                                span: 218..221,
                             },
-                            [
-                                Spanned {
-                                    node: Unit,
-                                    span: 240..242,
-                                },
-                            ],
+                            [],
                         ),
-                        span: 236..243,
+                        span: 218..223,
                     },
                     [
                         Op(
                             "ask",
-                            [
-                                "v",
-                            ],
+                            [],
                             "k",
                             Spanned {
                                 node: Call(
@@ -167,7 +156,7 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 266..267,
+                                        span: 251..252,
                                     },
                                     [
                                         Spanned {
@@ -177,11 +166,11 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 268..270,
+                                            span: 253..255,
                                         },
                                     ],
                                 ),
-                                span: 266..271,
+                                span: 251..256,
                             },
                         ),
                         Return(
@@ -190,15 +179,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 288..289,
+                                span: 273..274,
                             },
                         ),
                     ],
                 ),
-                span: 229..289,
+                span: 211..274,
             },
             wheres: [],
-            span: 208..289,
+            span: 190..274,
         },
         Decl {
             name: "state_example",
@@ -217,16 +206,11 @@ Program {
                                         node: Var(
                                             "get",
                                         ),
-                                        span: 329..332,
+                                        span: 314..317,
                                     },
-                                    [
-                                        Spanned {
-                                            node: Unit,
-                                            span: 333..335,
-                                        },
-                                    ],
+                                    [],
                                 ),
-                                span: 329..336,
+                                span: 314..319,
                             },
                             Spanned {
                                 node: Let(
@@ -237,7 +221,7 @@ Program {
                                                 node: Var(
                                                     "put",
                                                 ),
-                                                span: 348..351,
+                                                span: 331..334,
                                             },
                                             [
                                                 Spanned {
@@ -247,7 +231,7 @@ Program {
                                                             node: Var(
                                                                 "a",
                                                             ),
-                                                            span: 352..353,
+                                                            span: 335..336,
                                                         },
                                                         Spanned {
                                                             node: Int(
@@ -256,14 +240,14 @@ Program {
                                                                     suffix: None,
                                                                 },
                                                             ),
-                                                            span: 356..357,
+                                                            span: 339..340,
                                                         },
                                                     ),
-                                                    span: 352..357,
+                                                    span: 335..340,
                                                 },
                                             ],
                                         ),
-                                        span: 348..358,
+                                        span: 331..341,
                                     },
                                     Spanned {
                                         node: Call(
@@ -271,29 +255,22 @@ Program {
                                                 node: Var(
                                                     "get",
                                                 ),
-                                                span: 362..365,
+                                                span: 345..348,
                                             },
-                                            [
-                                                Spanned {
-                                                    node: Unit,
-                                                    span: 366..368,
-                                                },
-                                            ],
+                                            [],
                                         ),
-                                        span: 362..369,
+                                        span: 345..350,
                                     },
                                 ),
-                                span: 340..369,
+                                span: 323..350,
                             },
                         ),
-                        span: 321..369,
+                        span: 306..350,
                     },
                     [
                         Op(
                             "get",
-                            [
-                                "v",
-                            ],
+                            [],
                             "k",
                             Spanned {
                                 node: Call(
@@ -301,7 +278,7 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 392..393,
+                                        span: 378..379,
                                     },
                                     [
                                         Spanned {
@@ -311,11 +288,11 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 394..396,
+                                            span: 380..382,
                                         },
                                     ],
                                 ),
-                                span: 392..397,
+                                span: 378..383,
                             },
                         ),
                         Op(
@@ -330,16 +307,16 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 415..416,
+                                        span: 407..408,
                                     },
                                     [
                                         Spanned {
                                             node: Unit,
-                                            span: 417..419,
+                                            span: 409..411,
                                         },
                                     ],
                                 ),
-                                span: 415..420,
+                                span: 407..412,
                             },
                         ),
                         Return(
@@ -348,15 +325,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 437..438,
+                                span: 429..430,
                             },
                         ),
                     ],
                 ),
-                span: 314..438,
+                span: 299..430,
             },
             wheres: [],
-            span: 291..438,
+            span: 276..430,
         },
         Decl {
             name: "main",
@@ -373,11 +350,11 @@ Program {
                                 node: Var(
                                     "catch_exn",
                                 ),
-                                span: 462..471,
+                                span: 454..463,
                             },
                             [],
                         ),
-                        span: 462..473,
+                        span: 454..465,
                     },
                     Spanned {
                         node: Let(
@@ -388,11 +365,11 @@ Program {
                                         node: Var(
                                             "ask_example",
                                         ),
-                                        span: 484..495,
+                                        span: 476..487,
                                     },
                                     [],
                                 ),
-                                span: 484..497,
+                                span: 476..489,
                             },
                             Spanned {
                                 node: Let(
@@ -403,11 +380,11 @@ Program {
                                                 node: Var(
                                                     "state_example",
                                                 ),
-                                                span: 508..521,
+                                                span: 500..513,
                                             },
                                             [],
                                         ),
-                                        span: 508..523,
+                                        span: 500..515,
                                     },
                                     Spanned {
                                         node: Call(
@@ -415,7 +392,7 @@ Program {
                                                 node: Var(
                                                     "println",
                                                 ),
-                                                span: 526..533,
+                                                span: 518..525,
                                             },
                                             [
                                                 Spanned {
@@ -428,41 +405,41 @@ Program {
                                                                     node: Var(
                                                                         "a",
                                                                     ),
-                                                                    span: 534..535,
+                                                                    span: 526..527,
                                                                 },
                                                                 Spanned {
                                                                     node: Var(
                                                                         "b",
                                                                     ),
-                                                                    span: 538..539,
+                                                                    span: 530..531,
                                                                 },
                                                             ),
-                                                            span: 534..539,
+                                                            span: 526..531,
                                                         },
                                                         Spanned {
                                                             node: Var(
                                                                 "c",
                                                             ),
-                                                            span: 542..543,
+                                                            span: 534..535,
                                                         },
                                                     ),
-                                                    span: 534..543,
+                                                    span: 526..535,
                                                 },
                                             ],
                                         ),
-                                        span: 526..544,
+                                        span: 518..536,
                                     },
                                 ),
-                                span: 500..544,
+                                span: 492..536,
                             },
                         ),
-                        span: 476..544,
+                        span: 468..536,
                     },
                 ),
-                span: 454..544,
+                span: 446..536,
             },
             wheres: [],
-            span: 440..544,
+            span: 432..536,
         },
     ],
 }
@@ -475,23 +452,108 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn catch_exn() =
-  handle { return 42 to t@0; do raise(t@0) } with { raise(v, k) => return v, return r => return r }
+  handle
+    return 42 to t@0
+    do raise(t@0)
+  with
+    raise(v, k) =>
+      return v
+    return r =>
+      return r
 fn ask_example() =
-  handle { return () to t@1; do ask(t@1) } with { ask(v, k) => return 99 to t@2; return k to t@3; (force t@3)(t@2), return r => return r }
+  handle
+    do ask()
+  with
+    ask(k) =>
+      return 99 to t@1
+      return k to t@2
+      (force t@2)(t@1)
+    return r =>
+      return r
 fn state_example() =
-  handle { return () to t@4; do get(t@4) to a; return a to t@5; return 1 to t@6; t@5 + t@6 to t@7; do put(t@7) to _; return () to t@8; do get(t@8) } with { get(v, k) => return 10 to t@9; return k to t@10; (force t@10)(t@9), put(v, k) => return () to t@11; return k to t@12; (force t@12)(t@11), return r => return r }
+  handle
+    do get() to a
+    return a to t@3
+    return 1 to t@4
+    t@3 + t@4 to t@5
+    do put(t@5)
+    do get()
+  with
+    get(k) =>
+      return 10 to t@6
+      return k to t@7
+      (force t@7)(t@6)
+    put(v, k) =>
+      return () to t@8
+      return k to t@9
+      (force t@9)(t@8)
+    return r =>
+      return r
 fn main() =
-  catch_exn() to a; ask_example() to b; state_example() to c; return a to t@13; return b to t@14; t@13 + t@14 to t@15; return c to t@16; t@15 + t@16 to t@17; print t@17 to t@18; print_nl
+  catch_exn() to a
+  ask_example() to b
+  state_example() to c
+  return a to t@10
+  return b to t@11
+  t@10 + t@11 to t@12
+  return c to t@13
+  t@12 + t@13 to t@14
+  print t@14 to t@15
+  print_nl
 
 == fbip (rc) ==
 fn catch_exn() =
-  handle { return 42 to t@0; do raise(t@0) } with { raise(v, k) => return v, return r => return r }
+  handle
+    return 42 to t@0
+    do raise(t@0)
+  with
+    raise(v, k) =>
+      return v
+    return r =>
+      return r
 fn ask_example() =
-  handle { return () to t@1; do ask(t@1) } with { ask(v, k) => drop v to _; return 99 to t@2; return k to t@3; (force t@3)(t@2), return r => return r }
+  handle
+    do ask()
+  with
+    ask(k) =>
+      return 99 to t@1
+      return k to t@2
+      (force t@2)(t@1)
+    return r =>
+      return r
 fn state_example() =
-  handle { return () to t@4; do get(t@4) to a; return a to t@5; return 1 to t@6; t@5 + t@6 to t@7; do put(t@7) to _; drop _ to _; return () to t@8; do get(t@8) } with { get(v, k) => drop v to _; return 10 to t@9; return k to t@10; (force t@10)(t@9), put(v, k) => drop v to _; return () to t@11; return k to t@12; (force t@12)(t@11), return r => return r }
+  handle
+    do get() to a
+    return a to t@3
+    return 1 to t@4
+    t@3 + t@4 to t@5
+    do put(t@5)
+    drop _
+    do get()
+  with
+    get(k) =>
+      return 10 to t@6
+      return k to t@7
+      (force t@7)(t@6)
+    put(v, k) =>
+      drop v
+      return () to t@8
+      return k to t@9
+      (force t@9)(t@8)
+    return r =>
+      return r
 fn main() =
-  catch_exn() to a; ask_example() to b; state_example() to c; return a to t@13; return b to t@14; t@13 + t@14 to t@15; return c to t@16; t@15 + t@16 to t@17; print t@17 to t@18; drop t@18 to _; print_nl
+  catch_exn() to a
+  ask_example() to b
+  state_example() to c
+  return a to t@10
+  return b to t@11
+  t@10 + t@11 to t@12
+  return c to t@13
+  t@12 + t@13 to t@14
+  print t@14 to t@15
+  drop t@15
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
@@ -503,10 +565,10 @@ source_filename = "prism"
 @.str3 = private constant [54 x i8] c"ICE: effect op escaped a closed native handler clause\00"
 @.str4 = private constant [54 x i8] c"ICE: effect op escaped a closed native handler clause\00"
 @.str5 = private constant [50 x i8] c"ICE: unhandled effect op in closed native handler\00"
-@prism_native_kont_table = constant [1055 x i8] c"scheme  prism-core-hash-v1\0Abundle  52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_ask_example  e5e9da8fc4b676bdb948be7f5bb35807b75cd481b68b3b76894bad77449c0af9  ask_example\0Afn      prism_catch_exn  fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba  catch_exn\0Afn      prism_main  ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393  main\0Afn      prism_state_example  40a2c83934e56b2c81488394d595365304547e71b95cb91f4f37e80b80c38f0f  state_example\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1188 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:52aa4a8b9e527a1ce6f176f20f6a921eb92d737410af93efd7a573e584af6fa3\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_ask_example e5e9da8fc4b676bdb948be7f5bb35807b75cd481b68b3b76894bad77449c0af9 ask_example arity 0 slots abi-word[]\0Astate prism_catch_exn fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba catch_exn arity 0 slots abi-word[]\0Astate prism_main ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393 main arity 0 slots abi-word[]\0Astate prism_state_example 40a2c83934e56b2c81488394d595365304547e71b95cb91f4f37e80b80c38f0f state_example arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [1033 x i8] c"scheme  prism-core-hash-v1\0Abundle  9e401902649c0a9441fe12bbffaff5bfd31231e9e75310a60207bfc3b4455b22\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:9e401902649c0a9441fe12bbffaff5bfd31231e9e75310a60207bfc3b4455b22\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_ask_example  54e0b8aa9936100f5af317bca931b01451129f507e4fe570671a89e39e1ba90e  ask_example\0Afn      prism_catch_exn  fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba  catch_exn\0Afn      prism_main  52646e2ea1cf505c983efcad835fb929eac6146c27ba530f7ba615af03da7dc7  main\0Afn      prism_state_example  74872287c9ca3b2572d05afb1104b33f05f76257cd9b5d3f2290a3d2bd56dacf  state_example\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1166 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  9e401902649c0a9441fe12bbffaff5bfd31231e9e75310a60207bfc3b4455b22\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:9e401902649c0a9441fe12bbffaff5bfd31231e9e75310a60207bfc3b4455b22\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_ask_example 54e0b8aa9936100f5af317bca931b01451129f507e4fe570671a89e39e1ba90e ask_example arity 0 slots abi-word[]\0Astate prism_catch_exn fc82b74cc4232695fb98ef8a70d66a4261cddb8014f5d6c14520d7c192d597ba catch_exn arity 0 slots abi-word[]\0Astate prism_main 52646e2ea1cf505c983efcad835fb929eac6146c27ba530f7ba615af03da7dc7 main arity 0 slots abi-word[]\0Astate prism_state_example 74872287c9ca3b2572d05afb1104b33f05f76257cd9b5d3f2290a3d2bd56dacf state_example arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [11 x i8] c"prism_main\00"
-@.kont_hash2 = private constant [65 x i8] c"ad3c8de9940c73f5042d66d92830d3103fc261847d51f1f628316c0958dae393\00"
+@.kont_hash2 = private constant [65 x i8] c"52646e2ea1cf505c983efcad835fb929eac6146c27ba530f7ba615af03da7dc7\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8
@@ -527,35 +589,39 @@ entry:
   %t11 = ptrtoint ptr %t8 to i64
   %t12 = call i64 @prism_ebind(i64 %t6, i64 %t11)
   %t13 = call i64 @prism_0.region(i64 %t12)
-  %t16 = call ptr @prism_alloc(i64 1)
-  %t17 = getelementptr inbounds i8, ptr %t16, i64 8
-  store i64 0, ptr %t17, align 8
-  %t19 = getelementptr inbounds i8, ptr %t16, i64 24
-  store i64 0, ptr %t19, align 8
-  %t20 = ptrtoint ptr %t16 to i64
-  %t22 = call ptr @prism_alloc(i64 0)
-  %t23 = getelementptr inbounds i8, ptr %t22, i64 8
+  %t19 = call ptr @prism_alloc(i64 4)
+  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
+  store i64 1, ptr %t20, align 8
+  %t22 = getelementptr inbounds i8, ptr %t19, i64 24
+  store i64 1, ptr %t22, align 8
+  %t23 = getelementptr inbounds i8, ptr %t19, i64 32
   store i64 1, ptr %t23, align 8
-  %t25 = ptrtoint ptr %t22 to i64
-  %t26 = call i64 @prism_ebind(i64 %t20, i64 %t25)
+  %t24 = getelementptr inbounds i8, ptr %t19, i64 40
+  store i64 0, ptr %t24, align 8
+  %t25 = getelementptr inbounds i8, ptr %t19, i64 48
+  store i64 0, ptr %t25, align 8
+  %t26 = ptrtoint ptr %t19 to i64
+  call void @prism_effop_alloc()
   %t27 = call i64 @prism_22.region(i64 %t26)
-  %t30 = call ptr @prism_alloc(i64 1)
-  %t31 = getelementptr inbounds i8, ptr %t30, i64 8
-  store i64 0, ptr %t31, align 8
-  %t33 = getelementptr inbounds i8, ptr %t30, i64 24
-  store i64 0, ptr %t33, align 8
-  %t34 = ptrtoint ptr %t30 to i64
-  %t36 = call ptr @prism_alloc(i64 0)
-  %t37 = getelementptr inbounds i8, ptr %t36, i64 8
-  store i64 2, ptr %t37, align 8
-  %t39 = ptrtoint ptr %t36 to i64
-  %t40 = call i64 @prism_ebind(i64 %t34, i64 %t39)
+  %t33 = call ptr @prism_alloc(i64 4)
+  %t34 = getelementptr inbounds i8, ptr %t33, i64 8
+  store i64 1, ptr %t34, align 8
+  %t36 = getelementptr inbounds i8, ptr %t33, i64 24
+  store i64 3, ptr %t36, align 8
+  %t37 = getelementptr inbounds i8, ptr %t33, i64 32
+  store i64 1, ptr %t37, align 8
+  %t38 = getelementptr inbounds i8, ptr %t33, i64 40
+  store i64 0, ptr %t38, align 8
+  %t39 = getelementptr inbounds i8, ptr %t33, i64 48
+  store i64 0, ptr %t39, align 8
+  %t40 = ptrtoint ptr %t33 to i64
+  call void @prism_effop_alloc()
   %t42 = call ptr @prism_alloc(i64 0)
   %t43 = getelementptr inbounds i8, ptr %t42, i64 8
-  store i64 3, ptr %t43, align 8
+  store i64 1, ptr %t43, align 8
   %t45 = ptrtoint ptr %t42 to i64
   %t46 = call i64 @prism_ebind(i64 %t40, i64 %t45)
-  %t47 = call i64 @prism_46.region(i64 %t46)
+  %t47 = call i64 @prism_45.region(i64 %t46)
   %t48 = and i64 %t13, %t27
   %t50 = and i64 %t48, 1
   %t51 = icmp eq i64 %t50, 1
@@ -750,6 +816,9 @@ b8:                                               ; preds = %b6
 }
 
 ; Function Attrs: nounwind
+declare void @prism_effop_alloc() #0
+
+; Function Attrs: nounwind
 define i64 @prism_22.region(i64 %a0) #0 {
 entry:
   call void @prism_drive_step()
@@ -821,7 +890,7 @@ b7:                                               ; preds = %b6
   %t45 = ptrtoint ptr %t41 to i64
   %t47 = call ptr @prism_alloc(i64 1)
   %t48 = getelementptr inbounds i8, ptr %t47, i64 8
-  store i64 4, ptr %t48, align 8
+  store i64 2, ptr %t48, align 8
   %t50 = getelementptr inbounds i8, ptr %t47, i64 24
   store i64 %t14, ptr %t50, align 8
   %t51 = ptrtoint ptr %t47 to i64
@@ -881,7 +950,7 @@ b10:                                              ; preds = %b7
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_46.region(i64 %a0) #0 {
+define i64 @prism_45.region(i64 %a0) #0 {
 entry:
   call void @prism_drive_step()
   %t0 = inttoptr i64 %a0 to ptr
@@ -954,7 +1023,7 @@ b7:                                               ; preds = %b6
   %t47 = ptrtoint ptr %t43 to i64
   %t49 = call ptr @prism_alloc(i64 1)
   %t50 = getelementptr inbounds i8, ptr %t49, i64 8
-  store i64 5, ptr %t50, align 8
+  store i64 3, ptr %t50, align 8
   %t52 = getelementptr inbounds i8, ptr %t49, i64 24
   store i64 %t14, ptr %t52, align 8
   %t53 = ptrtoint ptr %t49 to i64
@@ -984,7 +1053,7 @@ b11:                                              ; preds = %b7
   call void @prism_rc_inc(i64 %t61)
   call void @prism_rc_dec(i64 %t54)
   %t65 = call i64 @prism_qApply(i64 %t59, i64 %t61)
-  %t66 = musttail call i64 @prism_46.region(i64 %t65)
+  %t66 = musttail call i64 @prism_45.region(i64 %t65)
   ret i64 %t66
 
 b12:                                              ; preds = %b7
@@ -1044,7 +1113,7 @@ b17:                                              ; preds = %b16
   %t110 = ptrtoint ptr %t106 to i64
   %t112 = call ptr @prism_alloc(i64 1)
   %t113 = getelementptr inbounds i8, ptr %t112, i64 8
-  store i64 6, ptr %t113, align 8
+  store i64 4, ptr %t113, align 8
   %t115 = getelementptr inbounds i8, ptr %t112, i64 24
   store i64 %t14, ptr %t115, align 8
   %t116 = ptrtoint ptr %t112 to i64
@@ -1074,7 +1143,7 @@ b21:                                              ; preds = %b17
   call void @prism_rc_inc(i64 %t124)
   call void @prism_rc_dec(i64 %t117)
   %t128 = call i64 @prism_qApply(i64 %t122, i64 %t124)
-  %t129 = musttail call i64 @prism_46.region(i64 %t128)
+  %t129 = musttail call i64 @prism_45.region(i64 %t128)
   ret i64 %t129
 
 b22:                                              ; preds = %b17
@@ -1242,9 +1311,6 @@ entry:
     i64 9, label %_lam9
     i64 10, label %_lam10
     i64 11, label %_lam11
-    i64 12, label %_lam12
-    i64 13, label %_lam13
-    i64 14, label %_lam14
   ]
 
 _lam0:                                            ; preds = %entry
@@ -1256,11 +1322,15 @@ _lam1:                                            ; preds = %entry
   br label %_merge
 
 _lam2:                                            ; preds = %entry
-  %_r2 = call i64 @prism_lam_2(i64 %_a0)
+  %_fp2_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv2_0 = load i64, ptr %_fp2_0, align 8
+  %_r2 = call i64 @prism_lam_2(i64 %_fv2_0, i64 %_a0)
   br label %_merge
 
 _lam3:                                            ; preds = %entry
-  %_r3 = call i64 @prism_lam_3(i64 %_a0)
+  %_fp3_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv3_0 = load i64, ptr %_fp3_0, align 8
+  %_r3 = call i64 @prism_lam_3(i64 %_fv3_0, i64 %_a0)
   br label %_merge
 
 _lam4:                                            ; preds = %entry
@@ -1270,15 +1340,11 @@ _lam4:                                            ; preds = %entry
   br label %_merge
 
 _lam5:                                            ; preds = %entry
-  %_fp5_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv5_0 = load i64, ptr %_fp5_0, align 8
-  %_r5 = call i64 @prism_lam_5(i64 %_fv5_0, i64 %_a0)
+  %_r5 = call i64 @prism_lam_5(i64 %_a0)
   br label %_merge
 
 _lam6:                                            ; preds = %entry
-  %_fp6_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv6_0 = load i64, ptr %_fp6_0, align 8
-  %_r6 = call i64 @prism_lam_6(i64 %_fv6_0, i64 %_a0)
+  %_r6 = call i64 @prism_lam_6(i64 %_a0)
   br label %_merge
 
 _lam7:                                            ; preds = %entry
@@ -1286,11 +1352,15 @@ _lam7:                                            ; preds = %entry
   br label %_merge
 
 _lam8:                                            ; preds = %entry
-  %_r8 = call i64 @prism_lam_8(i64 %_a0)
+  %_fp8_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv8_0 = load i64, ptr %_fp8_0, align 8
+  %_r8 = call i64 @prism_lam_8(i64 %_fv8_0, i64 %_a0)
   br label %_merge
 
 _lam9:                                            ; preds = %entry
-  %_r9 = call i64 @prism_lam_9(i64 %_a0)
+  %_fp9_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv9_0 = load i64, ptr %_fp9_0, align 8
+  %_r9 = call i64 @prism_lam_9(i64 %_fv9_0, i64 %_a0)
   br label %_merge
 
 _lam10:                                           ; preds = %entry
@@ -1305,28 +1375,12 @@ _lam11:                                           ; preds = %entry
   %_r11 = call i64 @prism_lam_11(i64 %_fv11_0, i64 %_a0)
   br label %_merge
 
-_lam12:                                           ; preds = %entry
-  %_fp12_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv12_0 = load i64, ptr %_fp12_0, align 8
-  %_r12 = call i64 @prism_lam_12(i64 %_fv12_0, i64 %_a0)
-  br label %_merge
-
-_lam13:                                           ; preds = %entry
-  %_fp13_0 = getelementptr inbounds i8, ptr %_cp, i64 24
-  %_fv13_0 = load i64, ptr %_fp13_0, align 8
-  %_r13 = call i64 @prism_lam_13(i64 %_fv13_0, i64 %_a0)
-  br label %_merge
-
-_lam14:                                           ; preds = %entry
-  %_r14 = call i64 @prism_lam_14(i64 %_a0)
-  br label %_merge
-
 _dead:                                            ; preds = %entry
   call void @prism_apply_error()
   unreachable
 
-_merge:                                           ; preds = %_lam14, %_lam13, %_lam12, %_lam11, %_lam10, %_lam9, %_lam8, %_lam7, %_lam6, %_lam5, %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
-  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ], [ %_r5, %_lam5 ], [ %_r6, %_lam6 ], [ %_r7, %_lam7 ], [ %_r8, %_lam8 ], [ %_r9, %_lam9 ], [ %_r10, %_lam10 ], [ %_r11, %_lam11 ], [ %_r12, %_lam12 ], [ %_r13, %_lam13 ], [ %_r14, %_lam14 ]
+_merge:                                           ; preds = %_lam11, %_lam10, %_lam9, %_lam8, %_lam7, %_lam6, %_lam5, %_lam4, %_lam3, %_lam2, %_lam1, %_lam0
+  %_result = phi i64 [ %_r0, %_lam0 ], [ %_r1, %_lam1 ], [ %_r2, %_lam2 ], [ %_r3, %_lam3 ], [ %_r4, %_lam4 ], [ %_r5, %_lam5 ], [ %_r6, %_lam6 ], [ %_r7, %_lam7 ], [ %_r8, %_lam8 ], [ %_r9, %_lam9 ], [ %_r10, %_lam10 ], [ %_r11, %_lam11 ]
   ret i64 %_result
 }
 
@@ -1365,48 +1419,7 @@ entry:
 }
 
 ; Function Attrs: nounwind
-declare void @prism_effop_alloc() #0
-
-; Function Attrs: nounwind
 define i64 @prism_lam_1(i64 %_p0) #0 {
-entry:
-  %t4 = call ptr @prism_alloc(i64 4)
-  %t5 = getelementptr inbounds i8, ptr %t4, i64 8
-  store i64 1, ptr %t5, align 8
-  %t7 = getelementptr inbounds i8, ptr %t4, i64 24
-  store i64 1, ptr %t7, align 8
-  %t8 = getelementptr inbounds i8, ptr %t4, i64 32
-  store i64 1, ptr %t8, align 8
-  %t9 = getelementptr inbounds i8, ptr %t4, i64 40
-  store i64 %_p0, ptr %t9, align 8
-  %t10 = getelementptr inbounds i8, ptr %t4, i64 48
-  store i64 0, ptr %t10, align 8
-  %t11 = ptrtoint ptr %t4 to i64
-  call void @prism_effop_alloc()
-  ret i64 %t11
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_2(i64 %_p0) #0 {
-entry:
-  %t4 = call ptr @prism_alloc(i64 4)
-  %t5 = getelementptr inbounds i8, ptr %t4, i64 8
-  store i64 1, ptr %t5, align 8
-  %t7 = getelementptr inbounds i8, ptr %t4, i64 24
-  store i64 3, ptr %t7, align 8
-  %t8 = getelementptr inbounds i8, ptr %t4, i64 32
-  store i64 1, ptr %t8, align 8
-  %t9 = getelementptr inbounds i8, ptr %t4, i64 40
-  store i64 %_p0, ptr %t9, align 8
-  %t10 = getelementptr inbounds i8, ptr %t4, i64 48
-  store i64 0, ptr %t10, align 8
-  %t11 = ptrtoint ptr %t4 to i64
-  call void @prism_effop_alloc()
-  ret i64 %t11
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_3(i64 %_p0) #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 1)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
@@ -1416,20 +1429,60 @@ entry:
   %t5 = ptrtoint ptr %t1 to i64
   %t7 = call ptr @prism_alloc(i64 0)
   %t8 = getelementptr inbounds i8, ptr %t7, i64 8
-  store i64 7, ptr %t8, align 8
+  store i64 5, ptr %t8, align 8
   %t10 = ptrtoint ptr %t7 to i64
   %t11 = call i64 @prism_ebind(i64 %t5, i64 %t10)
   %t13 = call ptr @prism_alloc(i64 0)
   %t14 = getelementptr inbounds i8, ptr %t13, i64 8
-  store i64 8, ptr %t14, align 8
+  store i64 6, ptr %t14, align 8
   %t16 = ptrtoint ptr %t13 to i64
   %t17 = call i64 @prism_ebind(i64 %t11, i64 %t16)
   %t19 = call ptr @prism_alloc(i64 0)
   %t20 = getelementptr inbounds i8, ptr %t19, i64 8
-  store i64 9, ptr %t20, align 8
+  store i64 7, ptr %t20, align 8
   %t22 = ptrtoint ptr %t19 to i64
   %t23 = call i64 @prism_ebind(i64 %t17, i64 %t22)
   ret i64 %t23
+}
+
+; Function Attrs: nounwind
+define i64 @prism_lam_2(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t2 = call ptr @prism_alloc(i64 1)
+  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
+  store i64 0, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
+  store i64 %_fv0, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t2 to i64
+  %t8 = call ptr @prism_alloc(i64 1)
+  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
+  store i64 8, ptr %t9, align 8
+  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
+  store i64 %_p0, ptr %t11, align 8
+  %t12 = ptrtoint ptr %t8 to i64
+  %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
+  ret i64 %t13
+}
+
+; Function Attrs: nounwind
+define i64 @prism_lam_3(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t2 = call ptr @prism_alloc(i64 1)
+  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
+  store i64 0, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
+  store i64 %_fv0, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t2 to i64
+  %t8 = call ptr @prism_alloc(i64 1)
+  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
+  store i64 9, ptr %t9, align 8
+  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
+  store i64 %_p0, ptr %t11, align 8
+  %t12 = ptrtoint ptr %t8 to i64
+  %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
+  ret i64 %t13
 }
 
 ; Function Attrs: nounwind
@@ -1453,47 +1506,7 @@ entry:
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_5(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_fv0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 11, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_6(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 1)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 0, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_fv0, ptr %t5, align 8
-  %t6 = ptrtoint ptr %t2 to i64
-  %t8 = call ptr @prism_alloc(i64 1)
-  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 12, ptr %t9, align 8
-  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
-  store i64 %_p0, ptr %t11, align 8
-  %t12 = ptrtoint ptr %t8 to i64
-  %t13 = musttail call i64 @prism_ebind(i64 %t6, i64 %t12)
-  ret i64 %t13
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_7(i64 %_p0) #0 {
+define i64 @prism_lam_5(i64 %_p0) #0 {
 entry:
   %t2 = call ptr @prism_alloc(i64 1)
   %t3 = getelementptr inbounds i8, ptr %t2, i64 8
@@ -1503,7 +1516,7 @@ entry:
   %t6 = ptrtoint ptr %t2 to i64
   %t8 = call ptr @prism_alloc(i64 1)
   %t9 = getelementptr inbounds i8, ptr %t8, i64 8
-  store i64 13, ptr %t9, align 8
+  store i64 11, ptr %t9, align 8
   %t11 = getelementptr inbounds i8, ptr %t8, i64 24
   store i64 %_p0, ptr %t11, align 8
   %t12 = ptrtoint ptr %t8 to i64
@@ -1512,7 +1525,7 @@ entry:
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_8(i64 %_p0) #0 {
+define i64 @prism_lam_6(i64 %_p0) #0 {
 entry:
   %t4 = call ptr @prism_alloc(i64 4)
   %t5 = getelementptr inbounds i8, ptr %t4, i64 8
@@ -1531,21 +1544,53 @@ entry:
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_9(i64 %_p0) #0 {
+define i64 @prism_lam_7(i64 %_p0) #0 {
 entry:
   call void @prism_rc_dec(i64 %_p0)
-  %t3 = call ptr @prism_alloc(i64 1)
-  %t4 = getelementptr inbounds i8, ptr %t3, i64 8
-  store i64 0, ptr %t4, align 8
-  %t6 = getelementptr inbounds i8, ptr %t3, i64 24
-  store i64 0, ptr %t6, align 8
-  %t7 = ptrtoint ptr %t3 to i64
-  %t9 = call ptr @prism_alloc(i64 0)
-  %t10 = getelementptr inbounds i8, ptr %t9, i64 8
-  store i64 14, ptr %t10, align 8
-  %t12 = ptrtoint ptr %t9 to i64
-  %t13 = call i64 @prism_ebind(i64 %t7, i64 %t12)
+  %t6 = call ptr @prism_alloc(i64 4)
+  %t7 = getelementptr inbounds i8, ptr %t6, i64 8
+  store i64 1, ptr %t7, align 8
+  %t9 = getelementptr inbounds i8, ptr %t6, i64 24
+  store i64 3, ptr %t9, align 8
+  %t10 = getelementptr inbounds i8, ptr %t6, i64 32
+  store i64 1, ptr %t10, align 8
+  %t11 = getelementptr inbounds i8, ptr %t6, i64 40
+  store i64 0, ptr %t11, align 8
+  %t12 = getelementptr inbounds i8, ptr %t6, i64 48
+  store i64 0, ptr %t12, align 8
+  %t13 = ptrtoint ptr %t6 to i64
+  call void @prism_effop_alloc()
   ret i64 %t13
+}
+
+; Function Attrs: nounwind
+define i64 @prism_lam_8(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t2 = call ptr @prism_alloc(i64 2)
+  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
+  store i64 2, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
+  store i64 %_p0, ptr %t5, align 8
+  %t6 = getelementptr inbounds i8, ptr %t2, i64 32
+  store i64 %_fv0, ptr %t6, align 8
+  %t7 = ptrtoint ptr %t2 to i64
+  ret i64 %t7
+}
+
+; Function Attrs: nounwind
+define i64 @prism_lam_9(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t2 = call ptr @prism_alloc(i64 2)
+  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
+  store i64 2, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
+  store i64 %_p0, ptr %t5, align 8
+  %t6 = getelementptr inbounds i8, ptr %t2, i64 32
+  store i64 %_fv0, ptr %t6, align 8
+  %t7 = ptrtoint ptr %t2 to i64
+  ret i64 %t7
 }
 
 ; Function Attrs: nounwind
@@ -1565,36 +1610,6 @@ entry:
 
 ; Function Attrs: nounwind
 define i64 @prism_lam_11(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 2)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 2, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_p0, ptr %t5, align 8
-  %t6 = getelementptr inbounds i8, ptr %t2, i64 32
-  store i64 %_fv0, ptr %t6, align 8
-  %t7 = ptrtoint ptr %t2 to i64
-  ret i64 %t7
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_12(i64 %_fv0, i64 %_p0) #0 {
-entry:
-  call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call ptr @prism_alloc(i64 2)
-  %t3 = getelementptr inbounds i8, ptr %t2, i64 8
-  store i64 2, ptr %t3, align 8
-  %t5 = getelementptr inbounds i8, ptr %t2, i64 24
-  store i64 %_p0, ptr %t5, align 8
-  %t6 = getelementptr inbounds i8, ptr %t2, i64 32
-  store i64 %_fv0, ptr %t6, align 8
-  %t7 = ptrtoint ptr %t2 to i64
-  ret i64 %t7
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_13(i64 %_fv0, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
   %t1 = and i64 %_fv0, %_p0
@@ -1630,25 +1645,6 @@ b2:                                               ; preds = %b1, %b3
   store i64 %t16, ptr %t21, align 8
   %t22 = ptrtoint ptr %t18 to i64
   ret i64 %t22
-}
-
-; Function Attrs: nounwind
-define i64 @prism_lam_14(i64 %_p0) #0 {
-entry:
-  %t4 = call ptr @prism_alloc(i64 4)
-  %t5 = getelementptr inbounds i8, ptr %t4, i64 8
-  store i64 1, ptr %t5, align 8
-  %t7 = getelementptr inbounds i8, ptr %t4, i64 24
-  store i64 3, ptr %t7, align 8
-  %t8 = getelementptr inbounds i8, ptr %t4, i64 32
-  store i64 1, ptr %t8, align 8
-  %t9 = getelementptr inbounds i8, ptr %t4, i64 40
-  store i64 %_p0, ptr %t9, align 8
-  %t10 = getelementptr inbounds i8, ptr %t4, i64 48
-  store i64 0, ptr %t10, align 8
-  %t11 = ptrtoint ptr %t4 to i64
-  call void @prism_effop_alloc()
-  ret i64 %t11
 }
 
 ; Function Attrs: nounwind

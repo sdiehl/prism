@@ -1,0 +1,11 @@
+-- A handler carries at most one return clause; a second is rejected rather
+-- than silently shadowed by whichever consumer reads the arm list first.
+effect Pick
+  pick() : Int
+
+fn main() =
+  println(handle pick() with {
+    pick() resume k => k(1),
+    return r => r,
+    return r => r + 1
+  })

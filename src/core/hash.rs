@@ -28,12 +28,77 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use serde::{Deserialize, Serialize};
+
 use super::cbpv::{self, Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::fv;
 use crate::sym::Sym;
 
-/// Map from a definition's canonical symbol to its content hash (hex).
-pub type Hashes = BTreeMap<Sym, String>;
+/// A content hash: a hex digest produced by the hasher.
+///
+/// A newtype over the hex string so a content hash cannot be confused with an
+/// arbitrary string as it travels through the identity, store, and lineage code.
+/// It renders and serializes exactly as its inner hex (via
+/// `Display`/`Deref`/`as_str`), so the wire bytes, on-disk objects, and folded
+/// roots are byte-identical to the bare string they replaced.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Digest(String);
+
+impl Digest {
+    /// The digest's hex text. The single spelling used at every serialization
+    /// boundary (disk objects, wire codec, hash inputs), so byte identity holds.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume the digest, yielding its owned hex string.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::ops::Deref for Digest {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Digest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for Digest {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Digest {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for Digest {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<Digest> for String {
+    fn from(d: Digest) -> Self {
+        d.0
+    }
+}
+
+/// Map from a definition's canonical symbol to its content hash.
+pub type Hashes = BTreeMap<Sym, Digest>;
 
 /// Scheme tag: every hash commits to it, so a change to this encoding cannot
 /// silently reuse an old hash computed under a different scheme.
@@ -53,7 +118,7 @@ pub const HASH_PREFIX_HEX: usize = 16;
 /// the datatype/effect shape digests, so the stdlib root covers the whole
 /// documented surface through one fold.
 #[must_use]
-pub fn root(entries: &BTreeMap<String, String>) -> String {
+pub fn root(entries: &BTreeMap<String, Digest>) -> Digest {
     let mut blob = String::from(SCHEME);
     for (name, hash) in entries {
         let _ = write!(blob, "|{}:{name}={hash}", name.len());
@@ -182,8 +247,8 @@ fn hash_component(
     }
 }
 
-pub(crate) fn hex(s: &str) -> String {
-    blake3::hash(s.as_bytes()).to_hex().to_string()
+pub(crate) fn hex(s: &str) -> Digest {
+    Digest(blake3::hash(s.as_bytes()).to_hex().to_string())
 }
 
 /// Canonically encode one definition's body (params as the outermost binders).
@@ -331,6 +396,22 @@ impl Enc<'_> {
                 self.out.push('p');
                 self.vals(args);
             }
+            // Unboxed products get their own tags (`P`, `R`), appended without a
+            // scheme bump: no boxed program constructs these nodes, so existing
+            // content hashes are untouched.
+            Value::UnboxedTuple(args) => {
+                self.out.push('P');
+                self.vals(args);
+            }
+            Value::UnboxedRecord(fields) => {
+                self.out.push('R');
+                self.out.push('{');
+                for (n, v) in fields {
+                    self.tok(n.as_str());
+                    self.val(v);
+                }
+                self.out.push('}');
+            }
         }
     }
 
@@ -404,6 +485,10 @@ impl Enc<'_> {
             Comp::Neg(lane, v) => {
                 self.tok(lane.hash_tag());
                 self.val(v);
+            }
+            Comp::UnboxedProject(v, field) => {
+                self.val(v);
+                self.tok(field.as_str());
             }
             Comp::Bind(m, x, n) => {
                 self.comp(m);
@@ -549,7 +634,7 @@ fn sccs(core: &Core, fnmap: &BTreeMap<Sym, &CoreFn>) -> Vec<Vec<Sym>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_program, Sym};
+    use super::{hash_program, Digest, Sym};
     use crate::core::{Comp, Core, CoreFn, Value};
     use std::collections::BTreeMap;
 
@@ -693,23 +778,23 @@ mod tests {
     #[test]
     fn root_is_deterministic_and_order_independent() {
         let mut a = BTreeMap::new();
-        a.insert("map".to_string(), "aaa".to_string());
-        a.insert("filter".to_string(), "bbb".to_string());
+        a.insert("map".to_string(), Digest::from("aaa"));
+        a.insert("filter".to_string(), Digest::from("bbb"));
         // A different insertion order yields the same sorted map, so the same root.
         let mut b = BTreeMap::new();
-        b.insert("filter".to_string(), "bbb".to_string());
-        b.insert("map".to_string(), "aaa".to_string());
+        b.insert("filter".to_string(), Digest::from("bbb"));
+        b.insert("map".to_string(), Digest::from("aaa"));
         assert_eq!(super::root(&a), super::root(&b));
     }
 
     #[test]
     fn root_moves_under_rename_or_content_change() {
-        let base = BTreeMap::from([("map".to_string(), "aaa".to_string())]);
+        let base = BTreeMap::from([("map".to_string(), Digest::from("aaa"))]);
         // Renaming the binding (same content hash, new name) changes the root:
         // the namespace commits to the public name.
-        let renamed = BTreeMap::from([("fmap".to_string(), "aaa".to_string())]);
+        let renamed = BTreeMap::from([("fmap".to_string(), Digest::from("aaa"))]);
         // Changing the behavior hash under the same name changes it too.
-        let rebodied = BTreeMap::from([("map".to_string(), "zzz".to_string())]);
+        let rebodied = BTreeMap::from([("map".to_string(), Digest::from("zzz"))]);
         assert_ne!(super::root(&base), super::root(&renamed));
         assert_ne!(super::root(&base), super::root(&rebodied));
     }

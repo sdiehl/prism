@@ -1,5 +1,5 @@
 effect Delim
-  ctl shift0(Int) : Int
+  shift0(Int) : Int
 
 -- Delimited continuations, the Danvy-Filinski shift/reset intuition pump.
 --
@@ -8,7 +8,7 @@ effect Delim
 --     Scheme                              Prism
 --     ------                              -----
 --     (reset BODY)                        handle body() with ... (the delimiter)
---     (shift k EXPR)                      ctl shift0(v, k) => EXPR (capture k)
+--     (shift k EXPR)                      shift0(v, k) => EXPR (capture k)
 --     k                                   resume, here the 2nd clause param
 --
 -- The captured continuation k is "delimited": it reaches only up to the
@@ -30,24 +30,24 @@ effect Delim
 -- whole point. Scheme needs a runtime escape hatch for this; here it falls out
 -- of the effect handler, and compiles to native code.
 
-fn body() : !{Delim} Int = 10 + shift0(100)
+fn body() : Int ! {Delim} = 10 + shift0(100)
 
 -- (shift k 100): k captured, never invoked. The delimiter just yields 100.
 fn reset_abort() =
   handle body() with
-    shift0(v, k) => v
+    shift0(v) resume k => v
     return r => r
 
 -- (shift k (k 100)): resume once, the ordinary single-shot case.
 fn reset_once() =
   handle body() with
-    shift0(v, k) => k(v)
+    shift0(v) resume k => k(v)
     return r => r
 
 -- (shift k (k (k 100))): resume the SAME continuation twice. Multishot.
 fn reset_twice() =
   handle body() with
-    shift0(v, k) => k(k(v))
+    shift0(v) resume k => k(k(v))
     return r => r
 
 fn main() =

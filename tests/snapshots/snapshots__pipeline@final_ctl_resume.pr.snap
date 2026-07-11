@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/final_ctl_resume.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Abort") VOpen Ctl Ident("abort") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("v") Eq VOpen Handle Ident("abort") LParen Int(IntLit { value: 7, suffix: None }) RParen With VOpen Final Ctl Ident("abort") LParen Ident("code") RParen FatArrow Ident("resume") LParen Ident("code") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Ident("println") LParen Ident("v") RParen VClose VClose
+VOpen Effect UIdent("Abort") VOpen Ident("abort") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("v") Eq VOpen Handle Ident("abort") LParen Int(IntLit { value: 7, suffix: None }) RParen With VOpen Ident("never") Ident("abort") LParen Ident("code") RParen FatArrow Ident("resume") LParen Ident("code") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Ident("println") LParen Ident("v") RParen VClose VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 130..165,
+            span: 126..157,
         },
     ],
     errors: [],
@@ -48,7 +48,7 @@ Program {
                                         node: Var(
                                             "abort",
                                         ),
-                                        span: 200..205,
+                                        span: 192..197,
                                     },
                                     [
                                         Spanned {
@@ -58,15 +58,15 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 206..207,
+                                            span: 198..199,
                                         },
                                     ],
                                 ),
-                                span: 200..208,
+                                span: 192..200,
                             },
                             [
                                 Sugar(
-                                    Final(
+                                    Never(
                                         "abort",
                                         [
                                             "code",
@@ -77,18 +77,18 @@ Program {
                                                     node: Var(
                                                         "resume",
                                                     ),
-                                                    span: 245..251,
+                                                    span: 233..239,
                                                 },
                                                 [
                                                     Spanned {
                                                         node: Var(
                                                             "code",
                                                         ),
-                                                        span: 252..256,
+                                                        span: 240..244,
                                                     },
                                                 ],
                                             ),
-                                            span: 245..257,
+                                            span: 233..245,
                                         },
                                     ),
                                 ),
@@ -98,12 +98,12 @@ Program {
                                         node: Var(
                                             "r",
                                         ),
-                                        span: 276..277,
+                                        span: 264..265,
                                     },
                                 ),
                             ],
                         ),
-                        span: 193..277,
+                        span: 185..265,
                     },
                     Spanned {
                         node: Call(
@@ -111,33 +111,33 @@ Program {
                                 node: Var(
                                     "println",
                                 ),
-                                span: 280..287,
+                                span: 268..275,
                             },
                             [
                                 Spanned {
                                     node: Var(
                                         "v",
                                     ),
-                                    span: 288..289,
+                                    span: 276..277,
                                 },
                             ],
                         ),
-                        span: 280..290,
+                        span: 268..278,
                     },
                 ),
-                span: 181..290,
+                span: 173..278,
             },
             wheres: [],
-            span: 167..290,
+            span: 159..278,
         },
     ],
 }
 
 == types ==
-Type Error: final ctl clause cannot resume
-    ╭─[ <source>:10:32 ]
+[E6030] Type Error: never clause cannot resume
+    ╭─[ <source>:10:28 ]
     │
- 10 │       final ctl abort(code) => resume(code)
-    │                                ───┬──  
-    │                                   ╰──── final ctl clause cannot resume
+ 10 │       never abort(code) => resume(code)
+    │                            ───┬──  
+    │                               ╰──── never clause cannot resume
 ────╯

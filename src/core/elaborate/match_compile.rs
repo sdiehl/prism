@@ -39,7 +39,7 @@ impl Elab<'_> {
         arms: Vec<(Pattern, Comp)>,
     ) -> Result<Comp, Error> {
         if arms.is_empty() {
-            return Err(Error::Ice(
+            return Err(Error::InternalInvariant(
                 "compile_match: empty match survived exhaustiveness".into(),
             ));
         }
@@ -121,7 +121,7 @@ impl Elab<'_> {
             let mut l2 = locals.clone();
             pat_vars(&arm.pat, &mut l2);
             let Some(g) = arm.guard.as_ref() else {
-                return Err(Error::Ice("cut marks a guarded arm".into()));
+                return Err(Error::InternalInvariant("cut marks a guarded arm".into()));
             };
             let cg = self.elab(g, &l2)?;
             let cb = self.elab(&arm.body, &l2)?;
@@ -203,7 +203,9 @@ impl Elab<'_> {
     ) -> Result<Comp, Error> {
         if arms.is_empty() {
             return default.ok_or_else(|| {
-                Error::Ice("compile_sub_arms: empty arm matrix survived exhaustiveness".into())
+                Error::InternalInvariant(
+                    "compile_sub_arms: empty arm matrix survived exhaustiveness".into(),
+                )
             });
         }
 
@@ -213,10 +215,9 @@ impl Elab<'_> {
         });
 
         if all_trivial {
-            let (subs, body) = arms
-                .into_iter()
-                .next()
-                .ok_or_else(|| Error::Ice("empty arm group survived the is_empty guard".into()))?;
+            let (subs, body) = arms.into_iter().next().ok_or_else(|| {
+                Error::InternalInvariant("empty arm group survived the is_empty guard".into())
+            })?;
             return Ok(bind_fields(field_vars, &subs, body));
         }
 
@@ -228,7 +229,7 @@ impl Elab<'_> {
                 })
             })
             .ok_or_else(|| {
-                Error::Ice("all_trivial guard guarantees a non-trivial column".into())
+                Error::InternalInvariant("all_trivial guard guarantees a non-trivial column".into())
             })?;
 
         let col_scrut = Value::Var(field_vars[col].clone().into());
@@ -319,7 +320,7 @@ impl Elab<'_> {
                 }
                 Pattern::Wild | Pattern::Var(_) => part.wild.push((subs, body)),
                 Pattern::Record(..) => {
-                    return Err(Error::Ice(
+                    return Err(Error::InternalInvariant(
                         "desugar_record_pat returned a record pattern".into(),
                     ))
                 }
@@ -383,7 +384,9 @@ impl Elab<'_> {
     ) -> Result<Comp, Error> {
         let mut rest_vars = field_vars.to_vec();
         rest_vars.remove(col);
-        let ice = || Error::Ice("scalar column without default survived exhaustiveness".into());
+        let ice = || {
+            Error::InternalInvariant("scalar column without default survived exhaustiveness".into())
+        };
         if part.has_bool {
             let side = |me: &mut Self, want: bool| -> Result<Comp, Error> {
                 let group = me.specialize(arms, col, col_scrut, 0, |p| match p {

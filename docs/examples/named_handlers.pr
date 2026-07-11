@@ -13,18 +13,18 @@
 --   70
 
 effect Read
-  ctl read() : String
+  read() : String
 
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 -- two instances of one effect. Dispatch is by instance, not by innermost.
 fn sources() =
   with conf <- handler
-    read(k) => k("conf.toml")
+    read() resume k => k("conf.toml")
     return r => r
   with data <- handler
-    read(k) => k("data.csv")
+    read() resume k => k("data.csv")
     return r => r
   println(conf.read())
   println(data.read())
@@ -34,11 +34,11 @@ fn sources() =
 -- instance only answers calls addressed through it.
 fn mixed() =
   with named <- handler
-    read(k) => k("named")
+    read() resume k => k("named")
     return r => r
   let inner =
     handle read() with
-      read(k) => k("inner")
+      read() resume k => k("inner")
       return r => r
   println(concat(inner, concat("/", named.read())))
 
@@ -46,7 +46,7 @@ fn mixed() =
 -- resumed twice. (3 * 10) + (4 * 10) = 70
 fn multishot() : Int =
   with h <- handler
-    ask(k) => k(3) + k(4)
+    ask() resume k => k(3) + k(4)
     return r => r
   h.ask() * 10
 

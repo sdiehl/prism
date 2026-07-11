@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/impredicative_option.pr
 ---
 == tokens ==
@@ -102,7 +102,7 @@ Program {
 }
 
 == types ==
-Type Error: in `boxed`: impredicative type: a polymorphic type cannot be a type argument to `Option` (a type parameter ranges over monomorphic types). Higher-rank types are allowed as function arguments, results, and declared data fields; wrap the polymorphic type in a data type with a polymorphic field to carry it here.
+[E1004] Type Error: in `boxed`: impredicative type: a polymorphic type cannot be a type argument to `Option` (a type parameter ranges over monomorphic types). Higher-rank types are allowed as function arguments, results, and declared data fields; wrap the polymorphic type in a data type with a polymorphic field to carry it here.
    ╭─[ <source>:4:1 ]
    │
  4 │ fn boxed() : Option(forall a. (a) -> a) = Some(\(x) -> x)

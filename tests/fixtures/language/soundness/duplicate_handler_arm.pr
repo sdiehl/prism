@@ -1,0 +1,9 @@
+effect Pick
+  pick() : Int
+
+fn main() =
+  println(handle pick() with {
+    pick() resume k => k(11),
+    pick() resume k => k(22),
+    return r => r
+  })

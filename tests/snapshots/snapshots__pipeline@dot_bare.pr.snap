@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/dot_bare.pr
 ---
 == tokens ==
@@ -174,7 +174,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: no field `norm1` on type `Point`
+[E4007] Type Error: in `main`: no field `norm1` on type `Point`
     ╭─[ <source>:10:11 ]
     │
  10 │   println(p.norm1)

@@ -29,7 +29,7 @@ instance applicativeBox : ApplicativeB(Box)
 instance monadBox : MonadB(Box)
   fn bind_(b, g) = g(open(b))
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(open(pure_(7)))  -- Applicative: lift a value in
   let c = fmap_(\(x) -> x + 1, Box(20))  -- Functor: map under the structure
   let d = bind_(c, \(x) -> Box(x * 2))  -- Monad: sequence (needs the two below)

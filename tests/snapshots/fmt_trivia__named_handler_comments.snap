@@ -1,13 +1,13 @@
 ---
-source: tests/fmt_trivia.rs
-expression: "fmt(\"effect State\\n\\\n     \\x20 ctl get() : Int\\n\\\n     \\n\\\n     fn run() : !{State} Int =\\n\\\n     \\x20 -- a named handler\\n\\\n     \\x20 with h <- handler\\n\\\n     \\x20   get(k) => k(7)\\n\\\n     \\x20 -- use it\\n\\\n     \\x20 h.get()\\n\")"
+source: tests/formatter/fmt_trivia.rs
+expression: "fmt(\"effect State\\n\\\n     \\x20 get() : Int\\n\\\n     \\n\\\n     fn run() : Int ! {State} =\\n\\\n     \\x20 -- a named handler\\n\\\n     \\x20 with h <- handler\\n\\\n     \\x20   get() resume k => k(7)\\n\\\n     \\x20 -- use it\\n\\\n     \\x20 h.get()\\n\")"
 ---
 effect State
-  ctl get() : Int
+  get() : Int
 
-fn run() : !{State} Int =
+fn run() : Int ! {State} =
   -- a named handler
   with h <- handler
-    get(k) => k(7)
+    get() resume k => k(7)
   -- use it
   h.get()

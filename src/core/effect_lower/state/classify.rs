@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::diagnostics::DriftLog;
 use super::super::evidence::{resume_set, strip_resume};
 use super::super::flow::{self, Loc};
-use super::super::Lowerer;
+use super::super::{EarlyExitMode, Lowerer, StateAnswerMode};
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
 use crate::sym::Sym;
 
@@ -99,7 +99,7 @@ impl Lowerer {
         }
         let handles = self.fusion_handles(core)?;
         self.state_a.clear();
-        self.state_mode = false;
+        self.state_answer = StateAnswerMode::Accumulator;
         let mut consumed: BTreeSet<Sym> = BTreeSet::new();
         let mut folds = 0u32;
         let mut takes = 0u32;
@@ -127,7 +127,7 @@ impl Lowerer {
                     return None;
                 }
                 if !return_body.as_deref().is_some_and(is_id_transformer) {
-                    self.state_mode = true;
+                    self.state_answer = StateAnswerMode::Producer;
                 }
                 for clause in clauses {
                     let kind = Self::is_fold(clause, &self.drift)?;
@@ -137,7 +137,7 @@ impl Lowerer {
                 }
                 continue;
             }
-            let [clause] = clauses.as_slice() else {
+            let [clause] = clauses.arms() else {
                 return None;
             };
             if self.is_take(clause) {
@@ -182,7 +182,11 @@ impl Lowerer {
         }) {
             return None;
         }
-        self.early = takes > 0;
+        self.early = if takes > 0 {
+            EarlyExitMode::ShortCircuit
+        } else {
+            EarlyExitMode::Continue
+        };
         Some(ops)
     }
 

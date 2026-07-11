@@ -7,15 +7,15 @@
 import Quickcheck (..)
 
 effect State
-  ctl get(Unit) : Int
-  ctl put(Int) : Unit
+  get() : Int
+  put(Int) : Unit
 
 -- The canonical State handler: parameter-passing, returning (result, final).
 fn run_state(s0, action : () -> a ! {State | e}) =
   let f =
     handle action() with
-      get(_u, k) => \(s) -> k(s)(s)
-      put(v, k) => \(_s) -> k(())(v)
+      get() resume k => \(s) -> k(s)(s)
+      put(v) resume k => \(_s) -> k(())(v)
       return r => \(s) -> (r, s)
   f(s0)
 
@@ -23,12 +23,12 @@ fn state_eq(l, r) = fst(l) == fst(r) && snd(l) == snd(r)
 
 -- get-get: a second `get` with no intervening `put` observes the same value.
 fn gg_lhs() =
-  let a = get(())
-  let b = get(())
+  let a = get()
+  let b = get()
   a + b * 7
 
 fn gg_rhs() =
-  let a = get(())
+  let a = get()
   a + a * 7
 
 fn prop_get_get(s0) = state_eq(run_state(s0, gg_lhs), run_state(s0, gg_rhs))
@@ -36,7 +36,7 @@ fn prop_get_get(s0) = state_eq(run_state(s0, gg_lhs), run_state(s0, gg_rhs))
 -- put-get: after `put(s)`, `get` returns `s` (equivalently, returning `s`).
 fn pg_lhs(s) =
   put(s)
-  get(())
+  get()
 
 fn pg_rhs(s) =
   put(s)
@@ -51,11 +51,11 @@ fn prop_put_get(p) =
 fn pp_lhs(s1, s2) =
   put(s1)
   put(s2)
-  get(())
+  get()
 
 fn pp_rhs(s2) =
   put(s2)
-  get(())
+  get()
 
 fn prop_put_put(t) =
   match t of

@@ -1,4 +1,4 @@
 -- Negation of a non-numeric value is a type error naming the offending type.
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let x = -"hello"
   println(1)

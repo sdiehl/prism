@@ -1,5 +1,5 @@
 ---
-source: tests/base_surface.rs
+source: tests/compiler/base_surface.rs
 expression: "lines.join(\"\\n\")"
 ---
 class Applicative
@@ -43,7 +43,9 @@ effop rng_rand
 type  Array
 type  Buf
 type  Canonical
+type  FloatBuf
 type  HashMap
+type  IntBuf
 type  List
 type  Map
 type  Option

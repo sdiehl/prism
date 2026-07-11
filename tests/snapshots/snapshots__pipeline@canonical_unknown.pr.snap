@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/canonical_unknown.pr
 ---
 == tokens ==
@@ -268,7 +268,7 @@ Program {
 }
 
 == types ==
-Type Error: `nope` is not an instance of Ord(Int)
+[E3032] Type Error: `nope` is not an instance of Ord(Int)
     ╭─[ <source>:18:1 ]
     │
  18 │ canonical Ord(Int) = nope

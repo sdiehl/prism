@@ -1,45 +1,45 @@
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 -- inner handler answers 2, outer answers 1: the masked ask skips the inner
 fn two_levels() =
   handle (handle ask() + mask<Ask>(ask()) with {
-      ask(k) => k(2),
+      ask() resume k => k(2),
       return r => r
     }) with
-    ask(k) => k(1)
+    ask() resume k => k(1)
     return r => r
 
 -- three handlers (inner 1, middle 10, outer 100): one mask reaches the
 -- middle, a double mask skips two and reaches the outer
 fn three_levels() =
   handle (handle handle mask<Ask>(ask()) + mask<Ask>(mask<Ask>(ask())) with {
-      ask(k) => k(1),
+      ask() resume k => k(1),
       return r => r
     } with {
-      ask(k) => k(10),
+      ask() resume k => k(10),
       return r => r
     }) with
-    ask(k) => k(100)
+    ask() resume k => k(100)
     return r => r
 
 -- the inner clause re-performs ask, which the outer answers with 7
 fn reperform() =
   handle (handle ask() + mask<Ask>(ask()) with {
-      ask(k) => k(ask() * 10),
+      ask() resume k => k(ask() * 10),
       return r => r
     }) with
-    ask(k) => k(7)
+    ask() resume k => k(7)
     return r => r
 
 -- the thunk capture forces whole-program monadification; mask still skips
 fn escalate() =
   let f = \() -> ask() + mask<Ask>(ask())
   handle (handle f() with {
-      ask(k) => k(20),
+      ask() resume k => k(20),
       return r => r
     }) with
-    ask(k) => k(3)
+    ask() resume k => k(3)
     return r => r
 
 fn main() =

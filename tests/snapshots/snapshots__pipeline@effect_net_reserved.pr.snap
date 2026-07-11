@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/effect_net_reserved.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Net") VOpen Ctl Ident("fetch") LParen KwString RParen Colon KwString VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+VOpen Effect UIdent("Net") VOpen Ident("fetch") LParen KwString RParen Colon KwString VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 149..188,
+            span: 149..184,
         },
     ],
     errors: [],
@@ -46,20 +46,20 @@ Program {
                         suffix: None,
                     },
                 ),
-                span: 208..209,
+                span: 204..205,
             },
             wheres: [],
-            span: 190..209,
+            span: 186..205,
         },
     ],
 }
 
 == types ==
-Type Error: effect `Net` is a reserved name (reserved for the network boundary capability)
+[E6006] Type Error: effect `Net` is a reserved name (reserved for the network boundary capability)
    ╭─[ <source>:3:1 ]
    │
  3 │ ╭─▶ effect Net
- 4 │ ├─▶   ctl fetch(String) : String
-   │ │                                  
-   │ ╰────────────────────────────────── effect `Net` is a reserved name (reserved for the network boundary capability)
+ 4 │ ├─▶   fetch(String) : String
+   │ │                              
+   │ ╰────────────────────────────── effect `Net` is a reserved name (reserved for the network boundary capability)
 ───╯

@@ -1,0 +1,475 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/or_null.pr
+---
+== tokens ==
+VOpen Fn Ident("find") LParen Ident("hit") Colon KwBool RParen Colon UIdent("OrNull") LParen KwInt RParen Eq VOpen Match Ident("hit") Of VOpen True FatArrow UIdent("This") LParen Int(IntLit { value: 7, suffix: None }) RParen VSemi False FatArrow UIdent("Null") VClose VClose VSemi Fn Ident("unwrap_or") LParen Ident("o") Colon UIdent("OrNull") LParen KwInt RParen Comma Ident("d") Colon KwInt RParen Colon KwInt Eq VOpen Match Ident("o") Of VOpen UIdent("Null") FatArrow Ident("d") VSemi UIdent("This") LParen Ident("n") RParen FatArrow Ident("n") VClose VClose VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("unwrap_or") LParen Ident("find") LParen True RParen Comma Int(IntLit { value: 0, suffix: None }) RParen Plus Ident("unwrap_or") LParen Ident("find") LParen False RParen Comma Int(IntLit { value: 100, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "find",
+            params: [
+                Param {
+                    name: "hit",
+                    ty: Some(
+                        Bool,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "OrNull",
+                    [
+                        Int,
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "hit",
+                        ),
+                        span: 406..409,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Bool(
+                                    true,
+                                ),
+                                span: 417..421,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "This",
+                                        ),
+                                        span: 425..429,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 7,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 430..431,
+                                        },
+                                    ],
+                                ),
+                                span: 425..432,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Bool(
+                                    false,
+                                ),
+                                span: 437..442,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "Null",
+                                ),
+                                span: 446..450,
+                            },
+                        },
+                    ],
+                ),
+                span: 400..450,
+            },
+            wheres: [],
+            span: 362..450,
+        },
+        Decl {
+            name: "unwrap_or",
+            params: [
+                Param {
+                    name: "o",
+                    ty: Some(
+                        Con(
+                            "OrNull",
+                            [
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "d",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "o",
+                        ),
+                        span: 507..508,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "Null",
+                                    [],
+                                ),
+                                span: 516..520,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "d",
+                                ),
+                                span: 524..525,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "This",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "n",
+                                            ),
+                                            span: 535..536,
+                                        },
+                                    ],
+                                ),
+                                span: 530..537,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "n",
+                                ),
+                                span: 541..542,
+                            },
+                        },
+                    ],
+                ),
+                span: 501..542,
+            },
+            wheres: [],
+            span: 452..542,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Bin(
+                    Add,
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "unwrap_or",
+                                ),
+                                span: 562..571,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "find",
+                                            ),
+                                            span: 572..576,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Bool(
+                                                    true,
+                                                ),
+                                                span: 577..581,
+                                            },
+                                        ],
+                                    ),
+                                    span: 572..582,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 0,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 584..585,
+                                },
+                            ],
+                        ),
+                        span: 562..586,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "unwrap_or",
+                                ),
+                                span: 589..598,
+                            },
+                            [
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "find",
+                                            ),
+                                            span: 599..603,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Bool(
+                                                    false,
+                                                ),
+                                                span: 604..609,
+                                            },
+                                        ],
+                                    ),
+                                    span: 599..610,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 100,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 612..615,
+                                },
+                            ],
+                        ),
+                        span: 589..616,
+                    },
+                ),
+                span: 562..616,
+            },
+            wheres: [],
+            span: 544..616,
+        },
+    ],
+}
+
+== types ==
+find : (Bool) -> OrNull(Int)
+unwrap_or : (OrNull(Int), Int) -> Int
+main : () -> Int
+
+== core (cbpv) ==
+fn find(hit) =
+  return hit to t@0
+  if t@0 then
+    return 7 to t@1
+    return This(t@1)
+  else
+    return Null
+fn unwrap_or(o, d) =
+  return o to t@2
+  case t@2 of
+    Null =>
+      return d
+    This(n) =>
+      return n
+fn main() =
+  return true to t@3
+  find(t@3) to t@4
+  return 0 to t@5
+  unwrap_or(t@4, t@5) to t@9
+  return false to t@6
+  find(t@6) to t@7
+  return 100 to t@8
+  unwrap_or(t@7, t@8) to t@10
+  t@9 + t@10
+
+== fbip (rc) ==
+fn find(hit) =
+  return hit to t@0
+  if t@0 then
+    drop t@0
+    return 7 to t@1
+    return This(t@1)
+  else
+    drop t@0
+    return Null
+fn unwrap_or(o, d) =
+  return o to t@2
+  case t@2 of
+    Null =>
+      drop t@2
+      return d
+    This(n) =>
+      dup n
+      drop t@2
+      drop d
+      return n
+fn main() =
+  return true to t@3
+  find(t@3) to t@4
+  return 0 to t@5
+  unwrap_or(t@4, t@5) to t@9
+  return false to t@6
+  find(t@6) to t@7
+  return 100 to t@8
+  unwrap_or(t@7, t@8) to t@10
+  t@9 + t@10
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [910 x i8] c"scheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_find  94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b  find\0Afn      prism_main  060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9  main\0Afn      prism_unwrap_or  500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14  unwrap_or\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1062 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_find 94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b find arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9 main arity 0 slots abi-word[]\0Astate prism_unwrap_or 500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14 unwrap_or arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [11 x i8] c"prism_find\00"
+@.kont_hash0 = private constant [65 x i8] c"94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b\00"
+@.kont_name0 = private constant [5 x i8] c"find\00"
+@.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
+@.kont_hash1 = private constant [65 x i8] c"060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9\00"
+@.kont_name1 = private constant [5 x i8] c"main\00"
+@.kont_symbol2 = private constant [16 x i8] c"prism_unwrap_or\00"
+@.kont_hash2 = private constant [65 x i8] c"500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14\00"
+@.kont_name2 = private constant [10 x i8] c"unwrap_or\00"
+@prism_native_kont_ptrs = constant [3 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_find, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }, { ptr, ptr, ptr, ptr } { ptr @prism_unwrap_or, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 3, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prism_find(i64 %a0) #0 {
+entry:
+  %t1 = icmp ne i64 %a0, 1
+  br i1 %t1, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %a0)
+  %t5 = call ptr @prism_alloc(i64 1)
+  %t6 = getelementptr inbounds i8, ptr %t5, i64 8
+  store i64 1, ptr %t6, align 8
+  %t8 = getelementptr inbounds i8, ptr %t5, i64 24
+  store i64 15, ptr %t8, align 8
+  %t9 = ptrtoint ptr %t5 to i64
+  ret i64 %t9
+
+b1:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %a0)
+  %t12 = call ptr @prism_alloc(i64 0)
+  %t13 = getelementptr inbounds i8, ptr %t12, i64 8
+  store i64 0, ptr %t13, align 8
+  %t15 = ptrtoint ptr %t12 to i64
+  ret i64 %t15
+}
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prism_unwrap_or(i64 %a0, i64 %a1) #0 {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
+  ]
+
+b2:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %a1
+
+b3:                                               ; preds = %entry
+  %t4 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t5 = load i64, ptr %t4, align 8
+  call void @prism_rc_inc(i64 %t5)
+  call void @prism_rc_dec(i64 %a0)
+  call void @prism_rc_dec(i64 %a1)
+  ret i64 %t5
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+}
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t1 = call i64 @prism_find(i64 3)
+  %t3 = call i64 @prism_unwrap_or(i64 %t1, i64 1)
+  %t5 = call i64 @prism_find(i64 1)
+  %t7 = call i64 @prism_unwrap_or(i64 %t5, i64 201)
+  %t8 = and i64 %t3, %t7
+  %t10 = and i64 %t8, 1
+  %t11 = icmp eq i64 %t10, 1
+  br i1 %t11, label %b0, label %b1
+
+b0:                                               ; preds = %entry
+  %t13 = ashr i64 %t3, 1
+  %t15 = ashr i64 %t7, 1
+  %t16 = add i64 %t13, %t15
+  %t18 = shl i64 %t16, 1
+  %t19 = ashr i64 %t18, 1
+  %t20 = icmp eq i64 %t19, %t16
+  br i1 %t20, label %b3, label %b1
+
+b1:                                               ; preds = %b0, %entry
+  %t22 = call i64 @prism_rt_int_add(i64 %t3, i64 %t7)
+  br label %b2
+
+b3:                                               ; preds = %b0
+  %t21 = or i64 %t18, 1
+  br label %b2
+
+b2:                                               ; preds = %b1, %b3
+  %t23 = phi i64 [ %t21, %b3 ], [ %t22, %b1 ]
+  call void @prism_rc_dec(i64 %t3)
+  call void @prism_rc_dec(i64 %t7)
+  ret i64 %t23
+}
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 107

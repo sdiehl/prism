@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/errors_undeclared.pr
 ---
 == tokens ==
@@ -75,7 +75,7 @@ Program {
 }
 
 == types ==
-Type Error: `Malformed` is not a declared error
+[E6049] Type Error: `Malformed` is not a declared error
    ╭─[ <source>:1:35 ]
    │
  1 │ fn main() = println(try 1 catch { Malformed(m) => 2 })

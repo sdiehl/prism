@@ -56,7 +56,7 @@ impl Lowerer {
             let mut ev_params = clause.params.clone();
             // In early mode the state is `Step Acc`: the evidence folds inside
             // SMore and forwards SDone untouched, so a stake upstream can stop.
-            let ev_body = if self.early {
+            let ev_body = if self.early.short_circuits() {
                 let step = self.fresh("step");
                 let body = self.step_map(step, *acc, ev_body);
                 ev_params.push(step);
@@ -75,7 +75,7 @@ impl Lowerer {
         // In early mode the seed is wrapped `SMore(acc0)` and the threaded loop's
         // final `Step` is unwrapped back to the bare accumulator.
         let acc0 = self.fresh("acc");
-        let g_body = if self.early {
+        let g_body = if self.early.short_circuits() {
             let st0 = self.fresh("st");
             let threaded = self.thread_st(body, evs, loc, st0)?;
             Comp::Bind(
@@ -160,7 +160,7 @@ impl Lowerer {
         else {
             return None;
         };
-        let [clause] = ops.as_slice() else {
+        let [clause] = ops.arms() else {
             return None;
         };
         let ev: Sym = *evs.get(&clause.name)?;
@@ -175,7 +175,7 @@ impl Lowerer {
             Box::new(Comp::Return(Value::Var(st))),
         );
         let mut ev_params = clause.params.clone();
-        let ev_body = if self.early {
+        let ev_body = if self.early.short_circuits() {
             let step = self.fresh("step");
             let body = self.step_map(step, st, ev_inner);
             ev_params.push(step);
@@ -195,7 +195,7 @@ impl Lowerer {
             Some(b) => self.rewrite(b, loc, evs)?,
             None => Comp::Return(Value::Var(rv)),
         };
-        let (seed, body_done) = if self.early {
+        let (seed, body_done) = if self.early.short_circuits() {
             (smore(Value::Unit), self.seed_unwrap(threaded))
         } else {
             (Value::Unit, threaded)
@@ -231,7 +231,7 @@ impl Lowerer {
         evs: &BTreeMap<Sym, Sym>,
     ) -> Option<Comp> {
         Some(match c {
-            Comp::Handle { ops, .. } => match ops.as_slice() {
+            Comp::Handle { ops, .. } => match ops.arms() {
                 [clause] if self.is_consumer(clause) => self.lower_consumer(c, evs, loc)?,
                 _ => self.lower_fold(c, evs, loc)?,
             },

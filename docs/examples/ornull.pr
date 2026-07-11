@@ -1,0 +1,9 @@
+fn find(hit : Bool) : OrNull(String) =
+  match hit of
+    true => This("found")
+    false => Null
+
+fn main() =
+  match find(true) of
+    Null => println("none")
+    This(s) => println(s)

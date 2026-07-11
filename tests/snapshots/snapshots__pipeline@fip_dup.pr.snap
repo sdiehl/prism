@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fip_dup.pr
 ---
 == tokens ==
@@ -123,10 +123,15 @@ use_twice : (Lst) -> Lst
 
 == core (cbpv) ==
 fn use_twice(xs) =
-  return xs to t@0; case t@0 { Nil => return xs | Cons(h, t) => return xs }
+  return xs to t@0
+  case t@0 of
+    Nil =>
+      return xs
+    Cons(h, t) =>
+      return xs
 
 == fip ==
-Type Error: usage check `fip` failed for function `use_twice`: is not linear (duplicates a value)
+[E1998] Type Error: usage check `fip` failed for function `use_twice`: is not linear (duplicates a value)
     ╭─[ <source>:8:1 ]
     │
   8 │ ╭─▶ fip fn use_twice(xs) =

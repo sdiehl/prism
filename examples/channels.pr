@@ -11,7 +11,7 @@
 
 import Concurrent (..)
 
-fn producer(c : Chan, n : Int) : !{Async(Int)} Int =
+fn producer(c : Chan, n : Int) : Int ! {Async(Int)} =
   if n == 0 then
     0
   else
@@ -19,7 +19,7 @@ fn producer(c : Chan, n : Int) : !{Async(Int)} Int =
     yield(())
     producer(c, n - 1)
 
-fn consumer(c : Chan, count : Int, acc : Int) : !{Async(Int), IO} Int =
+fn consumer(c : Chan, count : Int, acc : Int) : Int ! {Async(Int), IO} =
   if count == 0 then
     acc
   else
@@ -27,8 +27,8 @@ fn consumer(c : Chan, count : Int, acc : Int) : !{Async(Int), IO} Int =
     println("recv {v}")
     consumer(c, count - 1, acc + v)
 
-fn scene() : !{Async(Int), IO} Int =
-  let c = channel(())
+fn scene() : Int ! {Async(Int), IO} =
+  let c = channel()
   fork(\() -> producer(c, 3))
   consumer(c, 3, 0)
 

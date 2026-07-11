@@ -1,9 +1,9 @@
 effect State
-  ctl get(Unit) : Int
-  ctl put(Int) : Unit
+  get() : Int
+  put(Int) : Unit
 
 effect Exn
-  ctl raise(Int) : Int
+  raise(Int) : Int
 
 -- Composing two effects: State and Exn.
 --
@@ -16,15 +16,15 @@ effect Exn
 -- forwarding out through it) are shown in eff_forward.pr. Sequencing is the
 -- simplest idiom when the effects need not interleave.
 
-fn accumulate(xs) : !{State} Int =
+fn accumulate(xs) : Int ! {State} =
   match xs of
-    Nil => get(())
+    Nil => get()
     Cons(x, rest) =>
-      let n = get(())
+      let n = get()
       put(n + x)
       accumulate(rest)
 
-fn validate(total) : !{Exn} Int =
+fn validate(total) : Int ! {Exn} =
   if total > 100 then
     raise(0 - 1)
   else
@@ -33,12 +33,12 @@ fn validate(total) : !{Exn} Int =
 fn run(xs) =
   let f =
     handle accumulate(xs) with
-      get(u, k) => \(s) -> k(s)(s)
-      put(s2, k) => \(_s) -> k(())(s2)
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
       return r => \(_s) -> r
   let total = f(0)
   handle validate(total) with
-    raise(code, k) => code
+    raise(code) resume k => code
     return r => r
 
 fn main() =

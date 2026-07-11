@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/interp_holety.pr
 ---
 == tokens ==
@@ -99,7 +99,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: no instance for Num(Bool)
+[E3012] Type Error: in `main`: no instance for Num(Bool)
    ╭─[ <source>:4:17 ]
    │
  4 │   println("v = {flag + 1}")

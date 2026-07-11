@@ -38,7 +38,7 @@ pub fn mint_replay_cert(
 ) -> Result<Vec<u8>, Error> {
     let subject = sidecar_subject(sidecar_bytes);
     let trace = graph.trace().ok_or_else(|| {
-        Error::Resolve("lineage certify: not a run sidecar (no trace node)".into())
+        Error::ResolveLineage("lineage certify: not a run sidecar (no trace node)".into())
     })?;
     let trace_digest = format!("{}:{}", trace.scheme, trace.hash);
     let fingerprint = graph.compiler().map_or("", |c| c.fingerprint.as_str());

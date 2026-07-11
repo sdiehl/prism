@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/higher_eff.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Exn") VOpen Ctl Ident("raise") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("apply") LParen Ident("f") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("Exn") RBrace Comma Ident("x") Colon KwInt RParen Colon Bang LBrace UIdent("Exn") RBrace KwInt Eq Ident("f") LParen Ident("x") RParen VSemi Fn Ident("risky") LParen Ident("x") RParen Eq VOpen If Ident("x") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Ident("raise") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VSemi Else VOpen Ident("x") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("apply") LParen Ident("risky") Comma Int(IntLit { value: 0, suffix: None }) RParen With VOpen Ident("raise") LParen Ident("v") Comma Ident("k") RParen FatArrow Int(IntLit { value: 0, suffix: None }) Minus Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
+VOpen Effect UIdent("Exn") VOpen Ident("raise") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("apply") LParen Ident("f") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("Exn") RBrace Comma Ident("x") Colon KwInt RParen Colon KwInt Bang LBrace UIdent("Exn") RBrace Eq Ident("f") LParen Ident("x") RParen VSemi Fn Ident("risky") LParen Ident("x") RParen Eq VOpen If Ident("x") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Ident("raise") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VSemi Else VOpen Ident("x") VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("apply") LParen Ident("risky") Comma Int(IntLit { value: 0, suffix: None }) RParen With VOpen Ident("raise") LParen Ident("v") RParen Ident("resume") Ident("k") FatArrow Int(IntLit { value: 0, suffix: None }) Minus Ident("v") VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..33,
+            span: 0..29,
         },
     ],
     errors: [],
@@ -83,21 +83,21 @@ Program {
                         node: Var(
                             "f",
                         ),
-                        span: 94..95,
+                        span: 91..92,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 96..97,
+                            span: 93..94,
                         },
                     ],
                 ),
-                span: 94..98,
+                span: 91..95,
             },
             wheres: [],
-            span: 35..98,
+            span: 31..95,
         },
         Decl {
             name: "risky",
@@ -121,7 +121,7 @@ Program {
                                 node: Var(
                                     "x",
                                 ),
-                                span: 119..120,
+                                span: 116..117,
                             },
                             Spanned {
                                 node: Int(
@@ -130,10 +130,10 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 124..125,
+                                span: 121..122,
                             },
                         ),
-                        span: 119..125,
+                        span: 116..122,
                     },
                     Spanned {
                         node: Call(
@@ -141,7 +141,7 @@ Program {
                                 node: Var(
                                     "raise",
                                 ),
-                                span: 135..140,
+                                span: 132..137,
                             },
                             [
                                 Spanned {
@@ -151,23 +151,23 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 141..142,
+                                    span: 138..139,
                                 },
                             ],
                         ),
-                        span: 135..143,
+                        span: 132..140,
                     },
                     Spanned {
                         node: Var(
                             "x",
                         ),
-                        span: 155..156,
+                        span: 152..153,
                     },
                 ),
-                span: 116..156,
+                span: 113..153,
             },
             wheres: [],
-            span: 100..156,
+            span: 97..153,
         },
         Decl {
             name: "main",
@@ -183,14 +183,14 @@ Program {
                                 node: Var(
                                     "apply",
                                 ),
-                                span: 179..184,
+                                span: 176..181,
                             },
                             [
                                 Spanned {
                                     node: Var(
                                         "risky",
                                     ),
-                                    span: 185..190,
+                                    span: 182..187,
                                 },
                                 Spanned {
                                     node: Int(
@@ -199,11 +199,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 192..193,
+                                    span: 189..190,
                                 },
                             ],
                         ),
-                        span: 179..194,
+                        span: 176..191,
                     },
                     [
                         Op(
@@ -222,16 +222,16 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 219..220,
+                                        span: 222..223,
                                     },
                                     Spanned {
                                         node: Var(
                                             "v",
                                         ),
-                                        span: 223..224,
+                                        span: 226..227,
                                     },
                                 ),
-                                span: 219..224,
+                                span: 222..227,
                             },
                         ),
                         Return(
@@ -240,15 +240,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 241..242,
+                                span: 244..245,
                             },
                         ),
                     ],
                 ),
-                span: 172..242,
+                span: 169..245,
             },
             wheres: [],
-            span: 158..242,
+            span: 155..245,
         },
     ],
 }
@@ -260,19 +260,61 @@ main : () -> Int
 
 == core (cbpv) ==
 fn apply(f, x) =
-  return x to t@0; return f to t@1; (force t@1)(t@0)
+  return x to t@0
+  return f to t@1
+  (force t@1)(t@0)
 fn risky(x) =
-  return x to t@2; return 0 to t@3; t@2 == t@3 to t@5; if t@5 then (return 1 to t@4; do raise(t@4)) else (return x)
+  return x to t@2
+  return 0 to t@3
+  t@2 == t@3 to t@5
+  if t@5 then
+    return 1 to t@4
+    do raise(t@4)
+  else
+    return x
 fn main() =
-  handle { return thunk { \_p0. risky(_p0) } to t@6; return 0 to t@7; apply(t@6, t@7) } with { raise(v, k) => return 0 to t@8; return v to t@9; t@8 - t@9, return r => return r }
+  handle
+    return thunk { \_p0. risky(_p0) } to t@6
+    return 0 to t@7
+    apply(t@6, t@7)
+  with
+    raise(v, k) =>
+      return 0 to t@8
+      return v to t@9
+      t@8 - t@9
+    return r =>
+      return r
 
 == fbip (rc) ==
 fn apply(f, x) =
-  return x to t@0; return f to t@1; (force t@1)(t@0)
+  return x to t@0
+  return f to t@1
+  (force t@1)(t@0)
 fn risky(x) =
-  dup x to _; return x to t@2; return 0 to t@3; t@2 == t@3 to t@5; if t@5 then (drop x to _; drop t@5 to _; return 1 to t@4; do raise(t@4)) else (drop t@5 to _; return x)
+  dup x
+  return x to t@2
+  return 0 to t@3
+  t@2 == t@3 to t@5
+  if t@5 then
+    drop x
+    drop t@5
+    return 1 to t@4
+    do raise(t@4)
+  else
+    drop t@5
+    return x
 fn main() =
-  handle { return thunk { \_p0. risky(_p0) } to t@6; return 0 to t@7; apply(t@6, t@7) } with { raise(v, k) => return 0 to t@8; return v to t@9; t@8 - t@9, return r => return r }
+  handle
+    return thunk { \_p0. risky(_p0) } to t@6
+    return 0 to t@7
+    apply(t@6, t@7)
+  with
+    raise(v, k) =>
+      return 0 to t@8
+      return v to t@9
+      t@8 - t@9
+    return r =>
+      return r
 
 == llvm ==
 ; ModuleID = 'prism'
@@ -280,8 +322,8 @@ source_filename = "prism"
 
 @.str0 = private constant [25 x i8] c"unhandled effect `raise`\00"
 @.str1 = private constant [17 x i8] c"unhandled effect\00"
-@prism_native_kont_table = constant [926 x i8] c"scheme  prism-core-hash-v1\0Abundle  4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply  cd07a49e5c3e1b538de68bce6cd157a88e0c60d7180d0d222223c0c8b187821f  apply\0Afn      prism_main  4dfaa38e06bcac5ecaf9b709bb3e81d2d18351c6c15f966a79a8beb95e92106f  main\0Afn      prism_risky  fb168a6ddc90ce5b0e18d6748f8fb8d79a29b45bc32f2586c7042cb04dccb621  risky\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1078 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply cd07a49e5c3e1b538de68bce6cd157a88e0c60d7180d0d222223c0c8b187821f apply arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 4dfaa38e06bcac5ecaf9b709bb3e81d2d18351c6c15f966a79a8beb95e92106f main arity 0 slots abi-word[]\0Astate prism_risky fb168a6ddc90ce5b0e18d6748f8fb8d79a29b45bc32f2586c7042cb04dccb621 risky arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [904 x i8] c"scheme  prism-core-hash-v1\0Abundle  4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_apply  cd07a49e5c3e1b538de68bce6cd157a88e0c60d7180d0d222223c0c8b187821f  apply\0Afn      prism_main  4dfaa38e06bcac5ecaf9b709bb3e81d2d18351c6c15f966a79a8beb95e92106f  main\0Afn      prism_risky  fb168a6ddc90ce5b0e18d6748f8fb8d79a29b45bc32f2586c7042cb04dccb621  risky\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1056 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:4384e5fce856e3637edabb6e2b6aef3c13f3f62607fb19bcf76fcc1587d7802e\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_apply cd07a49e5c3e1b538de68bce6cd157a88e0c60d7180d0d222223c0c8b187821f apply arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 4dfaa38e06bcac5ecaf9b709bb3e81d2d18351c6c15f966a79a8beb95e92106f main arity 0 slots abi-word[]\0Astate prism_risky fb168a6ddc90ce5b0e18d6748f8fb8d79a29b45bc32f2586c7042cb04dccb621 risky arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash1 = private constant [65 x i8] c"4dfaa38e06bcac5ecaf9b709bb3e81d2d18351c6c15f966a79a8beb95e92106f\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"

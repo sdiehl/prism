@@ -1,5 +1,5 @@
 effect Gen
-  ctl yield(Int) : Unit
+  yield(Int) : Unit
 
 -- Generators from a yield effect.
 --
@@ -7,7 +7,7 @@ effect Gen
 -- just a handler: total folds each value into k(()), counted adds one per
 -- yield. One producer, reinterpreted by the handler it runs under.
 
-fn produce(n) : !{Gen} Unit =
+fn produce(n) : Unit ! {Gen} =
   if n == 0 then
     ()
   else
@@ -16,12 +16,12 @@ fn produce(n) : !{Gen} Unit =
 
 fn total(n) =
   handle produce(n) with
-    yield(v, k) => v + k(())
+    yield(v) resume k => v + k(())
     return r => 0
 
 fn counted(n) =
   handle produce(n) with
-    yield(v, k) => 1 + k(())
+    yield(v) resume k => 1 + k(())
     return r => 0
 
 fn main() =

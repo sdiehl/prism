@@ -1,0 +1,14 @@
+effect Leak
+  leak() : Unit
+
+class C(a)
+  method : (a) -> a ! {| e}
+
+instance cInt : C(Int)
+  fn method(x) =
+    leak()
+    x
+
+fn go(y : Int) : Int = method(y)
+
+fn main() = println(go(1))

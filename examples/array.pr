@@ -49,7 +49,7 @@ fn total(arr : Array(Int), i : Int, acc : Int) : Int =
   else
     total(arr, i + 1, acc + array_get(arr, i))
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let n = 50
   let s = array_new(n, true)
   let s = array_set(s, 0, false)

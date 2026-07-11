@@ -3,7 +3,7 @@
 -- `^` and factorial work unchanged: `^` over Int is bignum-correct. Ord(Int)
 -- keys a Map with plain comparisons.
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(factorial(50))
   println(2 ^ 100)
   let m = map_from_list([(3, "three"), (1, "one"), (2, "two")])

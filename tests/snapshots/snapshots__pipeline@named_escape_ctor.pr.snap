@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/named_escape_ctor.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Colon LParen KwUnit Comma LParen KwUnit RParen Arrow KwInt RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi LParen LParen RParen Comma Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+VOpen Effect UIdent("Ask") VOpen Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Colon LParen KwUnit Comma LParen KwUnit RParen Arrow KwInt RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi LParen LParen RParen Comma Lambda LParen Ident("u") RParen Arrow Ident("f") Dot Ident("ask") LParen RParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -21,7 +21,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 155..183,
+            span: 155..179,
         },
     ],
     errors: [],
@@ -57,7 +57,7 @@ Program {
                                 [
                                     Spanned {
                                         node: Unit,
-                                        span: 281..283,
+                                        span: 285..287,
                                     },
                                     Spanned {
                                         node: Lam(
@@ -75,7 +75,7 @@ Program {
                                                         node: Var(
                                                             "ask",
                                                         ),
-                                                        span: 293..293,
+                                                        span: 297..297,
                                                         synth: true,
                                                     },
                                                     [
@@ -83,18 +83,18 @@ Program {
                                                             node: Var(
                                                                 "f",
                                                             ),
-                                                            span: 293..294,
+                                                            span: 297..298,
                                                         },
                                                     ],
                                                 ),
-                                                span: 293..300,
+                                                span: 297..304,
                                             },
                                         ),
-                                        span: 285..300,
+                                        span: 289..304,
                                     },
                                 ],
                             ),
-                            span: 280..301,
+                            span: 284..305,
                         },
                         [
                             Op(
@@ -107,7 +107,7 @@ Program {
                                             node: Var(
                                                 "k",
                                             ),
-                                            span: 255..256,
+                                            span: 259..260,
                                         },
                                         [
                                             Spanned {
@@ -117,11 +117,11 @@ Program {
                                                         suffix: None,
                                                     },
                                                 ),
-                                                span: 257..258,
+                                                span: 261..262,
                                             },
                                         ],
                                     ),
-                                    span: 255..259,
+                                    span: 259..263,
                                 },
                             ),
                             Return(
@@ -130,16 +130,16 @@ Program {
                                     node: Var(
                                         "r",
                                     ),
-                                    span: 276..277,
+                                    span: 280..281,
                                 },
                             ),
                         ],
                     ),
                 ),
-                span: 223..301,
+                span: 219..305,
             },
             wheres: [],
-            span: 185..301,
+            span: 181..305,
         },
         Decl {
             name: "main",
@@ -153,7 +153,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 315..322,
+                        span: 319..326,
                     },
                     [
                         Spanned {
@@ -163,20 +163,20 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 323..324,
+                            span: 327..328,
                         },
                     ],
                 ),
-                span: 315..325,
+                span: 319..329,
             },
             wheres: [],
-            span: 303..325,
+            span: 307..329,
         },
     ],
 }
 
 == types ==
-Type Error: handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
+[E6034] Type Error: handler instance `f` escapes its `with` block: the value here is a function that still performs `f`'s operations after its handler is gone
     ╭─[ <source>:10:8 ]
     │
  10 │   ((), \(u) -> f.ask())

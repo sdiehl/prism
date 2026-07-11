@@ -73,7 +73,8 @@ pub(crate) use crate::core::builtins::{
     BUILTINS_BY_WIRE as BUILTINS, FLOAT_OPS_BY_WIRE as FLOAT_OPS,
 };
 use crate::core::{
-    hash_group, Comp, CoreFn, CoreOp, CorePat, HandleOp, Hashes, IoOp, NegLane, Value,
+    hash_group, CheckedHandler, Comp, CoreFn, CoreOp, CorePat, Digest, HandleOp, Hashes, IoOp,
+    NegLane, Value,
 };
 use crate::driver::WireKind;
 use crate::sym::Sym;
@@ -150,7 +151,7 @@ impl Decoded {
     /// its dependency hashes. Equal to the hash it had in its original
     /// whole-program context: the store's central invariant.
     #[must_use]
-    pub fn rehash(&self) -> Option<String> {
+    pub fn rehash(&self) -> Option<Digest> {
         hash_group(&self.group, &self.deps, &self.meta)
             .get(&self.group[self.target].name)
             .cloned()
@@ -462,6 +463,11 @@ impl<'a> Encoder<'a> {
                 put_tag(&mut out, Tag::VTuple);
                 put_indices(&mut out, &idxs);
             }
+            // The store does not yet encode unboxed products; callers reject
+            // them before committing Core.
+            Value::UnboxedTuple(_) | Value::UnboxedRecord(_) => {
+                unreachable!("unboxed values are not stored yet")
+            }
         }
         self.push(out)
     }
@@ -576,6 +582,9 @@ impl<'a> Encoder<'a> {
                 put_tag(&mut out, Tag::CNeg);
                 put_uvarint(&mut out, to_wire(NEG_LANES, *lane));
                 put_uvarint(&mut out, u64::from(vi));
+            }
+            Comp::UnboxedProject(_, _) => {
+                unreachable!("unboxed record projection is not stored yet")
             }
             Comp::Do(op, args) => {
                 let idxs = self.values(args);
@@ -1154,7 +1163,10 @@ impl Builder<'_> {
                     body: Box::new(bc),
                     return_var: ret_fresh.first().copied(),
                     return_body: rb.map(Box::new),
-                    ops: handle_ops,
+                    // A stored handler was validated at commit, but decode still
+                    // enforces uniqueness so a corrupt frame cannot reconstruct a
+                    // handler with duplicate operation clauses.
+                    ops: CheckedHandler::new(handle_ops).map_err(|_| CodecError::Malformed)?,
                 }
             }
             Node::Mask(names, b) => Comp::Mask(
@@ -1293,7 +1305,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
     let deps: Hashes = dep_syms
         .iter()
         .copied()
-        .zip(dep_hashes.iter().cloned())
+        .zip(dep_hashes.iter().cloned().map(Digest::from))
         .collect();
 
     Ok(Decoded {

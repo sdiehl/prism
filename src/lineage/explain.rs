@@ -92,7 +92,7 @@ pub fn why_output(graph: &LineageGraph, selector: &str) -> Result<Explanation, E
     };
     let produced_by = graph.producer_of(&selected.node_id()).map(|node| &node.id);
     if produced_by != Some(&request_node.id) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "why-output: `{selector}` is not produced by the graph's request"
         )));
     }
@@ -207,7 +207,7 @@ pub fn why_world_state(graph: &LineageGraph, selector: &str) -> Result<WorldExpl
             break;
         };
         let law = graph.law_of(&node.id).ok_or_else(|| {
-            Error::Resolve(format!(
+            Error::ResolveLineage(format!(
                 "lineage why: world state `{}` has no law edge",
                 node.id.0
             ))
@@ -286,7 +286,7 @@ fn select_output(graph: &LineageGraph, selector: &str) -> Result<SelectedOutput,
             }
         }
     }
-    Err(Error::Resolve(format!(
+    Err(Error::ResolveLineage(format!(
         "why-output: no output named `{selector}`; available outputs: {}",
         available_outputs(graph).join(", ")
     )))

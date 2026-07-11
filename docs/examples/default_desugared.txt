@@ -3,5 +3,5 @@
 a ?? b
   ==>
 handle a with
-  final ctl fail(_) => b
+  never fail(_) => b
   return r => r

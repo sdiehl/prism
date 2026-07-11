@@ -14,10 +14,10 @@
 --   0
 
 effect Ask
-  ctl ask(Unit) : Int
+  ask() : Int
 
 effect Tell
-  ctl tell(String) : Unit
+  tell(String) : Unit
 
 error Invalid(Int)
 
@@ -25,22 +25,22 @@ alias Ctx = {Ask, Tell}
 
 alias App = {Ctx, Invalid}
 
-fn greet() : !{Tell} Unit = tell("hello")
+fn greet() : Unit ! {Tell} = tell("hello")
 
-fn step(n) : !{App} Int =
+fn step(n) : Int ! {App} =
   greet()
-  let limit = ask(())
+  let limit = ask()
   tell("step {n}")
   if n > limit then
     throw Invalid(n)
   else
     limit - n
 
-fn run_app(n : Int) : !{IO} Int =
+fn run_app(n : Int) : Int ! {IO} =
   with handler
-    fun ask(_u) => 10
+    once ask() => 10
   with handler
-    fun tell(m) => println(m)
+    once tell(m) => println(m)
   try step(n) catch { Invalid(_bad) => 0 }
 
 fn main() =

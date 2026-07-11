@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/redundant.pr
 ---
 == tokens ==
@@ -166,7 +166,7 @@ Program {
 }
 
 == types ==
-Type Error: in `name`: unreachable match arm
+[E4000] Type Error: in `name`: unreachable match arm
    ╭─[ <source>:7:5 ]
    │
  7 │     Blue => 3

@@ -43,7 +43,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::flow::Loc;
-use super::Lowerer;
+use super::{Lowerer, StateAnswerMode};
 use crate::core::cbpv::{Comp, Core, CoreFn};
 use crate::names::ev;
 use crate::sym::Sym;
@@ -74,7 +74,7 @@ impl Lowerer {
         // handle's body must be value-coincident (its result is a read or a
         // producer tail-call, not a `return` of a non-state value). Otherwise fall
         // back to the (correct) `@region`/free-monad path.
-        if self.state_mode {
+        if self.state_answer == StateAnswerMode::Producer {
             for h in self.fusion_handles(core)? {
                 let Comp::Handle {
                     body, ops: clauses, ..

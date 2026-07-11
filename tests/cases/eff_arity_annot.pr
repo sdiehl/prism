@@ -1,5 +1,5 @@
 effect Emit(a)
-  ctl emit(a) : Unit
+  emit(a) : Unit
 
 fn consume(f : (Unit) -> Unit ! {Emit(Int, Int)}) : Int = 0
 

@@ -89,8 +89,8 @@ long prism_array_push(long a, long x) {
         return a;
     }
     /* full (grow, doubling) or shared (copy): one fresh array of the new size */
-    long ncap = len < cap ? cap : (cap < 1 ? 1 : cap * 2);
-    long *q = prism_alloc(ncap + 1);
+    long ncap = len < cap ? cap : prism_ckd_grow(cap, 1);
+    long *q = prism_alloc(prism_ckd_ladd(ncap, 1));
     arr_setlen(q, len + 1);
     for (long j = 0; j < len; j++) {
         long e = p[PRISM_ARR_ELEM0 + j];

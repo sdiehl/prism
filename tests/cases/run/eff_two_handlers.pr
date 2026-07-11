@@ -4,17 +4,17 @@
 -- where `use_env`'s `ask` becomes a forced evidence thunk that differs between
 -- the two call sites (k(1) vs k(2)). Output 33 must match interp == native.
 effect Reader
-  ctl ask(Unit) : Int
+  ask() : Int
 
-fn use_env(x) : !{Reader} Int = x + ask(())
+fn use_env(x) : Int ! {Reader} = x + ask()
 
 fn main() =
   let a =
     handle use_env(10) with
-      ask(u, k) => k(1)
+      ask() resume k => k(1)
       return r => r
   let b =
     handle use_env(20) with
-      ask(u, k) => k(2)
+      ask() resume k => k(2)
       return r => r
   println(a + b)

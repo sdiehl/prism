@@ -1,8 +1,8 @@
 effect Tick
-  ctl tick(Unit) : Int
+  tick(Unit) : Int
 
 effect Say
-  ctl say(Int) : Unit
+  say(Int) : Unit
 
 -- Effect polymorphism: one higher-order function, any effect row.
 --
@@ -21,14 +21,14 @@ fn pure_use() = twice(\(_u) -> 21)
 fn tick_use() =
   let g =
     handle twice(\(_u) -> tick(())) with
-      tick(u, k) => \(n) -> k(n)(n + 1)
+      tick(u) resume k => \(n) -> k(n)(n + 1)
       return r => \(_n) -> r
   g(1)
 
 -- e = {Say}: each force shouts before answering.
 fn say_use() =
   handle twice(\(_u) -> let _ = say(9) in 9) with
-    say(m, k) =>
+    say(m) resume k =>
       println(m)
       k(())
     return r => r

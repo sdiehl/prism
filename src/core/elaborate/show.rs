@@ -258,7 +258,7 @@ impl Elab<'_> {
         let mut arms = Vec::new();
         for cn in ctor_names {
             let info = self.ctors.get(&cn).cloned().ok_or_else(|| {
-                Error::Ice(format!("data decl names ctor `{cn}` with no CtorInfo"))
+                Error::InternalInvariant(format!("data decl names ctor `{cn}` with no CtorInfo"))
             })?;
             let subst: BTreeMap<String, Type> = info
                 .params
@@ -448,7 +448,7 @@ fn has_var(t: &Type) -> bool {
 // printer would abort at runtime on a structural cell. Rejected at the print
 // call site; the raw-printer runtime trap remains behind it as defense in depth.
 pub(super) fn polymorphic_print(span: Span) -> Error {
-    Error::Type(TypeError::Other {
+    Error::Type(TypeError::TypeFailure {
         span,
         msg: "cannot print a value of polymorphic type: its type is not known \
               here, so no printer can render it. Use `show(x)` with a `Show` \
@@ -469,7 +469,7 @@ fn unshowable(ty: Option<&Type>, span: Span) -> Error {
         Some(t) if is_fn(t) => format!("cannot show a function of type {}", t.show()),
         _ => "cannot infer the type to show; annotate the argument, e.g. (e : List(Int))".into(),
     };
-    Error::Type(TypeError::Other { span, msg })
+    Error::Type(TypeError::TypeFailure { span, msg })
 }
 
 // An injective mangling of a showable type into a `_show_*` function name.

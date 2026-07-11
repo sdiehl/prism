@@ -19,12 +19,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use crate::syntax::ast::{ClassDecl, Ctor, DataDecl, EffectDecl, Grade, Kind, Row, Ty};
+use crate::syntax::ast::{ClassDecl, Ctor, CtorShape, DataDecl, EffectDecl, Kind, Row, Ty};
 
-use super::hash::{hex, HASH_PREFIX_HEX, SCHEME};
+use super::hash::{hex, Digest, HASH_PREFIX_HEX, SCHEME};
 
 /// Map from a declaration name to its structural digest (hex).
-pub type Shapes = BTreeMap<String, String>;
+pub type Shapes = BTreeMap<String, Digest>;
 
 /// The contract digest of one datatype's shape.
 ///
@@ -96,7 +96,7 @@ pub fn class_digests(classes: &[ClassDecl]) -> Shapes {
 /// would bind, so it is the cheap seed for coherence: the method hashes already
 /// exist, this only folds them.
 #[must_use]
-pub fn instance_digest(class: &str, head: &Ty, methods: &BTreeMap<String, String>) -> String {
+pub fn instance_digest(class: &str, head: &Ty, methods: &BTreeMap<String, Digest>) -> Digest {
     // Head type variables are alpha-normalized (positional), so `Eq(List(a))` and
     // `Eq(List(b))` share an identity.
     let mut e = Enc::new(&free_vars(head));
@@ -149,10 +149,12 @@ fn encode_effect(eff: &EffectDecl) -> String {
         e.tok(&op.name);
         // The declared resumption grade is part of the op's shape. Only a
         // non-default grade is emitted, so every ungraded effect keeps its
-        // prior digest and only a graded op churns.
-        if op.grade != Grade::Many {
+        // prior digest and only a graded op churns. The tag is frozen and
+        // decoupled from the surface keyword, so a future respelling never
+        // moves a digest.
+        if !op.grade.is_default() {
             e.out.push('!');
-            e.out.push_str(&op.grade.keyword());
+            e.out.push_str(op.grade.digest_tag());
         }
         e.out.push('(');
         for p in &op.params {
@@ -265,16 +267,19 @@ impl Enc {
         self.tok(&c.name);
         // Record constructor: field order is part of the shape; field names are
         // part of the public surface, so commit to them. Positional otherwise.
-        if let Some(fields) = &c.fields {
-            self.out.push('r');
-            for (name, ty) in fields {
-                self.tok(name);
-                self.ty(ty);
+        match c.shape() {
+            CtorShape::Record(fields) => {
+                self.out.push('r');
+                for (name, ty) in fields {
+                    self.tok(name);
+                    self.ty(ty);
+                }
             }
-        } else {
-            self.out.push('a');
-            for ty in &c.args {
-                self.ty(ty);
+            CtorShape::Positional(args) => {
+                self.out.push('a');
+                for ty in args {
+                    self.ty(ty);
+                }
             }
         }
         self.out.push(';');
@@ -320,6 +325,17 @@ impl Enc {
             Ty::Tuple(args) => {
                 self.out.push_str("<T>");
                 self.tys(args);
+            }
+            Ty::UnboxedTuple(args) => {
+                self.out.push_str("<UT>");
+                self.tys(args);
+            }
+            Ty::UnboxedRecord(fs) => {
+                self.out.push_str("<UR>");
+                for (n, t) in fs {
+                    self.tok(n);
+                    self.ty(t);
+                }
             }
             Ty::Fun(params, row, ret) => {
                 self.out.push_str("<F>");

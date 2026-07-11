@@ -121,7 +121,7 @@ pub fn verify_world(graph: &LineageGraph) -> Result<WorldVerifyReport, Error> {
     for edge in &graph.edges {
         for (role, endpoint) in [("from", &edge.from), ("to", &edge.to)] {
             if !ids.contains(endpoint.0.as_str()) {
-                return Err(Error::Resolve(format!(
+                return Err(Error::ResolveLineage(format!(
                     "lineage verify: world edge {role} endpoint `{}` names no node",
                     endpoint.0
                 )));
@@ -134,7 +134,7 @@ pub fn verify_world(graph: &LineageGraph) -> Result<WorldVerifyReport, Error> {
     let laws = graph.world_laws();
     for (id, law) in &laws {
         if law.node_id() != **id {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "lineage verify: world law `{}` id does not match its hash `{}`",
                 id.0, law.law_hash
             )));
@@ -151,7 +151,7 @@ pub fn verify_world(graph: &LineageGraph) -> Result<WorldVerifyReport, Error> {
             .map(|edge| edge.to.0.as_str())
             .collect();
         if law_edges.len() != 1 {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "lineage verify: world state at branch {} tick {} has {} law edges, expected 1",
                 state.branch,
                 state.tick,
@@ -159,7 +159,7 @@ pub fn verify_world(graph: &LineageGraph) -> Result<WorldVerifyReport, Error> {
             )));
         }
         if !law_ids.contains(law_edges[0]) {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "lineage verify: world state at branch {} tick {} is identified by `{}`, not a law node",
                 state.branch, state.tick, law_edges[0]
             )));
@@ -179,7 +179,7 @@ pub fn verify_world(graph: &LineageGraph) -> Result<WorldVerifyReport, Error> {
             fork_endpoint(graph, id, EdgeKind::Produced, "divergent", fork, &state_ids)?;
         let minted = graph::world_fork_node_id(fork, &parent, &divergent);
         if minted != **id {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolveLineage(format!(
                 "lineage verify: world fork at branch {} tick {} id does not match its mint",
                 fork.parent_branch, fork.fork_tick
             )));
@@ -209,13 +209,13 @@ fn fork_endpoint(
         .find(|edge| &edge.from == fork_id && edge.kind == kind)
         .map(|edge| &edge.to)
         .ok_or_else(|| {
-            Error::Resolve(format!(
+            Error::ResolveLineage(format!(
                 "lineage verify: world fork at branch {} tick {} has no {label} state edge",
                 fork.parent_branch, fork.fork_tick
             ))
         })?;
     if !state_ids.contains(target.0.as_str()) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "lineage verify: world fork at branch {} tick {} {label} state `{}` does not resolve",
             fork.parent_branch, fork.fork_tick, target.0
         )));
@@ -233,14 +233,14 @@ fn verify_content(
     digest: &str,
 ) -> Result<(), Error> {
     let bytes = fs::read(resolved).map_err(|e| {
-        Error::Resolve(format!(
+        Error::ResolveLineage(format!(
             "lineage verify: missing {kind} `{}`: {e}",
             resolved.display()
         ))
     })?;
     let actual = graph::recompute_digest(scheme, &bytes)?;
     if actual != digest {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "lineage verify: {kind} `{label}` changed: recorded {scheme}:{digest}, \
              bytes hash to {scheme}:{actual}"
         )));
@@ -278,10 +278,10 @@ pub fn verify_run_replay(
     base_dir: &Path,
 ) -> Result<RunVerification, Error> {
     let trace = graph.trace().ok_or_else(|| {
-        Error::Resolve("verify-lineage: not a run sidecar (no trace node)".into())
+        Error::ResolveLineage("verify-lineage: not a run sidecar (no trace node)".into())
     })?;
     if trace.scheme != replayed_trace.scheme || trace.hash != replayed_trace.hash {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "verify-lineage: trace node changed: recorded {}:{}, replay computes {}:{}",
             trace.scheme, trace.hash, replayed_trace.scheme, replayed_trace.hash
         )));
@@ -295,11 +295,11 @@ pub fn verify_run_replay(
             _ => None,
         })
         .ok_or_else(|| {
-            Error::Resolve("verify-lineage: not a run sidecar (no stdout node)".into())
+            Error::ResolveLineage("verify-lineage: not a run sidecar (no stdout node)".into())
         })?;
     let actual_stdout = graph::recompute_digest(&stdout.digest_scheme, replayed_stdout)?;
     if actual_stdout != stdout.digest {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "verify-lineage: stdout node changed: recorded {}:{}, replay computes {}:{}",
             stdout.digest_scheme, stdout.digest, stdout.digest_scheme, actual_stdout
         )));
@@ -367,14 +367,14 @@ pub fn resolve_replay_file(
     };
     let path = sidecar_dir.join(&relation.path);
     let bytes = fs::read(&path).map_err(|e| {
-        Error::Resolve(format!(
+        Error::ResolveLineage(format!(
             "verify-lineage: replay file `{}` is missing: {e}",
             path.display()
         ))
     })?;
     let actual = graph::recompute_digest(&relation.scheme, &bytes)?;
     if actual != relation.digest {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveLineage(format!(
             "verify-lineage: replay file `{}` changed: recorded {}:{}, bytes hash to {}:{}",
             path.display(),
             relation.scheme,

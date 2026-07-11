@@ -17,6 +17,9 @@ extern crate libmimalloc_sys as _;
 // numbering, and the hostile-input discipline. The schemas stay in the codecs.
 pub(crate) mod binary;
 #[cfg(feature = "native")]
+// Public intentionally: external compiler hackers can implement `codegen::Isa`
+// and reuse Prism's semantic Core-to-instruction lowering for experimental
+// out-of-tree backends.
 pub mod codegen;
 // The CLI command bodies. Native-only: it drives clap parsing, project builds, the
 // package manager, and the interpreter, none of which exist in a wasm build.
@@ -25,7 +28,6 @@ pub mod cli;
 pub mod coeffect;
 pub mod core;
 pub mod debug;
-pub mod deprecated;
 pub mod docs;
 pub mod driver;
 pub mod error;
@@ -60,6 +62,7 @@ pub(crate) mod tc;
 pub mod types;
 #[cfg(feature = "wasm")]
 pub mod wasm;
+pub mod wired;
 
 /// Inclusive byte bounds of the printable ASCII range.
 ///
@@ -68,7 +71,7 @@ pub mod wasm;
 pub const ASCII_PRINTABLE_LO: u8 = 0x20;
 pub const ASCII_PRINTABLE_HI: u8 = 0x7E;
 
-pub use core::{CorePass, OptLevel, PassSpec, EFFECT_TIERS};
+pub use core::{CorePass, EffectStrategy, OptLevel, PassSpec, EFFECT_TIERS};
 pub use docs::{
     accept, preprocess_book, project_expect_files, project_pages, stdlib_expect_files,
     stdlib_pages, DocPage, ExpectFile, ExpectReport, Generated, ModuleSource, Report,
@@ -80,18 +83,18 @@ pub use driver::{
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
 pub use driver::{
-    check, check_at, check_on, check_on_in, commit_to_store, core_ir, core_ir_full, core_of,
-    debug_on, diff_on, dump, dump_at, dump_on, effect_strategy_full, effect_strategy_on,
-    effect_warnings_full, example_program, interpret, interpret_at, interpret_io_at,
-    interpret_io_on, interpret_io_on_with_args, namespace_identity, namespace_root,
-    off_platform_builtins, public_surface, query_on, rc_balanced, record_on, record_on_with_args,
-    record_run_on, replay_on, replay_run_on, report, report_at, report_on, resume_on,
-    shape_digests_of, source_diff_on, source_modules, stdlib_hash, step_ruler_on, store_def_inputs,
-    suspend_line_cuts, suspend_on, valid_backend_opt, with_custom_prelude, with_prelude, Config,
-    NamespaceIdentity, PublicDef, RecordedRun, Scheduler, StdlibHash, StepRuler, StepRulerRow,
-    SuspendCut, SuspendResult, TimingSink, BACKEND_OPT_LEVELS, STEP_RULER_FORMAT,
+    check, check_at, check_on, check_on_in, check_validated_on_in, commit_to_store, core_ir,
+    core_ir_full, core_of, debug_on, diff_on, dump, dump_at, dump_on, effect_strategy_full,
+    effect_strategy_on, effect_warnings_full, example_program, interpret, interpret_at,
+    interpret_io_at, interpret_io_on, interpret_io_on_with_args, namespace_identity,
+    namespace_root, off_platform_builtins, public_surface, query_on, rc_balanced, record_on,
+    record_on_with_args, record_run_on, replay_on, replay_run_on, report, report_at, report_on,
+    resume_on, shape_digests_of, source_diff_on, source_modules, stdlib_hash, step_ruler_on,
+    store_def_inputs, suspend_line_cuts, suspend_on, with_custom_prelude, with_prelude, BackendOpt,
+    Config, NamespaceIdentity, PublicDef, RecordedRun, Scheduler, StdlibHash, StepRuler,
+    StepRulerRow, SuspendCut, SuspendResult, TimingSink, STEP_RULER_FORMAT,
 };
-pub use error::{Error, LexError, ParseError, TypeError};
+pub use error::{Error, ErrorCode, ErrorPhase, LexError, ParseError, TypeError};
 pub use flags::{DynFlags, EffectTier};
 pub use fmt::{format, format_check, format_wire_accept};
 pub use resolve::{

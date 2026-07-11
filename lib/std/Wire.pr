@@ -46,8 +46,8 @@
 -- `Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read
 -- cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8
 -- with no UTF-8 interpretation, so it threads byte-for-byte identically on both
--- backends (the parity contract a `String`-of-bytes would break, since the
--- interpreter's `string_of_bytes` repairs invalid UTF-8 lossily). The cursor
+-- backends (the parity contract a `String`-of-bytes would break, since
+-- reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The cursor
 -- makes `decode` cheap: peeling a byte off the front advances the offset in O(1)
 -- with no copy, so a whole decode is linear. Encode accumulates into a growable
 -- buffer builder (`buf_push`, amortized O(1)), so building a container or a
@@ -335,7 +335,7 @@ instance serializeChar : Serialize(Char)
 
 -- Append a string's raw UTF-8 bytes to a body, one byte per index, accumulated
 -- left-to-right into a buffer builder so the whole body is one linear pass. A
--- `String` is always valid UTF-8, so reconstructing it with `string_of_bytes` on
+-- `String` is always valid UTF-8, so reconstructing it with `string_of_buf` on
 -- decode is lossless on both backends.
 fn string_body(s : String, i : Int, n : Int) : Bytes =
   bytes_of_buf(string_body_go(buf_empty(), s, i, n))
@@ -346,13 +346,14 @@ fn string_body_go(acc : Buf, s : String, i : Int, n : Int) : Buf =
   else
     string_body_go(buf_push(acc, byte_at(s, i)), s, i + 1, n)
 
--- Read exactly `n` bytes into an array, failing if the body runs out first.
-fn take_bytes(bs : Bytes, n : Int, arr : Array(Int)) : (Array(Int), Bytes) =
+-- Read exactly `n` bytes into a buffer builder, failing if the body runs out
+-- first. Accumulated left-to-right so the whole read is one linear pass.
+fn take_bytes(bs : Bytes, n : Int, acc : Buf) : (Buf, Bytes) =
   if n <= 0 then
-    (arr, bs)
+    (acc, bs)
   else
     match wire_uncons(bs) of
-      (b, rest) => take_bytes(rest, n - 1, array_push(arr, b))
+      (b, rest) => take_bytes(rest, n - 1, buf_push(acc, b))
 
 fn enc_string(s : String) : Bytes =
   wire_cat(put_uvarint(byte_len(s)), string_body(s, 0, byte_len(s)))
@@ -363,8 +364,8 @@ fn dec_string(bs : Bytes) : (String, Bytes) =
       if n > wire_len_max then
         fail()
       else
-        match take_bytes(r, n, array_empty()) of
-          (arr, rest) => (string_of_bytes(arr), rest)
+        match take_bytes(r, n, buf_empty()) of
+          (buf, rest) => (string_of_buf(buf), rest)
 
 instance serializeString : Serialize(String)
   fn encode(s) = enc_string(s)

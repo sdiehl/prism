@@ -1,0 +1,20 @@
+-- An effect-polymorphic class method (`method : (a) -> a ! {| e}`) obligates the
+-- instance to be parametric in the row `e`. It may forward effects that flow
+-- through `e`, but it may not choose a new concrete effect. Performing `leak`
+-- here must be rejected: a quantified row is a parametricity obligation, not
+-- permission. Once this passed check and failed at run time with an unhandled
+-- effect (the instance method's row was discarded during checking).
+effect Leak
+  leak() : Unit
+
+class C(a)
+  method : (a) -> a ! {| e}
+
+instance cInt : C(Int)
+  fn method(x) =
+    leak()
+    x
+
+fn go(y : Int) : Int = method(y)
+
+fn main() = println(go(1))

@@ -1,10 +1,9 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 14
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/num_separator_bad.pr
 ---
-Lexical Error: malformed numeric literal: `_` separators must sit between two digits at line 4:12
+[E7004] Lexical Error: malformed numeric literal: `_` separators must sit between two digits at line 4:12
    ╭─[ <source>:4:12 ]
    │
  4 │   println(1__0)

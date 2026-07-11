@@ -7,17 +7,10 @@ pub(super) const fn binop_prec(op: BinOp) -> u8 {
     match op {
         BinOp::Or => 1,
         BinOp::And => 2,
-        BinOp::Eq | BinOp::Ne | BinOp::Eqf | BinOp::Nef => 3,
-        BinOp::Lt
-        | BinOp::Le
-        | BinOp::Gt
-        | BinOp::Ge
-        | BinOp::Ltf
-        | BinOp::Lef
-        | BinOp::Gtf
-        | BinOp::Gef => 4,
-        BinOp::Add | BinOp::Sub | BinOp::Addf | BinOp::Subf => 5,
-        BinOp::Mul | BinOp::Div | BinOp::Rem | BinOp::Mulf | BinOp::Divf => 6,
+        BinOp::Eq | BinOp::Ne => 3,
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 4,
+        BinOp::Add | BinOp::Sub => 5,
+        BinOp::Mul | BinOp::Div | BinOp::Rem => 6,
         BinOp::Pow => 7,
     }
 }
@@ -54,18 +47,7 @@ pub(super) const fn neg_operand_needs_paren(child: &Expr) -> bool {
 const fn is_cmp(op: BinOp) -> bool {
     matches!(
         op,
-        BinOp::Eq
-            | BinOp::Ne
-            | BinOp::Eqf
-            | BinOp::Nef
-            | BinOp::Lt
-            | BinOp::Le
-            | BinOp::Gt
-            | BinOp::Ge
-            | BinOp::Ltf
-            | BinOp::Lef
-            | BinOp::Gtf
-            | BinOp::Gef
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
     )
 }
 
@@ -97,21 +79,13 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
             }
             // Equal precedence, left-associative: `parent(a, child(b, c))` reprints as
             // `a P b C c` and reparses as `child(parent(a, b), c)`. That regrouping is
-            // meaning-preserving only when the ops reassociate. Integer additive parents
-            // do (`a + (b - c) == (a + b) - c`); float additive parents do not, because
-            // rounding makes reassociation observable. A multiplicative parent only does
-            // over a pure `*` child, and never for floats.
+            // meaning-preserving only when the ops reassociate. An additive parent does
+            // (`a + (b - c) == (a + b) - c`); a subtractive parent does not. A
+            // multiplicative parent only does over a pure `*` child.
             match parent_op {
-                // Int subtractive/multiplicative parents keep parens because the
-                // regrouping changes meaning; float additive/multiplicative parents
-                // keep them because rounding makes reassociation observable.
-                BinOp::Sub
-                | BinOp::Div
-                | BinOp::Rem
-                | BinOp::Subf
-                | BinOp::Divf
-                | BinOp::Addf
-                | BinOp::Mulf => true,
+                // Subtractive/divisive parents keep parens because the regrouping
+                // changes meaning.
+                BinOp::Sub | BinOp::Div | BinOp::Rem => true,
                 BinOp::Mul => matches!(*op, BinOp::Div | BinOp::Rem),
                 _ => false,
             }

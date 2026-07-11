@@ -4,6 +4,10 @@
 //! an effect analysis: effect rows are discovered by principal inference, so the
 //! old syntactic effect set-pass that once lived here is gone.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::iter;
+
+use crate::scc::tarjan_scc;
 use crate::syntax::ast::{Core, Decl, Expr, HandlerArm, Pattern, Program, S};
 
 /// The strongly-connected components of `prog.fns`'s call graph, in dependency
@@ -24,7 +28,7 @@ use crate::syntax::ast::{Core, Decl, Expr, HandlerArm, Pattern, Program, S};
 /// and so changing the inferred (effect) type.
 #[must_use]
 pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
-    let names: std::collections::BTreeMap<&str, usize> = prog
+    let names: BTreeMap<&str, usize> = prog
         .fns
         .iter()
         .enumerate()
@@ -36,7 +40,7 @@ pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
         .fns
         .iter()
         .map(|d| {
-            let mut refs = std::collections::BTreeSet::new();
+            let mut refs = BTreeSet::new();
             // Seed the in-scope names with this function's own parameters: a
             // reference that a parameter shadows resolves to the parameter, not
             // the same-named top-level function.
@@ -45,7 +49,7 @@ pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
             refs.into_iter().collect()
         })
         .collect();
-    crate::scc::tarjan_scc(&deps)
+    tarjan_scc(&deps)
 }
 
 /// Whether a declaration's body refers to its own name: direct self-recursion,
@@ -55,9 +59,8 @@ pub(crate) fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
 /// call, so the parameters seed the in-scope names here too.
 #[must_use]
 pub(crate) fn is_self_recursive(d: &Decl<Core>) -> bool {
-    let names: std::collections::BTreeMap<&str, usize> =
-        std::iter::once((d.name.as_str(), 0)).collect();
-    let mut refs = std::collections::BTreeSet::new();
+    let names: BTreeMap<&str, usize> = iter::once((d.name.as_str(), 0)).collect();
+    let mut refs = BTreeSet::new();
     let mut bound: Vec<&str> = d.params.iter().map(|p| p.name.as_str()).collect();
     collect_refs(&d.body, &names, &mut bound, &mut refs);
     !refs.is_empty()
@@ -71,9 +74,9 @@ pub(crate) fn is_self_recursive(d: &Decl<Core>) -> bool {
 // fall out regardless.
 fn collect_refs<'a>(
     e: &'a S<Expr<Core>>,
-    names: &std::collections::BTreeMap<&str, usize>,
+    names: &BTreeMap<&str, usize>,
     bound: &mut Vec<&'a str>,
-    out: &mut std::collections::BTreeSet<usize>,
+    out: &mut BTreeSet<usize>,
 ) {
     match &e.node {
         Expr::Var(n) => {
@@ -112,6 +115,7 @@ fn collect_refs<'a>(
             bound.truncate(base);
         }
         Expr::FieldAccess(b, _)
+        | Expr::UnboxedField(b, _)
         | Expr::Inst(b, _)
         | Expr::Ann(b, _)
         | Expr::Mask(_, b)
@@ -136,7 +140,7 @@ fn collect_refs<'a>(
                 bound.truncate(base);
             }
         }
-        Expr::List(xs) | Expr::Tuple(xs) => {
+        Expr::List(xs) | Expr::Tuple(xs) | Expr::UnboxedTuple(xs) => {
             for x in xs {
                 collect_refs(x, names, bound, out);
             }
@@ -146,7 +150,7 @@ fn collect_refs<'a>(
             collect_refs(b, names, bound, out);
             collect_refs(c, names, bound, out);
         }
-        Expr::RecordCreate(_, fields) => {
+        Expr::RecordCreate(_, fields) | Expr::UnboxedRecord(fields) => {
             for (_, v) in fields {
                 collect_refs(v, names, bound, out);
             }

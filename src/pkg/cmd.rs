@@ -33,18 +33,20 @@ const LOCKFILE: &str = "prism.lock";
 pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(Error::Resolve("package name cannot be empty".into()));
+        return Err(Error::ResolvePackage("package name cannot be empty".into()));
     }
     if !is_package_name(name) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "package name `{name}` must contain only ASCII letters, digits, `_`, or `-`"
         )));
     }
     if dir.as_os_str().is_empty() {
-        return Err(Error::Resolve("directory name cannot be empty".into()));
+        return Err(Error::ResolvePackage(
+            "directory name cannot be empty".into(),
+        ));
     }
     if dir.exists() {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "`{}` already exists; `prism pkg init` creates a new package directory",
             dir.display()
         )));
@@ -125,7 +127,7 @@ pub fn why(target: &str, cfg: &Config) -> Result<String, Error> {
     let lock = load_lock(&root)?;
     lock.validate_current_scheme()?;
     if lock.entries.is_empty() {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "{LOCKFILE} pins no dependencies; run `prism add` first"
         )));
     }
@@ -134,12 +136,13 @@ pub fn why(target: &str, cfg: &Config) -> Result<String, Error> {
     // remote; the resolver does not change.
     let transport = DiskTransport::open(resolve_store_path(cfg.flags.store_path.as_deref()))?;
     let roots: Vec<String> = lock.entries.iter().map(|e| e.hash.clone()).collect();
-    let closure = resolve_closure(&transport, &roots).map_err(|e| Error::Resolve(e.to_string()))?;
+    let closure =
+        resolve_closure(&transport, &roots).map_err(|e| Error::ResolvePackage(e.to_string()))?;
 
     let store = transport.store();
     let hash = target_hash(target, &lock, store)?;
     let Some(chain) = trace(&closure, &roots, &hash) else {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "{target} ({hash}) is not in the closure of the locked roots"
         )));
     };
@@ -160,7 +163,7 @@ fn project_root(start: &Path) -> Result<PathBuf, Error> {
     project::find_manifest(&start)
         .and_then(|m| m.parent().map(Path::to_path_buf))
         .ok_or_else(|| {
-            Error::Resolve(format!(
+            Error::ResolvePackage(format!(
                 "no {MANIFEST} found: `prism add`/`prism why` operate inside a project"
             ))
         })
@@ -175,7 +178,7 @@ fn parse_add_arg(arg: &str) -> Result<(String, DepSource), Error> {
     }
     if let Some((url, version)) = arg.rsplit_once('@') {
         if url.is_empty() || version.is_empty() {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "`{arg}` is not a valid git reference; expected `<url>@<tag>`"
             )));
         }
@@ -187,7 +190,7 @@ fn parse_add_arg(arg: &str) -> Result<(String, DepSource), Error> {
             },
         ));
     }
-    Err(Error::Resolve(format!(
+    Err(Error::ResolvePackage(format!(
         "`{arg}` is neither a content-hash pin (`{scheme}:<hex>` or a bare hex digest) nor a git \
          reference (`<url>@<tag>`)",
         scheme = crate::core::HASH_SCHEME
@@ -261,7 +264,7 @@ fn target_hash(target: &str, lock: &Lock, store: &Store) -> Result<String, Error
     if let Some(hash) = store.lookup_name(target)? {
         return Ok(hash);
     }
-    Err(Error::Resolve(format!(
+    Err(Error::ResolvePackage(format!(
         "no dependency or definition named `{target}` in {LOCKFILE} or the store"
     )))
 }

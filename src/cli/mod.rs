@@ -55,7 +55,9 @@ pub fn file_name(p: &Path) -> String {
 
 pub fn render_cli_error(e: &Error, src: &str, name: &str) -> String {
     match e {
-        Error::Runtime(msg) => format!("fatal: {msg}\n"),
+        Error::RuntimeEvaluation(msg) | Error::RuntimeReplay(msg) | Error::RuntimeDebugger(msg) => {
+            format!("fatal: {msg}\n")
+        }
         _ => e.render(src, name),
     }
 }
@@ -210,7 +212,7 @@ fn build_dispatch(
         #[cfg(not(feature = "mlir"))]
         {
             let _ = (roots, cfg);
-            return Err(Error::Codegen(
+            return Err(Error::CodegenBackend(
                 "rebuild with --features mlir to use the MLIR backend".into(),
             ));
         }
@@ -249,7 +251,7 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
             .unwrap_or_else(|_| PathBuf::from("."));
         crate::project::find_manifest(&start).ok_or_else(|| {
             (
-                Error::Resolve(
+                Error::ResolveCommand(
                     "no prism.toml found: `prism check` without FILE checks the enclosing \
                      project; pass a `.pr` file to check a single source"
                         .into(),
@@ -260,7 +262,10 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
         })?
     };
     let (full, roots, name, _) = resolve_input(&input, cfg)?;
-    crate::check_on_in(&full, &roots, cfg).map_err(|e| (e, full, name))?;
+    // The public verdict validates (fip / replayable / effect reconciliation),
+    // so `prism check` agrees with `prism build`. The type-only surface stays
+    // available to `dump` / `report` / snapshots via `check_on_in`.
+    crate::check_validated_on_in(&full, &roots, cfg).map_err(|e| (e, full, name))?;
     Ok(())
 }
 

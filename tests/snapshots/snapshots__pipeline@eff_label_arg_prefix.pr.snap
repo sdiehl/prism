@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/eff_label_arg_prefix.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Tag") LParen Ident("a") RParen VOpen Ctl Ident("put") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("wants_int") LParen Ident("s") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Tag") LParen KwInt RParen Bar Ident("e") RBrace RParen Colon KwInt Eq Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("wants_int") LParen Lambda LParen Ident("_u") RParen Arrow Ident("put") LParen StringLit("hi") RParen RParen RParen VClose
+VOpen Effect UIdent("Tag") LParen Ident("a") RParen VOpen Ident("put") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("wants_int") LParen Ident("s") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace UIdent("Tag") LParen KwInt RParen Bar Ident("e") RBrace RParen Colon KwInt Eq Int(IntLit { value: 1, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("wants_int") LParen Lambda LParen Ident("_u") RParen Arrow Ident("put") LParen StringLit("hi") RParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -27,7 +27,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 453..486,
+            span: 453..482,
         },
     ],
     errors: [],
@@ -77,10 +77,10 @@ Program {
                         suffix: None,
                     },
                 ),
-                span: 546..547,
+                span: 542..543,
             },
             wheres: [],
-            span: 488..547,
+            span: 484..543,
         },
         Decl {
             name: "main",
@@ -94,7 +94,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 561..568,
+                        span: 557..564,
                     },
                     [
                         Spanned {
@@ -103,7 +103,7 @@ Program {
                                     node: Var(
                                         "wants_int",
                                     ),
-                                    span: 569..578,
+                                    span: 565..574,
                                 },
                                 [
                                     Spanned {
@@ -122,38 +122,38 @@ Program {
                                                         node: Var(
                                                             "put",
                                                         ),
-                                                        span: 588..591,
+                                                        span: 584..587,
                                                     },
                                                     [
                                                         Spanned {
                                                             node: Str(
                                                                 "hi",
                                                             ),
-                                                            span: 592..596,
+                                                            span: 588..592,
                                                         },
                                                     ],
                                                 ),
-                                                span: 588..597,
+                                                span: 584..593,
                                             },
                                         ),
-                                        span: 579..597,
+                                        span: 575..593,
                                     },
                                 ],
                             ),
-                            span: 569..598,
+                            span: 565..594,
                         },
                     ],
                 ),
-                span: 561..599,
+                span: 557..595,
             },
             wheres: [],
-            span: 549..599,
+            span: 545..595,
         },
     ],
 }
 
 == types ==
-Type Error: in `main`: type mismatch: expected Int, got String
+[E1998] Type Error: in `main`: type mismatch: expected Int, got String
     ╭─[ <source>:12:44 ]
     │
  12 │ fn main() = println(wants_int(\(_u) -> put("hi")))

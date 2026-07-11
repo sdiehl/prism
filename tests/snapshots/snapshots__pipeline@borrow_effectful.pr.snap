@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/borrow_effectful.pr
 ---
 == tokens ==
@@ -97,7 +97,7 @@ Program {
 }
 
 == types ==
-Type Error: `noisy` has a `borrow` parameter but is not pure; it performs IO
+[E5003] Type Error: `noisy` has a `borrow` parameter but is not pure; it performs IO
    ╭─[ <source>:1:1 ]
    │
  1 │ ╭─▶ fn noisy(borrow x) =

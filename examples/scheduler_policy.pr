@@ -22,31 +22,31 @@
 import Concurrent (..)
 
 effect Trace
-  ctl note(Int) : Unit
+  note(Int) : Unit
 
-fn worker(n : Int) : !{Async(Int), Trace} Int =
+fn worker(n : Int) : Int ! {Async(Int), Trace} =
   note(n)
   yield(())
   n
 
-fn scene() : !{Async(Int), Trace} Int =
+fn scene() : Int ! {Async(Int), Trace} =
   match scope([\() -> worker(1), \() -> worker(2)]) of
     Cons(a, Cons(b, Nil)) => a + b
     _ => 0
 
 -- Discharge `Async` with each policy; the residual `Trace` flows out to `main`.
-fn fifo() : !{Trace, Fail} Int = run_async(scene)
+fn fifo() : Int ! {Trace, Fail} = run_async(scene)
 
-fn lifo() : !{Trace, Fail} Int = run_lifo(scene)
+fn lifo() : Int ! {Trace, Fail} = run_lifo(scene)
 
 fn main() =
   handle fifo() with
-    note(n, k) =>
+    note(n) resume k =>
       println("fifo: {n}")
       k(())
     return s => println("fifo sum {s}")
   handle lifo() with
-    note(n, k) =>
+    note(n) resume k =>
       println("lifo: {n}")
       k(())
     return s => println("lifo sum {s}")

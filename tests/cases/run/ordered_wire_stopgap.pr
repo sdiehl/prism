@@ -23,7 +23,7 @@ fn body_ok(body : Bytes) : String =
 
 fn read_map(body : Bytes) : String =
   handle body_ok(body) with
-    final ctl fail() => "FAULT: map arrived ordered by a different Ord(k)"
+    never fail() => "FAULT: map arrived ordered by a different Ord(k)"
     return r => r
 
 fn main() =

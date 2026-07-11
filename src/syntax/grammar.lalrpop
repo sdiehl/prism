@@ -1,8 +1,8 @@
 use marginalia::Span;
 use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, CoeffectRow};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, grade_word_msg, dot_op_removed, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
-use crate::kw::DEPRECATED;
+use crate::kw::{self, DEPRECATED, VIEW, MAKE};
 
 grammar;
 
@@ -45,9 +45,6 @@ extern {
         "with"   => Token::With,
         "handler" => Token::Handler,
         "mask"   => Token::Mask,
-        "ctl"    => Token::Ctl,
-        "final"  => Token::Final,
-        "fun"    => Token::Fun,
         "val"    => Token::Val,
         "return" => Token::Return,
         "let"    => Token::Let,
@@ -132,6 +129,7 @@ extern {
         ":"     => Token::Colon,
         "!"     => Token::Bang,
         "@"     => Token::At,
+        "#"     => Token::Hash,
         ".."    => Token::DotDot,
         "."     => Token::Dot,
         "?"     => Token::Question,
@@ -242,7 +240,7 @@ PatClauses: Vec<(String, S<Expr>, Span)> = {
 };
 
 PatClause: (String, S<Expr>, Span) = {
-    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == "view" || kw == "make" {
+    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == VIEW || kw == MAKE {
         Ok((kw, e, Span::new(l, r)))
     } else {
         Err(lalrpop_util::ParseError::User {
@@ -558,16 +556,17 @@ EffOpList: Vec<EffOp> = {
     },
 };
 
-// The op-declaration prefix carries the resumption grade: bare `ctl` is `Many`
-// (the default, multishot), `fun` is `One` (tail-resumptive), and `final ctl`
-// is `Zero` (never resumes). The three reuse the existing keyword tokens.
+// The op-declaration prefix carries the resumption grade, a contextual word:
+// unmarked is `many` (the default, multishot), `once` is tail-resumptive, and
+// `never` never resumes. The word is a plain identifier (so `many`/`once`/`never`
+// stay usable as ordinary names elsewhere), validated in the action.
 EffOp: EffOp = {
-    "ctl" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+    <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
         EffOp { name, params, ret, grade: Grade::Many },
-    "fun" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
-        EffOp { name, params, ret, grade: Grade::One },
-    "final" "ctl" <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
-        EffOp { name, params, ret, grade: Grade::Zero },
+    <l:@L> <g:"ident"> <r:@R> <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>?
+        Grade::parse(&g)
+            .map(|grade| EffOp { name, params, ret, grade })
+            .ok_or_else(|| lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
 };
 
 // An op parameter may carry a binder name (`v : a`); only the type is kept.
@@ -658,11 +657,47 @@ Stmts: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms), span: Span::empty(l) },
 };
 
+// A function's return annotation. The canonical order is result-first,
+// `: Result ! {Effects}`, matching a function type's own `-> cod ! {row}` so a
+// signature reads left to right with no declaration-only convention. The two
+// retired prefix forms (`: !{E} T`) are still recognized in full so the
+// diagnostic points at the whole annotation with the fix, rather than failing as
+// a bare parse error; both start `: !`, so they never conflict with the postfix
+// form, which starts `: <type>`.
 RetAnn: (Option<Vec<EffLabel>>, Option<Ty>) = {
-    ":" "!" "{" <effs:Comma<EffLabel>> "}" <t:Type> => (Some(effs), Some(t)),
-    ":" "!" <t:Type>                                => (Some(vec![]), Some(t)),
-    ":" <t:Type>                                    => (None, Some(t)),
+    ":" <rt:RetType>                                => rt,
     ()                                              => (None, None),
+    <l:@L> ":" "!" "{" Comma<EffLabel> "}" Type <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), MIGRATE_RET_ORDER.to_string()),
+    }),
+    <l:@L> ":" "!" Type <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), MIGRATE_RET_ORDER.to_string()),
+    }),
+};
+
+// The postfix return annotation: a result type, then an optional declaration
+// effect. A trailing `! {row}` binds to the arrow when the result is itself a
+// function type (the returned closure's effect) and is the declaration's own
+// effect otherwise; a declaration effect must be a closed row. The empty
+// annotation `()` is handled by `RetAnn`, so this always yields a type.
+RetType: (Option<Vec<EffLabel>>, Option<Ty>) = {
+    "forall" <vs:(<"ident">)+> "." <rt:RetType> =>
+        (rt.0, rt.1.map(|t| Ty::Forall(vs, Box::new(t)))),
+    <l:@L> <a:Arrow> <eff:ArrowEff?> <r:@R> =>? match eff {
+        None => Ok((None, Some(a))),
+        Some(row) => match a {
+            Ty::Fun(ps, _, cod) => Ok((None, Some(Ty::Fun(ps, row, cod)))),
+            other => match row {
+                Row::Cons(labels, None) => Ok((Some(labels), Some(other))),
+                _ => Err(lalrpop_util::ParseError::User {
+                    error: (
+                        Span::new(l, r),
+                        "a declaration effect row must be closed; write `: T ! {A, B}`".to_string(),
+                    ),
+                }),
+            },
+        },
+    },
 };
 
 EffLabel: EffLabel = {
@@ -771,6 +806,9 @@ AType: Ty = {
     "(" <first:Type> "," <rest:Comma<Type>> ")" => {
         let mut ts = vec![first]; ts.extend(rest); Ty::Tuple(ts)
     },
+    // Unboxed product types: `#(a, b)` and `#{ x : a, y : b }`.
+    "#" "(" <ts:Comma<Type>> ")" => Ty::UnboxedTuple(ts),
+    "#" "{" <fs:Comma<RecordField>> "}" => Ty::UnboxedRecord(fs),
 };
 
 pub Expr: S<Expr> = {
@@ -886,15 +924,52 @@ HArms: Vec<HandlerArm> = {
     <v:(<HandlerArm> ArmSep)*> <e:HandlerArm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
 };
 
+// A clause is bare (`op(params, k) => ...`, the multishot form binding the
+// continuation explicitly), grade-prefixed (`once`/`never`), or `val`. The grade
+// word is a contextual identifier validated in the action; `many` is rejected
+// here because the multishot clause takes no keyword.
 HandlerArm: HandlerArm = {
     "return" <x:"ident"> "=>" <body:ExprOrBlock> => HandlerArm::Return(x, body),
-    <name:"ident"> "(" <params:(<"ident"> ",")*> <k:"ident"> ")" "=>" <body:ExprOrBlock>
-        => HandlerArm::Op(name, params, k, body),
-    "fun" <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock>
-        => HandlerArm::Sugar(SugarArm::Fun(name, params, body)),
-    "final" "ctl" <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock>
-        => HandlerArm::Sugar(SugarArm::Final(name, params, body)),
+    // Multishot clause. The canonical form names the continuation after `resume`
+    // (`op(params) resume k => ...`), giving it a visibly special position rather
+    // than a final parameter. The retired trailing-continuation form (`op(params,
+    // k) => ...`) is still accepted during migration: an empty `ResumeTail` takes
+    // the last parenthesized binder as the continuation.
+    <l:@L> <name:"ident"> "(" <all:Comma<"ident">> ")" <tail:ResumeTail> "=>" <body:ExprOrBlock> <r:@R> =>?
+        match tail {
+            Some(k) => Ok(HandlerArm::Op(name, all, k, body)),
+            // The retired trailing-continuation form parses structurally so the
+            // diagnostic points at the whole clause with the fix.
+            None => Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), MIGRATE_RESUME.to_string()),
+            }),
+        },
+    <l:@L> <g:"ident"> <r:@R> <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock> =>?
+        match Grade::parse(&g) {
+            Some(Grade::Once) => Ok(HandlerArm::Sugar(SugarArm::Once(name, params, body))),
+            Some(Grade::Never) => Ok(HandlerArm::Sugar(SugarArm::Never(name, params, body))),
+            Some(Grade::Many) => Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), GRADE_MANY_CLAUSE.to_string()) }),
+            None => Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
+        },
     "val" <name:"ident"> "=" <body:ExprOrBlock> => HandlerArm::Sugar(SugarArm::Val(name, body)),
+};
+
+// The continuation binder of a multishot clause. `resume k` names it explicitly
+// (the canonical form); the empty case is the retired trailing-continuation form,
+// accepted transitionally. The `resume` word is contextual, validated here so it
+// stays an ordinary identifier elsewhere; any other word is the pointed migration
+// error rather than a bare parse failure.
+ResumeTail: Option<String> = {
+    () => None,
+    <l:@L> <rw:"ident"> <k:"ident"> <r:@R> =>? {
+        if rw == kw::RESUME {
+            Ok(Some(k))
+        } else {
+            Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), MIGRATE_RESUME.to_string()),
+            })
+        }
+    },
 };
 
 Pipe: S<Expr> = {
@@ -1000,6 +1075,11 @@ And: S<Expr> = {
 Cmp: S<Expr> = {
     <l:@L> <la:Add> <op:CmpOp> <ra:Add> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(op, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    // The retired float dot-comparisons parse structurally so the diagnostic points
+    // at the whole comparison with the plain operator that now covers Float.
+    <l:@L> Add <d:DotCmpOp> Add <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
     Add,
 };
 
@@ -1010,12 +1090,28 @@ CmpOp: BinOp = {
     "<="  => BinOp::Le,
     ">"   => BinOp::Gt,
     ">="  => BinOp::Ge,
-    "==." => BinOp::Eqf,
-    "/=." => BinOp::Nef,
-    "<."  => BinOp::Ltf,
-    "<=." => BinOp::Lef,
-    ">."  => BinOp::Gtf,
-    ">=." => BinOp::Gef,
+};
+
+// The retired float dot-operators, each paired with the plain operator that now
+// covers Float. They parse structurally (their tokens are still lexed) only so the
+// action can emit a pointed removal diagnostic instead of a bare parse error.
+DotCmpOp: (&'static str, &'static str) = {
+    "==." => (kw::EQ_DOT, kw::EQ_EQ),
+    "/=." => (kw::NE_DOT, kw::NE),
+    "<."  => (kw::LT_DOT, kw::LT),
+    "<=." => (kw::LE_DOT, kw::LE),
+    ">."  => (kw::GT_DOT, kw::GT),
+    ">=." => (kw::GE_DOT, kw::GE),
+};
+
+DotAddOp: (&'static str, &'static str) = {
+    "+." => (kw::PLUS_DOT, kw::PLUS),
+    "-." => (kw::MINUS_DOT, kw::MINUS),
+};
+
+DotMulOp: (&'static str, &'static str) = {
+    "*." => (kw::STAR_DOT, kw::STAR),
+    "/." => (kw::SLASH_DOT, kw::SLASH),
 };
 
 Add: S<Expr> = {
@@ -1023,10 +1119,9 @@ Add: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Add, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Add> "-" <ra:Mul> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Sub, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Add> "+." <ra:Mul> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Addf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Add> "-." <ra:Mul> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Subf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> Add <d:DotAddOp> Mul <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
     Mul,
 };
 
@@ -1037,10 +1132,9 @@ Mul: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
     <l:@L> <la:Mul> "%" <ra:Neg> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "*." <ra:Neg> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mulf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
-    <l:@L> <la:Mul> "/." <ra:Neg> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Divf, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> Mul <d:DotMulOp> Neg <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
     Neg,
 };
 
@@ -1079,6 +1173,9 @@ Pow: S<Expr> = {
 Call: S<Expr> = {
     <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+    // `e.#field`: project a field of an unboxed record.
+    <l:@L> <e:Call> "." "#" <field:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedField(Box::new(e), field), span: Span::new(l, r) },
     // `e.[ path ]`: read the foci a path selects into a list.
     <l:@L> <e:Call> "." "[" <p:PathSteps> "]" <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
@@ -1109,6 +1206,16 @@ CallTight: S<Expr> = {
     // `a[i][j]`; multiple comma-separated indices are not a form.
     <l:@L> <f:CallTight> "[" <k:Expr> "]" <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
+    // Multi-index read `recv[i, j, ...]` (two or more indices): the indices form
+    // an index list, so the key is a synthetic list literal. Used for strided
+    // tensor access; a single index stays the form above.
+    <l:@L> <f:CallTight> "[" <k1:Expr> "," <ks:CommaPlus<Expr>> "]" <r:@R> => {
+        let span = Span::new(l, r);
+        let mut elems = vec![k1];
+        elems.extend(ks);
+        let key = Spanned { id: NodeId::DUMMY, synth: true, node: Expr::List(elems), span };
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Index(Box::new(f), Box::new(key)), span }
+    },
     <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
         dot_call(e, m, a, l, r),
     <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
@@ -1171,6 +1278,11 @@ Atom: S<Expr> = {
         let mut elems = vec![e]; elems.extend(rest);
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Tuple(elems), span: Span::new(l, r) }
     },
+    // Unboxed product values: `#(a, b)` an unboxed tuple, `#{ x = a }` an unboxed record.
+    <l:@L> "#" "(" <elems:Comma<Expr>> ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedTuple(elems), span: Span::new(l, r) },
+    <l:@L> "#" "{" <fields:Comma<RecordExprField>> "}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedRecord(fields), span: Span::new(l, r) },
     <l:@L> "[" "]" <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::List(vec![]), span: Span::new(l, r) },
     <l:@L> "[" <elems:CommaPlus<Expr>> "]" <r:@R> =>

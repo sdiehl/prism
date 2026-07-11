@@ -2,7 +2,7 @@
 -- Triggers whole-program monadic lowering, so it compiles natively too.
 
 effect Exn
-  ctl raise(Int) : Int
+  raise(Int) : Int
 
 fn risky(x) =
   if x == 0 then
@@ -12,6 +12,6 @@ fn risky(x) =
 
 fn main() =
   println(handle let f = \(x) -> risky(x) in f(0) with {
-    raise(v, k) => 0 - v,
+    raise(v) resume k => 0 - v,
     return r => r
   })

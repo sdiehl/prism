@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/vec_dim_arity.pr
 ---
 == tokens ==
@@ -90,7 +90,7 @@ Program {
 }
 
 == types ==
-Type Error: in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
+[E1002] Type Error: in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
    ╭─[ <source>:5:1 ]
    │
  5 │ fn demo(x : Vec(Int, 3, 4)) : Int = 0

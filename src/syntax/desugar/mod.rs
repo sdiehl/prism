@@ -11,10 +11,10 @@ use marginalia::Span;
 
 use super::ast::{
     BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
-    NodeId, Param, Pattern, Phase, Program, Spanned, Suffix, Ty, S,
+    NodeId, Param, Pattern, Phase, Program, Row, Spanned, Suffix, Ty, S,
 };
 use crate::coeffect::CoeffectFact;
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::fresh::Fresh;
 use crate::kw;
 use crate::names;
@@ -36,9 +36,10 @@ pub(crate) use stable::stable_rung_digests;
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, interp_lit, let_pat,
-    let_stmt, lift_noalloc, open_if, pattern_decl, seq_stmt, try_mark, with_rest, with_stmt,
-    IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT, FLIP_INSTANCE,
+    assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, dot_op_removed,
+    grade_word_msg, interp_lit, let_pat, let_stmt, lift_noalloc, open_if, pattern_decl, seq_stmt,
+    try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT,
+    FLIP_INSTANCE, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -72,7 +73,7 @@ pub(super) struct Cx {
 const THROW_RET: &str = "a@throw";
 
 // A one-op effect whose op never resumes (its result is the freshened-per-site
-// THROW_RET var pinned to `final ctl`). `fail`, `break`/`continue`, and every
+// THROW_RET var pinned to `never`). `fail`, `break`/`continue`, and every
 // `error` are all this exact shape, differing only in name and op params.
 fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -> EffectDecl {
     EffectDecl {
@@ -83,8 +84,8 @@ fn throw_effect(name: String, op_name: String, op_params: Vec<Ty>, span: Span) -
             params: op_params,
             ret: Ty::Var(THROW_RET.into()),
             // Never resumes: the poly-return restriction already forces every
-            // handler to `final ctl`, so grade Zero states the same fact.
-            grade: Grade::Zero,
+            // handler to `never`, so grade Zero states the same fact.
+            grade: Grade::Never,
         }],
         span,
     }
@@ -104,7 +105,7 @@ fn inject_fail(prog: &mut Program) {
 // `break` / `continue` desugar to non-resumable performs of these one-op effects,
 // each discharged by a handler the loop desugar installs, so neither ever appears
 // in a surfaced row. Always in scope (like `fail`), reusing THROW_RET so the
-// checker instantiates the op's result fresh per site and pins it to `final ctl`.
+// checker instantiates the op's result fresh per site and pins it to `never`.
 fn inject_loop_effects(prog: &mut Program) {
     for (eff, op) in [
         (names::BREAK_EFFECT, names::BREAK_OP),
@@ -129,7 +130,7 @@ fn inject_return_effect(prog: &mut Program) {
     // for its scope, so every `return` in the same function unifies its value with
     // that one type (the function's result type), exactly as `Emit(a)` ties a
     // stream's element type. The op result is the never-resume var, freshened and
-    // restricted to `final ctl` per site.
+    // restricted to `never` per site.
     prog.effects.push(EffectDecl {
         name: names::RETURN_EFFECT.into(),
         params: vec![names::RETURN_VAL.into()],
@@ -137,7 +138,7 @@ fn inject_return_effect(prog: &mut Program) {
             name: names::RETURN_OP.into(),
             params: vec![Ty::Var(names::RETURN_VAL.into())],
             ret: Ty::Var(THROW_RET.into()),
-            grade: Grade::Zero,
+            grade: Grade::Never,
         }],
         span: Span::empty(0),
     });
@@ -164,13 +165,10 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
     let mut out = PatMap::new();
     for p in std::mem::take(&mut prog.patterns) {
         if ctors.contains(&p.name) {
-            return Err(TypeError::Other {
-                span: p.span,
-                msg: format!(
-                    "pattern `{}` clashes with a constructor of the same name",
-                    p.name
-                ),
-            });
+            return Err(ErrKind::PatternClashesCtor {
+                name: p.name.clone(),
+            }
+            .at(p.span));
         }
         // `for` names a concrete type (a monomorphic view from a lambda) or a
         // single-param class (a view dispatched through a class method, so one
@@ -180,44 +178,40 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
         let mut make_ret = None;
         let view = if let Some(cl) = prog.classes.iter().find(|c| c.name == p.for_ty) {
             if p.make.is_some() {
-                return Err(TypeError::Other {
-                    span: p.span,
-                    msg: format!(
-                        "class-dispatched pattern `{}` cannot have a `make` clause",
-                        p.name
-                    ),
-                });
+                return Err(ErrKind::ClassPatternHasMake {
+                    name: p.name.clone(),
+                }
+                .at(p.span));
             }
             let Expr::Var(method) = &p.view.node else {
-                return Err(TypeError::Other {
-                    span: p.view.span,
-                    msg: format!(
-                        "class-dispatched pattern `{}` view must name a method of `{}`",
-                        p.name, p.for_ty
-                    ),
-                });
+                return Err(ErrKind::ClassPatternViewNotMethod {
+                    name: p.name.clone(),
+                    class: p.for_ty.clone(),
+                }
+                .at(p.view.span));
             };
             let Some((_, mty)) = cl.methods.iter().find(|(n, _)| n == method) else {
-                return Err(TypeError::Other {
-                    span: p.view.span,
-                    msg: format!("`{method}` is not a method of class `{}`", p.for_ty),
-                });
+                return Err(ErrKind::PatternViewUnknownMethod {
+                    method: method.clone(),
+                    class: p.for_ty.clone(),
+                }
+                .at(p.view.span));
             };
             let fun = match mty {
                 Ty::Forall(_, b) => b.as_ref(),
                 t => t,
             };
             let Ty::Fun(ps, _, ret) = fun else {
-                return Err(TypeError::Other {
-                    span: p.view.span,
-                    msg: format!("view method `{method}` must be a one-argument function"),
-                });
+                return Err(ErrKind::ViewMethodNotFunction {
+                    method: method.clone(),
+                }
+                .at(p.view.span));
             };
             if ps.len() != 1 {
-                return Err(TypeError::Other {
-                    span: p.view.span,
-                    msg: format!("view method `{method}` must take exactly one argument"),
-                });
+                return Err(ErrKind::ViewMethodArity {
+                    method: method.clone(),
+                }
+                .at(p.view.span));
             }
             let tv = Ty::Var(cl.param.clone());
             let ret_ty = ret.as_ref().clone();
@@ -226,7 +220,7 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
                 names::pat_view(&p.name),
                 lam1("_x", body, p.span),
                 p.span,
-                "view",
+                kw::VIEW,
                 &p.name,
             )?;
             d.params[0].ty = Some(tv.clone());
@@ -247,28 +241,27 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
                 names::pat_view(&p.name),
                 p.view.clone(),
                 p.span,
-                "view",
+                kw::VIEW,
                 &p.name,
             )?;
             d.params[0].ty = Some(fty);
             d
         } else {
-            return Err(TypeError::Other {
-                span: p.span,
-                msg: format!(
-                    "pattern `{}` is for undeclared type or class `{}`",
-                    p.name, p.for_ty
-                ),
-            });
+            return Err(ErrKind::PatternForUnknownType {
+                name: p.name.clone(),
+                ty: p.for_ty.clone(),
+            }
+            .at(p.span));
         };
         if out
             .insert(p.name.clone(), (p.params.len(), p.make.is_some()))
             .is_some()
         {
-            return Err(TypeError::Other {
-                span: p.span,
-                msg: format!("pattern `{}` is declared more than once", p.name),
-            });
+            return Err(ErrKind::DuplicateDecl {
+                kind: "pattern".into(),
+                name: p.name.clone(),
+            }
+            .at(p.span));
         }
         // Splice both fns at the first fn declared after this pattern, so source
         // order is preserved across several patterns (each inserted fn carries
@@ -281,7 +274,7 @@ fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap
             .position(|d| d.span.start > p.span.start)
             .unwrap_or(prog.fns.len());
         if let Some(mk) = p.make {
-            let mut d = lift_lam(names::pat_make(&p.name), mk, p.span, "make", &p.name)?;
+            let mut d = lift_lam(names::pat_make(&p.name), mk, p.span, kw::MAKE, &p.name)?;
             d.ret = make_ret;
             prog.fns.insert(at, d);
         }
@@ -321,12 +314,11 @@ fn lift_lam(
 ) -> Result<Decl, TypeError> {
     let clause_span = lam.span;
     let Expr::Lam(params, body) = lam.node else {
-        return Err(TypeError::Other {
-            span: clause_span,
-            msg: format!(
-                "`{clause}` clause of pattern `{pat}` must be a lambda, as in `{clause} \\(x) -> ...`"
-            ),
-        });
+        return Err(ErrKind::PatternClauseNotLambda {
+            clause: clause.to_string(),
+            pat: pat.to_string(),
+        }
+        .at(clause_span));
     };
     Ok(Decl {
         name,
@@ -369,29 +361,27 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
             .iter()
             .find(|(n, _)| *n == e.name)
         {
-            return Err(TypeError::Other {
-                span: e.span,
-                msg: format!(
-                    "effect `{}` is a reserved name (reserved for {reason})",
-                    e.name
-                ),
-            });
+            return Err(ErrKind::ReservedEffectName {
+                name: e.name.clone(),
+                reason: (*reason).to_string(),
+            }
+            .at(e.span));
         }
         if !effs.insert(e.name.as_str()) {
-            return Err(TypeError::Other {
-                span: e.span,
-                msg: format!("effect `{}` is declared more than once", e.name),
-            });
+            return Err(ErrKind::DuplicateDecl {
+                kind: "effect".into(),
+                name: e.name.clone(),
+            }
+            .at(e.span));
         }
         for op in &e.ops {
             if let Some(prev) = ops.insert(&op.name, &e.name) {
-                return Err(TypeError::Other {
-                    span: e.span,
-                    msg: format!(
-                        "operation `{}` is declared in both `{prev}` and `{}`",
-                        op.name, e.name
-                    ),
-                });
+                return Err(ErrKind::DuplicateEffectOp {
+                    op: op.name.clone(),
+                    first: prev.to_string(),
+                    second: e.name.clone(),
+                }
+                .at(e.span));
             }
         }
     }
@@ -405,18 +395,48 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
 // slipping through a position this pass does not visit.
 fn reject_coeffect_tys(prog: &Program) -> Result<(), TypeError> {
     fn check(t: &Ty, span: Span) -> Result<(), TypeError> {
-        if let Ty::Coeffect(_, row) = t {
-            let msg = row.first_unwired().map_or_else(
-                || {
-                    format!(
-                        "`{} {}` certifies a function declaration: write it after a `fn`'s return type",
-                        kw::AT,
-                        CoeffectFact::Noalloc
-                    )
-                },
-                |f| format!("usage fact `{f}` is reserved but not implemented"),
-            );
-            return Err(TypeError::Other { span, msg });
+        if let Ty::Coeffect(inner, row) = t {
+            // An unwired fact is always the reserved-fact error.
+            if let Some(f) = row.first_unwired() {
+                return Err(ErrKind::CoeffectFactUnimplemented {
+                    fact: f.to_string(),
+                }
+                .at(span));
+            }
+            // A wired closure-usage row (`@ once` / `@ portable`) on a function type
+            // is a valid contract; it flows to the type checker. Anything else is
+            // misplaced: `@ noalloc` was lifted at the fn root, `@ noescape` is
+            // admitted only on a function domain (below), and a usage row on a
+            // non-function type has no closure boundary to constrain.
+            if row.is_closure_contract() && matches!(**inner, Ty::Fun(..)) {
+                return check(inner, span);
+            }
+            return Err(ErrKind::CoeffectRowMisplaced.at(span));
+        }
+        // A function type's domain may carry the scoped-token contract
+        // (`(Builder @ noescape) -> a`): the callback promises that argument does
+        // not outlive the call. Admitted here, positionally, and nowhere else;
+        // the manual walk mirrors `each_child` for `Fun` (domains, row label
+        // arguments, return) so no position is skipped.
+        if let Ty::Fun(doms, row, ret) = t {
+            for d in doms {
+                match d {
+                    Ty::Coeffect(inner, drow)
+                        if drow.first_unwired().is_none() && drow.is_noescape_only() =>
+                    {
+                        check(inner, span)?;
+                    }
+                    other => check(other, span)?,
+                }
+            }
+            if let Row::Cons(labels, _) = row {
+                for l in labels {
+                    for a in &l.args {
+                        check(a, span)?;
+                    }
+                }
+            }
+            return check(ret, span);
         }
         let mut out = Ok(());
         t.each_child(&mut |c| {
@@ -487,6 +507,377 @@ fn reject_coeffect_tys(prog: &Program) -> Result<(), TypeError> {
     Ok(())
 }
 
+// A parameter annotated `((..) -> ..) @ once`: a usage row carrying `once` on a
+// function type.
+fn is_once_param(p: &Param) -> bool {
+    matches!(&p.ty, Some(Ty::Coeffect(inner, row))
+        if matches!(**inner, Ty::Fun(..)) && row.multiplicity() == Some(CoeffectFact::Once))
+}
+
+// Enforce the `@ once` linearity contract on closure parameters: each is used at
+// most once in the body, and only directly (as a call head `g(x)` or a direct
+// argument `h(g)`). Aliasing (`let x = g`), capture under a lambda, or any other
+// occurrence forces the `many` verdict, since the number of uses is then
+// unbounded. Branches take the max (only one runs); sequenced positions sum. This
+// complements the type checker's contravariant subsumption, which catches handing
+// a `@ once` closure to a `@ many` context; here we catch the direct reuse the
+// types alone would let through.
+fn check_once_linearity(prog: &Program) -> Result<(), TypeError> {
+    for d in &prog.fns {
+        for p in &d.params {
+            if is_once_param(p) && once_uses(&d.body, &p.name) > 1 {
+                return Err(ErrKind::OnceUsedMoreThanOnce {
+                    fn_name: d.name.clone(),
+                    param: p.name.clone(),
+                }
+                .at(d.span));
+            }
+        }
+    }
+    Ok(())
+}
+
+// Uses of `name` in `e`, clamped to the once lattice (0, 1, or 2 meaning "more
+// than once or unbounded"). A use is `name` appearing as a call head or a direct
+// argument; any other occurrence returns 2 (an escape). Sequenced positions sum
+// (clamped), branches take the max.
+fn once_uses(e: &S<Expr>, name: &str) -> usize {
+    let cap = |n: usize| n.min(2);
+    match &e.node {
+        // A bare occurrence not consumed as a call head or direct argument below:
+        // aliased, captured, returned, or otherwise escaping.
+        Expr::Var(n) if n == name => 2,
+        Expr::Call(f, args) => {
+            let mut total = match &f.node {
+                Expr::Var(n) if n == name => 1,
+                _ => once_uses(f, name),
+            };
+            for a in args {
+                let u = match &a.node {
+                    Expr::Var(n) if n == name => 1,
+                    _ => once_uses(a, name),
+                };
+                total = cap(total + u);
+            }
+            total
+        }
+        // A lambda body may run any number of times, so capturing `name` escapes.
+        Expr::Lam(_, b) => usize::from(once_uses(b, name) > 0) * 2,
+        Expr::If(c, t, el) => cap(once_uses(c, name) + once_uses(t, name).max(once_uses(el, name))),
+        Expr::Let(_, v, b) => cap(once_uses(v, name) + once_uses(b, name)),
+        Expr::Match(s, arms) => {
+            let branch = arms
+                .iter()
+                .map(|a| {
+                    cap(a.guard.as_ref().map_or(0, |g| once_uses(g, name))
+                        + once_uses(&a.body, name))
+                })
+                .max()
+                .unwrap_or(0);
+            cap(once_uses(s, name) + branch)
+        }
+        _ => {
+            let mut total = 0;
+            e.node
+                .each_child(&mut |c| total = cap(total + once_uses(c, name)));
+            total
+        }
+    }
+}
+
+// A parameter annotated `((..) -> ..) @ portable`.
+fn is_portable_param(p: &Param) -> bool {
+    matches!(&p.ty, Some(Ty::Coeffect(inner, row)) if matches!(**inner, Ty::Fun(..)) && row.is_portable())
+}
+
+// A written type whose values are portable (encodable) by construction: the
+// scalars and tuples/datatype spines over them. The AST dual of
+// `kont::portable_value_type`; a captured value of such a type may cross a
+// `@ portable` boundary.
+fn is_portable_annotation(t: &Ty) -> bool {
+    match t {
+        Ty::Int | Ty::I64 | Ty::U64 | Ty::Bool | Ty::Unit | Ty::Float | Ty::Char | Ty::Str => true,
+        Ty::Tuple(ts) | Ty::Con(_, ts) => ts.iter().all(is_portable_annotation),
+        _ => false,
+    }
+}
+
+// Collect every free variable of `e` (occurrences not bound by an enclosing
+// lambda, `let`, or match arm). Conservative around surface sugar: a form this
+// does not special-case recurses through `each_child` with the current binder
+// scope, so a name it cannot prove bound is reported free (a false capture only
+// costs a diagnostic).
+fn free_names(e: &S<Expr>, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
+    match &e.node {
+        Expr::Var(n) => {
+            if !bound.contains(n) {
+                out.insert(n.clone());
+            }
+        }
+        Expr::Lam(params, body) => {
+            let base = bound.len();
+            bound.extend(params.iter().map(|p| p.name.clone()));
+            free_names(body, bound, out);
+            bound.truncate(base);
+        }
+        Expr::Let(name, v, b) => {
+            free_names(v, bound, out);
+            bound.push(name.clone());
+            free_names(b, bound, out);
+            bound.pop();
+        }
+        Expr::Match(scrut, arms) => {
+            free_names(scrut, bound, out);
+            for a in arms {
+                let base = bound.len();
+                pat_binds(&a.pat, bound);
+                if let Some(g) = &a.guard {
+                    free_names(g, bound, out);
+                }
+                free_names(&a.body, bound, out);
+                bound.truncate(base);
+            }
+        }
+        _ => e.node.each_child(&mut |c| free_names(c, bound, out)),
+    }
+}
+
+// The names a pattern binds, appended to `out`.
+fn pat_binds(p: &S<Pattern>, out: &mut Vec<String>) {
+    match &p.node {
+        Pattern::Var(n) => out.push(n.clone()),
+        Pattern::Ctor(_, subs) | Pattern::Tuple(subs) => {
+            for s in subs {
+                pat_binds(s, out);
+            }
+        }
+        Pattern::Record(_, fields, _) => {
+            for (_, s) in fields {
+                pat_binds(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+// Enforce the `@ portable` mobility contract: a closure passed to a `@ portable`
+// parameter may capture only names that travel to a fresh runtime: a top-level
+// function or constructor (a content-addressed code reference), another
+// `@ portable` parameter of the enclosing function (a relay), or a
+// portable-typed parameter (scalar data). Any other captured free variable (a
+// local closure, a `var` cell, a handler op, a nonportable value) is rejected.
+// Conservative: a scalar bound by a local `let` is not yet admitted.
+fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
+    let portable_params: BTreeMap<&str, Vec<usize>> = prog
+        .fns
+        .iter()
+        .filter_map(|d| {
+            let idxs: Vec<usize> = d
+                .params
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| is_portable_param(p))
+                .map(|(i, _)| i)
+                .collect();
+            (!idxs.is_empty()).then_some((d.name.as_str(), idxs))
+        })
+        .collect();
+    if portable_params.is_empty() {
+        return Ok(());
+    }
+    let mut code_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
+    for t in &prog.types {
+        for c in &t.ctors {
+            code_names.insert(c.name.as_str());
+        }
+    }
+    for d in &prog.fns {
+        let ok: BTreeSet<String> = d
+            .params
+            .iter()
+            .filter(|p| is_portable_param(p) || p.ty.as_ref().is_some_and(is_portable_annotation))
+            .map(|p| p.name.clone())
+            .collect();
+        check_portable_calls(&d.body, &portable_params, &code_names, &ok)?;
+    }
+    Ok(())
+}
+
+fn check_portable_calls(
+    e: &S<Expr>,
+    portable_params: &BTreeMap<&str, Vec<usize>>,
+    code_names: &BTreeSet<&str>,
+    ok: &BTreeSet<String>,
+) -> Result<(), TypeError> {
+    if let Expr::Call(f, args) = &e.node {
+        if let Expr::Var(name) = &f.node {
+            if let Some(idxs) = portable_params.get(name.as_str()) {
+                for &i in idxs {
+                    if let Some(arg) = args.get(i) {
+                        check_arg_portable(arg, code_names, ok)?;
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Ok(());
+    e.node.each_child(&mut |c| {
+        if out.is_ok() {
+            out = check_portable_calls(c, portable_params, code_names, ok);
+        }
+    });
+    out
+}
+
+// A single argument flowing into a `@ portable` parameter.
+fn check_arg_portable(
+    arg: &S<Expr>,
+    code_names: &BTreeSet<&str>,
+    ok: &BTreeSet<String>,
+) -> Result<(), TypeError> {
+    let bad = |subject: String| Err(ErrKind::PortableCapturesNonportable { subject }.at(arg.span));
+    match &arg.node {
+        Expr::Lam(params, body) => {
+            let mut bound: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+            let mut free = BTreeSet::new();
+            free_names(body, &mut bound, &mut free);
+            for name in &free {
+                if !code_names.contains(name.as_str()) && !ok.contains(name) {
+                    return bad(name.clone());
+                }
+            }
+            Ok(())
+        }
+        // A bare code reference or a relayed `@ portable` value is already portable.
+        Expr::Var(g) if code_names.contains(g.as_str()) || ok.contains(g) => Ok(()),
+        Expr::Var(g) => bad(g.clone()),
+        _ => bad("a computed closure".into()),
+    }
+}
+
+// The domain positions of a function-typed parameter that carry the scoped-token
+// contract: `f : (Builder @ noescape) -> a` yields `[0]`. Phase-generic: the
+// contract map is built from the desugared (Core-phase) declarations.
+fn noescape_domains<P: Phase>(p: &Param<P>) -> Vec<usize> {
+    let Some(Ty::Fun(doms, _, _)) = &p.ty else {
+        return Vec::new();
+    };
+    doms.iter()
+        .enumerate()
+        .filter(|(_, d)| matches!(d, Ty::Coeffect(_, row) if row.is_noescape_only()))
+        .map(|(j, _)| j)
+        .collect()
+}
+
+// Enforce `@ noescape` on scoped-token callbacks: at every call handing a
+// closure to a parameter typed `(T @ noescape) -> a`, the closure's token
+// argument must not outlive the call. The value analysis (`token_escapes`)
+// rejects the directly expressible escapes: the token returned as the result,
+// embedded in returned data, aliased through a `let` that then flows out, or
+// captured by another closure. Runs on the desugared (Core-phase) bodies, where
+// statement sugar is gone, so value position is honest. The callback must be a
+// closure literal, a top-level function, or a relayed parameter carrying the
+// same contract; anything else cannot be checked and is rejected.
+fn check_noescape_contracts(prog: &Program<Core>) -> Result<(), TypeError> {
+    let mut contracts: BTreeMap<&str, Vec<(usize, usize)>> = BTreeMap::new();
+    for d in &prog.fns {
+        for (i, p) in d.params.iter().enumerate() {
+            for j in noescape_domains(p) {
+                contracts.entry(d.name.as_str()).or_default().push((i, j));
+            }
+        }
+    }
+    if contracts.is_empty() {
+        return Ok(());
+    }
+    let ctors: BTreeSet<String> = prog
+        .types
+        .iter()
+        .flat_map(|t| t.ctors.iter().map(|c| c.name.clone()))
+        .collect();
+    let fns: BTreeMap<&str, &Decl<Core>> = prog.fns.iter().map(|d| (d.name.as_str(), d)).collect();
+    for d in &prog.fns {
+        // Parameters of the enclosing function that carry the same contract at
+        // the same position may be relayed onward unchecked here; their own call
+        // sites are checked where a concrete closure is supplied.
+        let relays: BTreeSet<(String, usize)> = d
+            .params
+            .iter()
+            .flat_map(|p| noescape_domains(p).into_iter().map(|j| (p.name.clone(), j)))
+            .collect();
+        walk_noescape_calls(&d.body, &contracts, &ctors, &fns, &relays)?;
+    }
+    Ok(())
+}
+
+fn walk_noescape_calls(
+    e: &S<Expr<Core>>,
+    contracts: &BTreeMap<&str, Vec<(usize, usize)>>,
+    ctors: &BTreeSet<String>,
+    fns: &BTreeMap<&str, &Decl<Core>>,
+    relays: &BTreeSet<(String, usize)>,
+) -> Result<(), TypeError> {
+    if let Expr::Call(h, args) = &e.node {
+        if let Expr::Var(callee) = &h.node {
+            if let Some(sites) = contracts.get(callee.as_str()) {
+                for (i, j) in sites {
+                    if let Some(arg) = args.get(*i) {
+                        check_noescape_arg(arg, *j, callee, ctors, fns, relays)?;
+                    }
+                }
+            }
+        }
+    }
+    let mut out = Ok(());
+    e.node.each_child(&mut |c| {
+        if out.is_ok() {
+            out = walk_noescape_calls(c, contracts, ctors, fns, relays);
+        }
+    });
+    out
+}
+
+fn check_noescape_arg(
+    arg: &S<Expr<Core>>,
+    j: usize,
+    callee: &str,
+    ctors: &BTreeSet<String>,
+    fns: &BTreeMap<&str, &Decl<Core>>,
+    relays: &BTreeSet<(String, usize)>,
+) -> Result<(), TypeError> {
+    let escape = |token: &str, span: Span| {
+        Err(ErrKind::NoescapeTokenEscapes {
+            token: token.to_string(),
+            callee: callee.to_string(),
+        }
+        .at(span))
+    };
+    match &arg.node {
+        Expr::Lam(params, body) => {
+            let Some(p) = params.get(j) else {
+                return Ok(());
+            };
+            effects::token_escapes(body, &p.name, ctors, &mut BTreeSet::new())
+                .map_or(Ok(()), |span| escape(&p.name, span))
+        }
+        // A top-level function as the callback: its own body is the closure body.
+        Expr::Var(g) if fns.contains_key(g.as_str()) => {
+            let d = fns[g.as_str()];
+            let Some(p) = d.params.get(j) else {
+                return Ok(());
+            };
+            effects::token_escapes(&d.body, &p.name, ctors, &mut BTreeSet::new())
+                .map_or(Ok(()), |span| escape(&p.name, span))
+        }
+        // A relayed parameter carrying the same contract at the same position.
+        Expr::Var(g) if relays.contains(&(g.clone(), j)) => Ok(()),
+        _ => Err(ErrKind::NoescapeUncheckable {
+            callee: callee.to_string(),
+        }
+        .at(arg.span)),
+    }
+}
+
 /// # Errors
 /// Fails on malformed sugar, reported as a type error.
 pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
@@ -510,6 +901,8 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     // (`@ noalloc` at a `fn` return root) was lifted onto the decl flag at
     // parse, so anything left is a reserved fact or a misplaced certificate.
     reject_coeffect_tys(&prog)?;
+    check_once_linearity(&prog)?;
+    check_portable_captures(&prog)?;
     expand_synonyms(&mut prog)?;
     expand_aliases(&mut prog)?;
     derive_instances(&mut prog)?;
@@ -615,6 +1008,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
         deprecated: prog.deprecated,
     };
     assign_ids(&mut out);
+    check_noescape_contracts(&out)?;
     Ok(out)
 }
 
@@ -628,9 +1022,9 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
 //
 // The trigger is the surface wrappers (`names::CAP_WRAPPERS`), not the raw
 // capability operations, so a program that performs a capability directly and
-// installs its own handler (`run_io(\() -> rng_rand(()))`) is left unwrapped. The
+// installs its own handler (`run_io(\() -> rng_rand())`) is left unwrapped. The
 // wrapper names and the Replay/output names are single-sourced in `names`/
-// `builtins`, and a drift guard test pins each to its prelude definition.
+// `builtins`, and a drift guard test checks each to its prelude definition.
 fn wrap_main_world(fns: &mut [Decl<Core>]) {
     let names: BTreeSet<&str> = fns.iter().map(|d| d.name.as_str()).collect();
     if !names.contains(names::RUN_IO) || !names.contains(names::ENTRY_POINT) {

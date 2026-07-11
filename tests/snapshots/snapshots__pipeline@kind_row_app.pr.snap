@@ -1,0 +1,123 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/kind_row_app.pr
+---
+== tokens ==
+VOpen Type UIdent("Cmd") LParen Ident("a") Comma Ident("e") Colon UIdent("Row") RParen Eq UIdent("MkCmd") LParen KwInt RParen VSemi Fn Ident("f") LParen Ident("x") Colon UIdent("Cmd") LParen KwInt Comma Ident("g") LParen KwInt RParen RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Cmd",
+            params: [
+                "a",
+                "e",
+            ],
+            param_kinds: [
+                Type,
+                Row,
+            ],
+            ctors: [
+                Ctor {
+                    name: "MkCmd",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 373..406,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "f",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Con(
+                            "Cmd",
+                            [
+                                Int,
+                                App(
+                                    "g",
+                                    [
+                                        Int,
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 443..444,
+            },
+            wheres: [],
+            span: 408..444,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 458..465,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 466..467,
+                        },
+                    ],
+                ),
+                span: 458..468,
+            },
+            wheres: [],
+            span: 446..468,
+        },
+    ],
+}
+
+== types ==
+[E1003] Type Error: in `f`: kind mismatch: parameter 2 of `Cmd` has kind `Row`, but a `Type` was given
+   ╭─[ <source>:8:1 ]
+   │
+ 8 │ fn f(x : Cmd(Int, g(Int))) : Int = 0
+   │ ──────────────────┬─────────────────  
+   │                   ╰─────────────────── in `f`: kind mismatch: parameter 2 of `Cmd` has kind `Row`, but a `Type` was given
+───╯

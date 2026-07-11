@@ -1,0 +1,10 @@
+effect E
+  one() : Int
+  two() : Int
+
+fn main() =
+  println(handle one() + two() with {
+    one() resume k => k(1),
+    two() resume k => k(2),
+    return r => r
+  })

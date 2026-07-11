@@ -1,22 +1,22 @@
 effect Ask
-  ctl ask(Unit) : Int
+  ask() : Int
 
 effect Log
-  ctl log(Int) : Unit
+  log(Int) : Unit
 
-fn work() : !{Ask, Log} Int =
-  let a = ask(())
+fn work() : Int ! {Ask, Log} =
+  let a = ask()
   log(a)
-  let b = ask(())
+  let b = ask()
   log(b)
   a + b
 
 fn run() =
   handle (handle work() with {
-      ask(u, k) => let r = k(10) in let _ = println(r) in r + 100,
+      ask() resume k => let r = k(10) in let _ = println(r) in r + 100,
       return r => r * 2
     }) with
-    log(n, k) =>
+    log(n) resume k =>
       println(n)
       k(())
     return r => r

@@ -48,34 +48,77 @@ const VALUE_TAG_UNIT: &str = "unit";
 pub const RESERVED_EVENT_CAPABILITIES: &[&str] =
     &[crate::names::NET_EFFECT, crate::names::ENTROPY_EFFECT];
 
-pub const OP_ENV_ARGS_COUNT: &str = "Env.args_count";
-pub const OP_ENV_ARG: &str = "Env.arg";
-pub const OP_ENV_GETENV: &str = "Env.getenv";
-pub const OP_CONSOLE_READ_LINE: &str = "Console.read_line";
-pub const OP_CONSOLE_READ_INT: &str = "Console.read_int";
-pub const OP_PROCESS_SYSTEM: &str = "Process.system";
-pub const OP_FS_READ_FILE: &str = "FileSystem.read_file";
-pub const OP_FS_READ_FILE_BYTES: &str = "FileSystem.read_file_bytes";
-pub const OP_FS_FILE_EXISTS: &str = "FileSystem.file_exists";
-// The write side of the same family. These are output observations, not world
-// reads: a recorded run emits one per file mutation so a run sidecar can name the
-// files it produced. They are not `.replay` tape frames; the write re-executes on
-// replay, so the event recurs identically and the trace digest is unchanged.
-pub const OP_FS_WRITE_FILE: &str = "FileSystem.write_file";
-pub const OP_FS_WRITE_BYTES: &str = "FileSystem.write_bytes";
-pub const OP_FS_APPEND_FILE: &str = "FileSystem.append_file";
-pub const OP_FS_REMOVE_FILE: &str = "FileSystem.remove_file";
-pub const OP_RANDOM_RAND: &str = "Random.rand";
-pub const OP_CLOCK_WALL_NOW: &str = "Clock.wall_now";
-pub const OP_CLOCK_MONO_NOW: &str = "Clock.mono_now";
-// Console output boundaries. Outputs are re-performed on replay rather than
-// served from the tape, so these labels never appear in the provenance event
-// stream; the step ruler (`prism exec steps`) uses them to label output marks
-// on the machine-step clock. `println` is a print followed by a newline, so it
-// marks twice.
-pub const OP_CONSOLE_PRINT: &str = "Console.print";
-pub const OP_CONSOLE_NEWLINE: &str = "Console.newline";
-pub const OP_CONSOLE_EPRINT: &str = "Console.eprint";
+/// Canonical capability operation in the provenance protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CapOp {
+    EnvArgsCount,
+    EnvArg,
+    EnvGetenv,
+    ConsoleReadLine,
+    ConsoleReadInt,
+    ProcessSystem,
+    FsReadFile,
+    FsReadFileBytes,
+    FsFileExists,
+    FsWriteFile,
+    FsWriteBytes,
+    FsAppendFile,
+    FsRemoveFile,
+    RandomRand,
+    ClockWallNow,
+    ClockMonoNow,
+    ConsolePrint,
+    ConsoleNewline,
+    ConsoleEprint,
+}
+
+impl CapOp {
+    /// Frozen protocol spelling used in event hashes and diagnostics.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::EnvArgsCount => "Env.args_count",
+            Self::EnvArg => "Env.arg",
+            Self::EnvGetenv => "Env.getenv",
+            Self::ConsoleReadLine => "Console.read_line",
+            Self::ConsoleReadInt => "Console.read_int",
+            Self::ProcessSystem => "Process.system",
+            Self::FsReadFile => "FileSystem.read_file",
+            Self::FsReadFileBytes => "FileSystem.read_file_bytes",
+            Self::FsFileExists => "FileSystem.file_exists",
+            Self::FsWriteFile => "FileSystem.write_file",
+            Self::FsWriteBytes => "FileSystem.write_bytes",
+            Self::FsAppendFile => "FileSystem.append_file",
+            Self::FsRemoveFile => "FileSystem.remove_file",
+            Self::RandomRand => "Random.rand",
+            Self::ClockWallNow => "Clock.wall_now",
+            Self::ClockMonoNow => "Clock.mono_now",
+            Self::ConsolePrint => "Console.print",
+            Self::ConsoleNewline => "Console.newline",
+            Self::ConsoleEprint => "Console.eprint",
+        }
+    }
+}
+
+pub const OP_ENV_ARGS_COUNT: CapOp = CapOp::EnvArgsCount;
+pub const OP_ENV_ARG: CapOp = CapOp::EnvArg;
+pub const OP_ENV_GETENV: CapOp = CapOp::EnvGetenv;
+pub const OP_CONSOLE_READ_LINE: CapOp = CapOp::ConsoleReadLine;
+pub const OP_CONSOLE_READ_INT: CapOp = CapOp::ConsoleReadInt;
+pub const OP_PROCESS_SYSTEM: CapOp = CapOp::ProcessSystem;
+pub const OP_FS_READ_FILE: CapOp = CapOp::FsReadFile;
+pub const OP_FS_READ_FILE_BYTES: CapOp = CapOp::FsReadFileBytes;
+pub const OP_FS_FILE_EXISTS: CapOp = CapOp::FsFileExists;
+pub const OP_FS_WRITE_FILE: CapOp = CapOp::FsWriteFile;
+pub const OP_FS_WRITE_BYTES: CapOp = CapOp::FsWriteBytes;
+pub const OP_FS_APPEND_FILE: CapOp = CapOp::FsAppendFile;
+pub const OP_FS_REMOVE_FILE: CapOp = CapOp::FsRemoveFile;
+pub const OP_RANDOM_RAND: CapOp = CapOp::RandomRand;
+pub const OP_CLOCK_WALL_NOW: CapOp = CapOp::ClockWallNow;
+pub const OP_CLOCK_MONO_NOW: CapOp = CapOp::ClockMonoNow;
+pub const OP_CONSOLE_PRINT: CapOp = CapOp::ConsolePrint;
+pub const OP_CONSOLE_NEWLINE: CapOp = CapOp::ConsoleNewline;
+pub const OP_CONSOLE_EPRINT: CapOp = CapOp::ConsoleEprint;
 
 /// One argument or result value of a capability observation.
 ///
@@ -137,7 +180,7 @@ impl EventValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapEvent {
     /// A canonical operation label from the `OP_*` family.
-    pub op: &'static str,
+    pub op: CapOp,
     /// The observed arguments, in call order.
     pub args: Vec<EventValue>,
     /// The observed result.
@@ -150,7 +193,7 @@ impl CapEvent {
     // already digested by `EventValue::encode`, so the join is unambiguous.
     fn canonical(&self) -> String {
         let mut out = String::new();
-        let _ = write!(out, "{}\n{}", self.op, self.args.len());
+        let _ = write!(out, "{}\n{}", self.op.label(), self.args.len());
         for arg in &self.args {
             let _ = write!(out, "\n{}", arg.encode());
         }
@@ -254,8 +297,9 @@ mod tests {
         for op in live {
             for cap in RESERVED_EVENT_CAPABILITIES {
                 assert!(
-                    !op.starts_with(&format!("{cap}.")),
-                    "live op `{op}` uses reserved capability `{cap}`"
+                    !op.label().starts_with(&format!("{cap}.")),
+                    "live op `{}` uses reserved capability `{cap}`",
+                    op.label()
                 );
             }
         }

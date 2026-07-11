@@ -1,11 +1,11 @@
 effect Yield
-  ctl yield(Int) : Bool
+  yield(Int) : Bool
 
 fn collect_bools() =
   handle (let a = yield(1) in
     let b = yield(2) in
     let c = yield(3) in if a then if b then if c then 7 else 6 else 5 else 4) with
-    yield(v, k) => k(v > 1)
+    yield(v) resume k => k(v > 1)
     return r => r
 
 fn main() = println(collect_bools())

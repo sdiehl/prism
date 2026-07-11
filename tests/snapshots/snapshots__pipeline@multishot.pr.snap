@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/multishot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Yield") VOpen Ctl Ident("yield") LParen KwInt RParen Colon KwBool VClose VSemi Fn Ident("collect_bools") LParen RParen Eq VOpen Handle LParen Let Ident("a") Eq Ident("yield") LParen Int(IntLit { value: 1, suffix: None }) RParen In Let Ident("b") Eq Ident("yield") LParen Int(IntLit { value: 2, suffix: None }) RParen In Let Ident("c") Eq Ident("yield") LParen Int(IntLit { value: 3, suffix: None }) RParen In If Ident("a") Then If Ident("b") Then If Ident("c") Then Int(IntLit { value: 7, suffix: None }) Else Int(IntLit { value: 6, suffix: None }) Else Int(IntLit { value: 5, suffix: None }) Else Int(IntLit { value: 4, suffix: None }) RParen With VOpen Ident("yield") LParen Ident("v") Comma Ident("k") RParen FatArrow Ident("k") LParen Ident("v") Gt Int(IntLit { value: 1, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("collect_bools") LParen RParen RParen VClose
+VOpen Effect UIdent("Yield") VOpen Ident("yield") LParen KwInt RParen Colon KwBool VClose VSemi Fn Ident("collect_bools") LParen RParen Eq VOpen Handle LParen Let Ident("a") Eq Ident("yield") LParen Int(IntLit { value: 1, suffix: None }) RParen In Let Ident("b") Eq Ident("yield") LParen Int(IntLit { value: 2, suffix: None }) RParen In Let Ident("c") Eq Ident("yield") LParen Int(IntLit { value: 3, suffix: None }) RParen In If Ident("a") Then If Ident("b") Then If Ident("c") Then Int(IntLit { value: 7, suffix: None }) Else Int(IntLit { value: 6, suffix: None }) Else Int(IntLit { value: 5, suffix: None }) Else Int(IntLit { value: 4, suffix: None }) RParen With VOpen Ident("yield") LParen Ident("v") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("v") Gt Int(IntLit { value: 1, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("collect_bools") LParen RParen RParen VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..36,
+            span: 0..32,
         },
     ],
     errors: [],
@@ -48,7 +48,7 @@ Program {
                                         node: Var(
                                             "yield",
                                         ),
-                                        span: 77..82,
+                                        span: 73..78,
                                     },
                                     [
                                         Spanned {
@@ -58,11 +58,11 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 83..84,
+                                            span: 79..80,
                                         },
                                     ],
                                 ),
-                                span: 77..85,
+                                span: 73..81,
                             },
                             Spanned {
                                 node: Let(
@@ -73,7 +73,7 @@ Program {
                                                 node: Var(
                                                     "yield",
                                                 ),
-                                                span: 101..106,
+                                                span: 97..102,
                                             },
                                             [
                                                 Spanned {
@@ -83,11 +83,11 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 107..108,
+                                                    span: 103..104,
                                                 },
                                             ],
                                         ),
-                                        span: 101..109,
+                                        span: 97..105,
                                     },
                                     Spanned {
                                         node: Let(
@@ -98,7 +98,7 @@ Program {
                                                         node: Var(
                                                             "yield",
                                                         ),
-                                                        span: 125..130,
+                                                        span: 121..126,
                                                     },
                                                     [
                                                         Spanned {
@@ -108,11 +108,11 @@ Program {
                                                                     suffix: None,
                                                                 },
                                                             ),
-                                                            span: 131..132,
+                                                            span: 127..128,
                                                         },
                                                     ],
                                                 ),
-                                                span: 125..133,
+                                                span: 121..129,
                                             },
                                             Spanned {
                                                 node: If(
@@ -120,7 +120,7 @@ Program {
                                                         node: Var(
                                                             "a",
                                                         ),
-                                                        span: 140..141,
+                                                        span: 136..137,
                                                     },
                                                     Spanned {
                                                         node: If(
@@ -128,7 +128,7 @@ Program {
                                                                 node: Var(
                                                                     "b",
                                                                 ),
-                                                                span: 150..151,
+                                                                span: 146..147,
                                                             },
                                                             Spanned {
                                                                 node: If(
@@ -136,7 +136,7 @@ Program {
                                                                         node: Var(
                                                                             "c",
                                                                         ),
-                                                                        span: 160..161,
+                                                                        span: 156..157,
                                                                     },
                                                                     Spanned {
                                                                         node: Int(
@@ -145,7 +145,7 @@ Program {
                                                                                 suffix: None,
                                                                             },
                                                                         ),
-                                                                        span: 167..168,
+                                                                        span: 163..164,
                                                                     },
                                                                     Spanned {
                                                                         node: Int(
@@ -154,10 +154,10 @@ Program {
                                                                                 suffix: None,
                                                                             },
                                                                         ),
-                                                                        span: 174..175,
+                                                                        span: 170..171,
                                                                     },
                                                                 ),
-                                                                span: 157..175,
+                                                                span: 153..171,
                                                             },
                                                             Spanned {
                                                                 node: Int(
@@ -166,10 +166,10 @@ Program {
                                                                         suffix: None,
                                                                     },
                                                                 ),
-                                                                span: 181..182,
+                                                                span: 177..178,
                                                             },
                                                         ),
-                                                        span: 147..182,
+                                                        span: 143..178,
                                                     },
                                                     Spanned {
                                                         node: Int(
@@ -178,19 +178,19 @@ Program {
                                                                 suffix: None,
                                                             },
                                                         ),
-                                                        span: 188..189,
+                                                        span: 184..185,
                                                     },
                                                 ),
-                                                span: 137..189,
+                                                span: 133..185,
                                             },
                                         ),
-                                        span: 117..189,
+                                        span: 113..185,
                                     },
                                 ),
-                                span: 93..189,
+                                span: 89..185,
                             },
                         ),
-                        span: 68..190,
+                        span: 64..186,
                     },
                     [
                         Op(
@@ -205,7 +205,7 @@ Program {
                                         node: Var(
                                             "k",
                                         ),
-                                        span: 215..216,
+                                        span: 217..218,
                                     },
                                     [
                                         Spanned {
@@ -215,7 +215,7 @@ Program {
                                                     node: Var(
                                                         "v",
                                                     ),
-                                                    span: 217..218,
+                                                    span: 219..220,
                                                 },
                                                 Spanned {
                                                     node: Int(
@@ -224,14 +224,14 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 221..222,
+                                                    span: 223..224,
                                                 },
                                             ),
-                                            span: 217..222,
+                                            span: 219..224,
                                         },
                                     ],
                                 ),
-                                span: 215..223,
+                                span: 217..225,
                             },
                         ),
                         Return(
@@ -240,15 +240,15 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 240..241,
+                                span: 242..243,
                             },
                         ),
                     ],
                 ),
-                span: 61..241,
+                span: 57..243,
             },
             wheres: [],
-            span: 38..241,
+            span: 34..243,
         },
         Decl {
             name: "main",
@@ -262,7 +262,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 255..262,
+                        span: 257..264,
                     },
                     [
                         Spanned {
@@ -271,18 +271,18 @@ Program {
                                     node: Var(
                                         "collect_bools",
                                     ),
-                                    span: 263..276,
+                                    span: 265..278,
                                 },
                                 [],
                             ),
-                            span: 263..278,
+                            span: 265..280,
                         },
                     ],
                 ),
-                span: 255..279,
+                span: 257..281,
             },
             wheres: [],
-            span: 243..279,
+            span: 245..281,
         },
     ],
 }
@@ -293,22 +293,92 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn collect_bools() =
-  handle { return 1 to t@0; do yield(t@0) to a; return 2 to t@1; do yield(t@1) to b; return 3 to t@2; do yield(t@2) to c; return a to t@5; if t@5 then (return b to t@4; if t@4 then (return c to t@3; if t@3 then (return 7) else (return 6)) else (return 5)) else (return 4) } with { yield(v, k) => return v to t@6; return 1 to t@7; t@6 > t@7 to t@8; return k to t@9; (force t@9)(t@8), return r => return r }
+  handle
+    return 1 to t@0
+    do yield(t@0) to a
+    return 2 to t@1
+    do yield(t@1) to b
+    return 3 to t@2
+    do yield(t@2) to c
+    return a to t@5
+    if t@5 then
+      return b to t@4
+      if t@4 then
+        return c to t@3
+        if t@3 then
+          return 7
+        else
+          return 6
+      else
+        return 5
+    else
+      return 4
+  with
+    yield(v, k) =>
+      return v to t@6
+      return 1 to t@7
+      t@6 > t@7 to t@8
+      return k to t@9
+      (force t@9)(t@8)
+    return r =>
+      return r
 fn main() =
-  collect_bools() to t@10; print t@10 to t@11; print_nl
+  collect_bools() to t@10
+  print t@10 to t@11
+  print_nl
 
 == fbip (rc) ==
 fn collect_bools() =
-  handle { return 1 to t@0; do yield(t@0) to a; return 2 to t@1; do yield(t@1) to b; return 3 to t@2; do yield(t@2) to c; return a to t@5; if t@5 then (drop t@5 to _; return b to t@4; if t@4 then (drop t@4 to _; return c to t@3; if t@3 then (drop t@3 to _; return 7) else (drop t@3 to _; return 6)) else (drop t@4 to _; drop c to _; return 5)) else (drop t@5 to _; drop c to _; drop b to _; return 4) } with { yield(v, k) => return v to t@6; return 1 to t@7; t@6 > t@7 to t@8; return k to t@9; (force t@9)(t@8), return r => return r }
+  handle
+    return 1 to t@0
+    do yield(t@0) to a
+    return 2 to t@1
+    do yield(t@1) to b
+    return 3 to t@2
+    do yield(t@2) to c
+    return a to t@5
+    if t@5 then
+      drop t@5
+      return b to t@4
+      if t@4 then
+        drop t@4
+        return c to t@3
+        if t@3 then
+          drop t@3
+          return 7
+        else
+          drop t@3
+          return 6
+      else
+        drop t@4
+        drop c
+        return 5
+    else
+      drop t@5
+      drop c
+      drop b
+      return 4
+  with
+    yield(v, k) =>
+      return v to t@6
+      return 1 to t@7
+      t@6 > t@7 to t@8
+      return k to t@9
+      (force t@9)(t@8)
+    return r =>
+      return r
 fn main() =
-  collect_bools() to t@10; print t@10 to t@11; drop t@11 to _; print_nl
+  collect_bools() to t@10
+  print t@10 to t@11
+  drop t@11
+  print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [849 x i8] c"scheme  prism-core-hash-v1\0Abundle  0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_collect_bools  45db3a6ef2f5f8cfd5e3f44adc3413b8b91fcbfa1551e87bc16a2c3b9c983ba1  collect_bools\0Afn      prism_main  b1a9064b068c4308e2602d9f57a399081bf6b9450208769967b78e11c9fe22db  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [940 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_collect_bools 45db3a6ef2f5f8cfd5e3f44adc3413b8b91fcbfa1551e87bc16a2c3b9c983ba1 collect_bools arity 0 slots abi-word[]\0Astate prism_main b1a9064b068c4308e2602d9f57a399081bf6b9450208769967b78e11c9fe22db main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [827 x i8] c"scheme  prism-core-hash-v1\0Abundle  0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_collect_bools  45db3a6ef2f5f8cfd5e3f44adc3413b8b91fcbfa1551e87bc16a2c3b9c983ba1  collect_bools\0Afn      prism_main  b1a9064b068c4308e2602d9f57a399081bf6b9450208769967b78e11c9fe22db  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [918 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:0467b382989e96407bd15154f4e1ccf2fae70550d73c0a161c22de55ae754d4a\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_collect_bools 45db3a6ef2f5f8cfd5e3f44adc3413b8b91fcbfa1551e87bc16a2c3b9c983ba1 collect_bools arity 0 slots abi-word[]\0Astate prism_main b1a9064b068c4308e2602d9f57a399081bf6b9450208769967b78e11c9fe22db main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash1 = private constant [65 x i8] c"b1a9064b068c4308e2602d9f57a399081bf6b9450208769967b78e11c9fe22db\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"

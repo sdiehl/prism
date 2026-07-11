@@ -1,12 +1,12 @@
--- A final ctl clause declares it never resumes; a free `resume` in its body
+-- A never clause declares it never resumes; a free `resume` in its body
 -- is rejected at desugar with the span of the use.
 
 effect Abort
-  ctl abort(Int) : Int
+  abort(Int) : Int
 
 fn main() =
   let v =
     handle abort(7) with
-      final ctl abort(code) => resume(code)
+      never abort(code) => resume(code)
       return r => r
   println(v)

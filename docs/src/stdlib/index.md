@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v1`
-- **Hash**: `ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0`
-- **Compiler version**: Prism v0.9.0
+- **Hash**: `d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915`
+- **Compiler version**: Prism v0.10.0
 
 ## Modules
 
@@ -23,6 +23,9 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.Monad](./data-monad.md) - Generic operations derived from the `Applicative` and `Monad` classes.
 - [Data.Checked](./data-checked.md) - Safe arithmetic families over the machine-integer lanes.
 - [Data.Vec](./data-vec.md) - Fixed-length vectors indexed by a `Nat` dimension.
+- [Data.Tensor](./data-tensor.md) - Dense multi-dimensional tensors over a flat `FloatBuf`.
+- [Data.FlatArray](./data-flatarray.md) - Flat, unboxed-element arrays: one typed surface over the raw-word buffers.
+- [Teleport](./teleport.md) - The checked mobility boundary. `teleport` runs a portable, single-use computation as a unit that is safe to move to a fresh runtime.
 - [Replay](./replay.md) - Record/replay handlers for the capability effects.
 - [Concurrent](./concurrent.md) - Cooperative async/await concurrency as a single handler, polymorphic in the effects the fibers perform.
 - [Quickcheck](./quickcheck.md) - Property testing: run a boolean property over many generated inputs and report the first counterexample, deterministically.

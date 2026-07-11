@@ -77,6 +77,32 @@ impl FrontOpts {
         validate: true,
         pre_opt: true,
     };
+    // The public validity verdict (`prism check`): elaborate and run every
+    // semantic validator (fip / replayable / effect reconciliation), but stop
+    // before scheduler retarget, optimization, lowering, and codegen. This is
+    // what makes `check` agree with `build`: a program `check` accepts is one the
+    // compiler considers valid, the fip / noalloc / replayable annotations
+    // included. The type-only `CHECK` preset stays for internal callers (dump,
+    // report, snapshots) that observe the checked program rather than judging it.
+    pub(super) const CHECK_VALIDATED: Self = Self {
+        stop: FrontStop::Elaborated,
+        diagnostics: true,
+        scheduler_retarget: false,
+        validate: true,
+        pre_opt: false,
+    };
+    // The content-addressed identity surface, additionally validated: the store
+    // and package paths commit only programs that pass every semantic validator,
+    // so a persisted definition never carries an fbip / noalloc / replayable
+    // claim the build path would reject. Validation is side-effect-free on the
+    // pre-optimizer Core, so the committed identity is byte-identical to `IDENTITY`.
+    pub(super) const IDENTITY_VALIDATED: Self = Self {
+        stop: FrontStop::Elaborated,
+        diagnostics: false,
+        scheduler_retarget: false,
+        validate: true,
+        pre_opt: false,
+    };
     // The content-addressed identity surface: pre-optimizer Core with no scheduler
     // retarget, no validators, and no diagnostics, so a hash depends on the source
     // alone.

@@ -1,5 +1,5 @@
 effect Reader
-  ctl ask(Unit) : Int
+  ask() : Int
 
 -- Reader: a read-only environment as an effect.
 --
@@ -8,13 +8,13 @@ effect Reader
 -- scaled() and shifted() both ask without threading config through their
 -- signatures. The row {Reader} is discharged at the handler.
 
-fn scaled(x) : !{Reader} Int = x * ask(())
+fn scaled(x) : Int ! {Reader} = x * ask()
 
-fn shifted(x) : !{Reader} Int = scaled(x) + ask(())
+fn shifted(x) : Int ! {Reader} = scaled(x) + ask()
 
 fn with_env(env) =
   handle shifted(5) with
-    ask(u, k) => k(env)
+    ask() resume k => k(env)
     return r => r
 
 fn main() = println(with_env(10))

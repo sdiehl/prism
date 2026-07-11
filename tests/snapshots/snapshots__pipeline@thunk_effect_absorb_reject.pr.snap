@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/thunk_effect_absorb_reject.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Beep") VOpen Ctl Ident("beep") LParen KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("Wrap") VOpen Ctl Ident("wrap") LParen LParen RParen Arrow KwInt Bang LBrace UIdent("Wrap") Bar Ident("e") RBrace RParen Colon KwInt VClose VSemi Fn Ident("body") LParen RParen Colon Bang LBrace UIdent("Wrap") Comma UIdent("Beep") RBrace KwInt Eq VOpen Ident("beep") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Int(IntLit { value: 3, suffix: None }) VClose VSemi Fn Ident("use_wrap") LParen RParen Colon Bang LBrace UIdent("Wrap") RBrace KwInt Eq Ident("wrap") LParen Ident("body") RParen VClose
+VOpen Effect UIdent("Beep") VOpen Ident("beep") LParen KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("Wrap") VOpen Ident("wrap") LParen LParen RParen Arrow KwInt Bang LBrace UIdent("Wrap") Bar Ident("e") RBrace RParen Colon KwInt VClose VSemi Fn Ident("body") LParen RParen Colon KwInt Bang LBrace UIdent("Wrap") Comma UIdent("Beep") RBrace Eq VOpen Ident("beep") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Int(IntLit { value: 3, suffix: None }) VClose VSemi Fn Ident("use_wrap") LParen RParen Colon KwInt Bang LBrace UIdent("Wrap") RBrace Eq Ident("wrap") LParen Ident("body") RParen VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 436..470,
+            span: 436..466,
         },
         EffectDecl {
             name: "Wrap",
@@ -52,7 +52,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 472..524,
+            span: 468..516,
         },
     ],
     errors: [],
@@ -88,7 +88,7 @@ Program {
                                 node: Var(
                                     "beep",
                                 ),
-                                span: 560..564,
+                                span: 553..557,
                             },
                             [
                                 Spanned {
@@ -98,11 +98,11 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 565..566,
+                                    span: 558..559,
                                 },
                             ],
                         ),
-                        span: 560..567,
+                        span: 553..560,
                     },
                     Spanned {
                         node: Int(
@@ -111,13 +111,13 @@ Program {
                                 suffix: None,
                             },
                         ),
-                        span: 570..571,
+                        span: 563..564,
                     },
                 ),
-                span: 560..571,
+                span: 553..564,
             },
             wheres: [],
-            span: 526..571,
+            span: 518..564,
         },
         Decl {
             name: "use_wrap",
@@ -140,30 +140,30 @@ Program {
                         node: Var(
                             "wrap",
                         ),
-                        span: 603..607,
+                        span: 597..601,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "body",
                             ),
-                            span: 608..612,
+                            span: 602..606,
                         },
                     ],
                 ),
-                span: 603..613,
+                span: 597..607,
             },
             wheres: [],
-            span: 573..613,
+            span: 566..607,
         },
     ],
 }
 
 == types ==
-Type Error: in `use_wrap`: effect `Beep` not declared in annotation
-    ╭─[ <source>:17:31 ]
+[E5004] Type Error: in `use_wrap`: effect `Beep` not declared in annotation
+    ╭─[ <source>:17:32 ]
     │
- 17 │ fn use_wrap() : !{Wrap} Int = wrap(body)
-    │                               ─────┬────  
-    │                                    ╰────── in `use_wrap`: effect `Beep` not declared in annotation
+ 17 │ fn use_wrap() : Int ! {Wrap} = wrap(body)
+    │                                ─────┬────  
+    │                                     ╰────── in `use_wrap`: effect `Beep` not declared in annotation
 ────╯

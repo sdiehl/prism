@@ -13,9 +13,11 @@ Prism is a strict, impure functional language in the ML family whose type system
 
 A Prism program is a set of modules, each a file of declarations. The surface language elaborates to a strict, **call-by-push-value** core ([Levy, 2004](bibliography.md#levy-2004)) in **A-normal form** (the companion [Compiler](./compiler.md) document), compiles to native code through LLVM, and is managed by **deterministic reference counting** rather than a garbage collector.
 
-Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through **monads** and track both observability and **capability effects** ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides isolated **fibers** through handlers, failure as ordinary typed control flow, record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site **optic paths** for deeply nested structure traversal and update ([optic paths](#optic-paths)), and fusing stream combinators ([streams](#streams)).
+Three things distinguish Prism from its ML and Haskell ancestors. It is **strict**, with laziness opt-in through thunks over a [call-by-push-value](./compiler.md#the-core-calculus) core, so evaluation and effect order are left to right and explicit. Side effects are inferred, extensible **effect rows** ([effects and handlers](#effects-and-handlers)) that combine structurally across calls instead of through **monads** and track both observability and **capability effects** ([capability effects and IO](#capability-effects-and-io)): an operation handled inside a function does not appear in its type, so internally effectful code is reused as pure, and a function that reads the outside world names the part it reads (`Console`, `FileSystem`, `Random`, `Env`) rather than a blanket `IO`. The same reference-count discipline both frees memory and performs **fully-in-place (FBIP) update** ([declarations and programs](#declarations-and-programs)), compiling record updates and derived setters to in-place writes on uniquely owned values (those that a reference count proves have no other live reference; see [reference counting and FBIP reuse](./compiler.md#reference-counting-and-fbip-reuse)). Beyond these, the language provides isolated **fibers** through handlers, failure as ordinary typed control flow, record and replay of a program's interaction with the world over the capability effects ([record and replay](#record-and-replay)), derived lenses and use-site **optic paths** for deeply nested structure traversal and update ([optic paths](#optic-paths)), fusing stream combinators ([streams](#streams)), **unboxed types** ([unboxed products](#unboxed-products)), and checked **usage contracts** on closures ([coeffects](#usage-and-resource-annotations)).
 
-The deterministic core gives programs a stable identity: a definition is named by the hash of its **canonical Core form**, after alpha-normalizing binders so alpha-equivalent definitions share an identity and behavior-visible Core changes do not ([content-addressed core](./compiler.md#content-addressed-core)). The same rule extends to execution: a suspended continuation is a **`kont` envelope** whose **bundle digest** names the code it may resume against ([the kont envelope](./compiler.md#the-kont-envelope)), and replayability supplies the byte-identical observable contract ([suspend and resume](#suspend-and-resume)).
+The deterministic core gives programs a stable identity: a definition is named by the hash of its **canonical Core form**, after alpha-normalizing binders so alpha-equivalent definitions share an identity and behavior-visible Core changes do not ([content-addressed core](./compiler.md#content-addressed-core)).[^alpha-identity] The same rule extends to execution: a suspended continuation is a **`kont` envelope** whose **bundle digest** names the code it may resume against ([the kont envelope](./compiler.md#the-kont-envelope)), and replayability supplies the byte-identical observable contract ([suspend and resume](#suspend-and-resume)).
+
+[^alpha-identity]: Ergo the compiler is serenely uninterested in what you named your variables: two functions that reduce to the same normal form are the same function, whatever their authors privately felt while writing them. This is a liberation if you are not attached to your variable names and a quiet bereavement if you are.
 
 The browser teleport demo deliberately stops at same-origin migration: two contexts served by the same bundle exchange a `kont` envelope over `BroadcastChannel`, and the receiver checks the bundle digest before resuming. Cross-origin or cross-stranger mobility is not part of this release. That needs a typed `Mobile` envelope, receiver capability checks, and a distribution trust model; until those exist, content addressing proves identity of the moved computation, not authority to run code from an untrusted peer.
 
@@ -47,20 +49,21 @@ Prism distinguishes identifiers by initial case. A `varid` begins with a lower-c
 
 The following are reserved and may not be used as identifiers.
 
-|            |             |              |           |            |
-| ---------- | ----------- | ------------ | --------- | ---------- |
-| `fn`       | `fip`       | `fbip`       | `pub`     | `import`   |
-| `as`       | `type`      | `newtype`    | `opaque`  | `alias`    |
-| `effect`   | `error`     | `throw`      | `try`     | `catch`    |
-| `transact` | `class`     | `instance`   | `pattern` | `deriving` |
-| `where`    | `given`     | `handle`     | `with`    | `handler`  |
-| `mask`     | `ctl`       | `final`      | `fun`     | `val`      |
-| `return`   | `let`       | `var`        | `borrow`  | `in`       |
-| `for`      | `do`        | `if`         | `then`    | `else`     |
-| `elif`     | `match`     | `of`         | `forall`  | `true`     |
-| `false`    | `while`     | `loop`       | `break`   | `continue` |
-| `using`    | `canonical` | `replayable` | `without` | `alloc`    |
-| `probe`    |             |              |           |            |
+|            |            |            |             |              |
+| ---------- | ---------- | ---------- | ----------- | ------------ |
+| `fn`       | `fip`      | `fbip`     | `pub`       | `import`     |
+| `as`       | `type`     | `newtype`  | `opaque`    | `alias`      |
+| `effect`   | `error`    | `throw`    | `try`       | `catch`      |
+| `transact` | `class`    | `instance` | `pattern`   | `deriving`   |
+| `where`    | `given`    | `handle`   | `with`      | `handler`    |
+| `mask`     | `val`      | `return`   | `let`       | `var`        |
+| `borrow`   | `in`       | `for`      | `do`        | `if`         |
+| `then`     | `else`     | `elif`     | `match`     | `of`         |
+| `forall`   | `true`     | `false`    | `while`     | `loop`       |
+| `break`    | `continue` | `using`    | `canonical` | `replayable` |
+| `without`  | `alloc`    | `probe`    |             |              |
+
+The grade words `never`, `once`, and `many` are contextual: they name a resumption grade only in operation-declaration or handler-clause prefix position, and stay usable as ordinary identifiers everywhere else.
 
 The built-in type names `Int`, `I64`, `U64`, `Bool`, `Unit`, `Float`, `Char`, and `String` are also reserved. The prelude effect names `Console`, `FileSystem`, `Random`, and `Env`, the [capability effects](#capability-effects-and-io), are reserved as well.
 
@@ -70,7 +73,7 @@ The operator set is fixed; the language has no user-defined operators. Arithmeti
 
 | Class      | Operators                                                                          |
 | ---------- | ---------------------------------------------------------------------------------- |
-| Arithmetic | `+` `-` `*` `/` `%` `^` and deprecated float `+.` `-.` `*.` `/.`                   |
+| Arithmetic | `+` `-` `*` `/` `%` `^`                                                            |
 | Comparison | `==` `/=` `<` `<=` `>` `>=` and deprecated float `==.` `/=.` `<.` `<=.` `>.` `>=.` |
 | Logical    | `&&` `\|\|`                                                                        |
 | Pipeline   | `\|>` `>>` `<<`                                                                    |
@@ -85,7 +88,9 @@ The operator set is fixed; the language has no user-defined operators. Arithmeti
 
 An `integer` is a run of decimal digits, optionally grouped by underscore separators (`1_000_000`) that are cosmetic and carry no value. A value that fits in a machine word is an immediate; a larger literal is an arbitrary-precision integer (bignum). The suffix `i64` or `u64` selects a fixed-width 64-bit lane that wraps on overflow. A `float` is an IEEE-754 double, written with a fractional part (`1.5`), an exponent (`1e25`, `1.5e3`), or both; the exponent may be signed (`1e-25`, `1E25`) and separators are admitted in its mantissa and exponent on the same rule. Exponent notation always denotes a `Float`. A separator is valid only between two digits, so a leading, trailing, doubled, or `.`/`e`-adjacent underscore is a lexical error. A `char` is a single Unicode scalar in single quotes. A `string` is double-quoted UTF-8.
 
-There are no negative literals at the lexical level: a leading minus is the unary-minus operator ([operator precedence](#operator-precedence)), so `-5`, `-5i64`, and `-1.5` are `-` applied to the literal. `-5u64` is rejected because negation is undefined on the unsigned lane, and the exponent sign lives inside the `float` token, so it never collides with that operator. The lexical minimum of the signed fixed-width lane is written by folding the sign into the literal: `-9223372036854775808i64` is `I64` min, one past the magnitude the bare positive literal admits. The formatter preserves a writer's separator grouping verbatim.
+There are no negative literals at the lexical level: a leading minus is the unary-minus operator ([operator precedence](#operator-precedence)), so `-5`, `-5i64`, and `-1.5` are `-` applied to the literal. `-5u64` is rejected because negation is undefined on the unsigned lane, and the exponent sign lives inside the `float` token, so it never collides with that operator.[^i64-min-literal] The formatter preserves a writer's separator grouping verbatim.
+
+[^i64-min-literal]: The lexical minimum of the signed fixed-width lane is written by folding the sign into the literal: `-9223372036854775808i64` is `I64` min, one past the magnitude the bare positive literal admits.
 
 The escape sequences `\n`, `\t`, `\r`, `\\`, `\"`, `\{`, and `\}` are recognized in both character and string literals; a character literal additionally accepts `\'`.
 
@@ -153,9 +158,9 @@ Prism infers types by the **bidirectional, higher-rank inference** algorithm of 
 
 Quantification is **predicative**: a type-constructor argument and an inferred type variable range over monomorphic types, so a `forall` may not be written directly as a type argument (`List(forall a. (a) -> a)` is rejected as **impredicative**). **Higher-rank types** are allowed wherever they are not a type argument, namely as a function parameter, a function result, and a declared data field; a polymorphic value can be carried through a generic container by wrapping it in a data type with a polymorphic field.
 
-### 5.1 Three Lattices {#three-lattices}
+### 5.1 Three Posets {#three-posets}
 
-A Prism signature carries three orders: what a computation may do (the effect row, after `!`), how its values may be used (the usage row, after `@`), and how a handler may consume a continuation (the operation grade). All three are lattices, and each behaves the way it does because of the one lattice property it has or lacks.
+A **poset** (partially ordered set) is a set equipped with a reflexive, antisymmetric, and transitive order. A **lattice** is a poset in which every pair has both a least upper bound (a join) and a greatest lower bound (a meet). A Prism signature carries three posets: what a computation may do (the effect row, after `!`), how its values may be used (the usage row, after `@`), and how a handler may consume a continuation (the operation grade). Effect rows and operation grades are lattices: effect rows have union and intersection, while grades form a total chain. Coeffect axes are not lattices in general because some conflicting facts have no meet.
 
 **Effect rows: joins always exist.** The carrier is a set of effect names, the order is inclusion, the join is union:
 
@@ -165,19 +170,19 @@ Sequencing takes the join; handling subtracts back toward the pure bottom:
 
 ```prism
 effect Ask
-  fun ask(Unit) : Int
+  once ask(Unit) : Int
 
-fn f() : !{IO} Unit = println("f")
+fn f() : Unit ! {IO} = println("f")
 
-fn g() : !{Ask} Int = ask(())
+fn g() : Int ! {Ask} = ask(())
 
-fn foo() : !{IO, Ask} Int =
+fn foo() : Int ! {IO, Ask} =
   f()
   g()
 
-fn bar() : !{IO} Int =
+fn bar() : Int ! {IO} =
   handle foo() with
-    fun ask(u) => 7
+    once ask(u) => 7
 
 fn main() = println(bar())
 ```
@@ -210,28 +215,28 @@ fn main() = println(g())
 
 **Operation grades: a total chain.** Continuation use is a quantity, so its lattice is a total order:
 
-<p align="center"><img src="images/lattice-grades.svg" alt="the grade chain as a single vertical total order: many over once over never, paired with the keywords ctl, fun, and final ctl" width="240"></p>
+<p align="center"><img src="images/lattice-grades.svg" alt="the grade chain as a single vertical total order: the grade keywords many over once over never" width="240"></p>
 
 The whole discipline is one comparison at one boundary: a clause's grade at most its operation's declared grade ([effects and handlers](#effects-and-handlers)):
 
 ```prism
 effect E
-  final ctl quit(Unit) : Int  -- never: a clause must drop the continuation
-  fun ask(Unit) : Int         -- once:  a clause resumes exactly once, in tail
-  ctl coin(Unit) : Bool       -- many:  a clause may capture k, resume freely
+  never quit(Unit) : Int  -- never: a clause must drop the continuation
+  once ask(Unit) : Int    -- once:  a clause resumes exactly once, in tail
+  coin(Unit) : Bool       -- many:  a clause may capture k, resume freely (default)
 
-fn foo() : !{E} Int =
+fn foo() : Int ! {E} =
   let x = ask(())
   if coin(()) then x else quit(())
 
 fn run() : Int =
   handle foo() with
-    final ctl quit(u) => 0    -- never <= never  ok
-    fun ask(u) => 42          -- once  <= once   ok
-    coin(u, k) => k(true)     -- once  <= many   ok: below the grade is allowed
+    never quit(u) => 0        -- never <= never  ok
+    once ask(u) => 42         -- once  <= once   ok
+    coin(u) resume k => k(true)     -- once  <= many   ok: below the grade is allowed
 
--- ask(u, k) => k(1) + k(2) would be rejected: the clause for `ask`
--- exceeds its declared grade `fun`, resuming more than once
+-- ask(u) resume k => k(1) + k(2) would be rejected: the clause for `ask`
+-- exceeds its declared grade `once`, resuming more than once
 
 fn main() = println(run())
 ```
@@ -242,13 +247,17 @@ One signature exercises all three at once:
 fn spawn(f : (() -> a ! e) @ {once, portable}) : Fiber(a) ! {Async(a), e}
 ```
 
+`spawn` takes a portable thunk `f` that it may call at most once, starts it as a fiber producing an `a`, and may perform both the thunk's effects `e` and the asynchronous effect `Async(a)`.
+
 - **Row, joined**: whatever `f` performs is unioned into the caller's row alongside `Async`; the handler that later runs the fiber subtracts `Async` back out.
 - **Axes, met**: `@ {once, portable}` is one point on each of two axes, their meet in the product: `spawn` promises to call the thunk at most once and may carry it to another fiber.
-- **Grade, bounded**: the `Async` operations are `ctl`, the top of the chain, so a scheduler may hold the continuation and resume it later; `fun` would have pinned every handler to immediate single resumption.
+- **Grade, bounded**: the `Async` operations are `many`, the top of the chain, so a scheduler may hold the continuation and resume it later; `once` would have pinned every handler to immediate single resumption.
 
 The design is the three properties side by side. Effects always have joins: doing more must always be expressible. Coeffects sometimes lack meets: some promises genuinely contradict. Continuation use is a total order: it is a quantity, not a set.
 
-None of this should be surprising. An effect is just a coeffect on its own continuation; what's the problem?
+None of this should be surprising. An effect is just a coeffect on its own continuation; what's the problem?[^coeffect-k]
+
+[^coeffect-k]: A nod to "a monad is just a monoid in the category of endofunctors, what's the problem?", and like the original it is deadpan and true. Performing an operation reifies the rest of the program as a value, the continuation `k`, and the whole zoo of control effects is a usage contract on that one value: `never` discards `k`, `once` spends it exactly once, `many` spends it freely. That is the `@` lattice landing on a continuation instead of a closure, so `!` (what a computation may do) and `@` (how a value may be used) were never two systems, just one lattice read from both ends. The continuation was the first value in the language to carry a coeffect.
 
 ### 5.2 Types {#types}
 
@@ -282,31 +291,37 @@ At a function arrow the value's effect row is made _equal_ to the expected one b
 
 ### 5.6 Fixed-Width Integers {#fixed-width-integers}
 
-`Int` is arbitrary precision. `I64` and `U64` are the signed two's-complement and unsigned 64-bit lanes; they wrap on overflow rather than promoting to a bignum. Their operations are named builtins, not operators, since the surface `+`, `-`, and so on target `Int` and `Float`. Each takes two operands of the lane type.
+`Int` is arbitrary precision. `I64` and `U64` are the signed two's-complement and unsigned 64-bit lanes; they wrap on overflow rather than promoting to a bignum. Their arithmetic and comparisons are the plain operators through the [numerical tower](#numerical-tower), one spelling across every lane. The bit-level operations have no operator spelling and remain named builtins, each taking two operands of the lane type.
 
-| Family     | Operations (and the `u64_*` counterparts)                   |
-| ---------- | ----------------------------------------------------------- |
-| Arithmetic | `i64_add` `i64_sub` `i64_mul` `i64_div` `i64_rem` `i64_cmp` |
-| Bitwise    | `i64_and` `i64_or` `i64_xor`                                |
-| Shift      | `i64_shl` `i64_shr`                                         |
+| Family     | Operations (and the `u64_*` counterparts) |
+| ---------- | ----------------------------------------- |
+| Bitwise    | `i64_and` `i64_or` `i64_xor`              |
+| Shift      | `i64_shl` `i64_shr`                       |
+| Comparison | `i64_cmp`                                 |
 
 `and`, `or`, and `xor` share a single bit pattern across both lanes; `i64_shr` is an arithmetic (sign-extending) shift while `u64_shr` is logical; a shift count is taken modulo 64. `to_i64`/`to_u64` and `int_of_i64`/`int_of_u64` convert between `Int` and the fixed-width lanes.
 
 ### 5.7 Integer Arithmetic and Division {#integer-arithmetic}
 
-The arithmetic operators `+`, `-`, `*`, `/`, and `%` spell integer arithmetic here through the [numerical tower](#numerical-tower)'s `Int`, `I64`, and `U64` instances; `^` is [exponentiation](#exponentiation). On `Int` they are arbitrary precision: a sum, product, or difference is exact and never overflows, promoting a machine-word result to a bignum on demand. This section states the two facts that arithmetic on `Int` cannot state by its type alone: how division rounds, and what division by zero does. Both are identical on the interpreter and native backends, a corollary of the determinism contract and pinned by the parity corpus.
+The arithmetic operators `+`, `-`, `*`, `/`, and `%` spell integer arithmetic here through the [numerical tower](#numerical-tower)'s `Int`, `I64`, and `U64` instances; `^` is [exponentiation](#exponentiation). On `Int` they are arbitrary precision: a sum, product, or difference is exact and never overflows, promoting a machine-word result to a bignum on demand.[^int-never-overflow] This section states the two facts that arithmetic on `Int` cannot state by its type alone: how division rounds, and what division by zero does. Both are identical on the interpreter and native backends, a corollary of the determinism contract and pinned by the parity corpus.
 
-Division truncates toward zero and remainder takes the sign of the dividend. That is, `/` discards the fractional part by rounding toward zero rather than toward negative infinity, and `a % b` has the sign of `a` (or is zero), so the identity `a == (a / b) * b + (a % b)` holds for every non-zero `b`. The four sign combinations make the rule concrete: `7 / 2` and `(0 - 7) / (0 - 2)` are `3`, while `(0 - 7) / 2` and `7 / (0 - 2)` are `-3`; `7 % 3` and `7 % (0 - 3)` are `1`, while `(0 - 7) % 3` and `(0 - 7) % (0 - 3)` are `-1`. This is truncated division, the semantics of C99, Rust, and the hardware division instruction both backends emit.
+[^int-never-overflow]: "Never overflows" holds in the manner of most sweeping assurances: the number grows another limb instead of wrapping, and keeps growing, right up until it meets the finite quantity of memory the machine actually has, at which point the arithmetic ends the ordinary way and takes the process with it.
+
+Division truncates toward zero and remainder takes the sign of the dividend. That is, `/` discards the fractional part by rounding toward zero rather than toward negative infinity, and `a % b` has the sign of `a` (or is zero), so the identity `a == (a / b) * b + (a % b)` holds for every non-zero `b`.[^div-signs] This is truncated division, the semantics of C99, Rust, and the hardware division instruction both backends emit.
+
+[^div-signs]: The four sign combinations make the rule concrete: `7 / 2` and `(0 - 7) / (0 - 2)` are `3`, while `(0 - 7) / 2` and `7 / (0 - 2)` are `-3`; `7 % 3` and `7 % (0 - 3)` are `1`, while `(0 - 7) % 3` and `(0 - 7) % (0 - 3)` are `-1`.
 
 ```prism
 {{#include ../../tests/cases/run/num_int_div.pr}}
 ```
 
-Floored division, where `/` rounds toward negative infinity and `%` (the Euclidean-adjacent modulus) takes the sign of the divisor, was considered and declined. Two reasons decide it. The fixed-width lanes are the constraint: `i64_div`/`u64_div` and their remainders are the machine's truncating division, and an `Int` operator whose meaning diverged from the lane it shares a spelling with would split the integer family into two rounding rules a reader must track by type. And the determinism contract wants one rule across every lane and both backends rather than a surface convenience that the hardware does not compute; a caller who wants a floored or Euclidean modulus writes it once over these primitives (`((a % b) + b) % b` for a non-negative residue) rather than having the language pick a second, silently different `%`.
+Floored division, where `/` rounds toward negative infinity and `%` (the Euclidean-adjacent modulus) takes the sign of the divisor, was considered and declined. Two reasons decide it. The fixed-width lanes are the constraint: `/` and `%` on `I64` and `U64` are the machine's truncating division, and an `Int` operator whose meaning diverged from the lane it shares a spelling with would split the integer family into two rounding rules a reader must track by type. And the determinism contract wants one rule across every lane and both backends rather than a surface convenience that the hardware does not compute; a caller who wants a floored or Euclidean modulus writes it once over these primitives (`((a % b) + b) % b` for a non-negative residue) rather than having the language pick a second, silently different `%`.
 
 Division or remainder by zero is the one partial case of integer arithmetic. It is a runtime fault: the program halts immediately with exit status 1 and exactly `fatal: division by zero` on standard error, byte-identical on the interpreter and the native backend, on both `Int` and the fixed-width lanes. It is not a value, and unlike the recoverable `fail()` of [errors and failure](#errors-and-failure) it is not routed through an effect and cannot be caught; it aborts the run the way an unrecoverable `error(code)` does. Every other integer operation is total.
 
-The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](#fixed-width-integers)): `i64_add`, `i64_sub`, and `i64_mul` (and their `u64_` and `U64` counterparts) are two's-complement modular arithmetic, so `i64_add(I64_MAX, 1)` is `I64_MIN` and `u64_add(U64_MAX, 1)` is `0`. Division wraps on the one signed input that would overflow it, so `i64_div(I64_MIN, -1)` is `I64_MIN` and `i64_rem(I64_MIN, -1)` is `0`, consistent with the wrapping add/sub/mul rather than trapping; only a zero divisor faults. Unary minus follows the same wrap on the fixed-width lane, so `-x` on `I64` is the two's-complement negation and `-I64_MIN` is `I64_MIN`. `Int`, being a bignum, has no such edge: negation and division there are always exact.
+The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](#fixed-width-integers)): `+`, `-`, and `*` on `I64` and `U64` are two's-complement modular arithmetic, so adding one to `I64_MAX` wraps to `I64_MIN` and adding one to `U64_MAX` yields `0`.[^fixed-div-edge] Unary minus follows the same wrap on the fixed-width lane, so `-x` on `I64` is the two's-complement negation and `-I64_MIN` is `I64_MIN`. `Int`, being a bignum, has no such edge: negation and division there are always exact.
+
+[^fixed-div-edge]: Division wraps on the one signed input that would overflow it, so `I64_MIN / -1` on the `I64` lane is `I64_MIN` and `I64_MIN % -1` is `0`, consistent with the wrapping add/sub/mul rather than trapping; only a zero divisor faults.
 
 ```prism
 {{#include ../../tests/cases/run/num_fixed_wrap.pr}}
@@ -316,9 +331,13 @@ The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](
 
 The wrapping and faulting defaults above are the primitives; a program that wants overflow to be visible rather than silent reaches for the safe families in the `Data.Checked` library, which layer four disciplines over those primitives through one class, `Checked(a)`. The `checked_*` methods (`checked_add`, `checked_sub`, `checked_mul`, `checked_neg`, `checked_div`, `checked_mod`) return `Option(a)`, `None` exactly when the operation overflows the lane or divides by zero. The `saturating_*` methods (`add`, `sub`, `mul`) clamp to the bound the overflow crossed instead. The `wrapping_*` methods (`add`, `sub`, `mul`, `neg`) are explicit names for the two's-complement wrap the raw operators already perform ([fixed-width integers](#fixed-width-integers)), so a caller can spell the intent rather than rely on the default. And the `overflowing_*` methods (`add`, `sub`, `mul`) return the wrapped result paired with a `Bool` that is true precisely when the operation overflowed. Instances cover `I64`, `U64`, and `Int`; the checked narrowings `int_to_i64` and `int_to_u64` sit beside the class as free functions returning `Option`, the partial inverses of the total widenings `int_of_i64`/`int_of_u64`.
 
-`Checked` sits beside the arithmetic classes rather than inheriting from them: it carries no superclass and no raw operators, so it stays meaningful for any integer lane independently of what algebraic structure that lane also has. The connection runs the other way, as a law. The `wrapping_*` methods agree exactly, value for value, with the lane's raw arithmetic, `wrapping_add`/`wrapping_sub`/`wrapping_mul` with the two's-complement `+`/`-`/`*` and `wrapping_neg` with unary negation. `wrapping_neg` on `U64` is that same two's-complement wrap the lane's other operations use, so `wrapping_neg(0)` is `0` and `wrapping_neg(x)` is `U64_MAX - x + 1` for a nonzero `x`, rather than a fault or a rejection; the unsigned lane simply has no non-wrapping negation to prefer. Because the agreement is with the raw operators, it is stable under any later refactor that gives those operators a class of their own: the `wrapping_*` methods and the lane's ring operations remain the same function by construction.
+`Checked` sits beside the arithmetic classes rather than inheriting from them: it carries no superclass and no raw operators, so it stays meaningful for any integer lane independently of what algebraic structure that lane also has. The connection runs the other way, as a law. The `wrapping_*` methods agree exactly, value for value, with the lane's raw arithmetic, `wrapping_add`/`wrapping_sub`/`wrapping_mul` with the two's-complement `+`/`-`/`*` and `wrapping_neg` with unary negation.[^u64-wrapping-neg] Because the agreement is with the raw operators, it is stable under any later refactor that gives those operators a class of their own: the `wrapping_*` methods and the lane's ring operations remain the same function by construction.
 
-The families are not independent definitions that happen to line up; each fixed-width operation is computed once in the exact `Int` lane and then narrowed three ways, so the laws hold by construction and are pinned on both backends. For a lane bounded by `[lo, hi]`, `checked_op(x, y)` is `Some(wrapping_op(x, y))` when the exact result lies in range and `None` otherwise; `overflowing_op(x, y)` is `(wrapping_op(x, y), flag)` with `flag` true iff `checked_op(x, y)` is `None`; and `saturating_op(x, y)` is that same wrapped value when it is in range, and otherwise the crossed bound, `hi` on overflow above (`I64` max or `U64` max) and `lo` below (`I64` min or `0`). The overflow cases follow the primitives exactly: `checked_add(I64_MAX, 1)` is `None` while `saturating_add(I64_MAX, 1)` is `I64_MAX`; `checked_neg(I64_MIN)` and `checked_div(I64_MIN, -1)` are `None`, the two signed edges where the exact result escapes the lane; and `checked_sub` on `U64` is `None` on any unsigned underflow, with `checked_neg` there `Some(0)` only for `0`. Division and remainder inside a `checked_*` follow the truncating rule of [integer arithmetic](#integer-arithmetic). The `Int` instance is the degenerate case that keeps the class total rather than vacuous: unbounded, so `wrapping_*` and `saturating_*` are the identity, `overflowing_*` always flags `false`, and only a zero divisor turns a `checked_*` into `None`.
+[^u64-wrapping-neg]: `wrapping_neg` on `U64` is that same two's-complement wrap the lane's other operations use, so `wrapping_neg(0)` is `0` and `wrapping_neg(x)` is `U64_MAX - x + 1` for a nonzero `x`, rather than a fault or a rejection; the unsigned lane simply has no non-wrapping negation to prefer.
+
+The families are not independent definitions that happen to line up; each fixed-width operation is computed once in the exact `Int` lane and then narrowed three ways, so the laws hold by construction and are pinned on both backends. For a lane bounded by `[lo, hi]`, `checked_op(x, y)` is `Some(wrapping_op(x, y))` when the exact result lies in range and `None` otherwise; `overflowing_op(x, y)` is `(wrapping_op(x, y), flag)` with `flag` true iff `checked_op(x, y)` is `None`; and `saturating_op(x, y)` is that same wrapped value when it is in range, and otherwise the crossed bound, `hi` on overflow above (`I64` max or `U64` max) and `lo` below (`I64` min or `0`).[^checked-edges] Division and remainder inside a `checked_*` follow the truncating rule of [integer arithmetic](#integer-arithmetic). The `Int` instance is the degenerate case that keeps the class total rather than vacuous: unbounded, so `wrapping_*` and `saturating_*` are the identity, `overflowing_*` always flags `false`, and only a zero divisor turns a `checked_*` into `None`.
+
+[^checked-edges]: The overflow cases follow the primitives exactly: `checked_add(I64_MAX, 1)` is `None` while `saturating_add(I64_MAX, 1)` is `I64_MAX`; `checked_neg(I64_MIN)` and `checked_div(I64_MIN, -1)` are `None`, the two signed edges where the exact result escapes the lane; and `checked_sub` on `U64` is `None` on any unsigned underflow, with `checked_neg` there `Some(0)` only for `0`.
 
 ```prism
 {{#include ../../tests/cases/run/law_checked.pr}}
@@ -326,13 +345,17 @@ The families are not independent definitions that happen to line up; each fixed-
 
 ### 5.8 Floating-Point Arithmetic {#floating-point}
 
-`Float` is an IEEE-754 double. Its arithmetic and comparison operators are the plain `+`, `-`, `*`, `/`, `%`, `==`, `/=`, `<`, `<=`, `>`, and `>=` through the [numerical tower](#numerical-tower); the dot-suffixed forms `+.`, `-.`, `*.`, `/.`, `==.`, `/=.`, `<.`, `<=.`, `>.`, and `>=.` remain as deprecated aliases. There is no implicit coercion between `Int` and `Float`, so a mixed expression is a type error resolved by an explicit `to_float` ([exponentiation](#exponentiation)). Floating-point arithmetic is where a language most often becomes tier-dependent, because a fused multiply-add, an extended-precision register, or a differently rounded library call changes a low bit. Prism forbids that: every float operation follows one rounding rule and one set of special-value rules, and the interpreter and both native backends agree bit for bit, pinned by the parity corpus and, for the printer, by a dedicated formatter oracle.
+`Float` is an IEEE-754 double. Its arithmetic and comparison operators are the plain `+`, `-`, `*`, `/`, `%`, `==`, `/=`, `<`, `<=`, `>`, and `>=` through the [numerical tower](#numerical-tower). There is no implicit coercion between `Int` and `Float`, so a mixed expression is a type error resolved by an explicit `to_float` ([exponentiation](#exponentiation)). Floating-point arithmetic is where a language most often becomes tier-dependent, because a fused multiply-add, an extended-precision register, or a differently rounded library call changes a low bit. Prism forbids that: every float operation follows one rounding rule and one set of special-value rules, and the interpreter and both native backends agree bit for bit, pinned by the parity corpus and, for the printer, by a dedicated formatter oracle.
 
 The rounding contract is round to nearest, ties to even, the IEEE-754 default, applied to every arithmetic operation with no fused or wider-than-double intermediate. This is the single rule the language commits to, and it is why `0.1 + 0.2` is `0.30000000000000004` and `1.0 / 3.0` is `0.3333333333333333` identically everywhere: the result is the correctly rounded double, not an artifact of an evaluation order or a backend.
 
-Float division never faults. Where integer `/` by zero aborts, `/.` by zero is an ordinary IEEE result: `x / 0.0` is `inf` or `-inf` according to the sign of the numerator and of the zero, and `0.0 / 0.0` is `nan`. A `nan` then propagates through every arithmetic operation it touches, so `nan + 1.0` and `nan * 0.0` are both `nan`; there is no arithmetic that turns a `nan` back into a finite number. Because no float operation faults, a floating-point pipeline never introduces a failure edge into a function's effect row the way integer division by zero conceptually could.
+Float division never faults. Where integer `/` by zero aborts, `/.` by zero is an ordinary IEEE result: `x / 0.0` is `inf` or `-inf` according to the sign of the numerator and of the zero, and `0.0 / 0.0` is `nan`. A `nan` then propagates through every arithmetic operation it touches, so `nan + 1.0` and `nan * 0.0` are both `nan`; there is no arithmetic that turns a `nan` back into a finite number.[^nan-home] Because no float operation faults, a floating-point pipeline never introduces a failure edge into a function's effect row the way integer division by zero conceptually could.
 
-Signed zero is observable. `0.0` and `-0.0` are distinct values that compare equal (`0.0 == -0.0` is `true`) yet are distinguished by any operation that reads the sign bit: `1.0 / 0.0` is `inf` while dividing by negative zero is `-inf`. Unary minus on a `Float` is a genuine sign flip, not a subtraction from zero, so `-(0.0)` is `-0.0` (a subtraction `0.0 - 0.0` would give `+0.0`) and `-(-0.0)` is `0.0`; the sign flip is bit-identical on the interpreter and both native backends. Comparisons follow IEEE unordered semantics for `nan`: `nan` is equal to nothing including itself, so `nan == nan` is `false` and `nan /= nan` is `true`, and every ordering against `nan` (`nan < x`, `nan > x`) is `false`. The program below exercises each of these on both backends.
+[^nan-home]: `nan` is the one value with no route home: every operation applied in the hope of repairing it only propagates it further, and it declines to be equal even to itself, a solitude most values are spared having to contemplate.
+
+Signed zero is observable. `0.0` and `-0.0` are distinct values that compare equal (`0.0 == -0.0` is `true`) yet are distinguished by any operation that reads the sign bit: `1.0 / 0.0` is `inf` while dividing by negative zero is `-inf`.[^signed-zero-neg] Comparisons follow IEEE unordered semantics for `nan`: `nan` is equal to nothing including itself, so `nan == nan` is `false` and `nan /= nan` is `true`, and every ordering against `nan` (`nan < x`, `nan > x`) is `false`. The program below exercises each of these on both backends.
+
+[^signed-zero-neg]: Unary minus on a `Float` is a genuine sign flip, not a subtraction from zero, so `-(0.0)` is `-0.0` (a subtraction `0.0 - 0.0` would give `+0.0`) and `-(-0.0)` is `0.0`; the sign flip is bit-identical on the interpreter and both native backends.
 
 ```prism
 {{#include ../../tests/cases/run/num_float_ieee.pr}}
@@ -342,19 +365,27 @@ Printing is owned by the canonical `Float` formatter and not respecified here; t
 
 #### 5.7.1 Elementary Functions and Conversions {#elementary-functions}
 
-The elementary functions are owned the same way the arithmetic is. Rather than call whatever `libm` the platform links, Prism vendors one implementation of the double-precision math library and routes every function through it on every backend: the native code calls it, and the interpreter calls the identical compiled symbols, so a transcendental is a consequence of in-repo code, not of a system library's rounding. The determinism flag that makes this hold at the lowest bit is floating-point contraction disabled everywhere (`-ffp-contract=off`), so no fused multiply-add fuses `a*b+c` on one platform and not another, in ordinary arithmetic or inside these functions.
+The elementary functions are owned the same way the arithmetic is. Rather than call whatever `libm` the platform links, Prism vendors one implementation of the double-precision math library and routes every function through it on every backend: the native code calls it, and the interpreter calls the identical compiled symbols, so a transcendental is a consequence of in-repo code, not of a system library's rounding.[^fp-contract]
+
+[^fp-contract]: The determinism flag that makes this hold at the lowest bit is floating-point contraction disabled everywhere (`-ffp-contract=off`), so no fused multiply-add fuses `a*b+c` on one platform and not another, in ordinary arithmetic or inside these functions.
 
 The accuracy statement is deliberately modest and honest: the contract is **determinism, not correct rounding**. Each function is a deterministic faithful approximation, bit-for-bit identical on the interpreter and both native backends and across platforms, but it is not guaranteed to be the correctly rounded double of the true real result. Correctly-rounded transcendentals (the table-maker's-dilemma problem) are an explicit non-goal; what the language guarantees is that whatever value a function produces, it produces the same value everywhere, pinned by the conformance corpus over the hard cases (subnormals, the extremes, argument reduction near multiples of pi/2, signed zero, `nan`, and the infinities) and a deterministic bulk sweep.
 
-The functions divide into two classes. The **exact** operations are correctly rounded or integer-valued by IEEE-754 and therefore identical on every conforming platform regardless of implementation: `sqrt` (correctly rounded), `abs_float`, and the roundings `floor`, `ceil`, `trunc` (toward zero), and `round` (ties away from zero, so `round(2.5)` is `3.0` and `round(-2.5)` is `-3.0`, distinct from the ties-to-even of arithmetic). The **approximate** transcendentals are the owned-library functions: `sin`, `cos`, `tan`; the inverses `asin`, `acos`, `atan`, and the two-argument `atan2(y, x)`; the hyperbolics `sinh`, `cosh`, `tanh`; the exponentials `exp`, `exp2`, `expm1`; the logarithms `ln` (natural), `log2`, `log10`, `log1p`; `pow`, `cbrt`, and `hypot`. `fmod(x, y)` is the exact IEEE remainder. Domains and special values follow the usual conventions and propagate IEEE special values: a `nan` argument yields `nan`; `asin` and `acos` are `nan` outside `[-1, 1]`; `sqrt` of a negative is `nan`; `ln`, `log2`, `log10` are `-inf` at `0` and `nan` below it; `atan2` and `hypot` are defined on the whole plane; and every function is total (none faults), so like the operators they add no failure edge to an effect row.
+The functions divide into two classes. The **exact** operations are correctly rounded or integer-valued by IEEE-754 and therefore identical on every conforming platform regardless of implementation: `sqrt` (correctly rounded), `abs_float`, and the roundings `floor`, `ceil`, `trunc` (toward zero), and `round` (ties away from zero, so `round(2.5)` is `3.0` and `round(-2.5)` is `-3.0`, distinct from the ties-to-even of arithmetic). The **approximate** transcendentals are the owned-library functions: `sin`, `cos`, `tan`; the inverses `asin`, `acos`, `atan`, and the two-argument `atan2(y, x)`; the hyperbolics `sinh`, `cosh`, `tanh`; the exponentials `exp`, `exp2`, `expm1`; the logarithms `ln` (natural), `log2`, `log10`, `log1p`; `pow`, `cbrt`, and `hypot`. `fmod(x, y)` is the exact IEEE remainder.[^elem-domains]
 
-The `Int`/`Float` conversions pin their rounding once, identically on both backends. `to_float` rounds an `Int` to the nearest `Float`, ties to even. The three float-to-`Int` conversions differ only in how they round to an integer before converting: `truncate` toward zero, `floor_to_int` down, `ceil_to_int` up. All three then apply one saturating cast: a value beyond the signed 64-bit range clamps to that range's endpoint, and `nan` converts to `0`, matching the interpreter's semantics exactly (the native backend uses the saturating conversion, never the undefined-on-overflow one). A result that exceeds the tagged-immediate range becomes a bignum `Int`, so `truncate(1e300)` is the saturated `9223372036854775807` on both backends rather than a wrapped low word.
+[^elem-domains]: Domains and special values follow the usual conventions and propagate IEEE special values: a `nan` argument yields `nan`; `asin` and `acos` are `nan` outside `[-1, 1]`; `sqrt` of a negative is `nan`; `ln`, `log2`, `log10` are `-inf` at `0` and `nan` below it; `atan2` and `hypot` are defined on the whole plane; and every function is total (none faults), so like the operators they add no failure edge to an effect row.
+
+The `Int`/`Float` conversions pin their rounding once, identically on both backends. `to_float` rounds an `Int` to the nearest `Float`, ties to even. The three float-to-`Int` conversions differ only in how they round to an integer before converting: `truncate` toward zero, `floor_to_int` down, `ceil_to_int` up.[^float-to-int-cast]
+
+[^float-to-int-cast]: All three then apply one saturating cast: a value beyond the signed 64-bit range clamps to that range's endpoint, and `nan` converts to `0`, matching the interpreter's semantics exactly (the native backend uses the saturating conversion, never the undefined-on-overflow one). A result that exceeds the tagged-immediate range becomes a bignum `Int`, so `truncate(1e300)` is the saturated `9223372036854775807` on both backends rather than a wrapped low word.
 
 #### 5.7.2 The Numerical Tower {#numerical-tower}
 
-The arithmetic and comparison operators are one spelling per operation across every lane, with the lane chosen by the operand's type and resolved entirely at compile time. Three classes carry them. `Num(a)` provides `+`, `-`, `*`, and unary minus; `Div(a)` provides `/` and `%`; `Ord(a)` provides `<`, `<=`, `>`, and `>=` through its `cmp` method for non-primitive ordered types. `Num` and `Div` have instances for `Int`, `I64`, `U64`, and `Float`, so `+` reads on any of them and the earlier per-lane semantics of this chapter (the exact `Int`, the wrapping fixed-width lanes, the IEEE `Float`) are the instances' behavior, unchanged. `Div` is split from `Num` so a type with addition but no sensible division stays representable without a vacuous method. The dot-suffixed float operators remain as aliases for the plain operators on `Float` and are scheduled for removal; a plain `+` on `Float` and a `+.` elaborate to the identical primitive, as do `x < y` and `x <. y`.
+The arithmetic and comparison operators are one spelling per operation across every lane, with the lane chosen by the operand's type and resolved entirely at compile time. Three classes carry them. `Num(a)` provides `+`, `-`, `*`, and unary minus; `Div(a)` provides `/` and `%`; `Ord(a)` provides `<`, `<=`, `>`, and `>=` through its `cmp` method for non-primitive ordered types. `Num` and `Div` have instances for `Int`, `I64`, `U64`, and `Float`, so `+` reads on any of them and the earlier per-lane semantics of this chapter (the exact `Int`, the wrapping fixed-width lanes, the IEEE `Float`) are the instances' behavior, unchanged. `Div` is split from `Num` so a type with addition but no sensible division stays representable without a vacuous method.
 
-Resolution has no runtime cost. A monomorphic operand keeps the lane's direct primitive, exactly the code the operator emitted before the tower, so the class dictionary never survives specialization and the generated core is byte-identical, pinned by the allocation gate. Only genuinely polymorphic code, a function written `given Num(a)` or `given Div(a)`, dispatches through a dictionary, and that dictionary too is erased wherever the function is specialized to a concrete lane. Unary minus follows the same rule: `-x` on a concrete lane is the sign flip or two's-complement negation of [floating-point](#floating-point) and [integer arithmetic](#integer-arithmetic), and `-x` on a `Num(a)` operand dispatches through the class with the same value. Unsigned `U64` has no surface negation (`-x` on a `U64` is a type error naming the signed lanes), but the `Num(U64)` instance's negation is the two's-complement wrap, reachable through generic `Num` code and agreeing with `wrapping_neg` ([safe arithmetic](#safe-arithmetic)).
+Resolution has no runtime cost.[^abstraction-free] A monomorphic operand keeps the lane's direct primitive, exactly the code the operator emitted before the tower, so the class dictionary never survives specialization and the generated core is byte-identical, pinned by the allocation gate. Only genuinely polymorphic code, a function written `given Num(a)` or `given Div(a)`, dispatches through a dictionary, and that dictionary too is erased wherever the function is specialized to a concrete lane. Unary minus follows the same rule: `-x` on a concrete lane is the sign flip or two's-complement negation of [floating-point](#floating-point) and [integer arithmetic](#integer-arithmetic), and `-x` on a `Num(a)` operand dispatches through the class with the same value. Unsigned `U64` has no surface negation (`-x` on a `U64` is a type error naming the signed lanes), but the `Num(U64)` instance's negation is the two's-complement wrap, reachable through generic `Num` code and agreeing with `wrapping_neg` ([safe arithmetic](#safe-arithmetic)).
+
+[^abstraction-free]: This is the sort of abstraction the field likes to call free: the polymorphism is a compile-time fiction, and nothing is charged at run time for a convenience used only at type-check time. As with most things called free, the cost was entirely real and simply billed earlier, to the compiler.
 
 Integer literals are polymorphic. A literal with no width suffix adopts whatever numeric lane its context expects: `1` is a `Float` where a `Float` is wanted (so a `Float`-typed binding or argument needs no `.0`), an `I64` in an `I64` position, and so on, with the lane's constant placed directly in the elaborated core and no runtime conversion. A decimal or exponent literal denotes a fractional lane, of which `Float` is currently the only one. The **defaulting rule** fixes the ambiguous case: an integer literal with no constraining context defaults to `Int`, and a fractional literal to `Float`. The default always fires, so a program that never mentions the numeric classes never sees a class-constraint error; `let n = 5` is an `Int` exactly as before the tower. A width-suffixed literal (`5i64`, `5u64`) is monomorphic, its suffix a type ascription rather than a hint, and a literal out of range for the lane it resolves to is a compile error at resolution time.
 
@@ -382,9 +413,25 @@ A constructor may instead take _named_ fields, `C { f : T, ... }`, making the ty
 {{#include ../examples/record.pr}}
 ```
 
+### 5.11 Unboxed Products {#unboxed-products}
+
+A product may be written **unboxed** so its fields are carried inline rather than behind a heap cell: `#(a, b)` is an unboxed tuple and `#{ x : a, y : b }` an unboxed record, whose field is read with `e.#field`. A record lowers positionally to the same product representation, so projection reuses the tuple machinery and reference counting is balanced by construction. A product built and consumed within one function scalarizes away entirely, creating no cell at all; one that escapes across a boundary the optimizer cannot see through is boxed by the native backend, value-identical to the interpreter. Whether a given product is boxed is therefore a cost fact decided by the backend, never a difference an observer can name.
+
+```prism
+{{#include ../examples/unboxed_products.pr}}
+```
+
+### 5.12 Non-Allocating Nullables {#ornull}
+
+`OrNull(a)` is a nullable that costs no heap cell: `Null` is the empty word and `This(v)` carries a present element in the element's own representation. Because the two share one word of storage, the element type must be one whose values can never collide with the null word: a concrete, single-word, non-zero type. `Unit` (the zero word), a nested `OrNull`, an unboxed product, and an element type inference never pins are all rejected at compile time (E1019), on written annotations and on nullables inference discovers on its own alike. `Null` and `This` behave as ordinary constructors under `match`, exhaustiveness, and reference counting, so a nullable is byte-identical across backends and its representation stays a storage choice.
+
+```prism
+{{#include ../examples/ornull.pr}}
+```
+
 ## 6. Type Classes {#type-classes}
 
-A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A function states its constraints with a `given` clause after the return annotation, as `maximum_by_ord` and `join_shown` below do, and receives its dictionaries as hidden arguments resolved at each call site, one per constraint. The following program declares a second `Ord(Int)` instance named `ordDesc` that reverses the ordering, designates the prelude's ascending `ordInt` as canonical, and selects each explicitly.
+A class declares a single-parameter constraint and a set of method signatures. An instance is a _named_ value providing those methods for one head type. A function states its constraints with a `given` clause after the return annotation, as `announce` below does, and receives its dictionaries as hidden arguments resolved at each call site, one per constraint. The following program declares two `Describe(Temp)` instances, designates one canonical, and selects the other explicitly with `using`.
 
 A class, instance, or effect body is a layout block: the head ends its line and the members follow on indented lines, one per line, with no braces and no `where`. Each instance method is written in expression form, `fn m(x) = e`, and because the body is layout rather than brace-delimited it is a full layout context, so a method needing several bindings uses the same layout-sequenced statements a top-level `fn` body admits, not only `let .. in` chaining. A brace opening one of these bodies is a parse error that names the layout rewrite. A marker class with no methods, and its instance, are written as the bare head with no body.
 
@@ -416,7 +463,7 @@ Printing follows the same discipline. `print` and `println` display a concrete a
 
 ### 6.2 Superclasses {#superclasses}
 
-A class may require another as a **superclass** with `given`. Each instance then stores a resolved superclass dictionary as the leading field of its dictionary cell, and a `given Ord(a)` constraint discharges an `Eq(a)` obligation by projecting that field. The superclass witness is found automatically from the instances in scope.
+A class may require another as a **superclass** with `given`, the way an interface extends another. Each instance then stores a resolved superclass dictionary as the leading field of its dictionary cell, so one written constraint carries both capabilities: below, a `given Greet(a)` function calls the superclass method `name_of` with no `Nameable` constraint written, discharging it by projecting that field. The superclass witness is found automatically from the instances in scope, so the instance declaration never repeats it, and unlike inheritance nothing is overridden: the two dictionaries stay separate values.
 
 ```prism
 {{#include ../examples/superclass.pr}}
@@ -425,6 +472,8 @@ A class may require another as a **superclass** with `given`. Each instance then
 ### 6.3 Higher-Kinded Classes {#higher-kinded-classes}
 
 A class parameter may be a **type constructor** of kind `* -> *`, applied as `f(a)` in method signatures and resolved on the head constructor of each instance. The prelude's `Functor`/`Applicative`/`Monad`/`Foldable`/`Traversable` tower is built this way. The example below builds that tower explicitly over a custom container, each level naming its predecessor as a superclass with `given`, so an instance high in the tower can exist only where the ones below it do.
+
+<p align="center"><img src="images/class-tower.svg" alt="the higher-kinded class tower: Monad over Applicative over Functor, and Traversable over both Functor and Foldable; each arrow is a superclass constraint written with given" width="460"></p>
 
 ```prism
 {{#include ../examples/hkt_tower.pr}}
@@ -436,7 +485,9 @@ The prelude provides the same tower for `List` and `Option`. Its methods are **e
 {{#include ../examples/hkt.pr}}
 ```
 
-So `Monad` here is just another class, structure for `List`-style nondeterminism and `Option`-style failure, with none of the language integration it carries elsewhere: no do-notation, no privileged status, no `return`. Sequencing side effects is the effect system's job, not the monad's.
+So `Monad` here is just another class, structure for `List`-style nondeterminism and `Option`-style failure, with none of the language integration it carries elsewhere: no do-notation, no privileged status, no `return`, no burritos, no Kleisli categories.[^kleisli] Sequencing side effects is the effect system's job, not the monad's.
+
+[^kleisli]: The Kleisli category of a monad `m` has types as objects and functions `(a) -> m(b)` as arrows, composed by `bind`; it is the category you are quietly working in whenever every function must wrap its result to have an effect. Prism's effectful functions `(a) -> b ! {E}` are those arrows with the wrapper moved into the row: composition is ordinary function composition, the row accumulates structurally, and a handler discharges it. You have been composing Kleisli arrows all along; the language just declines to make you say so.
 
 The two systems meet in `Traversable`. The example below defines a recursive `Tree`, gives it the `Functor`/`Foldable`/`Traversable` instances, then runs a single generic `traverse` over it four ways. Nothing about the traversal changes between them; the behaviour is chosen entirely by the effect the per-element function performs, since `traverse`'s signature carries that row straight through. `State` numbers the leaves, `Fail` short-circuits, `Choice` (resumed multishot) enumerates every assignment, and `{State, Fail}` does the first two at once under two stacked handlers. Each is a job a monadic language hands to a different `Applicative` instance (`State`, `Maybe`, the list monad) or, for the last, a `StateT s Maybe` transformer stack; here it is one traversal and the effect rows supply the rest. This is the whole type system in one program: higher-kinded classes with a superclass chain, principal effect rows that compose, and handlers (including multishot resumption) discharging them.
 
@@ -452,13 +503,13 @@ Classes remain single-parameter; multi-parameter classes are not supported.
 
 An `effect` declares a set of operations; each operation has an argument list and a result type. Performing an operation is an ordinary call to its name. A function's effect _row_ is the set of effects whose operations it may perform and has not handled, written `! {L, ...}` on its result type, with an optional row variable tail `! {L | r}`. A bare `!` is an explicit empty row. A row is inferred when omitted.
 
-An operation's declaration carries a **grade**, the **resumption multiplicity** every handler clause for it must respect, written as the keyword prefix `ctl`, `fun`, or `final ctl`. The grades form a three-point **lattice** ordered `final ctl < fun < ctl`: `final ctl` never resumes (the continuation is dropped), `fun` resumes exactly once in tail position (no capture), and bare `ctl` may capture the continuation and resume any number of times. `ctl` is the default and the most general grade, so an operation declared without a narrower prefix admits every handler. The checking rule is one line: a handler clause's own multiplicity must be at most its operation's declared grade. A clause that resumes a `final ctl` operation, or that captures or re-enters the continuation of a `fun` operation, is rejected at that clause, its caret naming the operation and its declared grade; a clause more restrictive than the grade (handling a `ctl` operation tail-resumptively, say) is always allowed. The grade is a static, checked fact only: it constrains which handlers typecheck and lets the compiler keep an unrelated in-place `var` loop on its fast lowering when some other component resumes multishot, but it never changes the observable behavior of an accepted program.
+An operation's declaration carries a **grade**, the **resumption multiplicity** every handler clause for it must respect, written as the contextual prefix `never`, `once`, or `many`. The grades form a three-point **lattice** ordered `never < once < many`: `never` never resumes (the continuation is dropped), `once` resumes exactly once in tail position (no capture), and `many` may capture the continuation and resume any number of times. `many` is the default and the most general grade, so an operation declared with no prefix (or the explicit `many`) admits every handler; a grade word is written only to claim something stronger. The checking rule is one line: a handler clause's own multiplicity must be at most its operation's declared grade. A clause that resumes a `never` operation, or that captures or re-enters the continuation of a `once` operation, is rejected at that clause, its caret naming the operation and its declared grade; a clause more restrictive than the grade (handling a `many` operation tail-resumptively, say) is always allowed. The grade is a static, checked fact only: it constrains which handlers typecheck and lets the compiler keep an unrelated in-place `var` loop on its fast lowering when some other component resumes multishot, but it never changes the observable behavior of an accepted program.
 
-| Prefix      | Grade      | Resumption                                                               |
-| ----------- | ---------- | ------------------------------------------------------------------------ |
-| `final ctl` | `0` (zero) | never resumes; the continuation is dropped                               |
-| `fun`       | `1` (one)  | resumes exactly once, in tail position, without capturing `k`            |
-| `ctl`       | `ω` (many) | may capture `k` and resume any number of times, including zero (default) |
+| Prefix  | Grade | Resumption                                                     |
+| ------- | ----- | -------------------------------------------------------------- |
+| `never` | `0`   | never resumes; the continuation is dropped                     |
+| `once`  | `1`   | resumes exactly once, in tail position, without capturing `k`  |
+| `many`  | `ω`   | may capture `k` and resume any number of times, including zero |
 
 ```prism
 {{#include ../examples/eff_state.pr}}
@@ -468,7 +519,7 @@ A `handle e with` block discharges operations; its grammar is the `handler` nont
 
 Operations and handlers are **delimited control**: the `handle` block is the _delimiter_ (a prompt), and the resumption `k` is the **delimited continuation** it captures, the slice of computation between the perform site and the handler. Being first-class, `k` reinstalls that slice under the same handler when invoked. This is the typed, named generalization of `shift`/`reset`: a single prompt with one anonymous continuation becomes a row of named operations, each with its own clause, and the effect row is the static record of which delimiters a computation still requires.
 
-A clause may invoke `k` any number of times; more than once makes the continuation **multishot**: each call re-runs the captured slice from the perform site with a different result, so one handler can pursue several futures of the same computation. This is how nondeterminism or search handlers explore alternatives (an `amb` operation whose clause calls `k` once per choice and combines the outcomes) and how generators yield and continue. Never invoking `k` discards the captured slice, which is exactly how `raise` ([observability](#observability)) and a `final ctl` clause abort.
+A clause may invoke `k` any number of times; more than once makes the continuation **multishot**: each call re-runs the captured slice from the perform site with a different result, so one handler can pursue several futures of the same computation. This is how nondeterminism or search handlers explore alternatives (an `amb` operation whose clause calls `k` once per choice and combines the outcomes) and how generators yield and continue. Never invoking `k` discards the captured slice, which is exactly how `raise` ([observability](#observability)) and a `never` clause abort.
 
 ### 7.1 Observability {#observability}
 
@@ -486,13 +537,13 @@ The old joke about purity is that a function of type `Int -> Int` cannot launch 
 
 ### 7.2 Clause Sugar {#clause-sugar}
 
-Two clause forms abbreviate common shapes. `fun op(x) => e` is **tail-resumptive** sugar for `op(x, k) => k(e)`, resuming exactly once. `val v = e` is an install-time constant: `e` runs once when the handler installs, and every use of `v` returns it.
+Two clause forms abbreviate common shapes. `once op(x) => e` is **tail-resumptive** sugar for `op(x) resume k => k(e)`, resuming exactly once. `val v = e` is an install-time constant: `e` runs once when the handler installs, and every use of `v` returns it.
 
 ```prism
 {{#include ../examples/handlers_funval.pr}}
 ```
 
-A `final ctl op(x) => e` clause is **non-resumable**: it discards the continuation. This is the shape that `error`, `throw`, `try`, and `catch` desugar to ([errors and failure](#errors-and-failure)).
+A `never op(x) => e` clause is **non-resumable**: it discards the continuation. This is the shape that `error`, `throw`, `try`, and `catch` desugar to ([errors and failure](#errors-and-failure)).
 
 ### 7.3 Masking {#masking}
 
@@ -556,15 +607,15 @@ An escape analysis keeps the purity honest: the compiler rejects any closure or 
 
 ### 7.6 Errors and Failure {#errors-and-failure}
 
-Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `final ctl` clause of the [clause sugar](#clause-sugar). With the imperative `break`, `continue`, and `return` of [imperative control flow](#imperative-control-flow), they are one mechanism wearing several faces: each is a single-operation effect whose handler never resumes the captured continuation, installed only where the corresponding keyword actually occurs, so non-local control costs nothing where it is not used and (being handled at its boundary) surfaces in no effect row where it is.
+Prism has no built-in exception type. Errors and failure are two related mechanisms, both resting on the non-resumable `never` clause of the [clause sugar](#clause-sugar). With the imperative `break`, `continue`, and `return` of [imperative control flow](#imperative-control-flow), they are one mechanism wearing several faces: each is a single-operation effect whose handler never resumes the captured continuation, installed only where the corresponding keyword actually occurs, so non-local control costs nothing where it is not used and (being handled at its boundary) surfaces in no effect row where it is.
 
-**Extensible errors.** An `error N(t)` declaration introduces a one-operation effect whose operation never resumes; `throw N(x)` performs it. A function's error row is exactly the set of errors it may raise and has not caught, and distinct `error` declarations union structurally as functions compose, with no umbrella sum type and no conversion glue: `find_port` carrying `{NotFound}` and `parse_port` carrying `{Malformed}` compose to `{NotFound, Malformed}`. `try e catch { ... }` is subtractive handler sugar (one nested `final ctl` per arm): a partial catch discharges the labels it names and lets the rest flow to an enclosing handler, and an uncaught error is an unhandled-effect error naming exactly the labels that remain. Each catch arm names an error and binds its fields to variables.
+**Extensible errors.** An `error N(t)` declaration introduces a one-operation effect whose operation never resumes; `throw N(x)` performs it. A function's error row is exactly the set of errors it may raise and has not caught, and distinct `error` declarations union structurally as functions compose, with no umbrella sum type and no conversion glue: `find_port` carrying `{NotFound}` and `parse_port` carrying `{Malformed}` compose to `{NotFound, Malformed}`. `try e catch { ... }` is subtractive handler sugar (one nested `never` per arm): a partial catch discharges the labels it names and lets the rest flow to an enclosing handler, and an uncaught error is an unhandled-effect error naming exactly the labels that remain. Each catch arm names an error and binds its fields to variables.
 
 ```prism
 {{#include ../examples/errors.pr}}
 ```
 
-**Stacks of failure modes.** Because each `error` is an ordinary row label, a row alias ([composing rows](#composing-rows)) names a set of failure modes: `alias ConfigErr = {NotFound, Malformed}` states a subsystem's failure vocabulary once, and a layer above extends it structurally, `alias AppErr = {ConfigErr, NetErr}`, with no umbrella type and no wrapping. A signature `: !{AppErr} Int` reads as "may fail in exactly these ways", and because expansion flattens before checking, `catch` subtracts labels from the expanded set like any other handler: a partial catch over an alias discharges the modes it names and leaves the rest in the row.
+**Stacks of failure modes.** Because each `error` is an ordinary row label, a row alias ([composing rows](#composing-rows)) names a set of failure modes: `alias ConfigErr = {NotFound, Malformed}` states a subsystem's failure vocabulary once, and a layer above extends it structurally, `alias AppErr = {ConfigErr, NetErr}`, with no umbrella type and no wrapping. A signature `: Int ! {AppErr}` reads as "may fail in exactly these ways", and because expansion flattens before checking, `catch` subtracts labels from the expanded set like any other handler: a partial catch over an alias discharges the modes it names and leaves the rest in the row.
 
 ```prism
 {{#include ../examples/failure_stack.pr}}
@@ -576,7 +627,9 @@ These idioms span the recovery spectrum: the built-in `Exn` effect, raised by `e
 {{#include ../examples/exceptions.pr}}
 ```
 
-**The failure axis.** Beyond named errors, Prism has an anonymous, recoverable `fail()`, the deterministic-functional-logic failure of the Verse calculus ([Augustsson et al., 2023](bibliography.md#augustsson-verse-2023)). `guard(b)` fails when `b` is false; `a ?? b` runs `a` under a failure handler and falls back to `b`; `e?.field` chains through options, failing on `None`; `optional`/`succeeds`/`default` reify a failing computation as an `Option`, a `Bool`, or a default; and a comprehension guard may itself fail, pruning the element ([expressions](#expressions)). `transact body else fallback` snapshots every live `var`, runs the body under a failure handler, and restores the snapshots on failure, so an aborted attempt leaves observable state unchanged. The whole axis is `final ctl` handlers over a `Fail` effect, so an unhandled `fail()` is the ordinary unhandled-effect error, and "failable only in a failure context" falls out of the row discipline for free.
+**The failure axis.** Beyond named errors, Prism has an anonymous, recoverable `fail()`, the deterministic-functional-logic failure of the Verse calculus ([Augustsson et al., 2023](bibliography.md#augustsson-verse-2023)). `guard(b)` fails when `b` is false; `a ?? b` runs `a` under a failure handler and falls back to `b`; `e?.field` chains through options, failing on `None`; `optional`/`succeeds`/`default` reify a failing computation as an `Option`, a `Bool`, or a default; and a comprehension guard may itself fail, pruning the element ([expressions](#expressions)). `transact body else fallback` snapshots every live `var`, runs the body under a failure handler, and restores the snapshots on failure, so an aborted attempt leaves observable state unchanged. The whole axis is `never` handlers over a `Fail` effect, so an unhandled `fail()` is the ordinary unhandled-effect error, and "failable only in a failure context" falls out of the row discipline for free.[^none-heir]
+
+[^none-heir]: `None` is the well-mannered descendant of a much costlier idea: a way to denote absence that the type obliges you to handle, rather than one that lies quietly in a pointer waiting to be dereferenced at the least convenient possible moment. Estimates of what the wilder ancestor cost the industry are usually quoted with ten digits.
 
 ```prism
 {{#include ../examples/transact.pr}}
@@ -642,6 +695,8 @@ The reserved vocabulary is fixed, and an unknown word in usage position is a har
 
 An exclusive axis is a choice of one point, which is why `@ {once, many}` is rejected as a contradiction at parse. Only the fip axis composes, because its facts are cumulative strengthenings of one certificate rather than alternatives. **Polarity** is the axis's variance discipline, the direction its proof obligation flows. A **past** fact is covariant: it records how a value was built, the producer proves it, and the fact travels with the value wherever it goes. A **future** fact is contravariant: it restricts what may still be done with the value, the consumer promises it, and the fact binds at the use site. The polarity is stated by proof obligation, deciding which side of an API seam owes the evidence when a fact's checker lands, not by an algebraic comonadic/monadic decomposition.
 
+The multiplicity axis already has a checked instance elsewhere in the language, applied to a continuation rather than a value: an operation's **grade** ([effects and handlers](#effects-and-handlers)) is `never`, `once`, or `many`, the same words on the same lattice, restricting how a handler clause may resume the captured continuation `k`. The grade on an operation and the multiplicity fact on a closure are the same point on the same axis, read at two boundaries: the operation form is checked on a continuation and pins `once` to exactly one resumption in tail position, while the value form is affine, at most one use of the annotated closure. It adds one point the value facts omit, `never` (the continuation is dropped), because a value used zero times is not a tracked usage fact but a clause that never resumes is a real, useful grade. That shared vocabulary is not a coincidence of spelling: the continuation an operation hands its handler is the first value in the language to carry a coeffect, which is what makes "an effect is just a coeffect on its own continuation" ([three posets](#three-posets)) a literal statement rather than a slogan.
+
 The facts themselves:
 
 | Fact            | Axis         | Meaning                                                                      | Status      |
@@ -649,39 +704,39 @@ The facts themselves:
 | `noalloc`       | Allocation   | the result is computed without allocating a fresh heap cell, whole call tree | **checked** |
 | `linear`        | Fip          | no duplication of owned heap inputs (the `fip` family)                       | reserved    |
 | `bounded_stack` | Fip          | bounded stack usage (the strict `fip` promise)                               | reserved    |
-| `once`          | Multiplicity | consumed or called at most once                                              | reserved    |
+| `once`          | Multiplicity | consumed or called at most once                                              | **checked** |
 | `many`          | Multiplicity | may be consumed or called many times                                         | reserved    |
 | `unique`        | Aliasing     | statically unaliased ownership                                               | reserved    |
 | `aliased`       | Aliasing     | explicitly shared, non-unique                                                | reserved    |
 | `local`         | Escape       | tied to the current dynamic scope or region                                  | reserved    |
-| `noescape`      | Escape       | cannot be stored, returned, or captured past the boundary                    | reserved    |
-| `portable`      | Mobility     | may cross a mobility/replay/receiver boundary                                | reserved    |
+| `noescape`      | Escape       | cannot be stored, returned, or captured past the boundary                    | **checked** |
+| `portable`      | Mobility     | may cross a mobility/replay/receiver boundary                                | **checked** |
 
-The one checked fact today is the [allocation certificate](#allocation-certificates): `@ noalloc` at the root of a `fn`'s return annotation. Every other fact parses and is rejected as reserved.
+Checked today: `noalloc`, `once`, `portable`, and `noescape`. Other reserved facts are rejected until they have a checker.
 
-**Boundary facts, not ambient modes.** A usage fact attaches at the boundary that needs it, as a checked contract on a value at an API seam, and is checked where claimed; there is no whole-program usage vector threading through every judgment, and no ambient default on every value. Unannotated code claims nothing and pays nothing: the language is deterministic and replayable by default, so a usage fact marks an exceptional claim rather than repairing an unsafe baseline.
+**Boundary facts, not ambient modes.** This design space ranges from ambient classifications carried by every value to explicit claims checked only where needed. Prism chooses the latter: `@ once` constrains one consumer, `@ portable` one crossing, and `@ noalloc` one call tree; unannotated values carry no mode vector.
 
-**Reading this as a mode system.** The closest relative to usage rows in other languages is the modal "modes" discipline grown by recent systems dialects of the ML family. The surface is the same, down to the postfix syntax: `x : String @ local` there means what it means here, a qualifier on one value rather than a new type. Their axes and Prism's line up nearly word for word: a locality axis (`local`/`global`), a uniqueness axis (`unique`/`aliased`), a linearity axis (`once`/`many`), and mobility and contention axes for values crossing thread boundaries.
-
-Three pieces of the shared skeleton are worth naming. An axis is a small lattice, and a value may always move toward the permissive end: treating a unique value as aliased is free, while the reverse direction needs proof. Prism states the same lattices as exclusive axes, a row picking one point per axis, which is why `@ {once, many}` is a contradiction. Both systems also split their facts by direction, some recording how a value was produced and some constraining how it may still be consumed, which is the past/future polarity above. And their "mode crossing", where a type irrelevant to an axis moves freely along it, survives here as scalar exemption: an immediate carries no heap cell, so the allocation and multiplicity checkers have nothing to count. One renaming is deliberate: their linearity axis is Prism's multiplicity axis, because `linear` here already names a different fact, the fip axis's no-duplication discipline, and one word cannot serve both.
-
-The real fork in the road is the ambient vector. In the modal design, every value has a mode on every axis all the time. Unannotated code sits at a default point, the checker threads the whole vector through every judgment, and adding an axis means choosing a default for a world of existing code and teaching every signature and error message the new column. That is the right cost for their problem: the axes exist chiefly to prove data-race freedom and safe transfer between threads in a language where any value might cross, so the question "what mode is this value at?" genuinely has an answer everywhere, and the checker must be able to ask it everywhere.
-
-Prism does not have that problem, so it declines the tax. Data-race freedom and safe transfer are already theorems of the effect row and the determinism contract; there is no ambient question left for a mode vector to answer on every value. What remains are occasional, boundary-shaped resource claims: this function's call tree allocates nothing, this continuation is called at most once, this closure may cross a replay boundary. A coeffect row states exactly those claims, exactly where they are made, and an absent annotation is not a default point on a lattice but the absence of any claim, so unannotated code claims nothing, pays nothing, and cannot be broken by a default shifting underneath it. The economics follow from that shape: a new fact costs one reserved word and one checker at one kind of boundary, not a new column in every typing judgment, which is how the table above can reserve a vocabulary years ahead of its checkers at zero cost to programs that never write `@`.
-
-Depth splits the same way. An ambient mode applies recursively through structured data and needs per-field modalities to cut the recursion off. A Prism fact is a claim at the annotated boundary, and its checker decides how deep the proof reaches: the allocation certificate walks the whole call tree because allocation anywhere would falsify the claim, while a future `once` checker would look only at the uses of the one annotated value.
-
-The proof the template works was in the language before the syntax was: operation grades. An effect operation is declared `fun`, `ctl`, or `final ctl`, and those three words are a usage lattice on the continuation, never < once < many, checked at exactly one boundary (`clause_grade <= op_grade`), preserved through desugaring as data, and consumed by lowering instead of being reconstructed by whole-program analysis. Every future usage fact follows that shape.
+Operation grades are the established instance of this design. `never < once < many` constrains one handler boundary, survives desugaring as typed data, and is consumed directly by lowering.
 
 The wider family reads as one story. `borrow` lets a function read an argument without taking ownership. `fip` certifies allocation-freedom, linear consumption of owned heap values, and bounded stack for the recursive group. `fbip` keeps the allocation-free call-tree certificate without the full linear and bounded-stack promise. `@ noalloc` is the allocation certificate alone. Operation grades classify continuation use in handlers. Arena handlers live on the dynamic side of the same resource story: an arena handler decides who services allocation, not whether a static allocation certificate permits allocation.
 
 This split matters. A function may be `@ noalloc` and still perform `IO`; the row says the output effect is observable, while the allocation certificate says the call tree does not allocate fresh cells. Conversely, an arena facility may reify allocation as an effect only inside an explicit handler scope, while `@ noalloc` remains an allocation certificate rather than a row label.
 
+**Three verbs, one vocabulary.** Allocation is addressed three ways that share one resource story rather than competing. It can be _forbidden_: `@ noalloc` ([allocation certificates](#allocation-certificates)) proves a call tree allocates no fresh cell. It can be _redirected_: an arena handler routes the allocations a computation does make to a caller-chosen region, deciding who services them rather than whether they may happen (forthcoming, on the dynamic side named above). And it can be _avoided_: an [unboxed representation](#unboxed-products) stores a value inline, so no heap cell is created to begin with. The certificate reasons about whether allocation happens, the arena about where it goes, and the representation about whether a cell is needed at all; a single program may lean on all three at once without leaving this vocabulary.
+
+**Checked closure contracts.** Three usage facts are checked contracts on closures, not merely reserved words. `@ once` on a function-typed parameter admits a value used at most once: a `@ many` value fits a `@ once` slot but never the reverse, and using the parameter twice, aliasing it through a `let`, or capturing it under a lambda counts as further use and is rejected (E6059). `@ portable` admits a closure that captures only what travels to a fresh runtime: a content-addressed top-level function or constructor, another portable parameter, or portable scalar data; a captured local closure, `var` cell, or handler operation is rejected by name (E6060). `@ {once, portable}` requires both at once. `@ noescape`, written on a function domain (`(Builder @ noescape) -> a`), promises the callback's argument does not outlive the call: a token that is returned, embedded in returned data, aliased out, or captured by another closure is rejected (E6061), and the callback must be a checkable form, a closure literal, top-level function, or same-contract relay (E6062). Every fact is erased before the core, so an accepted program is byte-identical on both backends: the contract governs what the compiler accepts, never what a passing program does.
+
+`teleport(f : (() -> a) @ {once, portable}) : a` (the `Teleport` module) is the checked mobility boundary built from those facts: its parameter type makes each call prove the closure captures only content-addressed code and portable data and runs at most once, so the computation is safe to move to a fresh runtime. Placement is unobservable in exactly the way tier and backend choice are, so running a teleported closure is observationally identical to calling it directly; the boundary changes what is accepted, not what happens.
+
+```prism
+{{#include ../examples/usage_contracts.pr}}
+```
+
 ### 7.10 Structured Concurrency and Cancellation {#structured-concurrency}
 
 The [`Concurrent`](./stdlib/concurrent.md) library builds structured concurrency and cancellation on the `Async` operations above, and their contract is stated here as observable behavior rather than as a property of the scheduler. A `scope(tasks)` forks a list of fibers and joins them all before it returns, so no fiber outlives the call that spawned it, and a fiber's descendants are tracked so that an action taken on a fiber reaches everything it forked.
 
-Cancellation is a cooperative unwind, not an abrupt drop. `cancel(f)` marks the fiber `f` and all of its descendants; each stops at its next suspension point (a `yield`, an `await`, a channel operation) rather than mid-step, and then unwinds through its finalizers so every resource it holds is released. A finalizer is installed with `on_cancel(cleanup, body)`, which guarantees `cleanup` runs exactly once whether `body` finishes normally or is cancelled, and nested `on_cancel` cleanups run innermost first, the same order a stack of `final ctl` handlers unwinds ([clause sugar](#clause-sugar)). Waiting on a fiber that may be cancelled never hangs: `try_await(f)` returns an `Outcome(a) = Completed(a) | Was_Cancelled`, `Completed(v)` when `f` produced `v` and `Was_Cancelled` when it was cancelled before it could, where a bare `await` would have no value to yield.
+Cancellation is a cooperative unwind, not an abrupt drop. `cancel(f)` marks the fiber `f` and all of its descendants; each stops at its next suspension point (a `yield`, an `await`, a channel operation) rather than mid-step, and then unwinds through its finalizers so every resource it holds is released. A finalizer is installed with `on_cancel(cleanup, body)`, which guarantees `cleanup` runs exactly once whether `body` finishes normally or is cancelled, and nested `on_cancel` cleanups run innermost first, the same order a stack of `never` handlers unwinds ([clause sugar](#clause-sugar)). Waiting on a fiber that may be cancelled never hangs: `try_await(f)` returns an `Outcome(a) = Completed(a) | Was_Cancelled`, `Completed(v)` when `f` produced `v` and `Was_Cancelled` when it was cancelled before it could, where a bare `await` would have no value to yield.
 
 A `scope` is fail-fast. If one task fails with an unhandled `fail()` ([errors and failure](#errors-and-failure)), its sibling tasks are cancelled, their `on_cancel` finalizers run, and the failure is re-raised at the scope boundary rather than being swallowed. The failure therefore leaves `run_async` in the caller's residual row: `run_async : (() -> a ! {Async(a) | e}) -> a ! {e}` discharges `Async` but a failing scope forces `Fail` into `e`, so a program that spawns fallible work carries `{Fail}` out to a handler exactly as if it had performed `fail()` directly. Cancellation and failure are thus one mechanism seen from two sides: a deliberate `cancel` and a fail-fast sibling cancellation unwind through the identical finalizer path, so a resource is released once and only once on either.
 
@@ -878,6 +933,23 @@ A method call `e.m(args)` is **uniform-function-call syntax (UFCS)**: pure sugar
 {{#include ../examples/ufcs.pr}}
 ```
 
+Function composition is core to functional programming, and Prism keeps the full algebra: `f >> g` is the forward composition `\x -> g(f(x))`, `f << g` the backward `\x -> f(g(x))`, and `x |> f` pipes an already-computed value into a function. Composition binds tighter than the pipe, so `x |> f >> g` pipes `x` through the composed pipeline.
+
+The contrast with Haskell is direction, not power. Haskell's primitive is backward composition `(.)`, and idiomatic Haskell builds the function first and applies it last, reading right to left; pipelining a value forward takes the library operator `(&)`. Prism makes the forward reading the default: dot-chains, `|>`, and `>>` all read in dataflow order, left to right, the order in which the value actually moves.
+
+| idea                   | Prism       | Haskell     |
+| ---------------------- | ----------- | ----------- |
+| compose, forward       | `f >> g`    | `g . f`     |
+| compose, backward      | `f << g`    | `f . g`     |
+| pipe a value forward   | `x \|> f`   | `x & f`     |
+| chain calls on a value | `e.f().g()` | `(g . f) e` |
+
+The denotations agree exactly (`e.f().g()`, `e |> f >> g`, and `(f >> g)(e)` are the same program), so the choice among them is prose style: the dot for a value stepping through transformations, `|>` for a computed result flowing into a pipeline, `>>`/`<<` for naming a composed function that is passed around or applied later.
+
+```prism
+{{#include ../examples/compose.pr}}
+```
+
 ### 8.2 Comprehensions {#comprehensions}
 
 A comprehension `[ e for x in s, q, ... ]` collects `e` for each element; a qualifier `q` is a guard `if g` or a binder `let y = e`. A guard is evaluated in a failure context, so an element is pruned both when `g` is false and when computing `g` fails: a failable accessor such as `at_list` (a prelude lookup from [the standard prelude](#the-standard-prelude)) past the end of a list prunes that element rather than aborting. The statement form `for x in s, q, ... do body` runs `body` per survivor. Both desugar to the prelude's stream combinators (the `Emit` effect of [the standard prelude](#the-standard-prelude)), so they fuse without building an intermediate list.
@@ -902,14 +974,14 @@ Loops and early exit are surface sugar over **tail recursion** and effects, so t
 
 Each form desugars to an existing construct:
 
-| Surface                         | Desugaring                                                                           |
-| ------------------------------- | ------------------------------------------------------------------------------------ |
-| `x += e` (and `-=`, `*=`, `%=`) | `x := x <op> e`                                                                      |
-| `while cond do body`            | `repeat_while(\() -> cond, \() -> body)`                                             |
-| `loop body` (reachable `break`) | `repeat_while(\() -> true, \() -> body)`                                             |
-| `loop body` (no `break`)        | `forever(\() -> body)`, whose result is a bottom type                                |
-| `break` / `continue`            | a `final ctl` perform of an internal `Break`/`Continue` effect handled at the loop   |
-| `return e`                      | a `final ctl` perform of an internal `Return(a)` effect handled at the function body |
+| Surface                         | Desugaring                                                                       |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| `x += e` (and `-=`, `*=`, `%=`) | `x := x <op> e`                                                                  |
+| `while cond do body`            | `repeat_while(\() -> cond, \() -> body)`                                         |
+| `loop body` (reachable `break`) | `repeat_while(\() -> true, \() -> body)`                                         |
+| `loop body` (no `break`)        | `forever(\() -> body)`, whose result is a bottom type                            |
+| `break` / `continue`            | a `never` perform of an internal `Break`/`Continue` effect handled at the loop   |
+| `return e`                      | a `never` perform of an internal `Return(a)` effect handled at the function body |
 
 ```prism
 {{#include ../examples/imperative.pr}}
@@ -919,7 +991,9 @@ Each form desugars to an existing construct:
 
 `a ^ b` raises `a` to the power `b`. It binds tighter than `*` and than unary minus (`-2 ^ 2` is `-(2 ^ 2)`, the mathematical reading; a negative base needs parentheses, `(-2) ^ 2`), and is right-associative, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`. It is the method of the `Pow` class ([the standard prelude](#the-standard-prelude)) with `Int` and `Float` instances, so it desugars to `pow(a, b)`: over `Int` it is bignum-correct (the instance multiplies), over `Float` it is a `pow_float` call. A mixed `Int ^ Float` is a type error, resolved by an explicit `to_float`, exactly as `2 + 3.0` is (Prism never coerces between `Int` and `Float` implicitly).
 
-An `Int` exponent may be negative: `a ^ b` with `b < 0` is defined as `1 / a ^ (-b)` under the language's one truncating division rule ([integer arithmetic](#integer-arithmetic)). So `2 ^ -1` is `0`, `1 ^ -5` is `1`, `(-1) ^ -5` is `-1`, and `0 ^ -1` faults as the division by zero it literally is. `Float` exponents follow IEEE `pow`, so `2.0 ^ -1.0` is `0.5`.
+An `Int` exponent may be negative: `a ^ b` with `b < 0` is defined as `1 / a ^ (-b)` under the language's one truncating division rule ([integer arithmetic](#integer-arithmetic)).[^neg-exponent] `Float` exponents follow IEEE `pow`, so `2.0 ^ -1.0` is `0.5`.
+
+[^neg-exponent]: So `2 ^ -1` is `0`, `1 ^ -5` is `1`, `(-1) ^ -5` is `-1`, and `0 ^ -1` faults as the division by zero it literally is.
 
 ### 8.6 Indexing {#indexing}
 
@@ -927,7 +1001,15 @@ An `Int` exponent may be negative: `a ^ b` with `b < 0` is defined as `1 / a ^ (
 
 A read is _failable_: a missing index or key performs the `Fail` effect ([errors and failure](#errors-and-failure)), so `a[i]` has type `Elem ! {Fail}` and the partiality surfaces in the row rather than in an `Option` wrapper. It therefore composes with `??`, `?.`, `default`, and the rest of the failure axis: `a[i] ?? d` supplies a default, and the counter idiom is `m[k] := (m[k] ?? 0) + 1`, honest that an absent key starts at zero. A plain write `a[i] := v` is total; `a[i] += e` reads first, so it is `! {Fail}`. Writes rebind the underlying `var` and rewrite the cell in place when it is uniquely owned (FBIP, [declarations and programs](#declarations-and-programs)); nested `grid[i][j] := v` composes the same way. `a[i] := v` requires `a` to be an assignable `var`.
 
-### 8.7 Optic Paths {#optic-paths}
+### 8.7 Typed Buffers and Tensors {#buffers-and-tensors}
+
+`FloatBuf` and `IntBuf` are flat buffers of unboxed 8-byte elements, read and written through the `tbuf_*` and `ibuf_*` operations (`new`, `len`, `get`, `set`, `blit`). A buffer carries the same ownership discipline as `Array`: a write mutates it in place when it is uniquely owned and copies it when shared, so mutation is never observable through an alias, and elements thread bit-for-bit identically on both backends (NaN payloads and subnormals included). `Data.FlatArray` puts one typed surface over both: `FlatArray(a)` is dispatched by the `FlatElem` class (instances for `Float` and `I64`), so an unsupported element type is a missing-instance error rather than a representation fault. `Data.Tensor` is a record over `FloatBuf` carrying per-axis shape, strides, and names: `transpose` by axis name is a stride permutation that moves no data, `reshape` is contiguity-checked, and a bracket with two or more indices is multi-index sugar extending [indexing](#indexing): `t[i, j]` reads and `t[i, j] := v` writes through the strides. The storage under all of these is flat; only a read boxes the scalar it returns, so element layout stays a cost fact rather than a change in what a program computes.
+
+```prism
+{{#include ../examples/tensor_intro.pr}}
+```
+
+### 8.8 Optic Paths {#optic-paths}
 
 Prism has no optic library: no `Lens` type, no `over`/`set`/`toListOf` to compose, no profunctor encodings. It has one rule instead. Between the `|` and the operator of a record update ([record expressions](#record-expressions)), or inside `s.[ ... ]`, a **path** is a sequence of steps read left to right. The path _is_ the optic, spelled at the use site rather than reified as a value. Every form is sugar over `map`/`with`/`match`, so in-place reuse and fusion come for free and nothing new reaches the core: this is the language's "effects instead of monads" stance applied to optics, paths instead of optic combinators.
 
@@ -1160,7 +1242,7 @@ Paths are deliberately use-site syntax, not first-class values: there is no `Opt
 {{#include ../examples/optics_tour.pr}}
 ```
 
-### 8.8 Source Probes {#source-probes}
+### 8.9 Source Probes {#source-probes}
 
 A source probe is a named instrumentation point with a body that runs only when the process enables that name:
 
@@ -1200,7 +1282,7 @@ A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional *
 
 ## 10. Declarations and Programs {#declarations-and-programs}
 
-A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it. A return annotation is written `: !{R} T` for result type `T` and effect row `R`, `: ! T` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
+A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it. A return annotation is written `: T ! {R}` for result type `T` and effect row `R`, `: T !` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
 
 ```prism
 {{#include ../examples/named_args.pr}}
@@ -1218,7 +1300,7 @@ A function may be annotated `fip` or `fbip` to assert the fully-in-place discipl
 
 ### 10.1 Allocation Certificates {#allocation-certificates}
 
-The zero-allocation guarantee is the first checked [usage fact](#usage-and-resource-annotations): `@ noalloc`, written at the root of the return annotation. Read it as the result type with the allocation coeffect subtracted: the body and its whole call tree allocate no fresh cell, calling only allocation-free functions. It carries the same check as `fbip`, without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: !{IO} T @ noalloc`), and interoperates with the keyword forms: an `@ noalloc` function may call `fip`, `fbip`, or `@ noalloc` functions.
+The zero-allocation guarantee is the first checked [usage fact](#usage-and-resource-annotations): `@ noalloc`, written at the root of the return annotation. Read it as the result type with the allocation coeffect subtracted: the body and its whole call tree allocate no fresh cell, calling only allocation-free functions. It carries the same check as `fbip`, without the linearity and bounded-stack requirements `fip` adds. It composes with an effect row and with `given` constraints (`: T @ noalloc ! {IO}`), and interoperates with the keyword forms: an `@ noalloc` function may call `fip`, `fbip`, or `@ noalloc` functions.
 
 A failed certificate explains itself. The diagnostic lists the first three allocation witnesses in evaluation order, each a concrete reason with its name attached: a constructor built fresh outside `reuse` (by constructor name), a fresh tuple, a lambda materialized as a closure cell, a call to a function with no zero-allocation certificate (by callee name), an indirect call through a function value, or a primitive off the allocation-free list. A body with more sites than the bound reports the remainder as a trailing count (`and 2 more`), and the same witness detail backs the `fip` and `fbip` usage-check failures, so every discipline in the family points at its offending sites rather than restating the rule. The witnesses are read off the reuse-lowered core, after the compiler has already spent every reuse opportunity, so a reported allocation is one the optimizer could not eliminate, not folklore about the source text.
 
@@ -1242,6 +1324,31 @@ A serialized value is a contract across time: bytes written by yesterday's binar
 
 The inline default (`fog: Int = 30`) is the entire cost of an additive change: from it the compiler generates the total `upgrade_Save_V1_V2` (fill the new field with its default) and the honest `downgrade_Save_V2_V1`, which drops the field and returns the lowered value together with a `Loss` naming what could not be carried down. A change the compiler cannot guess, such as a field changing type, is written by hand inside the block as an `upgrade Vn -> Vm = ...` or `downgrade Vm -> Vn = ... drop_loss(f)` converter. Only adjacent converters ever exist; spanning several rungs composes along the ladder, so N rungs cost N-1 converters, never a pairwise matrix. Upgrade after downgrade is the identity on the safe subset, a law emitted as a property test over the derived generators rather than left to review.
 
+The generated names are not magic: each is minted by one mechanical scheme from exactly two ingredients, the type's name and the rung tags, and each lands as an ordinary top-level function or type. They can be called directly, read in `dump core`, and they collide with a hand-written declaration of the same spelling like anything else in the flat namespace. For a stable type `T` the family is:
+
+| generated item   | scheme                              | for `Save` above                          |
+| ---------------- | ----------------------------------- | ----------------------------------------- |
+| the current rung | the bare type name                  | `Save`                                    |
+| an earlier rung  | `T.Vn`                              | `Save.V1`                                 |
+| total upgrade    | `upgrade_T_Vfrom_Vto`               | `upgrade_Save_V1_V2`                      |
+| lossy downgrade  | `downgrade_T_Vfrom_Vto`             | `downgrade_Save_V2_V1`                    |
+| ladder dispatch  | `decode_ladder_T`                   | `decode_ladder_Save`                      |
+| frame codec      | `wire_encode_T` and `wire_decode_T` | `wire_encode_Save` and `wire_decode_Save` |
+
+Their signatures, as the compiler infers them for the block above:
+
+```prism,ignore
+upgrade_Save_V1_V2   : (Save.V1) -> Save
+downgrade_Save_V2_V1 : (Save) -> (Save.V1, Wire.Loss)
+wire_encode_Save     : (Save) -> Wire.Bytes
+wire_decode_Save     : (Wire.Bytes) -> Save ! {Fail}
+decode_ladder_Save   : (Wire.Bytes) -> Save ! {Fail}
+```
+
+The shapes carry the semantics. An upgrade is total, plain arrow, no effect row: filling a defaulted field cannot fail. A downgrade is also total but honest, returning the lowered value paired with the `Loss` naming what it dropped. The two decoders share one signature, `(Wire.Bytes) -> Save ! {Fail}`: `wire_decode_Save` insists the frame carry the current rung's digest, while `decode_ladder_Save` accepts a frame from any rung in the block, decodes it at that rung, and composes the upgrades to hand back a current `Save`; both refuse malformed bytes through the same `Fail` row rather than a sentinel value.
+
+The newest rung keeps the bare type name so ordinary code builds and matches the current version as the type itself; only shipped predecessors wear the dotted version tag. Converter names always read in the direction of travel, source rung then destination rung, so the pair for one additive change is `upgrade_T_V1_V2` and `downgrade_T_V2_V1`, and because only adjacent converters exist the full set of names is enumerable from the block header alone. Inside a hand-written converter the incoming value is bound to the source rung's tag lowercased: `upgrade V1 -> V2 = { ..v1, fog: 30 }` reads the old record as `v1`. The scheme runs in one direction only. Names are synthesized from the block and no later phase ever parses a fact back out of one, so renaming the type moves the entire family at once and nothing downstream keys on the spelling.
+
 A rung marked `frozen "<digest>"` is sealed: the digest is the rung's structural shape digest, the same construction that content-addresses every datatype ([content-addressed core](compiler.md#content-addressed-core)). Editing a sealed rung in place moves the digest and the program stops compiling, with the error naming the rung and the remedy: add a new rung instead of editing a shipped one. A rung that never shipped is reseated with `prism store wire --accept <file>`, which recomputes and rewrites its digest in place, loudly.
 
 The block also derives the type's `Serialize` against the current rung, and the generated ladder functions lift a value between rungs explicitly, so an old value is carried up through its converters rather than re-parsed by hand; a frame's rung rides its envelope, and dispatching an old frame through the ladder automatically is the wire library's job as that layer grows. The codec itself, the byte-level frame with its total decoder, is the `Wire` library, an opt-in import ([the standard prelude](#the-standard-prelude)): a program that never persists a value pays for none of this.
@@ -1261,9 +1368,7 @@ The annotation attaches to the declaration that follows it (a `fn`, `type`, `cla
 
 A _use_ of a deprecated definition compiles, with a warning that names the definition, the suggestion, and the use site. It is only a warning: behavior is unchanged, so a deprecation never breaks a build or alters what a program computes (a determinism corollary: the warning is a diagnostic, not a semantic). A definition's own body may use it without warning; only references from other definitions are reported, and only in the user's own source, so a deprecation inside an imported library does not warn at the library's internal call sites.
 
-The compiler applies the same mechanism to families it supersedes but has no declaration to annotate: the float dot-operators `+.` `-.` `*.` `/.` `==.` `/=.` `<.` `<=.` `>.` `>=.`, now that the plain operators are lane-polymorphic ([numeric arithmetic](#floating-point)), each warn with the plain spelling; the fixed-width arithmetic builtins that duplicate an operator (`i64_add`, `u64_mul`, and the rest of the `+ - * / %` set) warn with that operator; and the `string_of_bytes` builtin, superseded by `Data.Bytes` now that byte buffers are first-class, warns with `bytes_to_string`, the validating decoder that returns an `Option` (the explicit lossy repair is `string_of_buf`). The bitwise, shift, comparison, and conversion builtins have no operator replacement and are not deprecated.
-
-The policy is one deprecation window wide: a deprecated name keeps working with the warning through that window, and is removed after it. This is what lets the standard library evolve without a flag day: Base's surface may only ever grow, or shrink through one full deprecation window, never break in place.
+The policy is one deprecation window wide: a deprecated name keeps working with the warning through that window, and is removed after it. This is what lets the standard library evolve without a flag day: Base's surface may only ever grow, or shrink through one full deprecation window, never break in place. The float dot-operators (`+.` and its family) and the operator-duplicating fixed-width builtins (`i64_add` and its family) rode exactly this window out and are gone: a surviving spelling exists for every one of them (`+` on `Float`, `+` on `I64`), and writing a removed spelling is a pointed error naming it.
 
 ## 11. Modules {#modules}
 
@@ -1294,6 +1399,45 @@ fn main() = println(area(4, 5))
 {{#endtab }}
 
 {{#endtabs }}
+
+An opaque type is how a module exports an invariant instead of a representation: importers can name the type, hold values of it, and pass them back, but only the defining module can construct or inspect one, so every value in circulation went through the smart constructor and carries whatever guarantee it enforces.
+
+{{#tabs }}
+
+{{#tab name="src/Temp.pr" }}
+
+```prism
+opaque type Celsius = MkCelsius(Float)
+
+pub fn celsius(x : Float) : Celsius =
+  MkCelsius(if x < -273.15 then -273.15 else x)
+
+pub fn degrees(c : Celsius) : Float =
+  match c of
+    MkCelsius(x) => x
+```
+
+{{#endtab }}
+
+{{#tab name="src/main.pr" }}
+
+```prism,ignore
+import Temp (celsius, degrees)
+
+fn main() =
+  let boiling = celsius(100.0)
+  println(show(degrees(boiling)))       -- 100
+  let forged = MkCelsius(0.0 - 500.0)   -- error: unbound variable 'MkCelsius'
+  let peeked =
+    match boiling of
+      MkCelsius(x) => x                 -- error: unknown constructor MkCelsius
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+`Celsius` values below absolute zero cannot exist, and the proof is the module boundary rather than a runtime check at every use site: `celsius` clamps once, on the only road in.
 
 Name resolution rewrites every top-level definition to a canonical, module-qualified symbol (an export as `Data.Map.insert`, a private as the unforgeable, source-unwritable `Data.Map@helper`) and merges all modules into one program keyed by those symbols. Because identity is the canonical symbol, two modules may export the same short name and coexist. This is namespacing, not separate compilation: there are no per-module artifacts, and changing one module recompiles the whole program. Identifying each definition by a content hash of its core rather than by its name is a direction the compiler is prototyping ([content-addressed core](./compiler.md#content-addressed-core)); it would make a definition's identity independent of its name and recompilation incremental over only what actually changed.
 

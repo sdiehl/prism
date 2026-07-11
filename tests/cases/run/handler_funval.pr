@@ -1,41 +1,47 @@
 effect Cfg
-  ctl ask(Unit) : Int
-  ctl config() : Int
-  ctl tell(Int) : Unit
+  ask() : Int
+  config() : Int
+  tell(Int) : Unit
 
-fn use_env() : !{Cfg} Int =
-  tell(ask(()))
+fn use_env() : Int ! {Cfg} =
+  tell(ask())
   tell(config())
   tell(config())
-  config() + ask(())
+  config() + ask()
 
 -- One handler mixing all three clause forms. The val RHS prints 999 exactly
 -- once at install time even though config() is used three times, so {IO} is
 -- attributed here, not to use_env's {Cfg} row.
-fn run_env(env : Int) : !{IO} Int =
+fn run_env(env : Int) : Int ! {IO} =
   handle use_env() with
-    fun ask(u) => env * 2
+    once ask() => env * 2
     val config =
       println(999)
       41
-    tell(x, k) =>
+    tell(x) resume k =>
       println(x)
       k(())
     return r => r
 
-fn add_two() : !{Cfg} Int = ask(()) + ask(())
+fn add_two() : Int ! {Cfg} = ask() + ask()
 
-fn mid() : !{Cfg} Int =
+-- Handlers cover every `Cfg` op (coverage is checked); only `ask` ever fires
+-- in `add_two`/`mid`, the other arms exist to make the discharge honest.
+fn mid() : Int ! {Cfg} =
   let inner =
     handle add_two() with
-      fun ask(u) => 7
+      once ask() => 7
+      config() resume k => k(0)
+      tell(x) resume k => k(())
       return r => r
-  inner + ask(())
+  inner + ask()
 
--- Nested handlers: the inner fun clause shadows the outer one for add_two.
+-- Nested handlers: the inner `once` clause shadows the outer one for add_two.
 fn nested() : Int =
   handle mid() with
-    fun ask(u) => 100
+    once ask() => 100
+    config() resume k => k(0)
+    tell(x) resume k => k(())
     return r => r
 
 fn main() =

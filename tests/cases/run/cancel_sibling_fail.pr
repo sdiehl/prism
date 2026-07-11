@@ -6,24 +6,24 @@
 
 import Concurrent (..)
 
-fn sibling_loop() : !{Async(Int), IO, Fail} Int =
+fn sibling_loop() : Int ! {Async(Int), IO, Fail} =
   yield(())
   sibling_loop()
 
-fn sibling_body() : !{Async(Int), IO, Fail} Int =
+fn sibling_body() : Int ! {Async(Int), IO, Fail} =
   guard(true)
   println("sibling: running")
   sibling_loop()
 
-fn sibling() : !{Async(Int), IO, Fail} Int =
+fn sibling() : Int ! {Async(Int), IO, Fail} =
   on_cancel(\() -> println("sibling finalizer ran"), sibling_body)
 
-fn failer() : !{Async(Int), IO, Fail} Int =
+fn failer() : Int ! {Async(Int), IO, Fail} =
   println("failer: about to fail")
   yield(())
   fail()
 
-fn scene() : !{Async(Int), IO, Fail} Int =
+fn scene() : Int ! {Async(Int), IO, Fail} =
   scope([sibling, failer])
   0
 

@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use marginalia::Span;
 
 use super::escape::escapes;
-use super::{rw, Binding, Vars};
-use crate::error::TypeError;
+use super::{rw, Binding, VarOps, Vars};
+use crate::error::{ErrKind, TypeError};
 use crate::names::{self, CONT, RET, STATE, UNIT_ARG, VAL};
 use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, Ty, S};
 use crate::syntax::desugar::{call, evar, lam1, sp, Cx};
@@ -36,26 +36,29 @@ pub(super) fn rw_var_decl(
                 // The parameter-passing State handler resumes exactly once in
                 // tail position (`get(u,k) => \s -> k(s)(s)`), so both ops are
                 // grade One.
-                grade: Grade::One,
+                grade: Grade::Once,
             },
             EffOp {
                 name: put.clone(),
                 params: vec![st],
                 ret: Ty::Unit,
-                grade: Grade::One,
+                grade: Grade::Once,
             },
         ],
         span,
     });
     let mut env2 = env.clone();
-    env2.insert(x.into(), Binding::Var(get.clone(), put.clone()));
+    env2.insert(
+        x.into(),
+        Binding::Var(VarOps {
+            get: get.clone(),
+            put: put.clone(),
+        }),
+    );
     let rest2 = rw(rest, &env2, cx)?;
     let ops: BTreeSet<String> = [get.clone(), put.clone()].into();
     if let Some(bad) = escapes(&rest2, &ops, &cx.ctors, &mut BTreeSet::new()) {
-        return Err(TypeError::Other {
-            span: bad,
-            msg: format!("`var {x}` escapes its block: the value here is a function that still uses `{x}` after its scope ends"),
-        });
+        return Err(ErrKind::VarEscapes { var: x.to_string() }.at(bad));
     }
     // \(s) -> k(s)(s) | \(s) -> k(())(v) | \(s) -> r
     let ks = call(

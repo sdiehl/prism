@@ -22,9 +22,9 @@
 import Concurrent (..)
 
 effect Log
-  ctl log(String) : Unit
+  log(String) : Unit
 
-fn feed(c : Chan, items : List(Int)) : !{Async(Int)} Int =
+fn feed(c : Chan, items : List(Int)) : Int ! {Async(Int)} =
   match items of
     Nil => 0
     Cons(x, rest) =>
@@ -37,7 +37,7 @@ fn worker(
   input : Chan,
   output : Chan,
   n : Int
-) : !{Async(Int), Log} Int =
+) : Int ! {Async(Int), Log} =
   if n == 0 then
     0
   else
@@ -47,15 +47,15 @@ fn worker(
     yield(())
     worker(name, input, output, n - 1)
 
-fn collect(c : Chan, n : Int, acc : Int) : !{Async(Int)} Int =
+fn collect(c : Chan, n : Int, acc : Int) : Int ! {Async(Int)} =
   if n == 0 then
     acc
   else
     collect(c, n - 1, acc + recv(c))
 
-fn pipeline() : !{Async(Int), Log} Int =
-  let input = channel(())
-  let output = channel(())
+fn pipeline() : Int ! {Async(Int), Log} =
+  let input = channel()
+  let output = channel()
   fork(\() -> feed(input, [1, 2, 3, 4]))
   match (scope([
         \() -> worker("w1", input, output, 2),
@@ -65,7 +65,7 @@ fn pipeline() : !{Async(Int), Log} Int =
 
 fn main() =
   handle run_async(pipeline) with
-    log(msg, k) =>
+    log(msg) resume k =>
       println(msg)
       k(())
     return total => println("sum of squares: {total}")

@@ -1,4 +1,4 @@
-replayable fn roll() = rng_rand(())
+replayable fn roll() = rng_rand()
 
 replayable fn pure_calc(a, b, c) = a + b + c
 

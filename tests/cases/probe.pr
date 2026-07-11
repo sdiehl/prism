@@ -1,0 +1,4 @@
+-- A tracing probe desugars to a one-branch guard, `if probe_enabled("trace")
+-- then body else ()`, so a disabled probe (the default) evaluates neither its
+-- body nor the formatting inside it. This case pins that lowering.
+fn main() = probe "trace" do println(1)

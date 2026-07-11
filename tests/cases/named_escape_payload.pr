@@ -3,14 +3,14 @@
 -- when `save`'s handler eventually runs it: the unhandled-effect wall catches it
 -- and names the instance rather than the mangled internal effect.
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 effect Store
-  ctl save((Unit) -> Int) : Unit
+  save((Unit) -> Int) : Unit
 
 fn leak() =
   with f <- handler
-    ask(k) => k(5)
+    ask() resume k => k(5)
     return r => r
   save(\(u) -> f.ask())
 

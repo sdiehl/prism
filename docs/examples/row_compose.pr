@@ -4,19 +4,19 @@
 -- grouping is documentation that leaves no trace in the semantics.
 
 effect A
-  ctl alpha(Unit) : Unit
+  alpha() : Unit
 
 effect B
-  ctl beta(Unit) : Unit
+  beta() : Unit
 
 effect C
-  ctl gamma(Unit) : Unit
+  gamma() : Unit
 
 effect D
-  ctl delta(Unit) : Unit
+  delta() : Unit
 
 effect E
-  ctl epsilon(Unit) : Unit
+  epsilon() : Unit
 
 alias AB = {A, B}
 
@@ -24,18 +24,18 @@ alias CD = {C, D}
 
 alias App = {AB, CD, E}
 
-fn phi() : !{AB} Unit =
-  alpha(())
-  beta(())
+fn phi() : Unit ! {AB} =
+  alpha()
+  beta()
 
-fn psi() : !{CD} Unit =
-  gamma(())
-  delta(())
+fn psi() : Unit ! {CD} =
+  gamma()
+  delta()
 
-fn omega() : !{App} Unit =
+fn omega() : Unit ! {App} =
   phi()
   psi()
-  epsilon(())
+  epsilon()
 
 -- the flattened spelling of the same row: either may call the other
-fn flat() : !{A, B, C, D, E} Unit = omega()
+fn flat() : Unit ! {A, B, C, D, E} = omega()

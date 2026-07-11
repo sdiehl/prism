@@ -12,9 +12,9 @@ pub fn zone_name(z : Zone) : String = z.name
 
 pub fn zone_offset_minutes(z : Zone) : Int = z.offset_minutes
 
-pub fn utc() : Zone = Zone { name = "UTC", offset_minutes = 0 }
+pub fn utc() : Zone = Zone { name = "UTC", offset_minutes = 4 }
 
-pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 0 }
+pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 1 }
 
 pub fn america_new_york() : Zone =
   Zone { name = "America/New_York", offset_minutes = 0 - 300 }

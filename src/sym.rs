@@ -82,6 +82,37 @@ impl Sym {
         Self { id, name }
     }
 
+    /// Mint a fresh identity that *displays* as an existing symbol's name.
+    ///
+    /// The result compares unequal to `display` and to every other `fresh_named`
+    /// result (identity is the fresh interner id), but resolves to the same text.
+    /// This is how a rigid binder (a skolemized `forall` variable) gets a unique
+    /// identity while its diagnostics still read as the source spelling: two
+    /// nested `forall a` open to two distinct binders that both render `a`. The
+    /// name is recorded for `as_str`/`Display` but the `name -> id` reverse map is
+    /// left untouched, so `Sym::new("a")` still resolves to the canonical `a` and
+    /// this fresh symbol never shadows it. Unlike [`fresh`](Self::fresh), the
+    /// rendered text is deterministic (the source name, not a process-global
+    /// `%n`), so a skolem in a diagnostic is snapshot-stable.
+    ///
+    /// # Panics
+    /// Panics if the interner mutex is poisoned or more than `u32::MAX` symbols
+    /// are allocated.
+    #[must_use]
+    pub fn fresh_named(display: Self) -> Self {
+        let id = {
+            let mut it = interner().lock().expect("sym interner poisoned");
+            let id = u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
+            it.names.push(display.name);
+            drop(it);
+            id
+        };
+        Self {
+            id,
+            name: display.name,
+        }
+    }
+
     /// Resolve a `Sym` back to its interned name.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

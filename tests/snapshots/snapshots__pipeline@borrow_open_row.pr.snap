@@ -1,0 +1,159 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/borrow_open_row.pr
+---
+== tokens ==
+VOpen Fn Ident("invoke") LParen Borrow Ident("x") Colon KwInt Comma Ident("f") Colon LParen KwUnit RParen Arrow KwUnit Bang LBrace Bar Ident("e") RBrace RParen Colon KwInt Eq VOpen Ident("f") LParen LParen RParen RParen VSemi Ident("x") VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("invoke") LParen Int(IntLit { value: 1, suffix: None }) Comma Lambda LParen Ident("u") RParen Arrow LParen RParen RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "invoke",
+            params: [
+                Param {
+                    name: "x",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: true,
+                    default: None,
+                },
+                Param {
+                    name: "f",
+                    ty: Some(
+                        Fun(
+                            [
+                                Unit,
+                            ],
+                            Cons(
+                                [],
+                                Some(
+                                    "e",
+                                ),
+                            ),
+                            Unit,
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "f",
+                                ),
+                                span: 295..296,
+                            },
+                            [
+                                Spanned {
+                                    node: Unit,
+                                    span: 297..299,
+                                },
+                            ],
+                        ),
+                        span: 295..300,
+                    },
+                    Spanned {
+                        node: Var(
+                            "x",
+                        ),
+                        span: 303..304,
+                    },
+                ),
+                span: 295..304,
+            },
+            wheres: [],
+            span: 231..304,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 318..325,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "invoke",
+                                    ),
+                                    span: 326..332,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 333..334,
+                                    },
+                                    Spanned {
+                                        node: Lam(
+                                            [
+                                                Param {
+                                                    name: "u",
+                                                    ty: None,
+                                                    borrow: false,
+                                                    default: None,
+                                                },
+                                            ],
+                                            Spanned {
+                                                node: Unit,
+                                                span: 344..346,
+                                            },
+                                        ),
+                                        span: 336..346,
+                                    },
+                                ],
+                            ),
+                            span: 326..347,
+                        },
+                    ],
+                ),
+                span: 318..348,
+            },
+            wheres: [],
+            span: 306..348,
+        },
+    ],
+}
+
+== types ==
+[E5012] Type Error: `invoke` has a `borrow` parameter but forwards effects through its interface (its effect row {e0} is shared with a parameter or result); a borrowed parameter requires a body that performs no effects, since the caller retains ownership across the call and a forwarded effect can suspend or capture it
+   ╭─[ <source>:4:1 ]
+   │
+ 4 │ ╭─▶ fn invoke(borrow x : Int, f : (Unit) -> Unit ! {| e}) : Int =
+   ┆ ┆   
+ 6 │ ├─▶   x
+   │ │         
+   │ ╰───────── `invoke` has a `borrow` parameter but forwards effects through its interface (its effect row {e0} is shared with a parameter or result); a borrowed parameter requires a body that performs no effects, since the caller retains ownership across the call and a forwarded effect can suspend or capture it
+───╯

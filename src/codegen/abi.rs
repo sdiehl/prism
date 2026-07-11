@@ -1,3 +1,8 @@
+use std::collections::BTreeMap;
+
+use crate::kw;
+use crate::types::CtorInfo;
+
 pub(super) const TAG_OFF: i64 = 8;
 pub(super) const HDR_BYTES: i64 = 24;
 pub(super) const WORD_BYTES: i64 = 8;
@@ -12,4 +17,15 @@ const _: () = assert!(
 
 pub(super) fn idx64(n: usize) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+/// The runtime tag a `Case` dispatches on for constructor `name`: the wired-in
+/// nullable's `Null`/`This` tags, otherwise the datatype table's tag. Keeps the
+/// tag source the single `kw` constant instead of a literal re-typed in codegen.
+pub(super) fn ctor_tag(ctors: &BTreeMap<String, CtorInfo>, name: &str) -> Option<usize> {
+    match name {
+        kw::CTOR_NULL => Some(kw::OR_NULL_TAG),
+        kw::CTOR_THIS => Some(kw::OR_THIS_TAG),
+        _ => ctors.get(name).map(|info| info.tag),
+    }
 }

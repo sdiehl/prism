@@ -6,7 +6,7 @@ type Expr
   | Div(Expr, Expr)
   | Neg(Expr)
 
-fn eval(e) : ! Result(Int, Int) =
+fn eval(e) : Result(Int, Int) =
   match e of
     Lit(n) => Ok(n)
     Neg(a) =>
@@ -45,7 +45,7 @@ fn eval(e) : ! Result(Int, Int) =
               Err(c) => Err(c)
         Err(c) => Err(c)
 
-fn depth(e) : ! Int =
+fn depth(e) : Int =
   match e of
     Lit(_) => 0
     Neg(a) => 1 + depth(a)
@@ -54,12 +54,12 @@ fn depth(e) : ! Int =
     Mul(a, b) => 1 + max(depth(a), depth(b))
     Div(a, b) => 1 + max(depth(a), depth(b))
 
-fn show_result(r : Result(Int, a)) : !{IO} Unit =
+fn show_result(r : Result(Int, a)) : Unit ! {IO} =
   match r of
     Ok(v) => println(v)
     Err(_) => println(0 - 999)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let e1 = Div(Mul(Add(Lit(10), Lit(5)), Lit(3)), Lit(5))
   let e2 = Div(Lit(1), Lit(0))
   let e3 = Neg(Sub(Lit(3), Lit(10)))

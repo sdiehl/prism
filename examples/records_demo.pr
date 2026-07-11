@@ -21,7 +21,7 @@ fn run(p : Particle, n : Int) : Particle =
   else
     run(step(p), n - 1)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let origin = Vec2 { x = 0, y = 0 }
   let p0 =
     Particle {

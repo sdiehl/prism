@@ -29,7 +29,7 @@ fn norm(v : Vec2) : Int =
     Axis(n) => n
     _ => v.x + v.y
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let g =
     Game {
       player = Player {

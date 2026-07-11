@@ -1,0 +1,18 @@
+-- `OrNull(a)` is a nullable that carries no wrapper allocation in the surface
+-- semantics: `Null` is the empty case and `This(v)` holds a present `a`. It runs
+-- identically on the interpreter and native backends. The element type must have a
+-- non-null, single-word representation, so `Null` (the empty word) can never be
+-- mistaken for a present value.
+fn lookup(hit : Bool) : OrNull(String) =
+  match hit of
+    true => This("found")
+    false => Null
+
+fn describe(o : OrNull(String)) : String =
+  match o of
+    Null => "nothing"
+    This(s) => s
+
+fn main() =
+  println(describe(lookup(true)))
+  println(describe(lookup(false)))

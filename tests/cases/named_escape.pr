@@ -1,9 +1,9 @@
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 fn leak() : (Unit) -> Int =
   with f <- handler
-    ask(k) => k(5)
+    ask() resume k => k(5)
     return r => r
   \(u) -> f.ask()
 

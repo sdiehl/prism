@@ -1,0 +1,11 @@
+-- Regression: a comprehension inside a function with an explicit effect row no
+-- longer leaks the internal `Emit` (guard-free) or `Fail` (guarded) effect into
+-- the caller's row. `scollect`/`sfold` discharge `Emit`, `succeeds` discharges
+-- `Fail`, so both `go` and `keep` are pure and `main : Unit ! {IO}` type-checks.
+fn go() : List(Int) = [x * 2 for x in srange(1, 5)]
+
+fn keep() : List(Int) = [y for x in srange(1, 10), let y = x * x, if y > 20]
+
+fn main() : Unit ! {IO} =
+  println(show(ssum(sof(go()))))
+  println(show(ssum(sof(keep()))))

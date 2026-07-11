@@ -97,7 +97,7 @@ pub type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
 -- Combinators -----------------------------------------------------------------
 
 -- | A parser that consumes nothing and yields `x`. The applicative unit.
-pub fn pure_p(x) = Parser { opts = Nil, args = Nil, run = \(t, i) -> Ok((x, i)) }
+pub fn pure_p(x) = Parser { opts = Nil, args = Nil, run = \(_t, i) -> Ok((x, i)) }
 
 -- | Map `f` over a parser's result, leaving what it consumes unchanged.
 pub fn map_p(f, p : Parser(b)) =

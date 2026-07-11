@@ -332,12 +332,6 @@ pub enum Token {
     Handler,
     #[token("mask")]
     Mask,
-    #[token("ctl")]
-    Ctl,
-    #[token("final")]
-    Final,
-    #[token("fun")]
-    Fun,
     #[token("val")]
     Val,
     #[token("return")]
@@ -507,6 +501,13 @@ pub enum Token {
     // internal mangled names (`op@f@n`, `Var@x@0`) unforgeable from source.
     #[token("@")]
     At,
+    // The unboxed sigil. Admitted only in the unboxed-values surface: `#(...)`
+    // unboxed tuples, `#{...}` unboxed records, and `e.#field` unboxed projection.
+    // The grammar accepts it only in those positions, so `#` anywhere else is a
+    // syntax error, and it can never sit inside an identifier: unboxed syntax is
+    // always explicit at the use site.
+    #[token("#")]
+    Hash,
     #[token("..")]
     DotDot,
     #[token(".")]
@@ -602,9 +603,6 @@ impl Token {
             Self::With => kw::WITH,
             Self::Handler => kw::HANDLER,
             Self::Mask => kw::MASK,
-            Self::Ctl => kw::CTL,
-            Self::Final => kw::FINAL,
-            Self::Fun => kw::FUN,
             Self::Val => kw::VAL,
             Self::Return => kw::RETURN,
             Self::Let => kw::LET,
@@ -684,6 +682,7 @@ impl Token {
             Self::Colon => kw::COLON,
             Self::Bang => kw::BANG,
             Self::At => kw::AT,
+            Self::Hash => kw::HASH,
             Self::DotDot => kw::DOT_DOT,
             Self::Dot => kw::DOT,
             Self::QuestionQuestion => kw::QUESTION_QUESTION,
@@ -880,9 +879,6 @@ mod tests {
             (Token::With, kw::WITH),
             (Token::Handler, kw::HANDLER),
             (Token::Mask, kw::MASK),
-            (Token::Ctl, kw::CTL),
-            (Token::Final, kw::FINAL),
-            (Token::Fun, kw::FUN),
             (Token::Val, kw::VAL),
             (Token::Return, kw::RETURN),
             (Token::Let, kw::LET),
@@ -961,6 +957,7 @@ mod tests {
             (Token::Colon, kw::COLON),
             (Token::Bang, kw::BANG),
             (Token::At, kw::AT),
+            (Token::Hash, kw::HASH),
             (Token::DotDot, kw::DOT_DOT),
             (Token::Dot, kw::DOT),
             (Token::QuestionQuestion, kw::QUESTION_QUESTION),

@@ -25,7 +25,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, validate_hash, HashHex, FIELD_SEP, VERIFIED_DIR};
+use super::{atomic_write, shard_path, HashHex, FIELD_SEP, VERIFIED_DIR};
 
 const VERIFIED_HEADER_V1: &str = "prism-store-verified\tv1";
 const VERIFIED_HEADER_V2: &str = "prism-store-verified\tv2";
@@ -47,8 +47,7 @@ pub struct VerifiedRecord {
 const STATUS_PASS: &str = "pass";
 const STATUS_FAIL: &str = "fail";
 
-pub(super) fn put(root: &Path, hash: &HashHex, record: &VerifiedRecord) -> io::Result<()> {
-    validate_hash(hash)?;
+pub(super) fn put(root: &Path, hash: &HashHex<'_>, record: &VerifiedRecord) -> io::Result<()> {
     let mut records = get(root, hash)?;
     records.push(record.clone());
     let mut body = String::from(VERIFIED_HEADER_V2);
@@ -64,8 +63,7 @@ pub(super) fn put(root: &Path, hash: &HashHex, record: &VerifiedRecord) -> io::R
     atomic_write(&shard_path(&root.join(VERIFIED_DIR), hash), body.as_bytes())
 }
 
-pub(super) fn get(root: &Path, hash: &HashHex) -> io::Result<Vec<VerifiedRecord>> {
-    validate_hash(hash)?;
+pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Vec<VerifiedRecord>> {
     let path = shard_path(&root.join(VERIFIED_DIR), hash);
     let text = match fs::read_to_string(&path) {
         Ok(t) => t,
