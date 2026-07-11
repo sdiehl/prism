@@ -13,6 +13,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::core::HASH_PREFIX_HEX;
+use crate::error::line_col;
 use crate::lex::highlight::tok_class;
 use crate::lex::Token;
 use crate::resolve::{default_roots, Root};
@@ -21,8 +23,6 @@ use crate::{
     off_platform_builtins, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
     SuspendResult,
 };
-use line_col;
-use HASH_PREFIX_HEX;
 
 // The web host owns the effects. A browser can serve more of them than it might
 // seem: `print` is buffered and `read_line` host-fed, the `Random` capability is

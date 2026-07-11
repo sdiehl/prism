@@ -148,7 +148,19 @@ fmt-examples: build-release
 package-world: build-release
     ./target/release/prism pkg check-world packages --strict
 
-ci: fmt-check clippy test fmt-examples package-world
+ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world
+
+# The CI-only fast gates, mirrored locally so a red can't hide in a
+# configuration no local build compiles: the stub-marker grep and the
+# rustdoc private-link/deny-warnings pass.
+stub-check:
+    #!/usr/bin/env bash
+    if grep -rEn 'todo!|unimplemented!|FIXME|XXX|allow\(dead_code\)' src bin; then
+        echo "stub markers found (see above)"; exit 1
+    fi
+
+doc-check:
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --quiet
 
 # Build the wasm playground bundle and sync it into the docs (docs/src/pkg), so
 # the mdbook playground always runs the current compiler (no stale-bundle drift).

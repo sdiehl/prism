@@ -50,7 +50,6 @@ const SRC_KIND: &str = "src";
 /// `parse` row rather than a faked split.
 // The row schema names every compile phase; a wasm build constructs no LLVM/cc
 // phase, so those variants are legitimately unbuilt there, not dead.
-#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Parse,
@@ -103,7 +102,6 @@ impl CacheStatus {
 }
 
 /// The artifact kinds a row can name, in the `in=`/`out=` keys.
-#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ArtifactKind {
     /// The elaborated (pre-optimizer) Core root, a phase's compiled identity.
@@ -124,7 +122,6 @@ impl ArtifactKind {
 /// The trailing `k=v` count keys. Only counts that are real and already cheap to
 /// obtain at a phase are emitted; the family names the full vocabulary a reader
 /// may encounter.
-#[cfg_attr(not(feature = "native"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CountKey {
     Defs,

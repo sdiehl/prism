@@ -950,7 +950,7 @@ pub(crate) const SHOW_EMPTY_EFFECT_ROW: bool = false;
 
 /// Render a type followed by its effect row, omitting an empty row.
 ///
-/// The omission is governed by [`SHOW_EMPTY_EFFECT_ROW`]. This is the
+/// The omission is governed by `SHOW_EMPTY_EFFECT_ROW`. This is the
 /// canonical spelling for the `type ! {effects}` displays in the driver, REPL,
 /// and check-world metadata.
 #[must_use]
