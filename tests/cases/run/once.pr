@@ -1,0 +1,13 @@
+-- `@ once` on a closure parameter is a type-level usage contract: the callee may
+-- call it at most once, and only directly. The fact is erased before Core (it
+-- constrains checking, not execution), so an accepted program runs identically on
+-- both backends and threads no differently from an unannotated closure.
+fn once_apply(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)
+
+-- A `@ once` closure may be handed on to another `@ once` parameter (a single
+-- delegated use), and the compiler tracks that this is still at most one call.
+fn relay(g : ((Int) -> Int) @ once, x : Int) : Int = once_apply(g, x)
+
+fn main() =
+  println(once_apply(\(n) -> n * 2, 21))
+  println(relay(\(n) -> n + 100, 5))

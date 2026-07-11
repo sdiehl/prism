@@ -14,7 +14,7 @@ fn pick(fs : List(() -> Int), i : Int) : Int =
       else
         pick(rest, i - 1)
 
-fn tell(g : () -> Unit ! {IO}) : !{IO} Unit = g()
+fn tell(g : () -> Unit ! {IO}) : Unit ! {IO} = g()
 
 fn main() =
   println(force(\() -> 41 + 1))

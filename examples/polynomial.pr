@@ -91,7 +91,7 @@ fn show_poly(p : Poly) : String =
 fn pair_str(label : String, a : Int, b : Int) : String =
   concat(label, concat(show(a), concat(" ", show(b))))
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let p = Poly { arities = [2, 1, 0] }
   let q = Poly { arities = [1, 0] }
   println(show_poly(p))

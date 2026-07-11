@@ -60,7 +60,6 @@ pub(crate) const USAGE_SUMMARY_PHASE: &str = "usage-summary-md";
 const TIER_PHASE: &str = "tier";
 const GIT_DIR: &str = ".git";
 const TARGET_DIR: &str = "target";
-const COMPILER_INPUT_ROWS: &[&str] = &["source-root", "stdlib-root", "package-root"];
 
 // A gate outcome. Passed/NotRun/Failed are the only three values a gate reports;
 // the enum replaces the `&'static str` triple so `PackageGates::failed` compares
@@ -171,7 +170,7 @@ pub fn check_world_cmd(
     let manifests = world_manifests(path)?;
     if manifests.is_empty() {
         return Err((
-            Error::Resolve(format!(
+            Error::ResolveLineage(format!(
                 "no package projects found under `{}`",
                 path.display()
             )),
@@ -254,7 +253,7 @@ pub fn check_world_cmd(
     }
     if strict && (!compatibility.is_compatible() || gate_failed || usage_failed) {
         return Err((
-            Error::Resolve("check-world found an incompatible package universe".into()),
+            Error::ResolveLineage("check-world found an incompatible package universe".into()),
             String::new(),
             path.display().to_string(),
         ));
@@ -271,7 +270,7 @@ fn load_baseline(baseline: Option<&Path>) -> Result<Option<Value>, (Error, Strin
     let text = read(path).map_err(|e| (e, String::new(), path.display().to_string()))?;
     let value = serde_json::from_str::<Value>(&text).map_err(|e| {
         (
-            Error::Resolve(e.to_string()),
+            Error::ResolveLineage(e.to_string()),
             String::new(),
             path.display().to_string(),
         )
@@ -495,7 +494,7 @@ fn world_manifests(path: &Path) -> Result<Vec<PathBuf>, (Error, String, String)>
             return Ok(vec![path.to_path_buf()]);
         }
         return Err((
-            Error::Resolve(format!(
+            Error::ResolveLineage(format!(
                 "`{}` is not a package universe or prism.toml",
                 path.display()
             )),
@@ -713,7 +712,7 @@ fn check_world_json(
     };
     serde_json::to_string_pretty(&value).map_err(|e| {
         (
-            Error::Resolve(e.to_string()),
+            Error::ResolveLineage(e.to_string()),
             String::new(),
             path.display().to_string(),
         )
@@ -909,8 +908,8 @@ fn compiler_surface(identity: &crate::driver::ArtifactIdentity) -> String {
     identity
         .rows()
         .into_iter()
-        .filter(|(key, _)| !COMPILER_INPUT_ROWS.contains(key))
-        .map(|(key, value)| format!("{key}={value}"))
+        .filter(|row| !row.field.is_input_root())
+        .map(|row| format!("{}={}", row.field.label(), row.value))
         .collect::<Vec<_>>()
         .join(";")
 }

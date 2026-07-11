@@ -7,28 +7,21 @@ use marginalia::Span;
 use super::{call, eint, evar, lam1, sp, spat};
 use crate::core::builtins::Builtin;
 use crate::core::contract_digest;
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::fmt::decl::fmt_ty;
 use crate::names::{
-    ARBITRARY_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP, HASH_METHOD, INT_CMP,
+    self, ARBITRARY_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP, HASH_METHOD, INT_CMP,
     ORD_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN,
     SHAPE_DIGEST_METHOD, SHOW_METHOD, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
 };
 use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Constraint, Ctor, DataDecl, Decl, Expr, Fip, InstanceDecl, IntLit, Param,
-    PathOp, PathStep, Pattern, Program, Suffix, Ty, S,
+    Arm, BigInt, BinOp, Constraint, Ctor, CtorShape, DataDecl, Decl, Expr, Fip, InstanceDecl,
+    IntLit, Param, PathOp, PathStep, Pattern, Program, Suffix, Ty, S,
 };
 use crate::types::{
     ARBITRARY_CLASS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, LENS, ORD_CLASS,
     SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
 };
-
-// The bare, unqualified tail of a canonical name (`Wire.Serialize` -> `Serialize`,
-// a root name unchanged). `deriving (C)` names a class by its bare name, so this
-// maps an in-scope class's canonical name back to the token the surface wrote.
-fn bare(name: &str) -> &str {
-    name.rsplit_once(['.', '@']).map_or(name, |(_, n)| n)
-}
 
 // `deriving (Eq, Ord, Show)` synthesizes ordinary named instances here, so the
 // class machinery checks and elaborates them like hand-written ones. The
@@ -71,16 +64,12 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
     if let Some(i) = prog
         .instances
         .iter()
-        .find(|i| bare(&i.class) == STABLE_CLASS)
+        .find(|i| names::bare_name(&i.class) == STABLE_CLASS)
     {
-        return Err(TypeError::Other {
-            span: i.span,
-            msg: format!(
-                "`Stable` cannot be given a hand-written instance; its shape digest is \
-                 compiler-computed. Write `deriving (Stable)` on `{}` instead.",
-                fmt_ty(&i.head)
-            ),
-        });
+        return Err(ErrKind::StableHandWritten {
+            head: fmt_ty(&i.head),
+        }
+        .at(i.span));
     }
     // Each in-scope class's bare name mapped to its canonical name. A derived
     // instance must reference the canonical `Module.Class` the instance store
@@ -91,7 +80,7 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
     let class_canon: BTreeMap<&str, &str> = prog
         .classes
         .iter()
-        .map(|c| (bare(&c.name), c.name.as_str()))
+        .map(|c| (names::bare_name(&c.name), c.name.as_str()))
         .collect();
     // Each in-scope top-level function's bare name mapped to its canonical name.
     // A derived instance is built after name resolution, so a reference it emits
@@ -102,7 +91,7 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
     let value_canon: BTreeMap<&str, &str> = prog
         .fns
         .iter()
-        .map(|f| (bare(&f.name), f.name.as_str()))
+        .map(|f| (names::bare_name(&f.name), f.name.as_str()))
         .collect();
     let lib = |n: &str| value_canon.get(n).map_or(n, |c| *c).to_string();
     // The types whose every component is provably serializable-frozen: those that
@@ -121,10 +110,10 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
                 continue;
             }
             let Some(&canon) = class_canon.get(class.as_str()) else {
-                return Err(TypeError::Other {
-                    span: *cspan,
-                    msg: format!("unknown class in deriving: {class}"),
-                });
+                return Err(ErrKind::UnknownDerivingClass {
+                    class: class.clone(),
+                }
+                .at(*cspan));
             };
             out.push(match class.as_str() {
                 EQ_CLASS => derive_eq(d, canon),
@@ -135,14 +124,11 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
                 STABLE_CLASS => derive_stable(d, canon, *cspan, &stable_types)?,
                 ARBITRARY_CLASS => derive_arbitrary(d, canon, &lib),
                 other => {
-                    return Err(TypeError::Other {
-                        span: *cspan,
-                        msg: format!(
-                            "cannot derive {other} for {}; derivable are Eq, Ord, Show, Hash, \
-                             Serialize, Stable, Arbitrary, {LENS}",
-                            d.name
-                        ),
-                    })
+                    return Err(ErrKind::NotDerivable {
+                        class: other.to_string(),
+                        ty: d.name.clone(),
+                    }
+                    .at(*cspan))
                 }
             });
         }
@@ -159,22 +145,14 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
 fn derive_lens(d: &DataDecl, cspan: Span) -> Result<Vec<Decl>, TypeError> {
     let z = Z;
     let [ctor] = d.ctors.as_slice() else {
-        return Err(TypeError::Other {
-            span: cspan,
-            msg: format!(
-                "cannot derive Lens for {}: needs a single record constructor",
-                d.name
-            ),
-        });
+        return Err(ErrKind::LensNeedsRecord { ty: d.name.clone() }.at(cspan));
     };
     let Some(fields) = &ctor.fields else {
-        return Err(TypeError::Other {
-            span: cspan,
-            msg: format!(
-                "cannot derive Lens for {}: `{}` has no named fields",
-                d.name, ctor.name
-            ),
-        });
+        return Err(ErrKind::LensNeedsNamedFields {
+            ty: d.name.clone(),
+            ctor: ctor.name.clone(),
+        }
+        .at(cspan));
     };
     let self_ty = Ty::Con(
         d.name.clone(),
@@ -421,26 +399,31 @@ fn derive_show(d: &DataDecl, class: &str) -> InstanceDecl {
             let n = c.args.len();
             let body = if n == 0 {
                 sp(Expr::Str(c.name.clone()), z)
-            } else if let Some(fields) = &c.fields {
-                // Record constructor: `Name { f0 = v0, f1 = v1 }`.
-                let mut acc = sp(Expr::Str(" }".into()), z);
-                for (i, (fname, _)) in fields.iter().enumerate().rev() {
-                    let sep = if i > 0 { ", " } else { " { " };
-                    acc = concat(
-                        concat(sp(Expr::Str(format!("{sep}{fname} = ")), z), shown(i)),
-                        acc,
-                    );
-                }
-                concat(sp(Expr::Str(c.name.clone()), z), acc)
             } else {
-                let mut acc = sp(Expr::Str(")".into()), z);
-                for i in (0..n).rev() {
-                    acc = concat(shown(i), acc);
-                    if i > 0 {
-                        acc = concat(sp(Expr::Str(", ".into()), z), acc);
+                match c.shape() {
+                    // Record constructor: `Name { f0 = v0, f1 = v1 }`.
+                    CtorShape::Record(fields) => {
+                        let mut acc = sp(Expr::Str(" }".into()), z);
+                        for (i, (fname, _)) in fields.iter().enumerate().rev() {
+                            let sep = if i > 0 { ", " } else { " { " };
+                            acc = concat(
+                                concat(sp(Expr::Str(format!("{sep}{fname} = ")), z), shown(i)),
+                                acc,
+                            );
+                        }
+                        concat(sp(Expr::Str(c.name.clone()), z), acc)
+                    }
+                    CtorShape::Positional(_) => {
+                        let mut acc = sp(Expr::Str(")".into()), z);
+                        for i in (0..n).rev() {
+                            acc = concat(shown(i), acc);
+                            if i > 0 {
+                                acc = concat(sp(Expr::Str(", ".into()), z), acc);
+                            }
+                        }
+                        concat(sp(Expr::Str(format!("{}(", c.name)), z), acc)
                     }
                 }
-                concat(sp(Expr::Str(format!("{}(", c.name)), z), acc)
             };
             Arm {
                 pat: spat(Pattern::Ctor(c.name.clone(), fvars("_f", n, z)), z),
@@ -647,7 +630,7 @@ fn stable_type_set(prog: &Program) -> BTreeSet<String> {
         }
     }
     for i in &prog.instances {
-        if bare(&i.class) == STABLE_CLASS {
+        if names::bare_name(&i.class) == STABLE_CLASS {
             if let Ty::Con(n, _) = &i.head {
                 s.insert(n.clone());
             }
@@ -678,9 +661,10 @@ fn is_stable(t: &Ty, set: &BTreeSet<String>) -> bool {
         Ty::Tuple(ts) => ts.iter().all(|x| is_stable(x, set)),
         Ty::Con(n, args) => set.contains(n) && args.iter().all(|x| is_stable(x, set)),
         // A usage row is rejected in desugar before deriving; a type carrying
-        // one is never frozen-serializable.
+        // one is never frozen-serializable. Unboxed products have no derived
+        // instances in V1, so they are not frozen-serializable either.
         Ty::App(..) | Ty::Fun(..) | Ty::Forall(..) | Ty::State(_) | Ty::RowLit(_)
-        | Ty::Coeffect(..) => false,
+        | Ty::Coeffect(..) | Ty::UnboxedTuple(_) | Ty::UnboxedRecord(_) => false,
     }
 }
 
@@ -700,20 +684,18 @@ fn derive_stable(
     for c in &d.ctors {
         for (i, arg) in c.args.iter().enumerate() {
             if !is_stable(arg, set) {
-                let field = c.fields.as_ref().map_or_else(
-                    || format!("argument {} of `{}`", i + 1, bare(&c.name)),
-                    |fs| format!("field `{}`", fs[i].0),
-                );
-                return Err(TypeError::Other {
-                    span: cspan,
-                    msg: format!(
-                        "cannot derive Stable for {}: {} has type `{}`, which is not Stable. \
-                         A frozen format cannot contain a value that is not itself serializable.",
-                        bare(&d.name),
-                        field,
-                        fmt_ty(arg)
-                    ),
-                });
+                let field = match c.shape() {
+                    CtorShape::Record(fs) => format!("field `{}`", fs[i].0),
+                    CtorShape::Positional(_) => {
+                        format!("argument {} of `{}`", i + 1, names::bare_name(&c.name))
+                    }
+                };
+                return Err(ErrKind::StableFieldNotStable {
+                    ty: names::bare_name(&d.name).to_string(),
+                    field,
+                    field_ty: fmt_ty(arg),
+                }
+                .at(cspan));
             }
         }
     }

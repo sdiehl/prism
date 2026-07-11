@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/param_eff_mismatch.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("ints") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwInt RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("strs") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwString RParen RBrace KwUnit Eq Ident("emit") LParen StringLit("x") RParen VSemi Fn Ident("both") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwInt RParen RBrace KwUnit Eq VOpen Ident("ints") LParen RParen VSemi Ident("strs") LParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("ints") LParen RParen Colon KwUnit Bang LBrace UIdent("Emit") LParen KwInt RParen RBrace Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("strs") LParen RParen Colon KwUnit Bang LBrace UIdent("Emit") LParen KwString RParen RBrace Eq Ident("emit") LParen StringLit("x") RParen VSemi Fn Ident("both") LParen RParen Colon KwUnit Bang LBrace UIdent("Emit") LParen KwInt RParen RBrace Eq VOpen Ident("ints") LParen RParen VSemi Ident("strs") LParen RParen VClose VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
 
 == ast ==
 Program {
@@ -27,7 +27,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..35,
+            span: 0..31,
         },
     ],
     errors: [],
@@ -58,7 +58,7 @@ Program {
                         node: Var(
                             "emit",
                         ),
-                        span: 69..73,
+                        span: 66..70,
                     },
                     [
                         Spanned {
@@ -68,14 +68,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 74..75,
+                            span: 71..72,
                         },
                     ],
                 ),
-                span: 69..76,
+                span: 66..73,
             },
             wheres: [],
-            span: 37..76,
+            span: 33..73,
         },
         Decl {
             name: "strs",
@@ -100,21 +100,21 @@ Program {
                         node: Var(
                             "emit",
                         ),
-                        span: 113..117,
+                        span: 111..115,
                     },
                     [
                         Spanned {
                             node: Str(
                                 "x",
                             ),
-                            span: 118..121,
+                            span: 116..119,
                         },
                     ],
                 ),
-                span: 113..122,
+                span: 111..120,
             },
             wheres: [],
-            span: 78..122,
+            span: 75..120,
         },
         Decl {
             name: "both",
@@ -142,11 +142,11 @@ Program {
                                 node: Var(
                                     "ints",
                                 ),
-                                span: 158..162,
+                                span: 157..161,
                             },
                             [],
                         ),
-                        span: 158..164,
+                        span: 157..163,
                     },
                     Spanned {
                         node: Call(
@@ -154,17 +154,17 @@ Program {
                                 node: Var(
                                     "strs",
                                 ),
-                                span: 167..171,
+                                span: 166..170,
                             },
                             [],
                         ),
-                        span: 167..173,
+                        span: 166..172,
                     },
                 ),
-                span: 158..173,
+                span: 157..172,
             },
             wheres: [],
-            span: 124..173,
+            span: 122..172,
         },
         Decl {
             name: "main",
@@ -174,16 +174,16 @@ Program {
             constraints: [],
             body: Spanned {
                 node: Unit,
-                span: 187..189,
+                span: 186..188,
             },
             wheres: [],
-            span: 175..189,
+            span: 174..188,
         },
     ],
 }
 
 == types ==
-Type Error: in `both`: effect instantiation mismatch: `Emit(String)` is not compatible with `Emit(Int)`
+[E5006] Type Error: in `both`: effect instantiation mismatch: `Emit(String)` is not compatible with `Emit(Int)`
     ╭─[ <source>:10:3 ]
     │
  10 │   strs()

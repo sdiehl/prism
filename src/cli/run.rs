@@ -130,7 +130,7 @@ pub(crate) fn example_sources(dir: &Path) -> Result<Vec<PathBuf>, CmdError> {
     sources.sort();
     if sources.is_empty() {
         return Err((
-            Error::Resolve(format!(
+            Error::ResolveCommand(format!(
                 "no .{PRISM_SOURCE_EXTENSION} files found under {}",
                 dir.display()
             )),
@@ -243,7 +243,7 @@ pub fn run_examples_cmd(dir: &Path, cfg: &crate::Config, stdin: ExampleStdin) ->
         eprintln!("{failure}");
     }
     Err((
-        Error::Runtime(format!(
+        Error::RuntimeEvaluation(format!(
             "{} of {} examples failed",
             failures.len(),
             sources.len()

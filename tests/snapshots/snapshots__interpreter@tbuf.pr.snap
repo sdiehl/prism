@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/tbuf.pr
+---
+4
+8
+4
+1.5
+=> ()

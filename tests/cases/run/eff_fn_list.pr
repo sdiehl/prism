@@ -2,7 +2,7 @@
 -- under a handler.
 
 effect Out
-  ctl out(Int) : Unit
+  out(Int) : Unit
 
 fn shout(x) =
   out(x)
@@ -19,6 +19,6 @@ fn pipe(fs, x) =
 
 fn main() =
   println(handle pipe(Cons(shout, Cons(double, Cons(shout, Nil))), 5) with {
-    out(v, k) => let _ = println(v) in k(()),
+    out(v) resume k => let _ = println(v) in k(()),
     return r => r
   })

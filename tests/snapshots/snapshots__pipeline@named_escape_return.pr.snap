@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/named_escape_return.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Ask") VOpen Ctl Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Ident("f") VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+VOpen Effect UIdent("Ask") VOpen Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("leak") LParen RParen Eq VOpen With Ident("f") LArrow Handler VOpen Ident("ask") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 5, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VSemi Ident("f") VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -21,7 +21,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 135..163,
+            span: 135..159,
         },
     ],
     errors: [],
@@ -43,7 +43,7 @@ Program {
                             node: Var(
                                 "f",
                             ),
-                            span: 236..237,
+                            span: 240..241,
                         },
                         [
                             Op(
@@ -56,7 +56,7 @@ Program {
                                             node: Var(
                                                 "k",
                                             ),
-                                            span: 211..212,
+                                            span: 215..216,
                                         },
                                         [
                                             Spanned {
@@ -66,11 +66,11 @@ Program {
                                                         suffix: None,
                                                     },
                                                 ),
-                                                span: 213..214,
+                                                span: 217..218,
                                             },
                                         ],
                                     ),
-                                    span: 211..215,
+                                    span: 215..219,
                                 },
                             ),
                             Return(
@@ -79,16 +79,16 @@ Program {
                                     node: Var(
                                         "r",
                                     ),
-                                    span: 232..233,
+                                    span: 236..237,
                                 },
                             ),
                         ],
                     ),
                 ),
-                span: 179..237,
+                span: 175..241,
             },
             wheres: [],
-            span: 165..237,
+            span: 161..241,
         },
         Decl {
             name: "main",
@@ -102,7 +102,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 251..258,
+                        span: 255..262,
                     },
                     [
                         Spanned {
@@ -112,20 +112,20 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 259..260,
+                            span: 263..264,
                         },
                     ],
                 ),
-                span: 251..261,
+                span: 255..265,
             },
             wheres: [],
-            span: 239..261,
+            span: 243..265,
         },
     ],
 }
 
 == types ==
-Type Error: handler instance `f` is not a value: call its operations as `f.op(...)`
+[E6042] Type Error: handler instance `f` is not a value: call its operations as `f.op(...)`
     ╭─[ <source>:10:3 ]
     │
  10 │   f

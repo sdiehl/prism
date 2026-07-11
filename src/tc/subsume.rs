@@ -1,9 +1,31 @@
 use std::collections::BTreeSet;
 
 use super::{Entry, Tc, TcErr};
+use crate::coeffect::{CoeffectFact, CoeffectRow};
 use crate::names::{self, ScopedEscape};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label, Type};
+
+// Multiplicity as a level: `@ once` is 1 (restrictive), the default `@ many` is
+// 0. A value fits a context iff its level does not exceed the context's.
+fn mult_level(row: &CoeffectRow) -> u8 {
+    u8::from(matches!(row.multiplicity(), Some(CoeffectFact::Once)))
+}
+
+// A value of multiplicity `value` used in a context requiring `context`: the
+// value may be no more restrictive than the context allows, so a `@ once` value
+// (level 1) in a `@ many` context (level 0) is the one rejected pairing.
+fn check_mult(value: u8, context: u8) -> Result<(), TcErr> {
+    if value > context {
+        // `Keep` so this precise reason survives the caller's coarse
+        // expected/got rewrite (a bare `Fail` would be replaced by it).
+        Err(TcErr::Keep(
+            "a closure marked `@ once` cannot be passed where it may be used more than once".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 impl Tc<'_> {
     pub(super) fn subtype(&mut self, a: &Type, b: &Type) -> Result<(), TcErr> {
@@ -18,8 +40,26 @@ impl Tc<'_> {
             | (Type::U64, Type::U64)
             | (Type::Str, Type::Str) => Ok(()),
             (Type::Exist(x), Type::Exist(y)) if x == y => Ok(()),
-            (Type::Tuple(xs), Type::Tuple(ys)) if xs.len() == ys.len() => {
+            // Boxed and unboxed tuples unify structurally, each only with its own
+            // kind (the OR keeps them distinct: a boxed tuple never unifies with an
+            // unboxed one).
+            (Type::Tuple(xs), Type::Tuple(ys))
+            | (Type::UnboxedTuple(xs), Type::UnboxedTuple(ys))
+                if xs.len() == ys.len() =>
+            {
                 for (x, y) in xs.iter().zip(ys) {
+                    let x = self.apply(x);
+                    let y = self.apply(y);
+                    self.subtype(&x, &y)?;
+                }
+                Ok(())
+            }
+            // An unboxed record additionally requires the same fields in the same
+            // order (field names are part of the type's identity).
+            (Type::UnboxedRecord(xs), Type::UnboxedRecord(ys))
+                if xs.len() == ys.len() && xs.iter().zip(ys).all(|((a, _), (b, _))| a == b) =>
+            {
+                for ((_, x), (_, y)) in xs.iter().zip(ys) {
                     let x = self.apply(x);
                     let y = self.apply(y);
                     self.subtype(&x, &y)?;
@@ -42,6 +82,32 @@ impl Tc<'_> {
                     self.subtype(&x, &y)?;
                 }
                 Ok(())
+            }
+            // A nullable unifies with a nullable, covariantly on the element.
+            (Type::OrNull(x), Type::OrNull(y)) => {
+                let x = self.apply(x);
+                let y = self.apply(y);
+                self.subtype(&x, &y)
+            }
+            // Usage-annotated types check by their inner type plus a contravariant
+            // multiplicity: a value's usage must be no more permissive than its
+            // context permits. `@ many` (the default) fits a `@ once` slot, but a
+            // `@ once` value used where more uses are allowed is rejected (the
+            // delegation check: a once-closure cannot be handed to a many-context).
+            (Type::Coeffect(a0, ra), Type::Coeffect(b0, rb)) => {
+                let a = self.apply(a0);
+                let b = self.apply(b0);
+                self.subtype(&a, &b)?;
+                check_mult(mult_level(ra), mult_level(rb))
+            }
+            (Type::Coeffect(a0, ra), _) => {
+                let a = self.apply(a0);
+                self.subtype(&a, b)?;
+                check_mult(mult_level(ra), 0)
+            }
+            (_, Type::Coeffect(b0, _)) => {
+                let b = self.apply(b0);
+                self.subtype(a, &b)
             }
             // Two application spines unify head-to-head, argument-to-argument.
             (Type::App(h1, a1), Type::App(h2, a2)) => {
@@ -102,9 +168,13 @@ impl Tc<'_> {
                 Ok(())
             }
             (_, Type::Forall(n, b0)) => {
-                self.ctx.push(Entry::Uni(*n));
-                self.subtype(a, b0)?;
-                self.drop_uni(*n);
+                // Skolemize with a fresh identity that still renders as `n`, so
+                // two nested `forall a` cannot alias in the context.
+                let sk = Sym::fresh_named(*n);
+                let b1 = b0.subst_var(*n, &Type::Var(sk));
+                self.ctx.push(Entry::Uni(sk));
+                self.subtype(a, &b1)?;
+                self.drop_uni(sk);
                 Ok(())
             }
             (Type::RowForall(n, a0), _) => {
@@ -113,9 +183,11 @@ impl Tc<'_> {
                 self.subtype(&a1, b)
             }
             (_, Type::RowForall(n, b0)) => {
-                self.ctx.push(Entry::RowUni(*n));
-                self.subtype(a, b0)?;
-                self.drop_row_uni(*n);
+                let sk = Sym::fresh_named(*n);
+                let b1 = b0.subst_row_var(*n, &EffRow::Var(sk));
+                self.ctx.push(Entry::RowUni(sk));
+                self.subtype(a, &b1)?;
+                self.drop_row_uni(sk);
                 Ok(())
             }
             // A `Row`-kinded argument position: unify the carried effect rows.
@@ -233,11 +305,52 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
+            // Unboxed products articulate exactly like their boxed counterparts:
+            // splice one fresh existential per field to ex's left, then instantiate
+            // each against the corresponding field type. Reachable only when a field
+            // is itself a polytype (a monomorphic unboxed value takes the is_mono
+            // fast path above).
+            Type::UnboxedTuple(elems) => {
+                let elem_exs: Vec<u32> = elems.iter().map(|_| self.fresh_id()).collect();
+                let tup = Type::UnboxedTuple(elem_exs.iter().map(|e| Type::Exist(*e)).collect());
+                self.splice_solved(ex, &elem_exs, tup)?;
+                for (e, elem) in elem_exs.iter().zip(&elems) {
+                    let elem = self.apply(elem);
+                    self.inst(*e, &elem, left)?;
+                }
+                Ok(())
+            }
+            Type::UnboxedRecord(fields) => {
+                let field_exs: Vec<u32> = fields.iter().map(|_| self.fresh_id()).collect();
+                let rec = Type::UnboxedRecord(
+                    fields
+                        .iter()
+                        .zip(&field_exs)
+                        .map(|((n, _), e)| (*n, Type::Exist(*e)))
+                        .collect(),
+                );
+                self.splice_solved(ex, &field_exs, rec)?;
+                for (e, (_, t)) in field_exs.iter().zip(&fields) {
+                    let t = self.apply(t);
+                    self.inst(*e, &t, left)?;
+                }
+                Ok(())
+            }
+            // A nullable articulates through one fresh existential for its element.
+            Type::OrNull(elem) => {
+                let elem_ex = self.fresh_id();
+                let nul = Type::OrNull(Box::new(Type::Exist(elem_ex)));
+                self.splice_solved(ex, &[elem_ex], nul)?;
+                let elem = self.apply(&elem);
+                self.inst(elem_ex, &elem, left)
+            }
             Type::Forall(n, body) if left => {
-                self.ctx.push(Entry::Uni(n));
+                let sk = Sym::fresh_named(n);
+                let body = body.subst_var(n, &Type::Var(sk));
+                self.ctx.push(Entry::Uni(sk));
                 let body2 = self.apply(&body);
                 self.inst(ex, &body2, true)?;
-                self.drop_uni(n);
+                self.drop_uni(sk);
                 Ok(())
             }
             Type::Forall(n, body) => {
@@ -250,10 +363,12 @@ impl Tc<'_> {
                 Ok(())
             }
             Type::RowForall(n, body) if left => {
-                self.ctx.push(Entry::RowUni(n));
+                let sk = Sym::fresh_named(n);
+                let body = body.subst_row_var(n, &EffRow::Var(sk));
+                self.ctx.push(Entry::RowUni(sk));
                 let body2 = self.apply(&body);
                 self.inst(ex, &body2, true)?;
-                self.drop_row_uni(n);
+                self.drop_row_uni(sk);
                 Ok(())
             }
             Type::RowForall(n, body) => {
@@ -580,10 +695,12 @@ mod tests {
             data,
             eff_ops,
             field_res: BTreeMap::new(),
+            unboxed_field: BTreeMap::new(),
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
             pending: Vec::new(),
+            or_null_sites: Vec::new(),
             classes,
             instances,
             inst_keys,

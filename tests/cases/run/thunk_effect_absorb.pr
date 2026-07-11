@@ -7,26 +7,26 @@
 -- still absorbs it. `run_wrap` re-installs itself to run the thunk (as `Incr`
 -- does), so a thunk's own `Wrap` performs are re-handled while its `e` flows out.
 effect Out
-  ctl out(Int) : Unit
+  out(Int) : Unit
 
 effect Wrap
-  ctl wrap(() -> Int ! {Wrap | e}) : Int
+  wrap(() -> Int ! {Wrap | e}) : Int
 
 fn run_wrap(action : () -> a ! {Wrap | e}) : a =
   handle action() with
-    wrap(th, k) => k(run_wrap(th))
+    wrap(th) resume k => k(run_wrap(th))
     return x => x
 
-fn inner() : !{Out} Int =
+fn inner() : Int ! {Out} =
   out(7)
   3
 
-fn driver() : !{Wrap, Out} Int = wrap(inner)
+fn driver() : Int ! {Wrap, Out} = wrap(inner)
 
-fn work() : !{Out} Int = run_wrap(driver)
+fn work() : Int ! {Out} = run_wrap(driver)
 
 fn main() =
   println(handle work() with {
-    out(n, k) => let _ = println(n) in k(()),
+    out(n) resume k => let _ = println(n) in k(()),
     return r => r
   })

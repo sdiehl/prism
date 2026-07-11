@@ -1,4 +1,4 @@
 -- A digit separator `_` must sit between two digits; a doubled one is rejected
 -- by the lexer with a pointed message.
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(1__0)

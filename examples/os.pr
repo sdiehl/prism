@@ -3,7 +3,7 @@
 -- argument vector too, but are left out here to keep the demo deterministic
 -- across the interpreter and native backends.
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let path = "/tmp/prism_os_demo.txt"
   write_file(path, "hello, os surface")
   let contents = read_file(path)

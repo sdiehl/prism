@@ -1,0 +1,30 @@
+-- Function composition three ways: composed functions are values built with
+-- `>>` (forward) and `<<` (backward), a computed value flows on with `|>`,
+-- and the UFCS dot chains the same calls in the same left-to-right order.
+--
+-- Prints:
+--   22
+--   21
+--   22
+--   22
+--   100
+
+fn inc(x : Int) : Int = x + 1
+
+fn double(x : Int) : Int = x * 2
+
+fn clamp_hundred(x : Int) : Int =
+  if x > 100 then
+    100
+  else
+    x
+
+fn main() =
+  let up = inc >> double  -- \x -> double(inc(x))
+  let down = inc << double  -- \x -> inc(double(x))
+  println(show(up(10)))
+  println(show(down(10)))
+  println(show(10 |> inc |> double))
+  let ten = 10
+  println(show(ten.inc().double()))
+  println(show(200 |> inc >> double >> clamp_hundred))

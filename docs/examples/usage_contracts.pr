@@ -1,0 +1,10 @@
+import Teleport (..)
+
+fn classify(seed : Int) : Int = seed * 2
+
+fn run_once(f : (() -> Int) @ once) : Int = f()
+
+fn main() =
+  println(run_once(\() -> 1))
+  -- The closure captures only a top-level function: portable, single use.
+  println(teleport(\() -> classify(21)))

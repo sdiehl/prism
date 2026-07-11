@@ -1,0 +1,132 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/handler_arity.pr
+---
+== tokens ==
+VOpen Effect UIdent("St") VOpen Ident("put") LParen KwInt RParen Colon KwUnit VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Handle Ident("put") LParen Int(IntLit { value: 1, suffix: None }) RParen With LBrace Ident("put") LParen Ident("a") Comma Ident("b") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen LParen RParen RParen Comma Return Ident("r") FatArrow Int(IntLit { value: 9, suffix: None }) RBrace RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "St",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "put",
+                    params: [
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 200..227,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 243..250,
+                    },
+                    [
+                        Spanned {
+                            node: Handle(
+                                Spanned {
+                                    node: Call(
+                                        Spanned {
+                                            node: Var(
+                                                "put",
+                                            ),
+                                            span: 258..261,
+                                        },
+                                        [
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 1,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 262..263,
+                                            },
+                                        ],
+                                    ),
+                                    span: 258..264,
+                                },
+                                [
+                                    Op(
+                                        "put",
+                                        [
+                                            "a",
+                                            "b",
+                                        ],
+                                        "k",
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "k",
+                                                    ),
+                                                    span: 298..299,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Unit,
+                                                        span: 300..302,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 298..303,
+                                        },
+                                    ),
+                                    Return(
+                                        "r",
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 9,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 321..322,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 251..326,
+                        },
+                    ],
+                ),
+                span: 243..327,
+            },
+            wheres: [],
+            span: 229..327,
+        },
+    ],
+}
+
+== types ==
+[E5010] Type Error: in `main`: handler clause for `put` binds 2 parameter(s) besides the continuation, but the operation declares 1
+   ╭─[ <source>:9:27 ]
+   │
+ 9 │     put(a, b) resume k => k(()),
+   │                           ──┬──  
+   │                             ╰──── in `main`: handler clause for `put` binds 2 parameter(s) besides the continuation, but the operation declares 1
+───╯

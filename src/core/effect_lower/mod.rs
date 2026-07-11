@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use super::cbpv::{reachable_fns, Core, CoreFn, ElaboratedCore, LoweredCore, Value};
 use super::traverse::map_children as map_kids;
@@ -92,11 +93,6 @@ const EBIND: &str = "ebind";
 // The queue-application driver: runs an `EOp`'s type-aligned continuation queue.
 const QAPPLY: &str = "qApply";
 
-// Behind `PRISM_CEK_SPIKE`: a reserved op id marking a reified `resume`. The CEK
-// driver dispatches it specially, driving the captured continuation concatenated
-// with the clause's post-resume work; a real op id is always non-negative.
-const RESUME_OP_ID: i64 = -1;
-
 // Trampoline (`PRISM_TRAMPOLINE`): a fourth Eff ctor reifying a deferred monadic
 // hop. `EBounce(thunk)` is "run this thunk for the next Eff"; the `prism_drive`
 // loop forces it in constant native stack, so the run-queue/answer-function
@@ -112,17 +108,6 @@ const TQNIL: &str = "TQNil";
 const TQCONS: &str = "TQCons";
 const TQNIL_TAG: usize = 0;
 const TQCONS_TAG: usize = 1;
-
-// Behind `PRISM_CEK_SPIKE`: the CEK loop's meta-continuation, a LIFO stack of
-// pending answer-continuations (each a continuation queue). A resume pushes the
-// clause's post-resume work; reaching `EPure` with a non-empty stack pops and
-// applies it. Kept separate from an `EOp`'s own queue so nested parallel
-// multishot resumptions never tangle (which `concat`-ing them into the queue did).
-const MK: &str = "MK";
-const MKNIL: &str = "MKNil";
-const MKCONS: &str = "MKCons";
-const MKNIL_TAG: usize = 0;
-const MKCONS_TAG: usize = 1;
 
 /// Whether `name` is one of the residual free-monad driver templates: `ebind`, a
 /// per-handle driver (`{n}@handle`), or a mask driver (`{n}@mask`). Each entry to
@@ -195,28 +180,97 @@ pub type LowerResult = (LoweredCore, BTreeMap<String, CtorInfo>, Option<String>)
 // resume encodings, whereas the enum makes the choice mutually exclusive by
 // construction. Saved and restored around each clause body (see `handle.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MonadicScope {
+    Selective,
+    WholeProgram,
+}
+
+impl MonadicScope {
+    const fn is_whole(self) -> bool {
+        matches!(self, Self::WholeProgram)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum EarlyExitMode {
+    Continue,
+    ShortCircuit,
+}
+
+impl EarlyExitMode {
+    const fn short_circuits(self) -> bool {
+        matches!(self, Self::ShortCircuit)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StateAnswerMode {
+    Accumulator,
+    Producer,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NativeEffectMode {
+    Disabled,
+    Enabled,
+}
+
+impl NativeEffectMode {
+    const fn from_enabled(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    const fn enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ResumeCtorState {
+    Unused,
+    Used,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TrampolineMode {
+    Disabled,
+    Enabled,
+}
+
+impl TrampolineMode {
+    const fn from_enabled(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    const fn enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ResumeMode {
-    /// Not lowering a native/CEK clause: a resume application already yields an
-    /// Eff value and is threaded as-is (the mutually-recursive driver path).
+    /// Not lowering a native clause: a resume application already yields an Eff
+    /// value and is threaded as-is (the mutually-recursive driver path).
     Off,
     /// Native `{n}@region` loop: a resume yields `EResume(queue, value)`, which the
     /// loop drives by tail-calling itself on `qApply(queue, value)`.
     Native,
-    /// CEK trampoline (experimental): a resume yields `EOp(RESUME_OP_ID, ...)`
-    /// carrying its captured continuation queue, whose post-resume work the
-    /// surrounding `ebind` snocs onto the op's queue.
-    CekOp,
 }
 
-// The remaining flags are independent lowering modes (whole-program vs selective,
-// early short-circuit, native effect driving), not a state machine, so they stay
-// as separate booleans; the two resume-reification sub-states are unified in
-// `resume` above.
-#[allow(clippy::struct_excessive_bools)]
+// Independent lowering decisions use separate enums; each field admits only the
+// states meaningful to that decision.
 struct Lowerer {
     op_ids: BTreeMap<Sym, i64>,
     eff: BTreeSet<Sym>,
-    full: bool,
+    scope: MonadicScope,
     arities: BTreeMap<Sym, usize>,
     latent: Latent,
     flow: flow::ThunkFlow,
@@ -225,7 +279,7 @@ struct Lowerer {
     generated: Vec<CoreFn>,
     // Set by the state path when a `stake`-style early-terminating handler is
     // present: producers then thread `Step S` and check it after each emit.
-    early: bool,
+    early: EarlyExitMode,
     // Per fused op, how its `do op` site reconstructs the resume value with no
     // allocation: `Unit` (a write, result is unit) or `Acc` (a read, result is the
     // current accumulator). Populated by `fold_uniform`, read by `thread_st`.
@@ -236,26 +290,20 @@ struct Lowerer {
     // when the producer value coincides with it; the extra `thread_st` guards (a
     // non-state `return`, a producer result observed as a value) fall back rather
     // than miscompile when it does not.
-    state_mode: bool,
+    state_answer: StateAnswerMode,
     // Default on (opt out with `PRISM_NATIVE_EFFECTS=0`): drive eligible closed
     // handlers with a self-recursive `{n}@region` loop (a tail resume becomes a
     // queue plus `EResume`, and a function-answer state handler threads its state
     // in an accumulator) instead of a continuation thunk re-entering a mutually
     // recursive driver, so the resumed continuation is driven by a musttail
     // self-call and a parameter-passing loop runs in constant stack.
-    native: bool,
+    native: NativeEffectMode,
     // How a `resume` in the clause body currently being monadified is reified
-    // (`Native`/`CekOp`), or `Off` outside such a body. Saved/restored per clause.
+    // (`Native`), or `Off` outside such a body. Saved/restored per clause.
     resume: ResumeMode,
     // Recorded when any handler is driven natively, so the `EResume` ctor is added
     // to the table only when it is actually used.
-    used_resume: bool,
-    // Behind `PRISM_CEK_SPIKE`: drive in-scope-resume full-mode handlers with the
-    // CEK trampoline (constant stack) instead of the thunk-re-entrant driver.
-    cek_spike: bool,
-    // Whether the program uses `mask`. The CEK trampoline's skip/forward path is not
-    // yet validated against masking, so a masked program keeps the proven driver.
-    has_mask: bool,
+    resume_ctor: ResumeCtorState,
     // Trampoline: defer every monadic hop that can grow the native stack into an
     // `EBounce` and drive the whole free-monad computation through one
     // `prism_drive` loop, so a deferred-resume (parameter-passing) scheduler runs
@@ -267,7 +315,7 @@ struct Lowerer {
     // byte either way) and the fast path keeps a same-arity tail loop native, so
     // it costs nothing where the stack could not grow. A whole-program rewrite of
     // the free-monad fallback only; the evidence/state fusion paths never reach it.
-    trampoline: bool,
+    trampoline: TrampolineMode,
     // Per-lowering reporter for effect-lowering matcher drift. Scopes the once-per
     // -matcher stderr guard to this lowering (not a process-global static) and
     // reads `quiet` from `DynFlags`, so the diagnostic is a deterministic function
@@ -279,7 +327,7 @@ struct Lowerer {
 /// Panics only if a program declares more than `i64::MAX` distinct effect ops.
 ///
 /// # Errors
-/// Returns [`TypeError::Ice`] if lowering reaches an internal inconsistency: an
+/// Returns [`TypeError::InternalInvariant`] if lowering reaches an internal inconsistency: an
 /// op or effectful callee missing from the tables built during setup, or a
 /// monadified tail that is not Eff-shaped (a compiler bug surfaced as an error
 /// rather than a panic).
@@ -294,44 +342,56 @@ pub fn lower(
     Ok((LoweredCore(c), ct, warning))
 }
 
-/// No residual effects survive lowering: the program compiles to direct code.
-pub const TIER_PURE: &str = "pure";
-/// Evidence passing (the Identity answer): the fastest real effect lowering.
-pub const TIER_EVIDENCE: &str = "evidence";
-/// State fusion (the State answer): an accumulator threaded through producers.
-pub const TIER_STATE_FUSION: &str = "state-fusion";
-/// Free monad confined to a disjoint component, the rest still fused.
-pub const TIER_LOCAL_PARTIAL: &str = "local-partial";
-/// Only the effectful functions reify into the free monad; the rest stay native.
-pub const TIER_SELECTIVE_FREE_MONAD: &str = "selective-free-monad";
-/// Every function reifies into the free monad: the slowest, most general path.
-pub const TIER_WHOLE_PROGRAM_FREE_MONAD: &str = "whole-program-free-monad";
+/// Effect-lowering tier, ordered from cheapest to most general.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EffectStrategy {
+    Pure,
+    Evidence,
+    StateFusion,
+    LocalPartial,
+    SelectiveFreeMonad,
+    WholeProgramFreeMonad,
+}
 
-/// The lowering tiers in cost order, cheapest first.
-///
-/// A program's tier moving to a later index is a performance regression; moving
-/// to an earlier one is an improvement. `tests/perf_gate.rs`'s tier manifest
-/// reads this ordering to tell a silent fusion-to-free-monad collapse (fail
-/// loudly) from a genuine speedup (regenerate the golden). This array is the one
-/// canonical list of the tier names `strategy` can return, so a new tier is added
-/// here and nowhere else.
-pub const EFFECT_TIERS: [&str; 6] = [
-    TIER_PURE,
-    TIER_EVIDENCE,
-    TIER_STATE_FUSION,
-    TIER_LOCAL_PARTIAL,
-    TIER_SELECTIVE_FREE_MONAD,
-    TIER_WHOLE_PROGRAM_FREE_MONAD,
+impl EffectStrategy {
+    /// Frozen diagnostic and manifest spelling.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::Evidence => "evidence",
+            Self::StateFusion => "state-fusion",
+            Self::LocalPartial => "local-partial",
+            Self::SelectiveFreeMonad => "selective-free-monad",
+            Self::WholeProgramFreeMonad => "whole-program-free-monad",
+        }
+    }
+}
+
+impl fmt::Display for EffectStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// Lowering tiers in cost order, cheapest first.
+pub const EFFECT_TIERS: [EffectStrategy; 6] = [
+    EffectStrategy::Pure,
+    EffectStrategy::Evidence,
+    EffectStrategy::StateFusion,
+    EffectStrategy::LocalPartial,
+    EffectStrategy::SelectiveFreeMonad,
+    EffectStrategy::WholeProgramFreeMonad,
 ];
 
 /// The lowering strategy a program takes.
 ///
 /// The single source of truth is `lower_impl` itself, so the classification can
 /// never drift from the decision the compiler actually makes. One of the
-/// [`EFFECT_TIERS`]: [`TIER_PURE`] (no effects survive), [`TIER_EVIDENCE`],
-/// [`TIER_STATE_FUSION`], [`TIER_LOCAL_PARTIAL`] (free monad confined to a
-/// component, rest fused), [`TIER_SELECTIVE_FREE_MONAD`], or
-/// [`TIER_WHOLE_PROGRAM_FREE_MONAD`]. A perf snapshot pins this per program so a
+/// [`EFFECT_TIERS`]: [`EffectStrategy::Pure`] (no effects survive), [`EffectStrategy::Evidence`],
+/// [`EffectStrategy::StateFusion`], [`EffectStrategy::LocalPartial`] (free monad confined to a
+/// component, rest fused), [`EffectStrategy::SelectiveFreeMonad`], or
+/// [`EffectStrategy::WholeProgramFreeMonad`]. A perf snapshot records this per program so a
 /// fusion-to-free-monad regression is a reviewable diff.
 ///
 /// # Errors
@@ -341,7 +401,7 @@ pub fn strategy(
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
     grades: &OpGrades,
-) -> Result<&'static str, TypeError> {
+) -> Result<EffectStrategy, TypeError> {
     Ok(lower_impl(core, ctors, flags, grades, &mut None)?.2)
 }
 
@@ -351,7 +411,7 @@ fn lower_impl(
     flags: &DynFlags,
     grades: &OpGrades,
     warning: &mut Option<String>,
-) -> Result<(Core, BTreeMap<String, CtorInfo>, &'static str), TypeError> {
+) -> Result<(Core, BTreeMap<String, CtorInfo>, EffectStrategy), TypeError> {
     // Dead prelude code must not flip the program into monadic mode, so only
     // functions reachable from main are lowered (and kept) at all.
     let shaken;
@@ -410,7 +470,7 @@ fn lower_impl(
         ctors
     };
     if !core.fns.iter().any(|f| raw_effects(&f.body)) {
-        return Ok((core.clone(), ctors.clone(), TIER_PURE));
+        return Ok((core.clone(), ctors.clone(), EffectStrategy::Pure));
     }
 
     let mut op_set = BTreeSet::new();
@@ -428,7 +488,7 @@ fn lower_impl(
         .map(|(i, n)| {
             i64::try_from(i)
                 .map(|id| (n, id))
-                .map_err(|_| TypeError::Ice {
+                .map_err(|_| TypeError::InternalInvariant {
                     msg: "more than i64::MAX effect ops".into(),
                 })
         })
@@ -440,22 +500,24 @@ fn lower_impl(
     let mut lo = Lowerer {
         op_ids,
         eff,
-        full,
+        scope: if full {
+            MonadicScope::WholeProgram
+        } else {
+            MonadicScope::Selective
+        },
         arities: core.fns.iter().map(|f| (f.name, f.params.len())).collect(),
         latent: lat,
         flow: thunk_flow,
         resume_aliases: BTreeSet::new(),
         fresh: Fresh::new(),
         generated: Vec::new(),
-        early: false,
+        early: EarlyExitMode::Continue,
         state_a: BTreeMap::new(),
-        state_mode: false,
-        native: flags.native_effects,
-        used_resume: false,
-        cek_spike: flags.cek_spike,
-        has_mask: core.fns.iter().any(|f| contains_mask(&f.body)),
+        state_answer: StateAnswerMode::Accumulator,
+        native: NativeEffectMode::from_enabled(flags.native_effects),
+        resume_ctor: ResumeCtorState::Unused,
         resume: ResumeMode::Off,
-        trampoline: flags.trampoline,
+        trampoline: TrampolineMode::from_enabled(flags.trampoline),
         drift: DriftLog::new(flags.quiet),
     };
 
@@ -479,17 +541,17 @@ fn lower_impl(
     // back here with no state to undo.
     if tier == EffectTier::Auto {
         if let Some(lowered) = lo.try_lower_ev(core) {
-            return Ok((lowered, ctors.clone(), TIER_EVIDENCE));
+            return Ok((lowered, ctors.clone(), EffectStrategy::Evidence));
         }
     }
     if tier != EffectTier::FreeMonad {
         if let Some(lowered) = lo.try_lower_state(core) {
             let mut ctors = ctors.clone();
-            if lo.early {
+            if lo.early.short_circuits() {
                 ctors.insert(SMORE.into(), synth_ctor(STEP, MORE_TAG, 1));
                 ctors.insert(SDONE.into(), synth_ctor(STEP, DONE_TAG, 1));
             }
-            return Ok((lowered, ctors, TIER_STATE_FUSION));
+            return Ok((lowered, ctors, EffectStrategy::StateFusion));
         }
 
         // Global fusion failed. Before paying the free monad for the whole program,
@@ -499,7 +561,7 @@ fn lower_impl(
         // the split is not clean, so it never regresses a program that compiles today.
         if let Some((c, ct, w)) = lo.try_local(core, ctors)? {
             *warning = w;
-            return Ok((c, ct, TIER_LOCAL_PARTIAL));
+            return Ok((c, ct, EffectStrategy::LocalPartial));
         }
     }
 
@@ -541,19 +603,19 @@ fn lower_impl(
     fns.extend(std::mem::take(&mut lo.generated));
     fns.push(ebind_fn());
     fns.push(qapply_fn());
-    let monadic: BTreeSet<Sym> = if lo.full {
+    let monadic: BTreeSet<Sym> = if lo.scope.is_whole() {
         fns.iter().map(|f| f.name).collect()
     } else {
         lo.eff.clone()
     };
     let refs: Vec<&CoreFn> = fns.iter().collect();
-    check_convention_boundaries(&fns, &refs, &monadic, lo.full, &entries)?;
+    check_convention_boundaries(&fns, &refs, &monadic, lo.scope.is_whole(), &entries)?;
 
     // Run the trampoline as a semantics-preserving rewrite AFTER the boundary
     // check has validated the (untrampolined) monadic structure: it defers every
     // monadic hop into an `EBounce` and inserts `prism_drive` at each Eff-inspect
     // site, so the unbounded tail-call chain runs in constant native stack.
-    if lo.trampoline && lo.full {
+    if lo.trampoline.enabled() && lo.scope.is_whole() {
         trampoline::trampolinize(&mut fns, &mut lo.fresh);
         fns.push(trampoline::prism_drive_fn());
     }
@@ -563,21 +625,17 @@ fn lower_impl(
     ctors.insert(EOP.into(), synth_ctor(EFF, OP_TAG, 4));
     ctors.insert(TQNIL.into(), synth_ctor(TQ, TQNIL_TAG, 0));
     ctors.insert(TQCONS.into(), synth_ctor(TQ, TQCONS_TAG, 2));
-    if lo.used_resume {
+    if lo.resume_ctor == ResumeCtorState::Used {
         ctors.insert(ERESUME.into(), synth_ctor(EFF, RESUME_TAG, 2));
     }
-    if lo.cek_spike {
-        ctors.insert(MKNIL.into(), synth_ctor(MK, MKNIL_TAG, 0));
-        ctors.insert(MKCONS.into(), synth_ctor(MK, MKCONS_TAG, 2));
-    }
-    if lo.trampoline && lo.full {
+    if lo.trampoline.enabled() && lo.scope.is_whole() {
         ctors.insert(EBOUNCE.into(), synth_ctor(EFF, BOUNCE_TAG, 1));
     }
 
-    let strat = if lo.full {
-        TIER_WHOLE_PROGRAM_FREE_MONAD
+    let strat = if lo.scope.is_whole() {
+        EffectStrategy::WholeProgramFreeMonad
     } else {
-        TIER_SELECTIVE_FREE_MONAD
+        EffectStrategy::SelectiveFreeMonad
     };
     Ok((Core { fns }, ctors, strat))
 }
@@ -586,9 +644,12 @@ impl Lowerer {
     // Every op reaching lowering was assigned an id by collect_ops. Aliasing
     // a missed op to id 0 would silently misroute handler dispatch.
     fn op_id(&self, op: Sym) -> Result<i64, TypeError> {
-        self.op_ids.get(&op).copied().ok_or_else(|| TypeError::Ice {
-            msg: format!("effect op `{op}` escaped collect_ops"),
-        })
+        self.op_ids
+            .get(&op)
+            .copied()
+            .ok_or_else(|| TypeError::InternalInvariant {
+                msg: format!("effect op `{op}` escaped collect_ops"),
+            })
     }
 
     fn fresh(&mut self, hint: &str) -> Sym {

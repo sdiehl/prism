@@ -125,7 +125,7 @@ fn process_tiles(
   base : String,
   thr : Int,
   names : List(String)
-) : !{FileSystem} (List(Json), Int, Int, Int) =
+) : (List(Json), Int, Int, Int) ! {FileSystem} =
   match names of
     Nil => (Nil, 0, 0, 0)
     Cons(name, rest) =>
@@ -135,12 +135,12 @@ fn process_tiles(
       let (rest_js, c, a, s) = process_tiles(base, thr, rest)
       (Cons(tile_summary(name, n, t), rest_js), c + n, a + t.above, s + t.sum)
 
-fn read_config(base : String) : !{FileSystem} Json =
+fn read_config(base : String) : Json ! {FileSystem} =
   match decode(read_file(join(base, "config.json"))) of
     Ok(j) => j
     Err(_) => JNull
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let base =
     if file_exists("config.json") then
       "."

@@ -1,12 +1,12 @@
 import Concurrent (..)
 
-fn spin(k : Int) : !{Async(Int)} Int =
+fn spin(k : Int) : Int ! {Async(Int)} =
   if k == 0 then
     0
   else
     yield(())
     spin(k - 1)
 
-fn app() : !{Async(Int)} Int = spin(__N__)
+fn app() : Int ! {Async(Int)} = spin(__N__)
 
 fn main() = println(run_strategy(app))

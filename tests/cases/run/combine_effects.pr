@@ -1,14 +1,14 @@
 effect Raise
-  ctl raise(Int) : Int
+  raise(Int) : Int
 
 effect Tick
-  ctl tick(Unit) : Int
+  tick(Unit) : Int
 
 alias Boom = {Raise}
 
 alias App = {Boom, Tick}
 
-fn total(n) : !{App} Int =
+fn total(n) : Int ! {App} =
   let a = tick(())
   let b =
     if n == 0 then
@@ -17,15 +17,15 @@ fn total(n) : !{App} Int =
       n * tick(())
   a + b
 
-fn recover(n) : !{Tick} Int =
+fn recover(n) : Int ! {Tick} =
   handle total(n) with
-    raise(c, k) => 0 - c
+    raise(c) resume k => 0 - c
     return r => r
 
 fn run_one(n) =
   let f =
     handle recover(n) with
-      tick(u, k) => \(s) -> k(s)(s + 1)
+      tick(u) resume k => \(s) -> k(s)(s + 1)
       return r => \(_s) -> r
   f(1)
 

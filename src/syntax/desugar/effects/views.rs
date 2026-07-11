@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use marginalia::Span;
 
 use super::{rw, Vars};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::names;
 use crate::syntax::ast::{Arm, Core, Expr, Pattern, S};
 use crate::syntax::desugar::{call, evar, sp, spat, Cx};
@@ -18,19 +18,15 @@ pub(super) fn check_views(p: &S<Pattern>, top: bool, cx: &Cx) -> Result<(), Type
         Pattern::Ctor(n, ps) => {
             if let Some(&(arity, _)) = cx.patterns.get(n) {
                 if !top {
-                    return Err(TypeError::Other {
-                        span: p.span,
-                        msg: format!("view pattern `{n}` cannot be nested inside another pattern"),
-                    });
+                    return Err(ErrKind::ViewPatternNested { name: n.clone() }.at(p.span));
                 }
                 if ps.len() != arity {
-                    return Err(TypeError::Other {
-                        span: p.span,
-                        msg: format!(
-                            "pattern `{n}` takes {arity} argument(s), {} given",
-                            ps.len()
-                        ),
-                    });
+                    return Err(ErrKind::PatternArity {
+                        name: n.clone(),
+                        arity,
+                        got: ps.len(),
+                    }
+                    .at(p.span));
                 }
             }
             ps.iter().try_for_each(|q| check_views(q, false, cx))
@@ -61,12 +57,10 @@ pub(super) fn rw_view_match(
     let irrefutable =
         |a: &Arm| a.guard.is_none() && matches!(a.pat.node, Pattern::Var(_) | Pattern::Wild);
     let Some(catchall) = arms.iter().position(irrefutable) else {
-        return Err(TypeError::Other {
-            span: a.pat.span,
-            msg: format!(
-                "match through view pattern `{pname}` is never exhaustive: add a catchall arm"
-            ),
-        });
+        return Err(ErrKind::ViewMatchNotExhaustive {
+            name: pname.clone(),
+        }
+        .at(a.pat.span));
     };
     let vspan = a.pat.span;
     let tmp = names::pat_tmp(cx.next.bump());

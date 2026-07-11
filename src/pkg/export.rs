@@ -68,19 +68,19 @@ impl ExportManifest {
     /// Fails when the scheme, kind, or root differs.
     pub fn verify(&self, identity: &NamespaceIdentity) -> Result<(), Error> {
         if self.scheme != identity.scheme {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "export manifest uses hash scheme {}, but this namespace uses {}",
                 self.scheme, identity.scheme
             )));
         }
         if self.kind != identity.kind {
-            return Err(Error::Resolve(format!(
+            return Err(Error::ResolvePackage(format!(
                 "export manifest names artifact kind {}, but this namespace is {}",
                 self.kind, identity.kind
             )));
         }
-        if self.root != identity.root {
-            return Err(Error::Resolve(format!(
+        if self.root != identity.root.as_str() {
+            return Err(Error::ResolvePackage(format!(
                 "export manifest pins root {}, but this namespace is {}",
                 self.root, identity.root
             )));
@@ -97,7 +97,7 @@ pub fn parse_manifest(text: &str) -> Result<ExportManifest, Error> {
     let mut lines = text.lines();
     let header = lines.next();
     if header != Some(EXPORT_MANIFEST_HEADER) && header != Some(EXPORT_MANIFEST_HEADER_V1) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolvePackage(format!(
             "export manifest: missing or unrecognized header (expected {EXPORT_MANIFEST_HEADER:?})"
         )));
     }
@@ -115,9 +115,10 @@ pub fn parse_manifest(text: &str) -> Result<ExportManifest, Error> {
             _ => {}
         }
     }
-    let scheme = scheme.ok_or_else(|| Error::Resolve("export manifest: missing scheme".into()))?;
+    let scheme =
+        scheme.ok_or_else(|| Error::ResolvePackage("export manifest: missing scheme".into()))?;
     let kind = kind.unwrap_or_else(|| NAMESPACE_ARTIFACT_KIND.to_string());
-    let root = root.ok_or_else(|| Error::Resolve("export manifest: missing root".into()))?;
+    let root = root.ok_or_else(|| Error::ResolvePackage("export manifest: missing root".into()))?;
     Ok(ExportManifest { scheme, kind, root })
 }
 
@@ -161,7 +162,7 @@ pub fn export(
     Ok(ExportResult {
         source_path,
         manifest_path,
-        root: identity.root,
+        root: identity.root.into_string(),
         scheme: identity.scheme,
         kind: identity.kind,
     })

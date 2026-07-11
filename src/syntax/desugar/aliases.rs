@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::names;
 use crate::syntax::ast::{Decl, EffLabel, Program, Row, Ty};
 
@@ -77,15 +77,13 @@ fn resolve_alias(
         .aliases
         .iter()
         .find(|a| a.name == name)
-        .ok_or_else(|| TypeError::Other {
-            span: Span::empty(0),
-            msg: format!("unknown effect alias `{name}`"),
-        })?;
+        .ok_or_else(|| ErrKind::UnknownAlias { name: name.into() }.at(Span::empty(0)))?;
     if path.iter().any(|p| p == name) {
-        return Err(TypeError::Other {
-            span: a.span,
-            msg: format!("effect alias cycle: {} -> {name}", path.join(" -> ")),
-        });
+        return Err(ErrKind::DefCycle {
+            kind: "effect alias".into(),
+            path: format!("{} -> {name}", path.join(" -> ")),
+        }
+        .at(a.span));
     }
     path.push(name.into());
     let mut out: Vec<EffLabel> = Vec::new();
@@ -95,10 +93,11 @@ fn resolve_alias(
         } else if known.contains(&l.name) {
             vec![l.clone()]
         } else {
-            return Err(TypeError::Other {
-                span: a.span,
-                msg: format!("unknown effect `{}` in alias `{name}`", l.name),
-            });
+            return Err(ErrKind::UnknownEffectInAlias {
+                eff: l.name.clone(),
+                alias: name.into(),
+            }
+            .at(a.span));
         };
         for x in exp {
             if !out.contains(&x) {

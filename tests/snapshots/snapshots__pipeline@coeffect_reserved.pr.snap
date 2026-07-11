@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/coeffect_reserved.pr
 ---
 == tokens ==
-VOpen Fn Ident("apply") LParen Ident("f") Colon LParen LParen KwInt RParen Arrow KwInt RParen At LBrace Ident("once") Comma Ident("portable") RBrace Comma Ident("x") Colon KwInt RParen Colon KwInt Eq Ident("f") LParen Ident("x") RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("apply") LParen Lambda LParen Ident("y") RParen Arrow Ident("y") Plus Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 41, suffix: None }) RParen VClose
+VOpen Fn Ident("apply") LParen Ident("f") Colon LParen LParen KwInt RParen Arrow KwInt RParen At Ident("unique") Comma Ident("x") Colon KwInt RParen Colon KwInt Eq Ident("f") LParen Ident("x") RParen VSemi Fn Ident("main") LParen RParen Colon KwInt Eq Ident("apply") LParen Lambda LParen Ident("y") RParen Arrow Ident("y") Plus Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 41, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -31,8 +31,7 @@ Program {
                             ),
                             CoeffectRow {
                                 facts: [
-                                    Once,
-                                    Portable,
+                                    Unique,
                                 ],
                             },
                         ),
@@ -60,21 +59,21 @@ Program {
                         node: Var(
                             "f",
                         ),
-                        span: 242..243,
+                        span: 366..367,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 244..245,
+                            span: 368..369,
                         },
                     ],
                 ),
-                span: 242..246,
+                span: 366..370,
             },
             wheres: [],
-            span: 177..246,
+            span: 311..370,
         },
         Decl {
             name: "main",
@@ -90,7 +89,7 @@ Program {
                         node: Var(
                             "apply",
                         ),
-                        span: 266..271,
+                        span: 390..395,
                     },
                     [
                         Spanned {
@@ -110,7 +109,7 @@ Program {
                                             node: Var(
                                                 "y",
                                             ),
-                                            span: 280..281,
+                                            span: 404..405,
                                         },
                                         Spanned {
                                             node: Int(
@@ -119,13 +118,13 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 284..285,
+                                            span: 408..409,
                                         },
                                     ),
-                                    span: 280..285,
+                                    span: 404..409,
                                 },
                             ),
-                            span: 272..285,
+                            span: 396..409,
                         },
                         Spanned {
                             node: Int(
@@ -134,23 +133,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 287..289,
+                            span: 411..413,
                         },
                     ],
                 ),
-                span: 266..290,
+                span: 390..414,
             },
             wheres: [],
-            span: 248..290,
+            span: 372..414,
         },
     ],
 }
 
 == types ==
-Type Error: usage fact `once` is reserved but not implemented
-   ╭─[ <source>:4:1 ]
+[E6052] Type Error: usage fact `unique` is reserved but not implemented
+   ╭─[ <source>:5:1 ]
    │
- 4 │ fn apply(f : ((Int) -> Int) @ {once, portable}, x : Int) : Int = f(x)
-   │ ──────────────────────────────────┬──────────────────────────────────  
-   │                                   ╰──────────────────────────────────── usage fact `once` is reserved but not implemented
+ 5 │ fn apply(f : ((Int) -> Int) @ unique, x : Int) : Int = f(x)
+   │ ─────────────────────────────┬─────────────────────────────  
+   │                              ╰─────────────────────────────── usage fact `unique` is reserved but not implemented
 ───╯

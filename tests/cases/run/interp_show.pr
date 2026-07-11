@@ -2,7 +2,7 @@
 type Point = Point { x: Int, y: Int }
 
 effect Ask
-  ctl ask(Unit) : Int
+  ask() : Int
 
 fn main() =
   let p = Point { x = 1, y = 2 }
@@ -10,5 +10,5 @@ fn main() =
   println("p = {p}")
   println("xs = {xs}")
   with handler
-    ask(u, k) => k(21)
-  println("answer = {ask(()) * 2}")
+    ask() resume k => k(21)
+  println("answer = {ask() * 2}")

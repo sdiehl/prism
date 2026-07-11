@@ -139,7 +139,8 @@ void prism_rc_dec(long v) {
     while (p) {
         long *next = (long *)p[PRISM_RC_W];
         long dtag = p[PRISM_TAG_W];
-        if (dtag != PRISM_STR_TAG && dtag != PRISM_BIG_TAG && dtag != PRISM_BUF_TAG) {
+        if (dtag != PRISM_STR_TAG && dtag != PRISM_BIG_TAG && dtag != PRISM_BUF_TAG &&
+            dtag != PRISM_TBUF_TAG) {
             long n = p[PRISM_ARITY_W];
             for (long i = 0; i < n; i++) {
                 long c = p[PRISM_HDR_WORDS + i];
@@ -254,7 +255,7 @@ long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
     long *p = (long *)v;
     if (p[PRISM_TAG_W] == PRISM_STR_TAG || p[PRISM_TAG_W] == PRISM_BIG_TAG ||
-        p[PRISM_TAG_W] == PRISM_BUF_TAG)
+        p[PRISM_TAG_W] == PRISM_BUF_TAG || p[PRISM_TAG_W] == PRISM_TBUF_TAG)
         return 0;
     if (p[PRISM_RC_W] == 1) {
         long n = p[PRISM_ARITY_W];

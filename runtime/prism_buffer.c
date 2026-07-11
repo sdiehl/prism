@@ -103,7 +103,7 @@ long prism_buf_push(long b, long x) {
     /* Full (grow by doubling) or merely shared (copy at the current capacity): only
        double when there is genuinely no room, so a shared-but-unfilled buffer copied
        every push does not blow its capacity up exponentially. Mirrors prism_array_push. */
-    long ncap = len < cap ? cap : (cap < 8 ? 8 : cap * 2);
+    long ncap = len < cap ? cap : prism_ckd_grow(cap, 8);
     long *q = buf_alloc(ncap);
     memcpy(buf_data(q), buf_data(p), (size_t)len);
     buf_data(q)[len] = v;

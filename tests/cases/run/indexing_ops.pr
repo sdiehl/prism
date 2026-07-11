@@ -6,7 +6,7 @@
 --   15
 --   30
 --   102
-fn main() : !{Fail, IO} Unit =
+fn main() : Unit ! {Fail, IO} =
   var a := array_of_list([10, 20, 30])
   a[0] += 5
   println(show(a[0] ?? 0))

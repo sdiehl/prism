@@ -158,11 +158,11 @@ pub fn wall_cmp(a : Wall, b : Wall) : Int =
 
 -- | Read the monotonic clock. Deterministic under `run_clock`, real (and
 -- recorded) under `run_clock_real`.
-pub fn mono_clock() : Instant = Instant(mono_now(()))
+pub fn mono_clock() : Instant = Instant(mono_now())
 
 -- | Read the wall clock. Deterministic under `run_clock`, real (and recorded)
 -- under `run_clock_real`.
-pub fn wall_clock() : Wall = Wall(wall_now(()))
+pub fn wall_clock() : Wall = Wall(wall_now())
 
 -- | Run `action` against the real OS clock. `now`/`sleep` still thread a virtual
 -- counter (they are the scheduler's logical time), so this is a superset of
@@ -171,11 +171,11 @@ pub fn wall_clock() : Wall = Wall(wall_now(()))
 pub fn run_clock_real(action : () -> a ! {Clock | e}) : a =
   let g =
     handle action() with
-      now(u, k) => \(t) -> k(t)(t)
-      sleep(d, k) => \(t) -> k(())(t + d)
-      wall_now(u, k) => \(t) -> k(prim_wall_now())(t)
-      mono_now(u, k) => \(t) -> k(prim_mono_now())(t)
-      return r => \(t) -> r
+      now() resume k => \(t) -> k(t)(t)
+      sleep(d) resume k => \(t) -> k(())(t + d)
+      wall_now() resume k => \(t) -> k(prim_wall_now())(t)
+      mono_now() resume k => \(t) -> k(prim_mono_now())(t)
+      return r => \(_t) -> r
   g(0)
 
 -- Civil-calendar conversions (Howard Hinnant's algorithms), valid for the

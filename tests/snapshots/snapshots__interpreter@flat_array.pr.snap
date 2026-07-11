@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/flat_array.pr
+---
+4
+4
+42
+=> ()

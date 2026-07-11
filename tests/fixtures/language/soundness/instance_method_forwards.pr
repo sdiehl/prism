@@ -1,0 +1,7 @@
+class C(a)
+  method : (a) -> a ! {| e}
+
+instance cInt : C(Int)
+  fn method(x) = x
+
+fn main() = println(method(1))

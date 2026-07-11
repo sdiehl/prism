@@ -36,7 +36,7 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ## The `Bytes` representation
 
-`Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on both backends (the parity contract a `String`-of-bytes would break, since the interpreter's `string_of_bytes` repairs invalid UTF-8 lossily). The cursor makes `decode` cheap: peeling a byte off the front advances the offset in O(1) with no copy, so a whole decode is linear. Encode accumulates into a growable buffer builder (`buf_push`, amortized O(1)), so building a container or a string body stays linear rather than paying the quadratic cost a right-nested immutable `wire_cat` would incur. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)` view for callers that still want it.
+`Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on both backends (the parity contract a `String`-of-bytes would break, since reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The cursor makes `decode` cheap: peeling a byte off the front advances the offset in O(1) with no copy, so a whole decode is linear. Encode accumulates into a growable buffer builder (`buf_push`, amortized O(1)), so building a container or a string body stays linear rather than paying the quadratic cost a right-nested immutable `wire_cat` would incur. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)` view for callers that still want it.
 
 ## Totality
 
@@ -135,7 +135,7 @@ instance serializeChar : Serialize(Char)
 
 ### `serializeString`
 
-```prism,def,h-9d38fbcc2a5b0efc3d3b2fbcf83e5f1a295bbe5a80e14fbedb42b393910db66d
+```prism,def,h-f6c764e05f5ef60011e937912d7ad8c62316bd0d09723d1be5ee7c8e469198f9
 instance serializeString : Serialize(String)
 ```
 
@@ -309,7 +309,7 @@ A pure reference: a frame that carries its contract digest and no body. Its iden
 
 ### `wire_open`
 
-```prism,sig,h-37139d6744e36c305fc805723376dd3a8afb3625455fe01e91bcedaf8ab6f5d3
+```prism,sig,h-daf3e5dc496f7400ba12d2e4de897a44c31196b428fa800a963702c416bb2168
 wire_open : (Wire.Bytes, Int, String) -> Wire.Bytes ! {Fail}
 ```
 
@@ -317,7 +317,7 @@ Open a frame, checking the scheme, kind, and digest before the body and returnin
 
 ### `wire_is_reference`
 
-```prism,sig,h-062572a4d0978577459ee3f20a49fe74bcc4e4f2455fc4beb7ba2f3c6498449c
+```prism,sig,h-8d798d96135614e5fdeeba13e6c4f4698522cdc311494d0e7edc779afb44da50
 wire_is_reference : (Wire.Bytes, Int, String) -> Bool ! {Fail}
 ```
 
@@ -325,7 +325,7 @@ True when a well-formed frame for `kind`/`digest` carries no body (a pure refere
 
 ### `wire_open_value_any`
 
-```prism,sig,h-96d3550988c91d2ca32b3aad80ae6b8c56eee629455b5863b3efc0196514f460
+```prism,sig,h-3f4035da92132f1ce9172bd35f9ed23ab762aaac2b9c591592382cf818dbf662
 wire_open_value_any : (Wire.Bytes) -> (String, Wire.Bytes) ! {Fail}
 ```
 
@@ -341,7 +341,7 @@ Encode a value as a `value`-kind frame carrying an explicitly supplied contract 
 
 ### `wire_decode_value_with_digest`
 
-```prism,sig,h-d2e685ae60f716357ffe80681ee042fea4351362658dae432e1740e056cfd4e9
+```prism,sig,h-3f059e37b335d242b6cb9b8515f38e603221e2c873dc2b96bc53351501e60687
 wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail}
 ```
 
@@ -357,7 +357,7 @@ Encode a `Stable` value as a `value` frame under its own contract digest. The di
 
 ### `wire_decode_stable`
 
-```prism,sig,h-86e71ad9a2a7f6552379ea9220d20ae6b9f1d7057b8dc12b1dd0a68435cc92e1
+```prism,sig,h-f6d01abb33a022b80b7daa9f7e62bd409fc707e40696e1599ae72e606c30e846
 wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail}
 ```
 

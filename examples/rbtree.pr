@@ -13,7 +13,7 @@ type Color = R | B
 
 type RB = E | T(Color, RB, Int, RB)
 
-fn balance(c, l, x, r) : ! RB =
+fn balance(c, l, x, r) : RB =
   match T(c, l, x, r) of
     T(B, T(R, T(R, a, xv, b), yv, cc), zv, d) =>
       T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
@@ -25,7 +25,7 @@ fn balance(c, l, x, r) : ! RB =
       T(R, T(B, a, xv, b), yv, T(B, cc, zv, d))
     other => other
 
-fn ins(x, t) : ! RB =
+fn ins(x, t) : RB =
   match t of
     E => T(R, E, x, E)
     T(c, l, v, r) =>
@@ -36,29 +36,29 @@ fn ins(x, t) : ! RB =
       else
         t
 
-fn blacken(t) : ! RB =
+fn blacken(t) : RB =
   match t of
     E => E
     T(_c, l, x, r) => T(B, l, x, r)
 
-fn insert(x, t) : ! RB = blacken(ins(x, t))
+fn insert(x, t) : RB = blacken(ins(x, t))
 
-fn from_list(xs, t) : ! RB =
+fn from_list(xs, t) : RB =
   match xs of
     Nil => t
     Cons(x, rest) => from_list(rest, insert(x, t))
 
-fn size(t) : ! Int =
+fn size(t) : Int =
   match t of
     E => 0
     T(_c, l, _x, r) => 1 + size(l) + size(r)
 
-fn sum_rb(t) : ! Int =
+fn sum_rb(t) : Int =
   match t of
     E => 0
     T(_c, l, x, r) => x + sum_rb(l) + sum_rb(r)
 
-fn member(x, t) : ! Bool =
+fn member(x, t) : Bool =
   match t of
     E => false
     T(_c, l, v, r) =>
@@ -69,7 +69,7 @@ fn member(x, t) : ! Bool =
       else
         member(x, r)
 
-fn black_height(t) : ! Int =
+fn black_height(t) : Int =
   match t of
     E => 1
     T(c, l, _x, r) =>

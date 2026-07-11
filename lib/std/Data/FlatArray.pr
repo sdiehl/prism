@@ -1,0 +1,53 @@
+-- | Flat, unboxed-element arrays: one typed surface over the raw-word buffers.
+--
+-- A `FlatArray(a)` stores its elements as raw 8-byte words in a single
+-- contiguous buffer (`FloatBuf` for `Float`, `IntBuf` for `I64`), so the
+-- storage carries no per-element heap cells; only reading an element boxes the
+-- scalar it returns. The element types are exactly the fixed-width lanes whose
+-- bit pattern fills one word, chosen by the `FlatElem` instance in scope, so an
+-- unsupported element type is a missing-instance error at compile time rather
+-- than a runtime representation fault.
+--
+-- The buffers underneath follow the array's rc==1 in-place / shared-copy
+-- discipline, so a uniquely owned flat array updates in place and a shared one
+-- copies on write: value semantics, identical on both backends.
+
+-- | A dense array of unboxed one-word elements. The payload variant is chosen
+-- by the element's `FlatElem` instance; the phantom parameter keeps the two
+-- payloads from ever mixing at the type level.
+pub type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
+
+-- | The element contract: how a one-word scalar enters and leaves the flat
+-- storage. Instances exist for `Float` and `I64`.
+pub class FlatElem(a)
+  fa_new : (Int, a) -> FlatArray(a)
+  fa_get : (FlatArray(a), Int) -> a ! {Fail}
+  fa_set : (FlatArray(a), Int, a) -> FlatArray(a) ! {Fail}
+
+instance flatFloat : FlatElem(Float)
+  fn fa_new(n, init) = FloatArr(tbuf_new(n, init))
+  fn fa_get(xs, i) =
+    match xs of
+      FloatArr(b) => tbuf_get(b, i)
+      IntArr(_) => fail()
+  fn fa_set(xs, i, x) =
+    match xs of
+      FloatArr(b) => FloatArr(tbuf_set(b, i, x))
+      IntArr(_) => fail()
+
+instance flatI64 : FlatElem(I64)
+  fn fa_new(n, init) = IntArr(ibuf_new(n, init))
+  fn fa_get(xs, i) =
+    match xs of
+      IntArr(b) => ibuf_get(b, i)
+      FloatArr(_) => fail()
+  fn fa_set(xs, i, x) =
+    match xs of
+      IntArr(b) => IntArr(ibuf_set(b, i, x))
+      FloatArr(_) => fail()
+
+-- | The element count, independent of the element type.
+pub fn fa_len(xs : FlatArray(a)) : Int =
+  match xs of
+    FloatArr(b) => tbuf_len(b)
+    IntArr(b) => ibuf_len(b)

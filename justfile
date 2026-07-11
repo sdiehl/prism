@@ -16,14 +16,17 @@ run FILE:
 check FILE:
     cargo run -- check "{{FILE}}"
 
+# Default local test runner: nextest for all Rust test binaries, then doctests
+# (nextest deliberately skips rustdoc tests).
 test:
-    cargo test --all
+    cargo nextest run --all
+    cargo test --doc
 
 parity:
-    cargo test --test parity
+    cargo test --test native_parity parity::
 
 perf:
-    cargo test --test perf_gate
+    cargo test --test native_perf perf_gate::
 
 snapshots:
     cargo test --test snapshots
@@ -41,7 +44,7 @@ clippy:
 
 # Full test suite via nextest (failures-only), then doctests (nextest skips them).
 t:
-    cargo nextest run --all --status-level fail
+    cargo nextest run --all
     cargo test --doc
 
 # Run one test target or filter, filtered the same way. e.g. `just t1 fmt_records`
@@ -78,6 +81,24 @@ c:
     echo "$out" | grep -E "error|warning" || echo "check clean"
     exit $code
 
+# Feature matrix as an explicit local command, matching the CI matrix below.
+feature-matrix:
+    cargo check --all-targets
+    cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+    cargo check --features mlir
+    cargo check --features mimalloc
+
+# Generated artifacts must not be rewritten by ordinary tests. Run this after a
+# check/test command, or in CI after the test suite, to catch surprise mutation.
+no-drift:
+    git diff --exit-code
+    git diff --cached --exit-code
+
+# Compile-time baselines over the pinned corpus (benches/compile.rs). Pass extra
+# criterion flags after `--`, e.g. `just bench -- --quick` for a fast pass.
+bench *ARGS:
+    cargo bench --bench compile -- {{ARGS}}
+
 # Compile one program to a native binary and run it (fast codegen smoke).
 smoke1 FILE:
     #!/usr/bin/env bash
@@ -99,9 +120,9 @@ smoke1 FILE:
 _gate *FLAGS:
     #!/usr/bin/env bash
     set -eo pipefail
-    targets="--test parity --test tier_parity --test perf_gate --test snapshots --test store_oracle"
+    targets="--test native_parity --test native_tier --test native_fusion --test native_perf --test native_conformance --test native_sort --test native_cache --test snapshots --test compiler"
     if command -v cargo-nextest >/dev/null; then
-        cargo nextest run {{FLAGS}} $targets --status-level fail
+        cargo nextest run --profile ci {{FLAGS}} $targets
     else
         cargo test {{FLAGS}} $targets 2>&1 | grep -E "test result:|FAILED|error\["
     fi
@@ -117,7 +138,7 @@ gate-debug:
 # The gate with the content-addressed verdict cache on. Trustworthy by default
 # (keyed on the compiler binary, so any source change invalidates it); fall back
 # to `just gate` after changing the cache's own fingerprint logic (in
-# tests/common/mod.rs) or adding a compile-time input outside src/runtime/lib.
+# tests/support/mod.rs) or adding a compile-time input outside src/runtime/lib.
 gate-fast:
     @PRISM_GATE_CACHE=1 just _gate --release
 
@@ -127,7 +148,19 @@ fmt-examples: build-release
 package-world: build-release
     ./target/release/prism pkg check-world packages --strict
 
-ci: fmt-check clippy test fmt-examples package-world
+ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world
+
+# The CI-only fast gates, mirrored locally so a red can't hide in a
+# configuration no local build compiles: the stub-marker grep and the
+# rustdoc private-link/deny-warnings pass.
+stub-check:
+    #!/usr/bin/env bash
+    if grep -rEn 'todo!|unimplemented!|FIXME|XXX|allow\(dead_code\)' src bin; then
+        echo "stub markers found (see above)"; exit 1
+    fi
+
+doc-check:
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --quiet
 
 # Build the wasm playground bundle and sync it into the docs (docs/src/pkg), so
 # the mdbook playground always runs the current compiler (no stale-bundle drift).
@@ -225,7 +258,7 @@ fixtures: build
 # snapshot and CI fails on any un-accepted tier regression. Review the
 # resulting diff before committing.
 tier-accept:
-    PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test perf_gate tier_manifest_holds -- --nocapture
+    PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test native_perf tier_manifest_holds -- --nocapture
 
 # Bless doctest expectations: rewrite every stale or empty inline `output` block
 # with the example's actual output, in place, `ppx_expect` style. Point PATH at a

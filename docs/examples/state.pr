@@ -11,14 +11,14 @@ type Op
   | Reset
   | Get
 
-fn step(op, s) : ! (Int, Int) =
+fn step(op, s) : (Int, Int) =
   match op of
     Inc => (s + 1, s + 1)
     Dec => (s - 1, s - 1)
     Reset => (0, 0)
     Get => (s, s)
 
-fn run(ops, s) : !{IO} Unit =
+fn run(ops, s) : Unit ! {IO} =
   match ops of
     Nil => ()
     Cons(op, rest) =>
@@ -27,4 +27,4 @@ fn run(ops, s) : !{IO} Unit =
           println(v)
           run(rest, s2)
 
-fn main() : !{IO} Unit = run([Inc, Inc, Inc, Get, Dec, Reset, Inc, Get], 0)
+fn main() : Unit ! {IO} = run([Inc, Inc, Inc, Get, Dec, Reset, Inc, Get], 0)

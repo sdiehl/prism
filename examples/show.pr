@@ -5,7 +5,7 @@
 
 type Tree = Leaf | Node(Tree, Int, Tree) deriving (Show)
 
-fn build(n) : ! Tree =
+fn build(n) : Tree =
   if n == 0 then
     Leaf
   else

@@ -11,4 +11,5 @@ fn go(acc : Bytes, n : Int) : Bytes =
   else
     go(bytes_push(acc, mod(n, 256)), n - 1)
 
-fn main() : !{IO} Unit = println(show_int(bytes_length(go(bytes_empty, __N__))))
+fn main() : Unit ! {IO} =
+  println(show_int(bytes_length(go(bytes_empty, __N__))))

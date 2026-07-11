@@ -29,7 +29,7 @@ use marginalia::Span;
 
 use super::{call, evar, sp, spat};
 use crate::core::contract_digest;
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::names;
 use crate::names::{
     DECODE_METHOD, FAIL_OP, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_ENCODE_VALUE_WITH_DIGEST,
@@ -78,8 +78,11 @@ struct LossRef {
 /// no hand-written converter) or a frozen rung whose shape digest drifted.
 pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     let blocks = std::mem::take(&mut prog.stable);
-    let in_scope: std::collections::BTreeSet<&str> =
-        prog.classes.iter().map(|c| bare(&c.name)).collect();
+    let in_scope: std::collections::BTreeSet<&str> = prog
+        .classes
+        .iter()
+        .map(|c| names::bare_name(&c.name))
+        .collect();
     // Each imported function's bare name mapped to its canonical `Module.fn`, so a
     // generated frame helper's reference to a wire library function is already the
     // canonical name the resolver would have produced (this pass runs after name
@@ -88,7 +91,7 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     let wire_canon: std::collections::BTreeMap<String, String> = prog
         .fns
         .iter()
-        .map(|f| (bare(&f.name).to_string(), f.name.clone()))
+        .map(|f| (names::bare_name(&f.name).to_string(), f.name.clone()))
         .collect();
     let libf = |n: &str| {
         wire_canon
@@ -98,13 +101,11 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     let bytes_ty = canon_ty(prog, BYTES_TYPE);
     for sd in &blocks {
         if let Some(missing) = RUNG_REQUIRED.iter().find(|c| !in_scope.contains(**c)) {
-            return Err(TypeError::Other {
-                span: sd.span,
-                msg: format!(
-                    "`stable {}` needs the `{missing}` class in scope; add `import Wire (..)`",
-                    sd.name
-                ),
-            });
+            return Err(ErrKind::StableNeedsClass {
+                name: sd.name.clone(),
+                class: (*missing).to_string(),
+            }
+            .at(sd.span));
         }
         let derives = rung_derives(&in_scope);
         let loss = loss_ref(prog);
@@ -158,7 +159,7 @@ fn loss_ref(prog: &Program) -> LossRef {
     let canon = prog
         .types
         .iter()
-        .find(|d| bare(&d.name) == LOSS_TYPE)
+        .find(|d| names::bare_name(&d.name) == LOSS_TYPE)
         .map_or(LOSS_TYPE, |d| d.name.as_str())
         .to_string();
     LossRef {
@@ -174,7 +175,7 @@ fn canon_ty(prog: &Program, bare_name: &str) -> Ty {
     let canon = prog
         .types
         .iter()
-        .find(|d| bare(&d.name) == bare_name)
+        .find(|d| names::bare_name(&d.name) == bare_name)
         .map_or(bare_name, |d| d.name.as_str())
         .to_string();
     Ty::Con(canon, Vec::new())
@@ -203,12 +204,13 @@ fn resolve_rungs(sd: &StableDecl) -> Result<Vec<RungInfo>, TypeError> {
         let mut fields: Vec<(String, Ty)> = match &r.base {
             None => Vec::new(),
             Some(base) => {
-                let prev = out.last().filter(|p| &p.ver == base).ok_or_else(|| TypeError::Other {
-                    span: r.span,
-                    msg: format!(
-                        "rung `{}` extends `..{base}`, which is not the rung directly above it in `stable {}`",
-                        r.name, sd.name
-                    ),
+                let prev = out.last().filter(|p| &p.ver == base).ok_or_else(|| {
+                    ErrKind::RungExtendsNonAdjacent {
+                        rung: r.name.clone(),
+                        base: base.clone(),
+                        block: sd.name.clone(),
+                    }
+                    .at(r.span)
                 })?;
                 prev.fields.clone()
             }
@@ -226,15 +228,13 @@ fn resolve_rungs(sd: &StableDecl) -> Result<Vec<RungInfo>, TypeError> {
             } else {
                 fields.push((f.name.clone(), f.ty.clone()));
                 if is_ext {
-                    let def = f.default.clone().ok_or_else(|| TypeError::Other {
-                        span: r.span,
-                        msg: format!(
-                            "new field `{}` in rung `{}` needs a default (`{} : {} = <expr>`) so the upgrade can fill it",
-                            f.name,
-                            r.name,
-                            f.name,
-                            crate::fmt::decl::fmt_ty(&f.ty)
-                        ),
+                    let def = f.default.clone().ok_or_else(|| {
+                        ErrKind::RungFieldNeedsDefault {
+                            field: f.name.clone(),
+                            rung: r.name.clone(),
+                            field_ty: crate::fmt::decl::fmt_ty(&f.ty),
+                        }
+                        .at(r.span)
                     })?;
                     new.push((f.name.clone(), def));
                 }
@@ -259,11 +259,6 @@ fn rung_type(sd: &StableDecl, idx: usize, total: usize) -> String {
     } else {
         names::stable_rung(&sd.name, &sd.rungs[idx].name)
     }
-}
-
-// The bare tail of a canonical class name (`Wire.Serialize` -> `Serialize`).
-fn bare(name: &str) -> &str {
-    name.rsplit_once(['.', '@']).map_or(name, |(_, n)| n)
 }
 
 // The classes a rung derives: the required codec pair plus whichever optional
@@ -313,16 +308,11 @@ fn check_frozen(sd: &StableDecl, r: &Rung, data: &DataDecl) -> Result<(), TypeEr
         return Ok(());
     }
     let display = rung_display(sd, &r.name);
-    Err(TypeError::Other {
-        span: r.span,
-        msg: format!(
-            "frozen format `{display}` changed shape\n  \
-             its committed shape digest no longer matches. A shipped stable version is\n  \
-             immutable: add a new rung (`V = {{ ..{}, ... }}`) instead of editing `{}`.\n  \
-             If this rung never shipped, run `prism wire --accept {display}` to reseat it.",
-            r.name, r.name
-        ),
-    })
+    Err(ErrKind::FrozenShapeChanged {
+        display,
+        rung: r.name.clone(),
+    }
+    .at(r.span))
 }
 
 // The committed shape-digest prefix of a rung's record type, in the exact scheme
@@ -467,14 +457,13 @@ fn find_conv<'a>(
                 ConvDir::Upgrade => crate::kw::UPGRADE,
                 ConvDir::Downgrade => crate::kw::DOWNGRADE,
             };
-            TypeError::Other {
-                span: sd.span,
-                msg: format!(
-                    "rung `{to}` retypes a field of `{from}`, a type mutation, so `stable {}` \
-                     must give a `{word} {from} -> {to} = ...` converter",
-                    sd.name
-                ),
+            ErrKind::RungNeedsConverter {
+                to: to.to_string(),
+                from: from.to_string(),
+                block: sd.name.clone(),
+                dir: word.to_string(),
             }
+            .at(sd.span)
         })
 }
 

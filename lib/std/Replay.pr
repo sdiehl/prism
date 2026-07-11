@@ -46,15 +46,15 @@ fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
 pub fn record(action) =
   let g =
     handle action(()) with
-      con_read_int(u, k) => \(t) -> rec_int(k, t, prim_read_int())
-      con_read_line(u, k) => \(t) -> rec_str(k, t, prim_read_line())
-      fs_read_file(p, k) => \(t) -> rec_str(k, t, prim_read_file(p))
-      fs_read_bytes(p, k) => \(t) -> rec_bytes(k, t, prim_read_bytes(p))
-      fs_file_exists(p, k) => \(t) -> rec_bool(k, t, prim_file_exists(p))
-      rng_rand(u, k) => \(t) -> rec_int(k, t, prim_rand())
-      env_get(s, k) => \(t) -> rec_str(k, t, prim_getenv(s))
-      env_argc(u, k) => \(t) -> rec_int(k, t, prim_args_count())
-      env_arg(i, k) => \(t) -> rec_str(k, t, prim_arg(i))
+      con_read_int() resume k => \(t) -> rec_int(k, t, prim_read_int())
+      con_read_line() resume k => \(t) -> rec_str(k, t, prim_read_line())
+      fs_read_file(p) resume k => \(t) -> rec_str(k, t, prim_read_file(p))
+      fs_read_bytes(p) resume k => \(t) -> rec_bytes(k, t, prim_read_bytes(p))
+      fs_file_exists(p) resume k => \(t) -> rec_bool(k, t, prim_file_exists(p))
+      rng_rand() resume k => \(t) -> rec_int(k, t, prim_rand())
+      env_get(s) resume k => \(t) -> rec_str(k, t, prim_getenv(s))
+      env_argc() resume k => \(t) -> rec_int(k, t, prim_args_count())
+      env_arg(i) resume k => \(t) -> rec_str(k, t, prim_arg(i))
       return r => \(t) -> (r, reverse(t))
   g(Nil)
 
@@ -94,18 +94,18 @@ fn rep_bool(k, t) =
 pub fn replay(trace, action) =
   let g =
     handle action(()) with
-      con_read_int(u, k) => \(t) -> rep_int(k, t)
-      con_read_line(u, k) => \(t) -> rep_str(k, t)
-      fs_read_file(p, k) => \(t) -> rep_str(k, t)
-      fs_read_bytes(p, k) => \(t) -> rep_bytes(k, t)
-      fs_file_exists(p, k) => \(t) -> rep_bool(k, t)
-      rng_rand(u, k) => \(t) -> rep_int(k, t)
-      env_get(s, k) => \(t) -> rep_str(k, t)
-      env_argc(u, k) => \(t) -> rep_int(k, t)
-      env_arg(i, k) => \(t) -> rep_str(k, t)
-      out_print(x, k) => \(t) -> k(())(t)
-      out_println(x, k) => \(t) -> k(())(t)
-      return r => \(t) -> r
+      con_read_int() resume k => \(t) -> rep_int(k, t)
+      con_read_line() resume k => \(t) -> rep_str(k, t)
+      fs_read_file(p) resume k => \(t) -> rep_str(k, t)
+      fs_read_bytes(p) resume k => \(t) -> rep_bytes(k, t)
+      fs_file_exists(p) resume k => \(t) -> rep_bool(k, t)
+      rng_rand() resume k => \(t) -> rep_int(k, t)
+      env_get(s) resume k => \(t) -> rep_str(k, t)
+      env_argc() resume k => \(t) -> rep_int(k, t)
+      env_arg(i) resume k => \(t) -> rep_str(k, t)
+      out_print(x) resume k => \(t) -> k(())(t)
+      out_println(x) resume k => \(t) -> k(())(t)
+      return r => \(_t) -> r
   g(trace)
 
 -- Durable trace serialization over ground types. Each TraceEntry encodes as a
@@ -234,21 +234,25 @@ pub fn durable(path, action) =
       Nil
   let g =
     handle action(()) with
-      con_read_int(u, k) =>
-        \(t) -> step_int(path, k, t, \(z) -> prim_read_int())
-      con_read_line(u, k) =>
-        \(t) -> step_str(path, k, t, \(z) -> prim_read_line())
-      fs_read_file(p, k) =>
-        \(t) -> step_str(path, k, t, \(z) -> prim_read_file(p))
-      fs_read_bytes(p, k) =>
-        \(t) -> step_bytes(path, k, t, \(z) -> prim_read_bytes(p))
-      fs_file_exists(p, k) =>
-        \(t) -> step_bool(path, k, t, \(z) -> prim_file_exists(p))
-      rng_rand(u, k) => \(t) -> step_int(path, k, t, \(z) -> prim_rand())
-      env_get(s, k) => \(t) -> step_str(path, k, t, \(z) -> prim_getenv(s))
-      env_argc(u, k) => \(t) -> step_int(path, k, t, \(z) -> prim_args_count())
-      env_arg(i, k) => \(t) -> step_str(path, k, t, \(z) -> prim_arg(i))
-      out_print(x, k) => \(t) -> out_step(path, k, t, \(z) -> prim_print(x))
-      out_println(x, k) => \(t) -> out_step(path, k, t, \(z) -> prim_println(x))
-      return r => \(t) -> r
+      con_read_int() resume k =>
+        \(t) -> step_int(path, k, t, \(_z) -> prim_read_int())
+      con_read_line() resume k =>
+        \(t) -> step_str(path, k, t, \(_z) -> prim_read_line())
+      fs_read_file(p) resume k =>
+        \(t) -> step_str(path, k, t, \(_z) -> prim_read_file(p))
+      fs_read_bytes(p) resume k =>
+        \(t) -> step_bytes(path, k, t, \(_z) -> prim_read_bytes(p))
+      fs_file_exists(p) resume k =>
+        \(t) -> step_bool(path, k, t, \(_z) -> prim_file_exists(p))
+      rng_rand() resume k => \(t) -> step_int(path, k, t, \(_z) -> prim_rand())
+      env_get(s) resume k =>
+        \(t) -> step_str(path, k, t, \(_z) -> prim_getenv(s))
+      env_argc() resume k =>
+        \(t) -> step_int(path, k, t, \(_z) -> prim_args_count())
+      env_arg(i) resume k => \(t) -> step_str(path, k, t, \(_z) -> prim_arg(i))
+      out_print(x) resume k =>
+        \(t) -> out_step(path, k, t, \(_z) -> prim_print(x))
+      out_println(x) resume k =>
+        \(t) -> out_step(path, k, t, \(_z) -> prim_println(x))
+      return r => \(_t) -> r
   g(loaded)

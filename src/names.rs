@@ -84,7 +84,7 @@ pub const RUN_LIFO: &str = "Concurrent.run_lifo";
 // that reaches one needs the handler installed. This is the opt-in trigger, which
 // is why it keys off the wrapper names rather than the raw capability operations:
 // a program that performs a capability directly (and installs its own handler,
-// e.g. `run_io(\() -> rng_rand(()))`) is deliberately left unwrapped. These are
+// e.g. `run_io(\() -> rng_rand())`) is deliberately left unwrapped. These are
 // required prelude names like `main`/`run_io`; a drift guard test asserts each
 // resolves to a prelude function so a rename fails loudly instead of silently
 // changing codegen.
@@ -119,7 +119,7 @@ pub const INCR_REPLAY_DRIVERS: &[&str] =
 // `erase_control` recognizes calls to them by name to lower a recognized loop to
 // direct control flow, so a prelude rename without a matching edit here would
 // silently drop loop erasure onto the free-monad tier (a perf cliff, not a
-// miscompile). Pinned by the drift-guard test below.
+// miscompile). Guarded by the drift-guard test below.
 pub const REPEAT_WHILE: &str = "repeat_while";
 pub const FOREVER: &str = "forever";
 
@@ -133,7 +133,7 @@ pub const FOREVER: &str = "forever";
 // comprehension head performs; and
 // `str_escape` renders a `String` as a quoted literal in a derived `Show`. Each is
 // a compiler<->prelude string contract with no other home, so the drift-guard test
-// pins every one to its prelude definition, exactly as the loop drivers above are
+// checks every one to its prelude definition, exactly as the loop drivers above are
 // pinned: a rename fails the build instead of silently breaking the sugar.
 pub const RUN_IO: &str = "run_io";
 pub const FORCE_FN: &str = "force";
@@ -149,7 +149,7 @@ pub const STR_ESCAPE_FN: &str = "str_escape";
 // name: `==`/`!=` dispatch through `eq`, `<`/`<=`/`>`/`>=` through `cmp`, and
 // derived Show instances through `show`. One definition here keeps `derive.rs`,
 // `tc`, and `elaborate` in lockstep with the prelude class declarations; the
-// drift-guard test pins each to its class signature.
+// drift-guard test checks each to its class signature.
 pub const EQ_METHOD: &str = "eq";
 pub const ORD_METHOD: &str = "cmp";
 pub const SHOW_METHOD: &str = "show";
@@ -385,6 +385,15 @@ pub const fn output_op(newline: bool) -> &'static str {
 #[must_use]
 pub fn module_of(canon: &str) -> &str {
     canon.rsplit_once(['.', '@']).map_or("", |(m, _)| m)
+}
+
+// The unqualified tail of a canonical name: everything after the final `.` or
+// `@` (`Data.Map.insert` -> `insert`, `Wire.Serialize` -> `Serialize`), a root
+// name unchanged. The inverse of `module_of`; `deriving (C)` and rung derivation
+// use it to recover the token the surface wrote for an in-scope class.
+#[must_use]
+pub fn bare_name(canon: &str) -> &str {
+    canon.rsplit_once(['.', '@']).map_or(canon, |(_, n)| n)
 }
 
 // A module-private top-level name (e.g. `Data.Map@helper`). The `@` is
@@ -760,7 +769,7 @@ mod tests {
     // the desugarer emits calls to the helper functions and the `emit` op while
     // lowering sugar. Each name now has a single home in `names`, referenced from
     // both its emit and its match site, so those two directions agree by
-    // construction; this guard pins the remaining direction, name<->prelude, so a
+    // construction; this guard checks the remaining direction, name<->prelude, so a
     // prelude rename fails the build instead of silently degrading a tier or
     // breaking deriving or a comprehension.
     #[test]
@@ -810,10 +819,11 @@ mod tests {
                 "prelude helper `{f}` (names) has no `fn {f}(` in the prelude"
             );
         }
-        // The `Stream` effect op a comprehension head performs.
+        // The `Stream` effect op a comprehension head performs. Declared bare
+        // (grade `many`, the default), so anchor on the full op signature.
         assert!(
-            prelude.contains(&format!("ctl {EMIT_OP}(")),
-            "stream op `{EMIT_OP}` (names) has no `ctl {EMIT_OP}(` in the prelude"
+            prelude.contains(&format!("{EMIT_OP}(a) : Unit")),
+            "stream op `{EMIT_OP}` (names) has no `{EMIT_OP}(a) : Unit` declaration in the prelude"
         );
         assert!(
             prelude.contains(&format!("fn {INT_CMP}(")),
@@ -985,7 +995,7 @@ mod tests {
 
     // `sort_prim_kind` maps each canonical primitive `Ord` instance to the tag
     // the native kernel switches on, and returns `None` (generic merge sort) for
-    // anything else. Pin the mapping and the fail-safe, and confirm the tags are
+    // anything else. Check the mapping and the fail-safe, and confirm the tags are
     // distinct so no two element types collapse onto one comparison.
     #[test]
     fn sort_prim_kind_maps_canonical_instances() {

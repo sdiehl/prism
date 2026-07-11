@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::coeffect::CoeffectRow;
 use crate::kw;
 use crate::sym::Sym;
 
@@ -55,6 +56,8 @@ impl Kind {
 pub const LIST: &str = "List";
 pub const CONS: &str = "Cons";
 pub const NIL: &str = "Nil";
+pub const FLOAT_BUF: &str = "FloatBuf";
+pub const INT_BUF: &str = "IntBuf";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";
@@ -350,6 +353,19 @@ pub enum Type {
     // `App` always has a flexible head.
     App(Box<Self>, Box<Self>),
     Tuple(Vec<Self>),
+    // Unboxed product types (the `#` surface): `#(a, b)` an unboxed tuple,
+    // `#{ x : a }` an unboxed record. Their representation is `Repr::Product`
+    // (they move without a heap cell), distinct from the boxed `Tuple` above.
+    // `UnboxedRecord` keeps its fields in written order; the names are part of the
+    // type's identity.
+    UnboxedTuple(Vec<Self>),
+    UnboxedRecord(Vec<(Sym, Self)>),
+    // A non-allocating nullable (`OrNull(a)`): a value that is either the null
+    // word or an ordinary `a`. Its inner type must have a non-null representation
+    // (a heap pointer or tagged immediate, never the zero word), so `This(v)` is
+    // carried as `v` itself with no wrapper cell and `Null` is the zero word.
+    // `OrNull(OrNull(a))` is rejected: the null word would be ambiguous.
+    OrNull(Box<Self>),
     // An effect row carried in type-argument position: the argument supplied
     // for a `Row`-kinded parameter (`Cmd(Int, {IO})`), and what a rigid row
     // parameter `Var(e)` becomes once embedded in a `Con` spine. It only ever
@@ -363,6 +379,13 @@ pub enum Type {
     // literal it is already forced to equal. Erased before Core; it never
     // reaches codegen.
     Nat(u64),
+    // A type carrying a usage (coeffect) row, `T @ {once, ...}`. Wraps a function
+    // type in a parameter or return position to constrain how the value may be
+    // used: `@ once` on a closure argument means the consumer calls it at most
+    // once. The row flows contravariantly under subsumption (a `@ many` value fits
+    // a `@ once` context, never the reverse); it carries no type variables, so the
+    // structural passes recurse only into the inner type.
+    Coeffect(Box<Self>, CoeffectRow),
 }
 
 impl Type {
@@ -438,15 +461,21 @@ impl Type {
                 row.for_each_arg(&mut |a| a.free_exist(acc));
                 r.free_exist(acc);
             }
-            Self::Con(_, ps) | Self::Tuple(ps) => {
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
                 for p in ps {
                     p.free_exist(acc);
+                }
+            }
+            Self::UnboxedRecord(fs) => {
+                for (_, t) in fs {
+                    t.free_exist(acc);
                 }
             }
             Self::App(h, a) => {
                 h.free_exist(acc);
                 a.free_exist(acc);
             }
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.free_exist(acc),
             Self::Row(r) => r.for_each_arg(&mut |a| a.free_exist(acc)),
             _ => {}
         }
@@ -462,15 +491,21 @@ impl Type {
                 r.free_exist_row(acc);
             }
             Self::Forall(_, t) | Self::RowForall(_, t) => t.free_exist_row(acc),
-            Self::Con(_, ps) | Self::Tuple(ps) => {
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
                 for p in ps {
                     p.free_exist_row(acc);
+                }
+            }
+            Self::UnboxedRecord(fs) => {
+                for (_, t) in fs {
+                    t.free_exist_row(acc);
                 }
             }
             Self::App(h, a) => {
                 h.free_exist_row(acc);
                 a.free_exist_row(acc);
             }
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.free_exist_row(acc),
             Self::Row(r) => r.free_exist_row(acc),
             _ => {}
         }
@@ -510,15 +545,21 @@ impl Type {
                 row.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc));
                 r.walk_ty_vars(bound, acc);
             }
-            Self::Con(_, ps) | Self::Tuple(ps) => {
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
                 for p in ps {
                     p.walk_ty_vars(bound, acc);
+                }
+            }
+            Self::UnboxedRecord(fs) => {
+                for (_, t) in fs {
+                    t.walk_ty_vars(bound, acc);
                 }
             }
             Self::App(h, a) => {
                 h.walk_ty_vars(bound, acc);
                 a.walk_ty_vars(bound, acc);
             }
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.walk_ty_vars(bound, acc),
             Self::Row(r) => r.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc)),
             _ => {}
         }
@@ -539,15 +580,21 @@ impl Type {
                 bound.pop();
             }
             Self::Forall(_, t) => t.walk_row_vars(bound, acc),
-            Self::Con(_, ps) | Self::Tuple(ps) => {
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
                 for p in ps {
                     p.walk_row_vars(bound, acc);
+                }
+            }
+            Self::UnboxedRecord(fs) => {
+                for (_, t) in fs {
+                    t.walk_row_vars(bound, acc);
                 }
             }
             Self::App(h, a) => {
                 h.walk_row_vars(bound, acc);
                 a.walk_row_vars(bound, acc);
             }
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.walk_row_vars(bound, acc),
             Self::Row(r) => r.walk_vars(bound, acc),
             _ => {}
         }
@@ -568,6 +615,16 @@ impl Type {
             // Re-reduce after substitution: the head may have become concrete.
             Self::App(h, a) => Self::app(h.subst_exist(v, with), a.subst_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_exist(v, with)).collect()),
+            Self::UnboxedTuple(ts) => {
+                Self::UnboxedTuple(ts.iter().map(|t| t.subst_exist(v, with)).collect())
+            }
+            Self::UnboxedRecord(fs) => Self::UnboxedRecord(
+                fs.iter()
+                    .map(|(n, t)| (*n, t.subst_exist(v, with)))
+                    .collect(),
+            ),
+            Self::OrNull(a) => Self::OrNull(Box::new(a.subst_exist(v, with))),
+            Self::Coeffect(a, r) => Self::Coeffect(Box::new(a.subst_exist(v, with)), r.clone()),
             Self::Row(r) => Self::Row(r.map_args(&|a| a.subst_exist(v, with))),
             other => other.clone(),
         }
@@ -588,6 +645,16 @@ impl Type {
             }
             Self::App(h, a) => Self::app(h.subst_row_exist(v, with), a.subst_row_exist(v, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_row_exist(v, with)).collect()),
+            Self::UnboxedTuple(ts) => {
+                Self::UnboxedTuple(ts.iter().map(|t| t.subst_row_exist(v, with)).collect())
+            }
+            Self::UnboxedRecord(fs) => Self::UnboxedRecord(
+                fs.iter()
+                    .map(|(n, t)| (*n, t.subst_row_exist(v, with)))
+                    .collect(),
+            ),
+            Self::OrNull(a) => Self::OrNull(Box::new(a.subst_row_exist(v, with))),
+            Self::Coeffect(a, r) => Self::Coeffect(Box::new(a.subst_row_exist(v, with)), r.clone()),
             Self::Row(r) => Self::Row(r.subst_row_exist(v, with)),
             other => other.clone(),
         }
@@ -607,6 +674,16 @@ impl Type {
             Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.subst_var(name, with)).collect()),
             Self::App(h, a) => Self::app(h.subst_var(name, with), a.subst_var(name, with)),
             Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.subst_var(name, with)).collect()),
+            Self::UnboxedTuple(ts) => {
+                Self::UnboxedTuple(ts.iter().map(|t| t.subst_var(name, with)).collect())
+            }
+            Self::UnboxedRecord(fs) => Self::UnboxedRecord(
+                fs.iter()
+                    .map(|(n, t)| (*n, t.subst_var(name, with)))
+                    .collect(),
+            ),
+            Self::OrNull(a) => Self::OrNull(Box::new(a.subst_var(name, with))),
+            Self::Coeffect(a, r) => Self::Coeffect(Box::new(a.subst_var(name, with)), r.clone()),
             Self::Row(r) => Self::Row(r.map_args(&|a| a.subst_var(name, with))),
             other => other.clone(),
         }
@@ -631,6 +708,18 @@ impl Type {
             Self::Tuple(ts) => {
                 Self::Tuple(ts.iter().map(|t| t.subst_row_var(name, with)).collect())
             }
+            Self::UnboxedTuple(ts) => {
+                Self::UnboxedTuple(ts.iter().map(|t| t.subst_row_var(name, with)).collect())
+            }
+            Self::UnboxedRecord(fs) => Self::UnboxedRecord(
+                fs.iter()
+                    .map(|(n, t)| (*n, t.subst_row_var(name, with)))
+                    .collect(),
+            ),
+            Self::OrNull(a) => Self::OrNull(Box::new(a.subst_row_var(name, with))),
+            Self::Coeffect(a, r) => {
+                Self::Coeffect(Box::new(a.subst_row_var(name, with)), r.clone())
+            }
             Self::Row(r) => Self::Row(r.subst_row_var(name, with)),
             other => other.clone(),
         }
@@ -642,8 +731,12 @@ impl Type {
             Self::Fun(ps, row, r) => {
                 ps.iter().all(Self::is_mono) && row.is_mono_row() && r.is_mono()
             }
-            Self::Con(_, ps) | Self::Tuple(ps) => ps.iter().all(Self::is_mono),
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
+                ps.iter().all(Self::is_mono)
+            }
+            Self::UnboxedRecord(fs) => fs.iter().all(|(_, t)| t.is_mono()),
             Self::App(h, a) => h.is_mono() && a.is_mono(),
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.is_mono(),
             Self::Row(r) => r.is_mono_row(),
             _ => true,
         }
@@ -707,15 +800,21 @@ impl Type {
                 }
                 r.row_var_stats(total, tail);
             }
-            Self::Con(_, ps) | Self::Tuple(ps) => {
+            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
                 for p in ps {
                     p.row_var_stats(total, tail);
+                }
+            }
+            Self::UnboxedRecord(fs) => {
+                for (_, t) in fs {
+                    t.row_var_stats(total, tail);
                 }
             }
             Self::App(h, a) => {
                 h.row_var_stats(total, tail);
                 a.row_var_stats(total, tail);
             }
+            Self::OrNull(a) | Self::Coeffect(a, _) => a.row_var_stats(total, tail),
             Self::Row(r) => count_row_vars(r, total),
             _ => {}
         }
@@ -775,6 +874,19 @@ impl Type {
                 let ts: Vec<_> = ts.iter().map(|t| t.show_p(phantom)).collect();
                 format!("({})", ts.join(", "))
             }
+            Self::UnboxedTuple(ts) => {
+                let ts: Vec<_> = ts.iter().map(|t| t.show_p(phantom)).collect();
+                format!("#({})", ts.join(", "))
+            }
+            Self::UnboxedRecord(fs) => {
+                let fs: Vec<_> = fs
+                    .iter()
+                    .map(|(n, t)| format!("{n} : {}", t.show_p(phantom)))
+                    .collect();
+                format!("#{{ {} }}", fs.join(", "))
+            }
+            Self::OrNull(a) => format!("{}({})", kw::TY_OR_NULL, a.show_p(phantom)),
+            Self::Coeffect(a, r) => format!("{} {r}", a.show_p(phantom)),
             Self::Row(r) => r.show(),
             Self::Nat(n) => n.to_string(),
         }
@@ -826,5 +938,26 @@ pub fn show_effects(e: &Effects) -> String {
         let mut v: Vec<String> = e.iter().map(Sym::to_string).collect();
         v.sort();
         format!("{{{}}}", v.join(", "))
+    }
+}
+
+/// Whether an empty effect row is surfaced when pretty-printing a type.
+///
+/// With this `false` (the default) a pure type prints as just `Int` rather
+/// than `Int ! {}`; flip it to `true` to always print the empty row. It
+/// governs both the source formatter (via `fmt`) and the type displays below.
+pub(crate) const SHOW_EMPTY_EFFECT_ROW: bool = false;
+
+/// Render a type followed by its effect row, omitting an empty row.
+///
+/// The omission is governed by `SHOW_EMPTY_EFFECT_ROW`. This is the
+/// canonical spelling for the `type ! {effects}` displays in the driver, REPL,
+/// and check-world metadata.
+#[must_use]
+pub fn show_type_with_effects(ty: &Type, e: &Effects) -> String {
+    if e.is_empty() && !SHOW_EMPTY_EFFECT_ROW {
+        ty.show()
+    } else {
+        format!("{} ! {}", ty.show(), show_effects(e))
     }
 }

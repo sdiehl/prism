@@ -77,10 +77,11 @@ fresh : (Int) -> Box
 
 == core (cbpv) ==
 fn fresh(x) =
-  return x to t@0; return Box(t@0)
+  return x to t@0
+  return Box(t@0)
 
 == fip ==
-Type Error: usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
+[E1998] Type Error: usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
    ╭─[ <source>:3:1 ]
    │
  3 │ fbip fn fresh(x) = Box(x)

@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/instance_ambiguous.pr
 ---
 == tokens ==
@@ -260,7 +260,7 @@ Program {
 }
 
 == types ==
-Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
+[E3034] Type Error: 2 instances for Ord(Int): `ordInt` (this program), `ordRev` (this program); designate one with `canonical Ord(Int) = name`
    ╭─[ <source>:4:1 ]
    │
  4 │ ╭─▶ instance ordInt : Ord(Int)

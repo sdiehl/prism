@@ -2,7 +2,7 @@
 //!
 //! `break`/`continue`/`return` desugar (`syntax/desugar/effects/mod.rs`) to
 //! non-resumable performs of three internal one-op effects, each discharged by a
-//! `final ctl` handler the desugar wraps around the loop body (`continue`), the
+//! `never` handler the desugar wraps around the loop body (`continue`), the
 //! loop driver call (`break`), or the whole function body (`return`). As algebraic
 //! effects those handlers fall onto the free monad: each `do` reifies an `EOp`
 //! cell and the loop driver's resumption is a closure apply rather than a tail
@@ -19,7 +19,7 @@
 //!
 //! `break`/`continue` thread as an immediate `ctl:Int` (`0` = ran to the end, `1`
 //! = `continue`, `2` = `break`), short-circuiting the body on any non-zero so the
-//! discarded tail matches the dropped continuation of the `final ctl` handler.
+//! discarded tail matches the dropped continuation of the `never` handler.
 //! `continue` needs no driver change (`repeat_while`/`forever` already ignore the
 //! body result, so a `continue`-only body just yields `0`/`1`). `break` emits a
 //! fresh tail-recursive `{n}@loopdrv` that exits on `ctl == 2`.
@@ -39,7 +39,7 @@ use crate::core::fv;
 use crate::fresh::Fresh;
 use crate::names;
 // The prelude loop-driver names live in their one canonical home; a drift-guard
-// test there pins each to the prelude, so a rename cannot silently drop loop
+// test there checks each to the prelude, so a rename cannot silently drop loop
 // erasure onto the free-monad tier.
 use crate::names::{FOREVER, REPEAT_WHILE};
 use crate::sym::Sym;
@@ -668,14 +668,14 @@ fn ctl_signal(op: Sym) -> Option<i64> {
 }
 
 // Recognize the `continue` handler template the desugar wraps around a loop body:
-//   handle BODY with { loop@continue(k) => return (), return r => return () }
+//   handle BODY with { loop@continue() resume k => return (), return r => return () }
 // Match on the op name only (binders are alpha-renamed; the op name is unforgeable
 // in source). Returns the wrapped BODY, or None to leave the handler.
 fn match_continue(c: &Comp) -> Option<&Comp> {
     let Comp::Handle { body, ops, .. } = c else {
         return None;
     };
-    let [op] = ops.as_slice() else {
+    let [op] = ops.arms() else {
         return None;
     };
     if !names::is_continue_op(op.name.as_str()) {
@@ -691,7 +691,7 @@ fn match_return(c: &Comp) -> Option<&Comp> {
     let Comp::Handle { body, ops, .. } = c else {
         return None;
     };
-    let [op] = ops.as_slice() else {
+    let [op] = ops.arms() else {
         return None;
     };
     if !names::is_return_op(op.name.as_str()) {
@@ -703,14 +703,14 @@ fn match_return(c: &Comp) -> Option<&Comp> {
 // Recognize the `break` handler template the desugar wraps around the loop driver:
 //   handle { return thunk {\.cond} to tc
 //            return thunk {\.body} to tb
-//            repeat_while(tc, tb) } with { loop@break(k) => (), return r => () }
+//            repeat_while(tc, tb) } with { loop@break() resume k => (), return r => () }
 // Returns the inlined condition and body (the body with its own `continue` wrapper
 // peeled, since this loop's `continue` threads into the same `ctl`).
 fn match_break(c: &Comp) -> Option<(Comp, Comp)> {
     let Comp::Handle { body, ops, .. } = c else {
         return None;
     };
-    let [op] = ops.as_slice() else {
+    let [op] = ops.arms() else {
         return None;
     };
     if !names::is_break_op(op.name.as_str()) {

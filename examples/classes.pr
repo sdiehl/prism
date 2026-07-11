@@ -1,42 +1,46 @@
--- Typeclasses with Lean-style named instances. A class declares a dictionary
--- shape, instances are named values, and constrained functions take hidden
--- dictionaries resolved at the call site. When a head has two instances one is
--- canonical (here the prelude's ascending ordInt, designated below); implicit
--- resolution picks it, and the other is selected explicitly with
--- f(args, using instName). Coherence: resolution is never silently ambiguous.
+-- Typeclasses. A class is an interface: a named bundle of methods a type
+-- implements. An instance provides those methods for one type, and a function
+-- that says `given Shape(a)` works for every type with an instance, receiving
+-- the instance as a hidden argument resolved at each call site.
 
-fn maximum_by_ord(xs : List(a)) : Option(a) given Ord(a) =
-  match xs of
-    Nil => None
-    Cons(x, rest) =>
-      match maximum_by_ord(rest) of
-        None => Some(x)
-        Some(y) =>
-          if cmp(x, y) >= 0 then
-            Some(x)
-          else
-            Some(y)
+type Circle = MkCircle(Float)
 
-instance ordDesc : Ord(Int)
-  fn cmp(x, y) = int_cmp(y, x)
+type Rect = MkRect(Float, Float)
 
--- The prelude's ascending ordInt is the canonical Ord(Int); ordDesc stays the
--- explicit yardstick. Without this, two Ord(Int) instances would be a coherence
--- error at definition rather than a silent ambiguity at the use site.
-canonical Ord(Int) = ordInt
+class Shape(a)
+  area : (a) -> Float
+  name : (a) -> String
 
-fn join_shown(xs : List(a)) : String given Show(a) =
-  match xs of
-    Nil => ""
-    Cons(x, rest) =>
-      match rest of
-        Nil => show(x)
-        Cons(_, _) => concat(show(x), concat(", ", join_shown(rest)))
+instance shapeCircle : Shape(Circle)
+  fn area(c) =
+    match c of
+      MkCircle(r) => 3.14159265 * r * r
+  fn name(_c) = "circle"
 
-fn main() : !{IO} Unit =
-  let xs = [3, 1, 4, 1, 5, 9, 2, 6]
-  println(join_shown(sort_by_ord(xs, using ordInt)))
-  println(join_shown(sort_by_ord(xs, using ordDesc)))
-  println(unwrap_or(0, maximum_by_ord(xs, using ordInt)))
-  println(unwrap_or(0, maximum_by_ord(xs, using ordDesc)))
-  println(join_shown(sort_by_ord(["pear", "apple", "quince"])))
+instance shapeRect : Shape(Rect)
+  fn area(s) =
+    match s of
+      MkRect(w, h) => w * h
+  fn name(_s) = "rectangle"
+
+fn summary(x : a) : String given Shape(a) =
+  concat(name(x), concat(" of area ", show_float(area(x))))
+
+-- Instances are named values (Lean-style), which is what the knobs below hang
+-- off. A second instance for the same head type is legal; designating one
+-- canonical keeps implicit resolution deterministic (coherence: a program's
+-- meaning never depends on a silent tie-break), and the other instance is
+-- selected explicitly with `f(args, using instName)`.
+
+instance shapeBox : Shape(Rect)
+  fn area(s) =
+    match s of
+      MkRect(w, h) => w * h
+  fn name(_s) = "box"
+
+canonical Shape(Rect) = shapeRect
+
+fn main() =
+  println(summary(MkCircle(1.0)))
+  println(summary(MkRect(2.0, 3.0)))
+  println(summary(MkRect(2.0, 3.0), using shapeBox))

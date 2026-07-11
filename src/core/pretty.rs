@@ -179,6 +179,17 @@ pub fn pp_value(v: &Value) -> String {
             let vs: Vec<_> = vs.iter().map(pp_value).collect();
             format!("({})", vs.join(", "))
         }
+        Value::UnboxedTuple(vs) => {
+            let vs: Vec<_> = vs.iter().map(pp_value).collect();
+            format!("#({})", vs.join(", "))
+        }
+        Value::UnboxedRecord(fs) => {
+            let fs: Vec<_> = fs
+                .iter()
+                .map(|(n, v)| format!("{n} = {}", pp_value(v)))
+                .collect();
+            format!("#{{{}}}", fs.join(", "))
+        }
     }
 }
 
@@ -236,6 +247,7 @@ pub fn pp_comp(c: &Comp) -> String {
         }
         Comp::FloatBuiltin(op, v) => format!("{}({})", op.name(), pp_value(v)),
         Comp::Neg(_, v) => format!("{}{}", kw::MINUS, pp_value(v)),
+        Comp::UnboxedProject(v, field) => format!("{}.#{field}", pp_value(v)),
         Comp::Dup(v) => format!("dup {}", pp_value(v)),
         Comp::Drop(v) => format!("drop {}", pp_value(v)),
         Comp::WithReuse { token, freed, body } => {

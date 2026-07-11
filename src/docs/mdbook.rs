@@ -124,8 +124,9 @@ fn inject_stdlib(
             if path == STDLIB_INDEX || existing.contains(&path) {
                 continue;
             }
-            let body = fs::read_to_string(src_dir.join(&path))
-                .map_err(|e| Error::Codegen(format!("mdbook preprocessor: read {path}: {e}")))?;
+            let body = fs::read_to_string(src_dir.join(&path)).map_err(|e| {
+                Error::CodegenDocs(format!("mdbook preprocessor: read {path}: {e}"))
+            })?;
             let mut number = parent_number.clone();
             number.push(json!(subs.len() + 1));
             subs.push(json!({ "Chapter": {
@@ -306,11 +307,10 @@ fn walk(items: &mut Vec<Value>, warnings: &mut Vec<String>) {
 /// Fails if the input is not the expected mdbook preprocessor JSON.
 pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
     let parsed: Value = serde_json::from_str(input)
-        .map_err(|e| Error::Codegen(format!("mdbook preprocessor input: {e}")))?;
-    let mut book = parsed
-        .get(1)
-        .cloned()
-        .ok_or_else(|| Error::Codegen("mdbook preprocessor: expected [context, book]".into()))?;
+        .map_err(|e| Error::CodegenDocs(format!("mdbook preprocessor input: {e}")))?;
+    let mut book = parsed.get(1).cloned().ok_or_else(|| {
+        Error::CodegenDocs("mdbook preprocessor: expected [context, book]".into())
+    })?;
     // The book's markdown source directory, from the preprocessor context (the
     // stdlib injection reads module pages from it; mdbook itself only loads
     // chapters SUMMARY.md names).
@@ -338,6 +338,6 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
         walk(items, &mut warnings);
     }
     let json = serde_json::to_string(&book)
-        .map_err(|e| Error::Codegen(format!("mdbook preprocessor output: {e}")))?;
+        .map_err(|e| Error::CodegenDocs(format!("mdbook preprocessor output: {e}")))?;
     Ok((json, warnings))
 }

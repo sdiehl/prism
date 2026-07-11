@@ -498,6 +498,7 @@ fn descend_ops(c: &Comp, handled: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Neg(_, v)
+        | Comp::UnboxedProject(v, _)
         | Comp::Dup(v)
         | Comp::Drop(v)
         | Comp::Reuse(_, v)

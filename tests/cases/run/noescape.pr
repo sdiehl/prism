@@ -1,0 +1,19 @@
+-- `@ noescape` on a function domain is the scoped-token contract: the callback
+-- receives a value that must not outlive the call (not returned, not embedded in
+-- returned data, not aliased out, not captured by another closure), so the
+-- caller can hand out a scoped resource knowing it stays inside the call. Like
+-- the other usage facts it is erased before Core, so an accepted program runs
+-- identically on both backends.
+type Builder = MkBuilder(Int)
+
+fn finish(b : Builder) : Int =
+  match b of
+    MkBuilder(n) => n
+
+-- The caller creates the scoped token; the checked callback consumes it.
+fn with_builder(f : (Builder @ noescape) -> Int) : Int = f(MkBuilder(7))
+
+fn main() =
+  println(with_builder(\(b) -> finish(b) * 6))
+  -- A top-level function works as the callback: its body is checked the same way.
+  println(with_builder(finish))

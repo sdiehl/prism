@@ -6,13 +6,17 @@
 
 use std::fmt::Write as _;
 
-use super::{block_trailing_call, forces_break, Fmt, Mode, INDENT, LINE_WIDTH};
+use super::breaks::{block_trailing_call, forces_break};
+use super::{Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::coeffect::CoeffectFact;
 use crate::kw;
 use crate::syntax::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
     InstanceDecl, Kind, Param, PatternDecl, Row, Ty, S,
 };
+// The empty-effect-row switch lives with the type printer it also governs; the
+// source formatter reuses that one global rather than declaring a second.
+use crate::types::ty::SHOW_EMPTY_EFFECT_ROW;
 
 pub(super) fn fmt_import(i: &ImportDecl) -> String {
     let key = if i.reexport {
@@ -38,9 +42,15 @@ pub(crate) fn fmt_effect(e: &EffectDecl) -> String {
         .iter()
         .map(|op| {
             let params: Vec<String> = op.params.iter().map(fmt_ty).collect();
+            // The default grade (`many`) is unmarked; a stronger grade prints its
+            // word as a prefix.
+            let grade = if op.grade.is_default() {
+                String::new()
+            } else {
+                format!("{} ", op.grade.word())
+            };
             format!(
-                "{INDENT}{} {}({}) : {}",
-                op.grade.keyword(),
+                "{INDENT}{grade}{}({}) : {}",
                 op.name,
                 params.join(", "),
                 fmt_ty(&op.ret)
@@ -276,6 +286,17 @@ pub(crate) fn fmt_ty(t: &Ty) -> String {
             let ts: Vec<String> = ts.iter().map(fmt_ty).collect();
             format!("({})", ts.join(", "))
         }
+        Ty::UnboxedTuple(ts) => {
+            let ts: Vec<String> = ts.iter().map(fmt_ty).collect();
+            format!("#({})", ts.join(", "))
+        }
+        Ty::UnboxedRecord(fs) => {
+            let fs: Vec<String> = fs
+                .iter()
+                .map(|(n, t)| format!("{n} : {}", fmt_ty(t)))
+                .collect();
+            format!("#{{ {} }}", fs.join(", "))
+        }
         // A row literal in argument position prints as `{ .. }` (no leading `!`,
         // which marks a function's effect row, not a row-kinded argument).
         Ty::RowLit(Row::Cons(ls, tl)) => {
@@ -300,6 +321,15 @@ pub(crate) fn fmt_ty(t: &Ty) -> String {
 pub(super) fn fmt_row(r: &Row) -> String {
     match r {
         Row::Empty => String::new(),
+        // An explicit empty row (`! {}`) is pure; print it like `Row::Empty` unless
+        // the printer is configured to surface the empty row ([`SHOW_EMPTY_EFFECT_ROW`]).
+        Row::Cons(ls, tl) if ls.is_empty() && tl.is_none() => {
+            if SHOW_EMPTY_EFFECT_ROW {
+                " ! {}".into()
+            } else {
+                String::new()
+            }
+        }
         Row::Cons(ls, tl) => {
             let body = match tl {
                 Some(v) if ls.is_empty() => format!("| {v}"),
@@ -352,11 +382,11 @@ impl Fmt<'_> {
             p.params.join(", "),
             kw::FOR,
             p.for_ty,
-            clause("view", &p.view)
+            clause(kw::VIEW, &p.view)
         );
         if let Some(mk) = &p.make {
             out.push('\n');
-            out.push_str(&clause("make", mk));
+            out.push_str(&clause(kw::MAKE, mk));
         }
         out
     }
@@ -414,23 +444,38 @@ impl Fmt<'_> {
             t @ (Ty::Fun(..) | Ty::Forall(..)) if d.no_alloc => format!("({})", fmt_ty(t)),
             t => fmt_ty(t),
         };
+        // The allocation certificate `@ noalloc` is a postfix on the result type,
+        // ahead of any declaration effect, so it re-parses at the annotation root
+        // (`: T @ noalloc ! {E}`). It is folded into `ret_ann` here rather than
+        // appended after it, so `na` below stays empty in the result-first order.
+        let ty_ann = |t: &Ty| {
+            if d.no_alloc {
+                format!("{} {} {}", ret_ty(t), kw::AT, CoeffectFact::Noalloc)
+            } else {
+                ret_ty(t)
+            }
+        };
+        // The declaration effect prints result-first: `: Result ! {Effects}`,
+        // matching a function type's own `-> cod ! {row}`. An empty explicit row
+        // is a bare trailing `!`.
+        let eff_suffix = |effs: &[EffLabel]| {
+            if effs.is_empty() {
+                // An explicit empty declaration row is pure; omit it unless the
+                // printer is configured to surface the empty row.
+                if SHOW_EMPTY_EFFECT_ROW {
+                    " !".to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                format!(" ! {{{}}}", fmt_labels(effs))
+            }
+        };
         let ret_ann = match (&d.eff, &d.ret) {
             (None, None) => String::new(),
-            (None, Some(t)) => format!(" : {}", ret_ty(t)),
-            (Some(effs), None) => {
-                if effs.is_empty() {
-                    " : !".into()
-                } else {
-                    format!(" : !{{{}}}", fmt_labels(effs))
-                }
-            }
-            (Some(effs), Some(t)) => {
-                if effs.is_empty() {
-                    format!(" : ! {}", ret_ty(t))
-                } else {
-                    format!(" : !{{{}}} {}", fmt_labels(effs), ret_ty(t))
-                }
-            }
+            (None, Some(t)) => format!(" : {}", ty_ann(t)),
+            (Some(effs), None) => format!(" :{}", eff_suffix(effs)),
+            (Some(effs), Some(t)) => format!(" : {}{}", ty_ann(t), eff_suffix(effs)),
         };
         let wh = if d.constraints.is_empty() {
             String::new()
@@ -447,14 +492,9 @@ impl Fmt<'_> {
         } else {
             fip_key
         };
-        // The allocation certificate `@ noalloc` is a postfix on the return
-        // annotation (lifted onto the decl flag at parse), so it prints there,
-        // not in the leading `key`.
-        let na = if d.no_alloc {
-            format!(" {} {}", kw::AT, CoeffectFact::Noalloc)
-        } else {
-            String::new()
-        };
+        // The allocation certificate `@ noalloc` now prints inside `ret_ann`
+        // (ahead of the declaration effect), so nothing is appended after it.
+        let na = String::new();
         // A signature over budget with two or more parameters puts each on its own
         // line inside the parens (which suppress layout), the closing `)` and the
         // return annotation placed back at the declaration's column. The wrap is

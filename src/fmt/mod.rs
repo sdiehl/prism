@@ -6,20 +6,27 @@ use crate::error::Error;
 use crate::kw;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{
-    Arm, BinOp, CatchArm, ConvDir, Converter, Expr, HandlerArm, Marker, PathOp, PathStep, Pattern,
-    Program, Qualifier, Rung, Span, StableDecl, Sugar, SugarArm, Surface, S,
+    Arm, BinOp, CatchArm, ConvDir, Converter, Expr, Grade, HandlerArm, Marker, PathOp, PathStep,
+    Pattern, Program, Qualifier, Rung, StableDecl, Sugar, SugarArm, Surface, S,
 };
 
+mod breaks;
+mod call;
 pub(crate) mod decl;
 mod exprdoc;
+mod lit;
 mod ops;
 mod pat;
 mod records;
 mod stmts;
-use decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
-use ops::{
-    binop_prec, low_prec_operand, needs_left_paren, needs_right_paren, neg_operand_needs_paren,
+mod trivia;
+use breaks::{forces_break, wants_break};
+use call::{
+    call_shape, callee_parens, dot_parts, dot_recv_parens, is_with_call, paren_if, CallShape,
 };
+use decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
+use lit::{escape_str, fmt_char, fmt_float};
+use ops::{binop_prec, needs_left_paren, needs_right_paren, neg_operand_needs_paren};
 use pat::{fmt_pat, fmt_pat_inline};
 
 const INDENT: &str = "  ";
@@ -100,215 +107,6 @@ pub fn format_check(src: &str) -> Result<bool, Error> {
     Ok(formatted == src)
 }
 
-const fn is_with_call(args: &[S<Expr>]) -> bool {
-    matches!(args.last(), Some(a) if matches!(a.node, Expr::Lam(..)) && a.synth)
-}
-
-// A `Marker::Try` call head restores `e?`: the receiver is its single argument.
-fn try_recv<'a>(f: &S<Expr>, args: &'a [S<Expr>]) -> Option<&'a S<Expr>> {
-    match (&f.node, args) {
-        (Expr::Marker(Marker::Try), [recv]) => Some(recv),
-        _ => None,
-    }
-}
-
-// UFCS dot calls carry the synthetic-span marker on the callee var. That is
-// how the formatter restores `recv.f(args)` instead of `f(recv, args)`.
-type DotCall<'a> = (&'a str, &'a S<Expr>, &'a [S<Expr>]);
-
-fn dot_parts<'a>(f: &'a S<Expr>, args: &'a [S<Expr>]) -> Option<DotCall<'a>> {
-    match &f.node {
-        Expr::Var(name) if f.synth && !args.is_empty() => Some((name, &args[0], &args[1..])),
-        _ => None,
-    }
-}
-
-// The structural shape of a call `f(args)` once its head is decoded. Both the
-// flat/break printer (`fmt_call_flat`) and the inline printer decode through
-// this one classifier so they can never disagree on how a call head reads; a
-// missing arm here once let the break path drop a `using` clause, re-emitting
-// `f(a, using I)` as `f(using I)(a)` and breaking format round-trip.
-enum CallShape<'a> {
-    Recv(&'a S<Expr>),                              // `recv?`
-    Dot(DotCall<'a>),                               // `recv.name(rest)`
-    Inst(&'a S<Expr>, &'a [String], &'a [S<Expr>]), // `inner(args, using names)`
-    Plain(&'a S<Expr>, &'a [S<Expr>]),              // `f(args)`
-}
-
-// Decode a call head into its `CallShape`. Ordering is priority: a `?` receiver,
-// then a UFCS dot call, then explicit instance selection, then a plain call.
-fn call_shape<'a>(f: &'a S<Expr>, args: &'a [S<Expr>]) -> CallShape<'a> {
-    if let Some(recv) = try_recv(f, args) {
-        return CallShape::Recv(recv);
-    }
-    if let Some(dot) = dot_parts(f, args) {
-        return CallShape::Dot(dot);
-    }
-    if let Expr::Inst(inner, names) = &f.node {
-        return CallShape::Inst(inner, names, args);
-    }
-    CallShape::Plain(f, args)
-}
-
-// A dot receiver must stay postfix-tight. Anything looser is parenthesized.
-const fn dot_recv_parens(e: &Expr) -> bool {
-    low_prec_operand(e)
-        || matches!(
-            e,
-            Expr::Bin(..) | Expr::Handle(..) | Expr::Sugar(Sugar::Assign(..))
-        )
-}
-
-// `(b.f)(1)` calls the field closure. Bare `b.f(1)` reparses as UFCS f(b, 1).
-const fn callee_parens(e: &Expr) -> bool {
-    low_prec_operand(e) || matches!(e, Expr::Handle(..) | Expr::FieldAccess(..))
-}
-
-// Wrap an already-rendered operand in parens when the surrounding precedence
-// demands it.
-fn paren_if(parens: bool, s: String) -> String {
-    if parens {
-        format!("({s})")
-    } else {
-        s
-    }
-}
-
-// In statement position, `match` and `if` always lay out across lines, even
-// when they would fit on one: their arms and branches read better stacked, the
-// way other languages write them. Synth matches (pattern-let / `?` desugar) are
-// excluded. The block printer restores those surfaces inline. Record and optic
-// literals whose shape reads better stacked (`wants_break`) force layout too,
-// so a dense or nested constructor never stays cramped on one line.
-fn forces_break(e: &S<Expr>) -> bool {
-    wants_break(&e.node)
-        || matches!(
-            e.node,
-            Expr::Match(..)
-                | Expr::If(..)
-                | Expr::Sugar(Sugar::For(..) | Sugar::While(..) | Sugar::Transact(..))
-        ) && !e.synth
-}
-
-// The most fields a record constructor keeps on one line; beyond this it stacks
-// one field per line even when it would fit, for scannability.
-const MAX_INLINE_RECORD_FIELDS: usize = 4;
-
-// A record or optic literal reads better stacked across lines regardless of
-// width. A record does when it carries more than `MAX_INLINE_RECORD_FIELDS`
-// fields or nests another record constructor as a field value; a nested optic
-// update does when it has several clauses and any path actually traverses
-// (`each`/`?Ctor`/`where`/`[i]`), so the foci line up one per row.
-fn wants_break(e: &Expr) -> bool {
-    match e {
-        Expr::RecordCreate(_, fields) | Expr::RecordUpdate(_, _, fields) => {
-            fields.len() > MAX_INLINE_RECORD_FIELDS
-                || fields.iter().any(|(_, v)| contains_record_lit(&v.node))
-        }
-        Expr::RecordUpdatePath(_, ups) => {
-            ups.len() > 1 && ups.iter().any(|(p, _)| p.iter().any(path_step_traverses))
-        }
-        _ => false,
-    }
-}
-
-const fn is_record_lit(e: &Expr) -> bool {
-    matches!(
-        e,
-        Expr::RecordCreate(..) | Expr::RecordUpdate(..) | Expr::RecordUpdatePath(..)
-    )
-}
-
-fn contains_record_lit(e: &Expr) -> bool {
-    if is_record_lit(e) {
-        return true;
-    }
-    let mut found = false;
-    e.each_child(&mut |child| {
-        if !found {
-            found = contains_record_lit(&child.node);
-        }
-    });
-    found
-}
-
-const fn path_step_traverses(s: &PathStep) -> bool {
-    matches!(
-        s,
-        PathStep::Each | PathStep::Case(_) | PathStep::Index(_) | PathStep::Where(_)
-    )
-}
-
-// A call whose last argument is a lambda with a statement-shaped body: a
-// sequence/binding (`Let`), a handler/match/if, or imperative sugar (`var`,
-// `:=`, `throw`, `try`, `for`, `transact`, named `with`). Such a body reads
-// better as the offside `f() fn(x)` block. A lambda whose body is a single
-// value expression is left to print inline as `f(\x -> e)`.
-fn block_trailing_call(e: &S<Expr>) -> bool {
-    let Expr::Call(_, args) = &e.node else {
-        return false;
-    };
-    let Some(Expr::Lam(_, body)) = args.last().map(|a| &a.node) else {
-        return false;
-    };
-    matches!(
-        body.node,
-        Expr::Let(..)
-            | Expr::Handle(..)
-            | Expr::Match(..)
-            | Expr::If(..)
-            | Expr::Sugar(
-                Sugar::VarDecl(..)
-                    | Sugar::Assign(..)
-                    | Sugar::Throw(..)
-                    | Sugar::TryCatch(..)
-                    | Sugar::For(..)
-                    | Sugar::While(..)
-                    | Sugar::Transact(..)
-                    | Sugar::Probe(..)
-                    | Sugar::NamedHandle(..)
-            )
-    )
-}
-
-fn fmt_float(f: f64) -> String {
-    let s = format!("{f}");
-    if f.is_finite() && !s.contains(['.', 'e', 'E']) {
-        format!("{s}.0")
-    } else {
-        s
-    }
-}
-
-fn fmt_char(c: char) -> String {
-    let inner = match c {
-        '\\' => "\\\\".into(),
-        '\'' => "\\'".into(),
-        '\n' => "\\n".into(),
-        '\t' => "\\t".into(),
-        '\r' => "\\r".into(),
-        c => c.to_string(),
-    };
-    format!("'{inner}'")
-}
-
-fn escape_str(s: &str) -> String {
-    let mut out = String::new();
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            '{' => out.push_str("\\{"),
-            '}' => out.push_str("\\}"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 // The shared shape of `as_compound_assign`/`as_index_compound`: a synth
 // `Bin(op, lhs, rhs)` with a compound-eligible op whose `lhs` matches the
 // caller's target predicate. Returns the op and right operand, so the formatter
@@ -351,7 +149,7 @@ const fn arm_body(arm: &HandlerArm) -> &S<Expr> {
         HandlerArm::Return(_, b)
         | HandlerArm::Op(_, _, _, b)
         | HandlerArm::Sugar(
-            SugarArm::Fun(_, _, b) | SugarArm::Final(_, _, b) | SugarArm::Val(_, b),
+            SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
         ) => b,
     }
 }
@@ -363,23 +161,28 @@ fn arm_head(arm: &HandlerArm, ind: &str) -> String {
     match arm {
         HandlerArm::Return(x, _) => format!("{ind}{} {x} {}", kw::RETURN, kw::FAT_ARROW),
         HandlerArm::Op(name, params, k, _) => {
-            let mut ps: Vec<String> = params.clone();
-            ps.push(k.clone());
-            format!("{ind}{}({}) {}", name, ps.join(", "), kw::FAT_ARROW)
+            // The continuation prints after `resume`, in its visibly special
+            // position, rather than as a trailing parameter.
+            format!(
+                "{ind}{}({}) {} {k} {}",
+                name,
+                params.join(", "),
+                kw::RESUME,
+                kw::FAT_ARROW
+            )
         }
-        HandlerArm::Sugar(SugarArm::Fun(name, params, _)) => {
+        HandlerArm::Sugar(SugarArm::Once(name, params, _)) => {
             format!(
                 "{ind}{} {}({}) {}",
-                kw::FUN,
+                Grade::Once.word(),
                 name,
                 params.join(", "),
                 kw::FAT_ARROW
             )
         }
-        HandlerArm::Sugar(SugarArm::Final(name, params, _)) => format!(
-            "{ind}{} {} {}({}) {}",
-            kw::FINAL,
-            kw::CTL,
+        HandlerArm::Sugar(SugarArm::Never(name, params, _)) => format!(
+            "{ind}{} {}({}) {}",
+            Grade::Never.word(),
             name,
             params.join(", "),
             kw::FAT_ARROW
@@ -389,113 +192,6 @@ fn arm_head(arm: &HandlerArm, ind: &str) -> String {
 }
 
 impl Fmt<'_> {
-    fn verbatim(&self, start: usize, end: usize) -> String {
-        self.source.get(start..end).unwrap_or_default().to_string()
-    }
-
-    // Preserve the writer's numeric spelling verbatim: reprint a literal from
-    // source when it carries a digit separator or an exponent (`1_000_000`,
-    // `1e-25`, `1E3`), otherwise use the canonical rendering. Rewriting `1e3`
-    // to `1000.0` would be meaning-preserving but erases the writer's chosen
-    // notation, so scientific form is the writer's to keep. Idempotent either
-    // way, since a reparsed literal re-slices to the same text.
-    fn lit_text(&self, span: Span, canonical: impl FnOnce() -> String) -> String {
-        let src = self.source.get(span.start..span.end).unwrap_or_default();
-        if src.contains('_') || src.contains(['e', 'E']) {
-            src.to_string()
-        } else {
-            canonical()
-        }
-    }
-
-    // Line comments in `[lo, hi)`, each re-emitted on its own line at the given
-    // indent and newline-terminated. A blank line between two comments is kept so
-    // deliberately spaced comment groups survive; leading and trailing blanks are
-    // dropped. Block comments carry no placeable layout, so they are skipped (the
-    // same policy `emit_leading_trivia` uses at top level).
-    fn lead_comments(&self, lo: usize, hi: usize, indent: usize) -> String {
-        if lo >= hi {
-            return String::new();
-        }
-        let ind = INDENT.repeat(indent);
-        let mut out = String::new();
-        let mut gap = false;
-        for ev in self.trivia.between(lo, hi) {
-            match &ev.trivia {
-                Trivia::Comment {
-                    kind: BuiltinKind::Line,
-                    text,
-                } => {
-                    if gap && !out.is_empty() {
-                        out.push('\n');
-                    }
-                    gap = false;
-                    out.push_str(&ind);
-                    out.push_str(text);
-                    out.push('\n');
-                }
-                Trivia::Comment { .. } => {}
-                Trivia::BlankLine => gap = true,
-            }
-        }
-        out
-    }
-
-    // Whether any line comment sits in `[lo, hi)`. The inline fast paths check
-    // this before collapsing a node onto one line: a node carrying comments must
-    // take the laid-out path so `lead_comments` has somewhere to place them.
-    fn has_comments(&self, lo: usize, hi: usize) -> bool {
-        lo < hi
-            && self.trivia.between(lo, hi).any(|e| {
-                matches!(
-                    &e.trivia,
-                    Trivia::Comment {
-                        kind: BuiltinKind::Line,
-                        ..
-                    }
-                )
-            })
-    }
-
-    // A line comment that opens on the same source line as `after` (no newline
-    // in between), i.e. a trailing comment like `let x = 1 -- note`. Returns its
-    // text and the offset just past it, so the caller can both append it inline
-    // and skip it when emitting the following statement's leading comments.
-    fn trailing_comment(&self, after: usize) -> Option<(&str, usize)> {
-        let eol = self.source[after..]
-            .find('\n')
-            .map_or(self.source.len(), |i| after + i);
-        self.trivia
-            .between(after, eol)
-            .find_map(|ev| match &ev.trivia {
-                Trivia::Comment {
-                    kind: BuiltinKind::Line,
-                    text,
-                } => Some((text.as_str(), ev.span.end)),
-                _ => None,
-            })
-    }
-
-    fn emit_leading_trivia(&self, lo: usize, hi: usize, out: &mut String) {
-        for ev in self.trivia.between(lo, hi) {
-            match &ev.trivia {
-                Trivia::Comment {
-                    kind: BuiltinKind::Line,
-                    text,
-                } => {
-                    out.push_str(text);
-                    out.push('\n');
-                }
-                Trivia::Comment { .. } => {}
-                Trivia::BlankLine => {
-                    if !out.is_empty() {
-                        out.push('\n');
-                    }
-                }
-            }
-        }
-    }
-
     // A `stable` block, one rung or converter per line inside real braces (so the
     // entries are comma-separated, like a class body). Always multi-line, so the
     // layout is a pure function of the tree and round-trips idempotently; the
@@ -994,6 +690,24 @@ impl Fmt<'_> {
         Some(out)
     }
 
+    // The bracket-key text of an index expression. A multi-index bracket
+    // `t[i, j]` parses as an `Index` whose key is a synthetic list literal (the
+    // grammar marks it `synth`), so the formatter restores the written surface
+    // by joining the elements rather than printing the list's own brackets; a
+    // user-written list key `a[[1, 2]]` is not synthetic and keeps them.
+    fn index_key_inline(&self, key: &S<Expr>) -> Option<String> {
+        if key.synth {
+            if let Expr::List(es) = &key.node {
+                let parts: Option<Vec<_>> = es
+                    .iter()
+                    .map(|e| self.fmt_expr_inline(e, Mode::Flat))
+                    .collect();
+                return Some(parts?.join(", "));
+            }
+        }
+        self.fmt_expr_inline(key, Mode::Flat)
+    }
+
     fn fmt_expr_inline(&self, e: &S<Expr>, mode: Mode) -> Option<String> {
         match &e.node {
             Expr::Int(n) => Some(self.lit_text(e.span, || n.to_string())),
@@ -1159,10 +873,34 @@ impl Fmt<'_> {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{e_s}.{field}"))
             }
+            Expr::UnboxedField(e, field) => {
+                let e_s = self.fmt_expr_inline(e, mode)?;
+                Some(format!("{e_s}.#{field}"))
+            }
+            Expr::UnboxedTuple(elems) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
+                let parts: Option<Vec<_>> = elems
+                    .iter()
+                    .map(|x| self.fmt_expr_inline(x, Mode::Flat))
+                    .collect();
+                parts.map(|p| format!("#({})", p.join(", ")))
+            }
+            Expr::UnboxedRecord(fields) => {
+                if self.has_comments(e.span.start, e.span.end) {
+                    return None;
+                }
+                let parts: Option<Vec<_>> = fields
+                    .iter()
+                    .map(|(f, v)| Some(format!("{f} = {}", self.fmt_expr_inline(v, Mode::Flat)?)))
+                    .collect();
+                parts.map(|p| format!("#{{ {} }}", p.join(", ")))
+            }
             Expr::Index(recv, key) => {
                 let recv_s = self.fmt_expr_inline(recv, mode)?;
                 let recv_s = paren_if(callee_parens(&recv.node), recv_s);
-                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                let key_s = self.index_key_inline(key)?;
                 Some(format!("{recv_s}[{key_s}]"))
             }
             // Only produced by desugar, so the surface formatter never sees it;
@@ -1270,7 +1008,7 @@ impl Fmt<'_> {
             Sugar::IndexAssign(recv, key, value) => {
                 let recv_s = self.fmt_expr_inline(recv, mode)?;
                 let recv_s = paren_if(callee_parens(&recv.node), recv_s);
-                let key_s = self.fmt_expr_inline(key, Mode::Flat)?;
+                let key_s = self.index_key_inline(key)?;
                 if let Some((op, rhs)) = as_index_compound(value) {
                     let rhs_s = self.fmt_expr_inline(rhs, mode)?;
                     Some(format!("{recv_s}[{key_s}] {}= {rhs_s}", op.spelling()))

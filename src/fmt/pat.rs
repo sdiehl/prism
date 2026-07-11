@@ -6,7 +6,8 @@ use marginalia::pretty::{
     block, comma, concat, lbrace, lparen, pretty_at, pretty_flat, rbrace, rparen, text, Block, Doc,
 };
 
-use super::{fmt_char, fmt_float, INDENT, LINE_WIDTH};
+use super::lit::{fmt_char, fmt_float};
+use super::{INDENT, LINE_WIDTH};
 use crate::kw;
 use crate::syntax::ast::{Pattern, S};
 

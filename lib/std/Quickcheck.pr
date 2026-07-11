@@ -41,12 +41,12 @@ let shift_c : U64 = 31u64
 -- then avalanche it. The state is just the incrementing counter, so `sm_next`
 -- is the raw advance and `sm_out` mixes the advanced value.
 fn sm_out(s : U64) : U64 =
-  let z0 = u64_add(s, splitmix_gamma)
-  let z1 = u64_mul(u64_xor(z0, u64_shr(z0, shift_a)), splitmix_mix1)
-  let z2 = u64_mul(u64_xor(z1, u64_shr(z1, shift_b)), splitmix_mix2)
+  let z0 = s + splitmix_gamma
+  let z1 = u64_xor(z0, u64_shr(z0, shift_a)) * splitmix_mix1
+  let z2 = u64_xor(z1, u64_shr(z1, shift_b)) * splitmix_mix2
   u64_xor(z2, u64_shr(z2, shift_c))
 
-fn sm_next(s : U64) : U64 = u64_add(s, splitmix_gamma)
+fn sm_next(s : U64) : U64 = s + splitmix_gamma
 
 -- | Run `action` with the `Random` effect served by a seeded SplitMix64 stream,
 -- so the result is a pure function of `seed`. This is the REPLAYABLE handler the
@@ -54,13 +54,13 @@ fn sm_next(s : U64) : U64 = u64_add(s, splitmix_gamma)
 pub fn run_seeded(seed : U64, action : () -> a ! {Random | e}) =
   let f =
     handle action() with
-      rng_rand(_u, k) => \(s) -> k(int_of_u64(sm_out(s)))(sm_next(s))
+      rng_rand() resume k => \(s) -> k(int_of_u64(sm_out(s)))(sm_next(s))
       return r => \(_s) -> r
   f(seed)
 
 -- A random natural in `[0, n)`, folded from a full-width draw so it never goes
 -- negative regardless of the drawn sign. Requires `n > 0`.
-fn nat_below(n : Int) = int_of_u64(u64_rem(to_u64(rand()), to_u64(n)))
+fn nat_below(n : Int) = int_of_u64(to_u64(rand()) % to_u64(n))
 
 -- | A seeded, sized generator of `a`. Apply it with `gen_run`; build one with
 -- the combinators below. The size bounds recursive shapes (list length, tree
@@ -183,16 +183,15 @@ pub let gen_float : Gen(Float) = Gen(float_at)
 -- | Generator of a printable-ASCII `Char`.
 pub let gen_char : Gen(Char) = Gen(\(_size) -> chr(32 + nat_below(95)))
 
-fn rand_bytes(n : Int, arr : Array(Int)) =
+fn rand_bytes(n : Int, buf : Buf) =
   if n <= 0 then
-    arr
+    buf
   else
-    rand_bytes(n - 1, array_push(arr, 32 + nat_below(95)))
+    rand_bytes(n - 1, buf_push(buf, 32 + nat_below(95)))
 
 -- | Generator of a printable-ASCII `String`, length bounded by size.
 pub let gen_string : Gen(String) =
-  Gen() fn(size)
-    string_of_bytes(rand_bytes(nat_below(size + 1), array_empty()))
+  Gen(\(size) -> string_of_buf(rand_bytes(nat_below(size + 1), buf_empty())))
 
 fn list_of(g : Gen(a), size : Int, n : Int) =
   if n <= 0 then
@@ -237,7 +236,7 @@ pub type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int)
 -- The per-case seed: a well-mixed function of the base seed and the case index,
 -- so each case is independent and any single one reproduces on its own.
 fn seed_for(base : U64, i : Int) : U64 =
-  sm_out(u64_add(base, u64_mul(to_u64(i), splitmix_gamma)))
+  sm_out(base + to_u64(i) * splitmix_gamma)
 
 fn check_go(
   cfg : Config,

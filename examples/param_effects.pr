@@ -9,7 +9,7 @@
 --   lo
 --   hi
 
-fn walk(xs : List(a)) : !{Emit(a)} Unit =
+fn walk(xs : List(a)) : Unit ! {Emit(a)} =
   match xs of
     Nil => ()
     Cons(x, rest) =>
@@ -19,13 +19,13 @@ fn walk(xs : List(a)) : !{Emit(a)} Unit =
 fn total(xs : List(Int)) : Int =
   let f =
     handle walk(xs) with
-      emit(v, k) => \(acc) -> k(())(acc + v)
+      emit(v) resume k => \(acc) -> k(())(acc + v)
       return r => \(acc) -> acc
   f(0)
 
-fn shout(xs : List(String)) : !{IO} Unit =
+fn shout(xs : List(String)) : Unit ! {IO} =
   handle walk(xs) with
-    emit(w, k) =>
+    emit(w) resume k =>
       println(w)
       k(())
     return r => r

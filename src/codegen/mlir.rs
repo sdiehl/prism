@@ -2,9 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use super::abi::idx64;
-use super::emit::{
-    emit_with, escape_str, str_builtin_decls, Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa,
-};
+use super::emit::{emit_with_isa, escape_str, str_builtin_decls};
+use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use crate::core::LoweredCore;
 use crate::types::CtorInfo;
 
@@ -351,7 +350,7 @@ fn i64s(n: usize) -> String {
 /// Fails when a construct reaches codegen unlowered or unsupported, or when the
 /// structural self-check rejects the emitted module.
 pub fn emit(core: &LoweredCore, ctors: &BTreeMap<String, CtorInfo>) -> Result<String, String> {
-    let text = emit_with(&MlirText, core, ctors)?;
+    let text = emit_with_isa(&MlirText, core, ctors)?;
     verify(&text)?;
     Ok(text)
 }

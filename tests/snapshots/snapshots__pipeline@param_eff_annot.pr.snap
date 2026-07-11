@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/param_eff_annot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ctl Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("bad") LParen RParen Colon Bang LBrace UIdent("Emit") LParen KwString RParen RBrace KwUnit Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
+VOpen Effect UIdent("Emit") LParen Ident("a") RParen VOpen Ident("emit") LParen Ident("a") RParen Colon KwUnit VClose VSemi Fn Ident("bad") LParen RParen Colon KwUnit Bang LBrace UIdent("Emit") LParen KwString RParen RBrace Eq Ident("emit") LParen Int(IntLit { value: 1, suffix: None }) RParen VSemi Fn Ident("main") LParen RParen Eq LParen RParen VClose
 
 == ast ==
 Program {
@@ -27,7 +27,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..35,
+            span: 0..31,
         },
     ],
     errors: [],
@@ -58,7 +58,7 @@ Program {
                         node: Var(
                             "emit",
                         ),
-                        span: 71..75,
+                        span: 68..72,
                     },
                     [
                         Spanned {
@@ -68,14 +68,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 76..77,
+                            span: 73..74,
                         },
                     ],
                 ),
-                span: 71..78,
+                span: 68..75,
             },
             wheres: [],
-            span: 37..78,
+            span: 33..75,
         },
         Decl {
             name: "main",
@@ -85,19 +85,19 @@ Program {
             constraints: [],
             body: Spanned {
                 node: Unit,
-                span: 92..94,
+                span: 89..91,
             },
             wheres: [],
-            span: 80..94,
+            span: 77..91,
         },
     ],
 }
 
 == types ==
-Type Error: in `bad`: type mismatch: expected String, got Int
-   ╭─[ <source>:4:40 ]
+[E1998] Type Error: in `bad`: type mismatch: expected String, got Int
+   ╭─[ <source>:4:41 ]
    │
- 4 │ fn bad() : !{Emit(String)} Unit = emit(1)
-   │                                        ┬  
-   │                                        ╰── in `bad`: type mismatch: expected String, got Int
+ 4 │ fn bad() : Unit ! {Emit(String)} = emit(1)
+   │                                         ┬  
+   │                                         ╰── in `bad`: type mismatch: expected String, got Int
 ───╯

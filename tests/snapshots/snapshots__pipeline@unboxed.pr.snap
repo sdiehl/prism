@@ -1,0 +1,368 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/unboxed.pr
+---
+== tokens ==
+VOpen Fn Ident("area") LParen Ident("p") Colon Hash LParen KwInt Comma KwInt RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VSemi Fn Ident("point") LParen RParen Colon Hash LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace Eq Hash LBrace Ident("x") Eq Int(IntLit { value: 1, suffix: None }) Comma Ident("y") Eq Int(IntLit { value: 2, suffix: None }) RBrace VSemi Fn Ident("main") LParen RParen Colon KwInt Eq VOpen Let Ident("q") Eq Hash LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VSemi Ident("point") LParen RParen Dot Hash Ident("x") Plus Ident("point") LParen RParen Dot Hash Ident("y") VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "area",
+            params: [
+                Param {
+                    name: "p",
+                    ty: Some(
+                        UnboxedTuple(
+                            [
+                                Int,
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Int(
+                    IntLit {
+                        value: 0,
+                        suffix: None,
+                    },
+                ),
+                span: 506..507,
+            },
+            wheres: [],
+            span: 473..507,
+        },
+        Decl {
+            name: "point",
+            params: [],
+            ret: Some(
+                UnboxedRecord(
+                    [
+                        (
+                            "x",
+                            Int,
+                        ),
+                        (
+                            "y",
+                            Int,
+                        ),
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: UnboxedRecord(
+                    [
+                        (
+                            "x",
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 1,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 553..554,
+                            },
+                        ),
+                        (
+                            "y",
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 560..561,
+                            },
+                        ),
+                    ],
+                ),
+                span: 546..563,
+            },
+            wheres: [],
+            span: 509..563,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "q",
+                    Spanned {
+                        node: UnboxedTuple(
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 595..596,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 2,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 598..599,
+                                },
+                            ],
+                        ),
+                        span: 593..600,
+                    },
+                    Spanned {
+                        node: Bin(
+                            Add,
+                            Spanned {
+                                node: UnboxedField(
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "point",
+                                                ),
+                                                span: 603..608,
+                                            },
+                                            [],
+                                        ),
+                                        span: 603..610,
+                                    },
+                                    "x",
+                                ),
+                                span: 603..613,
+                            },
+                            Spanned {
+                                node: UnboxedField(
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "point",
+                                                ),
+                                                span: 616..621,
+                                            },
+                                            [],
+                                        ),
+                                        span: 616..623,
+                                    },
+                                    "y",
+                                ),
+                                span: 616..626,
+                            },
+                        ),
+                        span: 603..626,
+                    },
+                ),
+                span: 585..626,
+            },
+            wheres: [],
+            span: 565..626,
+        },
+    ],
+}
+
+== types ==
+area : (#(Int, Int)) -> Int
+point : () -> #{ x : Int, y : Int }
+main : () -> Int
+
+== core (cbpv) ==
+fn area(p) =
+  return 0
+fn point() =
+  return 1 to t@0
+  return 2 to t@1
+  return #(t@0, t@1)
+fn main() =
+  return 1 to t@2
+  return 2 to t@3
+  return #(t@2, t@3) to q
+  point() to t@4
+  case t@4 of
+    (t@5, _) =>
+      return t@5
+  to t@8
+  point() to t@6
+  case t@6 of
+    (_, t@7) =>
+      return t@7
+  to t@9
+  t@8 + t@9
+
+== fbip (rc) ==
+fn area(p) =
+  drop p
+  return 0
+fn point() =
+  return 1 to t@0
+  return 2 to t@1
+  drop t@1
+  drop t@0
+  return #(t@0, t@1)
+fn main() =
+  return 1 to t@2
+  return 2 to t@3
+  drop t@3
+  drop t@2
+  return #(t@2, t@3) to q
+  drop q
+  point() to t@4
+  case t@4 of
+    (t@5, _) =>
+      dup t@5
+      drop t@4
+      return t@5
+  to t@8
+  point() to t@6
+  case t@6 of
+    (_, t@7) =>
+      dup t@7
+      drop t@6
+      return t@7
+  to t@9
+  t@8 + t@9
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [902 x i8] c"scheme  prism-core-hash-v1\0Abundle  385f795c2d5214948dc22d3b8f29eec23e6ce68d8d9dd53fc9ee80d52eb65f77\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:385f795c2d5214948dc22d3b8f29eec23e6ce68d8d9dd53fc9ee80d52eb65f77\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_area  fdb57df92cb47c6dd5f7ec95f559b75fa63270ee947dd0f770f95e6b9ec3ccd0  area\0Afn      prism_main  e7fd8dacba2f8fed7b5ce4c21fbcd50d7bde4d44b22f67dc94c9c874c45ff8e4  main\0Afn      prism_point  4e81449fae46801f6206896271bc160995f62d4e5afda2194cef653bfbf8b589  point\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [902 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  385f795c2d5214948dc22d3b8f29eec23e6ce68d8d9dd53fc9ee80d52eb65f77\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:385f795c2d5214948dc22d3b8f29eec23e6ce68d8d9dd53fc9ee80d52eb65f77\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_main e7fd8dacba2f8fed7b5ce4c21fbcd50d7bde4d44b22f67dc94c9c874c45ff8e4 main arity 0 slots abi-word[]\0Astate prism_point 4e81449fae46801f6206896271bc160995f62d4e5afda2194cef653bfbf8b589 point arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
+@.kont_hash1 = private constant [65 x i8] c"e7fd8dacba2f8fed7b5ce4c21fbcd50d7bde4d44b22f67dc94c9c874c45ff8e4\00"
+@.kont_name1 = private constant [5 x i8] c"main\00"
+@.kont_symbol2 = private constant [12 x i8] c"prism_point\00"
+@.kont_hash2 = private constant [65 x i8] c"4e81449fae46801f6206896271bc160995f62d4e5afda2194cef653bfbf8b589\00"
+@.kont_name2 = private constant [6 x i8] c"point\00"
+@prism_native_kont_ptrs = constant [2 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }, { ptr, ptr, ptr, ptr } { ptr @prism_point, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 2, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prism_point() #0 {
+entry:
+  %t3 = call ptr @prism_alloc(i64 2)
+  %t4 = getelementptr inbounds i8, ptr %t3, i64 8
+  store i64 0, ptr %t4, align 8
+  %t6 = getelementptr inbounds i8, ptr %t3, i64 24
+  store i64 3, ptr %t6, align 8
+  %t7 = getelementptr inbounds i8, ptr %t3, i64 32
+  store i64 5, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  ret i64 %t8
+}
+
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prism_main() #0 {
+entry:
+  %t0 = call i64 @prism_point()
+  %t1 = inttoptr i64 %t0 to ptr
+  br label %b2
+
+b2:                                               ; preds = %entry
+  %t2 = getelementptr inbounds i8, ptr %t1, i64 24
+  %t3 = load i64, ptr %t2, align 8
+  call void @prism_rc_inc(i64 %t3)
+  call void @prism_rc_dec(i64 %t0)
+  br label %b0
+
+b1:                                               ; No predecessors!
+  call void @prism_match_error()
+  unreachable
+
+b0:                                               ; preds = %b2
+  %t6 = phi i64 [ %t3, %b2 ]
+  %t7 = call i64 @prism_point()
+  %t8 = inttoptr i64 %t7 to ptr
+  br label %b5
+
+b5:                                               ; preds = %b0
+  %t9 = getelementptr inbounds i8, ptr %t8, i64 32
+  %t10 = load i64, ptr %t9, align 8
+  call void @prism_rc_inc(i64 %t10)
+  call void @prism_rc_dec(i64 %t7)
+  br label %b3
+
+b4:                                               ; No predecessors!
+  call void @prism_match_error()
+  unreachable
+
+b3:                                               ; preds = %b5
+  %t13 = phi i64 [ %t10, %b5 ]
+  %t14 = and i64 %t6, %t13
+  %t16 = and i64 %t14, 1
+  %t17 = icmp eq i64 %t16, 1
+  br i1 %t17, label %b6, label %b7
+
+b6:                                               ; preds = %b3
+  %t19 = ashr i64 %t6, 1
+  %t21 = ashr i64 %t13, 1
+  %t22 = add i64 %t19, %t21
+  %t24 = shl i64 %t22, 1
+  %t25 = ashr i64 %t24, 1
+  %t26 = icmp eq i64 %t25, %t22
+  br i1 %t26, label %b9, label %b7
+
+b7:                                               ; preds = %b6, %b3
+  %t28 = call i64 @prism_rt_int_add(i64 %t6, i64 %t13)
+  br label %b8
+
+b9:                                               ; preds = %b6
+  %t27 = or i64 %t24, 1
+  br label %b8
+
+b8:                                               ; preds = %b7, %b9
+  %t29 = phi i64 [ %t27, %b9 ], [ %t28, %b7 ]
+  call void @prism_rc_dec(i64 %t6)
+  call void @prism_rc_dec(i64 %t13)
+  ret i64 %t29
+}
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+declare i64 @prism_rt_int_add(i64, i64) #0
+
+attributes #0 = { nounwind }
+
+== run ==
+output: []
+result: 3

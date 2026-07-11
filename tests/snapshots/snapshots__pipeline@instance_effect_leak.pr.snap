@@ -1,0 +1,205 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/instance_effect_leak.pr
+---
+== tokens ==
+VOpen Effect UIdent("Leak") VOpen Ident("leak") LParen RParen Colon KwUnit VClose VSemi Class UIdent("C") LParen Ident("a") RParen VOpen Ident("method") Colon LParen Ident("a") RParen Arrow Ident("a") Bang LBrace Bar Ident("e") RBrace VClose VSemi Instance Ident("cInt") Colon UIdent("C") LParen KwInt RParen VOpen Fn Ident("method") LParen Ident("x") RParen Eq VOpen Ident("leak") LParen RParen VSemi Ident("x") VClose VClose VSemi Fn Ident("go") LParen Ident("y") Colon KwInt RParen Colon KwInt Eq Ident("method") LParen Ident("y") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("go") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Leak",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "leak",
+                    params: [],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 465..492,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "C",
+            param: "a",
+            supers: [],
+            methods: [
+                (
+                    "method",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Cons(
+                            [],
+                            Some(
+                                "e",
+                            ),
+                        ),
+                        Var(
+                            "a",
+                        ),
+                    ),
+                ),
+            ],
+            span: 494..532,
+        },
+    ],
+    instances: [
+        InstanceDecl {
+            name: "cInt",
+            class: "C",
+            head: Int,
+            context: [],
+            methods: [
+                Decl {
+                    name: "method",
+                    params: [
+                        Param {
+                            name: "x",
+                            ty: None,
+                            borrow: false,
+                            default: None,
+                        },
+                    ],
+                    ret: None,
+                    eff: None,
+                    constraints: [],
+                    body: Spanned {
+                        node: Let(
+                            "_",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "leak",
+                                        ),
+                                        span: 578..582,
+                                    },
+                                    [],
+                                ),
+                                span: 578..584,
+                            },
+                            Spanned {
+                                node: Var(
+                                    "x",
+                                ),
+                                span: 589..590,
+                            },
+                        ),
+                        span: 578..590,
+                    },
+                    wheres: [],
+                    span: 559..590,
+                },
+            ],
+            module: "",
+            span: 534..590,
+        },
+    ],
+    fns: [
+        Decl {
+            name: "go",
+            params: [
+                Param {
+                    name: "y",
+                    ty: Some(
+                        Int,
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "method",
+                        ),
+                        span: 615..621,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "y",
+                            ),
+                            span: 622..623,
+                        },
+                    ],
+                ),
+                span: 615..624,
+            },
+            wheres: [],
+            span: 592..624,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 638..645,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Var(
+                                        "go",
+                                    ),
+                                    span: 646..648,
+                                },
+                                [
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 1,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 649..650,
+                                    },
+                                ],
+                            ),
+                            span: 646..651,
+                        },
+                    ],
+                ),
+                span: 638..652,
+            },
+            wheres: [],
+            span: 626..652,
+        },
+    ],
+}
+
+== types ==
+[E3006] Type Error: instance method `cInt.method` performs Leak, which the class method signature does not permit; a universally quantified effect row obligates parametricity, not permission to choose a concrete effect
+    ╭─[ <source>:15:5 ]
+    │
+ 15 │ ╭─▶     leak()
+ 16 │ ├─▶     x
+    │ │           
+    │ ╰─────────── instance method `cInt.method` performs Leak, which the class method signature does not permit; a universally quantified effect row obligates parametricity, not permission to choose a concrete effect
+────╯

@@ -13,7 +13,7 @@ fn tally(m : HashMap(Int), ws : List(String)) : HashMap(Int) =
     Nil => m
     Cons(w, rest) => tally(hm_insert(m, w, hm_get_or(0, m, w) + 1), rest)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let words = ["the", "cat", "sat", "on", "the", "mat", "the", "cat"]
   let freq = tally(hm_new(), words)
   println(hm_get_or(0, freq, "the"))

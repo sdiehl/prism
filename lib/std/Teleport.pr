@@ -1,0 +1,13 @@
+-- | The checked mobility boundary. `teleport` runs a portable, single-use
+-- computation as a unit that is safe to move to a fresh runtime.
+--
+-- The closure handed to `teleport` must capture only content-addressed code and
+-- portable data (`@ portable`) and be invoked at most once (`@ once`); the
+-- compiler proves that contract at every call site. Running a teleported closure
+-- is observationally identical to calling it directly -- how a computation is
+-- placed is never observable, the same invariant that makes tier and backend
+-- choice invisible -- so `teleport` is the checked boundary, not a change in
+-- behavior. Compose it with `Replay.record` for a durable, replayable mobile run.
+
+-- | Run a portable, single-use closure as a mobile unit.
+pub fn teleport(f : (() -> a) @ {once, portable}) : a = f()

@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/show_unknown.pr
 ---
 == tokens ==
@@ -54,10 +54,12 @@ Program {
 }
 
 == types ==
-Scope Error: in `shw`: unbound variable 'show'
+[E2000] Scope Error: in `shw`: unbound variable 'show'
    ╭─[ <source>:1:13 ]
    │
  1 │ fn shw(x) = show(x)
    │             ──┬─  
    │               ╰─── in `shw`: unbound variable 'show'
+   │ 
+   │ Help: did you mean `shw`?
 ───╯

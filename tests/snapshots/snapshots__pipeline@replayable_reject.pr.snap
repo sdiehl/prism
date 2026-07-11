@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/replayable_reject.pr
 ---
 == tokens ==
-VOpen Effect UIdent("World") VOpen Ctl Ident("spew") LParen KwInt RParen Colon KwInt VClose VSemi Replayable Fn Ident("leak") LParen RParen Eq Ident("spew") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
+VOpen Effect UIdent("World") VOpen Ident("spew") LParen KwInt RParen Colon KwInt VClose VSemi Replayable Fn Ident("leak") LParen RParen Eq Ident("spew") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -23,7 +23,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..34,
+            span: 0..30,
         },
     ],
     errors: [],
@@ -43,7 +43,7 @@ Program {
                         node: Var(
                             "spew",
                         ),
-                        span: 59..63,
+                        span: 55..59,
                     },
                     [
                         Spanned {
@@ -53,15 +53,15 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 64..65,
+                            span: 60..61,
                         },
                     ],
                 ),
-                span: 59..66,
+                span: 55..62,
             },
             wheres: [],
             replayable: true,
-            span: 36..66,
+            span: 32..62,
         },
     ],
 }
@@ -71,10 +71,11 @@ leak : () -> Int ! {World}
 
 == core (cbpv) ==
 fn leak() =
-  return 1 to t@0; do spew(t@0)
+  return 1 to t@0
+  do spew(t@0)
 
 == replayable ==
-Type Error: function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Clock, Output, Exn, Fail
+[E1998] Type Error: function `leak` is marked `replayable` but performs non-replayable effect `World`; a replayable function may use only Console, FileSystem, Random, Env, Clock, Output, Exn, Fail
    ╭─[ <source>:4:1 ]
    │
  4 │ replayable fn leak() = spew(1)

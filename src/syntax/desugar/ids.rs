@@ -88,19 +88,20 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
                 expr(&mut a.body, next);
             }
         }
-        Expr::List(xs) | Expr::Tuple(xs) => {
+        Expr::List(xs) | Expr::Tuple(xs) | Expr::UnboxedTuple(xs) => {
             for x in xs {
                 expr(x, next);
             }
         }
         Expr::FieldAccess(a, _)
+        | Expr::UnboxedField(a, _)
         | Expr::Mask(_, a)
         | Expr::Inst(a, _)
         | Expr::Ann(a, _)
         | Expr::Neg(a) => {
             expr(a, next);
         }
-        Expr::RecordCreate(_, fs) => {
+        Expr::RecordCreate(_, fs) | Expr::UnboxedRecord(fs) => {
             for (_, v) in fs {
                 expr(v, next);
             }

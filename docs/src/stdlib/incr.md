@@ -26,10 +26,10 @@ A handle to an incremental node carrying values of type `a`. It is a phantom-typ
 
 ```prism,def,h-e1efca3784a90fdb860d2c3d9b239eeb67ca04015bd528e88eafd7cb4f269947
 effect IncrRaw
-  ctl incr_input(Bytes) : String
-  ctl incr_get(String) : Bytes
-  ctl incr_set(String, Bytes) : Unit
-  ctl incr_memo(() -> Bytes ! {IncrRaw | e}) : String
+  incr_input(Bytes) : String
+  incr_get(String) : Bytes
+  incr_set(String, Bytes) : Unit
+  incr_memo(() -> Bytes ! {IncrRaw | e}) : String
 ```
 
 ## Functions and Values
@@ -86,7 +86,7 @@ A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
 
 ### `run_incr_durable`
 
-```prism,sig,h-61d3fadbd498c4246379390d6b1f5836ba5128bf9433332e0560a4da593a8c50
+```prism,sig,h-921260143f74c0241d8e90d5dd8b6601130c0d176673aa7f83f0fc8b6e145db9
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -96,7 +96,7 @@ The action must be pure up to `Fail`, so its row is closed at `{IncrRaw, Fail}`:
 
 ### `run_incr_store`
 
-```prism,sig,h-2c8ca0bea816b1e5e1481047706acf109c6f9543f5ca9a8e3d8cc108698402d7
+```prism,sig,h-97533ae7745d670fafae9b2051e1a30f982f89f0ac8a3452c5b5f3870f8e52e7
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -106,7 +106,7 @@ Every durability guarantee of the file form carries over. The action is pure up 
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-b4bcb23ca83596d3646ba557ed1e832eee82841ba96afd25ae39262fe72c60af
+```prism,sig,h-cd7326ae43ab748d95330837f7c10c4cd9897ddca0222b16b14ceb1d63c38471
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -114,7 +114,7 @@ Discharge the `Incr` effect with a durable, trace-replay snapshot at `path`, tag
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-01d9cb53177f10f9b31e635c68186b4c5a48db9e0d37ab3bea946cbc68d2462b
+```prism,sig,h-8a3b81238d87e75aa0f3acc0e6d27628a058f7d72d8225193cb3ebdde98233e6
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 

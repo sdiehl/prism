@@ -1,0 +1,14 @@
+-- `FlatArray(a)` is the typed surface over the raw-word buffers: elements are
+-- stored unboxed (no per-element heap cells) in a `FloatBuf` or `IntBuf` chosen
+-- by the element's `FlatElem` instance, with the phantom parameter keeping the
+-- two payloads apart at the type level. Reads box the scalar they return; the
+-- storage itself stays flat. Both element lanes thread bit-for-bit identically
+-- on the interpreter and native backends.
+import Data.FlatArray (..)
+
+fn main() =
+  let xs = fa_set(fa_set(fa_new(4, 0.0), 0, 1.25), 3, 2.75)
+  println(fa_len(xs))
+  println(fa_get(xs, 0) + fa_get(xs, 3))
+  let ys = fa_set(fa_set(fa_new(3, 0i64), 0, 40i64), 1, 2i64)
+  println(fa_get(ys, 0) + fa_get(ys, 1))

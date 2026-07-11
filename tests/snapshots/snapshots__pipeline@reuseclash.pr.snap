@@ -271,22 +271,65 @@ main : () -> Unit ! {IO}
 
 == core (cbpv) ==
 fn bump(p, _reuse_p) =
-  return p to t@0; case t@0 { Pair(a, b) => return a to t@1; return _reuse_p to t@2; t@1 + t@2 to t@3; return b to t@4; return Pair(t@3, t@4) }
+  return p to t@0
+  case t@0 of
+    Pair(a, b) =>
+      return a to t@1
+      return _reuse_p to t@2
+      t@1 + t@2 to t@3
+      return b to t@4
+      return Pair(t@3, t@4)
 fn main() =
-  return 1 to t@5; return 2 to t@6; return Pair(t@5, t@6) to t@7; return 10 to t@8; bump(t@7, t@8) to t@9; case t@9 { Pair(x, y) => return x to t@10; return y to t@11; t@10 + t@11 to t@12; print t@12 to t@13; print_nl }
+  return 1 to t@5
+  return 2 to t@6
+  return Pair(t@5, t@6) to t@7
+  return 10 to t@8
+  bump(t@7, t@8) to t@9
+  case t@9 of
+    Pair(x, y) =>
+      return x to t@10
+      return y to t@11
+      t@10 + t@11 to t@12
+      print t@12 to t@13
+      print_nl
 
 == fbip (rc) ==
 fn bump(p, _reuse_p) =
-  return p to t@0; case t@0 { Pair(a, b) => dup a to _; dup b to _; reuse_token t@0 to reuse#t@0; return a to t@1; return _reuse_p to t@2; t@1 + t@2 to t@3; return b to t@4; reuse reuse#t@0 as Pair(t@3, t@4) }
+  return p to t@0
+  case t@0 of
+    Pair(a, b) =>
+      dup a
+      dup b
+      reuse_token t@0 to reuse#t@0
+      return a to t@1
+      return _reuse_p to t@2
+      t@1 + t@2 to t@3
+      return b to t@4
+      reuse reuse#t@0 as Pair(t@3, t@4)
 fn main() =
-  return 1 to t@5; return 2 to t@6; return Pair(t@5, t@6) to t@7; return 10 to t@8; bump(t@7, t@8) to t@9; case t@9 { Pair(x, y) => dup x to _; dup y to _; drop t@9 to _; return x to t@10; return y to t@11; t@10 + t@11 to t@12; print t@12 to t@13; drop t@13 to _; print_nl }
+  return 1 to t@5
+  return 2 to t@6
+  return Pair(t@5, t@6) to t@7
+  return 10 to t@8
+  bump(t@7, t@8) to t@9
+  case t@9 of
+    Pair(x, y) =>
+      dup x
+      dup y
+      drop t@9
+      return x to t@10
+      return y to t@11
+      t@10 + t@11 to t@12
+      print t@12 to t@13
+      drop t@13
+      print_nl
 
 == llvm ==
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [831 x i8] c"scheme  prism-core-hash-v1\0Abundle  6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_bump  707a1034dc940f117cdaafa514982b265231180d6b4eb6e28076f8126115d9c5  bump\0Afn      prism_main  3139f618878dbc57852b595b73664171e7b27e5b77e5c3cf3c01757ff08cd8ae  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [949 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_bump 707a1034dc940f117cdaafa514982b265231180d6b4eb6e28076f8126115d9c5 bump arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 3139f618878dbc57852b595b73664171e7b27e5b77e5c3cf3c01757ff08cd8ae main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [809 x i8] c"scheme  prism-core-hash-v1\0Abundle  6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_bump  707a1034dc940f117cdaafa514982b265231180d6b4eb6e28076f8126115d9c5  bump\0Afn      prism_main  3139f618878dbc57852b595b73664171e7b27e5b77e5c3cf3c01757ff08cd8ae  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [927 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:6fc151deed027aa401f8a67669b9b249e7c0cf5930745950ff1372e380261eeb\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_bump 707a1034dc940f117cdaafa514982b265231180d6b4eb6e28076f8126115d9c5 bump arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prism_main 3139f618878dbc57852b595b73664171e7b27e5b77e5c3cf3c01757ff08cd8ae main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
 @.kont_hash1 = private constant [65 x i8] c"3139f618878dbc57852b595b73664171e7b27e5b77e5c3cf3c01757ff08cd8ae\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"

@@ -95,22 +95,26 @@ impl Manifest {
     /// Fails on malformed TOML or a missing/ill-typed `name` or `[bin] entry`.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let table: toml::Table =
-            toml::from_str(text).map_err(|e| Error::Resolve(format!("prism.toml: {e}")))?;
+            toml::from_str(text).map_err(|e| Error::ResolveProject(format!("prism.toml: {e}")))?;
         let pkg = table
             .get("package")
             .and_then(toml::Value::as_table)
-            .ok_or_else(|| Error::Resolve("prism.toml: missing [package] table".into()))?;
+            .ok_or_else(|| Error::ResolveProject("prism.toml: missing [package] table".into()))?;
         let name = pkg
             .get("name")
             .and_then(toml::Value::as_str)
-            .ok_or_else(|| Error::Resolve("prism.toml: [package] name must be a string".into()))?
+            .ok_or_else(|| {
+                Error::ResolveProject("prism.toml: [package] name must be a string".into())
+            })?
             .to_string();
         let entry = table
             .get("bin")
             .and_then(toml::Value::as_table)
             .and_then(|b| b.get("entry"))
             .and_then(toml::Value::as_str)
-            .ok_or_else(|| Error::Resolve("prism.toml: [bin] entry must be a string".into()))?;
+            .ok_or_else(|| {
+                Error::ResolveProject("prism.toml: [bin] entry must be a string".into())
+            })?;
         let src_dir = pkg
             .get("src")
             .and_then(toml::Value::as_str)
@@ -137,9 +141,9 @@ impl Manifest {
         let Some(deps) = table.get("dependencies") else {
             return Ok(Vec::new());
         };
-        let deps = deps
-            .as_table()
-            .ok_or_else(|| Error::Resolve("prism.toml: [dependencies] must be a table".into()))?;
+        let deps = deps.as_table().ok_or_else(|| {
+            Error::ResolveProject("prism.toml: [dependencies] must be a table".into())
+        })?;
         deps.iter()
             .map(|(name, val)| {
                 Ok(Dependency {
@@ -166,7 +170,7 @@ fn parse_dep_source(name: &str, val: &toml::Value) -> Result<DepSource, Error> {
                     .get("version")
                     .and_then(toml::Value::as_str)
                     .ok_or_else(|| {
-                        Error::Resolve(format!(
+                        Error::ResolveProject(format!(
                             "prism.toml: git dependency `{name}` needs a `version` tag"
                         ))
                     })?;
@@ -177,13 +181,13 @@ fn parse_dep_source(name: &str, val: &toml::Value) -> Result<DepSource, Error> {
             } else if let Some(path) = t.get("path").and_then(toml::Value::as_str) {
                 Ok(DepSource::Path(PathBuf::from(path)))
             } else {
-                Err(Error::Resolve(format!(
+                Err(Error::ResolveProject(format!(
                     "prism.toml: dependency `{name}` must set `path`, `git` (with `version`), \
                      or be a `{HASH_SCHEME}:<hex>` pin string"
                 )))
             }
         }
-        _ => Err(Error::Resolve(format!(
+        _ => Err(Error::ResolveProject(format!(
             "prism.toml: dependency `{name}` must be a path/pin string or an inline table"
         ))),
     }
@@ -252,7 +256,7 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
         .canonicalize()
         .unwrap_or_else(|_| manifest_path.clone());
     if visiting.contains(&key) {
-        return Err(Error::Resolve(format!(
+        return Err(Error::ResolveProject(format!(
             "dependency cycle through `{}`",
             manifest_path.display()
         )));
@@ -276,7 +280,7 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
             continue;
         };
         let dep_proj = load_project_rec(&root.join(rel), visiting)
-            .map_err(|e| Error::Resolve(format!("dependency `{}`: {e}", dep.name)))?;
+            .map_err(|e| Error::ResolveProject(format!("dependency `{}`: {e}", dep.name)))?;
         dep_src_dirs.push(dep_proj.src_dir);
         for d in dep_proj.dep_src_dirs {
             if !dep_src_dirs.contains(&d) {

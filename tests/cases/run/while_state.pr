@@ -1,16 +1,16 @@
 effect Counter
-  ctl get(Unit) : Int
-  ctl bump(Unit) : Unit
+  get() : Int
+  bump() : Unit
 
-fn count_up() : !{Counter, IO} Unit =
-  while get(()) < 4 do
-    println(get(()) * 10)
-    bump(())
+fn count_up() : Unit ! {Counter, IO} =
+  while get() < 4 do
+    println(get() * 10)
+    bump()
 
 fn main() =
   let f =
     handle count_up() with
-      get(u, k) => \(s) -> k(s)(s)
-      bump(u, k) => \(s) -> k(())(s + 1)
+      get() resume k => \(s) -> k(s)(s)
+      bump() resume k => \(s) -> k(())(s + 1)
       return r => \(s) -> s
   println(f(0))

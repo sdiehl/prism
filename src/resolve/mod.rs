@@ -22,8 +22,11 @@ use crate::syntax::ast::{
     Sugar, SugarArm, Surface, Ty, S,
 };
 
+mod identity;
 mod lints;
 mod load;
+use identity::{CanonicalName, ModuleName};
+
 pub use lints::lint_bindings;
 pub use load::{
     load, serving_root, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity,
@@ -94,7 +97,7 @@ pub fn imported_paths(root: &Program, roots: &[Root]) -> Result<Vec<String>, Err
 
 /// Bare names a selective import binds in unqualified scope, each mapped to the
 /// canonical symbol it resolves to.
-type Unqualified = BTreeMap<String, String>;
+type Unqualified = BTreeMap<String, CanonicalName>;
 
 /// A qualifier (alias, else last path component) mapped to the loaded modules it
 /// names; an entry has more than one index only when imports share a qualifier.
@@ -103,7 +106,7 @@ type Quals = BTreeMap<String, Vec<usize>>;
 /// A module's exported names mapped to the canonical symbol each resolves to.
 /// For an own definition that is `Module.name`; for a `pub import` re-export it
 /// is the original definition's canonical symbol.
-type Exports = BTreeMap<String, String>;
+type Exports = BTreeMap<String, CanonicalName>;
 
 /// Every name a program binds at the top level: the universe a `pub` export or
 /// an importer may refer to (type and constructor names, effects, errors,
@@ -149,7 +152,7 @@ fn exports_of(p: &Program) -> BTreeSet<String> {
 pub fn resolve(program: Program) -> Result<Program, TypeError> {
     let bound = binders(&program);
     if let Some(name) = program.exports.iter().find(|n| !bound.contains(*n)) {
-        return Err(TypeError::Scope {
+        return Err(TypeError::ScopeFailure {
             span: Span::empty(0),
             msg: format!("cannot export `{name}`: no such definition"),
         });
@@ -160,7 +163,7 @@ pub fn resolve(program: Program) -> Result<Program, TypeError> {
 /// A loaded module's identity and the canonical symbol each exported name
 /// resolves to (its own definitions plus any `pub import` re-exports).
 struct ModInfo {
-    path: String,
+    path: ModuleName,
     exports: Exports,
 }
 
@@ -231,7 +234,10 @@ pub fn import_bindings(
     for own in binders(program) {
         unqual.remove(&own);
     }
-    Ok(unqual)
+    Ok(unqual
+        .into_iter()
+        .map(|(name, canonical)| (name, canonical.as_str().to_string()))
+        .collect())
 }
 
 /// Rewrite an expression's bare references to canonical symbols.
@@ -250,9 +256,13 @@ pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> R
         return Ok(());
     }
     let own = BTreeMap::new();
+    let imports: Unqualified = imports
+        .iter()
+        .map(|(name, canonical)| (name.clone(), CanonicalName::new(canonical.clone())))
+        .collect();
     let quals = BTreeMap::new();
     let mods: &[ModInfo] = &[];
-    let mut rw = Rw::new("", &own, imports, &quals, mods);
+    let mut rw = Rw::new("", &own, &imports, &quals, mods);
     rw.expr(expr);
     rw.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
 }
@@ -262,7 +272,7 @@ pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> R
 /// private name becomes `Data.Map@helper` (the `@` is unforgeable in source and
 /// codegen rewrites it to a dot). The root module (`path == None`) is the
 /// empty-path module: its names stay bare.
-fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, String> {
+fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, CanonicalName> {
     let exports = exports_of(p);
     binders(p)
         .into_iter()
@@ -272,7 +282,7 @@ fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, String> {
                 Some(path) if exports.contains(&n) => format!("{path}.{n}"),
                 Some(path) => crate::names::private(path, &n),
             };
-            (n, canon)
+            (n, CanonicalName::new(canon))
         })
         .collect()
 }
@@ -291,12 +301,12 @@ fn build_scope(
     let mut quals: Quals = BTreeMap::new();
     for imp in imports {
         let path = imp.path.join(".");
-        let idx = *by_path
-            .get(path.as_str())
-            .ok_or_else(|| Error::Resolve(format!("cannot resolve import of module `{path}`")))?;
+        let idx = *by_path.get(path.as_str()).ok_or_else(|| {
+            Error::ResolveModule(format!("cannot resolve import of module `{path}`"))
+        })?;
         // A glob import (`import M (..)`) opens every exported name into
         // unqualified scope; a selective import opens just the listed names.
-        let opened: Vec<(String, String)> = if imp.glob {
+        let opened: Vec<(String, CanonicalName)> = if imp.glob {
             mods[idx]
                 .exports
                 .iter()
@@ -306,7 +316,7 @@ fn build_scope(
             let mut v = Vec::with_capacity(names.len());
             for n in names {
                 let Some(canon) = mods[idx].exports.get(n) else {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolveModule(format!(
                         "module `{path}` does not export `{n}`"
                     )));
                 };
@@ -319,7 +329,7 @@ fn build_scope(
         for (n, canon) in opened {
             if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
                 if prev != canon {
-                    return Err(Error::Resolve(format!(
+                    return Err(Error::ResolveModule(format!(
                         "`{n}` is ambiguous: brought unqualified by `{prev}` and `{canon}`"
                     )));
                 }
@@ -362,16 +372,19 @@ fn module_infos(modules: &[Module]) -> Result<(Vec<ModInfo>, BTreeMap<String, us
                 .into_iter()
                 .map(|n| {
                     let canon = format!("{path}.{n}");
-                    (n, canon)
+                    (n, CanonicalName::new(canon))
                 })
                 .collect();
-            ModInfo { path, exports }
+            ModInfo {
+                path: ModuleName::new(path),
+                exports,
+            }
         })
         .collect();
     let by_path: BTreeMap<String, usize> = mods
         .iter()
         .enumerate()
-        .map(|(i, m)| (m.path.clone(), i))
+        .map(|(i, m)| (m.path.as_str().to_string(), i))
         .collect();
     add_reexports(&mut mods, modules, &by_path)?;
     Ok((mods, by_path))
@@ -395,7 +408,7 @@ fn add_reexports(
             for imp in m.prog.imports.iter().filter(|i| i.reexport) {
                 let path = imp.path.join(".");
                 let si = *by_path.get(path.as_str()).ok_or_else(|| {
-                    Error::Resolve(format!("cannot resolve import of module `{path}`"))
+                    Error::ResolveModule(format!("cannot resolve import of module `{path}`"))
                 })?;
                 let src = &snapshot[si];
                 let names: Vec<String> = imp
@@ -452,8 +465,8 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
 /// names, and prelude names flow through untouched.
 struct Rw<'a> {
     module: &'a str,
-    own: &'a BTreeMap<String, String>,
-    unqualified: &'a BTreeMap<String, String>,
+    own: &'a BTreeMap<String, CanonicalName>,
+    unqualified: &'a BTreeMap<String, CanonicalName>,
     quals: &'a BTreeMap<String, Vec<usize>>,
     mods: &'a [ModInfo],
     locals: Vec<String>,
@@ -463,8 +476,8 @@ struct Rw<'a> {
 impl<'a> Rw<'a> {
     const fn new(
         module: &'a str,
-        own: &'a BTreeMap<String, String>,
-        unqualified: &'a BTreeMap<String, String>,
+        own: &'a BTreeMap<String, CanonicalName>,
+        unqualified: &'a BTreeMap<String, CanonicalName>,
         quals: &'a BTreeMap<String, Vec<usize>>,
         mods: &'a [ModInfo],
     ) -> Self {
@@ -720,12 +733,17 @@ impl<'a> Rw<'a> {
                     self.locals.truncate(base);
                 }
             }
-            Expr::List(xs) | Expr::Tuple(xs) => {
+            Expr::List(xs) | Expr::Tuple(xs) | Expr::UnboxedTuple(xs) => {
                 for x in xs {
                     self.expr(x);
                 }
             }
-            Expr::FieldAccess(x, _) | Expr::Neg(x) => self.expr(x),
+            Expr::FieldAccess(x, _) | Expr::UnboxedField(x, _) | Expr::Neg(x) => self.expr(x),
+            Expr::UnboxedRecord(fields) => {
+                for (_, v) in fields {
+                    self.expr(v);
+                }
+            }
             Expr::RecordCreate(name, fields) => {
                 *name = self.value(name, span);
                 for (_, v) in fields {
@@ -906,7 +924,7 @@ impl<'a> Rw<'a> {
                 self.expr(body);
             }
             HandlerArm::Sugar(
-                SugarArm::Fun(_, params, body) | SugarArm::Final(_, params, body),
+                SugarArm::Once(_, params, body) | SugarArm::Never(_, params, body),
             ) => {
                 self.locals.extend(params.iter().cloned());
                 self.expr(body);
@@ -944,7 +962,7 @@ impl<'a> Rw<'a> {
         self.own
             .get(name)
             .cloned()
-            .unwrap_or_else(|| name.to_string())
+            .map_or_else(|| name.to_string(), |name| name.as_str().to_string())
     }
 
     /// Resolve a referenced name: locals untouched; `Q.n` resolved through the
@@ -962,7 +980,7 @@ impl<'a> Rw<'a> {
             return self.qualified(q, n, name, span);
         }
         if let Some(canon) = self.own.get(name).or_else(|| self.unqualified.get(name)) {
-            return canon.clone();
+            return canon.as_str().to_string();
         }
         name.to_string()
     }
@@ -985,7 +1003,7 @@ impl<'a> Rw<'a> {
                 self.record(span, format!("module `{q}` does not export `{n}`"));
                 full.to_string()
             }
-            [m] => m.exports[n].clone(),
+            [m] => m.exports[n].as_str().to_string(),
             many => {
                 let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
                 self.record(
@@ -999,7 +1017,7 @@ impl<'a> Rw<'a> {
 
     fn record(&mut self, span: Span, msg: String) {
         if self.err.is_none() {
-            self.err = Some(TypeError::Scope { span, msg });
+            self.err = Some(TypeError::ScopeFailure { span, msg });
         }
     }
 }

@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fip_nontail.pr
 ---
 == tokens ==
@@ -98,10 +98,12 @@ relay : forall a b. (a) -> b
 fn wrap(x) =
   return x
 fn relay(x) =
-  return x to t@0; relay(t@0) to t@1; wrap(t@1)
+  return x to t@0
+  relay(t@0) to t@1
+  wrap(t@1)
 
 == fip ==
-Type Error: usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+[E1998] Type Error: usage check `fip` failed for function `relay`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
    ╭─[ <source>:9:1 ]
    │
  9 │ fip fn relay(x) = wrap(relay(x))

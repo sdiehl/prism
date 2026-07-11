@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/classes_effectful.pr
 ---
 == tokens ==
@@ -129,11 +129,11 @@ Program {
 }
 
 == types ==
-Type Error: instance method `loudInt.loud` must be pure; it performs IO
+[E3006] Type Error: instance method `loudInt.loud` performs IO, which the class method signature does not permit; a universally quantified effect row obligates parametricity, not permission to choose a concrete effect
    ╭─[ <source>:6:5 ]
    │
  6 │ ╭─▶     println(x)
  7 │ ├─▶     x
    │ │           
-   │ ╰─────────── instance method `loudInt.loud` must be pure; it performs IO
+   │ ╰─────────── instance method `loudInt.loud` performs IO, which the class method signature does not permit; a universally quantified effect row obligates parametricity, not permission to choose a concrete effect
 ───╯

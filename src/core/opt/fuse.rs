@@ -614,6 +614,7 @@ fn comp_pure(c: &Comp, cx: &mut Cx<'_>) -> bool {
                 | Comp::Case(..)
                 | Comp::FloatBuiltin(..)
                 | Comp::Neg(..)
+                | Comp::UnboxedProject(..)
                 | Comp::StrBuiltin(..)
                 | Comp::Dup(_)
                 | Comp::Drop(_)

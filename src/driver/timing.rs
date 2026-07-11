@@ -27,6 +27,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+#[cfg(feature = "native")]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,6 +48,8 @@ const SRC_KIND: &str = "src";
 ///
 /// Lexing and parsing are one driver call (`parse`), so they are one honest
 /// `parse` row rather than a faked split.
+// The row schema names every compile phase; a wasm build constructs no LLVM/cc
+// phase, so those variants are legitimately unbuilt there, not dead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     Parse,
@@ -298,6 +301,7 @@ pub(crate) fn timed<T>(
 /// The `emit.llvm` row's tail: the size and content digest of the emitted LLVM
 /// bitcode. Best-effort, since it runs only under the flag: a bitcode file that
 /// cannot be read yields a bare tail rather than an error.
+#[cfg(feature = "native")]
 pub(crate) fn llvm_artifact(bitcode: &Path) -> RowExtras {
     std::fs::read(bitcode).map_or_else(
         |_| RowExtras::default(),

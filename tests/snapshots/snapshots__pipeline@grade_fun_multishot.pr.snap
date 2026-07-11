@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/grade_fun_multishot.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Poll") VOpen Fun Ident("poll") LParen KwUnit RParen Colon KwInt VClose VSemi Fn Ident("use_it") LParen RParen Colon Bang LBrace UIdent("Poll") RBrace KwInt Eq Ident("poll") LParen LParen RParen RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("use_it") LParen RParen With VOpen Ident("poll") LParen Ident("u") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 1, suffix: None }) RParen Plus Ident("k") LParen Int(IntLit { value: 2, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
+VOpen Effect UIdent("Poll") VOpen Ident("once") Ident("poll") LParen RParen Colon KwInt VClose VSemi Fn Ident("use_it") LParen RParen Colon KwInt Bang LBrace UIdent("Poll") RBrace Eq Ident("poll") LParen RParen VSemi Fn Ident("main") LParen RParen Eq VOpen Handle Ident("use_it") LParen RParen With VOpen Ident("poll") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 1, suffix: None }) RParen Plus Ident("k") LParen Int(IntLit { value: 2, suffix: None }) RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
 
 == ast ==
 Program {
@@ -16,14 +16,12 @@ Program {
             ops: [
                 EffOp {
                     name: "poll",
-                    params: [
-                        Unit,
-                    ],
+                    params: [],
                     ret: Int,
-                    grade: One,
+                    grade: Once,
                 },
             ],
-            span: 146..180,
+            span: 144..175,
         },
     ],
     errors: [],
@@ -52,19 +50,14 @@ Program {
                         node: Var(
                             "poll",
                         ),
-                        span: 210..214,
+                        span: 206..210,
                     },
-                    [
-                        Spanned {
-                            node: Unit,
-                            span: 215..217,
-                        },
-                    ],
+                    [],
                 ),
-                span: 210..218,
+                span: 206..212,
             },
             wheres: [],
-            span: 182..218,
+            span: 177..212,
         },
         Decl {
             name: "main",
@@ -80,18 +73,16 @@ Program {
                                 node: Var(
                                     "use_it",
                                 ),
-                                span: 241..247,
+                                span: 235..241,
                             },
                             [],
                         ),
-                        span: 241..249,
+                        span: 235..243,
                     },
                     [
                         Op(
                             "poll",
-                            [
-                                "u",
-                            ],
+                            [],
                             "k",
                             Spanned {
                                 node: Bin(
@@ -102,7 +93,7 @@ Program {
                                                 node: Var(
                                                     "k",
                                                 ),
-                                                span: 273..274,
+                                                span: 272..273,
                                             },
                                             [
                                                 Spanned {
@@ -112,11 +103,11 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 275..276,
+                                                    span: 274..275,
                                                 },
                                             ],
                                         ),
-                                        span: 273..277,
+                                        span: 272..276,
                                     },
                                     Spanned {
                                         node: Call(
@@ -124,7 +115,7 @@ Program {
                                                 node: Var(
                                                     "k",
                                                 ),
-                                                span: 280..281,
+                                                span: 279..280,
                                             },
                                             [
                                                 Spanned {
@@ -134,14 +125,14 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 282..283,
+                                                    span: 281..282,
                                                 },
                                             ],
                                         ),
-                                        span: 280..284,
+                                        span: 279..283,
                                     },
                                 ),
-                                span: 273..284,
+                                span: 272..283,
                             },
                         ),
                         Return(
@@ -150,24 +141,24 @@ Program {
                                 node: Var(
                                     "r",
                                 ),
-                                span: 301..302,
+                                span: 300..301,
                             },
                         ),
                     ],
                 ),
-                span: 234..302,
+                span: 228..301,
             },
             wheres: [],
-            span: 220..302,
+            span: 214..301,
         },
     ],
 }
 
 == types ==
-Type Error: handler clause for `poll` exceeds its declared grade `fun` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
-    ╭─[ <source>:10:19 ]
+[E6028] Type Error: handler clause for `poll` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+    ╭─[ <source>:10:24 ]
     │
- 10 │     poll(u, k) => k(1) + k(2)
-    │                   ─────┬─────  
-    │                        ╰─────── handler clause for `poll` exceeds its declared grade `fun` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+ 10 │     poll() resume k => k(1) + k(2)
+    │                        ─────┬─────  
+    │                             ╰─────── handler clause for `poll` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
 ────╯

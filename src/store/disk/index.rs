@@ -36,7 +36,12 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation};
 
-use super::{atomic_write, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
+use super::{atomic_write, StoreHash, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
+
+fn checked_hash(hash: &str) -> io::Result<String> {
+    StoreHash::new(hash)?;
+    Ok(hash.to_string())
+}
 
 const NAMES_FILE: &str = "names";
 const DEPS_FILE: &str = "deps";
@@ -131,7 +136,7 @@ pub(super) fn load_names(root: &Path) -> io::Result<BTreeMap<String, String>> {
     let mut map = BTreeMap::new();
     for line in read_lines(&index_dir(root).join(NAMES_FILE), NAMES_HEADER)? {
         if let Some((name, hash)) = line.split_once(FIELD_SEP) {
-            map.insert(name.to_string(), hash.to_string());
+            map.insert(name.to_string(), checked_hash(hash)?);
         }
     }
     Ok(map)
@@ -159,9 +164,9 @@ pub(super) fn load_deps(root: &Path) -> io::Result<BTreeMap<String, BTreeSet<Str
     let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for line in read_lines(&index_dir(root).join(DEPS_FILE), DEPS_HEADER)? {
         if let Some((hash, deps)) = line.split_once(FIELD_SEP) {
-            let set = map.entry(hash.to_string()).or_default();
+            let set = map.entry(checked_hash(hash)?).or_default();
             for d in deps.split(LIST_SEP).filter(|s| !s.is_empty()) {
-                set.insert(d.to_string());
+                set.insert(checked_hash(d)?);
             }
         }
     }
@@ -202,7 +207,7 @@ fn load_canonical(root: &Path) -> io::Result<BTreeMap<(String, String), String>>
         let mut fields = line.splitn(3, FIELD_SEP);
         if let (Some(class), Some(head), Some(hash)) = (fields.next(), fields.next(), fields.next())
         {
-            map.insert((class.to_string(), head.to_string()), hash.to_string());
+            map.insert((class.to_string(), head.to_string()), checked_hash(hash)?);
         }
     }
     Ok(map)
@@ -268,7 +273,7 @@ fn load_refs(root: &Path) -> io::Result<BTreeMap<String, String>> {
     let mut map = BTreeMap::new();
     for line in read_lines(&index_dir(root).join(REFS_FILE), REFS_HEADER)? {
         if let Some((name, hash)) = line.split_once(FIELD_SEP) {
-            map.insert(name.to_string(), hash.to_string());
+            map.insert(name.to_string(), checked_hash(hash)?);
         }
     }
     Ok(map)
@@ -286,7 +291,7 @@ fn write_refs(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
 pub(super) fn set_ref(root: &Path, name: &str, hash: &str) -> io::Result<()> {
     let _lock = Lock::acquire(root)?;
     let mut map = load_refs(root)?;
-    map.insert(name.to_string(), hash.to_string());
+    map.insert(name.to_string(), checked_hash(hash)?);
     write_refs(root, &map)
 }
 
@@ -338,6 +343,17 @@ mod tests {
         drop(Lock::acquire(root).expect("re-acquires after release"));
     }
 
+    // A distinct, well-formed dummy hash per key: bound values must pass the
+    // index's lowercase-hex validation, so the fixtures are hex spellings of the
+    // key names rather than arbitrary strings.
+    fn hex_fixture(k: &str) -> String {
+        match k {
+            "alpha" => "a1fa".to_string(),
+            "beta" => "be7a".to_string(),
+            other => panic!("no hex fixture for {other}"),
+        }
+    }
+
     // Two writers contending over an index whose lock a dead writer left behind
     // must serialize, not both proceed and clobber: both bindings have to survive.
     // Pre-fix, a racy lock-steal let both "hold" and the later whole-file rewrite
@@ -355,7 +371,7 @@ mod tests {
                 let root = Arc::clone(&root);
                 thread::spawn(move || {
                     let mut m = BTreeMap::new();
-                    m.insert(k.to_string(), format!("hash-{k}"));
+                    m.insert(k.to_string(), hex_fixture(k));
                     bind_names(&root, &m).unwrap();
                 })
             })
@@ -365,8 +381,8 @@ mod tests {
         }
 
         let names = load_names(&root).unwrap();
-        assert_eq!(names.get("alpha").map(String::as_str), Some("hash-alpha"));
-        assert_eq!(names.get("beta").map(String::as_str), Some("hash-beta"));
+        assert_eq!(names.get("alpha").map(String::as_str), Some("a1fa"));
+        assert_eq!(names.get("beta").map(String::as_str), Some("be7a"));
     }
 
     #[test]
@@ -380,18 +396,18 @@ mod tests {
         };
 
         assert_eq!(
-            merge_canonicals(root, &[(key.clone(), "hash-a".to_string())]).unwrap(),
+            merge_canonicals(root, &[(key.clone(), "aaaa".to_string())]).unwrap(),
             Ok(()),
         );
         assert_eq!(
-            merge_canonicals(root, &[(key.clone(), "hash-b".to_string())]).unwrap(),
+            merge_canonicals(root, &[(key.clone(), "bbbb".to_string())]).unwrap(),
             Err(CanonicalConflict {
                 incoming_index: 0,
                 key: key.clone(),
-                existing: "hash-a".to_string(),
-                incoming: "hash-b".to_string(),
+                existing: "aaaa".to_string(),
+                incoming: "bbbb".to_string(),
             }),
         );
-        assert_eq!(canonical(root, &key).unwrap().as_deref(), Some("hash-a"));
+        assert_eq!(canonical(root, &key).unwrap().as_deref(), Some("aaaa"));
     }
 }

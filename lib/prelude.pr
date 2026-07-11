@@ -50,7 +50,7 @@ type Canonical = MkCanonical
 fn id(x) = x
 
 -- | The constant function: returns `x`, ignoring `y`.
-fn const(x, y) = x
+fn const(x, _y) = x
 
 -- | Function composition: `compose(f, g, x)` is `f(g(x))`.
 fn compose(f, g, x) = f(g(x))
@@ -217,19 +217,19 @@ fn guard(b) =
 -- | Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 fn optional(thunk) =
   handle thunk() with
-    final ctl fail() => None
+    never fail() => None
     return r => Some(r)
 
 -- | True when `thunk` runs to completion without calling `fail()`.
-fn succeeds(thunk) =
+fn succeeds(thunk : () -> a ! {Fail | e}) =
   handle thunk() with
-    final ctl fail() => false
+    never fail() => false
     return r => true
 
 -- | Run `thunk`, returning its result or the default `d` if it calls `fail()`.
 fn default(thunk, d) =
   handle thunk() with
-    final ctl fail() => d
+    never fail() => d
     return r => r
 
 -- | The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so
@@ -324,43 +324,43 @@ fn repeat(n, body) =
 
 -- | The stream effect: `emit(x)` yields one element to the enclosing consumer.
 effect Emit(a)
-  ctl emit(a) : Unit
+  emit(a) : Unit
 
 -- | Console output as an interceptable capability. `print`/`println` perform
 -- these ops; the default `run_io` handler discharges them to the real terminal,
 -- while replay/durable drop them during a replayed prefix.
 effect Output
-  ctl out_print(String) : Unit
-  ctl out_println(String) : Unit
+  out_print(String) : Unit
+  out_println(String) : Unit
 
 -- | Console input capability. The surface wrappers `read_int`/`read_line`
 -- perform these ops; `run_io` discharges each by resuming with the matching
 -- `prim_*` builtin, and the tail-resumptive handlers fuse to direct calls.
 effect Console
-  ctl con_read_int(Unit) : Int
-  ctl con_read_line(Unit) : String
+  con_read_int() : Int
+  con_read_line() : String
 
 -- | File-system read capability (`read_file`, `read_bytes`, `file_exists`).
 effect FileSystem
-  ctl fs_read_file(String) : String
-  ctl fs_read_bytes(String) : Buf
-  ctl fs_file_exists(String) : Bool
+  fs_read_file(String) : String
+  fs_read_bytes(String) : Buf
+  fs_file_exists(String) : Bool
 
 -- | Random-number capability (`rand`).
 effect Random
-  ctl rng_rand(Unit) : Int
+  rng_rand() : Int
 
 -- | Process-environment capability (`getenv`, `args_count`, `arg`).
 effect Env
-  ctl env_get(String) : String
-  ctl env_argc(Unit) : Int
-  ctl env_arg(Int) : String
+  env_get(String) : String
+  env_argc() : Int
+  env_arg(Int) : String
 
 -- | Read an integer from standard input.
-fn read_int() = con_read_int(())
+fn read_int() = con_read_int()
 
 -- | Read a line from standard input.
-fn read_line() = con_read_line(())
+fn read_line() = con_read_line()
 
 -- | Read the contents of the file at path `p`.
 fn read_file(p) = fs_read_file(p)
@@ -373,13 +373,13 @@ fn read_file_bytes(p) = fs_read_bytes(p)
 fn file_exists(p) = fs_file_exists(p)
 
 -- | A random integer.
-fn rand() = rng_rand(())
+fn rand() = rng_rand()
 
 -- | The value of environment variable `s` (empty when unset).
 fn getenv(s) = env_get(s)
 
 -- | The number of command-line arguments.
-fn args_count() = env_argc(())
+fn args_count() = env_argc()
 
 -- | The `i`th command-line argument.
 fn arg(i) = env_arg(i)
@@ -390,27 +390,27 @@ fn arg(i) = env_arg(i)
 -- allocation), leaving only `{IO | e}`.
 fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e}) =
   handle (handle handle handle handle action(()) with {
-      con_read_int(u, k) => k(prim_read_int()),
-      con_read_line(u, k) => k(prim_read_line()),
+      con_read_int() resume k => k(prim_read_int()),
+      con_read_line() resume k => k(prim_read_line()),
       return r => r
     } with {
-      fs_read_file(p, k) => k(prim_read_file(p)),
-      fs_read_bytes(p, k) => k(prim_read_bytes(p)),
-      fs_file_exists(p, k) => k(prim_file_exists(p)),
+      fs_read_file(p) resume k => k(prim_read_file(p)),
+      fs_read_bytes(p) resume k => k(prim_read_bytes(p)),
+      fs_file_exists(p) resume k => k(prim_file_exists(p)),
       return r => r
     } with {
-      rng_rand(u, k) => k(prim_rand()),
+      rng_rand() resume k => k(prim_rand()),
       return r => r
     } with {
-      env_get(s, k) => k(prim_getenv(s)),
-      env_argc(u, k) => k(prim_args_count()),
-      env_arg(i, k) => k(prim_arg(i)),
+      env_get(s) resume k => k(prim_getenv(s)),
+      env_argc() resume k => k(prim_args_count()),
+      env_arg(i) resume k => k(prim_arg(i)),
       return r => r
     }) with
-    out_print(x, k) =>
+    out_print(x) resume k =>
       prim_print(x)
       k(())
-    out_println(x, k) =>
+    out_println(x) resume k =>
       prim_println(x)
       k(())
     return r => r
@@ -422,7 +422,7 @@ fn srange_go(lo, hi) =
     srange_go(lo + 1, hi)
 
 -- | A stream of the integers in `[lo, hi)`, for the `Emit` combinators.
-fn srange(lo, hi) = \(u) -> srange_go(lo, hi)
+fn srange(lo, hi) = \(_u) -> srange_go(lo, hi)
 
 -- | Helper for `sof`: emit each element of `xs`.
 fn sof_go(xs) =
@@ -433,7 +433,7 @@ fn sof_go(xs) =
       sof_go(rest)
 
 -- | A stream of the elements of the list `xs`.
-fn sof(xs) = \(u) -> sof_go(xs)
+fn sof(xs) = \(_u) -> sof_go(xs)
 
 -- | The ascending list `[lo, lo+1, ..., hi]` (empty when `lo > hi`). Backs the
 -- `[a..z]` list syntax.
@@ -464,40 +464,43 @@ fn enum_from_then_to(a, b, hi) =
 -- | Helper for `smap`.
 fn smap_go(s, f) =
   handle s(()) with
-    fun emit(x) => emit(f(x))
+    once emit(x) => emit(f(x))
     return r => r
 
 -- | Map `f` over every element of a stream, fusing (no intermediate list).
-fn smap(s, f) = \(u) -> smap_go(s, f)
+fn smap(s, f) = \(_u) -> smap_go(s, f)
 
 -- | Helper for `skeep`.
 fn skeep_go(s, p) =
   handle s(()) with
-    fun emit(x) =>
+    once emit(x) =>
       if p(x) then
         emit(x)
     return r => r
 
 -- | Keep only the stream elements satisfying `p`, fusing.
-fn skeep(s, p) = \(u) -> skeep_go(s, p)
+fn skeep(s, p) = \(_u) -> skeep_go(s, p)
 
 -- | Helper for `stake`.
 fn stake_go(s, n) =
   let g =
     handle s(()) with
-      emit(x, k) =>
+      emit(x) resume k =>
         \(left) -> if left > 0 then let _ = emit(x) in k(())(left - 1) else ()
-      return r => \(left) -> ()
+      return r => \(_left) -> ()
   g(n)
 
 -- | The first `n` elements of a stream, stopping the producer early.
-fn stake(s, n) = \(u) -> stake_go(s, n)
+fn stake(s, n) = \(_u) -> stake_go(s, n)
 
--- | Left-fold a stream with `f` from the initial accumulator `z`, fusing.
-fn sfold(s, z, f) =
+-- | Left-fold a stream with `f` from the initial accumulator `z`, fusing. The
+-- stream row is pinned to `{Emit(a) | e}` so the handler discharges `Emit`
+-- (leaving `{e}`); without the annotation `Emit` slips into a bare row variable
+-- and leaks past the fold into the caller's row.
+fn sfold(s : (Unit) -> r ! {Emit(a) | e}, z, f) =
   let g =
     handle s(()) with
-      emit(x, k) => \(acc) -> k(())(f(acc, x))
+      emit(x) resume k => \(acc) -> k(())(f(acc, x))
       return r => \(acc) -> acc
   g(z)
 
@@ -539,18 +542,13 @@ fn fnv_from(s, i, h) =
   if i >= byte_len(s) then
     h
   else
-    fnv_from(
-        s,
-        i + 1,
-        u64_mul(u64_xor(h, to_u64(byte_at(s, i))), 1099511628211u64),
-      )
+    fnv_from(s, i + 1, u64_xor(h, to_u64(byte_at(s, i))) * 1099511628211u64)
 
 -- | The FNV-1a 64-bit hash of a string (the U64 lane wraps, O(length)).
 fn str_hash(s : String) : U64 = fnv_from(s, 0, 14695981039346656037u64)
 
 -- | Helper: the bucket index of key `k` in a table of `n` buckets.
-fn bucket_of(k : String, n : Int) : Int =
-  int_of_u64(u64_rem(str_hash(k), to_u64(n)))
+fn bucket_of(k : String, n : Int) : Int = int_of_u64(str_hash(k) % to_u64(n))
 
 -- | An empty hash map.
 fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
@@ -923,7 +921,7 @@ instance showChar : Show(Char)
   fn show(x) = show_char(x)
 
 instance showUnit : Show(Unit)
-  fn show(x) = "()"
+  fn show(_x) = "()"
 
 -- | Render `s` as a canonical double-quoted string literal, escaping the
 -- characters that would otherwise break the quoting. This is what `show`
@@ -992,7 +990,7 @@ instance hashStr : Hash(String)
   fn hash(x) = blake3(concat("s", concat(show_int(byte_len(x)), concat(":", x))))
 
 instance hashUnit : Hash(Unit)
-  fn hash(x) = blake3("1")
+  fn hash(_x) = blake3("1")
 
 instance powInt : Pow(Int)
   fn pow(b, e) = int_pow(b, e)

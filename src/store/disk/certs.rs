@@ -11,10 +11,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, validate_hash, HashHex, Written, CERTS_DIR};
+use super::{atomic_write, shard_path, HashHex, Written, CERTS_DIR};
 
-pub(super) fn put(root: &Path, subject: &HashHex, bytes: &[u8]) -> io::Result<Written> {
-    validate_hash(subject)?;
+pub(super) fn put(root: &Path, subject: &HashHex<'_>, bytes: &[u8]) -> io::Result<Written> {
     let path = shard_path(&root.join(CERTS_DIR), subject);
     if path.exists() {
         let existing = fs::read(&path)?;
@@ -34,8 +33,7 @@ pub(super) fn put(root: &Path, subject: &HashHex, bytes: &[u8]) -> io::Result<Wr
     Ok(Written::New)
 }
 
-pub(super) fn get(root: &Path, subject: &HashHex) -> io::Result<Option<Vec<u8>>> {
-    validate_hash(subject)?;
+pub(super) fn get(root: &Path, subject: &HashHex<'_>) -> io::Result<Option<Vec<u8>>> {
     match fs::read(shard_path(&root.join(CERTS_DIR), subject)) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -43,6 +41,6 @@ pub(super) fn get(root: &Path, subject: &HashHex) -> io::Result<Option<Vec<u8>>>
     }
 }
 
-pub(super) fn has(root: &Path, subject: &HashHex) -> bool {
-    validate_hash(subject).is_ok() && shard_path(&root.join(CERTS_DIR), subject).exists()
+pub(super) fn has(root: &Path, subject: &HashHex<'_>) -> bool {
+    shard_path(&root.join(CERTS_DIR), subject).exists()
 }

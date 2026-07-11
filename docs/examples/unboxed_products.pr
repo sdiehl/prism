@@ -1,0 +1,5 @@
+fn norm2() : Float =
+  let v = #{ re = 1.0, im = 2.0 }
+  v.#re * v.#re + v.#im * v.#im
+
+fn main() = println(norm2())

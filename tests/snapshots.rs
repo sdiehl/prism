@@ -60,7 +60,7 @@ fn normalize_native_kont_global_len(line: &str) -> String {
 // and effect shapes, class interfaces, and instance identities. Committed so that
 // a change to a serialization-relevant type, class, or instance shows up in
 // review rather than silently. Term behavior hashes are excluded (they are
-// covered by tests/stdlib_hash.rs); this pins the shapes, the frozen-format seed.
+// covered by tests/stdlib_hash.rs); this checks the shapes, the frozen-format seed.
 // Update with INSTA_UPDATE=always cargo test --test snapshots.
 #[test]
 fn stdlib_shape_digests() {
@@ -96,7 +96,7 @@ type Shape = Circle(Int) | Rect(Int, Int)
 type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
 type Range = Range { lo: Int, hi: Int }
 effect Log
-  ctl log(String) : Unit
+  log(String) : Unit
 ";
     let all = prism::shape_digests_of(&prism::with_prelude(SRC)).expect("shape digests");
     let names = ["Color", "Point", "Shape", "Tree", "Range", "Log"];
@@ -116,10 +116,9 @@ fn prelude_type_checks() {
         .iter()
         .map(|d| {
             format!(
-                "{} : {} ! {}",
+                "{} : {}",
                 d.name,
-                d.ty.show(),
-                prism::types::show_effects(&d.effects)
+                prism::types::show_type_with_effects(&d.ty, &d.effects)
             )
         })
         .collect();
@@ -140,45 +139,66 @@ fn nontight_effect_annotation_warns() {
             .map(|w| w.msg)
             .collect()
     };
-    let loose = warns("effect Eff\n  ctl op(Unit) : Int\nfn f() : !{Eff} Int = 1\n");
+    let loose = warns("effect Eff\n  op(Unit) : Int\nfn f() : Int ! {Eff} = 1\n");
     assert!(
         loose.iter().any(|m| m.contains("never performed")),
         "expected a non-tight effect-annotation warning, got {loose:?}"
     );
-    let tight = warns("effect Eff\n  ctl op(Unit) : Int\nfn f() : !{Eff} Int = op(())\n");
+    let tight = warns("effect Eff\n  op(Unit) : Int\nfn f() : Int ! {Eff} = op(())\n");
     assert!(
         tight.iter().all(|m| !m.contains("never performed")),
         "a performed effect should not warn, got {tight:?}"
     );
 }
 
-// The deprecation lint warns at use sites: a definition marked with the surface
-// `deprecated "..."` annotation carries the author's suggestion, while the
-// tower-superseded float dot-operators and fixed-width arithmetic builtins carry
-// the compiler's canonical replacement. A warning, never an error; behavior is
-// unchanged. The snapshot pins the warning text.
+// The surface `deprecated "..."` annotation warns at use sites, carrying the
+// author's suggestion. A warning, never an error; behavior is unchanged.
 #[test]
-fn deprecation_warnings() {
+fn deprecated_annotation_warns() {
     let src = prism::with_prelude(
         "deprecated \"use `+` on Float\"\n\
          fn old_add(x : Float, y : Float) : Float = plus(x, y)\n\
-         fn f_float() : Float = old_add(1.0, 2.0) +. (3.0 *. 4.0)\n\
-         fn f_cmp() : Bool = 1.0 <. 2.0 && 1.0 ==. 1.0\n\
-         fn f_i64() : I64 = i64_mul(2i64, 3i64)\n\
-         fn f_u64() : U64 = u64_add(1u64, 2u64)\n\
-         fn f_bytes() : String = string_of_bytes(array_empty())\n\
-         fn main() : Unit = println(show(f_float()))\n",
+         fn main() : Unit = println(show(old_add(1.0, 2.0)))\n",
     );
-    let mut msgs: Vec<String> = prism::check(&src)
+    let msgs: Vec<String> = prism::check(&src)
         .unwrap()
         .warnings
         .into_iter()
         .map(|w| w.msg)
         .filter(|m| m.contains("deprecated"))
         .collect();
-    msgs.sort();
-    msgs.dedup();
-    insta::assert_snapshot!(msgs.join("\n"));
+    assert_eq!(msgs, vec!["`old_add` is deprecated: use `+` on Float"]);
+}
+
+// The float dot-operators were removed: the plain operators are lane-polymorphic
+// over Float. Writing one is a pointed parse error naming the plain operator.
+#[test]
+fn float_dot_operators_removed() {
+    for (src, plain) in [
+        ("fn f() : Float = 1.0 +. 2.0\n", "+"),
+        ("fn f() : Float = 1.0 *. 2.0\n", "*"),
+        ("fn f() : Bool = 1.0 <. 2.0\n", "<"),
+        ("fn f() : Bool = 1.0 ==. 2.0\n", "=="),
+    ] {
+        let err = prism::check(&prism::with_prelude(src))
+            .expect_err("a float dot-operator must be rejected")
+            .to_string();
+        assert!(err.contains("was removed") && err.contains(plain), "{err}");
+    }
+}
+
+// The fixed-width arithmetic builtins and `string_of_bytes` were removed from the
+// surface; the plain operators cover the arithmetic on the fixed-width lanes. A
+// call to one no longer resolves.
+#[test]
+fn duplicate_builtins_removed() {
+    for src in [
+        "fn f() : I64 = i64_mul(2i64, 3i64)\n",
+        "fn f() : U64 = u64_add(1u64, 2u64)\n",
+        "fn f() : String = string_of_bytes(array_empty())\n",
+    ] {
+        prism::check(&prism::with_prelude(src)).expect_err("a removed builtin must not resolve");
+    }
 }
 
 // Local `var` state must discharge: fib2 uses two vars yet keeps a pure row.
@@ -282,9 +302,9 @@ fn recursive_fip_examples_lower_to_loops() {
 // function value the set pass cannot see) surfaces in the caller's row.
 #[test]
 fn higher_order_effects_propagate() {
-    let src = "effect Exn\n  ctl raise(Int) : Int\n\
+    let src = "effect Exn\n  raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
-               fn boom(n) : !{Exn} Int = raise(n)\n\
+               fn boom(n) : Int ! {Exn} = raise(n)\n\
                fn go(n) = apply(boom, n)\n";
     let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
     let apply = checked.decls.iter().find(|d| d.name == "apply").unwrap();
@@ -303,10 +323,10 @@ fn higher_order_effects_propagate() {
 // the effect arrived through an opaque function value.
 #[test]
 fn handler_discharges_higher_order_effect() {
-    let src = "effect Exn\n  ctl raise(Int) : Int\n\
+    let src = "effect Exn\n  raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
-               fn boom(n) : !{Exn} Int = raise(n)\n\
-               fn attempt(n) =\n  handle apply(boom, n) with\n    raise(c, k) => c\n    return r => r\n";
+               fn boom(n) : Int ! {Exn} = raise(n)\n\
+               fn attempt(n) =\n  handle apply(boom, n) with\n    raise(c) resume k => c\n    return r => r\n";
     let checked = prism::check(prism::with_prelude(src).as_str()).unwrap();
     let attempt = checked.decls.iter().find(|d| d.name == "attempt").unwrap();
     assert_eq!(attempt.ty.show(), "(Int) -> Int");
@@ -317,9 +337,9 @@ fn handler_discharges_higher_order_effect() {
 // value can no longer slip past a `borrow` parameter's purity requirement.
 #[test]
 fn borrow_rejects_laundered_effect() {
-    let src = "effect Exn\n  ctl raise(Int) : Int\n\
+    let src = "effect Exn\n  raise(Int) : Int\n\
                fn apply(f, x) = f(x)\n\
-               fn boom(n) : !{Exn} Int = raise(n)\n\
+               fn boom(n) : Int ! {Exn} = raise(n)\n\
                fn use_borrow(borrow x, n) = apply(boom, n) + x\n";
     let err = prism::check(prism::with_prelude(src).as_str()).unwrap_err();
     let msg = format!("{err}");
@@ -333,13 +353,13 @@ fn borrow_rejects_laundered_effect() {
 #[test]
 fn mask_reports_effect_in_both_engines() {
     // The inferred row carries the masked effect.
-    let ok = "effect Ask\n  ctl ask() : Int\nfn m() = mask<Ask>(5)\n";
+    let ok = "effect Ask\n  ask() : Int\nfn m() = mask<Ask>(5)\n";
     let checked = prism::check(prism::with_prelude(ok).as_str()).unwrap();
     let m = checked.decls.iter().find(|d| d.name == "m").unwrap();
     assert_eq!(prism::types::show_effects(&m.effects), "{Ask}");
     // And the purity gate (which reads that row) rejects a masked effect under a
     // `borrow` parameter, just as it does an ordinary one.
-    let bad = "effect Ask\n  ctl ask() : Int\nfn g(borrow x) = mask<Ask>(x)\n";
+    let bad = "effect Ask\n  ask() : Int\nfn g(borrow x) = mask<Ask>(x)\n";
     let err = prism::check(prism::with_prelude(bad).as_str()).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("borrow") && msg.contains("Ask"), "got: {msg}");
@@ -368,7 +388,7 @@ fn exit_code_and_stdout() {
 // Local monadification partitions the lowered program: the escaping Log
 // component reifies into the free monad (EOp cells threaded by `ebind`), while
 // the unrelated stream pipeline stays fused (its producers thread evidence/state
-// and build no EOp cell). Pins the split so a regression that re-globalizes
+// and build no EOp cell). Checks the split so a regression that re-globalizes
 // monadification, dragging the pipeline monadic, surfaces here.
 #[test]
 fn local_monadification_partition() {
@@ -496,7 +516,7 @@ fn unhandled_effect_traps_both_backends() {
     let prog = env::temp_dir().join("prism_unhandled_eff.pr");
     fs::write(
         &prog,
-        "effect Ask\n  ctl ask() : Int\nfn f() = ask()\nfn main() = println(f())\n",
+        "effect Ask\n  ask() : Int\nfn f() = ask()\nfn main() = println(f())\n",
     )
     .unwrap();
     let bin = env!("CARGO_BIN_EXE_prism");
@@ -558,7 +578,7 @@ fn interpreter() {
 // Terminal-printer coverage. `print` dispatches by type into three native
 // terminal printers (integer, float, string); every other shape is shown to a
 // string first, so the only runtime kinds that can reach a terminal printer
-// (and thus appear in `run.out`) are Int, Big, Float, Str. Pinning all four as
+// (and thus appear in `run.out`) are Int, Big, Float, Str. Recording all four as
 // exercised keeps each native terminal printer inside the parity net. The
 // structural shapes (ADTs, tuples, I64/U64/Bool/Unit) are covered the other
 // way: `print_structural.pr` prints one of each directly so the gate's
@@ -656,7 +676,7 @@ fn eff_poly_example() {
 }
 
 // Local-mutation showcase, also in examples/. Same naming trick, and the
-// purity claim in the example is pinned: fib_iter mutates two vars yet
+// purity claim in the example is checked: fib_iter mutates two vars yet
 // infers an empty effect row.
 #[test]
 fn var_pure_example() {
@@ -672,7 +692,7 @@ fn var_pure_example() {
 }
 
 // Deconstructors showcase, also in examples/. Same naming trick so the
-// gate's native-parity loop covers it; the fbip assertion pins constructor
+// gate's native-parity loop covers it; the fbip assertion checks constructor
 // reuse on a nested update path (no prelude, so the only reuse is main's).
 #[test]
 fn lenses_example() {
@@ -687,7 +707,7 @@ fn lenses_example() {
 }
 
 // `deriving (Lens)` showcase, also in examples/. Same naming trick so the
-// gate's native-parity loop covers it; the fbip assertion pins that the
+// gate's native-parity loop covers it; the fbip assertion checks that the
 // synthesized `with_<f>` setter reuses the constructor on a unique value.
 #[test]
 fn lens_derive_example() {
@@ -713,7 +733,7 @@ fn class_pattern_example() {
 }
 
 // Full stream fusion showcase, also in examples/. Same naming trick so the
-// gate's native-parity loop covers it. The lowered assertion pins that the
+// gate's native-parity loop covers it. The lowered assertion checks that the
 // producer -> smap -> skeep -> consumer chain threads emit evidence into each
 // stream thunk and fuses to direct forced calls: no `do`, no handle, no EOp
 // constructor survives.
@@ -736,7 +756,7 @@ fn stream_fuse_example() {
 }
 
 // Fold-consumer fusion (Blocker B): a fold handler is parameter-passing, not
-// tail-resumptive, so state threading drives it. The lowered assertion pins
+// tail-resumptive, so state threading drives it. The lowered assertion checks
 // that producer -> smap -> skeep -> fold threads the accumulator into each
 // stream thunk and leaves no `do`, handle, or EOp constructor behind.
 #[test]
@@ -759,7 +779,7 @@ fn stream_fold_example() {
 
 // Full stream-fusion showcase: `stake` early termination (the Step protocol) plus a fold
 // chain and for-loop consumers over a second stream, all in one program. The
-// lowered assertion pins that the whole program fuses with no `do`, handle, or
+// lowered assertion checks that the whole program fuses with no `do`, handle, or
 // EOp cell left, only the threaded Step state.
 #[test]
 fn streams_example() {
@@ -821,7 +841,7 @@ fn corpus_files() -> impl Iterator<Item = PathBuf> {
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("pr"))
 }
 
-// Strategy classification snapshot: pin which effect-lowering strategy every
+// Strategy classification snapshot: record which effect-lowering strategy every
 // effectful corpus program takes, so a regression that drops a program from a
 // fused path onto the free monad (or an improvement that lifts it off) is a
 // reviewable diff. The classification is the SAME decision the compiler makes
@@ -840,7 +860,7 @@ fn effect_strategy_manifest() {
         let Ok(strat) = prism::effect_strategy_full(&full, Path::new(".")) else {
             continue;
         };
-        if strat == "pure" {
+        if strat == prism::EffectStrategy::Pure {
             continue;
         }
         let key = path.strip_prefix(root).unwrap_or(&path).display();
@@ -859,10 +879,10 @@ fn effect_strategy_manifest() {
 #[test]
 fn free_monad_fallback_warns() {
     let src = prism::with_prelude(
-        "effect Boom\n  ctl boom(Int) : Int\n\
-         fn apply(f : (Int) -> Int ! {Boom}, x : Int) : !{Boom} Int = f(x)\n\
+        "effect Boom\n  boom(Int) : Int\n\
+         fn apply(f : (Int) -> Int ! {Boom}, x : Int) : Int ! {Boom} = f(x)\n\
          fn risky(x) =\n  if x == 0 then boom(1) else x\n\
-         fn main() =\n  handle apply(risky, 0) with\n    boom(v, k) => 0 - v\n    return r => r\n",
+         fn main() =\n  handle apply(risky, 0) with\n    boom(v) resume k => 0 - v\n    return r => r\n",
     );
     let warnings = prism::effect_warnings_full(&src, Path::new(".")).unwrap();
     insta::assert_snapshot!(warnings.join("\n"));
@@ -885,10 +905,14 @@ fn optimization_coverage() {
             seen.insert(s);
         }
     }
-    for opt in ["evidence", "state-fusion", "local-partial"] {
+    for strategy in [
+        prism::EffectStrategy::Evidence,
+        prism::EffectStrategy::StateFusion,
+        prism::EffectStrategy::LocalPartial,
+    ] {
         assert!(
-            seen.contains(opt),
-            "no corpus program exercises the `{opt}` fast path; its gate has no live witness"
+            seen.contains(&strategy),
+            "no corpus program exercises the `{strategy}` fast path; its gate has no live witness"
         );
     }
     // A basic imperative loop must compile to a loop, never the free monad.
@@ -898,7 +922,11 @@ fn optimization_coverage() {
     );
     let strat = prism::effect_strategy_full(&loop_prog, Path::new(".")).unwrap();
     assert!(
-        !strat.contains("free-monad"),
+        !matches!(
+            strat,
+            prism::EffectStrategy::SelectiveFreeMonad
+                | prism::EffectStrategy::WholeProgramFreeMonad
+        ),
         "a basic `var` while-loop classifies as `{strat}`: imperative loops must not reify \
          into the free monad (O(n) heap allocation and stack overflow)"
     );

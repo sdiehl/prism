@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/canonical_duplicate.pr
 ---
 == tokens ==
@@ -274,7 +274,7 @@ Program {
 }
 
 == types ==
-Type Error: duplicate canonical designation for Ord(Int)
+[E3033] Type Error: duplicate canonical designation for Ord(Int)
     ╭─[ <source>:20:1 ]
     │
  20 │ canonical Ord(Int) = ordRev

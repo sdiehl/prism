@@ -6,7 +6,7 @@
 
 import Sequence as Seq
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   -- producers
   println(Seq.to_list(Seq.range(1, 6)))
   println(Seq.to_list(Seq.from_list([10, 20, 30])))

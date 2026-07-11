@@ -108,7 +108,7 @@ fn collect_multishot(c: &Comp, grades: &OpGrades, out: &mut BTreeSet<Sym>) {
         for op in ops {
             let syntactic = multishot_clause(&op.body, op.resume);
             match grades.get(&op.name) {
-                Some(g) if *g <= Grade::One => debug_assert!(
+                Some(g) if *g <= Grade::Once => debug_assert!(
                     !syntactic,
                     "op `{}` declared grade {:?} but its clause scans as multishot; \
                      the desugar grade check should have rejected it",
@@ -228,7 +228,7 @@ fn match_var_block(c: &Comp) -> Option<VarBlock> {
     let Comp::Handle { body, ops, .. } = m.as_ref() else {
         return None;
     };
-    let [a, b] = ops.as_slice() else {
+    let [a, b] = ops.arms() else {
         return None;
     };
     // Identify which op is get and which is set; both must share name@id.

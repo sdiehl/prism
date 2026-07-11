@@ -2,11 +2,11 @@
 
 import Concurrent (..)
 
-fn quick() : !{Async(Int), IO} Int =
+fn quick() : Int ! {Async(Int), IO} =
   println("quick: done")
   7
 
-fn scene() : !{Async(Int), IO} Int =
+fn scene() : Int ! {Async(Int), IO} =
   let q = fork(quick)
   let v = await(q)
   println("awaited {v}")

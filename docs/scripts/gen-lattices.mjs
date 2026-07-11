@@ -87,20 +87,6 @@ function absentMeet(cx, cy) {
   ].join("\n");
 }
 
-// A borderless mono label: the keyword alias sitting beside a chain node, and a
-// faint dotted tick pairing it to that node.
-function aliasLabel(node, x, label) {
-  const w = chipW(node.label);
-  const rightEdge = node.cx + Math.round(w / 2);
-  return [
-    `<line x1="${rightEdge + 4}" y1="${node.cy}" x2="${x - 4}" y2="${node.cy}" `
-    + `stroke="${STROKE}" stroke-width="1" stroke-dasharray="2 3"/>`,
-    `<text x="${x}" y="${node.cy}" font-family="${MONO}" font-size="${FONT}" `
-    + `fill="${TEXT}" text-anchor="start" dominant-baseline="central">`
-    + esc(label) + `</text>`,
-  ].join("\n");
-}
-
 // A centered mono caption (axis direction, "(no meet)"-style notes).
 function caption(cx, cy, text, color, size) {
   return `<text x="${cx}" y="${cy}" font-family="${MONO}" font-size="${size}" `
@@ -238,28 +224,24 @@ const axesSvg = svg(
 );
 
 // -- Figure 3: grade chain, a single vertical total order with accent arrows. --
-const grMany = { label: "many", cx: 104, cy: 44, kind: "plain" };
-const grOnce = { label: "once", cx: 104, cy: 134, kind: "plain" };
-const grNever = { label: "never", cx: 104, cy: 224, kind: "plain" };
-const ALIAS_X = 168;
+// The chip label is the grade keyword itself (`many`/`once`/`never`), so no
+// separate keyword alias is paired to it.
+const grMany = { label: "many", cx: 150, cy: 44, kind: "plain" };
+const grOnce = { label: "once", cx: 150, cy: 134, kind: "plain" };
+const grNever = { label: "never", cx: 150, cy: 224, kind: "plain" };
 
 const gradesSvg = svg(
   300,
   268,
-  "the grade chain: many over once over never, a single vertical total order, "
-    + "paired with the keywords ctl, fun, and final ctl",
-  "Three chips stacked vertically with upward accent arrows: many at the top, "
-    + "once in the middle, never at the bottom. Each is paired by a dotted tick "
-    + "to its keyword: many to ctl, once to fun, never to final ctl.",
+  "the grade chain: many over once over never, a single vertical total order",
+  "Three chips stacked vertically with upward accent arrows: the grade keyword "
+    + "many at the top, once in the middle, never at the bottom.",
   [
     upArrow(grOnce, grMany),
     upArrow(grNever, grOnce),
     chip(grMany),
     chip(grOnce),
     chip(grNever),
-    aliasLabel(grMany, ALIAS_X, "ctl"),
-    aliasLabel(grOnce, ALIAS_X, "fun"),
-    aliasLabel(grNever, ALIAS_X, "final ctl"),
   ].join("\n"),
 );
 

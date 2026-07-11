@@ -8,7 +8,7 @@ Cooperative async/await concurrency as a single handler, polymorphic in the effe
 
 Prism has no shared mutable cell, so the handler only REIFIES each step as a `Cmd`, and a pure `drive` loop threads the run queue, the finished results, the parked awaiters, and the channel buffers. Those parked continuations escape into the scheduler state, so a program using this is whole-program free-monad; it runs in constant native stack under PRISM_TRAMPOLINE.
 
-Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all its descendants; each is stopped at its next suspension point (`yield`, `await`, `send`, `recv`), never mid-step, and unwinds through its `final ctl` finalizers so every resource is released exactly once. Wrap a resource with `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's awaiters observe it through `try_await` (which yields `Was_Cancelled` rather than hanging); a fiber that fails (an unhandled `fail()`) cancels its siblings in a `scope` and re-raises at the scope boundary.
+Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all its descendants; each is stopped at its next suspension point (`yield`, `await`, `send`, `recv`), never mid-step, and unwinds through its `never` finalizers so every resource is released exactly once. Wrap a resource with `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's awaiters observe it through `try_await` (which yields `Was_Cancelled` rather than hanging); a fiber that fails (an unhandled `fail()`) cancels its siblings in a `scope` and re-raises at the scope boundary.
 
 `scope` is a structured nursery: it forks a list of fibers and joins them all, so no fiber escapes the call, and a failing child fails the whole scope.
 
@@ -44,18 +44,18 @@ The outcome of `try_await`: a fiber that completed with a value, or one that was
 
 ### `Async`
 
-```prism,def,h-44d80903615983accc74634b484b5925eec4f7a18af1266b9c19adddfa890971
+```prism,def,h-9f39d182a2558cbecaaede66556e99c0d20c8e70e9747b9edaaca2d0bed3a606
 effect Async(a)
-  ctl fork(() -> a ! {Async(a) | e}) : Fiber
-  ctl poll_yield(Unit) : Signal
-  ctl poll_await(Fiber) : Wake(a)
-  ctl cancel(Fiber) : Unit
-  ctl channel(Unit) : Chan
-  ctl bounded(Int) : Chan
-  ctl poll_send(Chan, a) : Signal
-  ctl poll_recv(Chan) : Wake(a)
-  ctl kill(Unit) : b
-  ctl vanished(Unit) : b
+  fork(() -> a ! {Async(a) | e}) : Fiber
+  poll_yield() : Signal
+  poll_await(Fiber) : Wake(a)
+  cancel(Fiber) : Unit
+  channel() : Chan
+  bounded(Int) : Chan
+  poll_send(Chan, a) : Signal
+  poll_recv(Chan) : Wake(a)
+  never kill() : b
+  never vanished() : b
 ```
 
 The async/await effect. `fork` spawns a fiber and returns its handle, `yield` reschedules, `await` blocks on a fiber's result, and `cancel` requests a cooperative cancellation; `channel`/`send`/`recv` are a buffered FIFO channel for fiber-to-fiber messages. Discharge it with `run_async`.
@@ -64,12 +64,12 @@ The public `yield`/`await`/`send`/`recv` are thin wrappers (below) over the raw 
 
 ### `Clock`
 
-```prism,def,h-2dcc886599a310bc851dcdfc4c1cf94bca232fd0cf597a963f96391127df4e62
+```prism,def,h-65067994935c1ed9202e26227e9c8d3778a94ff55165956078824783c1f4c2bf
 effect Clock
-  ctl now(Unit) : Int
-  ctl sleep(Int) : Unit
-  ctl wall_now(Unit) : Int
-  ctl mono_now(Unit) : Int
+  now() : Int
+  sleep(Int) : Unit
+  wall_now() : Int
+  mono_now() : Int
 ```
 
 A logical-time capability: `now` reads the current tick and `sleep` advances it. Discharged by `run_clock`, which threads a pure counter, so time is virtual and deterministic: advance it in a test and behaviour is a function of it, with no real clock and no time primitive. A fiber may perform `Clock`; since the scheduler does not handle it, it flows out of `run_async` to an enclosing `run_clock` like any other capability. `now`/`sleep` are the logical scheduler clock (virtual ticks). `wall_now` and `mono_now` are the real-time reads (nanoseconds): the system wall clock (Unix epoch, UTC) and a monotonic counter. All four share the one `Clock` capability; which reading you get is a property of the installed handler, not the call. `run_clock` serves every op from the virtual counter (deterministic tests); `Time.run_clock_real` serves `wall_now`/`mono_now` from the recorded OS clock.
@@ -78,7 +78,7 @@ A logical-time capability: `now` reads the current tick and `sleep` advances it.
 
 ### `yield`
 
-```prism,sig,h-d67c0777c8987999034fabcab877d686938fbf0856e1a18dfd4a29e06ce9ae4e
+```prism,sig,h-7980ded6d67e388b875d1f4a8fd57b8490634955e8a21e6c20c30d27aa1c7698
 yield : forall a. (Unit) -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -86,7 +86,7 @@ Reschedule the current fiber. A cooperative yield point; also a cancellation poi
 
 ### `await`
 
-```prism,sig,h-02e622d96c2e70f9ede1f9a292807f182bebd72da721c5c2d5613f3e113fe13a
+```prism,sig,h-732951bfbf1bd5fcfa0b9fce8dab128294b6a2c12f75018b896b44a851ce9955
 await : forall a. (Concurrent.Fiber) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -94,7 +94,7 @@ Block until fiber `f` finishes, returning its result. If `f` was cancelled, this
 
 ### `send`
 
-```prism,sig,h-91f37d4b8e4a376586179c2b6ba884c368e3c1a28838aa0406abf265efe330e3
+```prism,sig,h-d0f4e31a31eaf62287369b1a5abcf54f47ca6162ee3313b35b596a6f4a03ed9f
 send : forall a. (Concurrent.Chan, a) -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -102,7 +102,7 @@ Send `v` on channel `c`. On a bounded channel a full buffer parks the sender unt
 
 ### `recv`
 
-```prism,sig,h-92ee8f6bf03ce409ae89c7437fcff22f26de5cd8251ff5fe609d38fe089ee823
+```prism,sig,h-c6fbf6216232015d7157a356a443d904829916456ad29586a81a81219c04b5a9
 recv : forall a. (Concurrent.Chan) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -110,7 +110,7 @@ Receive a value from channel `c`, parking until one is available. A cancellation
 
 ### `on_cancel`
 
-```prism,sig,h-9262514dc0170a60f350d80debaf73373f1b95eb16e9fabd0306969b9be76a84
+```prism,sig,h-5c0145f447150a4f31e02928a6b3fbe162ee9a8f38fb19a9a1fded0ea6f948c0
 on_cancel : forall e0 a b. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
 ```
 
@@ -118,7 +118,7 @@ Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once 
 
 ### `try_await`
 
-```prism,sig,h-557f352db4233cad6d57b6107c3a4abb63929ba1864ac3709682427e0cfc190a
+```prism,sig,h-8583df53bb21fb4c2d8b4c9a59caf002d6557a629b7f2b0af7e29332296dd64d
 try_await : forall a. (Concurrent.Fiber) -> Concurrent.Outcome(a) ! {Concurrent.Async(a)}
 ```
 
@@ -150,7 +150,7 @@ A second scheduling policy over the same `Async` effect: LIFO (depth-first), whi
 
 ### `scope`
 
-```prism,sig,h-f2c159196a30186a72f06c2798f418e272e401087dbeb9c42016799aa2141e97
+```prism,sig,h-ddc69d4b44df0f3806ce5760b870025190b7a36d4aee63fba39be3577e1ffdf6
 scope : forall e0 a. (List(() -> a ! {Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
 ```
 

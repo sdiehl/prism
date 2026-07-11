@@ -9,7 +9,7 @@
 -- 4
 type Vec2 = Vec2 { x: Int, y: Int } deriving (Lens)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let v = Vec2 { x = 3, y = 4 }
   println(x_of(v))
   let v2 = with_x(v, 7)

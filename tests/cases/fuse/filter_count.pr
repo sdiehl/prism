@@ -1,5 +1,5 @@
 -- Fuses: a count consumer over a filtered range.
 import Sequence as Seq
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(Seq.count(Seq.filter(Seq.range(1, 50), \(x) -> x > 10)))

@@ -1,0 +1,8 @@
+effect Ask
+  once ask() : Int
+
+fn main() =
+  println(handle ask() + 5 with {
+    ask() resume k => k(1) + 1,
+    return r => r
+  })

@@ -97,12 +97,15 @@ caller : (Int) -> Int
 
 == core (cbpv) ==
 fn plain(x) =
-  return x to t@0; return 1 to t@1; t@0 + t@1
+  return x to t@0
+  return 1 to t@1
+  t@0 + t@1
 fn caller(x) =
-  return x to t@2; plain(t@2)
+  return x to t@2
+  plain(t@2)
 
 == fip ==
-Type Error: usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
+[E1998] Type Error: usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
    ╭─[ <source>:7:1 ]
    │
  7 │ fbip fn caller(x) = plain(x)

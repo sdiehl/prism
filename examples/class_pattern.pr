@@ -32,7 +32,7 @@ fn head_or(x : c, d : Int) : Int given Peek(c) =
     First(n) => n
     _ => d
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(head_or(Box { v = 7 }, 0))
   println(head_or(Range { lo = 3, hi = 9 }, 0))
   println(head_or(Range { lo = 5, hi = 5 }, 0))

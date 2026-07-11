@@ -1,0 +1,10 @@
+-- An application in a `Row`-kinded position. `Cmd`'s second parameter has kind
+-- `Row`, so only a row literal or a row variable can be written there. An
+-- applied type `g(Int)` has no row representation and was silently erased to the
+-- empty row `{}` before; it is now a kind mismatch. A bare row variable stays
+-- legal, so genuinely row-polymorphic uses still check.
+type Cmd(a, e : Row) = MkCmd(Int)
+
+fn f(x : Cmd(Int, g(Int))) : Int = 0
+
+fn main() = println(0)

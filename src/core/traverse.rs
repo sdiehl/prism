@@ -69,6 +69,7 @@ pub trait Rewrite {
             ),
             Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, self.value(v, cx)),
             Comp::Neg(l, v) => Comp::Neg(*l, self.value(v, cx)),
+            Comp::UnboxedProject(v, f) => Comp::UnboxedProject(self.value(v, cx), *f),
             Comp::Do(n, args) => Comp::Do(*n, args.iter().map(|a| self.value(a, cx)).collect()),
             Comp::Handle {
                 body,
@@ -79,15 +80,12 @@ pub trait Rewrite {
                 body: Box::new(self.comp(body, cx)),
                 return_var: *return_var,
                 return_body: return_body.as_ref().map(|b| Box::new(self.comp(b, cx))),
-                ops: ops
-                    .iter()
-                    .map(|o| HandleOp {
-                        name: o.name,
-                        params: o.params.clone(),
-                        resume: o.resume,
-                        body: self.comp(&o.body, cx),
-                    })
-                    .collect(),
+                ops: ops.rebuild(|o| HandleOp {
+                    name: o.name,
+                    params: o.params.clone(),
+                    resume: o.resume,
+                    body: self.comp(&o.body, cx),
+                }),
             },
             Comp::Mask(es, b) => Comp::Mask(es.clone(), Box::new(self.comp(b, cx))),
             Comp::StrBuiltin(b, args) => {
@@ -114,6 +112,12 @@ pub trait Rewrite {
                 Value::Ctor(*n, *t, fs.iter().map(|f| self.value(f, cx)).collect())
             }
             Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| self.value(f, cx)).collect()),
+            Value::UnboxedTuple(fs) => {
+                Value::UnboxedTuple(fs.iter().map(|f| self.value(f, cx)).collect())
+            }
+            Value::UnboxedRecord(fs) => {
+                Value::UnboxedRecord(fs.iter().map(|(n, f)| (*n, self.value(f, cx))).collect())
+            }
             _ => v.clone(),
         }
     }
@@ -162,7 +166,8 @@ pub trait Visit {
             | Comp::Drop(v)
             | Comp::Reuse(_, v)
             | Comp::RefNew(v)
-            | Comp::RefGet(v) => self.visit_value(v),
+            | Comp::RefGet(v)
+            | Comp::UnboxedProject(v, _) => self.visit_value(v),
             Comp::RefSet(a, b) | Comp::Prim(_, a, b) => {
                 self.visit_value(a);
                 self.visit_value(b);
@@ -221,7 +226,12 @@ pub trait Visit {
     fn descend_value(&mut self, v: &Value) {
         match v {
             Value::Thunk(c) => self.visit_comp(c),
-            Value::Ctor(_, _, fs) | Value::Tuple(fs) => {
+            Value::UnboxedRecord(fs) => {
+                for (_, f) in fs {
+                    self.visit_value(f);
+                }
+            }
+            Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
                 for f in fs {
                     self.visit_value(f);
                 }

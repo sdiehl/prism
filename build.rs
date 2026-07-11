@@ -23,6 +23,7 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_effect.h",
     "prism_array.h",
     "prism_buffer.h",
+    "prism_tbuf.h",
     "prism_sort.h",
     "prism_kont.h",
     "prism_io.h",
@@ -37,6 +38,7 @@ const RUNTIME_SOURCES: &[&str] = &[
     "prism_sort.c",
     "prism_array.c",
     "prism_buffer.c",
+    "prism_tbuf.c",
     "prism_kont.c",
     "prism_io.c",
 ];

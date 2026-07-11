@@ -1,5 +1,5 @@
 effect Writer
-  ctl tell(Int) : Unit
+  tell(Int) : Unit
 
 -- Writer: accumulate output on the side.
 --
@@ -7,7 +7,7 @@ effect Writer
 -- accumulated list as a parameter: each tell conses onto it and resumes, and
 -- return hands back the final log. main sums the collected log.
 
-fn trace() : !{Writer} Unit =
+fn trace() : Unit ! {Writer} =
   tell(1)
   tell(2)
   tell(3)
@@ -16,7 +16,7 @@ fn trace() : !{Writer} Unit =
 fn run_writer() =
   let f =
     handle trace() with
-      tell(m, k) => \(log) -> k(())(Cons(m, log))
+      tell(m) resume k => \(log) -> k(())(Cons(m, log))
       return r => \(log) -> log
   reverse(f(Nil))
 

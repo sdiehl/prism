@@ -91,6 +91,64 @@ jobs:
             runtime/prism_arena.c -o /tmp/prism_arena_test
           /tmp/prism_arena_test
 
+  # Compile-only feature matrix. The heavier behavior checks stay in their
+  # dedicated jobs below (web bundle, MLIR parity, mimalloc parity smoke); this
+  # job exists to make feature compatibility explicit and fail fast when a
+  # feature graph stops compiling.
+  feature-matrix:
+    name: Feature matrix (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            command: cargo check --all-targets
+            wasm: false
+          - name: wasm
+            command: cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+            wasm: true
+          - name: mlir
+            command: cargo check --features mlir
+            wasm: false
+          - name: mimalloc
+            command: cargo check --features mimalloc
+            wasm: false
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+      TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Install wasm target
+        if: ${{ matrix.wasm }}
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+        with:
+          packages: libmlir-22-dev mlir-22-tools
+
+      - name: Check feature set
+        run: ${{ matrix.command }}
+
   # The C-runtime sanitizer + structural-backstop parity re-runs, split off `test`
   # so they run in parallel instead of tailing it (free runners: wall-clock, not cost).
   sanitizers:
@@ -119,11 +177,11 @@ jobs:
         env:
           PRISM_CC_FLAGS: "-fsanitize=address,undefined -fno-sanitize-recover=all"
           ASAN_OPTIONS: "detect_leaks=0:abort_on_error=1"
-        run: cargo test --test parity native_matches_interpreter
+        run: cargo test --test native_parity native_matches_interpreter
       - name: Runtime structural backstop
         env:
           PRISM_CC_FLAGS: "-DPRISM_RT_DEBUG"
-        run: cargo test --test parity native_matches_interpreter
+        run: cargo test --test native_parity native_matches_interpreter
 
   test:
     name: Test
@@ -161,7 +219,7 @@ jobs:
       # carries the source/toolchain fingerprint; the per-sha save key just lets
       # each run publish an updated snapshot.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-test-${{ runner.os }}-${{ github.sha }}
@@ -202,7 +260,7 @@ jobs:
       - name: Run tests
         env:
           PRISM_CORPUS_SHARDED: "1"
-        run: cargo nextest run --workspace
+        run: cargo nextest run --profile ci --workspace
 
       # nextest does not run Rust doctests (the `--test` in `-- | ... --test`
       # doc examples and rustdoc code blocks); cover them with a plain run.
@@ -244,6 +302,12 @@ jobs:
 
       - name: Check package world
         run: ./target/release/prism pkg check-world packages --strict
+
+      # Ordinary tests/checks must not rewrite committed generated artifacts. The
+      # accept/regeneration recipes (`just snap`, `just docs-gen`, `just hash`,
+      # `just tier-accept`, `just bless`) remain explicit review points.
+      - name: No surprise generated drift
+        run: git diff --exit-code
 
   web:
     name: Web playground
@@ -397,7 +461,7 @@ jobs:
       # do not overwrite each other's snapshots. The `mlir` tag makes these
       # markers distinct from the LLVM ones even were the dirs ever shared.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-mlir-${{ runner.os }}-${{ github.sha }}
@@ -420,7 +484,7 @@ jobs:
           TABLEGEN_220_PREFIX: /usr/lib/llvm-22
 
       - name: Run mlir parity test
-        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo nextest run --features mlir --test parity mlir_matches_interpreter
+        run: PATH=/usr/lib/llvm-22/bin:$PATH cargo nextest run --profile ci --features mlir --test native_parity mlir_matches_interpreter
         env:
           LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
@@ -428,6 +492,73 @@ jobs:
           PRISM_CC: /usr/lib/llvm-22/bin/clang
           PRISM_GATE_CACHE: "1"
           PRISM_GATE_FINGERPRINT: source
+
+  # The opt-in `mimalloc` feature routes the C runtime's allocation through mi_*
+  # (build.rs compiles the embedded runtime with -DPRISM_MIMALLOC; src/lib.rs links
+  # libmimalloc-sys so the shim resolves). It compiled clean but had no CI leg, so a
+  # change that broke the feature-gated code, or an mi_* symbol that stopped resolving
+  # at link, would only surface for whoever next ran `--features mimalloc` by hand.
+  # This job gates it two ways: a `cargo check` catches feature-gated code that stops
+  # compiling, and a bounded native-parity smoke builds+links the feature (proving the
+  # mi_* shim resolves, which check alone cannot) and diffs native output against the
+  # interpreter. The feature only swaps the compiler process's own allocator; generated
+  # native binaries go through the same link path regardless, so one corpus shard is a
+  # sufficient behavior smoke rather than the whole set.
+  mimalloc:
+    name: mimalloc feature
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      RUSTC_WRAPPER: sccache
+      # The parity smoke's verdict cache fingerprints the feature set, so these
+      # markers never collide with the plain-build (default-feature) ones.
+      PRISM_GATE_CACHE: "1"
+      PRISM_GATE_FINGERPRINT: source
+      # A high shard total keeps the smoke to a handful of the corpus's programs;
+      # index 0 pins which ones so the cache key is stable across runs.
+      PRISM_SHARD_TOTAL: "8"
+      PRISM_SHARD_INDEX: "0"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Bump when a build-script output (the vendored libm archive) changes
+          # shape in a way cargo's incremental can miss on a warm cache: forces a
+          # cold rebuild so `libprism_libm.a` is regenerated from current sources.
+          prefix-key: "v1-libm"
+
+      # Own gate-verdict cache key so this job's markers do not overwrite the
+      # Test/MLIR/parity snapshots. The feature fingerprint already keeps the
+      # marker contents distinct; the tag just separates the saved snapshots.
+      - name: Cache gate verdicts
+        uses: actions/cache@v6
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-mimalloc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-mimalloc-${{ runner.os }}-
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      # Fast fail: catches feature-gated code that stops compiling before paying
+      # for the full build+link of the parity smoke below.
+      - name: Check mimalloc feature compiles
+        run: cargo check --features mimalloc
+
+      # Builds+links the feature (mi_* must resolve) and diffs native output against
+      # the interpreter over one corpus shard, proving output stays byte-identical.
+      - name: Native parity smoke (mimalloc)
+        run: cargo test --features mimalloc --test native_parity native_matches_interpreter
 
   # The heavy native-parity corpus, split across N shards that run in parallel so
   # wall-clock is corpus/N rather than the whole thing serially in the Test job
@@ -468,7 +599,7 @@ jobs:
       # Per-shard gate-verdict cache: each shard owns a distinct key so the four
       # runs do not overwrite each other's snapshots.
       - name: Cache gate verdicts
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/gate-cache
           key: gate-verdicts-parity-${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
@@ -479,7 +610,7 @@ jobs:
         uses: ./.github/actions/setup-llvm
 
       - name: Native parity (shard ${{ matrix.shard }} of 4)
-        run: cargo test --test parity native_matches_interpreter
+        run: cargo test --test native_parity native_matches_interpreter
 
   nix:
     name: Nix dev shell + package

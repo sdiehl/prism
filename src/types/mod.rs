@@ -1,4 +1,5 @@
 pub(crate) mod effects;
+pub(crate) mod repr;
 pub(crate) mod ty;
 
 pub use crate::tc::{
@@ -6,8 +7,9 @@ pub use crate::tc::{
     DataInfo, DeclInfo, Dict, DictTable, EffOpInfo, Env, HeadKey, InstInfo, InstKeys, PathRes,
     Warning,
 };
+pub use repr::{is_or_null_element, repr_of_type, Repr};
 pub use ty::{
-    show_effects, Effects, Type, ARBITRARY_CLASS, CONS, DIV_CLASS, EQ_CLASS, HASH_CLASS,
-    IDENTIFIABLE, IDENTIFIABLE_BUNDLE, LENS, LIST, NIL, NUM_CLASS, ORD_CLASS, SERIALIZE_CLASS,
-    SHOW_CLASS, STABLE_CLASS,
+    show_effects, show_type_with_effects, Effects, Type, ARBITRARY_CLASS, CONS, DIV_CLASS,
+    EQ_CLASS, FLOAT_BUF, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, INT_BUF, LENS, LIST, NIL,
+    NUM_CLASS, ORD_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
 };

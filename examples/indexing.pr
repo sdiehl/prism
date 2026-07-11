@@ -24,7 +24,7 @@ fn word_counts(ws : List(String)) : HashMap(Int) =
     m[w] := (m[w] ?? 0) + 1
   m
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   var a := array_of_list([10, 20, 30])
   a[1] := 99
   println(show(a[1] ?? 0))

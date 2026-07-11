@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/guard_nonexhaustive.pr
 ---
 == tokens ==
@@ -168,7 +168,7 @@ Program {
 }
 
 == types ==
-Type Error: in `sign`: non-exhaustive match: missing _
+[E4001] Type Error: in `sign`: non-exhaustive match: missing _
    ╭─[ <source>:2:3 ]
    │
  2 │ ╭─▶   match n of

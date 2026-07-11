@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl};
 use crate::types::ty::Type;
@@ -21,19 +21,16 @@ pub(super) fn poly_recursion_hint(error: TypeError, decl: &Decl<Core>) -> TypeEr
         return error;
     }
     match error {
-        TypeError::Mismatch {
+        TypeError::TypeMismatch {
             span,
             expected,
             found,
-        } => TypeError::Other {
-            span,
-            msg: format!(
-                "type mismatch in recursive `{name}`: expected {expected}, got {found}. \
-                 If `{name}` is called at more than one type within its recursion group that is \
-                 polymorphic recursion; add a type signature to `{name}`.",
-                name = decl.name
-            ),
-        },
+        } => ErrKind::PolyRecursionMismatch {
+            name: decl.name.clone(),
+            expected,
+            found,
+        }
+        .at(span),
         other => other,
     }
 }

@@ -1,11 +1,11 @@
 effect Abort
-  ctl abort(Int) : Int
+  abort(Int) : Int
 
-fn prog() : !{Abort} Int =
+fn prog() : Int ! {Abort} =
   let x = abort(99)
   x + 1
 
 fn main() : Int =
   handle prog() with
-    final ctl abort(code) => code
+    never abort(code) => code
     return r => r

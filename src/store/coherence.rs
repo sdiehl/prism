@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::core::{instance_digest, Hashes};
+use crate::core::{instance_digest, Digest, Hashes};
 use crate::names::instance_method_prefix;
 use crate::store::disk::{CanonicalKey, Store};
 use crate::syntax::ast::{CanonicalDecl, InstanceDecl, Phase, Span, Ty};
@@ -157,7 +157,7 @@ fn canonical_bindings<P: Phase>(
                 class: key.0.clone(),
                 head: key.1.clone(),
             },
-            instance_hash: instance_digest(&chosen.class, &chosen.head, &methods),
+            instance_hash: instance_digest(&chosen.class, &chosen.head, &methods).into_string(),
             // Caret the `canonical` declaration when one designates this key (that
             // is where the author re-designates); otherwise the instance itself.
             span: decl.map_or(chosen.span, |d| d.span),
@@ -169,7 +169,7 @@ fn canonical_bindings<P: Phase>(
 // An instance's method behavior hashes, keyed by method name, recovered from the
 // lowered `i@<inst>@<method>` CoreFns. Mirrors the stdlib fingerprint so an
 // instance's store identity equals the one the fingerprint anchors.
-fn method_hashes(inst: &str, hashes: &Hashes) -> BTreeMap<String, String> {
+fn method_hashes(inst: &str, hashes: &Hashes) -> BTreeMap<String, Digest> {
     let prefix = instance_method_prefix(inst);
     hashes
         .iter()

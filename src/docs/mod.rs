@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::core::Digest;
 use crate::driver::{stdlib_driver_src, with_prelude, PRELUDE};
 use crate::error::Error;
 use crate::parse::{parse, ParseResult};
@@ -132,8 +133,8 @@ fn render_all(
     index_title: &str,
     index_blurb: &str,
     anchor: Option<&str>,
-    hashes: &BTreeMap<String, String>,
-    inst_hashes: &BTreeMap<String, String>,
+    hashes: &BTreeMap<String, Digest>,
+    inst_hashes: &BTreeMap<String, Digest>,
 ) -> Result<Generated, Error> {
     let mut pages = Vec::new();
     let mut examples = Vec::new();
@@ -269,7 +270,7 @@ pub fn stdlib_pages() -> Result<Generated, Error> {
     // names, so they share one lookup. Instances are lowercase like values (a
     // `showBool` value and a `showBool` instance coexist), so they are kept
     // separate and consulted only for instance entries.
-    let mut hashes: BTreeMap<String, String> = h
+    let mut hashes: BTreeMap<String, Digest> = h
         .defs
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.clone()))

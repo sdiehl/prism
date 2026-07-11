@@ -30,12 +30,12 @@ fn run(m : Moore(s, i, o), ins : List(i)) : List(o) = trace(m, m.init, ins)
 
 -- The interaction interface as an effect: pull the next input, push an output.
 effect Drive
-  ctl pull(Unit) : Int
-  ctl push(Int) : Unit
+  pull() : Int
+  push(Int) : Unit
 
-fn drive(m : Moore(Int, Int, Int), st : Int) : !{Drive} Unit =
+fn drive(m : Moore(Int, Int, Int), st : Int) : Unit ! {Drive} =
   push((m.out)(st))
-  let x = pull(())
+  let x = pull()
   drive(m, (m.step)(st, x))
 
 -- The handler is the environment the machine interacts with: it owns the input
@@ -44,8 +44,8 @@ fn drive(m : Moore(Int, Int, Int), st : Int) : !{Drive} Unit =
 fn run_eff(m : Moore(Int, Int, Int), ins : List(Int)) : List(Int) =
   let prog =
     handle drive(m, m.init) with
-      push(b, k) => \(rem, acc) -> k(())(rem, Cons(b, acc))
-      pull(u, k) =>
+      push(b) resume k => \(rem, acc) -> k(())(rem, Cons(b, acc))
+      pull() resume k =>
         \(rem, acc) -> match rem of { Nil => reverse(acc), Cons(x, rest) => k(x)(rest, acc) }
       return r => \(_rem, acc) -> reverse(acc)
   prog(ins, Nil)
@@ -82,7 +82,7 @@ fn series(
     out = \(s) -> (m2.out)(snd(s))
   }
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   -- Running total and running-total-mod-3, both Moore(Int, Int, Int).
   let summer = Moore { init = 0, step = \(s, a) -> s + a, out = \(s) -> s }
   let mod3 =

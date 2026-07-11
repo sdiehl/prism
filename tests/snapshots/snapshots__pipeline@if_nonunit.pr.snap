@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/if_nonunit.pr
 ---
 == tokens ==
@@ -80,7 +80,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: type mismatch: expected Int, got Unit
+[E1998] Type Error: in `main`: type mismatch: expected Int, got Unit
    ╭─[ <source>:3:7 ]
    │
  3 │     42

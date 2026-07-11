@@ -56,7 +56,7 @@ fn matches(re, s) : Bool =
     i += 1
   nullable(r)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   -- (a|b)* c
   let ab = Star(Alt(Chr(ord('a')), Chr(ord('b'))))
   let re = Seq(ab, Chr(ord('c')))

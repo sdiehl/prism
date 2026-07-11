@@ -1,0 +1,19 @@
+-- | Tracing probes.
+--
+-- `probe "name" do body` runs `body` only when the `PRISM_PROBES` environment
+-- variable names the probe: a comma-separated list of names, or `*` for all. It is
+-- off by default. A disabled probe evaluates neither its body nor the formatting
+-- inside it: the form desugars to `if probe_enabled("name") then body else ()`, so
+-- an untraced program pays one branch and allocates nothing on the hot path. The
+-- allocation certificate still sees the body, so a probe cannot smuggle allocation
+-- past `@ noalloc`.
+--
+-- Run this normally and only the greetings print. Run it with `PRISM_PROBES=greet`
+-- (or `PRISM_PROBES=*`) and each call emits its trace line first.
+fn greet(who : String) : Unit ! {IO} =
+  probe "greet" do println("[trace] greet called")
+  println(who)
+
+fn main() : Unit ! {IO} =
+  greet("hello")
+  greet("world")

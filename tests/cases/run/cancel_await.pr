@@ -3,12 +3,12 @@
 
 import Concurrent (..)
 
-fn looper() : !{Async(Int), IO} Int =
+fn looper() : Int ! {Async(Int), IO} =
   yield(())
   yield(())
   99
 
-fn scene() : !{Async(Int), IO} Int =
+fn scene() : Int ! {Async(Int), IO} =
   let w = fork(looper)
   yield(())
   cancel(w)

@@ -1,0 +1,149 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/once_nontail.pr
+---
+== tokens ==
+VOpen Effect UIdent("Ask") VOpen Ident("once") Ident("ask") LParen RParen Colon KwInt VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Ident("println") LParen Handle Ident("ask") LParen RParen Plus Int(IntLit { value: 5, suffix: None }) With LBrace Ident("ask") LParen RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 1, suffix: None }) RParen Plus Int(IntLit { value: 1, suffix: None }) Comma Return Ident("r") FatArrow Ident("r") RBrace RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "Ask",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "ask",
+                    params: [],
+                    ret: Int,
+                    grade: Once,
+                },
+            ],
+            span: 158..187,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 203..210,
+                    },
+                    [
+                        Spanned {
+                            node: Handle(
+                                Spanned {
+                                    node: Bin(
+                                        Add,
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "ask",
+                                                    ),
+                                                    span: 218..221,
+                                                },
+                                                [],
+                                            ),
+                                            span: 218..223,
+                                        },
+                                        Spanned {
+                                            node: Int(
+                                                IntLit {
+                                                    value: 5,
+                                                    suffix: None,
+                                                },
+                                            ),
+                                            span: 226..227,
+                                        },
+                                    ),
+                                    span: 218..227,
+                                },
+                                [
+                                    Op(
+                                        "ask",
+                                        [],
+                                        "k",
+                                        Spanned {
+                                            node: Bin(
+                                                Add,
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "k",
+                                                            ),
+                                                            span: 257..258,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Int(
+                                                                    IntLit {
+                                                                        value: 1,
+                                                                        suffix: None,
+                                                                    },
+                                                                ),
+                                                                span: 259..260,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 257..261,
+                                                },
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 1,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 264..265,
+                                                },
+                                            ),
+                                            span: 257..265,
+                                        },
+                                    ),
+                                    Return(
+                                        "r",
+                                        Spanned {
+                                            node: Var(
+                                                "r",
+                                            ),
+                                            span: 283..284,
+                                        },
+                                    ),
+                                ],
+                            ),
+                            span: 211..288,
+                        },
+                    ],
+                ),
+                span: 203..289,
+            },
+            wheres: [],
+            span: 189..289,
+        },
+    ],
+}
+
+== types ==
+[E6028] Type Error: handler clause for `ask` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+   ╭─[ <source>:8:23 ]
+   │
+ 8 │     ask() resume k => k(1) + 1,
+   │                       ────┬───  
+   │                           ╰───── handler clause for `ask` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+───╯

@@ -6,9 +6,10 @@
 //! every line it does not touch must survive. A general TOML re-emit cannot
 //! promise that (it normalizes), and pulling in a format-preserving TOML crate
 //! for a single append-or-replace is more dependency than the operation earns.
-//! So this is a small line-oriented editor: it finds the `[dependencies]`
-//! section, replaces the target key's line in place (or appends one), and leaves
-//! every other byte exactly as it found it. Only the edited key's own line
+//! The parser below builds a small format-preserving document model whose lines
+//! distinguish sections, assignments, comments, blanks, and opaque syntax. The
+//! editor changes one assignment node or inserts one, then renders every untouched
+//! node from its original bytes. Only the edited key's own line
 //! changes; an inline comment on that one line is not preserved, because the line
 //! is the thing being rewritten.
 
@@ -20,6 +21,86 @@ use crate::project::{hash_pin, DepSource};
 // is matched exactly so a subtable (`[dependencies.foo]`) or a neighbour section
 // ends the span rather than being mistaken for it.
 const DEPS_HEADER: &str = "[dependencies]";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SectionName {
+    Dependencies,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum LineKind {
+    Section(SectionName),
+    Assignment(String),
+    Blank,
+    Comment,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ManifestLine {
+    raw: String,
+    kind: LineKind,
+}
+
+impl ManifestLine {
+    fn parse(raw: String) -> Self {
+        let content = trimmed(&raw);
+        let kind = if content.is_empty() {
+            LineKind::Blank
+        } else if content.starts_with('#') {
+            LineKind::Comment
+        } else if is_section_header(content) {
+            if content == DEPS_HEADER {
+                LineKind::Section(SectionName::Dependencies)
+            } else {
+                LineKind::Section(SectionName::Other)
+            }
+        } else if let Some((key, _)) = content.split_once('=') {
+            let key = key.trim();
+            if key.is_empty() {
+                LineKind::Other
+            } else {
+                LineKind::Assignment(key.to_string())
+            }
+        } else {
+            LineKind::Other
+        };
+        Self { raw, kind }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ManifestDocument {
+    lines: Vec<ManifestLine>,
+}
+
+impl ManifestDocument {
+    fn parse(text: &str) -> Self {
+        Self {
+            lines: text
+                .split_inclusive('\n')
+                .map(|line| ManifestLine::parse(line.to_string()))
+                .collect(),
+        }
+    }
+
+    fn dependency_section(&self) -> Option<(usize, usize)> {
+        let header = self
+            .lines
+            .iter()
+            .position(|line| line.kind == LineKind::Section(SectionName::Dependencies))?;
+        let end = self.lines[header + 1..]
+            .iter()
+            .position(|line| matches!(line.kind, LineKind::Section(_)))
+            .map_or(self.lines.len(), |offset| header + 1 + offset);
+        Some((header, end))
+    }
+
+    fn render(self) -> String {
+        self.lines.into_iter().map(|line| line.raw).collect()
+    }
+}
 
 /// The `prism.toml` right-hand side for a dependency source.
 ///
@@ -47,35 +128,34 @@ pub fn render_source(source: &DepSource) -> String {
 /// target is returned byte-for-byte unchanged.
 #[must_use]
 pub fn set_dependency(text: &str, name: &str, value: &str) -> String {
-    let mut segs: Vec<String> = text.split_inclusive('\n').map(str::to_string).collect();
-
-    let Some(header) = segs.iter().position(|s| trimmed(s) == DEPS_HEADER) else {
+    let mut document = ManifestDocument::parse(text);
+    let Some((header, end)) = document.dependency_section() else {
         return append_new_section(text, name, value);
     };
 
-    // The section runs from just past its header to the next section header (or
-    // end of file).
-    let end = segs[header + 1..]
-        .iter()
-        .position(|s| is_section_header(s))
-        .map_or(segs.len(), |off| header + 1 + off);
-
-    if let Some(key_idx) = (header + 1..end).find(|&i| line_key(&segs[i]).as_deref() == Some(name))
-    {
-        segs[key_idx] = rewrite_line(&segs[key_idx], name, value);
-        return segs.concat();
+    if let Some(key_idx) = (header + 1..end).find(
+        |&index| matches!(&document.lines[index].kind, LineKind::Assignment(key) if key == name),
+    ) {
+        let line = &mut document.lines[key_idx];
+        line.raw = rewrite_line(&line.raw, name, value);
+        line.kind = LineKind::Assignment(name.to_string());
+        return document.render();
     }
 
-    // Not present: insert after the last content line of the section so the new
-    // key lands with its siblings, not below the blank line that separates
-    // sections. Falls back to just after the header for an empty section.
+    // Insert after section content but before its trailing blank separator.
     let insert_at = (header + 1..end)
         .rev()
-        .find(|&i| !trimmed(&segs[i]).is_empty())
-        .map_or(header + 1, |i| i + 1);
-    ensure_newline(&mut segs, insert_at);
-    segs.insert(insert_at, format!("{name} = {value}\n"));
-    segs.concat()
+        .find(|&index| document.lines[index].kind != LineKind::Blank)
+        .map_or(header + 1, |index| index + 1);
+    ensure_newline(&mut document.lines, insert_at);
+    document.lines.insert(
+        insert_at,
+        ManifestLine {
+            raw: format!("{name} = {value}\n"),
+            kind: LineKind::Assignment(name.to_string()),
+        },
+    );
+    document.render()
 }
 
 // Append a fresh `[dependencies]` section (with the one key) to a document that
@@ -103,20 +183,6 @@ fn rewrite_line(seg: &str, name: &str, value: &str) -> String {
     format!("{indent}{name} = {value}{eol}")
 }
 
-// The bare key of an assignment line (`key = ...`), or `None` for a blank line, a
-// comment, or a line with no `=`. Keys are trimmed; quoted TOML keys are not
-// unwrapped, since dependency names are bare identifiers.
-fn line_key(seg: &str) -> Option<String> {
-    let content = trimmed(seg);
-    if content.is_empty() || content.starts_with('#') {
-        return None;
-    }
-    content
-        .split_once('=')
-        .map(|(k, _)| k.trim().to_string())
-        .filter(|k| !k.is_empty())
-}
-
 // Whether a line is a TOML section header (`[..]` or `[[..]]` when trimmed).
 fn is_section_header(seg: &str) -> bool {
     let t = trimmed(seg);
@@ -141,11 +207,11 @@ fn trimmed(seg: &str) -> &str {
 
 // Ensure the segment before an insertion point ends in a newline, so the inserted
 // line begins on its own row even when the file's last line had no terminator.
-fn ensure_newline(segs: &mut [String], insert_at: usize) {
+fn ensure_newline(lines: &mut [ManifestLine], insert_at: usize) {
     if insert_at > 0 {
-        let prev = &mut segs[insert_at - 1];
-        if !prev.ends_with('\n') {
-            prev.push('\n');
+        let previous = &mut lines[insert_at - 1].raw;
+        if !previous.ends_with('\n') {
+            previous.push('\n');
         }
     }
 }
@@ -155,17 +221,16 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const BASE: &str = "\
-[package]
-name = \"app\" # the app
+    const BASE: &str = r#"[package]
+name = "app" # the app
 
 [bin]
-entry = \"src/main.pr\"
+entry = "src/main.pr"
 
 [dependencies]
-geo = { path = \"../geo\" } # local dep
-util = \"../util\"
-";
+geo = { path = "../geo" } # local dep
+util = "../util"
+"#;
 
     #[test]
     fn replaces_an_existing_key_in_place_touching_nothing_else() {
@@ -195,7 +260,12 @@ util = \"../util\"
 
     #[test]
     fn creates_the_section_when_absent() {
-        let no_deps = "[package]\nname = \"a\"\n\n[bin]\nentry = \"s.pr\"\n";
+        let no_deps = r#"[package]
+name = "a"
+
+[bin]
+entry = "s.pr"
+"#;
         let out = set_dependency(no_deps, "geo", "{ path = \"../geo\" }");
         assert!(out.contains("[dependencies]\ngeo = { path = \"../geo\" }\n"));
         // The original body is untouched and the section is separated by a blank.
@@ -230,7 +300,12 @@ util = \"../util\"
             ),
         ] {
             let doc = set_dependency(
-                "[package]\nname = \"a\"\n\n[bin]\nentry = \"s.pr\"\n",
+                r#"[package]
+name = "a"
+
+[bin]
+entry = "s.pr"
+"#,
                 name,
                 &render_source(&source),
             );

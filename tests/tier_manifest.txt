@@ -1,4 +1,4 @@
-# Effect-lowering tier manifest (H3). One `<program>\t<tier>` line per corpus
+# Effect-lowering tier manifest. One `<program>\t<tier>` line per corpus
 # program, sorted. The golden pinned by tests/perf_gate.rs::tier_manifest_holds.
 # A tier moving to a costlier one (see prism::EFFECT_TIERS order) is a silent
 # performance regression and fails CI; regenerate after a reviewed improvement
@@ -23,6 +23,7 @@ examples/classes.pr	pure
 examples/cli.pr	selective-free-monad
 examples/clock.pr	whole-program-free-monad
 examples/collatz.pr	pure
+examples/compose.pr	pure
 examples/comprehension.pr	whole-program-free-monad
 examples/condition.pr	selective-free-monad
 examples/curry.pr	pure
@@ -94,6 +95,7 @@ examples/pipeline.pr	whole-program-free-monad
 examples/poly.pr	pure
 examples/polynomial.pr	pure
 examples/primes.pr	pure
+examples/probe.pr	pure
 examples/proptest.pr	whole-program-free-monad
 examples/protocol_ladder.pr	whole-program-free-monad
 examples/queens.pr	selective-free-monad
@@ -158,6 +160,7 @@ tests/cases/run/classes.pr	pure
 tests/cases/run/combine_effects.pr	selective-free-monad
 tests/cases/run/comp_guard_dispatch.pr	whole-program-free-monad
 tests/cases/run/comp_guards.pr	whole-program-free-monad
+tests/cases/run/comp_in_annotated_row.pr	whole-program-free-monad
 tests/cases/run/comp_map_once.pr	state-fusion
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
@@ -186,6 +189,7 @@ tests/cases/run/final_ctl.pr	selective-free-monad
 tests/cases/run/fip.pr	pure
 tests/cases/run/fip_inplace.pr	pure
 tests/cases/run/fixed_ints.pr	pure
+tests/cases/run/flat_array.pr	selective-free-monad
 tests/cases/run/float_math.pr	pure
 tests/cases/run/float_prec.pr	pure
 tests/cases/run/floats.pr	pure
@@ -227,12 +231,14 @@ tests/cases/run/named_handlers.pr	selective-free-monad
 tests/cases/run/neg_lanes.pr	pure
 tests/cases/run/nested_patterns.pr	pure
 tests/cases/run/nested_split.pr	pure
+tests/cases/run/noescape.pr	pure
 tests/cases/run/nullary_fn.pr	pure
 tests/cases/run/num_fixed_wrap.pr	pure
 tests/cases/run/num_float_ieee.pr	pure
 tests/cases/run/num_int_div.pr	pure
 tests/cases/run/numeric_separators.pr	pure
 tests/cases/run/nursery_name_collision.pr	whole-program-free-monad
+tests/cases/run/once.pr	pure
 tests/cases/run/open_nontail.pr	selective-free-monad
 tests/cases/run/opt_chain.pr	selective-free-monad
 tests/cases/run/optics_each.pr	pure
@@ -242,12 +248,14 @@ tests/cases/run/optics_prism.pr	pure
 tests/cases/run/optics_read.pr	selective-free-monad
 tests/cases/run/optics_where.pr	pure
 tests/cases/run/option_chain.pr	pure
+tests/cases/run/or_null.pr	pure
 tests/cases/run/ord_dispatch.pr	pure
 tests/cases/run/ordered_wire_stopgap.pr	whole-program-free-monad
 tests/cases/run/param_eff.pr	evidence
 tests/cases/run/parse_float.pr	pure
 tests/cases/run/pattern_views.pr	pure
 tests/cases/run/poly_print.pr	pure
+tests/cases/run/portable.pr	pure
 tests/cases/run/primes.pr	pure
 tests/cases/run/print_structural.pr	pure
 tests/cases/run/quickcheck_detect.pr	whole-program-free-monad
@@ -271,9 +279,13 @@ tests/cases/run/strings_lib.pr	pure
 tests/cases/run/sugar_if.pr	evidence
 tests/cases/run/sugar_letpat.pr	pure
 tests/cases/run/sugar_try.pr	pure
+tests/cases/run/tbuf.pr	pure
+tests/cases/run/teleport.pr	pure
+tests/cases/run/tensor.pr	selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr	whole-program-free-monad
 tests/cases/run/trmc.pr	pure
 tests/cases/run/tuple_eq_ord.pr	selective-free-monad
+tests/cases/run/unboxed_run.pr	pure
 tests/cases/run/var_basic.pr	pure
 tests/cases/run/var_effects.pr	pure
 tests/cases/run/var_in_handler.pr	selective-free-monad

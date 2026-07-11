@@ -152,7 +152,7 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
     // The two backends must agree byte for byte; the interpreter oracle backstops
     // both, so a three-way agreement is what the green line asserts.
     if llvm_out != second_out || llvm_out != interp {
-        return Err(Error::Codegen(format!(
+        return Err(Error::CodegenVerification(format!(
             "attest: backends diverged for root {root}; LLVM and {second_name} are not \
              byte-identical (this is the invariant the attestation exists to catch)"
         )));
@@ -244,7 +244,7 @@ pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Er
             .collect();
         if !extra.is_empty() {
             let row: Vec<&str> = inferred.iter().map(|s| s.as_str()).collect();
-            return Err(Error::Ice(format!(
+            return Err(Error::InternalInvariant(format!(
                 "effect reconciliation: `{}` can still perform {extra:?} after lowering, \
                  but its inferred row is {row:?}",
                 f.name
@@ -296,7 +296,7 @@ pub(super) fn fip_check(
             Some(d) if d.fip == Fip::Fbip => usage_check_message("fbip", &d.name, &msg),
             _ => msg,
         };
-        Error::Type(TypeError::Other { span, msg })
+        Error::Type(TypeError::TypeFailure { span, msg })
     };
     let sigs = borrow_sigs(program);
     let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
@@ -390,7 +390,7 @@ pub(super) fn replayable_check(
                 },
                 offending.join("`, `")
             );
-            return Err(Error::Type(TypeError::Other { span: d.span, msg }));
+            return Err(Error::Type(TypeError::TypeFailure { span: d.span, msg }));
         }
     }
     Ok(())

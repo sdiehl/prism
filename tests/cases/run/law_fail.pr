@@ -6,14 +6,14 @@
 import Quickcheck (..)
 
 effect State
-  ctl get(Unit) : Int
-  ctl put(Int) : Unit
+  get() : Int
+  put(Int) : Unit
 
 fn run_state(s0, action : () -> a ! {State | e}) =
   let f =
     handle action() with
-      get(_u, k) => \(s) -> k(s)(s)
-      put(v, k) => \(_s) -> k(())(v)
+      get() resume k => \(s) -> k(s)(s)
+      put(v) resume k => \(_s) -> k(())(v)
       return r => \(s) -> (r, s)
   f(s0)
 
@@ -21,7 +21,7 @@ fn run_state(s0, action : () -> a ! {State | e}) =
 -- `optional` leaves `Fail` open, which a pure property cannot carry).
 fn attempt(action : () -> a ! {Fail | e}) =
   handle action() with
-    final ctl fail() => None
+    never fail() => None
     return r => Some(r)
 
 -- Left zero: `fail` discards its continuation, so anything after it is dead. A
@@ -44,7 +44,7 @@ fn body(b : Bool, s1 : Int) : Int =
   if b then
     fail()
   else
-    get(())
+    get()
 
 fn prop_fail_through_state(t) =
   match t of

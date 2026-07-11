@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use marginalia::Span;
 
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::syntax::ast::{Decl, Program, Ty};
 
 // Type synonyms are purely syntactic: each names a parameterized type and is
@@ -78,15 +78,13 @@ fn resolve_synonym(
         .synonyms
         .iter()
         .find(|s| s.name == name)
-        .ok_or_else(|| TypeError::Other {
-            span: Span::empty(0),
-            msg: format!("unknown type synonym `{name}`"),
-        })?;
+        .ok_or_else(|| ErrKind::UnknownSynonym { name: name.into() }.at(Span::empty(0)))?;
     if path.iter().any(|p| p == name) {
-        return Err(TypeError::Other {
-            span: s.span,
-            msg: format!("type synonym cycle: {} -> {name}", path.join(" -> ")),
-        });
+        return Err(ErrKind::DefCycle {
+            kind: "type synonym".into(),
+            path: format!("{} -> {name}", path.join(" -> ")),
+        }
+        .at(s.span));
     }
     path.push(name.into());
     let mut body = s.ty.clone();
@@ -132,14 +130,12 @@ fn apply_syn(t: &mut Ty, map: &SynMap) -> Result<(), TypeError> {
         }
         if let Some((params, body, span)) = map.get(name) {
             if params.len() != args.len() {
-                return Err(TypeError::Other {
-                    span: *span,
-                    msg: format!(
-                        "type synonym `{name}` expects {} argument(s), got {}",
-                        params.len(),
-                        args.len()
-                    ),
-                });
+                return Err(ErrKind::SynonymArity {
+                    name: name.clone(),
+                    want: params.len(),
+                    got: args.len(),
+                }
+                .at(*span));
             }
             let sub = params.iter().cloned().zip(args.iter().cloned()).collect();
             *t = subst_ty(body, &sub);
@@ -173,10 +169,12 @@ fn check_arity(name: &str, want: usize, got: usize, prog: &Program) -> Result<()
         .iter()
         .find(|s| s.name == name)
         .map_or_else(|| Span::empty(0), |s| s.span);
-    Err(TypeError::Other {
-        span,
-        msg: format!("type synonym `{name}` expects {want} argument(s), got {got}"),
-    })
+    Err(ErrKind::SynonymArity {
+        name: name.into(),
+        want,
+        got,
+    }
+    .at(span))
 }
 
 // Substitute synonym parameters with their arguments in an expanded body.

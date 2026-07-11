@@ -1,7 +1,7 @@
 -- Scientific notation always denotes a Float. The exponent sign lives in the
 -- lexer, so `1e-25` reads as one token and never collides with unary minus.
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(1e3)
   println(1E3)
   println(1.5e3)

@@ -1,0 +1,24 @@
+-- `@ portable` on a closure parameter is a mobility contract: the closure may
+-- capture only names that travel to a fresh runtime -- a top-level function or
+-- constructor (a content-addressed code reference), another `@ portable`
+-- parameter, or a portable-typed parameter (scalar data). Like `@ once`, the fact
+-- is a compile-time check erased before Core, so an accepted program is
+-- byte-identical on both backends. `@ {once, portable}` is the mobile single-use
+-- contract `teleport` requires; it enforces both axes at once.
+fn square(n : Int) : Int = n * n
+
+fn run_portable(f : (() -> Int) @ portable) : Int = f()
+
+-- Captures only the top-level `square` (a code reference): portable.
+fn from_code() : Int = run_portable(\() -> square(6))
+
+-- Captures the enclosing scalar parameter `x` (portable data).
+fn from_scalar(x : Int) : Int = run_portable(\() -> x + 1)
+
+-- The combined single-use, mobile contract: called at most once, portable.
+fn teleport(f : (() -> Int) @ {once, portable}) : Int = f()
+
+fn main() =
+  println(from_code())
+  println(from_scalar(41))
+  println(teleport(\() -> square(5)))

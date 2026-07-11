@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/mask_unknown.pr
 ---
 == tokens ==
@@ -56,7 +56,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: unknown effect `Nope` in mask
+[E5007] Type Error: in `main`: unknown effect `Nope` in mask
    ╭─[ <source>:1:21 ]
    │
  1 │ fn main() = println(mask<Nope>(1))

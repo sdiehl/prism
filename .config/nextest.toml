@@ -1,0 +1,93 @@
+[profile.default]
+failure-output = "immediate-final"
+status-level = "fail"
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[profile.ci]
+failure-output = "immediate-final"
+status-level = "fail"
+slow-timeout = { period = "60s", terminate-after = 6 }
+
+[test-groups]
+native-oracles = { max-threads = 1 }
+snapshot-goldens = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_parity)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_tier)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_fusion)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_perf)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_conformance)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_sort)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(native_cache)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(snapshots)'
+test-group = 'snapshot-goldens'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_parity)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_tier)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_fusion)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_perf)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_conformance)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_sort)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(native_cache)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(snapshots)'
+test-group = 'snapshot-goldens'
+slow-timeout = { period = "120s", terminate-after = 8 }

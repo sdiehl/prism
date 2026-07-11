@@ -4,7 +4,8 @@ use marginalia::Span;
 
 use super::effects::{rw, Vars};
 use super::{call, evar, sp, sp_sugar, Cx};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
+use crate::kw;
 use crate::names;
 use crate::syntax::ast::{
     Arm, BinOp, Converter, Core, Expr, Marker, NodeId, Param, Pattern, PatternDecl, Rung, Spanned,
@@ -12,8 +13,8 @@ use crate::syntax::ast::{
 };
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
-// clause); any other keyword is the optional `make` clause.
-const VIEW_KW: &str = "view";
+// clause); any other keyword is the optional `make` clause. `kw::VIEW`/`kw::MAKE`
+// are the canonical spellings.
 
 // The flip messages shown when a `class`/`instance`/`effect` body is opened with
 // a brace instead of layout. Each names the construct and the member it holds so
@@ -25,12 +26,55 @@ pub const FLIP_INSTANCE: &str =
 pub const FLIP_EFFECT: &str =
     "effect bodies use layout: remove the braces and put each operation on its own indented line";
 
+// A leading op/clause word that names no grade. The grades are `never`, `once`,
+// and `many`; `many` is the unmarked default, so it is also the message for a
+// stray `ctl`/`fun`/`final`, which are no longer grade spellings.
+#[must_use]
+pub fn grade_word_msg(word: &str) -> String {
+    format!(
+        "`{word}` is not a grade: an operation grade is `never`, `once`, or `many`, \
+         or omit it for `many`"
+    )
+}
+
+// A handler clause written `many op(...)`: the multishot clause binds the
+// continuation explicitly instead of taking a grade keyword.
+pub const GRADE_MANY_CLAUSE: &str =
+    "a `many` clause resumes explicitly: bind the continuation as the last parameter and call it, \
+     `op(params, k) => ...`, with no leading grade";
+
 // Shown when a type-argument position holds dimension arithmetic (`Vec(a, n + 1)`).
 // The `Nat` kind unifies dimensions by equality of literals and variables only, so
 // there is no `+` on a dimension; the message states what a dimension may be.
 pub const DECLINE_DIM_ARITH: &str =
     "arithmetic on dimensions is not supported: a dimension is a plain natural literal \
      (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only";
+
+// Shown when a multishot handler clause writes the retired trailing-continuation
+// form (`op(params, k) => ...`). The continuation now follows `resume`, giving it a
+// visibly special clause position instead of masquerading as a final parameter.
+pub const MIGRATE_RESUME: &str =
+    "a multishot handler clause names its continuation after `resume`: write \
+     `op(params) resume k => ...` instead of trailing the continuation as a parameter";
+
+// Shown when a float dot-operator (`+.` `*.` `<.` ...) appears. The plain
+// operators became lane-polymorphic over Float, so the Float-only dotted spellings
+// were removed; the parser still recognizes them structurally to point at the plain
+// operator that now covers Float rather than failing as a bare parse error.
+#[must_use]
+pub fn dot_op_removed(dot: &str, plain: &str) -> String {
+    format!(
+        "the float dot-operator `{dot}` was removed: the plain operator `{plain}` is \
+         lane-polymorphic over Float, so write `{plain}`"
+    )
+}
+
+// Shown when a declaration writes the retired effect-before-result order
+// (`: !{E} T`). The effect row now follows the result type, matching a function
+// type's own `-> cod ! {row}`, so a signature reads left to right.
+pub const MIGRATE_RET_ORDER: &str =
+    "the effect row now follows the result type: write `: Result ! {Effects}` \
+     instead of `: !{Effects} Result`";
 
 // One entry of a `stable` block body: a version rung or a hand-written converter.
 // The parser collects them interleaved (they share the comma-separated body);
@@ -300,10 +344,7 @@ pub(super) fn expand_interp(
     // construction; surface a structured error rather than panic if a malformed
     // `Interp` slice ever reaches here.
     let Some(last) = pieces.pop() else {
-        return Err(TypeError::Other {
-            span,
-            msg: "empty string interpolation".into(),
-        });
+        return Err(ErrKind::EmptyInterpolation.at(span));
     };
     Ok(pieces.into_iter().rev().fold(last, |acc, p| {
         call(evar("concat", span), vec![p, acc], span)
@@ -493,17 +534,17 @@ pub fn pattern_decl(
             Expr::Lam(ps, _) => ps.len(),
             // A bare identifier in a `view` clause names a class method, resolved
             // against the `for` class in lower_patterns (class-dispatched view).
-            Expr::Var(_) if kw == VIEW_KW => 1,
+            Expr::Var(_) if kw == kw::VIEW => 1,
             _ => return Err((cspan, format!("`{kw}` clause must be a lambda"))),
         };
-        let want = if kw == VIEW_KW { 1 } else { params.len() };
+        let want = if kw == kw::VIEW { 1 } else { params.len() };
         if arity != want {
             return Err((
                 cspan,
                 format!("`{kw}` for pattern `{name}` must take {want} argument(s), this lambda takes {arity}"),
             ));
         }
-        let slot = if kw == VIEW_KW { &mut view } else { &mut make };
+        let slot = if kw == kw::VIEW { &mut view } else { &mut make };
         if slot.replace(e).is_some() {
             return Err((
                 cspan,

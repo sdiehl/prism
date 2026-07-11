@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/streams_forin.pr
 ---
 == tokens ==
@@ -212,7 +212,7 @@ Program {
 }
 
 == types ==
-Scope Error: in `main`: unbound variable 'sof'
+[E2000] Scope Error: in `main`: unbound variable 'sof'
    ╭─[ <source>:2:12 ]
    │
  2 │   for x in sof([1, 2, 3]) do

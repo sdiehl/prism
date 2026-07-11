@@ -3,7 +3,7 @@
 use marginalia::Span;
 
 use super::{rw, Vars};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::syntax::ast::{Core, Expr, Sugar, S};
 use crate::syntax::desugar::{call, evar, Cx};
 
@@ -48,30 +48,33 @@ pub(super) fn fill_call(
         if let Expr::Sugar(Sugar::Assign(k, v)) = &a.node {
             seen_named = true;
             let Some(j) = sig.iter().position(|(pn, _)| pn == k) else {
-                return Err(TypeError::Other {
-                    span: a.span,
-                    msg: format!("`{name}` has no parameter `{k}`"),
-                });
+                return Err(ErrKind::NoParameter {
+                    fn_name: name.to_string(),
+                    param: k.clone(),
+                }
+                .at(a.span));
             };
             if slots[j].is_some() {
-                return Err(TypeError::Other {
-                    span: a.span,
-                    msg: format!("argument `{k}` to `{name}` given more than once"),
-                });
+                return Err(ErrKind::ArgGivenTwice {
+                    param: k.clone(),
+                    fn_name: name.to_string(),
+                }
+                .at(a.span));
             }
             slots[j] = Some(rw(v, env, cx)?);
         } else {
             if seen_named {
-                return Err(TypeError::Other {
-                    span: a.span,
-                    msg: format!("positional argument after named argument in call to `{name}`"),
-                });
+                return Err(ErrKind::PositionalAfterNamed {
+                    fn_name: name.to_string(),
+                }
+                .at(a.span));
             }
             if pos >= n {
-                return Err(TypeError::Other {
-                    span: a.span,
-                    msg: format!("`{name}` takes {n} argument(s), more were given"),
-                });
+                return Err(ErrKind::TooManyArgs {
+                    fn_name: name.to_string(),
+                    takes: n,
+                }
+                .at(a.span));
             }
             slots[pos] = Some(rw(a, env, cx)?);
             pos += 1;
@@ -84,10 +87,11 @@ pub(super) fn fill_call(
             None => match &sig[j].1 {
                 Some(d) => filled.push(rw(d, &Vars::new(), cx)?),
                 None => {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("call to `{name}` is missing argument `{}`", sig[j].0),
-                    });
+                    return Err(ErrKind::MissingArgument {
+                        fn_name: name.to_string(),
+                        param: sig[j].0.clone(),
+                    }
+                    .at(span));
                 }
             },
         }

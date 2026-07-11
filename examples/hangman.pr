@@ -6,25 +6,25 @@
 --
 -- The hangman.in fixture plays a winning game.
 
-fn mask_char(secret, guessed, i) : ! String =
+fn mask_char(secret, guessed, i) : String =
   let ch = substring(secret, i, 1)
   if str_contains(guessed, ch) then
     ch
   else
     "_"
 
-fn reveal(secret, guessed, i) : ! String =
+fn reveal(secret, guessed, i) : String =
   if i >= str_len(secret) then
     ""
   else
     concat(mask_char(secret, guessed, i), reveal(secret, guessed, i + 1))
 
-fn str_contains(hay, needle) : ! Bool =
+fn str_contains(hay, needle) : Bool =
   index_of_from(char_at(needle, 0), hay, 0) >= 0
 
-fn solved(secret, guessed) : ! Bool = str_eq(reveal(secret, guessed, 0), secret)
+fn solved(secret, guessed) : Bool = str_eq(reveal(secret, guessed, 0), secret)
 
-fn play(secret, guessed, lives) : !{IO, Console} Unit =
+fn play(secret, guessed, lives) : Unit ! {IO, Console} =
   println(reveal(secret, guessed, 0))
   if solved(secret, guessed) then
     println(lives)
@@ -36,4 +36,4 @@ fn play(secret, guessed, lives) : !{IO, Console} Unit =
     let hit = str_contains(secret, g)
     play(secret, guessed2, if hit then lives else lives - 1)
 
-fn main() : !{IO} Unit = play("prism", "", 5)
+fn main() : Unit ! {IO} = play("prism", "", 5)

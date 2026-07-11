@@ -44,6 +44,8 @@ const PRISM_ARRAY_H: &str = "prism_array.h";
 const PRISM_ARRAY_C: &str = "prism_array.c";
 const PRISM_BUFFER_H: &str = "prism_buffer.h";
 const PRISM_BUFFER_C: &str = "prism_buffer.c";
+const PRISM_TBUF_H: &str = "prism_tbuf.h";
+const PRISM_TBUF_C: &str = "prism_tbuf.c";
 const PRISM_SORT_H: &str = "prism_sort.h";
 const PRISM_SORT_C: &str = "prism_sort.c";
 const PRISM_KONT_H: &str = "prism_kont.h";
@@ -61,6 +63,7 @@ const BASE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Sort,
     RuntimeModule::Array,
     RuntimeModule::Buffer,
+    RuntimeModule::TypedBuffer,
     RuntimeModule::Io,
 ];
 const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
@@ -73,6 +76,7 @@ const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Sort,
     RuntimeModule::Array,
     RuntimeModule::Buffer,
+    RuntimeModule::TypedBuffer,
     RuntimeModule::NativeKont,
     RuntimeModule::Io,
 ];
@@ -98,6 +102,7 @@ enum RuntimeModule {
     Sort,
     Array,
     Buffer,
+    TypedBuffer,
     NativeKont,
     Io,
 }
@@ -123,6 +128,7 @@ impl RuntimeModule {
             Self::Sort => &[PRISM_SORT_H, PRISM_SORT_C],
             Self::Array => &[PRISM_ARRAY_H, PRISM_ARRAY_C],
             Self::Buffer => &[PRISM_BUFFER_H, PRISM_BUFFER_C],
+            Self::TypedBuffer => &[PRISM_TBUF_H, PRISM_TBUF_C],
             Self::NativeKont => &[PRISM_KONT_H, PRISM_KONT_C],
             Self::Io => &[PRISM_IO_H, PRISM_IO_C],
         }

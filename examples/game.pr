@@ -7,7 +7,7 @@
 
 type Hint = TooLow | TooHigh | Exact
 
-fn hint(secret, guess) : ! Hint =
+fn hint(secret, guess) : Hint =
   if guess < secret then
     TooLow
   elif guess > secret then
@@ -15,7 +15,7 @@ fn hint(secret, guess) : ! Hint =
   else
     Exact
 
-fn play(secret, round) : !{IO, Console} Int =
+fn play(secret, round) : Int ! {IO, Console} =
   let guess = read_int()
   match hint(secret, guess) of
     Exact => round
@@ -26,7 +26,7 @@ fn play(secret, round) : !{IO, Console} Int =
       println(1)
       play(secret, round + 1)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let secret = 63
   let rounds = play(secret, 1)
   println(rounds)

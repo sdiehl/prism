@@ -31,7 +31,7 @@ fn countdown(start : Int) : Int =
     ticks += 1
   ticks
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(show_int(sum_evens(10)))
   println(show_int(first_factor(91)))
   println(show_int(first_factor(97)))

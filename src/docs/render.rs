@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use crate::core::Digest;
 use crate::fmt::decl::{fmt_class, fmt_data, fmt_effect, fmt_labels, fmt_ty};
 use crate::syntax::ast::Program;
 
@@ -221,7 +222,7 @@ fn block_tag(code: &str) -> &'static str {
 // aliases have none (see the module docs). Emitted as an `h-<hex>` fence token
 // the theme turns into a subtle pill beside the block's `Σ` badge; the pill shows
 // a short prefix but copies the full hash on click.
-fn hash_class(hashes: &BTreeMap<String, String>, spec: &ModSpec, name: &str) -> String {
+fn hash_class(hashes: &BTreeMap<String, Digest>, spec: &ModSpec, name: &str) -> String {
     let qualified = format!("{}.{}", spec.dotted, name);
     hashes
         .get(&qualified)
@@ -238,8 +239,8 @@ pub(crate) fn page(
     program: &Program,
     trivia: &marginalia::TriviaTable,
     sigs: &BTreeMap<String, String>,
-    hashes: &BTreeMap<String, String>,
-    inst_hashes: &BTreeMap<String, String>,
+    hashes: &BTreeMap<String, Digest>,
+    inst_hashes: &BTreeMap<String, Digest>,
 ) -> (String, String, Vec<Example>) {
     let docs = extract(trivia, &all_starts(program));
     let entries = collect_entries(spec, program, sigs);

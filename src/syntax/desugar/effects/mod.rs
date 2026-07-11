@@ -11,7 +11,7 @@ use marginalia::Span;
 
 use super::sugar::expand_interp;
 use super::{call, evar, lam1, sp, Cx};
-use crate::error::TypeError;
+use crate::error::{ErrKind, TypeError};
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
     Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, PathStep, Pattern, Qualifier, Sugar,
@@ -26,7 +26,7 @@ mod vars;
 mod views;
 
 use defaults::fill_call;
-pub(in crate::syntax::desugar) use escape::referenced_names;
+pub(in crate::syntax::desugar) use escape::{referenced_names, token_escapes};
 use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
@@ -47,9 +47,45 @@ fn core_param(p: &Param) -> Param<Core> {
 // local that shadows any top-level fn of the same name (so its calls bypass the
 // named/default-argument rewrite).
 #[derive(Clone)]
+pub(super) struct VarOps {
+    pub get: String,
+    pub put: String,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SurfaceOpName(String);
+
+#[derive(Clone)]
+struct PrivateOpName(String);
+
+#[derive(Clone)]
+pub(super) struct InstanceOps(BTreeMap<SurfaceOpName, PrivateOpName>);
+
+impl InstanceOps {
+    fn from_names(ops: &BTreeMap<String, String>) -> Self {
+        Self(
+            ops.iter()
+                .map(|(surface, private)| {
+                    (
+                        SurfaceOpName(surface.clone()),
+                        PrivateOpName(private.clone()),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .get(&SurfaceOpName(name.to_string()))
+            .map(|name| name.0.as_str())
+    }
+}
+
+#[derive(Clone)]
 pub(super) enum Binding {
-    Var(String, String),
-    Inst(BTreeMap<String, String>),
+    Var(VarOps),
+    Instance(InstanceOps),
     Local,
 }
 
@@ -65,39 +101,27 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
     let span = e.span;
     let node: Expr<Core> = match &e.node {
         Expr::Marker(Marker::With) => {
-            return Err(TypeError::Other {
-                span,
-                msg: "`with` cannot be the last statement of a block: there is nothing for it to wrap".into(),
-            });
+            return Err(ErrKind::WithNotLast.at(span));
         }
         // `Try`/`Interp` markers only ever appear as a call head, handled by the
         // `Call` arms below; a bare one is unreachable, but surface an error
         // rather than crash if a malformed marker reaches here.
         Expr::Marker(Marker::Try | Marker::Interp) => {
-            return Err(TypeError::Other {
-                span,
-                msg: "internal: stray interpolation or `?` marker".into(),
+            return Err(TypeError::InternalInvariant {
+                msg: "stray interpolation or `?` marker".into(),
             });
         }
         Expr::Var(x) => match env.get(x) {
-            Some(Binding::Var(get, _)) => {
-                return Ok(call(evar(get, span), vec![sp(Expr::Unit, span)], span));
+            Some(Binding::Var(ops)) => {
+                return Ok(call(evar(&ops.get, span), vec![sp(Expr::Unit, span)], span));
             }
-            Some(Binding::Inst(_)) => {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!(
-                        "handler instance `{x}` is not a value: call its operations as `{x}.op(...)`"
-                    ),
-                });
+            Some(Binding::Instance(_)) => {
+                return Err(ErrKind::InstanceNotValue { name: x.clone() }.at(span));
             }
             Some(Binding::Local) => Expr::Var(x.clone()),
             None => {
                 if cx.patterns.contains_key(x) {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("pattern `{x}` is not a value: apply it as `{x}(...)`"),
-                    });
+                    return Err(ErrKind::PatternNotValue { name: x.clone() }.at(span));
                 }
                 Expr::Var(x.clone())
             }
@@ -176,10 +200,7 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             return expand_interp(args, span, env, cx);
         }
         Expr::Call(f, _) if matches!(&f.node, Expr::Marker(Marker::Try)) => {
-            return Err(TypeError::Other {
-                span,
-                msg: "`?` is only allowed on a whole statement: write `let x = e?` or `e?`".into(),
-            });
+            return Err(ErrKind::TryNotWholeStatement.at(span));
         }
         // `f.op(args)` parses as `op(f, args)`; when the receiver is a handler
         // instance in scope, the call dispatches to its private op instead.
@@ -188,35 +209,32 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             if let Expr::Var(n) = &f.node {
                 if let Some(&(arity, has_make)) = cx.patterns.get(n) {
                     if !has_make {
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!("pattern `{n}` has no `make` clause and cannot be used as an expression"),
-                        });
+                        return Err(ErrKind::PatternNoMake { name: n.clone() }.at(span));
                     }
                     if args.len() != arity {
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!(
-                                "pattern `{n}` takes {arity} argument(s), {} given",
-                                args.len()
-                            ),
-                        });
+                        return Err(ErrKind::PatternArity {
+                            name: n.clone(),
+                            arity,
+                            got: args.len(),
+                        }
+                        .at(span));
                     }
                     let args2: Result<Vec<_>, _> = args.iter().map(|a| rw(a, env, cx)).collect();
                     return Ok(call(evar(&names::pat_make(n), f.span), args2?, span));
                 }
             }
             if let (Expr::Var(m), Some(Expr::Var(r))) = (&f.node, args.first().map(|a| &a.node)) {
-                if let Some(Binding::Inst(ops)) = env.get(r) {
-                    let Some(mangled) = ops.get(m).cloned() else {
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!("handler instance `{r}` has no operation `{m}`"),
-                        });
+                if let Some(Binding::Instance(ops)) = env.get(r) {
+                    let Some(mangled) = ops.get(m) else {
+                        return Err(ErrKind::InstanceNoOp {
+                            instance: r.clone(),
+                            op: m.clone(),
+                        }
+                        .at(span));
                     };
                     let rest: Result<Vec<_>, _> =
                         args[1..].iter().map(|a| rw(a, env, cx)).collect();
-                    return Ok(call(evar(&mangled, f.span), rest?, span));
+                    return Ok(call(evar(mangled, f.span), rest?, span));
                 }
             }
             // A call of a top-level fn (not locally shadowed) may carry named
@@ -249,6 +267,18 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             Expr::Tuple(es2?)
         }
         Expr::FieldAccess(b, f) => Expr::FieldAccess(Box::new(rw(b, env, cx)?), f.clone()),
+        Expr::UnboxedField(b, f) => Expr::UnboxedField(Box::new(rw(b, env, cx)?), f.clone()),
+        Expr::UnboxedTuple(es) => {
+            let es2: Result<Vec<_>, _> = es.iter().map(|a| rw(a, env, cx)).collect();
+            Expr::UnboxedTuple(es2?)
+        }
+        Expr::UnboxedRecord(fs) => {
+            let fs2: Result<Vec<_>, _> = fs
+                .iter()
+                .map(|(f, v)| rw(v, env, cx).map(|v2| (f.clone(), v2)))
+                .collect();
+            Expr::UnboxedRecord(fs2?)
+        }
         Expr::RecordCreate(n, fs) => {
             let fs2: Result<Vec<_>, _> = fs
                 .iter()
@@ -340,10 +370,7 @@ fn index_to_var_set(
             span,
         )),
         Expr::Index(inner_recv, inner_key) => index_to_var_set(inner_recv, inner_key, set, span),
-        _ => Err(TypeError::Other {
-            span: recv.span,
-            msg: "the base of an indexed assignment must be a variable".into(),
-        }),
+        _ => Err(ErrKind::IndexAssignBaseNotVar.at(recv.span)),
     }
 }
 
@@ -360,11 +387,8 @@ fn rw_sugar(
         Sugar::Assign(x, v) => {
             let v2 = rw(v, env, cx)?;
             match env.get(x) {
-                Some(Binding::Var(_, put)) => Ok(call(evar(put, span), vec![v2], span)),
-                _ => Err(TypeError::Other {
-                    span,
-                    msg: format!("cannot assign to `{x}`: declare it with `var {x} := ...`"),
-                }),
+                Some(Binding::Var(ops)) => Ok(call(evar(&ops.put, span), vec![v2], span)),
+                _ => Err(ErrKind::CannotAssign { name: x.clone() }.at(span)),
             }
         }
         // `recv[key] := value` rebinds the root `var`; recover the equivalent
@@ -376,37 +400,32 @@ fn rw_sugar(
         }
         Sugar::Throw(name, args) => {
             if !cx.errors.contains(name) {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!("`{name}` is not a declared error"),
-                });
+                return Err(ErrKind::NotDeclaredError { name: name.clone() }.at(span));
             }
             let args2: Result<Vec<_>, _> = args.iter().map(|a| rw(a, env, cx)).collect();
             Ok(call(evar(&names::throw_op(name), span), args2?, span))
         }
         // One nested handle per catch arm, first arm innermost. Each level is
-        // a `final ctl` clause for that error's throw op plus an identity
+        // a `never` clause for that error's throw op plus an identity
         // return; the rebuilt tree goes back through rw so the Final
         // machinery (resume rejection, CONT rewrite) applies.
         Sugar::TryCatch(body, arms) => {
             let mut acc = (**body).clone();
             for a in arms {
                 if !cx.errors.contains(&a.name) {
-                    return Err(TypeError::Other {
-                        span: a.span,
-                        msg: format!("`{}` is not a declared error", a.name),
-                    });
+                    return Err(ErrKind::NotDeclaredError {
+                        name: a.name.clone(),
+                    }
+                    .at(a.span));
                 }
                 let arity = cx.op_sigs[&names::throw_op(&a.name)].2.params.len();
                 if a.binders.len() != arity {
-                    return Err(TypeError::Other {
-                        span: a.span,
-                        msg: format!(
-                            "`{}` carries {arity} value(s), this catch arm binds {}",
-                            a.name,
-                            a.binders.len()
-                        ),
-                    });
+                    return Err(ErrKind::CatchArmArity {
+                        name: a.name.clone(),
+                        arity,
+                        got: a.binders.len(),
+                    }
+                    .at(a.span));
                 }
                 let harms = final_handler(
                     names::throw_op(&a.name),
@@ -440,7 +459,7 @@ fn rw_sugar(
             let inner = wrap_if(has_continue, names::CONTINUE_OP, inner, span);
             let run = call((**s).clone(), vec![sp(Expr::Unit, s.span)], s.span);
             let arms = vec![
-                HandlerArm::Sugar(SugarArm::Fun("emit".into(), vec![x.clone()], inner)),
+                HandlerArm::Sugar(SugarArm::Once("emit".into(), vec![x.clone()], inner)),
                 HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
             ];
             let consumer = sp(Expr::Handle(Box::new(run), arms), span);
@@ -525,7 +544,7 @@ fn rw_sugar(
             let vars: Vec<(String, String)> = env
                 .values()
                 .filter_map(|b| match b {
-                    Binding::Var(get, put) => Some((get.clone(), put.clone())),
+                    Binding::Var(ops) => Some((ops.get.clone(), ops.put.clone())),
                     _ => None,
                 })
                 .collect();
@@ -613,10 +632,7 @@ fn validate_probe_name(name: &str, span: Span) -> Result<(), TypeError> {
     if valid {
         return Ok(());
     }
-    Err(TypeError::Other {
-        span,
-        msg: "probe name must match [A-Za-z0-9_.:-]+".into(),
-    })
+    Err(ErrKind::InvalidProbeName.at(span))
 }
 
 // `while cond do body` / `loop body` desugar to the tail-recursive prelude
@@ -639,7 +655,7 @@ fn rw_while(
     // `continue` ends the current iteration, so its handler wraps each body run;
     // `break` exits the loop, so its handler wraps the whole driver call. `break`
     // performed in the body forwards through the continue handler (a different
-    // effect) out to the break handler. Both are `final ctl`, so neither label
+    // effect) out to the break handler. Both are `never`, so neither label
     // surfaces. A nested loop captures its own break/continue, so the scan stops
     // at one.
     let (has_break, has_continue) = loop_ctl_used(body);
@@ -663,14 +679,14 @@ fn rw_while(
     rw(&full, env, cx)
 }
 
-// A `final ctl` handler that catches one loop-control op and yields `()`: as a
+// A `never` handler that catches one loop-control op and yields `()`: as a
 // final clause the continuation is dropped, so catching `break` abandons the loop
 // and catching `continue` abandons the current iteration. The return arm also
 // yields `()`, so the handled block has type Unit either way (the driver ignores
 // the body's value and the loop itself yields Unit).
 fn loop_ctl_handler(op: &str, body: S<Expr>, span: Span) -> S<Expr> {
     let arms = vec![
-        HandlerArm::Sugar(SugarArm::Final(op.into(), Vec::new(), sp(Expr::Unit, span))),
+        HandlerArm::Sugar(SugarArm::Never(op.into(), Vec::new(), sp(Expr::Unit, span))),
         HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
     ];
     sp(Expr::Handle(Box::new(body), arms), span)
@@ -686,17 +702,17 @@ fn wrap_if(used: bool, op: &str, body: S<Expr>, span: Span) -> S<Expr> {
     }
 }
 
-// A `final ctl` handler that catches one op, binds its carried values and yields
+// A `never` handler that catches one op, binds its carried values and yields
 // the clause body, with an identity return arm (the handled block keeps its
 // normal result). The twin of `loop_ctl_handler`, which instead yields Unit.
 fn final_handler(op: String, binders: Vec<String>, body: S<Expr>, span: Span) -> Vec<HandlerArm> {
     vec![
-        HandlerArm::Sugar(SugarArm::Final(op, binders, body)),
+        HandlerArm::Sugar(SugarArm::Never(op, binders, body)),
         HandlerArm::Return(RET.into(), evar(RET, span)),
     ]
 }
 
-// Wrap a function body in a `final ctl` handler for the internal `Return` effect
+// Wrap a function body in a `never` handler for the internal `Return` effect
 // when it uses `return`, so `return e` exits the function with `e`. The op arm
 // binds the carried value and yields it; the return arm passes the normal result
 // through. Both have the function's result type, the effect is fully discharged,
@@ -754,7 +770,7 @@ impl CtlScan {
             HandlerArm::Return(_, b)
             | HandlerArm::Op(_, _, _, b)
             | HandlerArm::Sugar(
-                SugarArm::Fun(_, _, b) | SugarArm::Final(_, _, b) | SugarArm::Val(_, b),
+                SugarArm::Once(_, _, b) | SugarArm::Never(_, _, b) | SugarArm::Val(_, b),
             ) => self.go(b),
         }
     }
@@ -878,12 +894,13 @@ impl CtlScan {
                     self.go(&a.body);
                 }
             }
-            Expr::List(es) | Expr::Tuple(es) => {
+            Expr::List(es) | Expr::Tuple(es) | Expr::UnboxedTuple(es) => {
                 for x in es {
                     self.go(x);
                 }
             }
             Expr::FieldAccess(b, _)
+            | Expr::UnboxedField(b, _)
             | Expr::Inst(b, _)
             | Expr::Ann(b, _)
             | Expr::Mask(_, b)
@@ -899,7 +916,7 @@ impl CtlScan {
                 self.go(key);
                 self.go(val);
             }
-            Expr::RecordCreate(_, fs) => {
+            Expr::RecordCreate(_, fs) | Expr::UnboxedRecord(fs) => {
                 for (_, v) in fs {
                     self.go(v);
                 }

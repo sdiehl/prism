@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/named_unknown.pr
 ---
 == tokens ==
@@ -138,7 +138,7 @@ Program {
 }
 
 == types ==
-Type Error: `f` has no parameter `z`
+[E6054] Type Error: `f` has no parameter `z`
    ╭─[ <source>:5:31 ]
    │
  5 │ fn main() = println(f(a := 1, z := 2))

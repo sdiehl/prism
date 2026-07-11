@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/tensor.pr
+---
+2
+6
+1
+6
+100
+1
+7
+9
+3
+4
+6
+=> ()

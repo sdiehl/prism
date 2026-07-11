@@ -21,7 +21,7 @@ fn main() =
   println(show(saturating_sub(i_min, one) == i_min))
   println(show(checked_neg(i_min) == None))
   println(show(wrapping_neg(i_min) == i_min))
-  println(show(checked_div(i_min, i64_sub(0i64, one)) == None))
+  println(show(checked_div(i_min, 0i64 - one) == None))
   println(show(checked_div(to_i64(7), to_i64(2)) == Some(to_i64(3))))
   println(show(checked_mod(to_i64(0 - 7), to_i64(2)) == Some(to_i64(0 - 1))))
   -- U64: unsigned underflow clamps to zero and wraps to the max.

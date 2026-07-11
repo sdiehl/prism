@@ -199,25 +199,62 @@ main : () -> String
 
 == core (cbpv) ==
 fn main() =
-  return 1 to t@0; return 2 to t@1; return MkPair(t@0, t@1) to t@2; i@hashPair@hash(t@2)
+  return 1 to t@0
+  return 2 to t@1
+  return MkPair(t@0, t@1) to t@2
+  i@hashPair@hash(t@2)
 fn i@hashInt@hash(x) =
-  return "i" to t@3; return x to t@4; show_int(t@4) to t@5; concat(t@3, t@5) to t@6; blake3(t@6)
+  return "i" to t@3
+  return x to t@4
+  show_int(t@4) to t@5
+  concat(t@3, t@5) to t@6
+  blake3(t@6)
 fn hashInt() =
   return _DHash(thunk { \_p0. i@hashInt@hash(_p0) })
 fn i@hashPair@hash(_x) =
-  return _x to t@7; case t@7 { MkPair(_f0, _f1) => return "c6:MkPair/0" to t@8; return _f0 to t@9; i@hashInt@hash(t@9) to t@10; return _f1 to t@11; i@hashInt@hash(t@11) to t@12; concat(t@10, t@12) to t@13; concat(t@8, t@13) to t@14; blake3(t@14) }
+  return _x to t@7
+  case t@7 of
+    MkPair(_f0, _f1) =>
+      return "c6:MkPair/0" to t@8
+      return _f0 to t@9
+      i@hashInt@hash(t@9) to t@10
+      return _f1 to t@11
+      i@hashInt@hash(t@11) to t@12
+      concat(t@10, t@12) to t@13
+      concat(t@8, t@13) to t@14
+      blake3(t@14)
 fn hashPair() =
   return _DHash(thunk { \_p0. i@hashPair@hash(_p0) })
 
 == fbip (rc) ==
 fn main() =
-  return 1 to t@0; return 2 to t@1; return MkPair(t@0, t@1) to t@2; i@hashPair@hash(t@2)
+  return 1 to t@0
+  return 2 to t@1
+  return MkPair(t@0, t@1) to t@2
+  i@hashPair@hash(t@2)
 fn i@hashInt@hash(x) =
-  return "i" to t@3; return x to t@4; show_int(t@4) to t@5; concat(t@3, t@5) to t@6; blake3(t@6)
+  return "i" to t@3
+  return x to t@4
+  show_int(t@4) to t@5
+  concat(t@3, t@5) to t@6
+  blake3(t@6)
 fn hashInt() =
   return _DHash(thunk { \_p0. i@hashInt@hash(_p0) })
 fn i@hashPair@hash(_x) =
-  return _x to t@7; case t@7 { MkPair(_f0, _f1) => dup _f0 to _; dup _f1 to _; drop t@7 to _; return "c6:MkPair/0" to t@8; return _f0 to t@9; i@hashInt@hash(t@9) to t@10; return _f1 to t@11; i@hashInt@hash(t@11) to t@12; concat(t@10, t@12) to t@13; concat(t@8, t@13) to t@14; blake3(t@14) }
+  return _x to t@7
+  case t@7 of
+    MkPair(_f0, _f1) =>
+      dup _f0
+      dup _f1
+      drop t@7
+      return "c6:MkPair/0" to t@8
+      return _f0 to t@9
+      i@hashInt@hash(t@9) to t@10
+      return _f1 to t@11
+      i@hashInt@hash(t@11) to t@12
+      concat(t@10, t@12) to t@13
+      concat(t@8, t@13) to t@14
+      blake3(t@14)
 fn hashPair() =
   return _DHash(thunk { \_p0. i@hashPair@hash(_p0) })
 
@@ -227,8 +264,8 @@ source_filename = "prism"
 
 @.str0 = private constant [12 x i8] c"c6:MkPair/0\00"
 @.str1 = private constant [2 x i8] c"i\00"
-@prism_native_kont_table = constant [1160 x i8] c"scheme  prism-core-hash-v1\0Abundle  5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_hashInt  bc92b8089677c936daefe4d58aac95bd6bdfacd96d556d6b26bf4b817df82d81  hashInt\0Afn      prism_hashPair  62fb73bdaf124905d0e1d03fba58247cce04c82e16004602339e0f5f78daa8f7  hashPair\0Afn      prism_i.hashInt.hash  e8a103621f761b91dd9aefb9f8be1dcf0c975f8b9c4f72dcc000dde7eb1344ac  i@hashInt@hash\0Afn      prism_i.hashPair.hash  0c52af20e022283f1f352543b2bd50f22943e9ad7f03df4bdf696810488856ba  i@hashPair@hash\0Afn      prism_main  ef4d9ba95966060e9f256658ac9f02c06b53a4c1b721b1bde9a294e0f5fc4516  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1102 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Acompiler  0.9.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Aflag  stdlib-root  prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  cek-spike  false\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_i.hashInt.hash e8a103621f761b91dd9aefb9f8be1dcf0c975f8b9c4f72dcc000dde7eb1344ac i@hashInt@hash arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_i.hashPair.hash 0c52af20e022283f1f352543b2bd50f22943e9ad7f03df4bdf696810488856ba i@hashPair@hash arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main ef4d9ba95966060e9f256658ac9f02c06b53a4c1b721b1bde9a294e0f5fc4516 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [1138 x i8] c"scheme  prism-core-hash-v1\0Abundle  5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_hashInt  bc92b8089677c936daefe4d58aac95bd6bdfacd96d556d6b26bf4b817df82d81  hashInt\0Afn      prism_hashPair  62fb73bdaf124905d0e1d03fba58247cce04c82e16004602339e0f5f78daa8f7  hashPair\0Afn      prism_i.hashInt.hash  e8a103621f761b91dd9aefb9f8be1dcf0c975f8b9c4f72dcc000dde7eb1344ac  i@hashInt@hash\0Afn      prism_i.hashPair.hash  0c52af20e022283f1f352543b2bd50f22943e9ad7f03df4bdf696810488856ba  i@hashPair@hash\0Afn      prism_main  ef4d9ba95966060e9f256658ac9f02c06b53a4c1b721b1bde9a294e0f5fc4516  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1080 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Acompiler  0.10.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:5b5c75dc5d0952d8ff45a250127fd932ebdd5a4c9978fcdfa7dbf2e2024fe834\0Aflag  stdlib-root  prism-core-hash-v1:d95021f40353a89b9a2c71d3ad310a22cf92c6aef9519776887688c6f1449915\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_i.hashInt.hash e8a103621f761b91dd9aefb9f8be1dcf0c975f8b9c4f72dcc000dde7eb1344ac i@hashInt@hash arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_i.hashPair.hash 0c52af20e022283f1f352543b2bd50f22943e9ad7f03df4bdf696810488856ba i@hashPair@hash arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main ef4d9ba95966060e9f256658ac9f02c06b53a4c1b721b1bde9a294e0f5fc4516 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [21 x i8] c"prism_i.hashInt.hash\00"
 @.kont_hash2 = private constant [65 x i8] c"e8a103621f761b91dd9aefb9f8be1dcf0c975f8b9c4f72dcc000dde7eb1344ac\00"
 @.kont_name2 = private constant [15 x i8] c"i@hashInt@hash\00"

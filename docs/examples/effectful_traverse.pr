@@ -44,11 +44,11 @@ instance traversableTree : Traversable(Tree)
   fn traverse(g, t) = twalk(g, t)
 
 effect State
-  ctl get(Unit) : Int
-  ctl put(Int) : Unit
+  get() : Int
+  put(Int) : Unit
 
 effect Choice
-  ctl pick(Unit) : Bool
+  pick() : Bool
 
 -- A parameter-passing State handler: the handled block becomes a state
 -- transformer, run with an initial counter. The action's row is written
@@ -57,8 +57,8 @@ effect Choice
 fn run_state(s0, action : () -> a ! {State | e}) =
   let f =
     handle action() with
-      get(_u, k) => \(s) -> k(s)(s)
-      put(v, k) => \(_s) -> k(())(v)
+      get() resume k => \(s) -> k(s)(s)
+      put(v) resume k => \(_s) -> k(())(v)
       return r => \(_s) -> r
   f(s0)
 
@@ -67,32 +67,32 @@ fn run_state(s0, action : () -> a ! {State | e}) =
 -- drops out of `main`'s row), not merely at runtime.
 fn attempt(action : () -> a ! {Fail | e}) =
   handle action() with
-    final ctl fail() => None
+    never fail() => None
     return r => Some(r)
 
 -- Per-leaf functions, each performing a different effect. Their rows are what
 -- pick the traversal's behaviour; keeping them monomorphic keeps the example
 -- about the effects, not inference.
-fn number(x : Int) : !{State} (Int, Int) =
-  let n = get(())
+fn number(x : Int) : (Int, Int) ! {State} =
+  let n = get()
   put(n + 1)
   (n, x)
 
-fn nonneg(x : Int) : !{Fail} Int =
+fn nonneg(x : Int) : Int ! {Fail} =
   guard(x >= 0)
   x
 
-fn sign(x : Int) : !{Choice} Int =
-  if pick(()) then
+fn sign(x : Int) : Int ! {Choice} =
+  if pick() then
     x
   else
     0 - x
 
-fn audit(x : Int) : !{State, Fail} (Int, Int) =
+fn audit(x : Int) : (Int, Int) ! {State, Fail} =
   guard(x >= 0)
   number(x)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let t = Branch(Branch(Leaf(1), Leaf(2)), Leaf(3))
   -- State: number the leaves left to right (the State applicative elsewhere).
   println(show(run_state(0, \() -> traverse(number, t))))
@@ -103,7 +103,7 @@ fn main() : !{IO} Unit =
   -- 2^3 of them collected (the List applicative; here the continuation is reentered).
   let worlds =
     handle traverse(sign, t) with
-      pick(_u, k) => append(k(true), k(false))
+      pick() resume k => append(k(true), k(false))
       return r => Cons(r, Nil)
   println(show(length(worlds)))
   -- {State, Fail} in a single pass under two stacked handlers: number and

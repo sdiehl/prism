@@ -25,7 +25,6 @@ pub struct ArtifactIdentity {
     pub effect_tier: &'static str,
     pub native_effects: bool,
     pub trampoline: bool,
-    pub cek_spike: bool,
     pub fuse: bool,
     pub rt_checks: bool,
     pub native_kont_frames: bool,
@@ -37,6 +36,83 @@ pub struct NativeToolchainIdentity {
     pub cc: String,
     pub cc_version: String,
     pub cc_flags: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactField {
+    Compiler,
+    HashScheme,
+    Target,
+    Backend,
+    SourceRoot,
+    StdlibRoot,
+    PackageRoot,
+    Opt,
+    Passes,
+    Disabled,
+    BackendOpt,
+    Scheduler,
+    EffectTier,
+    NativeEffects,
+    Trampoline,
+    Fuse,
+    RuntimeChecks,
+    NativeKontFrames,
+    NativeCc,
+    NativeCcVersion,
+    NativeCcFlags,
+}
+
+impl ArtifactField {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Compiler => "compiler",
+            Self::HashScheme => "hash-scheme",
+            Self::Target => "target",
+            Self::Backend => "backend",
+            Self::SourceRoot => "source-root",
+            Self::StdlibRoot => "stdlib-root",
+            Self::PackageRoot => "package-root",
+            Self::Opt => "opt",
+            Self::Passes => "passes",
+            Self::Disabled => "disabled",
+            Self::BackendOpt => "backend-opt",
+            Self::Scheduler => "scheduler",
+            Self::EffectTier => "effect-tier",
+            Self::NativeEffects => "native-effects",
+            Self::Trampoline => "trampoline",
+            Self::Fuse => "fuse",
+            Self::RuntimeChecks => "rt-checks",
+            Self::NativeKontFrames => "native-kont-frames",
+            Self::NativeCc => "native-cc",
+            Self::NativeCcVersion => "native-cc-version",
+            Self::NativeCcFlags => "native-cc-flags",
+        }
+    }
+
+    #[must_use]
+    pub const fn is_input_root(self) -> bool {
+        matches!(
+            self,
+            Self::SourceRoot | Self::StdlibRoot | Self::PackageRoot
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactRow {
+    pub field: ArtifactField,
+    pub value: String,
+}
+
+impl ArtifactRow {
+    fn new(field: ArtifactField, value: impl Into<String>) -> Self {
+        Self {
+            field,
+            value: value.into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,12 +137,11 @@ impl ArtifactIdentity {
             opt: opt_label(cfg.opt),
             passes: pass_spec_label(cfg.passes.as_ref()),
             disabled: disabled_label(&cfg.disabled),
-            backend_opt: cfg.backend_opt.clone(),
+            backend_opt: cfg.backend_opt.as_str().to_string(),
             scheduler: cfg.scheduler.label(),
             effect_tier: cfg.flags.effect_tier.label(),
             native_effects: cfg.flags.native_effects,
             trampoline: cfg.flags.trampoline,
-            cek_spike: cfg.flags.cek_spike,
             fuse: cfg.flags.fuse,
             rt_checks: cfg.flags.rt_checks,
             native_kont_frames: cfg.flags.native_kont_frames,
@@ -97,59 +172,70 @@ impl ArtifactIdentity {
     #[must_use]
     pub fn fingerprint(&self) -> String {
         let mut out = String::new();
-        for (key, value) in self.rows() {
-            write!(out, "{key}={value};").unwrap();
+        for row in self.rows() {
+            write!(out, "{}={};", row.field.label(), row.value).unwrap();
         }
         out
     }
 
     #[must_use]
-    pub fn rows(&self) -> Vec<(&'static str, String)> {
+    pub fn rows(&self) -> Vec<ArtifactRow> {
         self.rows_for(ArtifactRows::Full)
     }
 
     #[must_use]
-    pub fn portable_rows(&self) -> Vec<(&'static str, String)> {
+    pub fn portable_rows(&self) -> Vec<ArtifactRow> {
         self.rows_for(ArtifactRows::Portable)
     }
 
-    fn rows_for(&self, mode: ArtifactRows) -> Vec<(&'static str, String)> {
+    fn rows_for(&self, mode: ArtifactRows) -> Vec<ArtifactRow> {
         let mut rows = vec![
-            ("compiler", self.compiler_version.to_string()),
-            ("hash-scheme", self.hash_scheme.to_string()),
-            ("target", self.target.to_string()),
-            ("backend", self.backend.clone()),
+            ArtifactRow::new(ArtifactField::Compiler, self.compiler_version),
+            ArtifactRow::new(ArtifactField::HashScheme, self.hash_scheme),
+            ArtifactRow::new(ArtifactField::Target, self.target),
+            ArtifactRow::new(ArtifactField::Backend, self.backend.clone()),
         ];
         if let Some(root) = &self.source_root {
-            rows.push(("source-root", scheme_root(self.hash_scheme, root)));
+            rows.push(ArtifactRow::new(
+                ArtifactField::SourceRoot,
+                scheme_root(self.hash_scheme, root),
+            ));
         }
         if let Some(root) = &self.stdlib_root {
-            rows.push(("stdlib-root", scheme_root(self.hash_scheme, root)));
+            rows.push(ArtifactRow::new(
+                ArtifactField::StdlibRoot,
+                scheme_root(self.hash_scheme, root),
+            ));
         }
         rows.extend(
             self.package_roots
                 .iter()
-                .map(|root| ("package-root", root.clone())),
+                .map(|root| ArtifactRow::new(ArtifactField::PackageRoot, root.clone())),
         );
         rows.extend([
-            ("opt", self.opt.to_string()),
-            ("passes", self.passes.clone()),
-            ("disabled", self.disabled.clone()),
-            ("backend-opt", self.backend_opt.clone()),
-            ("scheduler", self.scheduler.to_string()),
-            ("effect-tier", self.effect_tier.to_string()),
-            ("native-effects", self.native_effects.to_string()),
-            ("trampoline", self.trampoline.to_string()),
-            ("cek-spike", self.cek_spike.to_string()),
-            ("fuse", self.fuse.to_string()),
-            ("rt-checks", self.rt_checks.to_string()),
-            ("native-kont-frames", self.native_kont_frames.to_string()),
+            ArtifactRow::new(ArtifactField::Opt, self.opt),
+            ArtifactRow::new(ArtifactField::Passes, self.passes.clone()),
+            ArtifactRow::new(ArtifactField::Disabled, self.disabled.clone()),
+            ArtifactRow::new(ArtifactField::BackendOpt, self.backend_opt.clone()),
+            ArtifactRow::new(ArtifactField::Scheduler, self.scheduler),
+            ArtifactRow::new(ArtifactField::EffectTier, self.effect_tier),
+            ArtifactRow::new(
+                ArtifactField::NativeEffects,
+                self.native_effects.to_string(),
+            ),
+            ArtifactRow::new(ArtifactField::Trampoline, self.trampoline.to_string()),
+            ArtifactRow::new(ArtifactField::Fuse, self.fuse.to_string()),
+            ArtifactRow::new(ArtifactField::RuntimeChecks, self.rt_checks.to_string()),
+            ArtifactRow::new(
+                ArtifactField::NativeKontFrames,
+                self.native_kont_frames.to_string(),
+            ),
         ]);
         if let (ArtifactRows::Full, Some(toolchain)) = (mode, &self.native_toolchain) {
             rows.extend([
-                ("native-cc", toolchain.cc.clone()),
-                ("native-cc-version", toolchain.cc_version.clone()),
-                ("native-cc-flags", toolchain.cc_flags.clone()),
+                ArtifactRow::new(ArtifactField::NativeCc, toolchain.cc.clone()),
+                ArtifactRow::new(ArtifactField::NativeCcVersion, toolchain.cc_version.clone()),
+                ArtifactRow::new(ArtifactField::NativeCcFlags, toolchain.cc_flags.clone()),
             ]);
         }
         rows
@@ -248,38 +334,38 @@ fn pass_list_label(passes: &[CorePass]) -> String {
 mod tests {
     use super::*;
 
-    fn row_keys(identity: &ArtifactIdentity) -> Vec<&'static str> {
-        identity.rows().into_iter().map(|(key, _)| key).collect()
+    fn row_fields(identity: &ArtifactIdentity) -> Vec<ArtifactField> {
+        identity.rows().into_iter().map(|row| row.field).collect()
     }
 
     #[test]
     fn native_backend_identity_names_linker_inputs() {
         let identity = ArtifactIdentity::from_config(&Config::default(), "llvm");
-        let rows = row_keys(&identity);
-        assert!(rows.contains(&"native-cc"));
-        assert!(rows.contains(&"native-cc-version"));
-        assert!(rows.contains(&"native-cc-flags"));
+        let rows = row_fields(&identity);
+        assert!(rows.contains(&ArtifactField::NativeCc));
+        assert!(rows.contains(&ArtifactField::NativeCcVersion));
+        assert!(rows.contains(&ArtifactField::NativeCcFlags));
     }
 
     #[test]
     fn non_native_identity_omits_linker_inputs() {
         let identity = ArtifactIdentity::from_config(&Config::default(), "interpreter");
-        let rows = row_keys(&identity);
-        assert!(!rows.contains(&"native-cc"));
-        assert!(!rows.contains(&"native-cc-version"));
-        assert!(!rows.contains(&"native-cc-flags"));
+        let rows = row_fields(&identity);
+        assert!(!rows.contains(&ArtifactField::NativeCc));
+        assert!(!rows.contains(&ArtifactField::NativeCcVersion));
+        assert!(!rows.contains(&ArtifactField::NativeCcFlags));
     }
 
     #[test]
     fn portable_rows_omit_host_toolchain_strings() {
         let identity = ArtifactIdentity::from_config(&Config::default(), "llvm");
-        let rows: Vec<&'static str> = identity
+        let rows: Vec<ArtifactField> = identity
             .portable_rows()
             .into_iter()
-            .map(|(key, _)| key)
+            .map(|row| row.field)
             .collect();
-        assert!(!rows.contains(&"native-cc"));
-        assert!(!rows.contains(&"native-cc-version"));
-        assert!(!rows.contains(&"native-cc-flags"));
+        assert!(!rows.contains(&ArtifactField::NativeCc));
+        assert!(!rows.contains(&ArtifactField::NativeCcVersion));
+        assert!(!rows.contains(&ArtifactField::NativeCcFlags));
     }
 }

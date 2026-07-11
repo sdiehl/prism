@@ -193,7 +193,7 @@ Program {
 }
 
 == types ==
-Type Error: in `main`: effect row `{e0}` would capture the rigid row `e0`: `e0` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it
+[E1998] Type Error: in `main`: effect row `{e0}` would capture the rigid row `e0`: `e0` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it
    ╭─[ <source>:8:31 ]
    │
  8 │ fn main() = println(call_poly(\(g) -> g(1), \(x) -> x + 41))

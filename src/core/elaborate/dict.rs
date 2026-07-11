@@ -29,7 +29,7 @@ impl Elab<'_> {
             .arity
             .get(name)
             .copied()
-            .ok_or_else(|| Error::Ice(format!("no arity for global `{name}`")))?;
+            .ok_or_else(|| Error::InternalInvariant(format!("no arity for global `{name}`")))?;
         let ps: Vec<String> = (0..n).map(names::generated_param).collect();
         let vals: Vec<Value> = ps.iter().map(|p| Value::Var(p.clone().into())).collect();
         let body = Self::head_call(name, vals)?;
@@ -44,10 +44,10 @@ impl Elab<'_> {
             .checked
             .classes
             .get(&class)
-            .ok_or_else(|| Error::Ice(format!("no class info for `{class}`")))?
+            .ok_or_else(|| Error::InternalInvariant(format!("no class info for `{class}`")))?
             .methods;
         let (name, sig) = methods.get(idx).ok_or_else(|| {
-            Error::Ice(format!(
+            Error::InternalInvariant(format!(
                 "method index {idx} out of range for class `{class}`"
             ))
         })?;
@@ -84,7 +84,9 @@ impl Elab<'_> {
                     .checked
                     .classes
                     .get(&Sym::from(subclass))
-                    .ok_or_else(|| Error::Ice(format!("no class info for `{subclass}`")))?;
+                    .ok_or_else(|| {
+                        Error::InternalInvariant(format!("no class info for `{subclass}`"))
+                    })?;
                 let n = cls.supers.len() + cls.methods.len();
                 let fv = self.fresh();
                 let binders = (0..n)
@@ -158,11 +160,9 @@ impl Elab<'_> {
             other => {
                 let mut binds = Vec::new();
                 let dv = self.dict_value(other, &mut binds)?;
-                let cls = self
-                    .checked
-                    .classes
-                    .get(&class)
-                    .ok_or_else(|| Error::Ice(format!("no class info for `{class}`")))?;
+                let cls = self.checked.classes.get(&class).ok_or_else(|| {
+                    Error::InternalInvariant(format!("no class info for `{class}`"))
+                })?;
                 let nsup = cls.supers.len();
                 let n = nsup + cls.methods.len();
                 let field = nsup + idx;
@@ -189,7 +189,7 @@ impl Elab<'_> {
     // resolved dictionaries.
     pub(super) fn constrained_value(&mut self, name: &str, id: NodeId) -> Result<Comp, Error> {
         let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
+            Error::InternalInvariant(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
             let (_, arity) = self.method_sig(class, idx)?;
@@ -205,7 +205,7 @@ impl Elab<'_> {
             .arity
             .get(name)
             .copied()
-            .ok_or_else(|| Error::Ice(format!("no arity for global `{name}`")))?;
+            .ok_or_else(|| Error::InternalInvariant(format!("no arity for global `{name}`")))?;
         let ps: Vec<String> = (0..n).map(names::generated_param).collect();
         let mut binds = Vec::new();
         let mut all: Vec<Value> = ds
@@ -228,7 +228,7 @@ impl Elab<'_> {
         binds: &mut Vec<(Comp, String)>,
     ) -> Result<Comp, Error> {
         let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
-            Error::Ice(format!("no dictionary resolution for `{name}` at {id:?}"))
+            Error::InternalInvariant(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         // A `sort`/`sort_by_ord` whose `Ord` is a canonical primitive instance
         // lowers to the native sort kernel. A user instance (e.g. a reversed
@@ -270,12 +270,14 @@ impl Elab<'_> {
         // separate mirrors of the same set; a drift here is a compiler bug, so it
         // surfaces as a structured ICE rather than a panic.
         let resolve_float = || {
-            FloatOp::from_name(name)
-                .ok_or_else(|| Error::Ice(format!("float builtin `{name}` not in FloatOp")))
+            FloatOp::from_name(name).ok_or_else(|| {
+                Error::InternalInvariant(format!("float builtin `{name}` not in FloatOp"))
+            })
         };
         let resolve_str = || {
-            Builtin::from_name(name)
-                .ok_or_else(|| Error::Ice(format!("str builtin `{name}` not in Builtin")))
+            Builtin::from_name(name).ok_or_else(|| {
+                Error::InternalInvariant(format!("str builtin `{name}` not in Builtin"))
+            })
         };
         Ok(match builtin(name).map(|(_, kind)| kind) {
             Some(BuiltinKind::Print) => Comp::Io(IoOp::Print, vec![first(args)]),
@@ -304,7 +306,7 @@ impl Elab<'_> {
 // invariant break surfaced as a structured ICE rather than an index panic.
 fn first_dict<'a>(ds: &'a [Dict], name: &str) -> Result<&'a Dict, Error> {
     ds.first()
-        .ok_or_else(|| Error::Ice(format!("no dictionary for `{name}`")))
+        .ok_or_else(|| Error::InternalInvariant(format!("no dictionary for `{name}`")))
 }
 
 // The native-sort key for a `sort`/`sort_by_ord` call, or `None` to keep the

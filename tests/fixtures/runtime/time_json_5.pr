@@ -1,0 +1,16 @@
+import Time (..)
+
+fn reparse(s) =
+  match parse_rfc3339(s) of
+    Some(w) => println(format_rfc3339(w))
+    None => println("none")
+
+fn main() =
+  println(format_rfc3339(Wall(0)))
+  println(format_rfc3339(Wall(1751630096123456789)))
+  reparse("2026-07-04T12:34:56Z")
+  reparse("2026-07-04T12:34:56.123456789Z")
+  reparse("2026-07-04T12:34:56+02:00")
+  reparse("2026-07-04T12:34:56-05:30")
+  reparse("not a date")
+  reparse("2026-13-04T12:34:56Z")

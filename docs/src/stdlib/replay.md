@@ -42,7 +42,7 @@ Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 
 ### `durable`
 
-```prism,sig,h-b59570cac0a93480bb6e50ff3651d3344a21152412100058705a5d98d49f174f
+```prism,sig,h-a2d7a52a3be9221d23d4405432332c6d1629470c45ec9a860cb452e5f3d41dc1
 durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
 ```
 

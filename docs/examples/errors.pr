@@ -3,7 +3,7 @@
 -- {NotFound}, parse_port carries {Malformed}, and their composition unions to
 -- {NotFound, Malformed} with no umbrella enum or conversion glue.
 --
--- `try`/`catch` is subtractive handler sugar (one nested `final ctl` per arm).
+-- `try`/`catch` is subtractive handler sugar (one nested `never` per arm).
 -- A partial catch discharges its label and passes the rest to an outer try. An
 -- uncaught case is an unhandled-effect error naming exactly what remains.
 --
@@ -37,7 +37,7 @@ fn parse_port(s) =
     throw Malformed(s)
 
 -- Composed: the row unions to {NotFound, Malformed}.
-fn port_of(cfg, key) : !{NotFound, Malformed} Int =
+fn port_of(cfg, key) : Int ! {NotFound, Malformed} =
   parse_port(find_port(cfg, key))
 
 fn describe(cfg, key) =
@@ -50,7 +50,11 @@ fn describe(cfg, key) =
 fn main() =
   let cfg = [("http", "8080"), ("https", "443"), ("smtp", "oops")]
   println(describe(cfg, "http"))
-  let port = try try port_of(cfg, "gopher") catch { Malformed(_s) => 0 } catch { NotFound(_k) => 80 }
+  let port =
+    try
+      try port_of(cfg, "gopher") catch { Malformed(_s) => 0 }
+    catch
+      NotFound(_k) => 80
   println("default {show(port)}")
   println(describe(cfg, "smtp"))
   println(describe(cfg, "https"))

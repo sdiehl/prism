@@ -1,0 +1,13 @@
+-- The unboxed-values surface parses into distinct AST nodes, resolves at the
+-- type level (a `#(Int, Int)` parameter annotation is fine), and lowers to Core:
+-- an unboxed tuple has the same value semantics as a boxed one, and an unboxed
+-- record lowers to a positional tuple (its field order is fixed by its type),
+-- so field projection is an ordinary product `Case` and reuses the same refcount
+-- handling. The native ABI alone determines the heap-cell-free layout.
+fn area(p : #(Int, Int)) : Int = 0
+
+fn point() : #{ x : Int, y : Int } = #{ x = 1, y = 2 }
+
+fn main() : Int =
+  let q = #(1, 2)
+  point().#x + point().#y

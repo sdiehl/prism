@@ -47,7 +47,7 @@ pub fn pat_vars(p: &CorePat, out: &mut Set) {
 
 // A `Var` is free unless an enclosing binder shadows it. The binder stack is a
 // plain `Vec` (not a set) so shadowing nests and unbinds correctly; equality of
-// the resulting set with the subtractive definition is what the tests pin.
+// the resulting set with the subtractive definition is what the tests check.
 #[derive(Default)]
 struct Fv {
     free: Set,
@@ -126,7 +126,7 @@ impl Visit for Fv {
 #[cfg(test)]
 mod tests {
     use super::{comp, value, Set};
-    use crate::core::cbpv::{Comp, CoreOp, CorePat, HandleOp, Value};
+    use crate::core::cbpv::{CheckedHandler, Comp, CoreOp, CorePat, HandleOp, Value};
     use crate::sym::Sym;
 
     fn s(name: &str) -> Sym {
@@ -204,7 +204,7 @@ mod tests {
             return_var: Some(s("rv")),
             // uses the bound `rv` and a free `ro`.
             return_body: Some(Box::new(Comp::Prim(CoreOp::Add, var("rv"), var("ro")))),
-            ops: vec![op],
+            ops: CheckedHandler::new(vec![op]).unwrap(),
         };
         assert_eq!(comp(&c), set(&["bd", "ro", "of"]));
     }

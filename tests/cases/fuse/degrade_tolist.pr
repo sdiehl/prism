@@ -1,5 +1,5 @@
 -- Degrades to not fusing (list-building consumer), still correct.
 import Sequence as Seq
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   println(Seq.to_list(Seq.map(Seq.range(1, 6), \(x) -> x * x)))

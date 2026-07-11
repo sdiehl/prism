@@ -36,7 +36,7 @@ instance arbitraryBool : Arbitrary(Bool)
   fn arbitrary(size) = gen_run(gen_bool, size)
 
 instance arbitraryUnit : Arbitrary(Unit)
-  fn arbitrary(size) = ()
+  fn arbitrary(_size) = ()
 
 instance arbitraryChar : Arbitrary(Char)
   fn arbitrary(size) = gen_run(gen_char, size)

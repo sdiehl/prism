@@ -1,6 +1,6 @@
 effect Coop
-  ctl fork(Unit) : Bool
-  ctl yield(Unit) : Unit
+  fork(Unit) : Bool
+  yield(Unit) : Unit
 
 -- A cooperative scheduler in one handler ("a poor man's concurrency", Claessen
 -- 1999). `fork()` returns twice, true to the child and false to the parent, so
@@ -23,20 +23,21 @@ effect Coop
 -- infinite type `q = (List q) -> Unit`.
 type Task = Task((List(Task)) -> Unit ! {IO})
 
-fn run_q(q : List(Task)) : !{IO} Unit =
+fn run_q(q : List(Task)) : Unit ! {IO} =
   match q of
     Nil => ()
     Cons(Task(step), rest) => step(rest)
 
-fn schedule(main : () -> Unit ! {Coop, IO}) : !{IO} Unit =
+fn schedule(main : () -> Unit ! {Coop, IO}) : Unit ! {IO} =
   let start =
     handle main() with
-      fork(u, k) => \(q) -> run_q(append(q, [Task(k(true)), Task(k(false))]))
-      yield(u, k) => \(q) -> run_q(append(q, [Task(k(()))]))
+      fork(u) resume k =>
+        \(q) -> run_q(append(q, [Task(k(true)), Task(k(false))]))
+      yield(u) resume k => \(q) -> run_q(append(q, [Task(k(()))]))
       return r => \(q) -> run_q(q)
   start(Nil)
 
-fn worker(name : String, n : Int) : !{Coop, IO} Unit =
+fn worker(name : String, n : Int) : Unit ! {Coop, IO} =
   if n == 0 then
     ()
   else
@@ -44,7 +45,7 @@ fn worker(name : String, n : Int) : !{Coop, IO} Unit =
     yield(())
     worker(name, n - 1)
 
-fn demo() : !{Coop, IO} Unit =
+fn demo() : Unit ! {Coop, IO} =
   if fork(()) then
     worker("A", 3)
   else

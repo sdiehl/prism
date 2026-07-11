@@ -10,10 +10,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, validate_hash, HashHex, Written, OBJECTS_DIR};
+use super::{atomic_write, shard_path, HashHex, Written, OBJECTS_DIR};
 
-pub(super) fn put(root: &Path, hash: &HashHex, bytes: &[u8]) -> io::Result<Written> {
-    validate_hash(hash)?;
+pub(super) fn put(root: &Path, hash: &HashHex<'_>, bytes: &[u8]) -> io::Result<Written> {
     let path = shard_path(&root.join(OBJECTS_DIR), hash);
     if path.exists() {
         let existing = fs::read(&path)?;
@@ -33,11 +32,10 @@ pub(super) fn put(root: &Path, hash: &HashHex, bytes: &[u8]) -> io::Result<Writt
     Ok(Written::New)
 }
 
-pub(super) fn get(root: &Path, hash: &HashHex) -> io::Result<Vec<u8>> {
-    validate_hash(hash)?;
+pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Vec<u8>> {
     fs::read(shard_path(&root.join(OBJECTS_DIR), hash))
 }
 
-pub(super) fn has(root: &Path, hash: &HashHex) -> bool {
-    validate_hash(hash).is_ok() && shard_path(&root.join(OBJECTS_DIR), hash).exists()
+pub(super) fn has(root: &Path, hash: &HashHex<'_>) -> bool {
+    shard_path(&root.join(OBJECTS_DIR), hash).exists()
 }

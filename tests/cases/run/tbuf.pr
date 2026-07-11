@@ -1,0 +1,25 @@
+-- Typed (f64) buffers are the flat storage under the tensor library: a
+-- contiguous region of raw words with the same rc==1 in-place / shared-copy
+-- discipline as arrays, so the interpreter and native backends thread them
+-- bit-for-bit identically. This exercises new/set/get/len and a bulk blit,
+-- including the value-semantics guarantee (a shared write copies, leaving the
+-- original untouched) that the leak oracle and parity both pin.
+fn build() : FloatBuf =
+  let a = tbuf_new(4, 0.0)
+  let a1 = tbuf_set(a, 0, 1.5)
+  let a2 = tbuf_set(a1, 1, 2.5)
+  tbuf_set(a2, 3, 4.0)
+
+fn sum4(b : FloatBuf) : Float =
+  tbuf_get(b, 0) + tbuf_get(b, 1) + tbuf_get(b, 2) + tbuf_get(b, 3)
+
+fn main() =
+  let a = build()
+  println(tbuf_len(a))
+  println(sum4(a))
+  -- Blit the first two elements of `a` into a fresh zero buffer at offset 2.
+  let z = tbuf_new(4, 0.0)
+  let z2 = tbuf_blit(z, 2, a, 0, 2)
+  println(sum4(z2))
+  -- Value semantics: `a` is unchanged by the blit that read from it.
+  println(tbuf_get(a, 0))

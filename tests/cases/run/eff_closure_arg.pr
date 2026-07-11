@@ -2,12 +2,12 @@
 -- handler. The do sits in a lambda body, invisible to latent analysis.
 
 effect Tell
-  ctl tell(Int) : Int
+  tell(Int) : Int
 
 fn apply_twice(f, x) = f(f(x))
 
 fn main() =
   println(handle apply_twice(\(n) -> tell(n) + n, 3) with {
-    tell(v, k) => k(v * 10),
+    tell(v) resume k => k(v * 10),
     return r => r
   })

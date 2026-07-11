@@ -1,9 +1,9 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/interp_unterm.pr
 ---
-Lexical Error: unterminated string literal at line 2:26
+[E7003] Lexical Error: unterminated string literal at line 2:26
    ╭─[ <source>:2:26 ]
    │
  2 │ fn main() = println("a {x")

@@ -18,13 +18,13 @@ end
 local cmd = vim.cmd
 
 -- Declarations and binding forms.
-cmd([[syntax keyword prismKeyword let var in fun val return do borrow with handler given where as forall deriving of handle using]])
+cmd([[syntax keyword prismKeyword let var in val return do borrow with handler given where as forall deriving of handle using]])
 cmd([[syntax keyword prismInclude import pub]])
 cmd([[syntax keyword prismStructure fn fip fbip replayable type newtype opaque alias effect class instance canonical pattern]])
 cmd([[syntax keyword prismConditional if then else elif match]])
 cmd([[syntax keyword prismRepeat for while loop break continue]])
 -- Effect control and failure forms.
-cmd([[syntax keyword prismException throw try catch transact mask final ctl error]])
+cmd([[syntax keyword prismException throw try catch transact mask error]])
 cmd([[syntax keyword prismBoolean true false]])
 
 -- Builtin scalar types and effect/handler verbs that are ordinary identifiers

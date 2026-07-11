@@ -20,7 +20,7 @@ alias NetErr = {Timeout}
 
 alias AppErr = {ConfigErr, NetErr}
 
-fn read_port(cfg, key) : !{ConfigErr} Int =
+fn read_port(cfg, key) : Int ! {ConfigErr} =
   match cfg of
     Nil => throw NotFound(key)
     Cons(pair, rest) =>
@@ -33,22 +33,28 @@ fn read_port(cfg, key) : !{ConfigErr} Int =
       else
         read_port(rest, key)
 
-fn ping(ms) : !{NetErr} Int =
+fn ping(ms) : Int ! {NetErr} =
   if ms > 100 then
     throw Timeout(ms)
   else
     ms
 
-fn boot(cfg) : !{AppErr} Int = read_port(cfg, "http") + ping(25)
+fn boot(cfg) : Int ! {AppErr} = read_port(cfg, "http") + ping(25)
 
 -- a partial catch: ConfigErr's labels are discharged, Timeout remains
-fn config_safe(cfg) : !{NetErr} Int =
+fn config_safe(cfg) : Int ! {NetErr} =
   try boot(cfg) catch { NotFound(_k) => 80, Malformed(_s) => 80 }
 
 fn main() =
   let good = [("http", "8080")]
   let bad = [("http", "oops")]
-  let full = try boot(good) catch { NotFound(_k) => 0, Malformed(_s) => 0, Timeout(_ms) => 0 }
+  let full =
+    try
+      boot(good)
+    catch
+      NotFound(_k) => 0
+      Malformed(_s) => 0
+      Timeout(_ms) => 0
   println(full)
   let fallback = try config_safe(bad) catch { Timeout(_ms) => 0 }
   println(fallback)

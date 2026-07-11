@@ -127,12 +127,14 @@ top : (Int) -> Box
 
 == core (cbpv) ==
 fn mk(x) =
-  return x to t@0; return Box(t@0)
+  return x to t@0
+  return Box(t@0)
 fn top(x) =
-  return x to t@1; mk(t@1)
+  return x to t@1
+  mk(t@1)
 
 == fip ==
-Type Error: allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
+[E1998] Type Error: allocation certificate `@ noalloc` failed for function `top`: in `top`, call to `mk` may allocate (`mk` has no zero-allocation certificate)
    ╭─[ <source>:8:1 ]
    │
  8 │ fn top(x : Int) : Box @ noalloc = mk(x)

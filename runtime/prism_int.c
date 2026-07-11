@@ -81,7 +81,7 @@ static long mag_sub(const unsigned long *a, long na, const unsigned long *b, lon
 
 static void mag_mul(const unsigned long *a, long na, const unsigned long *b, long nb,
                     unsigned long *o) {
-    memset(o, 0, (size_t)(na + nb) * 8);
+    memset(o, 0, prism_ckd_words_bytes(prism_ckd_ladd(na, nb)));
     for (long i = 0; i < na; i++) {
         unsigned long carry = 0;
         for (long j = 0; j < nb; j++) {
@@ -96,9 +96,9 @@ static void mag_mul(const unsigned long *a, long na, const unsigned long *b, lon
 /* Shift-subtract long division: q gets na limbs, r gets nb + 1. */
 static void mag_divrem(const unsigned long *a, long na, const unsigned long *b, long nb,
                        unsigned long *q, unsigned long *r) {
-    memset(q, 0, (size_t)na * 8);
-    memset(r, 0, (size_t)(nb + 1) * 8);
-    for (long i = na * 64 - 1; i >= 0; i--) {
+    memset(q, 0, prism_ckd_words_bytes(na));
+    memset(r, 0, prism_ckd_words_bytes(prism_ckd_ladd(nb, 1)));
+    for (long i = prism_ckd_lmul(na, 64) - 1; i >= 0; i--) {
         unsigned long bit = (a[i / 64] >> (i % 64)) & 1;
         for (long k = 0; k <= nb; k++) {
             unsigned long top = r[k] >> 63;
@@ -168,7 +168,7 @@ static long big_addsub(long a, long b, int flip) {
     long ma = big_mag(a), mb = big_mag(b);
     int sa = big_count(a) < 0, sb = (big_count(b) < 0) ^ flip;
     const unsigned long *la = big_limbs(a), *lb = big_limbs(b);
-    unsigned long *o = malloc((size_t)((ma > mb ? ma : mb) + 1) * 8);
+    unsigned long *o = malloc(prism_ckd_words_bytes(prism_ckd_ladd(ma > mb ? ma : mb, 1)));
     if (!o) abort();
     long n;
     int neg;
@@ -198,10 +198,11 @@ long prism_big_sub(long a, long b) {
 long prism_big_mul(long a, long b) {
     long ma = big_mag(a), mb = big_mag(b);
     if (ma == 0 || mb == 0) return big_make(0, 0, 0);
-    unsigned long *o = malloc((size_t)(ma + mb) * 8);
+    long mo = prism_ckd_ladd(ma, mb);
+    unsigned long *o = malloc(prism_ckd_words_bytes(mo));
     if (!o) abort();
     mag_mul(big_limbs(a), ma, big_limbs(b), mb, o);
-    long r = big_make(o, ma + mb, (big_count(a) < 0) != (big_count(b) < 0));
+    long r = big_make(o, mo, (big_count(a) < 0) != (big_count(b) < 0));
     free(o);
     return r;
 }
@@ -212,11 +213,12 @@ static long big_divrem(long a, long b, int want_rem) {
     long ma = big_mag(a), mb = big_mag(b);
     if (mb == 0) prism_div_zero();
     if (ma == 0) return big_make(0, 0, 0);
-    unsigned long *q = malloc((size_t)ma * 8);
-    unsigned long *r = malloc((size_t)(mb + 1) * 8);
+    long mr = prism_ckd_ladd(mb, 1);
+    unsigned long *q = malloc(prism_ckd_words_bytes(ma));
+    unsigned long *r = malloc(prism_ckd_words_bytes(mr));
     if (!q || !r) abort();
     mag_divrem(big_limbs(a), ma, big_limbs(b), mb, q, r);
-    long res = want_rem ? big_make(r, mb + 1, big_count(a) < 0)
+    long res = want_rem ? big_make(r, mr, big_count(a) < 0)
                         : big_make(q, ma, (big_count(a) < 0) != (big_count(b) < 0));
     free(q);
     free(r);
@@ -241,17 +243,17 @@ long prism_big_cmp(long a, long b) {
 long prism_big_show(long a) {
     long n = big_mag(a);
     if (n == 0) return prism_str_lit("0", 1);
-    unsigned long *t = malloc((size_t)n * 8);
-    unsigned long *chunk = malloc((size_t)(n + 2) * 8);
+    unsigned long *t = malloc(prism_ckd_words_bytes(n));
+    unsigned long *chunk = malloc(prism_ckd_words_bytes(prism_ckd_ladd(n, 2)));
     if (!t || !chunk) abort();
-    memcpy(t, big_limbs(a), (size_t)n * 8);
+    memcpy(t, big_limbs(a), prism_ckd_words_bytes(n));
     long k = 0;
     while (n > 0) {
         chunk[k++] = mag_divmod_small(t, n, 10000000000000000000UL);
         n = mag_trim(t, n);
     }
-    long cap = k * 19 + 2;
-    char *buf = malloc((size_t)cap);
+    long cap = prism_ckd_ladd(prism_ckd_lmul(k, 19), 2);
+    char *buf = malloc(prism_ckd_size(cap));
     if (!buf) abort();
     char *o = buf;
     if (big_count(a) < 0) *o++ = '-';

@@ -206,6 +206,7 @@ fn spends(token: Sym, c: &Comp) -> usize {
         | Comp::Error(v)
         | Comp::FloatBuiltin(_, v)
         | Comp::Neg(_, v)
+        | Comp::UnboxedProject(v, _)
         | Comp::Dup(v)
         | Comp::Drop(v)
         | Comp::RefNew(v)
@@ -232,7 +233,10 @@ fn spends(token: Sym, c: &Comp) -> usize {
 fn spends_val(token: Sym, v: &Value) -> usize {
     match v {
         Value::Thunk(c) => spends(token, c),
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().map(|f| spends_val(token, f)).sum(),
+        Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
+            fs.iter().map(|f| spends_val(token, f)).sum()
+        }
+        Value::UnboxedRecord(fs) => fs.iter().map(|(_, f)| spends_val(token, f)).sum(),
         _ => 0,
     }
 }

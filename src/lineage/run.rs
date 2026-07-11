@@ -12,8 +12,9 @@ use std::path::Path;
 use crate::driver::{ArtifactIdentity, BuildIdentity};
 use crate::error::Error;
 use crate::provenance::{
-    self, trace_digest, CapEvent, EventValue, EVENT_HASH_SCHEME, OP_ENV_GETENV, OP_FS_APPEND_FILE,
-    OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,
+    self, trace_digest, CapEvent, CapOp, EventValue, EVENT_HASH_SCHEME, OP_ENV_GETENV,
+    OP_FS_APPEND_FILE, OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE,
+    OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,
 };
 use crate::resolve::Root;
 use crate::Config;
@@ -75,7 +76,7 @@ impl RunLineage {
             .stdlib
             .as_ref()
             .map(|root| lineage_root(RootRole::Stdlib, root))
-            .ok_or_else(|| Error::Resolve("lineage: run roots do not include Std".into()))?;
+            .ok_or_else(|| Error::ResolveLineage("lineage: run roots do not include Std".into()))?;
         let packages = identity
             .packages
             .iter()
@@ -143,7 +144,7 @@ fn observed_inputs(events: &[CapEvent]) -> (Vec<EnvReadPayload>, Vec<InputFilePa
 // The write mode a provenance op label denotes, or `None` if the op is not a file
 // write. One home for the op-to-mode mapping, keeping the family in sync with the
 // interpreter's `write_obs` labels.
-fn write_mode_of(op: &str) -> Option<WriteMode> {
+const fn write_mode_of(op: CapOp) -> Option<WriteMode> {
     match op {
         OP_FS_WRITE_FILE | OP_FS_WRITE_BYTES => Some(WriteMode::Write),
         OP_FS_APPEND_FILE => Some(WriteMode::Append),
@@ -321,7 +322,7 @@ pub fn run_entry(graph: &LineageGraph) -> Result<String, Error> {
         NodeKind::Request(request) if request.kind == super::RequestKind::Run => {
             Ok(request.entry.clone())
         }
-        _ => Err(Error::Resolve(
+        _ => Err(Error::ResolveLineage(
             "verify-lineage: not a run sidecar (no run request)".into(),
         )),
     }

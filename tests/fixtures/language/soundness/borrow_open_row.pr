@@ -1,0 +1,5 @@
+fn invoke(borrow x : Int, f : (Unit) -> Unit ! {| e}) : Int =
+  f(())
+  x
+
+fn main() = println(invoke(1, \(u) -> ()))

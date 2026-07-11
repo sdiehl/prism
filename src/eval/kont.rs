@@ -479,6 +479,11 @@ impl Encoder {
                 put_uvarint(&mut out, bytes.len() as u64);
                 out.extend_from_slice(bytes);
             }
+            // Typed buffers are storage primitives and cannot cross a
+            // serialized continuation boundary.
+            Rv::TBuf(_) => {
+                return Err(SuspendError::NonSerializable("typed buffer".into()));
+            }
             Rv::Resume(frames) => {
                 let idxs = self.frames(frames)?;
                 put_tag(&mut out, Tag::VResume);

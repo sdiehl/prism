@@ -131,7 +131,7 @@ fn read_utf8(bytes: &[u8], cursor: &mut usize, len: usize) -> Result<String, Err
 }
 
 fn bundle_error(msg: impl Into<String>) -> Error {
-    Error::Resolve(format!("invalid source bundle: {}", msg.into()))
+    Error::ResolvePackage(format!("invalid source bundle: {}", msg.into()))
 }
 
 #[cfg(test)]

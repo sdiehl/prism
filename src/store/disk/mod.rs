@@ -27,8 +27,10 @@
 //! binding is recovered on the next commit.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,9 +74,54 @@ const SHARD_HEX: usize = 2;
 const FIELD_SEP: char = '\t';
 const LIST_SEP: char = ' ';
 
-/// A content hash rendered as lowercase hex, the identity every layer is keyed
-/// by. Borrowed here to avoid churn; the store never owns hashes.
-type HashHex = str;
+/// Validated lowercase hexadecimal identity accepted by store internals.
+///
+/// Construction is the only validation boundary; paths and indexes cannot be
+/// addressed with an unchecked string after this point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StoreHash<'a>(&'a str);
+
+impl<'a> StoreHash<'a> {
+    /// Validate a hexadecimal store identity.
+    ///
+    /// # Errors
+    /// Returns `InvalidInput` when `hash` is too short for sharding or contains
+    /// anything other than lowercase hexadecimal digits.
+    pub fn new(hash: &'a str) -> io::Result<Self> {
+        if hash.len() < SHARD_HEX
+            || !hash
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "hash must be lowercase hex and at least two characters",
+            ));
+        }
+        Ok(Self(hash))
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'a str {
+        self.0
+    }
+}
+
+impl fmt::Display for StoreHash<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl Deref for StoreHash<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+type HashHex<'a> = StoreHash<'a>;
 
 /// Whether a `put` created a new object or matched an existing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,38 +181,42 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error, an ill-formed hash, or a byte mismatch
     /// against an existing object.
-    pub fn put(&self, hash: &HashHex, bytes: &[u8]) -> io::Result<Written> {
-        objects::put(&self.root, hash, bytes)
+    pub fn put(&self, hash: &str, bytes: &[u8]) -> io::Result<Written> {
+        let hash = StoreHash::new(hash)?;
+        objects::put(&self.root, &hash, bytes)
     }
 
     /// Read an anonymous object.
     ///
     /// # Errors
     /// Fails if the hash is absent or on a filesystem error.
-    pub fn get(&self, hash: &HashHex) -> io::Result<Vec<u8>> {
-        objects::get(&self.root, hash)
+    pub fn get(&self, hash: &str) -> io::Result<Vec<u8>> {
+        let hash = StoreHash::new(hash)?;
+        objects::get(&self.root, &hash)
     }
 
     /// Whether an anonymous object exists for `hash`.
     #[must_use]
-    pub fn has(&self, hash: &HashHex) -> bool {
-        objects::has(&self.root, hash)
+    pub fn has(&self, hash: &str) -> bool {
+        StoreHash::new(hash).is_ok_and(|hash| objects::has(&self.root, &hash))
     }
 
     /// Write (or overwrite, since the layer is mutable) a definition's metadata.
     ///
     /// # Errors
     /// Fails on a filesystem error or an ill-formed hash.
-    pub fn put_meta(&self, hash: &HashHex, m: &DefMeta) -> io::Result<()> {
-        meta::put(&self.root, hash, m)
+    pub fn put_meta(&self, hash: &str, m: &DefMeta) -> io::Result<()> {
+        let hash = StoreHash::new(hash)?;
+        meta::put(&self.root, &hash, m)
     }
 
     /// Read a definition's metadata, if any.
     ///
     /// # Errors
     /// Fails on a filesystem error or a malformed metadata blob.
-    pub fn get_meta(&self, hash: &HashHex) -> io::Result<Option<DefMeta>> {
-        meta::get(&self.root, hash)
+    pub fn get_meta(&self, hash: &str) -> io::Result<Option<DefMeta>> {
+        let hash = StoreHash::new(hash)?;
+        meta::get(&self.root, &hash)
     }
 
     /// Bind names to hashes in the mutable name index (read-modify-write under
@@ -174,6 +225,9 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error.
     pub fn bind_names(&self, bindings: &BTreeMap<String, String>) -> io::Result<()> {
+        for hash in bindings.values() {
+            StoreHash::new(hash)?;
+        }
         index::bind_names(&self.root, bindings)
     }
 
@@ -200,6 +254,7 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error.
     pub fn set_ref(&self, name: &str, hash: &str) -> io::Result<()> {
+        StoreHash::new(hash)?;
         index::set_ref(&self.root, name, hash)
     }
 
@@ -217,6 +272,12 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error.
     pub fn add_dependents(&self, edges: &BTreeMap<String, BTreeSet<String>>) -> io::Result<()> {
+        for (hash, dependents) in edges {
+            StoreHash::new(hash)?;
+            for dependent in dependents {
+                StoreHash::new(dependent)?;
+            }
+        }
         index::add_dependents(&self.root, edges)
     }
 
@@ -224,9 +285,10 @@ impl Store {
     ///
     /// # Errors
     /// Fails on a filesystem error.
-    pub fn dependents(&self, hash: &HashHex) -> io::Result<BTreeSet<String>> {
+    pub fn dependents(&self, hash: &str) -> io::Result<BTreeSet<String>> {
+        let hash = StoreHash::new(hash)?;
         Ok(index::load_deps(&self.root)?
-            .remove(hash)
+            .remove(hash.as_str())
             .unwrap_or_default())
     }
 
@@ -236,6 +298,7 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error.
     pub fn set_canonical(&self, key: &CanonicalKey, instance_hash: &str) -> io::Result<()> {
+        StoreHash::new(instance_hash)?;
         index::set_canonical(&self.root, key, instance_hash)
     }
 
@@ -248,6 +311,9 @@ impl Store {
         &self,
         bindings: &[(CanonicalKey, String)],
     ) -> io::Result<Result<(), CanonicalConflict>> {
+        for (_, hash) in bindings {
+            StoreHash::new(hash)?;
+        }
         index::merge_canonicals(&self.root, bindings)
     }
 
@@ -264,16 +330,18 @@ impl Store {
     ///
     /// # Errors
     /// Fails on a filesystem error or an ill-formed hash.
-    pub fn put_verified(&self, hash: &HashHex, record: &VerifiedRecord) -> io::Result<()> {
-        verified::put(&self.root, hash, record)
+    pub fn put_verified(&self, hash: &str, record: &VerifiedRecord) -> io::Result<()> {
+        let hash = StoreHash::new(hash)?;
+        verified::put(&self.root, &hash, record)
     }
 
     /// The verification records recorded for `hash`.
     ///
     /// # Errors
     /// Fails on a filesystem error or a malformed record.
-    pub fn verified(&self, hash: &HashHex) -> io::Result<Vec<VerifiedRecord>> {
-        verified::get(&self.root, hash)
+    pub fn verified(&self, hash: &str) -> io::Result<Vec<VerifiedRecord>> {
+        let hash = StoreHash::new(hash)?;
+        verified::get(&self.root, &hash)
     }
 
     /// Write the certificate envelope attesting a property of `subject`. Immutable
@@ -283,8 +351,9 @@ impl Store {
     /// # Errors
     /// Fails on a filesystem error, an ill-formed hash, or a byte mismatch against
     /// an existing certificate.
-    pub fn put_cert(&self, subject: &HashHex, bytes: &[u8]) -> io::Result<Written> {
-        certs::put(&self.root, subject, bytes)
+    pub fn put_cert(&self, subject: &str, bytes: &[u8]) -> io::Result<Written> {
+        let subject = StoreHash::new(subject)?;
+        certs::put(&self.root, &subject, bytes)
     }
 
     /// The certificate envelope attesting `subject`, or `None` when none exists.
@@ -292,14 +361,15 @@ impl Store {
     ///
     /// # Errors
     /// Fails on a filesystem error or an ill-formed hash.
-    pub fn get_cert(&self, subject: &HashHex) -> io::Result<Option<Vec<u8>>> {
-        certs::get(&self.root, subject)
+    pub fn get_cert(&self, subject: &str) -> io::Result<Option<Vec<u8>>> {
+        let subject = StoreHash::new(subject)?;
+        certs::get(&self.root, &subject)
     }
 
     /// Whether a certificate envelope exists for `subject`.
     #[must_use]
-    pub fn has_cert(&self, subject: &HashHex) -> bool {
-        certs::has(&self.root, subject)
+    pub fn has_cert(&self, subject: &str) -> bool {
+        StoreHash::new(subject).is_ok_and(|subject| certs::has(&self.root, &subject))
     }
 }
 
@@ -383,7 +453,7 @@ pub fn commit_program(
             if let Some(m) = metas.get(&func.name) {
                 store.put_meta(hash, m)?;
                 stats.meta_written += 1;
-                names.insert(m.name.clone(), hash.clone());
+                names.insert(m.name.clone(), hash.as_str().to_string());
                 stats.names_bound += 1;
             }
 
@@ -393,9 +463,9 @@ pub fn commit_program(
             for dep in graph.direct_deps(func.name) {
                 if let Some(dep_hash) = hashes.get(&dep) {
                     dependents
-                        .entry(dep_hash.clone())
+                        .entry(dep_hash.as_str().to_string())
                         .or_default()
-                        .insert(hash.clone());
+                        .insert(hash.as_str().to_string());
                 }
             }
         }
@@ -475,23 +545,13 @@ fn check_stamp(version: &Path) -> io::Result<()> {
 }
 
 // The sharded path for a hash under `layer`: `<layer>/<first 2 hex>/<rest>`.
-fn shard_path(layer: &Path, hash: &HashHex) -> PathBuf {
+fn shard_path(layer: &Path, hash: &HashHex<'_>) -> PathBuf {
     let (shard, rest) = hash.split_at(SHARD_HEX);
     layer.join(shard).join(rest)
 }
 
 // A hash usable as a filesystem key: nonempty hex, long enough to shard. This
 // guards the path construction, not the hash's cryptographic strength.
-fn validate_hash(hash: &HashHex) -> io::Result<()> {
-    if hash.len() > SHARD_HEX && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("ill-formed content hash {hash:?}"),
-        ))
-    }
-}
 
 // Unique temp path in `dir`. The `.tmp.` prefix marks it as never an object or
 // index file, so a reader (which only opens exact known paths) ignores a temp

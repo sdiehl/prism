@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/neg_nonnumeric.pr
 ---
 == tokens ==
-VOpen Fn Ident("main") LParen RParen Colon Bang LBrace UIdent("IO") RBrace KwUnit Eq VOpen Let Ident("x") Eq Minus StringLit("hello") VSemi Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+VOpen Fn Ident("main") LParen RParen Colon KwUnit Bang LBrace UIdent("IO") RBrace Eq VOpen Let Ident("x") Eq Minus StringLit("hello") VSemi Ident("println") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
 
 == ast ==
 Program {
@@ -39,10 +39,10 @@ Program {
                                 node: Str(
                                     "hello",
                                 ),
-                                span: 114..121,
+                                span: 115..122,
                             },
                         ),
-                        span: 113..121,
+                        span: 114..122,
                     },
                     Spanned {
                         node: Call(
@@ -50,7 +50,7 @@ Program {
                                 node: Var(
                                     "println",
                                 ),
-                                span: 124..131,
+                                span: 125..132,
                             },
                             [
                                 Spanned {
@@ -60,23 +60,23 @@ Program {
                                             suffix: None,
                                         },
                                     ),
-                                    span: 132..133,
+                                    span: 133..134,
                                 },
                             ],
                         ),
-                        span: 124..134,
+                        span: 125..135,
                     },
                 ),
-                span: 105..134,
+                span: 106..135,
             },
             wheres: [],
-            span: 78..134,
+            span: 78..135,
         },
     ],
 }
 
 == types ==
-Type Error: in `main`: no instance for Num(String)
+[E3012] Type Error: in `main`: no instance for Num(String)
    ╭─[ <source>:3:11 ]
    │
  3 │   let x = -"hello"

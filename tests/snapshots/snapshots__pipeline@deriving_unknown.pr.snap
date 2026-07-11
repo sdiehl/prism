@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/deriving_unknown.pr
 ---
 == tokens ==
@@ -88,7 +88,7 @@ Program {
 }
 
 == types ==
-Type Error: unknown class in deriving: Monoid
+[E6017] Type Error: unknown class in deriving: Monoid
    ╭─[ <source>:4:32 ]
    │
  4 │ type Foo = A | B deriving (Eq, Monoid)

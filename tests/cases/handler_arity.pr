@@ -1,0 +1,11 @@
+-- A handler clause binds exactly the operation's declared parameter count
+-- (besides the continuation). Both directions are compile errors, not the
+-- runtime binder-mismatch fault they used to be.
+effect St
+  put(Int) : Unit
+
+fn main() =
+  println(handle put(1) with {
+    put(a, b) resume k => k(()),
+    return r => 9
+  })

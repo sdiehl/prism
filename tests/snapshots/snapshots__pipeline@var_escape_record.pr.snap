@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/var_escape_record.pr
 ---
 == tokens ==
@@ -197,7 +197,7 @@ Program {
 }
 
 == types ==
-Type Error: `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
+[E6037] Type Error: `var x` escapes its block: the value here is a function that still uses `x` after its scope ends
    ╭─[ <source>:5:13 ]
    │
  5 │   Box { f = \(n) -> x + n }

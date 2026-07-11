@@ -1,0 +1,17 @@
+-- `teleport` (Teleport module) is the checked mobility boundary. It runs a
+-- portable, single-use closure -- one that captures only content-addressed code
+-- and portable data, invoked at most once, so it is safe to move to a fresh
+-- runtime. The compiler proves the `@ {once, portable}` contract at each call;
+-- running a teleported closure is observationally identical to calling it, so it
+-- threads no differently on the two backends. Compose it with `Replay.record`
+-- for a durable, replayable mobile run.
+import Teleport (..)
+
+fn double(n : Int) : Int = n + n
+
+-- A teleported closure may call top-level functions (code references) freely.
+fn moved(x : Int) : Int = teleport(\() -> double(x) + 1)
+
+fn main() =
+  println(teleport(\() -> double(20)))
+  println(moved(5))

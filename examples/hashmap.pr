@@ -11,7 +11,7 @@
 --   3
 --   apple banana cherry
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let m = hm_new()
   let m = hm_insert(m, "apple", 50)
   let m = hm_insert(m, "banana", 250)

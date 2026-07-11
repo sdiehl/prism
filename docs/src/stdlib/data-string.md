@@ -98,15 +98,15 @@ True when `needle` occurs anywhere in `s`.
 
 ### `map_case`
 
-```prism,sig,h-eb62b360e9f8eba830ef73227430dc58d4d775b88593183205278d67fc4fdbed
-map_case : (String, Int, Array(Int), Bool) -> Array(Int)
+```prism,sig,h-b598dbebc6f4f42e20d6164ec9e58ce4210bca01d5aec126ab6e5605b390fe74
+map_case : (String, Int, Buf, Bool) -> Buf
 ```
 
-Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte array (`up` selects upper- vs lower-casing).
+Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte buffer (`up` selects upper- vs lower-casing).
 
 ### `to_upper`
 
-```prism,sig,h-68debadff5e1f7f852cb67df889cddc7011795c91508ac3853814874b6419ce0
+```prism,sig,h-23a7c7f5cdce9b267eabc8e31b49661dff251753397992d3a3f3259622870ce2
 to_upper : (String) -> String
 ```
 
@@ -114,7 +114,7 @@ ASCII upper-case of `s` (non-letters unchanged).
 
 ### `to_lower`
 
-```prism,sig,h-ce825b8c5d9f13702d20357b2df2b5c6c97a892e12adf0047a881911881f9ccd
+```prism,sig,h-1c391da3ddabefebcfab2524904b69615c51821c040b68176275d77cd996d8a4
 to_lower : (String) -> String
 ```
 
@@ -138,15 +138,15 @@ Helper for `trim`: the index just past the last non-whitespace byte before `i`.
 
 ### `slice_bytes`
 
-```prism,sig,h-1d203050fca561f7ce51e9717743a3602d271ffb93f6721ca32ba8e651d8b790
-slice_bytes : (String, Int, Int, Array(Int)) -> Array(Int)
+```prism,sig,h-5e6fc9bdfb9a2644ecc8d8ebf3b154620bf95582554bd47b3847c6838db36fb4
+slice_bytes : (String, Int, Int, Buf) -> Buf
 ```
 
-Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `arr`.
+Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`.
 
 ### `trim`
 
-```prism,sig,h-ec0181cc19fe626edd9f4f20d49742bae02b8bb8afe6d25c42d25a4fdcf61980
+```prism,sig,h-c37348d302e46e5369cc04482d79a97677c057f28e6aaad86b731b744ba1c90b
 trim : (String) -> String
 ```
 

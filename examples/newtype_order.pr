@@ -19,7 +19,7 @@ instance ordDown : Ord(Down)
     match (a, b) of
       (Down(x), Down(y)) => int_cmp(y, x)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let xs = [3, 1, 2]
   -- sort here resolves the canonical Ord(Int): ascending.
   println("ascending  (canonical Ord Int) = {sort(xs)}")

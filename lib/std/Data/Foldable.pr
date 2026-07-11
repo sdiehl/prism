@@ -24,11 +24,12 @@ pub fn product(t : f(Int)) : Int given Foldable(f) =
   fold_l(\(acc, x) -> acc * x, 1, t)
 
 -- | The number of elements.
-pub fn length(t : f(a)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + 1, 0, t)
+pub fn length(t : f(a)) : Int given Foldable(f) =
+  fold_l(\(acc, _x) -> acc + 1, 0, t)
 
 -- | True when the container has no elements.
 pub fn is_empty(t : f(a)) : Bool given Foldable(f) =
-  fold_l(\(acc, x) -> false, true, t)
+  fold_l(\(_acc, _x) -> false, true, t)
 
 -- | True when every element satisfies `p` (vacuously true when empty).
 pub fn all(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =

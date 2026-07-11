@@ -63,7 +63,7 @@ fn describe(v : Vec2) : String =
     OnXAxis(x) => concat("on the x axis at ", show(x))
     _ => "not on an axis"
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let v = Vec2 { x = 3, y = 4 }
   -- Basic: derived getter and functional setter, no optic plumbing.
   println(x_of(v))

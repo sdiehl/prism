@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/vec_type_for_nat.pr
 ---
 == tokens ==
@@ -85,7 +85,7 @@ Program {
 }
 
 == types ==
-Type Error: in `demo`: kind mismatch: parameter 2 of `Vec` has kind `Nat`, but a `Type` was given
+[E1003] Type Error: in `demo`: kind mismatch: parameter 2 of `Vec` has kind `Nat`, but a `Type` was given
    ╭─[ <source>:5:1 ]
    │
  5 │ fn demo(x : Vec(Int, Bool)) : Int = 0

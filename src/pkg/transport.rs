@@ -24,6 +24,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::core::Digest;
 use crate::pkg::trust::{self, IndexRow, SignedArtifact};
 use crate::store::codec::decode_def;
 use crate::store::disk::{Store, Written};
@@ -90,7 +91,7 @@ impl From<TransportError> for crate::error::Error {
     fn from(e: TransportError) -> Self {
         match e {
             TransportError::Io(io) => Self::Io(io),
-            other => Self::Resolve(other.to_string()),
+            other => Self::ResolvePackage(other.to_string()),
         }
     }
 }
@@ -109,10 +110,10 @@ impl From<TransportError> for crate::error::Error {
 pub fn verify(hash: &str, bytes: &[u8]) -> Result<(), TransportError> {
     let decoded = decode_def(bytes)?;
     match decoded.rehash() {
-        Some(h) if h == hash => Ok(()),
+        Some(h) if h.as_str() == hash => Ok(()),
         got => Err(TransportError::HashMismatch {
             requested: hash.to_string(),
-            got,
+            got: got.map(Digest::into_string),
         }),
     }
 }

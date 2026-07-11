@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/errors_ctl_poly.pr
 ---
 == tokens ==
-VOpen Effect UIdent("Bail") VOpen Ctl Ident("bail") LParen KwString RParen Colon Ident("a") VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("r") Eq VOpen Handle Ident("bail") LParen StringLit("nope") RParen With VOpen Ident("bail") LParen Ident("m") Comma Ident("k") RParen FatArrow Ident("k") LParen Int(IntLit { value: 0, suffix: None }) RParen VSemi Return Ident("v") FatArrow Ident("v") VClose VClose VSemi Ident("println") LParen Ident("r") RParen VClose VClose
+VOpen Effect UIdent("Bail") VOpen Ident("bail") LParen KwString RParen Colon Ident("a") VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("r") Eq VOpen Handle Ident("bail") LParen StringLit("nope") RParen With VOpen Ident("bail") LParen Ident("m") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Int(IntLit { value: 0, suffix: None }) RParen VSemi Return Ident("v") FatArrow Ident("v") VClose VClose VSemi Ident("println") LParen Ident("r") RParen VClose VClose
 
 == ast ==
 Program {
@@ -25,7 +25,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 0..34,
+            span: 0..30,
         },
     ],
     errors: [],
@@ -50,18 +50,18 @@ Program {
                                         node: Var(
                                             "bail",
                                         ),
-                                        span: 69..73,
+                                        span: 65..69,
                                     },
                                     [
                                         Spanned {
                                             node: Str(
                                                 "nope",
                                             ),
-                                            span: 74..80,
+                                            span: 70..76,
                                         },
                                     ],
                                 ),
-                                span: 69..81,
+                                span: 65..77,
                             },
                             [
                                 Op(
@@ -76,7 +76,7 @@ Program {
                                                 node: Var(
                                                     "k",
                                                 ),
-                                                span: 107..108,
+                                                span: 109..110,
                                             },
                                             [
                                                 Spanned {
@@ -86,11 +86,11 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 109..110,
+                                                    span: 111..112,
                                                 },
                                             ],
                                         ),
-                                        span: 107..111,
+                                        span: 109..113,
                                     },
                                 ),
                                 Return(
@@ -99,12 +99,12 @@ Program {
                                         node: Var(
                                             "v",
                                         ),
-                                        span: 130..131,
+                                        span: 132..133,
                                     },
                                 ),
                             ],
                         ),
-                        span: 62..131,
+                        span: 58..133,
                     },
                     Spanned {
                         node: Call(
@@ -112,33 +112,33 @@ Program {
                                 node: Var(
                                     "println",
                                 ),
-                                span: 134..141,
+                                span: 136..143,
                             },
                             [
                                 Spanned {
                                     node: Var(
                                         "r",
                                     ),
-                                    span: 142..143,
+                                    span: 144..145,
                                 },
                             ],
                         ),
-                        span: 134..144,
+                        span: 136..146,
                     },
                 ),
-                span: 50..144,
+                span: 46..146,
             },
             wheres: [],
-            span: 36..144,
+            span: 32..146,
         },
     ],
 }
 
 == types ==
-Type Error: op `bail` has a polymorphic return type and can only be handled by `final ctl`
-   ╭─[ <source>:7:21 ]
+[E6029] Type Error: op `bail` has a polymorphic return type and can only be handled by `never`
+   ╭─[ <source>:7:27 ]
    │
- 7 │       bail(m, k) => k(0)
-   │                     ──┬─  
-   │                       ╰─── op `bail` has a polymorphic return type and can only be handled by `final ctl`
+ 7 │       bail(m) resume k => k(0)
+   │                           ──┬─  
+   │                             ╰─── op `bail` has a polymorphic return type and can only be handled by `never`
 ───╯

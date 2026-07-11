@@ -22,7 +22,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, validate_hash, HashHex, FIELD_SEP, META_DIR};
+use super::{atomic_write, shard_path, HashHex, FIELD_SEP, META_DIR};
 
 const META_HEADER: &str = "prism-store-meta\tv1";
 const KEY_NAME: &str = "name";
@@ -30,7 +30,7 @@ const KEY_TYPE: &str = "type";
 const KEY_DOC: &str = "doc";
 
 /// The metadata-layer facts for one definition. Extended (not replaced) as later
-/// milestones add source positions and richer docs.
+/// future formats add source positions and richer documentation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefMeta {
     /// The canonical human name the hash is bound to.
@@ -41,8 +41,7 @@ pub struct DefMeta {
     pub doc: String,
 }
 
-pub(super) fn put(root: &Path, hash: &HashHex, m: &DefMeta) -> io::Result<()> {
-    validate_hash(hash)?;
+pub(super) fn put(root: &Path, hash: &HashHex<'_>, m: &DefMeta) -> io::Result<()> {
     let body = format!(
         "{META_HEADER}\n{KEY_NAME}{FIELD_SEP}{}\n{KEY_TYPE}{FIELD_SEP}{}\n{KEY_DOC}{FIELD_SEP}{}\n",
         m.name, m.ty, m.doc
@@ -50,8 +49,7 @@ pub(super) fn put(root: &Path, hash: &HashHex, m: &DefMeta) -> io::Result<()> {
     atomic_write(&shard_path(&root.join(META_DIR), hash), body.as_bytes())
 }
 
-pub(super) fn get(root: &Path, hash: &HashHex) -> io::Result<Option<DefMeta>> {
-    validate_hash(hash)?;
+pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Option<DefMeta>> {
     let path = shard_path(&root.join(META_DIR), hash);
     let text = match fs::read_to_string(&path) {
         Ok(t) => t,

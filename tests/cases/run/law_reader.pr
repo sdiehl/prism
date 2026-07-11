@@ -5,21 +5,21 @@
 import Quickcheck (..)
 
 effect Reader
-  ctl ask(Unit) : Int
+  ask() : Int
 
 fn run_reader(env, action : () -> a ! {Reader | e}) =
   handle action() with
-    ask(_u, k) => k(env)
+    ask() resume k => k(env)
     return r => r
 
 -- ask-ask: `ask() then ask()` is observationally `ask()` reused.
 fn aa_lhs() =
-  let a = ask(())
-  let b = ask(())
+  let a = ask()
+  let b = ask()
   a + b * 11
 
 fn aa_rhs() =
-  let a = ask(())
+  let a = ask()
   a + a * 11
 
 fn prop_ask_ask(env) = run_reader(env, aa_lhs) == run_reader(env, aa_rhs)

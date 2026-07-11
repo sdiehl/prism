@@ -179,7 +179,7 @@ An effect-polymorphic traversal: `traverse` is an effectful `map`, the per-eleme
 
 ```prism,def,h-ba91a990a806c50b9519dca2e1a67c09b836444bbe38e38818b42da3ae8252a0
 effect Emit(a)
-  ctl emit(a) : Unit
+  emit(a) : Unit
 ```
 
 The stream effect: `emit(x)` yields one element to the enclosing consumer.
@@ -188,18 +188,18 @@ The stream effect: `emit(x)` yields one element to the enclosing consumer.
 
 ```prism,def,h-39f981c8652b998e20a080265184646ee7b8ed303a7ede35fcd102ec8b881a66
 effect Output
-  ctl out_print(String) : Unit
-  ctl out_println(String) : Unit
+  out_print(String) : Unit
+  out_println(String) : Unit
 ```
 
 Console output as an interceptable capability. `print`/`println` perform these ops; the default `run_io` handler discharges them to the real terminal, while replay/durable drop them during a replayed prefix.
 
 ### `Console`
 
-```prism,def,h-91fcb6eb318baeea64057792d041a817656926de3d6ca4d994b6773617859348
+```prism,def,h-e967837b1c2f80c99ca5ccb8d85e852dd4147caff80f0946977acce4e823e973
 effect Console
-  ctl con_read_int(Unit) : Int
-  ctl con_read_line(Unit) : String
+  con_read_int() : Int
+  con_read_line() : String
 ```
 
 Console input capability. The surface wrappers `read_int`/`read_line` perform these ops; `run_io` discharges each by resuming with the matching `prim_*` builtin, and the tail-resumptive handlers fuse to direct calls.
@@ -208,29 +208,29 @@ Console input capability. The surface wrappers `read_int`/`read_line` perform th
 
 ```prism,def,h-759f11014b90dcfc7424a865d8e009a91ebe2958614253265d24db51bd3e5e67
 effect FileSystem
-  ctl fs_read_file(String) : String
-  ctl fs_read_bytes(String) : Buf
-  ctl fs_file_exists(String) : Bool
+  fs_read_file(String) : String
+  fs_read_bytes(String) : Buf
+  fs_file_exists(String) : Bool
 ```
 
 File-system read capability (`read_file`, `read_bytes`, `file_exists`).
 
 ### `Random`
 
-```prism,def,h-6fff37bdb302654e80373dec569df4176d12a191e1af5890c3ba0380dd164c16
+```prism,def,h-044eed567ef648d8c3de4d3a3286c00b6500445fe895c3793627e7f30e333e34
 effect Random
-  ctl rng_rand(Unit) : Int
+  rng_rand() : Int
 ```
 
 Random-number capability (`rand`).
 
 ### `Env`
 
-```prism,def,h-3d8a6cd048c666941860a539025d9fbe6f781a06add5c352f8c3ec17ccdae058
+```prism,def,h-8b41de0e984c772f3cb5d3a3fafb81a0bc48564b4deb094322dce4503b7bbb93
 effect Env
-  ctl env_get(String) : String
-  ctl env_argc(Unit) : Int
-  ctl env_arg(Int) : String
+  env_get(String) : String
+  env_argc() : Int
+  env_arg(Int) : String
 ```
 
 Process-environment capability (`getenv`, `args_count`, `arg`).
@@ -771,7 +771,7 @@ Tau, `2 * pi`.
 
 ### `rand_below`
 
-```prism,sig,h-41dfa4dc95a1886adad5af60936772a828de5018222dbe7d79ed1dfcc7d03e83
+```prism,sig,h-d68b6454b8b822ca93103348e8f50a3bcaf4ece1a4deb2db3d382b5ab46e85af
 rand_below : (Int) -> Int ! {Random}
 ```
 
@@ -779,7 +779,7 @@ A random integer in `[0, n)`, over the seeded SplitMix64 stream.
 
 ### `rand_range`
 
-```prism,sig,h-b8a6aa258e51332d9cfa8491c599dc0f6fc1e4489c6f35d504e8dee26917332b
+```prism,sig,h-025725f987854d36a5d1f9d87bbac22d505ee26c9928cf6fc1cceec2431b1afd
 rand_range : (Int, Int) -> Int ! {Random}
 ```
 
@@ -787,7 +787,7 @@ A random integer in `[lo, hi)`.
 
 ### `rand_bool`
 
-```prism,sig,h-2586aab31280658f2d6bc6f873876d0f6122b70207c4b6676c8e7a2505f1cd0e
+```prism,sig,h-a4159d758588ed454217d6936eb0c370e31cf8855c54d54e5505ee45589b0797
 rand_bool : () -> Bool ! {Random}
 ```
 
@@ -851,8 +851,8 @@ Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 
 ### `succeeds`
 
-```prism,sig,h-2578632e7cb3d703fdb7254f9bec45e5d45414a9c13676146e2e7872d6517726
-succeeds : forall e0 a. (() -> a ! {e0}) -> Bool ! {e0}
+```prism,sig,h-c65c9ddea6bcbe92d0b217395f56dbd767488be3ed58f1f11ab287371b00d850
+succeeds : forall e0 a. (() -> a ! {Fail, e0}) -> Bool ! {e0}
 ```
 
 True when `thunk` runs to completion without calling `fail()`.
@@ -899,7 +899,7 @@ The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
 
 ### `at_hashmap`
 
-```prism,sig,h-2d8dd49edaf0b8f7fb0caec02be7148827a5dbabb62512a0b7ae1c94f3df81a9
+```prism,sig,h-ca58677037e217c838f391118cb36163ed243ed74deca4391ddf93d3a5162e17
 at_hashmap : forall a. (HashMap(a), String) -> a ! {Fail}
 ```
 
@@ -971,7 +971,7 @@ Run `body` `n` times for its effects.
 
 ### `read_int`
 
-```prism,sig,h-86131d9ea0231bf311033e9d245da0a25006ef4c146e3e298e70e25b992cf440
+```prism,sig,h-6f06b7a16f4793ff32abc75c0ceb068370555d43b552ca6cf2d00ad7a88027b6
 read_int : () -> Int ! {Console}
 ```
 
@@ -979,7 +979,7 @@ Read an integer from standard input.
 
 ### `read_line`
 
-```prism,sig,h-5bdb5cd811aeb0b397f13e84f1b8da0cf8a64a0cb1948234d52566ee38a10984
+```prism,sig,h-f5cd08cb16276b745f3c3f7eb67338f5d8f0d11ad3ef3b2a0ef7e11538123981
 read_line : () -> String ! {Console}
 ```
 
@@ -1011,7 +1011,7 @@ True when a file exists at path `p`.
 
 ### `rand`
 
-```prism,sig,h-db92ce01b9fe29accea875e316cf2355e347edb3b5b52fd3f0188dc3e4a16b50
+```prism,sig,h-5b036958801c55447b8a5d07c7f7b66fd300c2983deddf06e6decf95f99ccbcb
 rand : () -> Int ! {Random}
 ```
 
@@ -1027,7 +1027,7 @@ The value of environment variable `s` (empty when unset).
 
 ### `args_count`
 
-```prism,sig,h-2e441c5f6bce826afef617751fbe4773a9fd82d24a2a5819bf758f09285c4867
+```prism,sig,h-d46604c29181ba411be3f03dfb80af05fdfc5758fec13cb94792f747a3dfc91b
 args_count : () -> Int ! {Env}
 ```
 
@@ -1155,24 +1155,24 @@ The first `n` elements of a stream, stopping the producer early.
 
 ### `sfold`
 
-```prism,sig,h-057d631c70c5d006957d103412a093dcb38ba910ab500a99fab253abdbfc64a4
-sfold : forall e0 a b c. ((Unit) -> b ! {e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
+```prism,sig,h-40d3277e4d15540265cb660f36e685e61c6684058af099f80bc09ba81028c6d8
+sfold : forall e0 a b c. ((Unit) -> b ! {Emit(c), e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 ```
 
-Left-fold a stream with `f` from the initial accumulator `z`, fusing.
+Left-fold a stream with `f` from the initial accumulator `z`, fusing. The stream row is pinned to `{Emit(a) | e}` so the handler discharges `Emit` (leaving `{e}`); without the annotation `Emit` slips into a bare row variable and leaks past the fold into the caller's row.
 
 ### `ssum`
 
-```prism,sig,h-1acd72923aecf7a9603b72e34a923e7557490bf5fef6d8b4930d6531a71fdfe8
-ssum : forall e0 a. ((Unit) -> a ! {e0}) -> Int ! {e0}
+```prism,sig,h-cfbcbb33a7f56df86676f15fc31c5dbe29ecdcd0034792387c7facdd43080ed9
+ssum : forall e0 a. ((Unit) -> a ! {Emit(Int), e0}) -> Int ! {e0}
 ```
 
 Sum a stream of numbers.
 
 ### `scollect`
 
-```prism,sig,h-07eae7dab4778a4da24c198c4a99fc43eaa906050d05e76b70c6e04aeacbf56c
-scollect : forall e0 a b. ((Unit) -> a ! {e0}) -> List(b) ! {e0}
+```prism,sig,h-e44202e58e952ff2a502443c739e9de42c95f96e79a1da11fc8b3bf9c70b1f3e
+scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
 ```
 
 Collect a stream into a list, in emission order.
@@ -1219,7 +1219,7 @@ Join a list of strings into one with a single allocation (an O(n) builder that r
 
 ### `fnv_from`
 
-```prism,sig,h-0429bce29fe99117becf7cb3c4dc5ea6fc325646159baefee3ba97f3a76c7205
+```prism,sig,h-c303cacfdab41622a525fa2b5b6fa8ffe5576ff35cb4b6ebb5c7e72e30738c62
 fnv_from : (String, Int, U64) -> U64
 ```
 
@@ -1227,7 +1227,7 @@ Helper for `str_hash`: fold one byte into the running FNV-1a hash.
 
 ### `str_hash`
 
-```prism,sig,h-8f2afbe6f2227e953795c76a695282dc0c2efcc72f3db6fa098738bad911616d
+```prism,sig,h-a9aa108caa8fedda5389dded881208cf6d3644eaeecf5a5b829c5a08298fb9ed
 str_hash : (String) -> U64
 ```
 
@@ -1235,7 +1235,7 @@ The FNV-1a 64-bit hash of a string (the U64 lane wraps, O(length)).
 
 ### `bucket_of`
 
-```prism,sig,h-a79263beeb68ee53b7a862e94dcb7b97eca8626d095d808a608d063585d5179b
+```prism,sig,h-b3636c7029e71d6a2e349df9da617583e42ceb61a0d638936902610b55db1e7d
 bucket_of : (String, Int) -> Int
 ```
 
@@ -1259,7 +1259,7 @@ Helper: look up `k` in an association-list bucket (matches pairs directly so it 
 
 ### `hm_lookup`
 
-```prism,sig,h-22ded004622f21440d75f3d275ea8f0da2da71b2dcfe13e8a124eafa311a4abf
+```prism,sig,h-418010e80e56b6ad9a49d04a58a434ed180f184331d091ed6300889b3d6b368a
 hm_lookup : forall a. (HashMap(a), String) -> Option(a)
 ```
 
@@ -1267,7 +1267,7 @@ The value bound to `k` as `Some`, or `None`.
 
 ### `hm_member`
 
-```prism,sig,h-3c6cd8320cf620f3f4e50086bba7c6f8d001a980933b5411f7e256b94539fb16
+```prism,sig,h-e4f1d17dd007091de5a830162c92751e3f9ac4fcdd5b7bd22c0b35ad09213022
 hm_member : forall a. (HashMap(a), String) -> Bool
 ```
 
@@ -1275,7 +1275,7 @@ True when `k` is present.
 
 ### `hm_get_or`
 
-```prism,sig,h-8c5ae0b0cf7e7ec092f6377a2555605bb61ccd0a1b1b50468ccc32a0beb71d40
+```prism,sig,h-c0e0b465ef0005b2b376d36c0e5ec8a58daf69b3ee09ff8e86529e1e55c03a9d
 hm_get_or : forall a. (a, HashMap(a), String) -> a
 ```
 
@@ -1291,7 +1291,7 @@ Helper for `hm_put_raw`: replace or add `k` in a bucket, returning the chain and
 
 ### `hm_put_raw`
 
-```prism,sig,h-fd1e8cf942154bb61f59918328a1d344ee6867ef059d4f869d83a19b1a4420a2
+```prism,sig,h-f66ebeb6120efde2493e962ad35bc0f915168c3f20b25bf8775a6ad4c8059a76
 hm_put_raw : forall a. (HashMap(a), String, a) -> HashMap(a)
 ```
 
@@ -1339,7 +1339,7 @@ The number of entries.
 
 ### `hm_reinsert`
 
-```prism,sig,h-61bff050802c92b83be95e0abc1112eb29fe282c3bc83aa5e12e2b7a9c984b09
+```prism,sig,h-d262a71bce21eb5b31e0977bbf8bcbf7a4d31a7d7342473d5ef2ab13d75491d4
 hm_reinsert : forall a. (HashMap(a), List((String, a))) -> HashMap(a)
 ```
 
@@ -1347,7 +1347,7 @@ Helper for `hm_insert`: re-insert every pair into a fresh table.
 
 ### `hm_insert`
 
-```prism,sig,h-dd693cfe2447d0d6c2608fbc276a7f7fc8a795523a6fbd4e0d42abb7c30c566a
+```prism,sig,h-cb4d05c4515adf952bc3537e31364093d5c9fbdbd2867fac5bad8aa3139bcdfd
 hm_insert : forall a. (HashMap(a), String, a) -> HashMap(a)
 ```
 
@@ -1355,7 +1355,7 @@ Insert or overwrite `k`, doubling the bucket count and rehashing once the load f
 
 ### `hm_delete`
 
-```prism,sig,h-863416228834cee56cd408b28779a3299d89be73554daebef2823f5b9dab0342
+```prism,sig,h-b9c1cc1da7834af948ef37ea4491c67c53382f0c326d29dfc86bd92edd0baccc
 hm_delete : forall a. (HashMap(a), String) -> HashMap(a)
 ```
 
@@ -1387,7 +1387,7 @@ The values of the map.
 
 ### `hm_from_list_go`
 
-```prism,sig,h-5878a35545a47d2e70e7207ead8fc318c37c454654ce22caf29cb9ae6cfc0508
+```prism,sig,h-3b0f2d31edaa06762ff41d0b84892983f45cbb94a1e6c4e6514ea4092a56b93d
 hm_from_list_go : forall a. (HashMap(a), List((String, a))) -> HashMap(a)
 ```
 
@@ -1395,7 +1395,7 @@ Helper for `hm_from_list`.
 
 ### `hm_from_list`
 
-```prism,sig,h-5f8d1d11cb105d025e930a4fa2e0941425563bc4676700d1ef5651c98a49dd97
+```prism,sig,h-4b4af5f1ebb7a5a1e430d77517811f2a1806f8ad8b3d9d69abd05dbec87337ff
 hm_from_list : forall a. (List((String, a))) -> HashMap(a)
 ```
 
@@ -1403,7 +1403,7 @@ Build a hash map from `(key, value)` pairs (later pairs win).
 
 ### `hm_adjust`
 
-```prism,sig,h-0331808a226efcef10adff4db2e47a0377fb5894bf5ab74b738b1b1065e9fa0b
+```prism,sig,h-039d035bc636a1db0235eea88b616e2dceea0fd53780f1ef277607c8f0c33ef9
 hm_adjust : forall e0 a. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0}
 ```
 
@@ -1451,7 +1451,7 @@ Helper for `args`.
 
 ### `args`
 
-```prism,sig,h-88d85ca6a626c8c741ce734306b0ae767d82c7c1cc215dfdcb86d2f4c9d2e3e6
+```prism,sig,h-e68e69a07f84250b714b412e21311c5cc2545e41d983abb0d2b83b00f812fca0
 args : () -> List(String) ! {Env}
 ```
 

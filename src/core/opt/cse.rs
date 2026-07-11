@@ -60,7 +60,11 @@ fn vkey(v: &Value) -> Option<VKey> {
         Value::Bool(b) => VKey::Bool(*b),
         Value::Unit => VKey::Unit,
         Value::Str(s) => VKey::Str(s.clone()),
-        Value::Thunk(_) | Value::Ctor(..) | Value::Tuple(_) => return None,
+        Value::Thunk(_)
+        | Value::Ctor(..)
+        | Value::Tuple(_)
+        | Value::UnboxedTuple(_)
+        | Value::UnboxedRecord(_) => return None,
     })
 }
 
@@ -164,20 +168,17 @@ impl Rewrite for Cse {
                     let a = narrow(avail, &return_var.iter().copied().collect::<Vec<_>>());
                     Box::new(self.comp(b, &a))
                 }),
-                ops: ops
-                    .iter()
-                    .map(|o| {
-                        let mut bs = o.params.clone();
-                        bs.push(o.resume);
-                        let a = narrow(avail, &bs);
-                        HandleOp {
-                            name: o.name,
-                            params: o.params.clone(),
-                            resume: o.resume,
-                            body: self.comp(&o.body, &a),
-                        }
-                    })
-                    .collect(),
+                ops: ops.rebuild(|o| {
+                    let mut bs = o.params.clone();
+                    bs.push(o.resume);
+                    let a = narrow(avail, &bs);
+                    HandleOp {
+                        name: o.name,
+                        params: o.params.clone(),
+                        resume: o.resume,
+                        body: self.comp(&o.body, &a),
+                    }
+                }),
             },
             Comp::WithReuse { token, freed, body } => {
                 let a = narrow(avail, &[*token]);

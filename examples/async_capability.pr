@@ -16,15 +16,15 @@
 import Concurrent (..)
 
 effect Log
-  ctl log(String) : Unit
+  log(String) : Unit
 
-fn worker(name : String) : !{Async(Int), Log} Int =
+fn worker(name : String) : Int ! {Async(Int), Log} =
   log("{name}: begin")
   yield(())
   log("{name}: end")
   1
 
-fn scene() : !{Async(Int), Log} Int =
+fn scene() : Int ! {Async(Int), Log} =
   match scope([\() -> worker("A"), \() -> worker("B")]) of
     Cons(a, Cons(b, Nil)) => a + b
     _ => 0
@@ -32,7 +32,7 @@ fn scene() : !{Async(Int), Log} Int =
 -- `run_async` discharges `Async` but leaves `Log`; grant the capability here.
 fn main() =
   handle run_async(scene) with
-    log(msg, k) =>
+    log(msg) resume k =>
       println(msg)
       k(())
     return total => println("done: {total}")

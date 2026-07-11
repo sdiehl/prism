@@ -1,11 +1,15 @@
 mod abi;
+mod dispatch;
 mod emit;
+pub mod isa;
 mod llvm;
 #[cfg(feature = "mlir")]
 mod mlir;
 mod native_kont;
 pub mod rt;
 
+pub use emit::emit_with_isa;
+pub use isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 pub use llvm::{
     emit as emit_llvm, emit_bitcode as emit_llvm_bc,
     emit_bitcode_with_native_kont_table as emit_llvm_bc_with_native_kont_table,

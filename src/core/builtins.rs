@@ -171,38 +171,111 @@ pub fn float_surface(name: &str) -> Option<(usize, BuiltinKind)> {
     FloatOp::from_name(name).map(|_| (FLOAT_ARITY, FLOAT_KIND))
 }
 
-/// Per-argument calling convention for the `prism_*` runtime call a builtin
-/// lowers to, read by codegen at `Comp::StrBuiltin`. The first slice is the
-/// pointer-tagged immediate (int/bool) args untagged before the call, the second
-/// the boxed-double args unboxed before the call; every other argument passes raw
-/// (string cell, boxed 64-bit cell, or tagged Int word). The flag is true when the
-/// result is a bare integer to retag.
-type AbiSpec = (&'static [usize], &'static [usize], bool);
+/// Representation of one runtime-call argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AbiArg {
+    Raw,
+    Immediate,
+    BoxedFloat,
+}
+
+/// Representation of a runtime-call result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AbiResult {
+    Raw,
+    RetagImmediate,
+}
+
+/// Calling convention for one `prism_*` runtime builtin.
+///
+/// Construction checks that an argument cannot be both immediate and boxed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AbiSpec {
+    immediate: &'static [usize],
+    boxed_float: &'static [usize],
+    result: AbiResult,
+}
+
+impl AbiSpec {
+    const fn new(
+        immediate: &'static [usize],
+        boxed_float: &'static [usize],
+        result: AbiResult,
+    ) -> Self {
+        let mut i = 0;
+        while i < immediate.len() {
+            let mut j = 0;
+            while j < boxed_float.len() {
+                assert!(
+                    immediate[i] != boxed_float[j],
+                    "conflicting builtin ABI argument"
+                );
+                j += 1;
+            }
+            i += 1;
+        }
+        Self {
+            immediate,
+            boxed_float,
+            result,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn arg(self, index: usize) -> AbiArg {
+        if self.immediate.contains(&index) {
+            AbiArg::Immediate
+        } else if self.boxed_float.contains(&index) {
+            AbiArg::BoxedFloat
+        } else {
+            AbiArg::Raw
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn result(self) -> AbiResult {
+        self.result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn args_within(self, arity: usize) -> bool {
+        self.immediate
+            .iter()
+            .chain(self.boxed_float)
+            .all(|i| *i < arity)
+    }
+}
 
 // The calling conventions the runtime builtins use, named once so each registry
 // row states its convention by name instead of an inline tuple.
 //
 // Default: every argument passes raw and the result is a cell or already-tagged
 // word (string ops, fixed-width arithmetic on boxed cells, elaborator-only ops).
-const RAW: AbiSpec = (&[], &[], false);
+const RAW: AbiSpec = AbiSpec::new(&[], &[], AbiResult::Raw);
 // Bare-integer result to retag (predicates, lengths, exit codes).
-const RETAG: AbiSpec = (&[], &[], true);
+const RETAG: AbiSpec = AbiSpec::new(&[], &[], AbiResult::RetagImmediate);
 // Index arg raw; bare-integer (char/byte) result to retag.
-const IDX1_RETAG: AbiSpec = (&[1], &[], true);
+const IDX1_RETAG: AbiSpec = AbiSpec::new(&[1], &[], AbiResult::RetagImmediate);
 // Index arg raw; element/array result (cell or polymorphic) passes through.
-const IDX1: AbiSpec = (&[1], &[], false);
+const IDX1: AbiSpec = AbiSpec::new(&[1], &[], AbiResult::Raw);
 // Single immediate arg (bool/char/index/exit/capacity); raw result.
-const IMM0: AbiSpec = (&[0], &[], false);
+const IMM0: AbiSpec = AbiSpec::new(&[0], &[], AbiResult::Raw);
 // Two immediate args (length and init byte); cell result.
-const IMM01: AbiSpec = (&[0, 1], &[], false);
+const IMM01: AbiSpec = AbiSpec::new(&[0, 1], &[], AbiResult::Raw);
 // One boxed-float arg; raw result.
-const F0: AbiSpec = (&[], &[0], false);
+const F0: AbiSpec = AbiSpec::new(&[], &[0], AbiResult::Raw);
 // Float arg 0, immediate arg 1; raw result.
-const F0_IMM1: AbiSpec = (&[1], &[0], false);
+const F0_IMM1: AbiSpec = AbiSpec::new(&[1], &[0], AbiResult::Raw);
 // Two boxed-float args; boxed-float result.
-const F01: AbiSpec = (&[], &[0, 1], false);
+const F01: AbiSpec = AbiSpec::new(&[], &[0, 1], AbiResult::Raw);
 // Two immediate index/length args; cell result (a fresh string or buffer).
-const IDX12: AbiSpec = (&[1, 2], &[], false);
+const IDX12: AbiSpec = AbiSpec::new(&[1, 2], &[], AbiResult::Raw);
+// Immediate length arg 0, boxed-float init arg 1; cell result (a typed buffer).
+const IMM0_F1: AbiSpec = AbiSpec::new(&[0], &[1], AbiResult::Raw);
+// Buffer arg raw, immediate index arg 1, boxed-float value arg 2; cell result.
+const IDX1_F2: AbiSpec = AbiSpec::new(&[1], &[2], AbiResult::Raw);
+// Two buffer args raw, immediate index/length args 1, 3, 4; cell result (blit).
+const IDX134: AbiSpec = AbiSpec::new(&[1, 3, 4], &[], AbiResult::Raw);
 
 // Platform facts a builtin can carry. `OffPlatform` touches the host OS (file IO,
 // env, process, args), so it has no implementation in a browser build and is
@@ -268,7 +341,7 @@ macro_rules! builtins {
 
             /// Calling convention for the runtime call this builtin lowers to.
             #[must_use]
-            pub const fn abi(self) -> AbiSpec {
+            pub(crate) const fn abi(self) -> AbiSpec {
                 match self { $( Self::$variant => $abi, )* }
             }
 
@@ -393,21 +466,21 @@ builtins! {
     ToU64 "to_u64" "ToU64" 30 RAW surface 1 Int "(Int) -> U64";
     IntOfI64 "int_of_i64" "IntOfI64" 31 RAW surface 1 Int "(I64) -> Int";
     IntOfU64 "int_of_u64" "IntOfU64" 32 RAW surface 1 Int "(U64) -> Int";
-    I64Add "i64_add" "I64Add" 33 RAW surface 2 Str "(I64, I64) -> I64";
-    I64Sub "i64_sub" "I64Sub" 34 RAW surface 2 Str "(I64, I64) -> I64";
-    I64Mul "i64_mul" "I64Mul" 35 RAW surface 2 Str "(I64, I64) -> I64";
-    I64Div "i64_div" "I64Div" 36 RAW surface 2 Str "(I64, I64) -> I64";
-    U64Div "u64_div" "U64Div" 37 RAW surface 2 Str "(U64, U64) -> U64";
-    I64Rem "i64_rem" "I64Rem" 38 RAW surface 2 Str "(I64, I64) -> I64";
-    U64Rem "u64_rem" "U64Rem" 39 RAW surface 2 Str "(U64, U64) -> U64";
+    I64Add "i64_add" "I64Add" 33 RAW;
+    I64Sub "i64_sub" "I64Sub" 34 RAW;
+    I64Mul "i64_mul" "I64Mul" 35 RAW;
+    I64Div "i64_div" "I64Div" 36 RAW;
+    U64Div "u64_div" "U64Div" 37 RAW;
+    I64Rem "i64_rem" "I64Rem" 38 RAW;
+    U64Rem "u64_rem" "U64Rem" 39 RAW;
     I64Cmp "i64_cmp" "I64Cmp" 40 RETAG surface 2 Str "(I64, I64) -> Int";
     U64Cmp "u64_cmp" "U64Cmp" 41 RETAG surface 2 Str "(U64, U64) -> Int";
-    U64Add "u64_add" "U64Add" 42 RAW surface 2 Str "(U64, U64) -> U64";
-    U64Sub "u64_sub" "U64Sub" 43 RAW surface 2 Str "(U64, U64) -> U64";
-    U64Mul "u64_mul" "U64Mul" 44 RAW surface 2 Str "(U64, U64) -> U64";
+    U64Add "u64_add" "U64Add" 42 RAW;
+    U64Sub "u64_sub" "U64Sub" 43 RAW;
+    U64Mul "u64_mul" "U64Mul" 44 RAW;
     ByteAt "byte_at" "ByteAt" 45 IDX1_RETAG surface 2 Str "(String, Int) -> Int";
     ByteLen "byte_len" "ByteLen" 46 RETAG surface 1 Str "(String) -> Int";
-    StringOfBytes "string_of_bytes" "StringOfBytes" 47 RAW surface 1 Str "(Array(Int)) -> String";
+    StringOfBytes "string_of_bytes" "StringOfBytes" 47 RAW;
     ArrayPop "array_pop" "ArrayPop" 48 RAW surface 1 Str "forall a. (Array(a)) -> Array(a)";
     I64And "i64_and" "I64And" 49 RAW surface 2 Str "(I64, I64) -> I64";
     I64Or "i64_or" "I64Or" 50 RAW surface 2 Str "(I64, I64) -> I64";
@@ -440,6 +513,16 @@ builtins! {
     BufOfString "buf_of_string" "BufOfString" 89 RAW surface 1 Str "(String) -> Buf";
     StringOfBuf "string_of_buf" "StringOfBuf" 90 RAW surface 1 Str "(Buf) -> String";
     BufUtf8Valid "buf_utf8_valid" "BufUtf8Valid" 91 RETAG surface 1 Str "(Buf) -> Bool";
+    TbufNew "tbuf_new" "TbufNew" 95 IMM0_F1 surface 2 Str "(Int, Float) -> FloatBuf";
+    TbufLen "tbuf_len" "TbufLen" 96 RETAG surface 1 Str "(FloatBuf) -> Int";
+    TbufGet "tbuf_get" "TbufGet" 97 IDX1 surface 2 Str "(FloatBuf, Int) -> Float";
+    TbufSet "tbuf_set" "TbufSet" 98 IDX1_F2 surface 3 Str "(FloatBuf, Int, Float) -> FloatBuf";
+    TbufBlit "tbuf_blit" "TbufBlit" 99 IDX134 surface 5 Str "(FloatBuf, Int, FloatBuf, Int, Int) -> FloatBuf";
+    IbufNew "ibuf_new" "IbufNew" 100 IMM0_F1 surface 2 Str "(Int, I64) -> IntBuf";
+    IbufLen "ibuf_len" "IbufLen" 101 RETAG surface 1 Str "(IntBuf) -> Int";
+    IbufGet "ibuf_get" "IbufGet" 102 IDX1 surface 2 Str "(IntBuf, Int) -> I64";
+    IbufSet "ibuf_set" "IbufSet" 103 IDX1_F2 surface 3 Str "(IntBuf, Int, I64) -> IntBuf";
+    IbufBlit "ibuf_blit" "IbufBlit" 104 IDX134 surface 5 Str "(IntBuf, Int, IntBuf, Int, Int) -> IntBuf";
     SortPrim "sort_prim" "SortPrim" 66 RAW;
     TaqSnoc "taq_snoc" "TaqSnoc" 67 RAW;
     TaqConcat "taq_concat" "TaqConcat" 68 RAW;
@@ -477,6 +560,15 @@ impl Builtin {
     pub fn sym(self) -> String {
         match self {
             Self::Concat => "prism_str_concat".into(),
+            // The typed-buffer C runtime (`runtime/prism_tbuf.c`) moves raw 8-byte
+            // words and is element-kind-agnostic, so the i64-element builtins call
+            // the same symbols as the f64-element ones; only the surface types and
+            // interpreter arms differ.
+            Self::IbufNew => "prism_tbuf_new".into(),
+            Self::IbufLen => "prism_tbuf_len".into(),
+            Self::IbufGet => "prism_tbuf_get".into(),
+            Self::IbufSet => "prism_tbuf_set".into(),
+            Self::IbufBlit => "prism_tbuf_blit".into(),
             _ => format!("prism_{}", self.name()),
         }
     }
@@ -666,6 +758,16 @@ mod tag_tests {
                 (Builtin::BufOfString, "BufOfString"),
                 (Builtin::StringOfBuf, "StringOfBuf"),
                 (Builtin::BufUtf8Valid, "BufUtf8Valid"),
+                (Builtin::TbufNew, "TbufNew"),
+                (Builtin::TbufLen, "TbufLen"),
+                (Builtin::TbufGet, "TbufGet"),
+                (Builtin::TbufSet, "TbufSet"),
+                (Builtin::TbufBlit, "TbufBlit"),
+                (Builtin::IbufNew, "IbufNew"),
+                (Builtin::IbufLen, "IbufLen"),
+                (Builtin::IbufGet, "IbufGet"),
+                (Builtin::IbufSet, "IbufSet"),
+                (Builtin::IbufBlit, "IbufBlit"),
                 (Builtin::SortPrim, "SortPrim"),
                 (Builtin::TaqSnoc, "TaqSnoc"),
                 (Builtin::TaqConcat, "TaqConcat"),
@@ -692,8 +794,9 @@ mod tag_tests {
 
     // A builtin is surface-callable exactly when it carries an arity/kind and a
     // signature: both projections must agree, so a new surface builtin cannot land
-    // with a signature but no dispatch entry (or the reverse). The five internal
-    // ops carry neither.
+    // with a signature but no dispatch entry (or the reverse). The compiler-internal
+    // ops (the fixed-width arithmetic the operator lowering emits, the taq/sort
+    // primitives, `big_lit`) carry neither.
     #[test]
     fn surface_and_signature_agree() {
         for b in Builtin::ALL {

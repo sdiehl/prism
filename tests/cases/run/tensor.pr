@@ -1,0 +1,31 @@
+-- A dense tensor over a flat `FloatBuf`, indexed with the `t[i, j]` sugar. The
+-- library keeps the layout in a per-axis stride list, so transpose-by-name is a
+-- permutation with no data movement: reading the transposed view walks the same
+-- buffer in the permuted stride order. Indexing, functional and in-place
+-- (`var`) set, transpose, and reshape all run identically on both backends.
+import Data.Tensor (..)
+
+fn main() =
+  let t = from_list([2, 3], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+  println(rank(t))
+  println(size(t))
+  -- Strided reads through the multi-index sugar.
+  println(t[[0, 0]])
+  println(t[[1, 2]])
+  -- Functional set returns a new tensor; the original is untouched.
+  let t2 = tensor_set(t, [0, 0], 100.0)
+  println(t2[[0, 0]])
+  println(t[[0, 0]])
+  -- In-place set on a `var` through the sugar.
+  var m := from_list([2, 2], [0.0, 0.0, 0.0, 0.0])
+  m[[0, 1]] := 7.0
+  m[[1, 0]] := 9.0
+  println(m[[0, 1]])
+  println(m[[1, 0]])
+  -- Transpose by name: a 2x3 becomes 3x2 with no copy; tt[j, i] reads t[i, j].
+  let tt = transpose(t, "0", "1")
+  println(tt[[2, 0]])
+  println(tt[[0, 1]])
+  -- Reshape a contiguous tensor; a transposed view would `fail()` here.
+  let r = reshape(t, [3, 2])
+  println(r[[2, 1]])

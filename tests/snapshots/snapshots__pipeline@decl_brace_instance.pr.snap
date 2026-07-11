@@ -1,13 +1,13 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/decl_brace_instance.pr
 ---
 == tokens ==
 VOpen Instance Ident("eqInt") Colon UIdent("Eq") LParen KwInt RParen LBrace Fn Ident("eq") LParen Ident("x") Comma Ident("y") RParen Eq True RBrace VClose
 
 == parse ==
-Parse Error: instance bodies use layout: remove the braces and put each member on its own indented line
+[E7100] Parse Error: instance bodies use layout: remove the braces and put each member on its own indented line
    ╭─[ <source>:1:26 ]
    │
  1 │ instance eqInt : Eq(Int) {

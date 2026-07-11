@@ -10,38 +10,38 @@
 --   13
 
 effect Ask
-  ctl ask() : Int
+  ask() : Int
 
 -- inner answers 2, outer 10. ask() + mask<Ask>(ask()) = 2 + 10 = 12
 fn shadowed() =
   handle (handle ask() + mask<Ask>(ask()) with {
-      ask(k) => k(2),
+      ask() resume k => k(2),
       return r => r
     }) with
-    ask(k) => k(10)
+    ask() resume k => k(10)
     return r => r
 
 -- three handlers deep (inner 1, middle 100, outer 200). The single mask
 -- reaches the middle, the double mask the outer. 100 + 200 = 300
 fn deep() =
   handle (handle handle mask<Ask>(ask()) + mask<Ask>(mask<Ask>(ask())) with {
-      ask(k) => k(1),
+      ask() resume k => k(1),
       return r => r
     } with {
-      ask(k) => k(100),
+      ask() resume k => k(100),
       return r => r
     }) with
-    ask(k) => k(200)
+    ask() resume k => k(200)
     return r => r
 
 -- the inner clause re-performs ask, answered by the outer (3). The masked ask
 -- in the body skips to the outer too. 3 + 3 + 7 = 13
 fn reask() =
   handle (handle ask() + mask<Ask>(ask()) + 7 with {
-      ask(k) => k(ask()),
+      ask() resume k => k(ask()),
       return r => r
     }) with
-    ask(k) => k(3)
+    ask() resume k => k(3)
     return r => r
 
 fn main() =

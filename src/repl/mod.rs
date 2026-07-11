@@ -29,7 +29,10 @@ use crate::resolve::{default_roots, import_bindings, resolve_expr, resolve_modul
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Expr, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
-use crate::types::{check, infer_expr, infer_expr_dicts, show_effects, Checked, CtorInfo, Type};
+use crate::types::{
+    check, infer_expr, infer_expr_dicts, show_effects, show_type_with_effects, Checked, CtorInfo,
+    Type,
+};
 
 // Canonical commands. Any unambiguous prefix resolves to one (`:lo` -> :load,
 // `:r` -> :reload), ghci style, so no separate aliases are needed.
@@ -274,7 +277,7 @@ impl Session {
         let mut input = stdin.lock();
         let v = {
             let mut m = Machine::new(&built.globals, &mut out, &mut input);
-            m.eval(&comp).map_err(Error::Runtime)?
+            m.eval(&comp).map_err(Error::RuntimeEvaluation)?
         };
         drop(out);
         drop(input);
@@ -437,9 +440,6 @@ const fn category(t: &Token) -> Cat {
         | K::With
         | K::Handler
         | K::Mask
-        | K::Ctl
-        | K::Final
-        | K::Fun
         | K::Val
         | K::Return
         | K::Let
@@ -876,9 +876,8 @@ fn info(session: &Session, built: &Built, name: &str) {
     let mut out: Vec<String> = Vec::new();
     if let Some(d) = ck.decls.iter().find(|d| d.name == name) {
         out.push(format!(
-            "{name} : {} ! {}",
-            d.ty.show(),
-            show_effects(&d.effects)
+            "{name} : {}",
+            show_type_with_effects(&d.ty, &d.effects)
         ));
     }
     if let Some(c) = ck.ctors.get(name) {
@@ -1009,7 +1008,7 @@ fn show_type(session: &Session, built: &Built, rest: &str) {
     match desugared {
         Err(e) => report(&e.into(), &text, "<repl>"),
         Ok(e) => match infer_expr(&built.checked, &e) {
-            Ok((ty, eff)) => println!("{rest} : {} ! {}", ty.show(), show_effects(&eff)),
+            Ok((ty, eff)) => println!("{rest} : {}", show_type_with_effects(&ty, &eff)),
             Err(e) => report(&e.into(), &text, "<repl>"),
         },
     }

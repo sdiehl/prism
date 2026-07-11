@@ -1,0 +1,171 @@
+-- | Dense multi-dimensional tensors over a flat `FloatBuf`.
+--
+-- A `Tensor` is a flat buffer of `f64` words plus three lists, one entry per
+-- axis: the axis `shape` (its extent), its `strides` (the flat-offset step for a
+-- unit step along that axis), and its `axes` (a name). Reading `t[i, j]` is a
+-- strided lookup: `offset = sum_k idx[k] * strides[k]`, then a single
+-- `tbuf_get`. Because the layout lives entirely in the stride list, transposing
+-- by name is a permutation of the three lists with no data movement, and the
+-- underlying buffer is shared until a write forces a copy (the buffer's own
+-- rc==1 in-place / shared-copy discipline).
+--
+-- The surface covers construction, indexing, transpose-by-name, and a
+-- contiguity-checked reshape. Elementwise math, broadcasting, and matmul are
+-- deliberately absent; when they land, reduction order will be the source loop
+-- order (deterministic by construction).
+--
+-- `t[i, j]` and `t[i, j] := v` are surface sugar for `at_tensor` / `tensor_set`.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Foldable (..)
+
+-- | A dense tensor: flat storage plus per-axis shape, strides, and names.
+pub type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
+
+-- | The flat backing buffer.
+pub fn buf(t : Tensor) : FloatBuf =
+  match t of
+    MkTensor(b, _, _, _) => b
+
+-- | The extent of each axis, outermost first.
+pub fn shape(t : Tensor) : List(Int) =
+  match t of
+    MkTensor(_, s, _, _) => s
+
+-- | The flat-offset stride of each axis.
+pub fn strides(t : Tensor) : List(Int) =
+  match t of
+    MkTensor(_, _, st, _) => st
+
+-- | The name of each axis.
+pub fn axes(t : Tensor) : List(String) =
+  match t of
+    MkTensor(_, _, _, ax) => ax
+
+-- | The number of axes.
+pub fn rank(t : Tensor) : Int = length(shape(t))
+
+-- | The total number of elements: the product of the shape.
+pub fn size(t : Tensor) : Int = prod(shape(t))
+
+-- The product of a list of extents (the flat length a shape needs).
+fn prod(xs : List(Int)) : Int = foldl(\(acc, x) -> acc * x, 1, xs)
+
+-- The sum of a list.
+fn sum(xs : List(Int)) : Int = foldl(\(acc, x) -> acc + x, 0, xs)
+
+-- Row-major (C-order) strides for a shape: the stride of an axis is the product
+-- of every extent to its right, so the last axis has stride 1.
+fn rm_strides_go(k : Int, n : Int, shape : List(Int)) : List(Int) =
+  if k >= n then
+    Nil
+  else
+    Cons(prod(drop(k + 1, shape)), rm_strides_go(k + 1, n, shape))
+
+fn rm_strides(shape : List(Int)) : List(Int) =
+  rm_strides_go(0, length(shape), shape)
+
+-- Default axis names "0", "1", ... for a rank.
+fn default_axes(n : Int) : List(String) = map(\(i) -> show_int(i), range(0, n))
+
+-- The flat offset of a multi-index under a stride list: the dot product of the
+-- index and the strides.
+fn offset(idx : List(Int), st : List(Int)) : Int =
+  sum(zip_with(\(i, s) -> i * s, idx, st))
+
+-- | A tensor of the given shape with every element set to `fill`, row-major.
+pub fn new(shape : List(Int), fill : Float) : Tensor =
+  MkTensor(
+      tbuf_new(prod(shape), fill),
+      shape,
+      rm_strides(shape),
+      default_axes(length(shape)),
+    )
+
+-- Write a list of values into a buffer starting at index `i`.
+fn fill_from(b : FloatBuf, i : Int, xs : List(Float)) : FloatBuf =
+  match xs of
+    Nil => b
+    Cons(x, rest) => fill_from(tbuf_set(b, i, x), i + 1, rest)
+
+-- | A row-major tensor of the given shape filled from a flat list of values.
+-- Extra list elements past the shape's size are ignored; missing ones stay 0.
+pub fn from_list(shape : List(Int), xs : List(Float)) : Tensor =
+  MkTensor(
+      fill_from(tbuf_new(prod(shape), 0.0), 0, xs),
+      shape,
+      rm_strides(shape),
+      default_axes(length(shape)),
+    )
+
+-- | The element at a multi-index, or `fail()` if the offset is out of range.
+-- Backs `t[i, j]`.
+pub fn at_tensor(t : Tensor, idx : List(Int)) : Float =
+  match t of
+    MkTensor(b, _, st, _) =>
+      let off = offset(idx, st)
+      if off >= 0 && off < tbuf_len(b) then
+        tbuf_get(b, off)
+      else
+        fail()
+
+-- | A tensor equal to `t` but with the element at a multi-index set to `v`, or
+-- `fail()` if out of range. Backs `t[i, j] := v`.
+pub fn tensor_set(t : Tensor, idx : List(Int), v : Float) : Tensor =
+  match t of
+    MkTensor(b, sh, st, ax) =>
+      let off = offset(idx, st)
+      if off >= 0 && off < tbuf_len(b) then
+        MkTensor(tbuf_set(b, off, v), sh, st, ax)
+      else
+        fail()
+
+-- The position of a name in a list, or `fail()` if absent.
+fn index_of_go(k : Int, x : String, xs : List(String)) : Int =
+  match xs of
+    Nil => fail()
+    Cons(y, rest) =>
+      if y == x then
+        k
+      else
+        index_of_go(k + 1, x, rest)
+
+fn index_of(x : String, xs : List(String)) : Int = index_of_go(0, x, xs)
+
+-- Swap the elements at two positions of a list.
+fn swap_at(i : Int, j : Int, xs : List(a)) : List(a) =
+  match nth(i, xs) of
+    None => fail()
+    Some(vi) =>
+      match nth(j, xs) of
+        None => fail()
+        Some(vj) => list_set(list_set(xs, i, vj), j, vi)
+
+-- | Transpose two named axes: a permutation of the shape, strides, and names
+-- with no data movement (the buffer is shared). Reading a transposed tensor
+-- walks the same buffer in the permuted stride order.
+pub fn transpose(t : Tensor, a : String, b : String) : Tensor =
+  match t of
+    MkTensor(b0, sh, st, ax) =>
+      let i = index_of(a, ax)
+      let j = index_of(b, ax)
+      MkTensor(b0, swap_at(i, j, sh), swap_at(i, j, st), swap_at(i, j, ax))
+
+-- | Reinterpret the elements under a new shape of the same size. Requires the
+-- tensor to be contiguous (row-major strides); a transposed view must be copied
+-- first, so reshaping one is a `fail()`. The new axes get default names.
+pub fn reshape(t : Tensor, new_shape : List(Int)) : Tensor =
+  match t of
+    MkTensor(b, sh, st, _) =>
+      if st == rm_strides(sh) && prod(sh) == prod(new_shape) then
+        MkTensor(
+            b,
+            new_shape,
+            rm_strides(new_shape),
+            default_axes(length(new_shape)),
+          )
+      else
+        fail()

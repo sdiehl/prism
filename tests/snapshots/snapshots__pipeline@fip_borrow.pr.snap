@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/fip_borrow.pr
 ---
 == tokens ==
@@ -49,7 +49,7 @@ fn keep(x) =
   return x
 
 == fip ==
-Type Error: usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
+[E1998] Type Error: usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
    ╭─[ <source>:4:1 ]
    │
  4 │ fip fn keep(borrow x) = x

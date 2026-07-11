@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/var_escape_through_call.pr
 ---
 == tokens ==
@@ -185,7 +185,7 @@ Program {
 }
 
 == types ==
-Type Error: in `leak`: `var x` escapes its block: a value here still uses `x` after its scope ends
+[E1998] Type Error: in `leak`: `var x` escapes its block: a value here still uses `x` after its scope ends
     ╭─[ <source>:12:7 ]
     │
  12 │   idf(\(n) -> x + n)

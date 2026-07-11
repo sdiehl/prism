@@ -46,14 +46,14 @@ fn lex(input : String) : List(String) =
       i += 1
   reverse(acc)
 
-fn print_each(toks : List(String)) : !{IO} Unit =
+fn print_each(toks : List(String)) : Unit ! {IO} =
   match toks of
     Nil => ()
     Cons(t, rest) =>
       println(t)
       print_each(rest)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let input = "12 + foo * (34 - bar)"
   let toks = lex(input)
   println(show_int(length(toks)))

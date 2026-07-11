@@ -86,7 +86,7 @@ pub fn audit(cfg: &crate::Config, allow_unsigned: bool) -> CmdResult {
         Ok(())
     } else {
         Err((
-            Error::Resolve("audit failed".into()),
+            Error::ResolvePackage("audit failed".into()),
             String::new(),
             "audit".to_string(),
         ))

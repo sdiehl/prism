@@ -31,6 +31,11 @@ pub const CLASS: &str = "class";
 pub const INSTANCE: &str = "instance";
 pub const CANONICAL: &str = "canonical";
 pub const PATTERN: &str = "pattern";
+// The two clause keywords of a `pattern` declaration: `view` (the single-argument
+// forward direction) and `make` (the optional constructor direction). Contextual,
+// like the pattern clauses themselves.
+pub const VIEW: &str = "view";
+pub const MAKE: &str = "make";
 pub const DERIVING: &str = "deriving";
 pub const WHERE: &str = "where";
 pub const GIVEN: &str = "given";
@@ -38,11 +43,12 @@ pub const HANDLE: &str = "handle";
 pub const WITH: &str = "with";
 pub const HANDLER: &str = "handler";
 pub const MASK: &str = "mask";
-pub const CTL: &str = "ctl";
-pub const FINAL: &str = "final";
-pub const FUN: &str = "fun";
 pub const VAL: &str = "val";
 pub const RETURN: &str = "return";
+// Contextual keyword: introduces the continuation binder in a multishot handler
+// clause (`op(params) resume k => ...`). Special only in that clause position, so
+// it stays usable as an ordinary identifier elsewhere.
+pub const RESUME: &str = "resume";
 pub const LET: &str = "let";
 pub const VAR: &str = "var";
 pub const BORROW: &str = "borrow";
@@ -73,6 +79,17 @@ pub const TY_CHAR: &str = "Char";
 pub const TY_STRING: &str = "String";
 pub const TY_I64: &str = "I64";
 pub const TY_U64: &str = "U64";
+// The non-allocating nullable and its two wired-in constructors. `OrNull(a)` is a
+// built-in type head (not a prelude datatype); `Null` is the zero word and
+// `This(v)` carries `v` with no wrapper cell.
+pub const TY_OR_NULL: &str = "OrNull";
+pub const CTOR_NULL: &str = "Null";
+pub const CTOR_THIS: &str = "This";
+// Constructor tags for the wired-in nullable, shared by elaboration (which builds
+// the tagged cells), pattern lowering, and coverage (sibling tag order). `Null` is
+// the nullary tag 0, `This` the unary tag 1.
+pub const OR_NULL_TAG: usize = 0;
+pub const OR_THIS_TAG: usize = 1;
 
 pub const ARROW: &str = "->";
 pub const LARROW: &str = "<-";
@@ -115,6 +132,7 @@ pub const COLON_EQ: &str = ":=";
 pub const COLON: &str = ":";
 pub const BANG: &str = "!";
 pub const AT: &str = "@";
+pub const HASH: &str = "#";
 pub const DOT_DOT: &str = "..";
 pub const DOT: &str = ".";
 pub const QUESTION_QUESTION: &str = "??";

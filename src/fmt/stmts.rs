@@ -1,4 +1,5 @@
-use super::{block_trailing_call, forces_break, Expr, Fmt, Mode, INDENT, LINE_WIDTH, S};
+use super::breaks::{block_trailing_call, forces_break};
+use super::{Expr, Fmt, Mode, Sugar, INDENT, LINE_WIDTH, S};
 use crate::kw;
 
 impl Fmt<'_> {
@@ -44,6 +45,20 @@ impl Fmt<'_> {
                 if inner.len() + inline.len() <= LINE_WIDTH {
                     return format!("{ind}{} {name} =\n{inner}{inline}", kw::LET);
                 }
+            }
+            // `try`/`catch` and `handle` have no mid-width form: the document
+            // engine carries them as unbreakable flat text, so past the inline
+            // width they lay out offside, matching their statement-position
+            // rendering.
+            if matches!(
+                value.node,
+                Expr::Handle(..) | Expr::Sugar(Sugar::TryCatch(..))
+            ) {
+                return format!(
+                    "{ind}{} {name} =\n{}",
+                    kw::LET,
+                    self.fmt_block(value, indent + 1, from)
+                );
             }
             if let Some(broken) = self.render_expr(value, ind.len(), head.len()) {
                 return format!("{head}{broken}");

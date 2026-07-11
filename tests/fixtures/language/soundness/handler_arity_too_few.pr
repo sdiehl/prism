@@ -1,0 +1,8 @@
+effect Pair
+  pair(Int, Int) : Int
+
+fn main() =
+  println(handle pair(1, 2) with {
+    pair(a) resume k => k(a),
+    return r => r
+  })

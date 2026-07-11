@@ -2,16 +2,16 @@
 
 import Concurrent (..)
 
-fn worker_body() : !{Async(Int), IO} Int =
+fn worker_body() : Int ! {Async(Int), IO} =
   println("worker: before yield")
   yield(())
   println("worker: after yield (must not print)")
   5
 
-fn worker() : !{Async(Int), IO} Int =
+fn worker() : Int ! {Async(Int), IO} =
   on_cancel(\() -> println("finalizer ran"), worker_body)
 
-fn scene() : !{Async(Int), IO} Int =
+fn scene() : Int ! {Async(Int), IO} =
   let w = fork(worker)
   yield(())
   cancel(w)

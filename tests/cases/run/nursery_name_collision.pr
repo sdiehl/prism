@@ -6,23 +6,23 @@
 import Concurrent (..)
 
 effect Trace
-  ctl note(Int) : Unit
+  note(Int) : Unit
 
-fn worker(n : Int) : !{Async(Int), Trace} Int =
+fn worker(n : Int) : Int ! {Async(Int), Trace} =
   note(n)
   yield(())
   n
 
-fn tasks() : !{Async(Int), Trace} Int =
+fn tasks() : Int ! {Async(Int), Trace} =
   match scope([\() -> worker(1), \() -> worker(2), \() -> worker(3)]) of
     Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
     _ => 0
 
-fn go() : !{Trace, Fail} Int = run_async(tasks)
+fn go() : Int ! {Trace, Fail} = run_async(tasks)
 
 fn main() =
   handle go() with
-    note(n, k) =>
+    note(n) resume k =>
       println("note {n}")
       k(())
     return s => println("sum {s}")

@@ -5,13 +5,13 @@
 -- thunk's row was dropped on an unparameterized effect, and only a phantom type
 -- parameter forced the absorption).
 effect Beep
-  ctl beep(Int) : Unit
+  beep(Int) : Unit
 
 effect Wrap
-  ctl wrap(() -> Int ! {Wrap | e}) : Int
+  wrap(() -> Int ! {Wrap | e}) : Int
 
-fn body() : !{Wrap, Beep} Int =
+fn body() : Int ! {Wrap, Beep} =
   beep(1)
   3
 
-fn use_wrap() : !{Wrap} Int = wrap(body)
+fn use_wrap() : Int ! {Wrap} = wrap(body)

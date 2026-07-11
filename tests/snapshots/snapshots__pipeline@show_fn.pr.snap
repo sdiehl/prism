@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/show_fn.pr
 ---
 == tokens ==
@@ -84,7 +84,7 @@ Program {
 }
 
 == types ==
-Scope Error: in `main`: unbound variable 'show'
+[E2000] Scope Error: in `main`: unbound variable 'show'
    ╭─[ <source>:3:13 ]
    │
  3 │ fn main() = show(inc)

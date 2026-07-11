@@ -6,7 +6,7 @@
 --
 -- Input fixture (echo.in): three lines of text.
 
-fn cat(n) : !{IO, Console} Unit =
+fn cat(n) : Unit ! {IO, Console} =
   let line = read_line()
   if str_eq(line, "") then
     ()
@@ -14,4 +14,4 @@ fn cat(n) : !{IO, Console} Unit =
     println(concat(show_int(n), concat("  ", line)))
     cat(n + 1)
 
-fn main() : !{IO} Unit = cat(1)
+fn main() : Unit ! {IO} = cat(1)

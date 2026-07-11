@@ -62,11 +62,12 @@ void print_str(long s) {
  * codepoint (not byte), so multi-byte UTF-8 text behaves as the source reads. */
 long prism_str_concat(long a, long b) {
     long la = prism_str_len_bytes(a), lb = prism_str_len_bytes(b);
-    long *p = prism_str_alloc(la + lb);
+    long lab = prism_ckd_ladd(la, lb);
+    long *p = prism_str_alloc(lab);
     char *o = (char *)(p + PRISM_HDR_WORDS);
     memcpy(o, prism_str_data(a), (size_t)la);
     memcpy(o + la, prism_str_data(b), (size_t)lb);
-    o[la + lb] = 0;
+    o[lab] = 0;
     return (long)p;
 }
 

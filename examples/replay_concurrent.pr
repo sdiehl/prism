@@ -15,12 +15,12 @@ import Concurrent (..)
 
 import Replay (record, replay)
 
-fn worker(_name : String) : !{Async(Int), Random} Int =
+fn worker(_name : String) : Int ! {Async(Int), Random} =
   let r = rand_below(100)
   yield(())
   r
 
-fn scene() : !{Async(Int), Random} Int =
+fn scene() : Int ! {Async(Int), Random} =
   match scope([\() -> worker("A"), \() -> worker("B")]) of
     Cons(a, Cons(b, Nil)) => a + b
     _ => 0

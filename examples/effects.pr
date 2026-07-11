@@ -2,34 +2,34 @@
 -- Errors are values (Result), not exceptions. |> makes data flow
 -- explicit. The same pure functions work in any context.
 
-fn safe_div(n, d) : ! Result(Int, Int) =
+fn safe_div(n, d) : Result(Int, Int) =
   if d == 0 then
     Err(0)
   else
     Ok(n / d)
 
 -- Statistics: pure, total, failure-explicit.
-fn mean(xs) : ! Result(Int, Int) =
+fn mean(xs) : Result(Int, Int) =
   if is_nil(xs) then
     Err(0)
   else
     safe_div(sum(xs), length(xs))
 
-fn variance(xs) : ! Result(Int, Int) =
+fn variance(xs) : Result(Int, Int) =
   and_then_result(
       \(m) -> let diffs = map(\(x) -> (x - m) * (x - m), xs) in safe_div(sum(diffs), length(xs)),
       mean(xs),
     )
 
 -- Count values whose squared deviation exceeds threshold * variance.
-fn count_outliers(threshold, xs) : ! Result(Int, Int) =
+fn count_outliers(threshold, xs) : Result(Int, Int) =
   and_then_result(
       \(m) -> and_then_result(\(v) -> Ok(count(\(x) -> abs(x - m) * abs(x - m) > threshold * v, xs)), variance(xs)),
       mean(xs),
     )
 
 -- Normalize x into [0, 100]. Err on an inverted range.
-fn normalize(lo, hi, x) : ! Result(Int, Int) =
+fn normalize(lo, hi, x) : Result(Int, Int) =
   if lo >= hi then
     Err(0)
   else
@@ -39,19 +39,19 @@ fn normalize(lo, hi, x) : ! Result(Int, Int) =
 fn lift(f, default, xs) = map(\(x) -> result_or(default, f(x)), xs)
 
 -- Pipeline: filter valid range, mean, scale.
-fn score_pipeline(lo, hi, scale, xs) : ! Result(Int, Int) =
+fn score_pipeline(lo, hi, scale, xs) : Result(Int, Int) =
   Ok(filter(\(x) -> lo <= x && x <= hi, xs))
     |> and_then_result(mean)
     |> map_result(\(m) -> m * scale)
     |> and_then_result(safe_div(10000))
 
 -- IO lives here and nowhere above
-fn report(v : Result(Int, a)) : !{IO} Unit =
+fn report(v : Result(Int, a)) : Unit ! {IO} =
   match v of
     Ok(x) => println(x)
     Err(_) => println(0 - 999)
 
-fn main() : !{IO} Unit =
+fn main() : Unit ! {IO} =
   let data = range(1, 11)
   report(mean(data))
   report(variance(data))

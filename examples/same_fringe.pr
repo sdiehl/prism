@@ -1,5 +1,5 @@
 effect Gen
-  ctl yield(Int) : Unit
+  yield(Int) : Unit
 
 -- Same-fringe, the classic coroutine problem: do two differently shaped trees
 -- have the same left-to-right sequence of leaves? Flattening both throws away
@@ -17,7 +17,7 @@ type Tree = Leaf(Int) | Branch(Tree, Tree)
 
 type Step = Done | More(Int, () -> Step)
 
-fn leaves(t) : !{Gen} Unit =
+fn leaves(t) : Unit ! {Gen} =
   match t of
     Leaf(n) => yield(n)
     Branch(l, r) =>
@@ -27,7 +27,7 @@ fn leaves(t) : !{Gen} Unit =
 -- Resume-on-demand: the continuation `k` becomes the rest of the stream.
 fn to_stream(thunk) =
   handle thunk() with
-    yield(v, k) => More(v, \() -> k(()))
+    yield(v) resume k => More(v, \() -> k(()))
     return r => Done
 
 fn same(s1, s2) =

@@ -114,21 +114,21 @@ instance checkedI64 : Checked(I64)
   fn checked_neg(x) = i64_check(0 - int_of_i64(x))
   fn checked_div(x, y) =
     if i64_div_ok(x, y) then
-      Some(i64_div(x, y))
+      Some(x / y)
     else
       None
   fn checked_mod(x, y) =
     if i64_div_ok(x, y) then
-      Some(i64_rem(x, y))
+      Some(x % y)
     else
       None
   fn saturating_add(x, y) = i64_clamp(int_of_i64(x) + int_of_i64(y))
   fn saturating_sub(x, y) = i64_clamp(int_of_i64(x) - int_of_i64(y))
   fn saturating_mul(x, y) = i64_clamp(int_of_i64(x) * int_of_i64(y))
-  fn wrapping_add(x, y) = i64_add(x, y)
-  fn wrapping_sub(x, y) = i64_sub(x, y)
-  fn wrapping_mul(x, y) = i64_mul(x, y)
-  fn wrapping_neg(x) = i64_sub(to_i64(0), x)
+  fn wrapping_add(x, y) = x + y
+  fn wrapping_sub(x, y) = x - y
+  fn wrapping_mul(x, y) = x * y
+  fn wrapping_neg(x) = to_i64(0) - x
   fn overflowing_add(x, y) = i64_pair(int_of_i64(x) + int_of_i64(y))
   fn overflowing_sub(x, y) = i64_pair(int_of_i64(x) - int_of_i64(y))
   fn overflowing_mul(x, y) = i64_pair(int_of_i64(x) * int_of_i64(y))
@@ -174,19 +174,19 @@ instance checkedU64 : Checked(U64)
     if y == to_u64(0) then
       None
     else
-      Some(u64_div(x, y))
+      Some(x / y)
   fn checked_mod(x, y) =
     if y == to_u64(0) then
       None
     else
-      Some(u64_rem(x, y))
+      Some(x % y)
   fn saturating_add(x, y) = u64_clamp(int_of_u64(x) + int_of_u64(y))
   fn saturating_sub(x, y) = u64_clamp(int_of_u64(x) - int_of_u64(y))
   fn saturating_mul(x, y) = u64_clamp(int_of_u64(x) * int_of_u64(y))
-  fn wrapping_add(x, y) = u64_add(x, y)
-  fn wrapping_sub(x, y) = u64_sub(x, y)
-  fn wrapping_mul(x, y) = u64_mul(x, y)
-  fn wrapping_neg(x) = u64_sub(to_u64(0), x)
+  fn wrapping_add(x, y) = x + y
+  fn wrapping_sub(x, y) = x - y
+  fn wrapping_mul(x, y) = x * y
+  fn wrapping_neg(x) = to_u64(0) - x
   fn overflowing_add(x, y) = u64_pair(int_of_u64(x) + int_of_u64(y))
   fn overflowing_sub(x, y) = u64_pair(int_of_u64(x) - int_of_u64(y))
   fn overflowing_mul(x, y) = u64_pair(int_of_u64(x) * int_of_u64(y))

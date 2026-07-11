@@ -7,8 +7,9 @@ use super::{
     Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted,
     Warning,
 };
-use crate::error::TypeError;
-use crate::names::{dict_ctor, module_of};
+use crate::error::suggest;
+use crate::error::{ErrKind, TypeError};
+use crate::names::{self, dict_ctor, module_of};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, NodeId, Program};
 use crate::types::ty::{EffRow, Kind, Type};
@@ -81,10 +82,7 @@ impl Tc<'_> {
         for op in std::mem::take(&mut self.index_ops) {
             let recv = self.apply(&op.recv);
             let Some((kty, elem, writable)) = super::infer::index_container(&recv) else {
-                return Err(TypeError::Other {
-                    span: op.recv_span,
-                    msg: format!("type `{}` is not indexable with `[]`", recv.show()),
-                });
+                return Err(ErrKind::NotIndexable { ty: recv.show() }.at(op.recv_span));
             };
             let elem = self.apply(&elem);
             self.subtype(&op.key, &kty).map_err(|e| e.at(op.span))?;
@@ -92,13 +90,7 @@ impl Tc<'_> {
                 .map_err(|e| e.at(op.span))?;
             if let Some(val) = op.val {
                 if !writable {
-                    return Err(TypeError::Other {
-                        span: op.recv_span,
-                        msg: format!(
-                            "type `{}` does not support indexed assignment `a[i] := v`",
-                            recv.show()
-                        ),
-                    });
+                    return Err(ErrKind::NotIndexAssignable { ty: recv.show() }.at(op.recv_span));
                 }
                 self.subtype(&val, &elem).map_err(|e| e.at(op.span))?;
             }
@@ -168,7 +160,7 @@ impl Tc<'_> {
             }
             match self.dicts.get(&w.id) {
                 Some(prev) if *prev != ds => {
-                    return Err(TypeError::Ice {
+                    return Err(TypeError::InternalInvariant {
                         msg: format!("conflicting dict records at {:?}", w.span),
                     })
                 }
@@ -197,36 +189,33 @@ impl Tc<'_> {
         // depth bound is the standard fuel backstop.
         let goal = (class.to_string(), t.clone());
         if chain.contains(&goal) {
-            return Err(TypeError::Other {
-                span,
-                msg: format!(
-                    "cyclic instance resolution: {class}({}) depends on itself",
-                    t.show()
-                ),
-            });
+            return Err(ErrKind::CyclicInstance {
+                class: class.to_string(),
+                ty: t.show(),
+            }
+            .at(span));
         }
         if chain.len() > MAX_INSTANCE_DEPTH {
-            return Err(TypeError::Other {
-                span,
-                msg: format!("instance resolution for {class}({}) is too deep", t.show()),
-            });
+            return Err(ErrKind::InstanceTooDeep {
+                class: class.to_string(),
+                ty: t.show(),
+            }
+            .at(span));
         }
         let inst_name = if let Some(name) = explicit {
-            let info = self
-                .instances
-                .get(&Sym::from(name))
-                .ok_or_else(|| TypeError::Other {
-                    span,
-                    msg: format!("unknown instance `{name}`"),
-                })?;
+            let info = self.instances.get(&Sym::from(name)).ok_or_else(|| {
+                ErrKind::UnknownInstance {
+                    name: name.to_string(),
+                }
+                .at(span)
+            })?;
             if info.class.as_str() != class {
-                return Err(TypeError::Other {
-                    span,
-                    msg: format!(
-                        "instance `{name}` is for class {}, expected {class}",
-                        info.class
-                    ),
-                });
+                return Err(ErrKind::InstanceClassMismatch {
+                    name: name.to_string(),
+                    found: info.class.to_string(),
+                    class: class.to_string(),
+                }
+                .at(span));
             }
             name.to_string()
         } else {
@@ -284,22 +273,21 @@ impl Tc<'_> {
                     // here is a backstop, not a reachable user error.
                     let Some(name) = self.canonical.get(&(Sym::from(class), key)) else {
                         let listed = provenance_list(self.instances, many);
-                        return Err(TypeError::Other {
-                            span,
-                            msg: format!(
-                                "ambiguous instance for {class}({h}): {listed}; \
-                                 designate one with `canonical {class}({h}) = name`",
-                                h = t.show(),
-                            ),
-                        });
+                        return Err(ErrKind::AmbiguousInstance {
+                            class: class.to_string(),
+                            ty: t.show(),
+                            listed,
+                        }
+                        .at(span));
                     };
                     name.to_string()
                 }
                 _ => {
-                    return Err(TypeError::Other {
-                        span,
-                        msg: format!("no instance for {class}({})", t.show()),
-                    })
+                    return Err(ErrKind::NoInstance {
+                        class: class.to_string(),
+                        ty: t.show(),
+                    }
+                    .at(span))
                 }
             }
         };
@@ -315,14 +303,13 @@ impl Tc<'_> {
             head = head.subst_var(*n, x);
         }
         self.equate(t, &head).map_err(|e| {
-            e.or(TypeError::Other {
-                span,
-                msg: format!(
-                    "instance `{inst_name}` : {class}({}) does not match {}",
-                    info.head.show(),
-                    t.show()
-                ),
-            })
+            e.or(ErrKind::InstanceHeadMismatch {
+                inst: inst_name.clone(),
+                class: class.to_string(),
+                head: info.head.show(),
+                ty: t.show(),
+            }
+            .at(span))
         })?;
         // This goal joins the resolution stack while we discharge its context and
         // superclass obligations, so a child that asks for it again is a cycle.
@@ -380,16 +367,20 @@ impl Tc<'_> {
 
     fn head_key(class: &str, t: &Type, span: Span) -> Result<HeadKey, TypeError> {
         head_name(t).ok_or_else(|| {
-            let msg = match t {
-                Type::Exist(_) => format!(
-                    "cannot infer the type for constraint {class}(_); add a type annotation"
-                ),
-                Type::Var(v) => format!(
-                    "cannot discharge constraint {class}({v}); add `given {class}({v})` to the enclosing function"
-                ),
-                other => format!("no instance for {class}({})", other.show()),
+            let kind = match t {
+                Type::Exist(_) => ErrKind::CannotInferConstraint {
+                    class: class.to_string(),
+                },
+                Type::Var(v) => ErrKind::CannotDischargeConstraint {
+                    class: class.to_string(),
+                    var: v.to_string(),
+                },
+                other => ErrKind::NoInstance {
+                    class: class.to_string(),
+                    ty: other.show(),
+                },
             };
-            TypeError::Other { span, msg }
+            kind.at(span)
         })
     }
 }
@@ -477,10 +468,10 @@ fn check_superclass_cycles(
                 .iter()
                 .find(|d| cyc.contains(&d.name))
                 .map_or_else(Span::default, |d| d.span);
-            return Err(TypeError::Other {
-                span,
-                msg: format!("superclass cycle: {}", cyc.join(" -> ")),
-            });
+            return Err(ErrKind::SuperclassCycle {
+                path: cyc.join(" -> "),
+            }
+            .at(span));
         }
     }
     Ok(())
@@ -501,39 +492,37 @@ pub(super) fn build_classes(
     let mut constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)> = BTreeMap::new();
     for c in &prog.classes {
         if classes.contains_key(&Sym::from(&c.name)) {
-            return Err(TypeError::Other {
-                span: c.span,
-                msg: format!("duplicate class {}", c.name),
-            });
+            return Err(ErrKind::DuplicateClass {
+                name: c.name.clone(),
+            }
+            .at(c.span));
         }
         let mut infos = Vec::new();
         for (idx, (mname, sig)) in c.methods.iter().enumerate() {
             let t = convert_data(sig);
             if !matches!(t, Type::Fun(..)) {
-                return Err(TypeError::Other {
-                    span: c.span,
-                    msg: format!("class method `{mname}` must have a function type"),
-                });
+                return Err(ErrKind::ClassMethodNotFunction {
+                    method: mname.clone(),
+                }
+                .at(c.span));
             }
             let mut vars = BTreeSet::new();
             collect_type_vars(&t, &mut vars);
             if !vars.contains(&Sym::from(&c.param)) {
-                return Err(TypeError::Other {
-                    span: c.span,
-                    msg: format!(
-                        "class method `{mname}` must mention the class parameter `{}`",
-                        c.param
-                    ),
-                });
+                return Err(ErrKind::ClassMethodMissingParam {
+                    method: mname.clone(),
+                    param: c.param.clone(),
+                }
+                .at(c.span));
             }
             if env.contains_key(&Sym::from(mname))
                 || methods.contains_key(&Sym::from(mname))
                 || fn_names.contains(mname.as_str())
             {
-                return Err(TypeError::Other {
-                    span: c.span,
-                    msg: format!("class method `{mname}` clashes with an existing definition"),
-                });
+                return Err(ErrKind::ClassMethodClash {
+                    method: mname.clone(),
+                }
+                .at(c.span));
             }
             let sorted: Vec<Sym> = vars.into_iter().collect();
             let scheme = quantify(&t, &sorted);
@@ -600,23 +589,24 @@ pub(super) fn build_classes(
     // into unbounded recursion at the first use site.
     check_superclass_cycles(&classes, &prog.classes)?;
     for i in &prog.instances {
-        let class = classes
-            .get(&Sym::from(&i.class))
-            .ok_or_else(|| TypeError::Other {
-                span: i.span,
-                msg: format!("unknown class {}", i.class),
-            })?;
+        let class = classes.get(&Sym::from(&i.class)).ok_or_else(|| {
+            ErrKind::UnknownClass {
+                class: i.class.clone(),
+            }
+            .at(i.span)
+            .maybe_help(suggest::suggestion(
+                &i.class,
+                prog.classes.iter().map(|c| names::bare_name(&c.name)),
+            ))
+        })?;
         if instances.contains_key(&Sym::from(&i.name))
             || env.contains_key(&Sym::from(&i.name))
             || fn_names.contains(i.name.as_str())
         {
-            return Err(TypeError::Other {
-                span: i.span,
-                msg: format!(
-                    "instance name `{}` clashes with an existing definition",
-                    i.name
-                ),
-            });
+            return Err(ErrKind::InstanceNameClash {
+                name: i.name.clone(),
+            }
+            .at(i.span));
         }
         let (head, key, head_vars) = convert_instance_head(i, data)?;
         let context = instance_context(i, &classes, &head_vars)?;
@@ -626,10 +616,11 @@ pub(super) fn build_classes(
         let mut supers = Vec::new();
         for s in &class.supers {
             if !classes.contains_key(s) {
-                return Err(TypeError::Other {
-                    span: i.span,
-                    msg: format!("class {} names unknown superclass {s}", i.class),
-                });
+                return Err(ErrKind::UnknownSuperclass {
+                    class: i.class.clone(),
+                    sup: s.to_string(),
+                }
+                .at(i.span));
             }
             supers.push((*s, head.clone()));
         }
@@ -671,20 +662,17 @@ fn convert_instance_head(
     data: &BTreeMap<String, DataInfo>,
 ) -> Result<(Type, HeadKey, BTreeSet<Sym>), TypeError> {
     let head = convert_data(&i.head);
-    let key = head_name(&head).ok_or_else(|| TypeError::Other {
-        span: i.span,
-        msg: "instance head must be a primitive type or a data type constructor".to_string(),
-    })?;
+    let key = head_name(&head).ok_or_else(|| ErrKind::InstanceHeadNotType.at(i.span))?;
     // Both a data-type head `T(a, b)` and a tuple head `(a, b)` carry argument
     // slots that must be distinct type variables; a tuple has no nominal name to
     // check against `data`, a `Con` does.
     let args: &[Type] = match &head {
         Type::Con(n, args) => {
             if !data.contains_key(n.as_str()) {
-                return Err(TypeError::Other {
-                    span: i.span,
-                    msg: format!("unknown type {n}"),
-                });
+                return Err(ErrKind::UnknownType {
+                    name: n.to_string(),
+                }
+                .at(i.span));
             }
             args
         }
@@ -697,12 +685,7 @@ fn convert_instance_head(
             Type::Var(v) if !head_vars.contains(v) => {
                 head_vars.insert(*v);
             }
-            _ => {
-                return Err(TypeError::Other {
-                    span: i.span,
-                    msg: "instance head arguments must be distinct type variables".to_string(),
-                })
-            }
+            _ => return Err(ErrKind::InstanceHeadArgsNotVars.at(i.span)),
         }
     }
     Ok((head, key, head_vars))
@@ -718,22 +701,16 @@ fn instance_context(
     let mut context = Vec::new();
     for ct in &i.context {
         if !classes.contains_key(&Sym::from(&ct.class)) {
-            return Err(TypeError::Other {
-                span: ct.span,
-                msg: format!("unknown class {}", ct.class),
-            });
+            return Err(ErrKind::UnknownClass {
+                class: ct.class.clone(),
+            }
+            .at(ct.span));
         }
         match &ct.ty {
             ast::Ty::Var(v) if head_vars.contains(&Sym::from(v)) => {
                 context.push((Sym::from(&ct.class), Type::Var(Sym::from(v))));
             }
-            _ => {
-                return Err(TypeError::Other {
-                    span: ct.span,
-                    msg: "instance context constraints must be over the head's type variables"
-                        .to_string(),
-                })
-            }
+            _ => return Err(ErrKind::InstanceContextNotHeadVars.at(ct.span)),
         }
     }
     Ok(context)
@@ -746,48 +723,46 @@ fn check_instance_methods(class: &ClassInfo, i: &ast::InstanceDecl<Core>) -> Res
     let mut seen = BTreeSet::new();
     for m in &i.methods {
         if !seen.insert(Sym::from(&m.name)) {
-            return Err(TypeError::Other {
-                span: m.span,
-                msg: format!("duplicate method `{}` in instance `{}`", m.name, i.name),
-            });
+            return Err(ErrKind::DuplicateInstanceMethod {
+                method: m.name.clone(),
+                instance: i.name.clone(),
+            }
+            .at(m.span));
         }
         let Some((_, sig)) = class
             .methods
             .iter()
             .find(|(n, _)| n.as_str() == m.name.as_str())
         else {
-            return Err(TypeError::Other {
-                span: m.span,
-                msg: format!("class {} has no method `{}`", i.class, m.name),
-            });
+            return Err(ErrKind::ClassHasNoMethod {
+                class: i.class.clone(),
+                method: m.name.clone(),
+            }
+            .at(m.span));
         };
         if m.params.iter().any(|p| p.ty.is_some())
             || m.ret.is_some()
             || m.eff.is_some()
             || !m.constraints.is_empty()
         {
-            return Err(TypeError::Other {
-                span: m.span,
-                msg: format!(
-                    "instance method `{}` takes its signature from class {}; drop the annotations",
-                    m.name, i.class
-                ),
-            });
+            return Err(ErrKind::InstanceMethodAnnotated {
+                method: m.name.clone(),
+                class: i.class.clone(),
+            }
+            .at(m.span));
         }
         let arity = match sig {
             Type::Fun(doms, _, _) => doms.len(),
             _ => 0,
         };
         if m.params.len() != arity {
-            return Err(TypeError::Other {
-                span: m.span,
-                msg: format!(
-                    "method `{}` of class {} takes {arity} parameter(s), got {}",
-                    m.name,
-                    i.class,
-                    m.params.len()
-                ),
-            });
+            return Err(ErrKind::MethodArityMismatch {
+                method: m.name.clone(),
+                class: i.class.clone(),
+                arity,
+                got: m.params.len(),
+            }
+            .at(m.span));
         }
     }
     let missing: Vec<&str> = class
@@ -797,14 +772,11 @@ fn check_instance_methods(class: &ClassInfo, i: &ast::InstanceDecl<Core>) -> Res
         .map(|(n, _)| n.as_str())
         .collect();
     if !missing.is_empty() {
-        return Err(TypeError::Other {
-            span: i.span,
-            msg: format!(
-                "instance `{}` is missing method(s): {}",
-                i.name,
-                missing.join(", ")
-            ),
-        });
+        return Err(ErrKind::InstanceMissingMethods {
+            instance: i.name.clone(),
+            methods: missing.join(", "),
+        }
+        .at(i.span));
     }
     Ok(())
 }
@@ -861,36 +833,27 @@ fn build_canonical(
     let mut canonical: Canon = BTreeMap::new();
     for c in &prog.canonicals {
         let head = convert_data(&c.head);
-        let key = head_name(&head).ok_or_else(|| TypeError::Other {
-            span: c.span,
-            msg: "canonical head must be a primitive type or a data type constructor".to_string(),
-        })?;
+        let key = head_name(&head).ok_or_else(|| ErrKind::CanonicalHeadNotType.at(c.span))?;
         let registered = inst_keys
             .get(&(Sym::from(&c.class), key.clone()))
             .is_some_and(|ns| ns.contains(&Sym::from(&c.name)));
         if !registered {
-            return Err(TypeError::Other {
-                span: c.span,
-                msg: format!(
-                    "`{}` is not an instance of {}({})",
-                    c.name,
-                    c.class,
-                    head.show()
-                ),
-            });
+            return Err(ErrKind::NotAnInstance {
+                name: c.name.clone(),
+                class: c.class.clone(),
+                ty: head.show(),
+            }
+            .at(c.span));
         }
         if canonical
             .insert((Sym::from(&c.class), key), Sym::from(&c.name))
             .is_some()
         {
-            return Err(TypeError::Other {
-                span: c.span,
-                msg: format!(
-                    "duplicate canonical designation for {}({})",
-                    c.class,
-                    head.show()
-                ),
-            });
+            return Err(ErrKind::DuplicateCanonical {
+                class: c.class.clone(),
+                ty: head.show(),
+            }
+            .at(c.span));
         }
     }
     // Iterate in name order: `Sym` keys order by intern id, so sort on the class
@@ -912,15 +875,13 @@ fn build_canonical(
             .iter()
             .find(|i| names.contains(&Sym::from(&i.name)) && i.module.is_empty())
             .map_or_else(Span::default, |i| i.span);
-        return Err(TypeError::Other {
-            span,
-            msg: format!(
-                "{n} instances for {class}({head}): {listed}; \
-                 designate one with `canonical {class}({head}) = name`",
-                n = names.len(),
-                listed = provenance_list(instances, names),
-            ),
-        });
+        return Err(ErrKind::MultipleInstances {
+            n: names.len(),
+            class: class.to_string(),
+            head,
+            listed: provenance_list(instances, names),
+        }
+        .at(span));
     }
     Ok(canonical)
 }

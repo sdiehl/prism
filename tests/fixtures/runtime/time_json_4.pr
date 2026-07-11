@@ -1,0 +1,14 @@
+import Json (..)
+
+fn from_str(s) =
+  match decode(s) of
+    Ok(j) => j
+    Err(e) => JNull
+
+fn decode_ints(s) : List(Int) = default(\() -> from_json(from_str(s)), Nil)
+
+fn main() =
+  let j = to_json_string([1, 2, 3])
+  println(j)
+  println(to_json_string(decode_ints(j)))
+  println(to_json_string((true, "hi")))

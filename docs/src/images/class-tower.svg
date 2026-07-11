@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 360" role="img" aria-label="the higher-kinded class tower: Monad over Applicative over Functor, and Traversable over both Functor and Foldable; each arrow is a superclass constraint written with given">
+<title>the higher-kinded class tower: Monad over Applicative over Functor, and Traversable over both Functor and Foldable</title>
+<desc>Five chips: Functor and Foldable at the bottom, Applicative above Functor, Monad above Applicative, and Traversable above both Functor and Foldable. Upward accent arrows mark each superclass constraint.</desc>
+<line x1="114" y1="300" x2="114" y2="219" stroke="#2f9e63" stroke-width="1.25"/>
+<path d="M 114 212 L 110 219 L 118 219 Z" fill="#2f9e63"/>
+<line x1="114" y1="185" x2="114" y2="104" stroke="#2f9e63" stroke-width="1.25"/>
+<path d="M 114 97 L 110 104 L 118 104 Z" fill="#2f9e63"/>
+<line x1="336" y1="300" x2="336" y2="104" stroke="#2f9e63" stroke-width="1.25"/>
+<path d="M 336 97 L 332 104 L 340 104 Z" fill="#2f9e63"/>
+<line x1="160" y1="296" x2="290" y2="106" stroke="#2f9e63" stroke-width="1.25"/>
+<path d="M 294 100 L 285.5 102.5 L 292 107 Z" fill="#2f9e63"/>
+<rect x="70" y="300" width="88" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="114" y="314" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Functor</text>
+<rect x="290" y="300" width="92" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="336" y="314" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Foldable</text>
+<rect x="59" y="185" width="110" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="114" y="199" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Applicative</text>
+<rect x="80" y="70" width="68" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="114" y="84" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Monad</text>
+<rect x="281" y="70" width="110" height="27" rx="7" fill="none" stroke="#8a8f98" stroke-width="1.25"/>
+<text x="336" y="84" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#6f747c" text-anchor="middle" dominant-baseline="central">Traversable</text>
+</svg>

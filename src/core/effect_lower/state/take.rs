@@ -36,7 +36,7 @@ impl Lowerer {
         let Comp::Handle { ops, .. } = m else {
             return None;
         };
-        let [clause] = ops.as_slice() else {
+        let [clause] = ops.arms() else {
             return None;
         };
         if !self.is_take(clause) {
@@ -63,7 +63,7 @@ impl Lowerer {
         let Comp::Handle { body, ops, .. } = handle else {
             return None;
         };
-        let [clause] = ops.as_slice() else {
+        let [clause] = ops.arms() else {
             return None;
         };
         let op = clause.name;

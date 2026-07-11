@@ -7,7 +7,7 @@ input_file: tests/cases/coeffect_paren.pr
 VOpen Fn Ident("f") LParen Ident("g") Colon LParen KwInt RParen Arrow KwInt Bang LBrace UIdent("IO") RBrace At Ident("once") Comma Ident("x") Colon KwInt RParen Colon KwInt Eq Ident("g") LParen Ident("x") RParen VClose
 
 == parse ==
-Parse Error: parenthesize the function type before `@`: write `((a) -> b ! {E}) @ fact`
+[E7100] Parse Error: parenthesize the function type before `@`: write `((a) -> b ! {E}) @ fact`
    ╭─[ <source>:3:10 ]
    │
  3 │ fn f(g : (Int) -> Int ! {IO} @ once, x : Int) : Int = g(x)

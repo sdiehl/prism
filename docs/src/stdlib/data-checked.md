@@ -26,7 +26,7 @@ instance checkedI64 : Checked(I64)
 
 ### `checkedU64`
 
-```prism,def,h-9f85fb707a84b8180b42da335e12787e2fb4540f8740795e8c9b48b9c9b23afd
+```prism,def,h-3b5ddc5e540ce2aa790b5d506251be66c77117a0efc108379c1602c73c1aadd4
 instance checkedU64 : Checked(U64)
 ```
 

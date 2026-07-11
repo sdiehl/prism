@@ -1,11 +1,11 @@
 effect Ask
-  ctl ask(Unit) : Int
+  ask() : Int
 
-fn use() : !{Ask} Int =
-  let x = ask(())
+fn use() : Int ! {Ask} =
+  let x = ask()
   x + 1
 
 fn main() : Int =
   handle use() with
-    ask(u, k) => k(5)
+    ask() resume k => k(5)
     return x => x

@@ -23,25 +23,25 @@ A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends th
 
 ### `arbitraryInt`
 
-```prism,def,h-5945b83976352810b07cb7c9b2afca522ef6c41408b467465878109933825d69
+```prism,def,h-1fb4fd815892b5468c49a6768411b906d07bd6132528af16183a9a2ccfd6183b
 instance arbitraryInt : Arbitrary(Int)
 ```
 
 ### `arbitraryI64`
 
-```prism,def,h-4d4fb3a67b655327e381b5d46fc0074b066cac9084df8df55a0a77aa54f3ae46
+```prism,def,h-e3d1486ead8f82e0740600133d5f06f376426ba0151785c6e2632ee98201c79e
 instance arbitraryI64 : Arbitrary(I64)
 ```
 
 ### `arbitraryU64`
 
-```prism,def,h-eb1fe2575052bd782861b71ed4e39470af108358546ce156e6e6eeff3533c7c3
+```prism,def,h-89a29c087ba37ae75cc3829785e885272840a84cd8ad2d6e877d366dcc4f1f20
 instance arbitraryU64 : Arbitrary(U64)
 ```
 
 ### `arbitraryBool`
 
-```prism,def,h-e85bd82ddde4fc2b0c36b87d1219f4ea26e14624fe4818ae1c8d1f1ed87c3fe6
+```prism,def,h-05953b0553a7ff8683c51736ad053c482f417102eb02b49edb4e64a208ce7410
 instance arbitraryBool : Arbitrary(Bool)
 ```
 
@@ -53,31 +53,31 @@ instance arbitraryUnit : Arbitrary(Unit)
 
 ### `arbitraryChar`
 
-```prism,def,h-8a02d7a66eb688baf2b52a30b8cc10c8a40e44d4ea91267a5163642fa9c85f54
+```prism,def,h-2714f73beca6c58ba779158a83daa0ebd82c249dba5792da60004544724e5444
 instance arbitraryChar : Arbitrary(Char)
 ```
 
 ### `arbitraryFloat`
 
-```prism,def,h-5410ba1dffeb786a47c765c9bb8ff184716ec738c33722cb6ce8b068f64329b8
+```prism,def,h-87c299ea0c77345b0f731d4c5e5814b8ac243529bfe62c5f477a4f60287513e0
 instance arbitraryFloat : Arbitrary(Float)
 ```
 
 ### `arbitraryString`
 
-```prism,def,h-9d507faac57120991163e0b5feb3042f24484a5952e1c460c18e4f905950311a
+```prism,def,h-93de04ba484e410ff0f15b53a38c271adf7778d2ef78f39a2f39e25295ed9fd6
 instance arbitraryString : Arbitrary(String)
 ```
 
 ### `arbitraryOption`
 
-```prism,def,h-f62439427e5e882f9a35dfbb13e05271562d7e2cfa6ad52e37df695dae0dede1
+```prism,def,h-6f8e2daa5df2adf2439b8c2cd4b9de73436936692ac82e02f98fe3c567ec979a
 instance arbitraryOption : Arbitrary(Option(a))
 ```
 
 ### `arbitraryList`
 
-```prism,def,h-70efd1bb02dc20223d1bb65e18ae659e7c6aed0ec359ce5ea660a265baaad95e
+```prism,def,h-1df8f5350157e26db7a6a1db5d6e3f4da75bba5804f6e85940a88c12d32db6b0
 instance arbitraryList : Arbitrary(List(a))
 ```
 

@@ -3,10 +3,14 @@
 -- `untrusted` reads files: it performs the `FileSystem` capability but cannot
 -- discharge it itself, so its row demands a handler. `sandbox` runs it under a
 -- handler that answers `FileSystem` with stubs (`read_file` returns "<denied>",
--- `file_exists` returns false), so the sub-computation never reaches the real
--- filesystem no matter which files it names or how it branches: the only
--- interpreter for those operations in scope is the stub. Authority is exactly the
--- handlers installed, and `sandbox` grants none for the real world.
+-- `file_exists` returns false, `read_bytes` returns no bytes), so the
+-- sub-computation never reaches the real filesystem no matter which files it
+-- names or how it branches: the only interpreter for those operations in scope
+-- is the stub. Authority is exactly the handlers installed, and `sandbox`
+-- grants none for the real world. The compiler enforces that the stub set is
+-- complete: a handler must implement every operation of the effect it handles,
+-- so a capability op added later cannot silently tunnel past the sandbox to a
+-- real handler outside it.
 --
 -- `sandbox` is polymorphic in the fiber's other effects `e` (row-kinded), so it
 -- constrains `FileSystem` and lets everything else flow out unchanged. This is
@@ -15,7 +19,7 @@
 -- Expected output:
 --   sandboxed read: <denied>
 
-fn untrusted() : !{FileSystem} String =
+fn untrusted() : String ! {FileSystem} =
   if file_exists("/etc/passwd") then
     read_file("/etc/passwd")
   else
@@ -23,8 +27,9 @@ fn untrusted() : !{FileSystem} String =
 
 fn sandbox(action : () -> a ! {FileSystem | e}) : a =
   handle action() with
-    fs_read_file(path, k) => k("<denied>")
-    fs_file_exists(path, k) => k(false)
+    fs_read_file(path) resume k => k("<denied>")
+    fs_read_bytes(path) resume k => k(buf_empty())
+    fs_file_exists(path) resume k => k(false)
     return r => r
 
 fn main() = println("sandboxed read: {sandbox(untrusted)}")

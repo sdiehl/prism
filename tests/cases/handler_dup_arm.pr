@@ -1,0 +1,13 @@
+-- A handler binds each operation exactly once. Two clauses for the same op
+-- must be a compile error: the interpreter's arm map would resolve the
+-- duplicate last-wins while the free-monad cascade resolves it first-wins,
+-- making the lowering tier observable in program output.
+effect Pick
+  pick() : Int
+
+fn main() =
+  println(handle pick() with {
+    pick() resume k => k(11),
+    pick() resume k => k(22),
+    return r => r
+  })

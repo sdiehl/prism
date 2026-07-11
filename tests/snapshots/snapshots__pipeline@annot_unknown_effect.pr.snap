@@ -1,10 +1,10 @@
 ---
 source: tests/snapshots.rs
-expression: "prism::report(&src)"
+expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/annot_unknown_effect.pr
 ---
 == tokens ==
-VOpen Fn Ident("fact") LParen Ident("n") RParen Colon Bang LBrace UIdent("Foo") RBrace KwInt Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
+VOpen Fn Ident("fact") LParen Ident("n") RParen Colon KwInt Bang LBrace UIdent("Foo") RBrace Eq VOpen If Ident("n") EqEq Int(IntLit { value: 0, suffix: None }) Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Ident("n") Star Ident("fact") LParen Ident("n") Minus Int(IntLit { value: 1, suffix: None }) RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Ident("fact") LParen Int(IntLit { value: 5, suffix: None }) RParen RParen VClose
 
 == ast ==
 Program {
@@ -46,7 +46,7 @@ Program {
                                 node: Var(
                                     "n",
                                 ),
-                                span: 31..32,
+                                span: 32..33,
                             },
                             Spanned {
                                 node: Int(
@@ -55,10 +55,10 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 36..37,
+                                span: 37..38,
                             },
                         ),
-                        span: 31..37,
+                        span: 32..38,
                     },
                     Spanned {
                         node: Int(
@@ -67,7 +67,7 @@ Program {
                                 suffix: None,
                             },
                         ),
-                        span: 47..48,
+                        span: 48..49,
                     },
                     Spanned {
                         node: Bin(
@@ -76,7 +76,7 @@ Program {
                                 node: Var(
                                     "n",
                                 ),
-                                span: 60..61,
+                                span: 61..62,
                             },
                             Spanned {
                                 node: Call(
@@ -84,7 +84,7 @@ Program {
                                         node: Var(
                                             "fact",
                                         ),
-                                        span: 64..68,
+                                        span: 65..69,
                                     },
                                     [
                                         Spanned {
@@ -94,7 +94,7 @@ Program {
                                                     node: Var(
                                                         "n",
                                                     ),
-                                                    span: 69..70,
+                                                    span: 70..71,
                                                 },
                                                 Spanned {
                                                     node: Int(
@@ -103,23 +103,23 @@ Program {
                                                             suffix: None,
                                                         },
                                                     ),
-                                                    span: 73..74,
+                                                    span: 74..75,
                                                 },
                                             ),
-                                            span: 69..74,
+                                            span: 70..75,
                                         },
                                     ],
                                 ),
-                                span: 64..75,
+                                span: 65..76,
                             },
                         ),
-                        span: 60..75,
+                        span: 61..76,
                     },
                 ),
-                span: 28..75,
+                span: 29..76,
             },
             wheres: [],
-            span: 0..75,
+            span: 0..76,
         },
         Decl {
             name: "main",
@@ -133,7 +133,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 89..96,
+                        span: 90..97,
                     },
                     [
                         Spanned {
@@ -142,7 +142,7 @@ Program {
                                     node: Var(
                                         "fact",
                                     ),
-                                    span: 97..101,
+                                    span: 98..102,
                                 },
                                 [
                                     Spanned {
@@ -152,27 +152,27 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 102..103,
+                                        span: 103..104,
                                     },
                                 ],
                             ),
-                            span: 97..104,
+                            span: 98..105,
                         },
                     ],
                 ),
-                span: 89..105,
+                span: 90..106,
             },
             wheres: [],
-            span: 77..105,
+            span: 78..106,
         },
     ],
 }
 
 == types ==
-Type Error: in `fact`: unknown effect `Foo`
+[E5001] Type Error: in `fact`: unknown effect `Foo`
    ╭─[ <source>:1:1 ]
    │
- 1 │ ╭─▶ fn fact(n) : !{Foo} Int =
+ 1 │ ╭─▶ fn fact(n) : Int ! {Foo} =
    ┆ ┆   
  5 │ ├─▶     n * fact(n - 1)
    │ │                         

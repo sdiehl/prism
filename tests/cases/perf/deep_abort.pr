@@ -1,12 +1,12 @@
 effect Abort
-  ctl abort(Int) : Int
+  abort(Int) : Int
 
 fn first(xs) =
   match xs of
     Nil => 0
     Cons(x, _) => x
 
-fn walk(n : Int, acc) : !{Abort} Int =
+fn walk(n : Int, acc) : Int ! {Abort} =
   if n == 0 then
     abort(length(acc))
   else
@@ -16,7 +16,7 @@ fn walk(n : Int, acc) : !{Abort} Int =
 
 fn deep_abort(n : Int) =
   handle walk(n, Nil) with
-    final ctl abort(code) => code
+    never abort(code) => code
     return r => r
 
 fn main() = println(deep_abort(__N__))

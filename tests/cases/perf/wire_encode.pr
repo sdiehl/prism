@@ -12,4 +12,4 @@ fn recs(n : Int, acc : List(Rec)) : List(Rec) =
   else
     recs(n - 1, Cons(Rec(n, n * 2, true), acc))
 
-fn main() : !{IO} Unit = println(show_int(wire_len(encode(recs(__N__, Nil)))))
+fn main() : Unit ! {IO} = println(show_int(wire_len(encode(recs(__N__, Nil)))))

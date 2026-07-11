@@ -5,7 +5,7 @@
 -- prefix skip in `absorb_row` used to drop the lambda form unchecked, so the
 -- mismatch only surfaced at run time inside the eventual handler.
 effect Tag(a)
-  ctl put(a) : Unit
+  put(a) : Unit
 
 fn wants_int(s : (Unit) -> Unit ! {Tag(Int) | e}) : Int = 1
 

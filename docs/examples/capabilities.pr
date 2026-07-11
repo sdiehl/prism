@@ -5,16 +5,16 @@
 -- `! {Env}` alone, and their structural union, never a blanket `! {IO}`. (The
 -- inputs a browser cannot serve, file reads and stdin, would be reported instead.)
 
-fn roll() : !{Random} Int = rand_below(6) + 1
+fn roll() : Int ! {Random} = rand_below(6) + 1
 
-fn user() : !{Env} String =
+fn user() : String ! {Env} =
   let name = getenv("USER")
   if name == "" then
     "anonymous"
   else
     name
 
-fn summary() : !{Env, Random} String =
+fn summary() : String ! {Env, Random} =
   "{user()} rolled {roll()}, {roll()}, {roll()}"
 
 fn main() = println(summary())
