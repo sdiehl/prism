@@ -6,7 +6,7 @@ Dense multi-dimensional tensors over a flat `FloatBuf`.
 
 A `Tensor` is a flat buffer of `f64` words plus three lists, one entry per axis: the axis `shape` (its extent), its `strides` (the flat-offset step for a unit step along that axis), and its `axes` (a name). Reading `t[i, j]` is a strided lookup: `offset = sum_k idx[k] * strides[k]`, then a single `tbuf_get`. Because the layout lives entirely in the stride list, transposing by name is a permutation of the three lists with no data movement, and the underlying buffer is shared until a write forces a copy (the buffer's own rc==1 in-place / shared-copy discipline).
 
-This is the A0 surface: construction, indexing, transpose-by-name, and a contiguity-checked reshape. Elementwise math, broadcasting, and matmul are deliberately absent; when they land, reduction order will be the source loop order (deterministic by construction).
+The surface covers construction, indexing, transpose-by-name, and a contiguity-checked reshape. Elementwise math, broadcasting, and matmul are deliberately absent; when they land, reduction order will be the source loop order (deterministic by construction).
 
 `t[i, j]` and `t[i, j] := v` are surface sugar for `at_tensor` / `tensor_set`.
 

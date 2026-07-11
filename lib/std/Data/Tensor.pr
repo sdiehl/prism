@@ -9,7 +9,7 @@
 -- underlying buffer is shared until a write forces a copy (the buffer's own
 -- rc==1 in-place / shared-copy discipline).
 --
--- This is the A0 surface: construction, indexing, transpose-by-name, and a
+-- The surface covers construction, indexing, transpose-by-name, and a
 -- contiguity-checked reshape. Elementwise math, broadcasting, and matmul are
 -- deliberately absent; when they land, reduction order will be the source loop
 -- order (deterministic by construction).

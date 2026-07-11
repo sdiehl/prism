@@ -63,6 +63,7 @@ const BASE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Sort,
     RuntimeModule::Array,
     RuntimeModule::Buffer,
+    RuntimeModule::TypedBuffer,
     RuntimeModule::Io,
 ];
 const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[

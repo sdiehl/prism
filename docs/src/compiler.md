@@ -514,7 +514,7 @@ For example, a constructor applied to a call elaborates so the call is named bef
 
 {{#tabs }}
 
-{{#tab name="surface" }}
+{{#tab name="Surface" }}
 
 ```prism,ignore
 fn f(y) = Cons(g(y), Nil)
@@ -522,7 +522,7 @@ fn f(y) = Cons(g(y), Nil)
 
 {{#endtab }}
 
-{{#tab name="core" }}
+{{#tab name="Core" }}
 
 ```text
 Lam [y]
@@ -538,7 +538,7 @@ A `match` compiles to a `Case` on an already-named value, each arm binding its c
 
 {{#tabs }}
 
-{{#tab name="surface" }}
+{{#tab name="Surface" }}
 
 ```prism,ignore
 fn area(s) =
@@ -549,7 +549,7 @@ fn area(s) =
 
 {{#endtab }}
 
-{{#tab name="core" }}
+{{#tab name="Core" }}
 
 ```text
 Lam [s]
@@ -566,7 +566,7 @@ A function parameter is a thunk value: calling it is `Force` then `App`, kept di
 
 {{#tabs }}
 
-{{#tab name="surface" }}
+{{#tab name="Surface" }}
 
 ```prism,ignore
 fn twice(f, x) = f(f(x))
@@ -574,7 +574,7 @@ fn twice(f, x) = f(f(x))
 
 {{#endtab }}
 
-{{#tab name="core" }}
+{{#tab name="Core" }}
 
 ```text
 Lam [f, x]
@@ -590,7 +590,7 @@ And a lambda in argument position is a computation frozen into a value with `Thu
 
 {{#tabs }}
 
-{{#tab name="surface" }}
+{{#tab name="Surface" }}
 
 ```prism,ignore
 fn scaled(y) = twice(\(n) -> n + y, y)
@@ -598,7 +598,7 @@ fn scaled(y) = twice(\(n) -> n + y, y)
 
 {{#endtab }}
 
-{{#tab name="core" }}
+{{#tab name="Core" }}
 
 ```text
 Lam [y]
@@ -757,7 +757,7 @@ The splitting is easiest to see on a two-column match. Three rows, but the tree 
 
 {{#tabs }}
 
-{{#tab name="surface" }}
+{{#tab name="Surface" }}
 
 ```prism,ignore
 fn both_ready(a, b) =
@@ -769,7 +769,7 @@ fn both_ready(a, b) =
 
 {{#endtab }}
 
-{{#tab name="decision tree" }}
+{{#tab name="Decision Tree" }}
 
 ```text
 case a of
@@ -980,7 +980,7 @@ A dozen node-to-instruction rules cover almost everything a program is made of:
 
 {{#endtab }}
 
-{{#tab name="arm64" }}
+{{#tab name="ARM64" }}
 
 ```asm
 {{#include ../examples/lower_tail_asm.txt}}
