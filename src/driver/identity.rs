@@ -447,10 +447,12 @@ impl BuildIdentity {
 // resolves and elaborates the module, and is harmless beside the prelude's
 // own glob imports.
 pub(crate) fn stdlib_driver_src() -> String {
-    let imports: String = crate::stdlib::STDLIB
-        .iter()
-        .map(|(name, _)| format!("import {name}\n"))
-        .collect();
+    let mut imports = String::new();
+    for (name, _) in crate::stdlib::STDLIB {
+        imports.push_str("import ");
+        imports.push_str(name);
+        imports.push('\n');
+    }
     with_prelude(&imports)
 }
 
