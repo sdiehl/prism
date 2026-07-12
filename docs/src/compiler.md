@@ -88,7 +88,7 @@ Moving to incremental, per-module compilation is planned but not implemented; th
 
 ## 5. Desugaring {#desugaring}
 
-Desugaring rewrites surface sugar into the smaller core-surface language the checker and elaborator handle (`src/syntax/desugar/`), each rule shown as surface form and the form it lowers to.
+Desugaring rewrites surface sugar into the smaller core-surface language the checker and elaborator handle (`src/syntax/desugar/`). Each rule below shows its surface form beside the elaborated Core the compiler prints for it (`prism dump core`, prelude elided), so the target is read off the real artifact rather than a hand-drawn approximation; the binder ids (`t@733`) are the compiler's own.
 
 The surface tree is parameterized by its compilation _phase_ (`src/syntax/ast.rs`). An `Expr<P>` holds its sugar-only forms, its parse-time markers, and its surface-only handler clauses in fields whose types are associated types of the phase `P`: in the `Surface` phase those are the real sugar payloads, and in the `Core` phase, desugar's output, they are the uninhabited type `Never`. Because `Never` has no values, a sugar node cannot be constructed in the core phase at all, so a missed desugaring is a type error in the compiler rather than a runtime `unreachable!`, and every later pass over `Expr<Core>` is statically excused from matching the sugar cases.
 
@@ -104,10 +104,10 @@ Function composition lowers to a lambda, kept as sugar only so the operator surv
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/compose_desugared.txt}}
+{{#include ../examples/compose.core.txt}}
 ```
 
 {{#endtab }}
@@ -126,10 +126,10 @@ An arithmetic sequence lowers to a prelude enumeration call.
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/range_desugared.txt}}
+{{#include ../examples/range.core.txt}}
 ```
 
 {{#endtab }}
@@ -148,10 +148,10 @@ A list comprehension (and the statement `for`) lowers to a stream (a producer pe
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/comp_desugared.txt}}
+{{#include ../examples/comp.core.txt}}
 ```
 
 {{#endtab }}
@@ -170,10 +170,10 @@ A record update rebuilds the constructor along the named fields; on a uniquely o
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/record_update_desugared.txt}}
+{{#include ../examples/record_update.core.txt}}
 ```
 
 {{#endtab }}
@@ -192,10 +192,10 @@ A record update rebuilds the constructor along the named fields; on a uniquely o
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/lens_desugared.txt}}
+{{#include ../examples/lens.core.txt}}
 ```
 
 {{#endtab }}
@@ -214,10 +214,10 @@ The failure fallback `a ?? b` runs `a` under a `Fail` handler that yields `b` if
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/default_desugared.txt}}
+{{#include ../examples/default.core.txt}}
 ```
 
 {{#endtab }}
@@ -236,10 +236,10 @@ A method call `e.m(args)` is uniform-function-call sugar: the receiver becomes t
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/ufcs_desugared.txt}}
+{{#include ../examples/ufcs.core.txt}}
 ```
 
 {{#endtab }}
@@ -258,10 +258,10 @@ A string with interpolation holes becomes a concatenation of its literal pieces 
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/interp_desugared.txt}}
+{{#include ../examples/interp.core.txt}}
 ```
 
 {{#endtab }}
@@ -280,10 +280,10 @@ A string with interpolation holes becomes a concatenation of its literal pieces 
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/trycatch_desugared.txt}}
+{{#include ../examples/trycatch.core.txt}}
 ```
 
 {{#endtab }}
@@ -297,15 +297,15 @@ A string with interpolation holes becomes a concatenation of its literal pieces 
 {{#tab name="Surface" }}
 
 ```prism
-{{#include ../examples/transact.pr}}
+{{#include ../examples/transact_sugar.pr}}
 ```
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/transact_desugared.txt}}
+{{#include ../examples/transact.core.txt}}
 ```
 
 {{#endtab }}
@@ -319,15 +319,15 @@ Optional chaining `a?.b` is `force(a).b`, where `force` raises `fail()` on `None
 {{#tab name="Surface" }}
 
 ```prism
-{{#include ../examples/optionals.pr}}
+{{#include ../examples/optchain_sugar.pr}}
 ```
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/optchain_desugared.txt}}
+{{#include ../examples/optchain.core.txt}}
 ```
 
 {{#endtab }}
@@ -346,10 +346,10 @@ A `with f <- handler { .. }` block binds a first-class handler instance over a f
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/with_desugared.txt}}
+{{#include ../examples/with.core.txt}}
 ```
 
 {{#endtab }}
@@ -368,10 +368,10 @@ A trailing block argument is appended as the call's last argument.
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/trailingblock_desugared.txt}}
+{{#include ../examples/trailingblock.core.txt}}
 ```
 
 {{#endtab }}
@@ -390,10 +390,10 @@ A bidirectional pattern synonym desugars to a `view` call in match position and 
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/pattern_syn_desugared.txt}}
+{{#include ../examples/pattern_syn.core.txt}}
 ```
 
 {{#endtab }}
@@ -412,10 +412,10 @@ A nested path update rebuilds the single-constructor spine (the chain of nested 
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/pathupdate_desugared.txt}}
+{{#include ../examples/pathupdate.core.txt}}
 ```
 
 {{#endtab }}
@@ -434,10 +434,10 @@ A nested path update rebuilds the single-constructor spine (the chain of nested 
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/deriving_desugared.txt}}
+{{#include ../examples/deriving.core.txt}}
 ```
 
 {{#endtab }}
@@ -456,10 +456,10 @@ The postfix `e?` unwraps `Ok` and short-circuits on `Err`.
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/postfix_try_desugared.txt}}
+{{#include ../examples/postfix_try.core.txt}}
 ```
 
 {{#endtab }}
@@ -916,9 +916,17 @@ That same-origin boundary is intentional. The demo proves migration of a running
 
 The translation from core to instructions is narrow because the machine underneath it is narrow. By the time the backend runs, effect lowering has erased every `Handle` and `Do` (see [effect lowering](#effect-lowering)), reference counting has inserted every `Dup` and `Drop` (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)), and the [value representation](#value-representation) has collapsed every type to one machine word. So the emitter faces only two things to lower: data laid out in cells, and computation as straight-line calls and branches over `i64` words. It emits no struct types and no read barriers; one `i64` is the type of every value, and `inttoptr`/`ptrtoint` reinterpret that word as a cell pointer only where a field must be reached. Because this is the shared emitter's mapping, the MLIR backend emits the identical shape in the `llvm` dialect, byte for byte.
 
-A **value** is an immediate or a pointer, both an `i64`. An `Int` literal is the immediate `(n << 1) | 1`, so the literal `0` is the constant `1`; `Bool`, `Unit`, and the fixed-width words are immediates too. A `Ctor` allocates: `prism_alloc(arity)` returns a cell whose header the emitter fills by storing the tag at offset 8, then storing each field from offset 24 upward, and the cell's `ptrtoint` is the value word. A `Case` is the inverse and asks for exactly one shape: reinterpret the scrutinee as a pointer, `load` its tag from offset 8, and `switch`, one block per constructor plus a default that calls `prism_match_error` and falls into `unreachable` (the exhaustiveness the checker already proved, made a hard trap rather than a silent fallthrough). Each arm reaches its bound fields by `getelementptr` and `load`, and drops or retains them as the surrounding reference-count nodes direct. All of `unwrap` is one such switch:
+A **value** is an immediate or a pointer, both an `i64`. An `Int` literal is the immediate `(n << 1) | 1`, so the literal `0` is the constant `1`; `Bool`, `Unit`, and the fixed-width words are immediates too. A `Ctor` allocates: `prism_alloc(arity)` returns a cell whose header the emitter fills by storing the tag at offset 8, then storing each field from offset 24 upward, and the cell's `ptrtoint` is the value word. A `Case` is the inverse and asks for exactly one shape: reinterpret the scrutinee as a pointer, `load` its tag from offset 8, and `switch`, one block per constructor plus a default that calls `prism_match_error` and falls into `unreachable` (the exhaustiveness the checker already proved, made a hard trap rather than a silent fallthrough). Each arm reaches its bound fields by `getelementptr` and `load`, and drops or retains them as the surrounding reference-count nodes direct. All of `unwrap` is one such switch (the LLVM tab is the emitter's own output at `-O0`, unoptimized so the function survives as its own definition; with optimization the backend inlines a leaf this small into its caller):
 
 {{#tabs }}
+
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/lower_unwrap.pr}}
+```
+
+{{#endtab }}
 
 {{#tab name="Core" }}
 
@@ -964,6 +972,14 @@ A dozen node-to-instruction rules cover almost everything a program is made of:
 
 {{#tabs }}
 
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/lower_sumto.pr}}
+```
+
+{{#endtab }}
+
 {{#tab name="Core" }}
 
 ```text
@@ -996,6 +1012,14 @@ The assembly is the payoff: there is no `bl _prism_sumto`. The recursive tail ca
 
 {{#tabs }}
 
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/eff_state.pr}}
+```
+
+{{#endtab }}
+
 {{#tab name="Core" }}
 
 ```text
@@ -1022,6 +1046,14 @@ When a handler cannot resolve to compile-time evidence, because a clause capture
 
 {{#tabs }}
 
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/lower_adder.pr}}
+```
+
+{{#endtab }}
+
 {{#tab name="Core" }}
 
 ```text
@@ -1043,6 +1075,14 @@ When a handler cannot resolve to compile-time evidence, because a clause capture
 **In-place reuse (FBIP).** The reuse pass (see [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse)) turns match-then-rebuild, the shape of every functional update, into in-place mutation when the matched value is uniquely owned. It emits a `reuse_token` on the dead scrutinee and a `reuse_alloc` for the new constructor: `prism_reuse_token` hands back the cell's shell when its refcount is 1 and null otherwise, and `prism_reuse_alloc` overwrites that shell or falls back to a fresh allocation. So a `bump` mapping over a uniquely-owned list rewrites each node's fields with `store`s and allocates nothing, while the identical source over a shared list transparently copies:
 
 {{#tabs }}
+
+{{#tab name="Surface" }}
+
+```prism
+{{#include ../examples/lower_reuse.pr}}
+```
+
+{{#endtab }}
 
 {{#tab name="Core" }}
 

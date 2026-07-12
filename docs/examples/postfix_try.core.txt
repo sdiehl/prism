@@ -1,0 +1,17 @@
+fn quarter(n) =
+  return n to t@739
+  half(t@739) to t@740
+  case t@740 of
+    Ok(h) =>
+      return h to t@741
+      half(t@741) to t@742
+      case t@742 of
+        Ok(q) =>
+          return q to t@743
+          return Ok(t@743)
+        Err(e@) =>
+          return e@ to t@744
+          return Err(t@744)
+    Err(e@) =>
+      return e@ to t@745
+      return Err(t@745)

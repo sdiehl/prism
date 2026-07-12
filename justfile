@@ -204,6 +204,16 @@ docs-gen:
 hash: docs-gen
     INSTA_UPDATE=always cargo test --test snapshots shape_digests
 
+# Regenerate the committed compiler-artifact files the book includes (the Core,
+# lowered, and fbip dumps behind the Surface/Core figures in compiler.md and
+# spec.md) from their `.pr` sources with the real compiler. The mapping lives in
+# docs/examples/core-artifacts.tsv; the dumps carry ANF binder ids that shift
+# when the prelude changes, so rerun this after a front-end change and commit the
+# result. Idempotent: a second run changes nothing.
+docs-core:
+    cargo build --release
+    PRISM_BIN=target/release/prism bash docs/scripts/gen-core.sh
+
 # `docs` regenerates the stdlib reference and rebuilds the wasm bundle first (via
 # `wasm`, which syncs it into docs/src/pkg), so the book and the served
 # playground are never stale.

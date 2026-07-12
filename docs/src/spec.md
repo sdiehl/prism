@@ -19,8 +19,6 @@ The deterministic core gives programs a stable identity: a definition is named b
 
 [^alpha-identity]: Ergo the compiler is serenely uninterested in what you named your variables: two functions that reduce to the same normal form are the same function, whatever their authors privately felt while writing them. This is a liberation if you are not attached to your variable names and a quiet bereavement if you are.
 
-The browser teleport demo deliberately stops at same-origin migration: two contexts served by the same bundle exchange a `kont` envelope over `BroadcastChannel`, and the receiver checks the bundle digest before resuming. Cross-origin or cross-stranger mobility is not part of this release. That needs a typed `Mobile` envelope, receiver capability checks, and a distribution trust model; until those exist, content addressing proves identity of the moved computation, not authority to run code from an untrusted peer.
-
 This specification proceeds in dependency order: notation, lexical structure, grammar, types, then the constructs the grammar describes.
 
 ## 2. Notation {#notation}
@@ -585,23 +583,25 @@ A `var x := e` desugars to a private two-operation effect (a get and a set); eac
 
 {{#endtab }}
 
-{{#tab name="Desugared" }}
+{{#tab name="Core" }}
 
 ```text
-{{#include ../examples/var_desugared.txt}}
+{{#include ../examples/var_core_effect.txt}}
 ```
 
 {{#endtab }}
 
-{{#tab name="Core" }}
+{{#tab name="Lowered" }}
 
 ```text
-{{#include ../examples/var_core.txt}}
+{{#include ../examples/var_lowered.txt}}
 ```
 
 {{#endtab }}
 
 {{#endtabs }}
+
+The two tabs are the compiler's own dumps: **Core** (`prism dump core`) is the elaborated form, where each `var` has become a private two-operation `State` effect (`do get@a@0` / `do set@a@0`) wrapped in a value-threading handler, one nested handler per `var`; **Lowered** (`prism dump lowered`) is after effect lowering, where the escape check has let those handlers collapse to a mutable cell (`ref_new` / `ref_get` / `ref_set`) and the loop to a constant-stack `repeat`. The get/set effect never reaches the function's type, so `fib_iter` stays pure.
 
 An escape analysis keeps the purity honest: the compiler rejects any closure or returned value that would carry the var out of its block, so the state cannot outlive its handler.
 

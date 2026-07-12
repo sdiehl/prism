@@ -1,5 +1,0 @@
--- A method call `e.m(args)` is uniform-function-call sugar: the receiver becomes
--- the first argument of `m`, so a dot-chain reads left to right.
-5.inc().double()
-  ==>
-double(inc(5))

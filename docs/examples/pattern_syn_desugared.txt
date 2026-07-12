@@ -1,8 +1,0 @@
--- `pattern N(p) for T = view v make m` is bidirectional. In match position, `N`
--- runs `v` and matches `Some`; in expression position, `N(e)` calls `m(e)`.
-match val of
-  OnXAxis(x) => body
-  ==>
-match (\(v) -> if v.y == 0 then Some(v.x) else None)(val) of
-  Some(x) => body
--- expression position:  OnXAxis(e)  ==>  (\(x) -> Vec2 { x = x, y = 0 })(e)

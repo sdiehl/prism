@@ -10,8 +10,8 @@ The closure handed to `teleport` must capture only content-addressed code and po
 
 ### `teleport`
 
-```prism,sig
-fn teleport(f)
+```prism,sig,h-7403582003a1553adf44ddc93bc77265fda77224818c30edd89935e4537100d0
+teleport : forall a. (() -> a @ {once, portable}) -> a
 ```
 
 Run a portable, single-use closure as a mobile unit.

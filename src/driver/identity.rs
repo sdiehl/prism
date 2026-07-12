@@ -435,26 +435,23 @@ impl BuildIdentity {
 }
 
 // The composed source that pulls in the entire documented standard library:
-// the always-on prelude (which glob-imports the `Data.*` modules) plus every
-// module it does not open. Docs and the stdlib hash share this one definition
-// of "the stdlib", so a module missing here silently gets no hash badge in the
-// generated docs (its types and functions never reach the elaborated Core the
-// hash is taken from). Qualified-only (no `(..)`): the driver body never
-// names anything from these modules directly, and opening them all
-// unqualified collides (`Concurrent.Outcome` vs `Quickcheck.Outcome`); a
-// bare import still resolves and elaborates the module.
+// the always-on prelude plus one import per embedded module. Docs and the
+// stdlib hash share this one definition of "the stdlib", so the import list is
+// derived from the embedded module table rather than hand-typed: a module in
+// `STDLIB` that was missing here would silently get no hash badge in the
+// generated docs and, worse, fall outside the stdlib Merkle root (its types
+// and functions would never reach the elaborated Core the hash is taken
+// from). Qualified-only (no `(..)`): the driver body never names anything
+// from these modules directly, and opening them all unqualified collides
+// (`Concurrent.Outcome` vs `Quickcheck.Outcome`); a bare import still
+// resolves and elaborates the module, and is harmless beside the prelude's
+// own glob imports.
 pub(crate) fn stdlib_driver_src() -> String {
-    with_prelude(
-        "import Data.Checked\n\
-         import Data.Vec\n\
-         import Replay\n\
-         import Concurrent\n\
-         import Blit\n\
-         import Incr\n\
-         import Quickcheck\n\
-         import Test\n\
-         import Wire\n",
-    )
+    let imports: String = crate::stdlib::STDLIB
+        .iter()
+        .map(|(name, _)| format!("import {name}\n"))
+        .collect();
+    with_prelude(&imports)
 }
 
 /// One entry of a program's public surface: an exported name paired with the

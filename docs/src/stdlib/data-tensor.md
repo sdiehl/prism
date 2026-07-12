@@ -14,7 +14,7 @@ The surface covers construction, indexing, transpose-by-name, and a contiguity-c
 
 ### `Tensor`
 
-```prism,def
+```prism,def,h-95be73d420215e199c05f53c9523b187c6dc8a1f405910aa3ca74c7cc5e5413a
 type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
 ```
 
@@ -24,96 +24,96 @@ A dense tensor: flat storage plus per-axis shape, strides, and names.
 
 ### `buf`
 
-```prism,sig
-fn buf(t)
+```prism,sig,h-ef46804750c80c3b43a147bc96ab948795ba8b80f0b2b32635c6da89e57fdc11
+buf : (Data.Tensor.Tensor) -> FloatBuf
 ```
 
 The flat backing buffer.
 
 ### `shape`
 
-```prism,sig
-fn shape(t)
+```prism,sig,h-58df84c53e8071dcf8a0485e6c0677d49f46d48cbfa73b36fbcba4d4df7ce426
+shape : (Data.Tensor.Tensor) -> List(Int)
 ```
 
 The extent of each axis, outermost first.
 
 ### `strides`
 
-```prism,sig
-fn strides(t)
+```prism,sig,h-7ace8776e12005e49dfa25656ac9088e181a429a00972a9df839ec97212943ba
+strides : (Data.Tensor.Tensor) -> List(Int)
 ```
 
 The flat-offset stride of each axis.
 
 ### `axes`
 
-```prism,sig
-fn axes(t)
+```prism,sig,h-c92d5c0d57261561888724459364ede1cc54bfff4480a3cef7409068d13c0412
+axes : (Data.Tensor.Tensor) -> List(String)
 ```
 
 The name of each axis.
 
 ### `rank`
 
-```prism,sig
-fn rank(t)
+```prism,sig,h-57bc683253254dd4c179492614b19db1f919ee3e9be745760bc64eed30242aa1
+rank : (Data.Tensor.Tensor) -> Int
 ```
 
 The number of axes.
 
 ### `size`
 
-```prism,sig
-fn size(t)
+```prism,sig,h-7be8affae7d523e3fd75b24d8d95828471e020f5863f4d0447b3831caaf95f58
+size : (Data.Tensor.Tensor) -> Int
 ```
 
 The total number of elements: the product of the shape.
 
 ### `new`
 
-```prism,sig
-fn new(shape, fill)
+```prism,sig,h-0931be4e634cad3ea30f9ef14c89aa2415332b47d286bb3e3b283db9d5e40c7b
+new : (List(Int), Float) -> Data.Tensor.Tensor
 ```
 
 A tensor of the given shape with every element set to `fill`, row-major.
 
 ### `from_list`
 
-```prism,sig
-fn from_list(shape, xs)
+```prism,sig,h-97e1874ac302af9ef2d08ebf599de9f743248729462a0bfbdf35a6db91de5164
+from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor
 ```
 
 A row-major tensor of the given shape filled from a flat list of values. Extra list elements past the shape's size are ignored; missing ones stay 0.
 
 ### `at_tensor`
 
-```prism,sig
-fn at_tensor(t, idx)
+```prism,sig,h-4e467ac95f04a35c9409f5dec8468f0ea17ed31568a03a80bbe502a2407c06d5
+at_tensor : (Data.Tensor.Tensor, List(Int)) -> Float ! {Fail}
 ```
 
 The element at a multi-index, or `fail()` if the offset is out of range. Backs `t[i, j]`.
 
 ### `tensor_set`
 
-```prism,sig
-fn tensor_set(t, idx, v)
+```prism,sig,h-4f932e486146edf5b0d2119e45a115456d9e31e3d84bfac8780e6d5b5053cf7c
+tensor_set : (Data.Tensor.Tensor, List(Int), Float) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 A tensor equal to `t` but with the element at a multi-index set to `v`, or `fail()` if out of range. Backs `t[i, j] := v`.
 
 ### `transpose`
 
-```prism,sig
-fn transpose(t, a, b)
+```prism,sig,h-ea27421ec526053ecc7e28f4b56d8f1dfa09b77ab5925d23258a39f064a0989c
+transpose : (Data.Tensor.Tensor, String, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Transpose two named axes: a permutation of the shape, strides, and names with no data movement (the buffer is shared). Reading a transposed tensor walks the same buffer in the permuted stride order.
 
 ### `reshape`
 
-```prism,sig
-fn reshape(t, new_shape)
+```prism,sig,h-706ea3322ca735430bf5bc9234bb4171ce206d7990aa9ec26b9889291cfdbf5b
+reshape : (Data.Tensor.Tensor, List(Int)) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Reinterpret the elements under a new shape of the same size. Requires the tensor to be contiguous (row-major strides); a transposed view must be copied first, so reshaping one is a `fail()`. The new axes get default names.

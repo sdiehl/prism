@@ -70,6 +70,25 @@ fn covers_the_whole_library() {
                 "missing instance digest for {name}"
             );
         }
+        // Every embedded module must contribute at least one entry, so a module
+        // added to `STDLIB` but dropped from the composed driver source cannot
+        // silently fall outside the root (and lose its docs hash badges). Defs
+        // key by canonical symbol (`Module.name` public, `Module@name` private);
+        // shapes/classes/instances key by bare name, so defs are the reliable
+        // per-module witness.
+        for (module, _) in prism::stdlib::STDLIB {
+            let dot = format!("{module}.");
+            let at = format!("{module}@");
+            let covered = h
+                .defs
+                .keys()
+                .any(|k| k.as_str().starts_with(&dot) || k.as_str().starts_with(&at));
+            assert!(
+                covered,
+                "module {module} contributes no definition to the stdlib root; \
+                 is it missing from stdlib_driver_src?"
+            );
+        }
     });
 }
 

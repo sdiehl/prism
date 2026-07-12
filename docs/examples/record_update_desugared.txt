@@ -1,7 +1,0 @@
--- `C { ..base, f = e }` rebuilds the constructor: take every field from `base`,
--- override the listed ones. On a uniquely owned `base` the rebuild is in place
--- (FBIP), so the update is a pointer write rather than a fresh allocation.
-Vec2 { ..v, x = 7 }
-  ==>
-match v of
-  Vec2(x0, y0) => Vec2(7, y0)

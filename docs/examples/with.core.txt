@@ -1,0 +1,12 @@
+fn main() =
+  handle
+    do read@conf@0() to t@733
+    prints t@733 to t@734
+    print_nl
+  with
+    read@conf@0(k) =>
+      return "conf.toml" to t@735
+      return k to t@736
+      (force t@736)(t@735)
+    return r =>
+      return r

@@ -26,53 +26,24 @@ nix run github:sdiehl/prism          # or run it directly
 nix develop                          # dev shell: prism, LLVM, cargo, just on PATH
 ```
 
-### Homebrew
+### macOS / Linux
+
+Native codegen needs LLVM 22 at runtime, so install it first:
 
 ```shell
-brew install sdiehl/prism/prism
+brew install llvm@22                                          # macOS
+curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22     # Debian/Ubuntu
 ```
 
-### Docker
+Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
 
 ```shell
-docker run ghcr.io/sdiehl/prism --help
+curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | sh
 ```
 
-### Linux
+The installer verifies the release tarball's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking, and installs to `~/.local/bin` without sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
 
-```shell
-# Debian / Ubuntu
-curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.10.0/prism_0.10.0_amd64.deb
-sudo apt install ./prism_0.10.0_amd64.deb
-
-# Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.10.0/prism-0.10.0-1.x86_64.rpm
-
-# Arch
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.10.0/prism-0.10.0-1-x86_64.pkg.tar.zst
-
-# Alpine
-curl -LO https://github.com/sdiehl/prism/releases/download/v0.10.0/prism_0.10.0_x86_64.apk
-sudo apk add --allow-untrusted ./prism_0.10.0_x86_64.apk
-```
-
-Debian and Fedora can use the hosted repo instead, for `install prism` + upgrades:
-
-```shell
-# Debian / Ubuntu
-echo 'deb [trusted=yes] https://apt.fury.io/sdiehl/ /' | sudo tee /etc/apt/sources.list.d/prism.list
-sudo apt update && sudo apt install prism
-
-# Fedora / RHEL
-sudo tee /etc/yum.repos.d/prism.repo <<'EOF'
-[prism]
-baseurl=https://yum.fury.io/sdiehl/
-enabled=1
-gpgcheck=0
-EOF
-sudo dnf install prism
-```
+Also available: `brew install sdiehl/prism/prism`, `docker run ghcr.io/sdiehl/prism`, and deb/rpm/apk/pacman packages on the [releases page](https://github.com/sdiehl/prism/releases).
 
 ### From Source
 

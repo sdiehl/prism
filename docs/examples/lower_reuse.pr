@@ -1,0 +1,6 @@
+fn bump(xs : List(Int)) : List(Int) =
+  match xs of
+    Nil => Nil
+    Cons(h, t) => Cons(h + 1, bump(t))
+
+fn main() = println(sum(bump([1, 2, 3])))

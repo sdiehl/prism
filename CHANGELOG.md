@@ -16,6 +16,7 @@
 - Soundness: tightened handler coverage, duplicate-arm, arity, borrow-row, rigid-variable, effect-application, coeffect, and unboxed-product checks.
 - Project diffing: bare `prism diff` compares Git `HEAD` with the working tree and reports semantic edits, dependent definitions, and compact source deltas.
 - Identity: namespace roots now include definitions, shapes, classes, and instances. Continuations also bind Std, scheduler, and runtime identity, so incompatible resumes fail early; persisted identities must be regenerated.
+- Stdlib fingerprint: the composed stdlib source now derives its imports from the embedded module table, bringing Cli, Data.FlatArray, Data.Ordered, Data.Tensor, Json, Teleport, and Time into the Merkle root (and their docs pages gain hash badges and inferred signatures); the root moved accordingly, and a coverage gate now asserts every embedded module contributes to it.
 - Backend API: the shared `Isa` interface and generic emitter are public for out-of-tree experimental backends.
 - Internals: added validated store hashes, typed resolver identities, named builtin ABI modes, effect-lowering mode enums, format-preserving manifest edits, leaner fixtures, broader CI
 

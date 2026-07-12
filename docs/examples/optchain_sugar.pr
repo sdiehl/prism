@@ -1,0 +1,11 @@
+type City = City { zip: Int }
+
+type Addr = Addr { city: Option(City) }
+
+-- `a?.city?.zip` is `force(a).city` chained: the path short-circuits on the
+-- first `None`, and `??` supplies the default.
+fn zip_of(a : Option(Addr)) : Int = a?.city?.zip ?? 0 - 1
+
+fn main() =
+  println(zip_of(Some(Addr { city = Some(City { zip = 42 }) })))
+  println(zip_of(None))

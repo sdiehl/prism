@@ -67,4 +67,7 @@ cp -f web/dist/incr.html "$out/incr/index.html"
 cp -f web/dist/prism-world.html "$out/world/index.html"
 cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 
+# 5. The shell installer, served at /install.sh for `curl ... | sh`.
+cp -f scripts/install.sh "$out/install.sh"
+
 echo "unified site assembled at $out (docs at /, playground at /play/, REPL at /repl/, gallery at /gallery/, scrubber at /scrub/, pendulum at /pendulum/, branch at /branch/, chaos at /chaos/, schedule at /schedule/, teleport at /teleport/, merkle at /merkle/, incr at /incr/, world at /world/)"

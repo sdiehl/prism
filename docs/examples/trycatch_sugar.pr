@@ -6,6 +6,5 @@ fn lookup(k : String) : Int ! {NotFound} =
   else
     throw NotFound(k)
 
-fn main() =
-  println(try lookup("a") catch { NotFound(k) => 0 })
-  println(try lookup("z") catch { NotFound(k) => 0 })
+-- `try e catch { N(x) => h }` is one nested `never` clause discharging N's label.
+fn main() = println(try lookup("z") catch { NotFound(k) => 0 })

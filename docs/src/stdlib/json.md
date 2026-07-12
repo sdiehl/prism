@@ -18,7 +18,7 @@ Strings are validated UTF-8 by construction (the `String` type), so invalid UTF-
 
 ### `Json`
 
-```prism,def
+```prism,def,h-1d019dc20172444f417d2b268028d3244599485c236e88482d60f6ffd7ae4241
 type Json
   = JNull
   | JBool(Bool)
@@ -33,7 +33,7 @@ A dynamic JSON value. Numbers split into `JInt` and `JFloat` so the exact-or-err
 
 ### `JsonError`
 
-```prism,def
+```prism,def,h-30c2231cdfce1cc2d2c181bf78aec84eb991cc25b65e45f73cd0eda736333235
 type JsonError = JsonError(String, Int, Int)
 ```
 
@@ -43,7 +43,7 @@ A decode failure: a human-readable message and the 1-based line and column of th
 
 ### `ToJson`
 
-```prism,def
+```prism,def,h-72eeb6eb72c263c47b8a5a3917855c8ba5a72537cf1eaf685186a4b557b8b84c
 class ToJson(a)
   to_json : (a) -> Json
 ```
@@ -52,7 +52,7 @@ Convert a value to a `Json` tree.
 
 ### `FromJson`
 
-```prism,def
+```prism,def,h-5c7a20486fefc0fab87a119e41f7fe1738f68627367e2c7ccb0a5f841fdf6a97
 class FromJson(a)
   from_json : (Json) -> a ! {Fail | e}
 ```
@@ -63,85 +63,85 @@ Recover a value from a `Json` tree, failing (through `Fail`) on a structural mis
 
 ### `toJsonInt`
 
-```prism,def
+```prism,def,h-32b6f9de622a634459cbe7e1cf40936088774f1056d575a00a6d95748459b64e
 instance toJsonInt : ToJson(Int)
 ```
 
 ### `toJsonFloat`
 
-```prism,def
+```prism,def,h-111bdf60aa04ac3a326279df105a00a1ad4ce1d903001d97d4b9fc30c7012ca5
 instance toJsonFloat : ToJson(Float)
 ```
 
 ### `toJsonBool`
 
-```prism,def
+```prism,def,h-b8abd1b65f64014801a752792e27751612fdecaf71894b0cd3a6072c51861c75
 instance toJsonBool : ToJson(Bool)
 ```
 
 ### `toJsonString`
 
-```prism,def
+```prism,def,h-e7cf0150e6bc042b57437e9aebb594f5da560a2f4b756dce555407b66e10b837
 instance toJsonString : ToJson(String)
 ```
 
 ### `toJsonList`
 
-```prism,def
+```prism,def,h-eb29e88e1da969d64b7009cba1e7ccb893512a91b39869c93bb79c6f67378e22
 instance toJsonList : ToJson(List(a))
 ```
 
 ### `toJsonOption`
 
-```prism,def
+```prism,def,h-59de435c02561719f3c18601f1ff2403604ccac12d7498a5af879557b4238f22
 instance toJsonOption : ToJson(Option(a))
 ```
 
 ### `toJsonPair`
 
-```prism,def
+```prism,def,h-f46b50d2e5f71862b0f66950e7404062aa0e9957a161ec0b9bbe611c3b53f1af
 instance toJsonPair : ToJson((a, b))
 ```
 
 ### `fromJsonInt`
 
-```prism,def
+```prism,def,h-55308c934d632ee2a77b6aede3e63741ffd5df0b97998cca2f6affd531257723
 instance fromJsonInt : FromJson(Int)
 ```
 
 ### `fromJsonFloat`
 
-```prism,def
+```prism,def,h-6a7d26abac950aa8abb582882ccd199795fe4dfdce7b5d48d915522243cf88aa
 instance fromJsonFloat : FromJson(Float)
 ```
 
 ### `fromJsonBool`
 
-```prism,def
+```prism,def,h-5dd3e47e039d48203532c30b62881461bd6b8c7051846baff081d1aba0629c56
 instance fromJsonBool : FromJson(Bool)
 ```
 
 ### `fromJsonString`
 
-```prism,def
+```prism,def,h-c415a208a684074eb4fdb1998fb8d3b14937b9781e1e0d55c2ea21582f8a7b34
 instance fromJsonString : FromJson(String)
 ```
 
 ### `fromJsonList`
 
-```prism,def
+```prism,def,h-ed54201a64e45c42a570314c9b1e3db66e973c9a886b18cd51a3b891bb0e8c26
 instance fromJsonList : FromJson(List(a))
 ```
 
 ### `fromJsonOption`
 
-```prism,def
+```prism,def,h-58d97c98e2213bcf2f66747a65150ddb9c4ad1872e96249fef953412d6c0d2e5
 instance fromJsonOption : FromJson(Option(a))
 ```
 
 ### `fromJsonPair`
 
-```prism,def
+```prism,def,h-a53627f2b193a00b4fd6ca7f2db31107a404ec449e6c3dfeb5560b3dfb5ce796
 instance fromJsonPair : FromJson((a, b))
 ```
 
@@ -149,40 +149,40 @@ instance fromJsonPair : FromJson((a, b))
 
 ### `json_error_message`
 
-```prism,sig
-fn json_error_message(e)
+```prism,sig,h-d827db90aadb9ec99c6e602d955f23cc12f835cadfaf8e4b596603365737eb5c
+json_error_message : (Json.JsonError) -> String
 ```
 
 Render a `JsonError` as `line L col C: message`.
 
 ### `decode`
 
-```prism,sig
-fn decode(s)
+```prism,sig,h-8ffae19d4dbf7d80cfb0c1bf5a8e3515b2b0ea67c090769ee6e1a7ded5e729a7
+decode : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
 Decode a JSON document with exact number semantics: a number decodes only when its lexeme is already canonical, otherwise a decode error. Total: any malformed or lossy input is an `Err` with a position.
 
 ### `decode_lossy`
 
-```prism,sig
-fn decode_lossy(s)
+```prism,sig,h-887f61312281e2ec0fece08c95932ae117f1ae2057f2a0574e6eca609b58eefd
+decode_lossy : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
 Decode a JSON document, accepting any well-formed number and normalizing it to `JInt` (exact integer in range) or the nearest `JFloat`. Still total, and still rejects structurally malformed input.
 
 ### `encode`
 
-```prism,sig
-fn encode(j)
+```prism,sig,h-98f2bc05816e96174c7cf50b9d7863390c826959199c07c3d386e7405a50f51e
+encode : (Json.Json) -> String
 ```
 
 Encode a `Json` value to its canonical byte-deterministic string: object keys sorted, numbers by the owned formatter, one fixed string escaping, no optional whitespace. Equal values encode to equal bytes.
 
 ### `to_json_string`
 
-```prism,sig
-fn to_json_string(x)
+```prism,sig,h-24c511bbf533e34b787aa840538a0cb339035df220668d67190ad2f5a8a4d9f2
+to_json_string : forall a. (a) -> String
 ```
 
 Encode a typed value straight to a canonical JSON string.
