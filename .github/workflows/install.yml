@@ -43,7 +43,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run the installer against the latest release
         # PRISM_NO_NIX pins the test to the tarball path; runners have no Nix,
-        # but the pin keeps the exercised path explicit either way.
+        # but the pin keeps the exercised path explicit either way. The token
+        # authenticates the api.github.com latest-release lookup, which is
+        # rate-limited per IP and 403s on shared macOS runners.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: PRISM_NO_NIX=1 sh scripts/install.sh
       - name: Installed binary runs
         run: |

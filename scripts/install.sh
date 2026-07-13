@@ -37,9 +37,15 @@ need_cmd() {
 }
 
 # All downloads: HTTPS only, modern TLS, fail on HTTP errors, retry transient.
+# GitHub API calls send GITHUB_TOKEN when present: unauthenticated api.github.com
+# requests are rate-limited per IP, which 403s on shared runners.
 fetch() {
-  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1" \
-    || err "download failed: $1"
+  case "$1" in
+    "$API"/*) [ -n "${GITHUB_TOKEN:-}" ] && set -- "$1" "$2" -H "Authorization: Bearer $GITHUB_TOKEN" ;;
+  esac
+  url="$1"; out="$2"; shift 2
+  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 "$@" -o "$out" "$url" \
+    || err "download failed: $url"
 }
 
 detect_target() {

@@ -58,7 +58,9 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 11
+          # Pinned to web/package.json's packageManager: a floating "11" once
+          # pulled a just-published pnpm whose self-installer crashed.
+          version: 11.6.0
 
       - uses: actions/setup-node@v6
         with:
