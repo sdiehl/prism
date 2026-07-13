@@ -194,7 +194,7 @@ jobs:
       # Int would exit with that value); assert the printed output instead.
       - name: Smoke test packaged binary
         run: |
-          printf 'fn main() : !{IO} Unit =\n  println(42)\n' > /tmp/hello.pr
+          printf 'fn main() : Unit ! {IO} =\n  println(42)\n' > /tmp/hello.pr
           "./${PKG}/prism" /tmp/hello.pr -o /tmp/hello
           out="$(/tmp/hello)"
           echo "output: $out"

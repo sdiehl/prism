@@ -24,6 +24,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The workflow only reads the checkout and public release assets.
+permissions:
+  contents: read
+
 jobs:
   install:
     name: install (${{ matrix.os }})
