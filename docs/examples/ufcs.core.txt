@@ -1,0 +1,6 @@
+fn main() =
+  return 5 to t@737
+  inc(t@737) to t@738
+  double(t@738) to t@739
+  print t@739 to t@740
+  print_nl

@@ -232,7 +232,9 @@ impl Lowerer {
     ) -> Option<Comp> {
         Some(match c {
             Comp::Handle { ops, .. } => match ops.arms() {
-                [clause] if self.is_consumer(clause) => self.lower_consumer(c, evs, loc)?,
+                [clause] if self.is_consumer(clause, ops.resume_use(0)) => {
+                    self.lower_consumer(c, evs, loc)?
+                }
                 _ => self.lower_fold(c, evs, loc)?,
             },
             Comp::Return(v) => Comp::Return(self.rewrite_value(v, loc, evs)?),

@@ -283,6 +283,7 @@ impl Tc<'_> {
                 Type::UnboxedRecord(fs.iter().map(|(n, t)| (*n, self.apply(t))).collect())
             }
             Type::OrNull(a) => Type::OrNull(Box::new(self.apply(a))),
+            Type::Coeffect(a, r) => Type::Coeffect(Box::new(self.apply(a)), r.clone()),
             Type::Row(r) => Type::Row(self.apply_row(r)),
             other => other.clone(),
         }
@@ -423,17 +424,23 @@ impl Tc<'_> {
         let t: &Type = zt;
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
-        // One zonk per env binding feeds the existential, row-existential, and
-        // free-type-variable sets; the env is often the whole prelude, so walking
-        // it once rather than three times is the cheaper of identical passes.
+        // The persistent environment indexes only bindings with free variables.
+        // Expand those through current solutions; closed prelude and prior
+        // top-level schemes need no visit at every local generalization point.
         let mut env_exs = BTreeSet::new();
         let mut env_row_exs = BTreeSet::new();
-        let mut env_tvars = BTreeSet::new();
-        for v in env.values() {
-            let av = self.apply(v);
-            av.free_exist(&mut env_exs);
-            av.free_exist_row(&mut env_row_exs);
-            super::env::collect_type_vars(&av, &mut env_tvars);
+        let mut env_tvars = env.free_type_vars().collect::<BTreeSet<_>>();
+        for exist in env.free_exists() {
+            let applied = self.apply(&Type::Exist(exist));
+            applied.free_exist(&mut env_exs);
+            applied.free_exist_row(&mut env_row_exs);
+            super::env::collect_type_vars(&applied, &mut env_tvars);
+        }
+        for exist in env.free_row_exists() {
+            let applied = self.apply(&Type::Row(EffRow::Exist(exist)));
+            applied.free_exist(&mut env_exs);
+            applied.free_exist_row(&mut env_row_exs);
+            super::env::collect_type_vars(&applied, &mut env_tvars);
         }
         // Generalized existentials keep their historical id-order naming, so an
         // all-existential scheme (every inferred function) prints byte-identically

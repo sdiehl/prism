@@ -20,13 +20,10 @@ impl Elab<'_> {
         // leaves default to Int and the spine prints as the interpreter's does.
         // A *free* rigid var is an enclosing function's parameter, which needs
         // runtime type info, so it stays unresolved and the caller falls back.
-        [
-            self.checked.span_types.get(&e.id).cloned(),
-            self.local_ty(e, locals),
-        ]
-        .into_iter()
-        .flatten()
-        .find_map(default_printable)
+        [self.hir.node_type(e.id).cloned(), self.local_ty(e, locals)]
+            .into_iter()
+            .flatten()
+            .find_map(default_printable)
     }
 
     // Direct lowering of a `print`/`println` argument to the runtime printer,
@@ -78,41 +75,44 @@ impl Elab<'_> {
         arg_expr: &S<Expr<CorePhase>>,
         locals: &Locals,
         newline: bool,
-    ) -> Comp {
+    ) -> Result<Comp, Error> {
         // The `Output` ops carry a `String`, so the value is rendered here at the
         // call site where its type is concrete, then handed to the op.
-        let val = self.display_comp(v, arg_expr, locals);
+        let val = self.display_comp(v, arg_expr, locals)?;
         let op = names::output_op(newline);
         let s = self.fresh();
-        Comp::Bind(
+        Ok(Comp::Bind(
             Box::new(val),
             s.clone().into(),
             Box::new(Comp::Do(op.into(), vec![Value::Var(s.into())])),
-        )
+        ))
     }
 
     // The type-directed "display" rendering of a value to a `String`, shared by
-    // `print`/`println` and by string interpolation. Unlike the `Show` typeclass
-    // it is total (an unresolved type falls back to the integer printer rather
-    // than demanding an instance) and it renders a top-level `String` raw: a
-    // message or an interpolated string is inserted verbatim, not quoted. Only
-    // nested strings inside a structure quote, matching `Show`. This is the
-    // documented "magic" printer; `show` is the canonical, dictionary-dispatched
-    // one.
+    // `print`/`println` and by string interpolation. It renders a top-level
+    // `String` raw (a message or interpolated string is inserted verbatim, not
+    // quoted); only nested strings inside a structure quote, matching `Show`.
+    // This is the documented "magic" printer; `show` is the canonical,
+    // dictionary-dispatched one. It requires a concrete type: a polymorphic hole
+    // is handled by the caller (dictionary-or-reject, exactly like a polymorphic
+    // `print`), never silently rendered as an integer.
     pub(super) fn display_comp(
         &mut self,
         v: Value,
         arg_expr: &S<Expr<CorePhase>>,
         locals: &Locals,
-    ) -> Comp {
-        match self.printable_ty(arg_expr, locals) {
+    ) -> Result<Comp, Error> {
+        Ok(match self.printable_ty(arg_expr, locals) {
             Some(Type::Str) => Comp::Return(v),
             Some(Type::Float) => Comp::StrBuiltin(Builtin::ShowFloat, vec![v]),
-            Some(Type::Int) | None => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),
-            Some(ty) => self
-                .show_for_type(v.clone(), &ty, arg_expr.span)
-                .unwrap_or_else(|_| Comp::StrBuiltin(Builtin::ShowInt, vec![v])),
-        }
+            Some(Type::Int) => Comp::StrBuiltin(Builtin::ShowInt, vec![v]),
+            Some(ty) => self.show_for_type(v, &ty, arg_expr.span)?,
+            // A free rigid var (an enclosing parameter): no static type to
+            // render. Reaching here means the caller expected a concrete type;
+            // reject rather than assume Int, which would misread a non-Int value
+            // and diverge native output from the interpreter.
+            None => return Err(polymorphic_print(arg_expr.span)),
+        })
     }
 
     // Emit a print of an already-rendered `String` computation. Mirrors the two

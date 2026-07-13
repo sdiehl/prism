@@ -138,22 +138,6 @@ fn run_native_diff(
     let fails = parallel_check(&cases, |case| {
         let a = native_output(case, &format!("{tag}-{a_tag}"), a_cfg)?;
         let b = native_output(case, &format!("{tag}-{b_tag}"), b_cfg)?;
-        if a.status.code() != b.status.code() {
-            return Err(format!(
-                "{tag} exit code diverges for {}: {a_tag} {:?}, {b_tag} {:?}",
-                case.display(),
-                a.status.code(),
-                b.status.code()
-            ));
-        }
-        if a.stdout != b.stdout {
-            return Err(format!(
-                "{tag} stdout diverges for {}:\n  {a_tag}: {:?}\n  {b_tag}: {:?}",
-                case.display(),
-                String::from_utf8_lossy(&a.stdout),
-                String::from_utf8_lossy(&b.stdout)
-            ));
-        }
         let a_err = String::from_utf8_lossy(&a.stderr);
         let b_err = String::from_utf8_lossy(&b.stderr);
         if !leak_free(&a_err) || !leak_free(&b_err) {
@@ -162,6 +146,31 @@ fn run_native_diff(
                 case.display(),
                 a_err.trim(),
                 b_err.trim()
+            ));
+        }
+        let program_stderr = |stderr: &str| {
+            stderr
+                .lines()
+                .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let a_trace = prism::ObservationTrace::from_process(
+            &a.stdout,
+            program_stderr(&a_err).as_bytes(),
+            a.status.code().unwrap_or(-1),
+        );
+        let b_trace = prism::ObservationTrace::from_process(
+            &b.stdout,
+            program_stderr(&b_err).as_bytes(),
+            b.status.code().unwrap_or(-1),
+        );
+        if a_trace != b_trace {
+            return Err(format!(
+                "{tag} observation trace diverges for {}:\n  {a_tag}: {:?}\n  {b_tag}: {:?}",
+                case.display(),
+                a_trace.observations,
+                b_trace.observations
             ));
         }
         Ok(())

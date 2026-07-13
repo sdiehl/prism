@@ -73,6 +73,7 @@ pub fn run_file_cmd(
             backend: crate::lineage::BACKEND_INTERPRETER,
             argv: args,
             events: &recorded.events,
+            observations: &recorded.canonical_trace,
             stdout: &recorded.term,
             replay: Some(replay),
         })

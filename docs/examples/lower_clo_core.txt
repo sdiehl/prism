@@ -1,2 +1,6 @@
 fn adder(x) =
-  \y -> x + y            -- the lambda captures x
+  thunk { \y.
+    return x to t@733
+    return y to t@734
+    t@733 + t@734
+  }

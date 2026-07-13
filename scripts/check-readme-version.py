@@ -16,7 +16,9 @@ readme = (root / "README.md").read_text()
 refs = re.findall(r"releases/download/v(\d+\.\d+\.\d+)", readme)
 refs += re.findall(r"prism[-_](\d+\.\d+\.\d+)", readme)
 if not refs:
-    sys.exit("no prism version references found in README.md install commands")
+    # The install path is the unversioned curl|sh installer; nothing to drift.
+    print(f"README.md has no versioned install URLs; nothing to check ({want})")
+    sys.exit(0)
 
 bad = sorted({v for v in refs if v != want})
 if bad:

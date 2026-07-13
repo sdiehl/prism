@@ -140,6 +140,7 @@ fn read_lock(project_root: &Path) -> Result<Lock, Error> {
 // `prism build`. `out` overrides the default name (source stem for a file, the
 // package name for a project).
 pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Config) -> CmdResult {
+    let is_project = arg.is_dir() || arg.file_name().is_some_and(|name| name == PRISM_MANIFEST);
     let lineage_request = project_lineage_request(arg)?;
     let (full, roots, name, default_out) = resolve_input(arg, cfg)?;
     let out = out.unwrap_or(default_out);
@@ -156,14 +157,28 @@ pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Co
             println!("  compiling {m}");
         }
     }
+    if is_project {
+        crate::check_modules_on(&full, &roots, cfg).map_err(|e| (e, full.clone(), name.clone()))?;
+    }
     let report = build_dispatch(mlir, &full, &roots, &out, cfg)
         .map_err(|e| (e, full.clone(), name.clone()))?;
+    if cfg.flags.explain_cache {
+        eprintln!(
+            "compiler cache: linked={} bitcode={} reason={}",
+            report.cache.label(),
+            report.bitcode_cache.label(),
+            report.cache_explanation()
+        );
+    }
     if let Some(request) = lineage_request {
-        let mut artifacts = vec![("native-binary", out.clone())];
-        let bitcode = out.with_extension("bc");
-        if bitcode.exists() {
-            artifacts.push(("llvm-bitcode", bitcode));
-        }
+        // The native binary is the durable build output and the only artifact
+        // recorded here. The `.bc` intermediate is deliberately excluded:
+        // codegen writes it beside the binary only on a bitcode-cache miss (a
+        // warm build links from the cache and leaves no `.bc`), so recording it
+        // would make the lineage graph depend on cache state rather than on the
+        // inputs, breaking the determinism contract that identical inputs
+        // produce identical lineage.
+        let artifacts = vec![("native-binary", out.clone())];
         let lineage = crate::lineage::BuildLineage::collect(crate::lineage::BuildLineageInput {
             request,
             source: &full,

@@ -8,22 +8,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(feature = "mlir")]
 use std::fmt::Write;
+use std::mem::size_of;
 use std::slice;
+
+use serde::{Deserialize, Serialize};
+
+const CLOSURE_TAG_SCHEME: &[u8] = b"prism-closure-tag-v1";
+const CLOSURE_TAG_MASK: u64 = i64::MAX.cast_unsigned();
 
 use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
 use super::dispatch::partial_app_body;
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
+#[cfg(feature = "mlir")]
+use crate::core::builtins::BUILTINS;
 use crate::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
-use crate::core::effect_lower::EOP;
+use crate::core::effect_lower::{is_free_monad_driver, EOP};
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
 use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
+use crate::names::{closure_cap, generated_param};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
 
 // Variable identity stays `Sym` end-to-end; the value is the SSA register name
 // (`%t3`, `%a0`, ...), the legitimate output-edge text.
 type Regs = BTreeMap<Sym, String>;
+
+fn closure_tag(owner: Sym, ordinal: usize) -> usize {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(CLOSURE_TAG_SCHEME);
+    hasher.update(owner.as_str().as_bytes());
+    hasher.update(&ordinal.to_le_bytes());
+    let mut bytes = [0; size_of::<u64>()];
+    bytes.copy_from_slice(&hasher.finalize().as_bytes()[..size_of::<u64>()]);
+    let mut tag = u64::from_le_bytes(bytes) & CLOSURE_TAG_MASK;
+    while tag == BIG_TAG.cast_unsigned() || tag == STR_TAG.cast_unsigned() {
+        tag = (tag + 1) & CLOSURE_TAG_MASK;
+    }
+    usize::try_from(tag).expect("closure tags fit the native target word")
+}
 
 #[derive(Clone)]
 pub(super) enum LamBody {
@@ -38,6 +61,7 @@ pub(super) enum LamBody {
 #[derive(Clone)]
 pub(super) struct LamInfo {
     pub(super) tag: usize,
+    pub(super) owner: Sym,
     pub(super) params: Vec<Sym>,
     pub(super) free_vars: Vec<Sym>,
     pub(super) body: LamBody,
@@ -89,6 +113,9 @@ pub(super) struct Cg<'a, I> {
     // arity with no matching lambda) still needs the function emitted, or it is
     // an undefined symbol at link time.
     pub(super) used_apply: BTreeSet<usize>,
+    current_owner: Option<Sym>,
+    owner_ordinals: BTreeMap<Sym, usize>,
+    used_closure_tags: BTreeSet<usize>,
     trmc: Option<TrmcCtx>,
 }
 
@@ -110,7 +137,21 @@ impl<'a, I: Isa> Cg<'a, I> {
             used_rt: BTreeMap::new(),
             used_fcall: BTreeSet::new(),
             used_apply: BTreeSet::new(),
+            current_owner: None,
+            owner_ordinals: BTreeMap::new(),
+            used_closure_tags: BTreeSet::new(),
             trmc: None,
+        }
+    }
+
+    pub(super) fn mint_closure_tag(&mut self, owner: Sym) -> Result<usize, String> {
+        let ordinal = self.owner_ordinals.entry(owner).or_default();
+        let tag = closure_tag(owner, *ordinal);
+        *ordinal += 1;
+        if self.used_closure_tags.insert(tag) {
+            Ok(tag)
+        } else {
+            Err(format!("ICE: closure tag collision for `{owner}`"))
         }
     }
 
@@ -140,6 +181,10 @@ impl<'a, I: Isa> Cg<'a, I> {
             tag < BIG_TAG.min(STR_TAG),
             "ICE: ctor tag collides with reserved heap tags"
         );
+        self.fill_tagged_obj(ptr, tag, fields)
+    }
+
+    fn fill_tagged_obj(&mut self, ptr: &str, tag: i64, fields: &[String]) -> String {
         let tag_ptr = self.dst(|i, b, d| i.gep(b, d, ptr, TAG_OFF));
         let tv = self.isa.const_int(&mut self.b, tag);
         self.isa.store(&mut self.b, &tv, &tag_ptr);
@@ -155,6 +200,12 @@ impl<'a, I: Isa> Cg<'a, I> {
         let n = self.isa.const_int(&mut self.b, idx64(fields.len()));
         let ptr = self.dst(|i, b, d| i.call_ptr(b, d, rt::ALLOC, slice::from_ref(&n)));
         self.fill_obj(&ptr, tag, fields)
+    }
+
+    fn alloc_closure_obj(&mut self, tag: i64, fields: &[String]) -> String {
+        let n = self.isa.const_int(&mut self.b, idx64(fields.len()));
+        let ptr = self.dst(|i, b, d| i.call_ptr(b, d, rt::ALLOC, slice::from_ref(&n)));
+        self.fill_tagged_obj(&ptr, tag, fields)
     }
 
     fn reuse_obj(&mut self, token: &str, tag: i64, fields: &[String]) -> String {
@@ -175,9 +226,13 @@ impl<'a, I: Isa> Cg<'a, I> {
         let mut free_vars: Vec<Sym> = fv::comp_without(body, params).into_iter().collect();
         free_vars.sort_by_cached_key(|s| s.as_str());
 
-        let tag = self.lams.len();
+        let owner = self
+            .current_owner
+            .ok_or_else(|| "ICE: closure without a top-level owner".to_string())?;
+        let tag = self.mint_closure_tag(owner)?;
         self.lams.push(LamInfo {
             tag,
+            owner,
             params: params.to_vec(),
             free_vars: free_vars.clone(),
             body: LamBody::Core(body.clone()),
@@ -191,7 +246,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                     .ok_or_else(|| format!("unbound free var {fv}"))
             })
             .collect::<Result<_, _>>()?;
-        Ok(self.alloc_obj(idx64(tag), &fvs))
+        Ok(self.alloc_closure_obj(idx64(tag), &fvs))
     }
 
     fn untag(&mut self, v: &str) -> String {
@@ -1025,6 +1080,7 @@ impl<'a, I: Isa> Cg<'a, I> {
     }
 
     fn function(&mut self, f: &CoreFn) -> Result<String, String> {
+        self.current_owner = Some(f.name);
         let body = reassoc(&f.body);
         if let Some(mode) = trmc_mode(f.name.as_str(), f.params.len(), &body) {
             return self.trmc_function(f, &body, mode);
@@ -1038,7 +1094,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         // Count one driver work-step per entry to a free-monad driver (stderr-only
         // under PRISM_DRIVE_STATS, so stdout is untouched). This is the counter
         // whose asymptotics track the trampoline's actual work.
-        if crate::core::effect_lower::is_free_monad_driver(f.name.as_str()) {
+        if is_free_monad_driver(f.name.as_str()) {
             self.isa.call_void(&mut self.b, rt::DRIVE_STEP, &[]);
         }
         self.lower_tail(&regs, &body)?;
@@ -1097,6 +1153,7 @@ impl<'a, I: Isa> Cg<'a, I> {
     }
 
     fn lam_fn(&mut self, idx: usize) -> Result<String, String> {
+        self.current_owner = Some(self.lams[idx].owner);
         let tag = self.lams[idx].tag;
         let params = self.lams[idx].params.clone();
         let free_vars = self.lams[idx].free_vars.clone();
@@ -1131,12 +1188,24 @@ impl<'a, I: Isa> Cg<'a, I> {
                     self.isa
                         .call_void(&mut self.b, rt::RC_INC, slice::from_ref(r));
                 }
-                let r =
-                    self.dst(|i, b, d| i.call(b, d, &format!("prism_lam_{target}"), &all_params));
+                let target_tag = self.lams[target].tag;
+                let r = self.dst(|i, b, d| {
+                    i.call(b, d, &format!("prism_lam_{target_tag}"), &all_params);
+                });
                 self.isa.ret(&mut self.b, &r);
             }
         }
         Ok(format!("{header}{}{}", self.b.body, self.isa.fn_close()))
+    }
+}
+
+pub(super) enum SelectedEmissionError {
+    Codegen(String),
+}
+
+impl From<String> for SelectedEmissionError {
+    fn from(error: String) -> Self {
+        Self::Codegen(error)
     }
 }
 
@@ -1146,7 +1215,6 @@ impl<'a, I: Isa> Cg<'a, I> {
 /// and tail-call lowering. The [`Isa`] implementation only spells instructions.
 ///
 /// # Errors
-///
 /// Returns a diagnostic when the lowered Core violates a code-generation
 /// invariant or the backend cannot emit a required construct.
 pub fn emit_with_isa<I: Isa>(
@@ -1154,6 +1222,293 @@ pub fn emit_with_isa<I: Isa>(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
 ) -> Result<String, String> {
+    emit_with_isa_selection(isa, core, ctors, None, true).map_err(|error| match error {
+        SelectedEmissionError::Codegen(error) => error,
+    })
+}
+
+/// Lower a selected set of top-level definitions while retaining the complete
+/// program arity table for cross-SCC calls. This boundary is intentionally
+/// limited to definitions that do not mint closures or indirect-call
+/// dispatchers; those require the whole-program closure-tag plan.
+///
+/// # Errors
+/// Returns a diagnostic when selection is empty, a selected definition is not
+/// independently emit-able, or ordinary code generation fails.
+pub(super) fn emit_selected_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: &BTreeSet<Sym>,
+) -> Result<String, SelectedEmissionError> {
+    if selected.is_empty() {
+        return Err(SelectedEmissionError::Codegen(
+            "ICE: empty backend SCC selection".to_string(),
+        ));
+    }
+    emit_with_isa_selection(isa, core, ctors, Some(selected), false)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ClosureSummary {
+    lams: Vec<ClosureShape>,
+    used_apply: BTreeSet<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ClosureShape {
+    tag: usize,
+    owner: String,
+    params: usize,
+    free_vars: usize,
+}
+
+impl ClosureSummary {
+    pub(crate) fn validate(&self) -> bool {
+        let mut tags = BTreeSet::new();
+        let mut owner_counts = BTreeMap::<&str, usize>::new();
+        for lambda in &self.lams {
+            if !tags.insert(lambda.tag) {
+                return false;
+            }
+            *owner_counts.entry(&lambda.owner).or_default() += 1;
+        }
+        owner_counts.into_iter().all(|(owner, count)| {
+            let owner = Sym::new(owner);
+            (0..count).all(|ordinal| tags.contains(&closure_tag(owner, ordinal)))
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct ClosurePlan {
+    lams: Vec<LamInfo>,
+    adapters: BTreeMap<(usize, usize), usize>,
+    used_apply: BTreeSet<usize>,
+    ordinary_lams: usize,
+}
+
+impl ClosurePlan {
+    pub(super) fn fingerprint(&self) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"prism-closure-plan-v2");
+        for lambda in &self.lams {
+            hasher.update(&lambda.tag.to_le_bytes());
+            hasher.update(lambda.owner.as_str().as_bytes());
+            hasher.update(&lambda.params.len().to_le_bytes());
+            hasher.update(&lambda.free_vars.len().to_le_bytes());
+            match &lambda.body {
+                LamBody::Core(_) => {
+                    hasher.update(b"core");
+                }
+                LamBody::Curry { target } => {
+                    hasher.update(b"curry");
+                    hasher.update(&self.lams[*target].tag.to_le_bytes());
+                }
+            }
+        }
+        for arity in &self.used_apply {
+            hasher.update(&arity.to_le_bytes());
+        }
+        hasher.finalize().to_hex().to_string()
+    }
+
+    pub(super) fn dispatch_arities(&self) -> BTreeSet<usize> {
+        let mut arities = self
+            .lams
+            .iter()
+            .map(|lambda| lambda.params.len())
+            .collect::<BTreeSet<_>>();
+        arities.extend(self.used_apply.iter().copied());
+        arities
+    }
+
+    pub(super) const fn has_adapters(&self) -> bool {
+        self.ordinary_lams < self.lams.len()
+    }
+}
+
+pub(super) fn closure_summary_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: &BTreeSet<Sym>,
+) -> Result<ClosureSummary, String> {
+    let live = reachable_fns(core);
+    let fn_arities = core
+        .fns
+        .iter()
+        .map(|function| (function.name.to_string(), function.params.len()))
+        .collect();
+    let mut cg = Cg::new(isa, ctors, fn_arities);
+    for function in &core.fns {
+        if live.contains(&function.name) && selected.contains(&function.name) {
+            let _ = cg.function(function)?;
+        }
+    }
+    let mut index = 0;
+    while index < cg.lams.len() {
+        let _ = cg.lam_fn(index)?;
+        index += 1;
+    }
+    let summary = ClosureSummary {
+        lams: cg
+            .lams
+            .into_iter()
+            .map(|lambda| ClosureShape {
+                tag: lambda.tag,
+                owner: lambda.owner.to_string(),
+                params: lambda.params.len(),
+                free_vars: lambda.free_vars.len(),
+            })
+            .collect(),
+        used_apply: cg.used_apply,
+    };
+    if summary.validate() {
+        Ok(summary)
+    } else {
+        Err("ICE: invalid SCC closure summary".to_string())
+    }
+}
+
+pub(super) fn plan_closures_from_summaries_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    summaries: &[ClosureSummary],
+) -> Result<ClosurePlan, String> {
+    if !summaries.iter().all(ClosureSummary::validate) {
+        return Err("ICE: invalid SCC closure summary".to_string());
+    }
+    let fn_arities = core
+        .fns
+        .iter()
+        .map(|function| (function.name.to_string(), function.params.len()))
+        .collect();
+    let mut cg = Cg::new(isa, ctors, fn_arities);
+    for summary in summaries {
+        cg.used_apply.extend(summary.used_apply.iter().copied());
+        for lambda in &summary.lams {
+            let owner = Sym::new(&lambda.owner);
+            let params = (0..lambda.params)
+                .map(|index| Sym::new(&generated_param(index)))
+                .collect();
+            let free_vars = (0..lambda.free_vars)
+                .map(|index| Sym::new(&closure_cap(index)))
+                .collect();
+            cg.lams.push(LamInfo {
+                tag: lambda.tag,
+                owner,
+                params,
+                free_vars,
+                body: LamBody::Core(Comp::Return(Value::Unit)),
+            });
+            *cg.owner_ordinals.entry(owner).or_default() += 1;
+            if !cg.used_closure_tags.insert(lambda.tag) {
+                return Err("ICE: closure tag collision across SCC summaries".to_string());
+            }
+        }
+    }
+    cg.lams.sort_by_key(|lambda| lambda.tag);
+    let ordinary_lams = cg.lams.len();
+    loop {
+        let before = (cg.lams.len(), cg.used_apply.len());
+        for arity in cg.apply_arities() {
+            cg.plan_dispatch(arity);
+        }
+        if (cg.lams.len(), cg.used_apply.len()) == before {
+            break;
+        }
+    }
+    Ok(ClosurePlan {
+        lams: cg.lams,
+        adapters: cg.adapters,
+        used_apply: cg.used_apply,
+        ordinary_lams,
+    })
+}
+
+pub(super) fn plan_closures_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<ClosurePlan, String> {
+    let selected = core
+        .fns
+        .iter()
+        .map(|function| function.name)
+        .collect::<BTreeSet<_>>();
+    let summary = closure_summary_with_isa(isa, core, ctors, &selected)?;
+    plan_closures_from_summaries_with_isa(isa, core, ctors, &[summary])
+}
+
+fn cg_from_closure_plan<'a, I: Isa>(
+    isa: &'a I,
+    core: &Core,
+    ctors: &'a BTreeMap<String, CtorInfo>,
+    plan: &ClosurePlan,
+) -> Cg<'a, I> {
+    let fn_arities = core
+        .fns
+        .iter()
+        .map(|function| (function.name.to_string(), function.params.len()))
+        .collect();
+    let mut cg = Cg::new(isa, ctors, fn_arities);
+    cg.lams.clone_from(&plan.lams);
+    cg.adapters.clone_from(&plan.adapters);
+    cg.used_apply.clone_from(&plan.used_apply);
+    cg.used_closure_tags = cg.lams.iter().map(|lambda| lambda.tag).collect();
+    cg
+}
+
+pub(super) fn emit_closure_adapters_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    plan: &ClosurePlan,
+) -> Result<String, String> {
+    let mut cg = cg_from_closure_plan(isa, core, ctors, plan);
+    let mut bodies = String::new();
+    for index in plan.ordinary_lams..cg.lams.len() {
+        bodies.push_str(&cg.lam_fn(index)?);
+        bodies.push('\n');
+    }
+    Ok(finish_module(isa, &cg, &bodies, ""))
+}
+
+pub(super) fn emit_closure_dispatch_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    plan: &ClosurePlan,
+    arity: usize,
+) -> String {
+    let mut cg = cg_from_closure_plan(isa, core, ctors, plan);
+    let dispatch = cg.apply_dispatch(arity);
+    finish_module(isa, &cg, "", &dispatch)
+}
+
+pub(super) fn emit_selected_plan_with_isa<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: &BTreeSet<Sym>,
+) -> Result<String, String> {
+    if selected.is_empty() {
+        return Err("ICE: empty backend global-plan selection".to_string());
+    }
+    emit_with_isa_selection(isa, core, ctors, Some(selected), true).map_err(|error| match error {
+        SelectedEmissionError::Codegen(error) => error,
+    })
+}
+
+fn emit_with_isa_selection<I: Isa>(
+    isa: &I,
+    core: &Core,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: Option<&BTreeSet<Sym>>,
+    owns_closure_plan: bool,
+) -> Result<String, SelectedEmissionError> {
     let live = reachable_fns(core);
     let fn_arities: BTreeMap<String, usize> = core
         .fns
@@ -1164,7 +1519,7 @@ pub fn emit_with_isa<I: Isa>(
     let mut cg = Cg::new(isa, ctors, fn_arities);
 
     for f in &core.fns {
-        if live.contains(&f.name) {
+        if live.contains(&f.name) && selected.is_none_or(|members| members.contains(&f.name)) {
             fn_bodies.push_str(&cg.function(f)?);
             fn_bodies.push('\n');
         }
@@ -1180,6 +1535,15 @@ pub fn emit_with_isa<I: Isa>(
         fn_bodies.push('\n');
         lam_idx += 1;
     }
+
+    if !owns_closure_plan {
+        return Ok(finish_module(isa, &cg, &fn_bodies, ""));
+    }
+
+    // Stable closure tags, rather than traversal position, define the global
+    // dispatcher order. This makes folding independently discovered SCC
+    // summaries byte-identical to whole-program planning.
+    cg.lams.sort_by_key(|lambda| lambda.tag);
 
     // Plan every curry adapter and follow-on apply arity to a fixpoint. This runs
     // against the complete closure set, and adapter (`Curry`) bodies mint no
@@ -1213,6 +1577,10 @@ pub fn emit_with_isa<I: Isa>(
         dispatch.push('\n');
     }
 
+    Ok(finish_module(isa, &cg, &fn_bodies, &dispatch))
+}
+
+fn finish_module<I: Isa>(isa: &I, cg: &Cg<'_, I>, fn_bodies: &str, dispatch: &str) -> String {
     let mut out = String::new();
     let mut seen = BTreeSet::new();
     isa.prelude(&mut out, &mut seen);
@@ -1230,9 +1598,9 @@ pub fn emit_with_isa<I: Isa>(
         isa.str_global(&mut out, i, s);
     }
     out.push('\n');
-    out.push_str(&fn_bodies);
-    out.push_str(&dispatch);
-    Ok(out)
+    out.push_str(fn_bodies);
+    out.push_str(dispatch);
+    out
 }
 
 /// Escape a string for an MLIR string literal: printable ASCII verbatim,
@@ -1255,7 +1623,7 @@ pub(super) fn escape_str(s: &str) -> String {
 /// `(symbol, arity)` pair taking and returning `i64`.
 #[cfg(feature = "mlir")]
 pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
-    crate::core::builtins::BUILTINS
+    BUILTINS
         .iter()
         .filter(|(_, _, kind)| *kind == BuiltinKind::Str)
         .map(|(name, arity, _)| {

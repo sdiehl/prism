@@ -692,44 +692,174 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
     }
 }
 
-// Free effect-row variables in a type, so a class method's signature can be
-// generalized over its row variables (an effect-polymorphic method like `fmap`).
-pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
+// Per-variable kinds across one declaration's annotations. Every occurrence of
+// a type variable demands one kind from its position (a constructor's declared
+// parameter kind, a row tail, a dimension slot, an applied head, plain type
+// everywhere else); the first occurrence records the demand and a conflicting
+// later occurrence is an error naming both kinds. The syntactic gate in
+// `check_annot_rows` accepts a bare variable at any Row/Nat position without
+// ever reconciling two occurrences, so `Cmd(e, e)` (the same variable at kind
+// Type and kind Row) used to pass; this pass closes that hole. Deliberately no
+// kind metavariables: a variable's kind is whatever its positions demand, and
+// disagreement is an error rather than an inference problem.
+pub(super) fn demand_var_kinds(
+    t: &ast::Ty,
+    data: &BTreeMap<String, super::DataInfo>,
+    vars: &mut BTreeMap<String, Kind>,
+    span: Span,
+) -> Result<(), TypeError> {
+    fn row_demands(
+        r: &ast::Row,
+        data: &BTreeMap<String, super::DataInfo>,
+        vars: &mut BTreeMap<String, Kind>,
+        span: Span,
+    ) -> Result<(), TypeError> {
+        if let ast::Row::Cons(labels, tail) = r {
+            for l in labels {
+                for a in &l.args {
+                    demand_var_kinds(a, data, vars, span)?;
+                }
+            }
+            if let Some(v) = tail {
+                match vars.get(v.as_str()).cloned() {
+                    None => {
+                        vars.insert(v.clone(), Kind::Row);
+                    }
+                    Some(Kind::Row) => {}
+                    Some(prev) => {
+                        return Err(ErrKind::KindVarConflict {
+                            var: v.clone(),
+                            first: prev.show(),
+                            second: Kind::Row.show(),
+                        }
+                        .at(span))
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    let demand = |vars: &mut BTreeMap<String, Kind>, v: &str, k: Kind| match vars.get(v).cloned() {
+        None => {
+            vars.insert(v.to_string(), k);
+            Ok(())
+        }
+        Some(prev) if prev == k => Ok(()),
+        Some(prev) => Err(ErrKind::KindVarConflict {
+            var: v.to_string(),
+            first: prev.show(),
+            second: k.show(),
+        }
+        .at(span)),
+    };
+    match t {
+        ast::Ty::Var(v) => demand(vars, v, Kind::Type),
+        ast::Ty::App(head, args) => {
+            // An applied variable head is higher-kinded: as many plain-type
+            // domains as it was given arguments, yielding a plain type.
+            let doms = vec![Kind::Type; args.len()];
+            demand(vars, head, Kind::arrow(&doms))?;
+            args.iter()
+                .try_for_each(|a| demand_var_kinds(a, data, vars, span))
+        }
+        ast::Ty::Con(n, args) => {
+            let kinds = data
+                .get(n)
+                .map(|d| d.param_kinds.clone())
+                .unwrap_or_default();
+            for (i, arg) in args.iter().enumerate() {
+                match (kinds.get(i), arg) {
+                    (Some(Kind::Row), ast::Ty::Var(v)) => demand(vars, v, Kind::Row)?,
+                    (Some(Kind::Nat), ast::Ty::Var(v)) => demand(vars, v, Kind::Nat)?,
+                    (Some(Kind::Row), ast::Ty::RowLit(r)) => row_demands(r, data, vars, span)?,
+                    _ => demand_var_kinds(arg, data, vars, span)?,
+                }
+            }
+            Ok(())
+        }
+        ast::Ty::Fun(ps, row, ret) => {
+            ps.iter()
+                .try_for_each(|p| demand_var_kinds(p, data, vars, span))?;
+            row_demands(row, data, vars, span)?;
+            demand_var_kinds(ret, data, vars, span)
+        }
+        ast::Ty::Forall(vs, b) => {
+            // Bound variables scope to the body: stash any outer records for
+            // the bound names, check the body against fresh entries, then
+            // restore the outer scope's records.
+            let stash: Vec<(String, Option<Kind>)> =
+                vs.iter().map(|v| (v.clone(), vars.remove(v))).collect();
+            let r = demand_var_kinds(b, data, vars, span);
+            for (v, prev) in stash {
+                match prev {
+                    Some(k) => {
+                        vars.insert(v, k);
+                    }
+                    None => {
+                        vars.remove(&v);
+                    }
+                }
+            }
+            r
+        }
+        ast::Ty::Tuple(ts) | ast::Ty::UnboxedTuple(ts) => ts
+            .iter()
+            .try_for_each(|x| demand_var_kinds(x, data, vars, span)),
+        ast::Ty::UnboxedRecord(fs) => fs
+            .iter()
+            .try_for_each(|(_, x)| demand_var_kinds(x, data, vars, span)),
+        ast::Ty::Coeffect(b, _) => demand_var_kinds(b, data, vars, span),
+        ast::Ty::RowLit(r) => row_demands(r, data, vars, span),
+        _ => Ok(()),
+    }
+}
+
+// Visit the tail of every effect row reachable in a type (function rows and
+// row-kinded arguments, through every type former), recursing into row label
+// arguments. The one traversal behind every "which rows flow through this
+// interface" question; callers filter the tails they care about.
+pub(super) fn for_each_row_tail(t: &Type, f: &mut impl FnMut(&EffRow)) {
     match t {
         Type::Fun(ps, row, r) => {
             for p in ps {
-                collect_row_vars(p, out);
+                for_each_row_tail(p, f);
             }
-            if let EffRow::Var(v) = row.tail() {
-                out.insert(*v);
-            }
-            row.for_each_arg(&mut |a| collect_row_vars(a, out));
-            collect_row_vars(r, out);
+            f(row.tail());
+            row.for_each_arg(&mut |a| for_each_row_tail(a, f));
+            for_each_row_tail(r, f);
         }
         Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
             for p in ps {
-                collect_row_vars(p, out);
+                for_each_row_tail(p, f);
             }
         }
         Type::UnboxedRecord(fs) => {
             for (_, t) in fs {
-                collect_row_vars(t, out);
+                for_each_row_tail(t, f);
             }
         }
         Type::App(h, a) => {
-            collect_row_vars(h, out);
-            collect_row_vars(a, out);
+            for_each_row_tail(h, f);
+            for_each_row_tail(a, f);
         }
-        Type::OrNull(a) => collect_row_vars(a, out),
-        Type::Forall(_, b) | Type::RowForall(_, b) => collect_row_vars(b, out),
+        Type::OrNull(a) => for_each_row_tail(a, f),
+        Type::Forall(_, b) | Type::RowForall(_, b) => for_each_row_tail(b, f),
         Type::Row(r) => {
-            if let EffRow::Var(v) = r.tail() {
-                out.insert(*v);
-            }
-            r.for_each_arg(&mut |a| collect_row_vars(a, out));
+            f(r.tail());
+            r.for_each_arg(&mut |a| for_each_row_tail(a, f));
         }
         _ => {}
     }
+}
+
+// Free effect-row variables in a type, so a class method's signature can be
+// generalized over its row variables (an effect-polymorphic method like `fmap`).
+pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
+    for_each_row_tail(t, &mut |tail| {
+        if let EffRow::Var(v) = tail {
+            out.insert(*v);
+        }
+    });
 }
 
 // True when a declaration carries a full type signature (every parameter and
@@ -948,7 +1078,7 @@ const NON_ENUM_SIGS: &[(&str, &str)] = &[
 // keeps that row: a builtin is a function whose effects inference must attribute
 // at every call site, exactly like a surface function's inferred row. The
 // returned label list is the parsed row, checked by the signature-parsing tests.
-fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
+pub(super) fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
     let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::InternalInvariant {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
     })?;

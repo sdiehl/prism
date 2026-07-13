@@ -1,0 +1,24 @@
+-- Dictionary evidence: a call through a `given` constraint records Param
+-- evidence, a superclass method reached through a subclass constraint
+-- records Super evidence, and a monomorphic call site records the Global
+-- instance dictionary.
+
+class Same(a)
+  same : (a, a) -> Bool
+
+class Before(a) given Same(a)
+  before : (a, a) -> Bool
+
+instance sameInt : Same(Int)
+  fn same(a, b) = a == b
+
+instance beforeInt : Before(Int)
+  fn before(a, b) = a < b
+
+fn le(x : a, y : a) : Bool given Before(a) =
+  if same(x, y) then
+    true
+  else
+    before(x, y)
+
+fn main() : Bool = le(1, 2)

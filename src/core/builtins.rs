@@ -56,7 +56,7 @@ macro_rules! float_ops {
         $variant:ident $name:literal $tag:literal $wire:literal $sig:literal
             $( sym $sym:literal )? ;
     )* ) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub enum FloatOp { $( $variant, )* }
 
         impl FloatOp {
@@ -173,6 +173,7 @@ pub fn float_surface(name: &str) -> Option<(usize, BuiltinKind)> {
 
 /// Representation of one runtime-call argument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(feature = "native")]
 pub(crate) enum AbiArg {
     Raw,
     Immediate,
@@ -181,6 +182,7 @@ pub(crate) enum AbiArg {
 
 /// Representation of a runtime-call result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(feature = "native")]
 pub(crate) enum AbiResult {
     Raw,
     RetagImmediate,
@@ -190,12 +192,14 @@ pub(crate) enum AbiResult {
 ///
 /// Construction checks that an argument cannot be both immediate and boxed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(feature = "native")]
 pub(crate) struct AbiSpec {
     immediate: &'static [usize],
     boxed_float: &'static [usize],
     result: AbiResult,
 }
 
+#[cfg(feature = "native")]
 impl AbiSpec {
     const fn new(
         immediate: &'static [usize],
@@ -251,30 +255,43 @@ impl AbiSpec {
 //
 // Default: every argument passes raw and the result is a cell or already-tagged
 // word (string ops, fixed-width arithmetic on boxed cells, elaborator-only ops).
+#[cfg(feature = "native")]
 const RAW: AbiSpec = AbiSpec::new(&[], &[], AbiResult::Raw);
 // Bare-integer result to retag (predicates, lengths, exit codes).
+#[cfg(feature = "native")]
 const RETAG: AbiSpec = AbiSpec::new(&[], &[], AbiResult::RetagImmediate);
 // Index arg raw; bare-integer (char/byte) result to retag.
+#[cfg(feature = "native")]
 const IDX1_RETAG: AbiSpec = AbiSpec::new(&[1], &[], AbiResult::RetagImmediate);
 // Index arg raw; element/array result (cell or polymorphic) passes through.
+#[cfg(feature = "native")]
 const IDX1: AbiSpec = AbiSpec::new(&[1], &[], AbiResult::Raw);
 // Single immediate arg (bool/char/index/exit/capacity); raw result.
+#[cfg(feature = "native")]
 const IMM0: AbiSpec = AbiSpec::new(&[0], &[], AbiResult::Raw);
 // Two immediate args (length and init byte); cell result.
+#[cfg(feature = "native")]
 const IMM01: AbiSpec = AbiSpec::new(&[0, 1], &[], AbiResult::Raw);
 // One boxed-float arg; raw result.
+#[cfg(feature = "native")]
 const F0: AbiSpec = AbiSpec::new(&[], &[0], AbiResult::Raw);
 // Float arg 0, immediate arg 1; raw result.
+#[cfg(feature = "native")]
 const F0_IMM1: AbiSpec = AbiSpec::new(&[1], &[0], AbiResult::Raw);
 // Two boxed-float args; boxed-float result.
+#[cfg(feature = "native")]
 const F01: AbiSpec = AbiSpec::new(&[], &[0, 1], AbiResult::Raw);
 // Two immediate index/length args; cell result (a fresh string or buffer).
+#[cfg(feature = "native")]
 const IDX12: AbiSpec = AbiSpec::new(&[1, 2], &[], AbiResult::Raw);
 // Immediate length arg 0, boxed-float init arg 1; cell result (a typed buffer).
+#[cfg(feature = "native")]
 const IMM0_F1: AbiSpec = AbiSpec::new(&[0], &[1], AbiResult::Raw);
 // Buffer arg raw, immediate index arg 1, boxed-float value arg 2; cell result.
+#[cfg(feature = "native")]
 const IDX1_F2: AbiSpec = AbiSpec::new(&[1], &[2], AbiResult::Raw);
 // Two buffer args raw, immediate index/length args 1, 3, 4; cell result (blit).
+#[cfg(feature = "native")]
 const IDX134: AbiSpec = AbiSpec::new(&[1, 3, 4], &[], AbiResult::Raw);
 
 // Platform facts a builtin can carry. `OffPlatform` touches the host OS (file IO,
@@ -320,7 +337,7 @@ macro_rules! builtins {
         /// (`show_i64`/`show_u64`, fixed-width arithmetic). `name()` is the single
         /// string source; the IR, interpreter dispatch, and codegen all key off
         /// the enum so a name can never drift.
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub enum Builtin { $( $variant, )* }
 
         impl Builtin {
@@ -340,6 +357,7 @@ macro_rules! builtins {
             }
 
             /// Calling convention for the runtime call this builtin lowers to.
+            #[cfg(feature = "native")]
             #[must_use]
             pub(crate) const fn abi(self) -> AbiSpec {
                 match self { $( Self::$variant => $abi, )* }

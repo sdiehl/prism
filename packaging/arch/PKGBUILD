@@ -1,7 +1,7 @@
 # Maintainer: Stephen Diehl <stephen.m.diehl@gmail.com>
 # Binary package tracking the GitHub release tarballs. Refresh sums with updpkgsums.
 pkgname=prism-bin
-pkgver=0.6.0
+pkgver=0.11.0
 pkgrel=1
 pkgdesc="An effect-typed functional language that compiles to native code through LLVM"
 arch=('x86_64' 'aarch64')

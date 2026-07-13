@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0
+
+- Checked HIR: the high-level intermediate representation between typechecking and elaboration now carries every per-node fact in one dense artifact read through a boundary that a lint pass proof-checks, so elaboration re-derives nothing and an inconsistent fact is caught before use. `dump hir` prints it.
+- Incremental compilation: checking is now a content-addressed query over persisted module interfaces and checked bodies. An implementation-only edit keeps an interface's digest stable and never re-checks its importers, so compile time tracks the semantic change rather than the size of the codebase.
+- Build cache: compiled native objects and per-pass fingerprints persist and are reused across builds, with a downstream cache that skips any work whose inputs are unchanged.
+- Observation trace: the interpreter, native builds, every forced effect tier, and replay share one canonical ordered trace of output, capability events, file commits, faults, and results. It is the single definition of "identical behavior" the caches and tier parity check against.
+- Self-explaining rebuilds: all seven durable query families, module check through link, record why they recomputed or reused their results as lineage facts, and `prism lineage why-recompiled` explains a rebuild from their graph diff, offline, down to the semantic input that moved.
+- Store crash safety: the content-addressed store's publication discipline is proven against injected crashes at every write stage; a torn write is never readable, retries converge, and immutable content survives divergent writers.
+- Tensors: added elementwise math, matmul, and named-axis `sum`/`mean` reductions, all summed in source-loop order for bit-identical results across backends.
+- Soundness: a polymorphic string-interpolation hole is now rejected with a diagnostic pointing at `show`, instead of being silently rendered as an integer and diverging native output from the interpreter.
+- Examples: added a tree-walking interpreter, a stack bytecode VM, a simply-typed lambda-calculus checker, and a backtracking regex matcher to the gallery.
+- Web: the playground gained a Godbolt-style "Show IR" view pairing checked HIR over Core.
+- Internals: the formatter and error modules were split into focused files, the checked HIR gained committed byte goldens, and fast development gates (`just gate-dev`, changed-file routing) landed beside the authoritative cold gate.
+
 ## 0.10.0
 
 - Effects: grades are now `never`, `once`, and `many`; retired grade words are identifiers again. Comprehensions fully discharge internal effects, and the unused CEK spike is gone.
@@ -16,6 +30,7 @@
 - Soundness: tightened handler coverage, duplicate-arm, arity, borrow-row, rigid-variable, effect-application, coeffect, and unboxed-product checks.
 - Project diffing: bare `prism diff` compares Git `HEAD` with the working tree and reports semantic edits, dependent definitions, and compact source deltas.
 - Identity: namespace roots now include definitions, shapes, classes, and instances. Continuations also bind Std, scheduler, and runtime identity, so incompatible resumes fail early; persisted identities must be regenerated.
+- Stdlib fingerprint: the composed stdlib source now derives its imports from the embedded module table, bringing Cli, Data.FlatArray, Data.Ordered, Data.Tensor, Json, Teleport, and Time into the Merkle root (and their docs pages gain hash badges and inferred signatures); the root moved accordingly, and a coverage gate now asserts every embedded module contributes to it.
 - Backend API: the shared `Isa` interface and generic emitter are public for out-of-tree experimental backends.
 - Internals: added validated store hashes, typed resolver identities, named builtin ABI modes, effect-lowering mode enums, format-preserving manifest edits, leaner fixtures, broader CI
 

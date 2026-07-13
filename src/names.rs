@@ -51,8 +51,8 @@ pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random
 
 // The concurrency preemption seam. `Preempt` is the row label a preemptive
 // scheduler will discharge, gating the yield-safepoint pass; it is reserved not
-// shipped, so a user `effect Preempt` is rejected and the name stays free for
-// that release without a later breaking change. It is deliberately absent from
+// shipped, so a user `effect Preempt` is rejected and the name remains available
+// without a breaking change. It is deliberately absent from
 // the `replayable` allowed set, so a preemptive program is non-replayable by the
 // existing row-subset check with no new rule. (`Clock`, the logical-time
 // capability, shipped in the `Concurrent` stdlib, so it is an ordinary effect and

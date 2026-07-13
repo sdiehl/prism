@@ -1,8 +1,0 @@
--- `deriving (Lens)` synthesizes, per record field, a getter `<f>_of` and a
--- functional setter `with_<f>`. They are ordinary functions; no optic type.
-type Vec2 = Vec2 { x: Int, y: Int } deriving (Lens)
-  ==>
-fn x_of(v)      = match v of Vec2(x, y) => x
-fn with_x(v, a) = match v of Vec2(x, y) => Vec2(a, y)
-fn y_of(v)      = match v of Vec2(x, y) => y
-fn with_y(v, a) = match v of Vec2(x, y) => Vec2(x, a)

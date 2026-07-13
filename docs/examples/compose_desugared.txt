@@ -1,4 +1,0 @@
--- `f >> g` is forward composition, `f << g` backward. Kept as surface sugar so
--- the operator survives formatting; desugar lowers it to a lambda.
-(inc >> dbl)   ==>   \(x) -> dbl(inc(x))
-(inc << dbl)   ==>   \(x) -> inc(dbl(x))

@@ -94,6 +94,46 @@ fn modlib_project_interprets() {
 }
 
 #[test]
+fn why_recompiled_uses_persisted_module_decisions() {
+    let store = env::temp_dir().join(format!("prism-why-recompiled-{}", process::id()));
+    let source = env::temp_dir().join(format!("prism-why-recompiled-{}.pr", process::id()));
+    let _ = fs::remove_dir_all(&store);
+    fs::write(&source, "fn main() : Int = 42\n").unwrap();
+    let first = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .args(["lineage", "why-recompiled", source.to_str().unwrap()])
+        .env("PRISM_STORE_PATH", &store)
+        .env("PRISM_COMPILER_CACHE", "1")
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8(first.stdout).unwrap();
+    assert!(first_stdout.contains("recompiled <root>: no previous successful module query"));
+
+    let second = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .args(["lineage", "why-recompiled", source.to_str().unwrap()])
+        .env("PRISM_STORE_PATH", &store)
+        .env("PRISM_COMPILER_CACHE", "1")
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8(second.stdout).unwrap();
+    assert!(second_stdout.contains("reused <root>"));
+    assert!(second_stdout.contains("reused backend-scc main"));
+    assert!(second_stdout.contains("reused effect whole-program:"));
+    assert!(second_stdout.contains("reused closure-plan native-kont-plan"));
+    fs::remove_dir_all(store).unwrap();
+    fs::remove_file(source).unwrap();
+}
+
+#[test]
 fn loading_a_missing_manifest_errors() {
     assert!(load_project(Path::new("/nonexistent/prism-project")).is_err());
 }

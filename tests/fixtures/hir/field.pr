@@ -1,0 +1,11 @@
+-- Record field access: `p.x` and `p.y` must resolve to the `Point`
+-- constructor with a fixed field index and arity, and the checker must
+-- record zonked types for the nodes it judged.
+
+type Point = Point { x: Int, y: Int }
+
+fn get_x(p : Point) : Int = p.x
+
+fn get_y(p : Point) : Int = p.y
+
+fn main() : Int = get_x(Point { x = 1, y = 2 }) + get_y(Point { x = 3, y = 4 })

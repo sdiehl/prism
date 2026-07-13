@@ -322,6 +322,15 @@ fn f(g : ((Int) -> Int) @ once) : Int = apply1(g, 3)
 fn main() = println(f(\(n) -> n))
 ";
 
+// An inner binder that shadows the `@ once` parameter rebinds the name: uses of
+// the shadow are a different variable and must not count against the contract.
+// Here `g` is used once directly; the lambda's own `g` parameter is used twice.
+const ONCE_SHADOWED: &str = r"fn f(g : ((Int) -> Int) @ once, x : Int) : Int =
+  let twice = \(g : (Int) -> Int) -> g(g(0))
+  g(x) + twice(\(n) -> n + 1)
+fn main() = println(f(\(n) -> n, 5))
+";
+
 fn once_code(src: &str, what: &str) -> String {
     let err =
         prism::check(&prism::with_prelude(src)).expect_err(&format!("{what} must be rejected"));
@@ -340,6 +349,10 @@ fn once_single_use_and_pass_once_check() {
     assert!(
         prism::check(&prism::with_prelude(ONCE_PASS_ONCE)).is_ok(),
         "passing a `@ once` closure to another `@ once` parameter must check"
+    );
+    assert!(
+        prism::check(&prism::with_prelude(ONCE_SHADOWED)).is_ok(),
+        "a shadowing inner binder must not count against the `@ once` contract"
     );
 }
 

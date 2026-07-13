@@ -14,7 +14,7 @@ Opt-in: this module is not opened by the prelude, so ambient effect rows and the
 
 ### `OrdWitness`
 
-```prism,def
+```prism,def,h-8a2e3e9460113d4ab978fcaa3978f7667cd7051b8b817ff1b7710ccb38a23ac8
 type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
 ```
 
@@ -24,8 +24,8 @@ An ordering witness: a comparator branded by the phantom `brand`. The only way t
 
 ### `with_ordering`
 
-```prism,sig
-fn with_ordering(cmp, body)
+```prism,sig,h-08645ffe4161983e5b2ec4ef8ee621d13f588d3d09bdd3ea60a0feddc6529f3f
+with_ordering : forall a b. ((a, a) -> Int, forall brand. (Data.Ordered.OrdWitness(a, brand)) -> b) -> b
 ```
 
 Run `body` with a fresh ordering witness carrying `cmp`. The witness's brand is rigid and unique to this call: a map built under it cannot be handed to a different witness's operation, and that mismatch is a compile error naming both brands. The result `a` may not mention the brand, so a branded map never escapes the block, only a summary of it (a size, a looked-up value, an encoded form).
@@ -34,48 +34,48 @@ The brand binder is spelled `brand` rather than a bare letter on purpose: it mus
 
 ### `ord_empty`
 
-```prism,sig
-fn ord_empty(_w)
+```prism,sig,h-cb546ff5601304a5155f307d3d19ee8940bd5fde0ab431873d9bc9f2ff3a8b30
+ord_empty : forall a b c. (Data.Ordered.OrdWitness(a, b)) -> Map(a, c, b)
 ```
 
 The empty map under witness `w`, carrying `w`'s brand.
 
 ### `ord_insert`
 
-```prism,sig
-fn ord_insert(w, key, x, m)
+```prism,sig,h-ac30d23ffd18dc46f8576d5d4d666d0af9f2252128f505761093bcff0b206f66
+ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Map(a, c, b)) -> Map(a, c, b)
 ```
 
 Insert under witness `w`; the result carries `w`'s brand.
 
 ### `ord_lookup`
 
-```prism,sig
-fn ord_lookup(w, key, m)
+```prism,sig,h-a4a558866553e9c154efb940b6125d8447ea1f4b7b5b24c4d83baafc01bffeb6
+ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Option(c)
 ```
 
 Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
 
 ### `ord_member`
 
-```prism,sig
-fn ord_member(w, key, m)
+```prism,sig,h-0ffc90bf2d8777973b9edb3d140c5c54e4a08f6a0886323e56f5620b370315d2
+ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Bool
 ```
 
 True when `key` is present under witness `w`.
 
 ### `ord_to_list`
 
-```prism,sig
-fn ord_to_list(_w, m)
+```prism,sig,h-c52ad6bcdae0ef62d47c39d2e2f1b782baec9e951a1a275ac387007bc5902c93
+ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> List((a, c))
 ```
 
 The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
 
 ### `ord_size`
 
-```prism,sig
-fn ord_size(_w, m)
+```prism,sig,h-0df8cc4c4e55e5210e4dd1bf33e7dc840eb338afcf826762720b8ffce7a7257a
+ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> Int
 ```
 
 The number of entries in a `w`-branded map.

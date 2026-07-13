@@ -12,6 +12,7 @@ examples/bignum.pr	pure
 examples/bits.pr	pure
 examples/boids.pr	pure
 examples/builder.pr	pure
+examples/bytecode.pr	pure
 examples/calc.pr	evidence
 examples/calkin_wilf.pr	pure
 examples/cbpv.pr	pure
@@ -66,6 +67,7 @@ examples/imperative.pr	pure
 examples/incr_resident.pr	whole-program-free-monad
 examples/indexing.pr	whole-program-free-monad
 examples/interaction.pr	state-fusion
+examples/interp.pr	selective-free-monad
 examples/json.pr	pure
 examples/lambda.pr	selective-free-monad
 examples/leaderboard.pr	whole-program-free-monad
@@ -102,6 +104,7 @@ examples/queens.pr	selective-free-monad
 examples/rbtree.pr	pure
 examples/record_replay.pr	whole-program-free-monad
 examples/records_demo.pr	pure
+examples/regex.pr	pure
 examples/regex_deriv.pr	pure
 examples/replay_concurrent.pr	whole-program-free-monad
 examples/same_fringe.pr	whole-program-free-monad
@@ -112,12 +115,14 @@ examples/smallest_free.pr	pure
 examples/sort.pr	pure
 examples/stable.pr	whole-program-free-monad
 examples/state.pr	pure
+examples/stlc.pr	selective-free-monad
 examples/stream_fold.pr	state-fusion
 examples/stream_fuse.pr	evidence
 examples/streams.pr	state-fusion
 examples/superclass.pr	pure
 examples/tagless.pr	pure
 examples/teleport.pr	pure
+examples/tensor_ops.pr	selective-free-monad
 examples/textutil.pr	pure
 examples/time.pr	whole-program-free-monad
 examples/transact.pr	selective-free-monad

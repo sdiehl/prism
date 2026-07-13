@@ -1,8 +1,38 @@
-fn tick() : !{State} Int =
-  let n = get(())          -- perform get
-  put(n + 1)               -- perform put
-  n
-
-handle counter() with
-  get(u, k)  => \s  -> k(s)(s)      -- k is the continuation
-  put(s2, k) => \_s -> k(())(s2)
+fn tick() =
+  do get() to n
+  return n to t@733
+  return 1 to t@734
+  t@733 + t@734 to t@735
+  do put(t@735)
+  return n
+fn counter() =
+  tick()
+  tick()
+  tick()
+  do get()
+fn run_counter(init) =
+  handle
+    counter()
+  with
+    get(k) =>
+      thunk { \s.
+        return s to t@736
+        return s to t@737
+        return k to t@738
+        (force t@738)(t@737) to t@739
+        (force t@739)(t@736)
+      }
+    put(s2, k) =>
+      thunk { \_s.
+        return s2 to t@740
+        return () to t@741
+        return k to t@742
+        (force t@742)(t@741) to t@743
+        (force t@743)(t@740)
+      }
+    return r =>
+      return thunk { \_s. return r }
+  to f
+  return init to t@744
+  return f to t@745
+  (force t@745)(t@744)

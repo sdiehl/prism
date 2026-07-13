@@ -1,0 +1,21 @@
+-- Numeric lane selection: a bare integer literal adopting a fixed-width or
+-- Float expected type records the concrete lane the elaborator must emit
+-- (the default Int lane is implicit and records nothing).
+
+fn wide(n : I64) : I64 = n + 1
+
+fn wrap(u : U64) : U64 = u + 1
+
+fn scale(x : Float) : Float = x * 2
+
+fn main() : I64 =
+  if scale(0.5) < 1.0 then
+    wide(41)
+  else
+    wrap_floor()
+
+fn wrap_floor() : I64 =
+  if wrap(7) > 8 then
+    1
+  else
+    0

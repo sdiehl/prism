@@ -6,7 +6,7 @@ Dense multi-dimensional tensors over a flat `FloatBuf`.
 
 A `Tensor` is a flat buffer of `f64` words plus three lists, one entry per axis: the axis `shape` (its extent), its `strides` (the flat-offset step for a unit step along that axis), and its `axes` (a name). Reading `t[i, j]` is a strided lookup: `offset = sum_k idx[k] * strides[k]`, then a single `tbuf_get`. Because the layout lives entirely in the stride list, transposing by name is a permutation of the three lists with no data movement, and the underlying buffer is shared until a write forces a copy (the buffer's own rc==1 in-place / shared-copy discipline).
 
-The surface covers construction, indexing, transpose-by-name, and a contiguity-checked reshape. Elementwise math, broadcasting, and matmul are deliberately absent; when they land, reduction order will be the source loop order (deterministic by construction).
+The surface covers construction, indexing, transpose-by-name, a contiguity-checked reshape, elementwise math (`map_tensor`, `zip_with_tensor`, `add`/`sub`/`mul`/`div`, `scale`), full reductions (`sum_all`, `prod_all`, `mean`), and `matmul`. Every reduction and contraction sums in row-major source-loop order, so results are bit-identical across backends. Broadcasting is deliberately absent, and the math functions require contiguous operands (a transposed view must be materialised first).
 
 `t[i, j]` and `t[i, j] := v` are surface sugar for `at_tensor` / `tensor_set`.
 
@@ -14,7 +14,7 @@ The surface covers construction, indexing, transpose-by-name, and a contiguity-c
 
 ### `Tensor`
 
-```prism,def
+```prism,def,h-95be73d420215e199c05f53c9523b187c6dc8a1f405910aa3ca74c7cc5e5413a
 type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
 ```
 
@@ -24,96 +24,200 @@ A dense tensor: flat storage plus per-axis shape, strides, and names.
 
 ### `buf`
 
-```prism,sig
-fn buf(t)
+```prism,sig,h-ef46804750c80c3b43a147bc96ab948795ba8b80f0b2b32635c6da89e57fdc11
+buf : (Data.Tensor.Tensor) -> FloatBuf
 ```
 
 The flat backing buffer.
 
 ### `shape`
 
-```prism,sig
-fn shape(t)
+```prism,sig,h-58df84c53e8071dcf8a0485e6c0677d49f46d48cbfa73b36fbcba4d4df7ce426
+shape : (Data.Tensor.Tensor) -> List(Int)
 ```
 
 The extent of each axis, outermost first.
 
 ### `strides`
 
-```prism,sig
-fn strides(t)
+```prism,sig,h-7ace8776e12005e49dfa25656ac9088e181a429a00972a9df839ec97212943ba
+strides : (Data.Tensor.Tensor) -> List(Int)
 ```
 
 The flat-offset stride of each axis.
 
 ### `axes`
 
-```prism,sig
-fn axes(t)
+```prism,sig,h-c92d5c0d57261561888724459364ede1cc54bfff4480a3cef7409068d13c0412
+axes : (Data.Tensor.Tensor) -> List(String)
 ```
 
 The name of each axis.
 
 ### `rank`
 
-```prism,sig
-fn rank(t)
+```prism,sig,h-57bc683253254dd4c179492614b19db1f919ee3e9be745760bc64eed30242aa1
+rank : (Data.Tensor.Tensor) -> Int
 ```
 
 The number of axes.
 
 ### `size`
 
-```prism,sig
-fn size(t)
+```prism,sig,h-7be8affae7d523e3fd75b24d8d95828471e020f5863f4d0447b3831caaf95f58
+size : (Data.Tensor.Tensor) -> Int
 ```
 
 The total number of elements: the product of the shape.
 
 ### `new`
 
-```prism,sig
-fn new(shape, fill)
+```prism,sig,h-0931be4e634cad3ea30f9ef14c89aa2415332b47d286bb3e3b283db9d5e40c7b
+new : (List(Int), Float) -> Data.Tensor.Tensor
 ```
 
 A tensor of the given shape with every element set to `fill`, row-major.
 
 ### `from_list`
 
-```prism,sig
-fn from_list(shape, xs)
+```prism,sig,h-97e1874ac302af9ef2d08ebf599de9f743248729462a0bfbdf35a6db91de5164
+from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor
 ```
 
 A row-major tensor of the given shape filled from a flat list of values. Extra list elements past the shape's size are ignored; missing ones stay 0.
 
 ### `at_tensor`
 
-```prism,sig
-fn at_tensor(t, idx)
+```prism,sig,h-4e467ac95f04a35c9409f5dec8468f0ea17ed31568a03a80bbe502a2407c06d5
+at_tensor : (Data.Tensor.Tensor, List(Int)) -> Float ! {Fail}
 ```
 
 The element at a multi-index, or `fail()` if the offset is out of range. Backs `t[i, j]`.
 
 ### `tensor_set`
 
-```prism,sig
-fn tensor_set(t, idx, v)
+```prism,sig,h-4f932e486146edf5b0d2119e45a115456d9e31e3d84bfac8780e6d5b5053cf7c
+tensor_set : (Data.Tensor.Tensor, List(Int), Float) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 A tensor equal to `t` but with the element at a multi-index set to `v`, or `fail()` if out of range. Backs `t[i, j] := v`.
 
 ### `transpose`
 
-```prism,sig
-fn transpose(t, a, b)
+```prism,sig,h-ea27421ec526053ecc7e28f4b56d8f1dfa09b77ab5925d23258a39f064a0989c
+transpose : (Data.Tensor.Tensor, String, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Transpose two named axes: a permutation of the shape, strides, and names with no data movement (the buffer is shared). Reading a transposed tensor walks the same buffer in the permuted stride order.
 
 ### `reshape`
 
-```prism,sig
-fn reshape(t, new_shape)
+```prism,sig,h-706ea3322ca735430bf5bc9234bb4171ce206d7990aa9ec26b9889291cfdbf5b
+reshape : (Data.Tensor.Tensor, List(Int)) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Reinterpret the elements under a new shape of the same size. Requires the tensor to be contiguous (row-major strides); a transposed view must be copied first, so reshaping one is a `fail()`. The new axes get default names.
+
+### `map_tensor`
+
+```prism,sig,h-cf1dcec23253fb31b02c77ae07bd6bca23a98c359f7db2300e859053740c0a10
+map_tensor : forall e0. ((Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
+```
+
+A tensor of the same shape with `f` applied to every element. Requires a contiguous input; the result is contiguous.
+
+### `zip_with_tensor`
+
+```prism,sig,h-4789b65b64bfceceb06bbd83f17bc1ef47046c35cd177e4748647ae578ca5bfc
+zip_with_tensor : forall e0. ((Float, Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
+```
+
+Combine two identically-shaped contiguous tensors elementwise with `f`, or `fail()` if the shapes differ or either is not contiguous. No broadcasting.
+
+### `add`
+
+```prism,sig,h-4bab1c77b8228a1146b05a0056864bdf7c61c2613b0da4f96bec288fc7bf36e0
+add : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Elementwise sum of two identically-shaped tensors.
+
+### `sub`
+
+```prism,sig,h-3137b4d040960712b209b429ec13f63865685fb9c7bf38bf3186752cb1590fa7
+sub : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Elementwise difference.
+
+### `mul`
+
+```prism,sig,h-7a68a44105d0205e72c84b225ea05f23e7a350d65753c979a567fc17b2974b17
+mul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Elementwise (Hadamard) product, not matrix multiplication.
+
+### `div`
+
+```prism,sig,h-49699a14f9c83b2a4c128e3f6d3beecb36d99ed18922a21398987aa9697455cf
+div : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Elementwise quotient.
+
+### `scale`
+
+```prism,sig,h-7b7d30a9317d18400ded602a7ede01a90084634b6f95dbd24245759a5328e3c7
+scale : (Float, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Every element multiplied by a scalar.
+
+### `sum_all`
+
+```prism,sig,h-97cb276526732016c178f23a32b97ae77887a6891f342113b041c81b2e44448b
+sum_all : (Data.Tensor.Tensor) -> Float ! {Fail}
+```
+
+The sum of every element, added in row-major order. Requires a contiguous tensor (so the summation order is well defined).
+
+### `prod_all`
+
+```prism,sig,h-e390a0813d70a7cae4d2c3cb5a01722583294a5a30391dc1d8efacff386d1b85
+prod_all : (Data.Tensor.Tensor) -> Float ! {Fail}
+```
+
+The product of every element, in row-major order.
+
+### `mean`
+
+```prism,sig,h-2471f21934c1fd5e10fe21641a473a0526c08338aa541ca64f07d3b16e0caac8
+mean : (Data.Tensor.Tensor) -> Float ! {Fail}
+```
+
+The arithmetic mean of every element.
+
+### `sum_axis`
+
+```prism,sig,h-8e800749c547bd236d29c9c6e846950f79f4e04d700b2f94559581d5de5231a8
+sum_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Reduce over one named axis by summing, removing that axis (rank `r` becomes `r - 1`); the remaining axes keep their names. The contracted axis is summed in index order `0..extent` (source loop order), so the result is bit-identical across backends. `fail()` on a missing axis or a non-contiguous input.
+
+### `mean_axis`
+
+```prism,sig,h-d528f334e963ef97feff4925aa21704245e238917d20373754961978aa859a2b
+mean_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Reduce over one named axis by averaging: the sum over that axis divided by its extent, removing the axis. Same source-loop order and contiguity requirement as `sum_axis`.
+
+### `matmul`
+
+```prism,sig,h-90dcd6d991b9674b27ffc5bd401c371ea1eadfe3bddad7e9c13693dc0b45f54f
+matmul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
+```
+
+Matrix product of a rank-2 `[m, k]` tensor with a rank-2 `[k, n]` tensor, giving `[m, n]`. The contraction sums in source loop order, so the result is bit-identical across backends. `fail()` unless both operands are contiguous, rank 2, with matching inner extents.

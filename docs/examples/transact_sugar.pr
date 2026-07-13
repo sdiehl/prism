@@ -1,0 +1,14 @@
+-- `transact body else fallback` snapshots the live vars, runs `body` under a
+-- Fail handler, and on failure restores them before yielding `fallback`.
+fn attempt(spend : Int) : Int =
+  var balance := 100
+  transact
+    balance -= spend
+    guard(balance >= 0)
+    balance
+  else
+    0 - 1
+
+fn main() =
+  println(attempt(40))
+  println(attempt(140))

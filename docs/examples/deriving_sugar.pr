@@ -1,4 +1,7 @@
-type Color = Red | Green | Blue deriving (Eq, Ord, Show)
+-- `deriving (Eq, Show)` generates one structural instance per class: `eq`
+-- compares constructor and fields, `show` renders the constructor name. `Ord`
+-- would derive a `cmp` ordering by constructor index the same way.
+type Color = Red | Green | Blue deriving (Eq, Show)
 
 fn main() =
   println(show(Green))

@@ -1,0 +1,50 @@
+name: Install
+
+# The curl-pipe-sh installer is a release artifact in its own right: it must
+# keep working against the latest published release on every platform it
+# claims. Runs when the script (or this workflow) changes, when a release is
+# published, weekly to catch release-asset rot, and on demand.
+on:
+  pull_request:
+    paths:
+      - scripts/install.sh
+      - .github/workflows/install.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/install.sh
+      - .github/workflows/install.yml
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest is x86_64, ubuntu-24.04-arm is aarch64, macos-latest is
+        # arm64: one runner per published tarball target.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the installer against the latest release
+        # PRISM_NO_NIX pins the test to the tarball path; runners have no Nix,
+        # but the pin keeps the exercised path explicit either way.
+        run: PRISM_NO_NIX=1 sh scripts/install.sh
+      - name: Installed binary runs
+        run: |
+          bin="$HOME/.local/bin/prism"
+          "$bin" --version
+          printf 'fn main() : Unit ! {IO} = println("install ok")\n' > /tmp/smoke.pr
+          out="$("$bin" run /tmp/smoke.pr)"
+          case "$out" in *"install ok"*) echo "smoke: $out" ;; *) echo "unexpected output: $out"; exit 1 ;; esac

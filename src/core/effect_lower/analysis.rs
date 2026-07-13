@@ -6,7 +6,6 @@ use super::checks::{all_calls, raw_effects};
 use super::walk::{collect_ops, each_subcomp, each_value, latent, thunks_in_comp, thunks_in_value};
 use super::{Latent, MaskOp};
 use crate::core::cbpv::{Comp, Core, CoreFn, Value};
-use crate::core::fv;
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 
@@ -379,24 +378,11 @@ pub(super) fn open_resume_escapes(c: &Comp, fl: &Latent) -> bool {
                 depth: 0,
             });
         }
-        if !s.is_empty() && ops.iter().any(|op| resume_in_thunk(&op.body, op.resume)) {
+        if !s.is_empty() && ops.iter_with_use().any(|(_, ru)| ru.in_thunk) {
             return true;
         }
     }
     let mut found = false;
     each_subcomp(c, &mut |sc| found |= open_resume_escapes(sc, fl));
-    found
-}
-
-fn resume_in_thunk(c: &Comp, resume: Sym) -> bool {
-    let mut found = false;
-    each_value(c, &mut |v| {
-        let mut ts = Vec::new();
-        thunks_in_value(v, &mut ts);
-        for t in ts {
-            found |= fv::comp(t).contains(&resume);
-        }
-    });
-    each_subcomp(c, &mut |sc| found |= resume_in_thunk(sc, resume));
     found
 }

@@ -3,9 +3,9 @@ pub(crate) mod repr;
 pub(crate) mod ty;
 
 pub use crate::tc::{
-    check, infer_expr, infer_expr_dicts, infer_expr_env, Canon, Checked, ClassInfo, CtorInfo,
-    DataInfo, DeclInfo, Dict, DictTable, EffOpInfo, Env, HeadKey, InstInfo, InstKeys, PathRes,
-    Warning,
+    check, check_seeded, infer_expr, infer_expr_dicts, infer_expr_env, Canon, Checked, ClassInfo,
+    CtorInfo, DataInfo, DeclInfo, Dict, DictTable, EffOpInfo, Env, HeadKey, InstInfo, InstKeys,
+    PathRes, TypecheckSeed, Warning,
 };
 pub use repr::{is_or_null_element, repr_of_type, Repr};
 pub use ty::{

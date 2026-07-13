@@ -54,7 +54,11 @@ fn expand_derives(deriving: &[(String, Span)]) -> Vec<(String, Span)> {
     out
 }
 
-pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
+pub(super) fn derive_instances(
+    prog: &mut Program,
+    external_classes: &BTreeMap<String, String>,
+    external_values: &BTreeMap<String, String>,
+) -> Result<(), TypeError> {
     // `Stable`'s sole method is its shape contract digest, a per-type constant the
     // compiler computes and injects. A hand-written instance could only restate that
     // digest (or lie about it), so `Stable` is derive-only: reject a user-authored
@@ -77,23 +81,32 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
     // maps to itself. When two imports share a bare class name the last wins,
     // which is harmless: a genuinely ambiguous derive is already an overlap the
     // checker reports on the resulting instances.
-    let class_canon: BTreeMap<&str, &str> = prog
-        .classes
-        .iter()
-        .map(|c| (names::bare_name(&c.name), c.name.as_str()))
-        .collect();
+    let mut class_canon = external_classes.clone();
+    class_canon.extend(prog.classes.iter().map(|class| {
+        (
+            names::bare_name(&class.name).to_string(),
+            class.name.clone(),
+        )
+    }));
     // Each in-scope top-level function's bare name mapped to its canonical name.
     // A derived instance is built after name resolution, so a reference it emits
     // to a library function (the wire codec's byte builders, the property
     // generators) must already be the canonical `Module.fn`. Prelude functions and
     // the user type's own constructors are canonical bare names, so they need no
     // lookup; only the opt-in library helpers do.
-    let value_canon: BTreeMap<&str, &str> = prog
-        .fns
-        .iter()
-        .map(|f| (names::bare_name(&f.name), f.name.as_str()))
-        .collect();
-    let lib = |n: &str| value_canon.get(n).map_or(n, |c| *c).to_string();
+    let mut value_canon = external_values.clone();
+    value_canon.extend(prog.fns.iter().map(|function| {
+        (
+            names::bare_name(&function.name).to_string(),
+            function.name.clone(),
+        )
+    }));
+    let lib = |name: &str| {
+        value_canon
+            .get(name)
+            .map_or(name, String::as_str)
+            .to_string()
+    };
     // The types whose every component is provably serializable-frozen: those that
     // derive (or hand-write) a `Stable` instance. Read once so a `deriving
     // (Stable)` can check its fields structurally at the derive site.
@@ -109,7 +122,7 @@ pub(super) fn derive_instances(prog: &mut Program) -> Result<(), TypeError> {
                 fns.extend(derive_lens(d, *cspan)?);
                 continue;
             }
-            let Some(&canon) = class_canon.get(class.as_str()) else {
+            let Some(canon) = class_canon.get(class.as_str()) else {
                 return Err(ErrKind::UnknownDerivingClass {
                     class: class.clone(),
                 }
@@ -611,8 +624,12 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
         };
         let gettag = call(evar(&lib(WIRE_GET_TAG), z), vec![evar("_bs", z)], z);
         sp(Expr::Match(Box::new(gettag), vec![outer]), z)
+    } else if let Some(c0) = d.ctors.first() {
+        decode_read(c0, 0, "_bs", z)
     } else {
-        decode_read(&d.ctors[0], 0, "_bs", z)
+        // An uninhabited type has no value to decode; failing is the only
+        // honest reading of any input (never a panic in the compiler).
+        call(evar(FAIL_OP, z), vec![], z)
     };
     let decode = mdecl(DECODE_METHOD, &["_bs"], dec_body, z);
     inst_skel(d, class, "serialize", vec![encode, decode], z)
@@ -753,6 +770,11 @@ fn ctor_gen(c: &Ctor, lib: &impl Fn(&str) -> String, z: Span) -> S<Expr> {
 // A generator that picks uniformly among a set of constructors: one on its own
 // generates directly, several go through `gen_choose(g0, [g1, ..])`.
 fn choose_gen(ctors: &[&Ctor], lib: &impl Fn(&str) -> String, z: Span) -> S<Expr> {
+    if ctors.is_empty() {
+        // An uninhabited type has nothing to generate; the generator fails when
+        // run rather than the compiler panicking on an empty constructor list.
+        return call(evar(FAIL_OP, z), vec![], z);
+    }
     if let [only] = ctors {
         return ctor_gen(only, lib, z);
     }

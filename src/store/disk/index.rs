@@ -302,32 +302,9 @@ pub(super) fn get_ref(root: &Path, name: &str) -> io::Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use crate::store::disk::testutil::TempDir;
     use std::sync::Arc;
     use std::thread;
-
-    // A per-process counter so concurrent tests never collide on a temp dir.
-    static NONCE: AtomicU64 = AtomicU64::new(0);
-
-    struct TempDir {
-        path: PathBuf,
-    }
-
-    impl TempDir {
-        fn new(tag: &str) -> Self {
-            let mut path = std::env::temp_dir();
-            let n = NONCE.fetch_add(1, Ordering::Relaxed);
-            path.push(format!("prism-index-{tag}-{}-{n}", std::process::id()));
-            fs::create_dir_all(&path).unwrap();
-            Self { path }
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
 
     // A lock file a dead writer left behind holds no kernel lock, so a new writer
     // acquires immediately rather than deadlocking, and re-acquires after release:

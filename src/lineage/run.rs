@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::driver::{ArtifactIdentity, BuildIdentity};
 use crate::error::Error;
 use crate::provenance::{
-    self, trace_digest, CapEvent, CapOp, EventValue, EVENT_HASH_SCHEME, OP_ENV_GETENV,
+    self, CapEvent, CapOp, EventValue, ObservationTrace, EVENT_HASH_SCHEME, OP_ENV_GETENV,
     OP_FS_APPEND_FILE, OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE,
     OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,
 };
@@ -54,6 +54,8 @@ pub struct RunLineageInput<'a> {
     pub backend: &'a str,
     pub argv: Vec<String>,
     pub events: &'a [CapEvent],
+    /// The run's complete ordered observation artifact.
+    pub observations: &'a ObservationTrace,
     /// The run's captured stdout transcript.
     pub stdout: &'a str,
     /// The durable `.replay` file the trace was written to, if the caller recorded
@@ -84,7 +86,7 @@ impl RunLineage {
             .collect();
         let (env_reads, input_files) = observed_inputs(input.events);
         let file_writes = observed_outputs(input.events);
-        let digest = trace_digest(input.events);
+        let digest = input.observations.trace_digest();
         Ok(Self {
             request: input.request,
             source: source_lineage_root(&identity.source),

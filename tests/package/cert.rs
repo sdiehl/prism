@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism::core::HASH_SCHEME;
-use prism::pkg::trust::{AuditReport, IndexRow, RootAudit, Verdict};
+use prism::pkg::trust::{AuditReport, IndexRow, RootAudit, Verdict, INDEX_KIND_NAMESPACE};
 use prism::store::cert::{
     check_cert, decode_cert, emit, encode_cert, parity_cert, Cert, CertStatus, Claim,
     BACKEND_INTERP, BACKEND_LLVM, CLAIM_LEAN_CHECKED,
@@ -64,8 +64,8 @@ fn green_row(subject: &str, cert: CertStatus) -> RootAudit {
             name: "demo".to_string(),
             tag: "1.0".to_string(),
             root: subject.to_string(),
-            scheme: prism::core::HASH_SCHEME.to_string(),
-            kind: prism::pkg::trust::INDEX_KIND_NAMESPACE.to_string(),
+            scheme: HASH_SCHEME.to_string(),
+            kind: INDEX_KIND_NAMESPACE.to_string(),
         },
         outcome: Ok(1),
         cert,

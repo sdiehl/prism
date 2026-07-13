@@ -49,6 +49,29 @@ fn immutability_rejects_a_different_rewrite() {
 }
 
 #[test]
+fn concurrent_divergent_object_writers_cannot_overwrite() {
+    let tmp = TempDir::new("store", "object-race");
+    let store = Store::open_or_create(tmp.store_root()).unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let mut threads = Vec::new();
+    for bytes in [b"first".as_slice(), b"second".as_slice()] {
+        let store = store.clone();
+        let barrier = barrier.clone();
+        threads.push(std::thread::spawn(move || {
+            barrier.wait();
+            store.put(H1, bytes)
+        }));
+    }
+    let results = threads
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    let stored = store.get(H1).unwrap();
+    assert!(stored == b"first" || stored == b"second");
+}
+
+#[test]
 fn objects_are_sharded_by_first_hash_byte() {
     let tmp = TempDir::new("store", "shard");
     let store = Store::open_or_create(tmp.store_root()).unwrap();
@@ -123,6 +146,58 @@ fn name_and_dep_indexes_round_trip() {
     store.add_dependents(&edges).unwrap();
     assert!(store.dependents(H1).unwrap().contains(H2));
     assert!(store.dependents(H2).unwrap().is_empty());
+}
+
+#[test]
+fn compiler_query_index_is_typed_and_immutable() {
+    let tmp = TempDir::new("store", "queries");
+    let store = Store::open_or_create(tmp.store_root()).unwrap();
+
+    assert_eq!(store.get_query("linked-native", H1).unwrap(), None);
+    store.put(H2, b"native-output").unwrap();
+    store.put_query("linked-native", H1, H2).unwrap();
+    assert_eq!(
+        store.get_query("linked-native", H1).unwrap().as_deref(),
+        Some(H2)
+    );
+    store.put_query("linked-native", H1, H2).unwrap();
+    assert!(store.put_query("linked-native", H1, H1).is_err());
+    assert!(store.put_query("../escape", H1, H2).is_err());
+}
+
+#[test]
+fn concurrent_identical_query_writers_converge() {
+    let tmp = TempDir::new("store", "query-concurrent");
+    let store = Store::open_or_create(tmp.store_root()).unwrap();
+    store.put(H2, b"native-output").unwrap();
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let store = store.clone();
+        threads.push(std::thread::spawn(move || {
+            store.put_query("linked-native", H1, H2).unwrap();
+        }));
+    }
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    assert_eq!(
+        store.get_query("linked-native", H1).unwrap().as_deref(),
+        Some(H2)
+    );
+}
+
+#[test]
+fn malformed_query_entry_is_never_a_hit() {
+    let tmp = TempDir::new("store", "query-corrupt");
+    let store = Store::open_or_create(tmp.store_root()).unwrap();
+    let path = tmp
+        .store_root()
+        .join("queries")
+        .join("linked-native")
+        .join(H1);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, b"not-a-query\n").unwrap();
+    assert!(store.get_query("linked-native", H1).is_err());
 }
 
 #[test]

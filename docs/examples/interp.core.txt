@@ -1,0 +1,14 @@
+fn main() =
+  return "Prism" to name
+  return 42 to n
+  return "hello " to t@733
+  return name to t@734
+  return t@734 to t@735
+  return ", n = " to t@736
+  return n to t@737
+  show_int(t@737) to t@738
+  concat(t@736, t@738) to t@739
+  concat(t@735, t@739) to t@740
+  concat(t@733, t@740) to t@741
+  prints t@741 to t@742
+  print_nl

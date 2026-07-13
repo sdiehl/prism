@@ -16,7 +16,7 @@ RFC 3339 formatting and parsing are pure, total, UTC-only string code: no locale
 
 ### `Duration`
 
-```prism,def
+```prism,def,h-7e016327a17fe1a6bce054c482ea3242432b3330e502ba25eee3664506fb2780
 type Duration = Duration(Int)
 ```
 
@@ -24,7 +24,7 @@ A signed span of time, in nanoseconds.
 
 ### `Instant`
 
-```prism,def
+```prism,def,h-d107ff19263e790386d1d46011d60c50c3055d2fb9a2de6cfb69e86122fee1dd
 type Instant = Instant(Int)
 ```
 
@@ -32,7 +32,7 @@ A monotonic clock reading, in nanoseconds from an unspecified origin.
 
 ### `Wall`
 
-```prism,def
+```prism,def,h-82d43b86d98a8309c88519db947db79feffc05d6ad867afa21b4f29b037ca199
 type Wall = Wall(Int)
 ```
 
@@ -42,250 +42,250 @@ A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
 
 ### `nanos_per_sec`
 
-```prism,sig
-fn nanos_per_sec()
+```prism,sig,h-5a3a1b91cc92d22d2d9b6cbafb1a6bba2298e6d71856d5976256972b473db0f4
+nanos_per_sec : () -> Int
 ```
 
 ### `nanos_per_milli`
 
-```prism,sig
-fn nanos_per_milli()
+```prism,sig,h-3e9da0b72233cbc671737eff6c08561e4160f1bab33815f46a19f46c8fe89bc1
+nanos_per_milli : () -> Int
 ```
 
 ### `nanos_per_micro`
 
-```prism,sig
-fn nanos_per_micro()
+```prism,sig,h-b53a496fc633478f0f6dc42e2a9a870cf5ba9b49de5524d4a70ef4e76fe00968
+nanos_per_micro : () -> Int
 ```
 
 ### `dur_nanos`
 
-```prism,sig
-fn dur_nanos(d)
+```prism,sig,h-50694bb9d968bf720a3e0aeb25ee3414a5e1e44862fb56904a25388d5ba9372d
+dur_nanos : (Time.Duration) -> Int
 ```
 
 The span in whole nanoseconds.
 
 ### `nanos`
 
-```prism,sig
-fn nanos(n)
+```prism,sig,h-4bb4086ff342601ecd846e994f9e6e087b34a595b09ef086eeb71b21372b8b9c
+nanos : (Int) -> Time.Duration
 ```
 
 A duration of `n` nanoseconds.
 
 ### `micros`
 
-```prism,sig
-fn micros(n)
+```prism,sig,h-abd0792b27aae91049b4bf33ac4dd035d7f0cf4838dca01d1e860a60ccb1bd96
+micros : (Int) -> Time.Duration
 ```
 
 A duration of `n` microseconds.
 
 ### `millis`
 
-```prism,sig
-fn millis(n)
+```prism,sig,h-28200c6d0e094e1561895f4174976ef2874d509413f0220e62bdef617fbf3607
+millis : (Int) -> Time.Duration
 ```
 
 A duration of `n` milliseconds.
 
 ### `seconds`
 
-```prism,sig
-fn seconds(n)
+```prism,sig,h-dda6e020c39f4f9dd65f05e8237d08494096e8570e1f138d1679150239159c25
+seconds : (Int) -> Time.Duration
 ```
 
 A duration of `n` seconds.
 
 ### `minutes`
 
-```prism,sig
-fn minutes(n)
+```prism,sig,h-6360729a62ed435f269d8d043428efa9f890df340a3d2ef17c405020bbc51a7e
+minutes : (Int) -> Time.Duration
 ```
 
 A duration of `n` minutes.
 
 ### `hours`
 
-```prism,sig
-fn hours(n)
+```prism,sig,h-c86843060ed6cca21ad0732f36dcd16516688f1c755346b7f194273e9a979e0a
+hours : (Int) -> Time.Duration
 ```
 
 A duration of `n` hours.
 
 ### `dur_as_secs`
 
-```prism,sig
-fn dur_as_secs(d)
+```prism,sig,h-0f135a31bdeb3ae2bbb90a2deb900365ccebffb040fe4a477efe15717220b40b
+dur_as_secs : (Time.Duration) -> Int
 ```
 
 The whole-second part of a duration (truncated toward zero).
 
 ### `dur_as_millis`
 
-```prism,sig
-fn dur_as_millis(d)
+```prism,sig,h-980f5a3c79f98ec5d7732a3472156e7009147ccc2bb390a83de1db726cf24d3e
+dur_as_millis : (Time.Duration) -> Int
 ```
 
 The whole-millisecond part of a duration (truncated toward zero).
 
 ### `dur_add`
 
-```prism,sig
-fn dur_add(a, b)
+```prism,sig,h-aae31de146d51d19a6211b7f2fa1bc54318e1fcd255889ef6417d06eb864df0d
+dur_add : (Time.Duration, Time.Duration) -> Time.Duration
 ```
 
 Sum of two durations.
 
 ### `dur_sub`
 
-```prism,sig
-fn dur_sub(a, b)
+```prism,sig,h-a985f26b9e4a6dff4c9fe8cc49a34af1366b5508e26f757c03a9c0fa2cdbad80
+dur_sub : (Time.Duration, Time.Duration) -> Time.Duration
 ```
 
 Difference of two durations (`a - b`).
 
 ### `dur_scale`
 
-```prism,sig
-fn dur_scale(a, k)
+```prism,sig,h-fa09df9664d13fce70b778bfdadf3f9284cc5b5feec9aab3601f7c01b96614f0
+dur_scale : (Time.Duration, Int) -> Time.Duration
 ```
 
 A duration scaled by an integer factor.
 
 ### `dur_negate`
 
-```prism,sig
-fn dur_negate(a)
+```prism,sig,h-8b5bb2869b26a58d16b9b5e35c8bae6bda4a18f69c47da70708e2128d6c75553
+dur_negate : (Time.Duration) -> Time.Duration
 ```
 
 A duration with the sign flipped.
 
 ### `dur_cmp`
 
-```prism,sig
-fn dur_cmp(a, b)
+```prism,sig,h-079d85906375b4a86c39e0bae086f77032e54c84f8e7f780bd2d3dab5b2ff568
+dur_cmp : (Time.Duration, Time.Duration) -> Int
 ```
 
 Ordering of two durations (`-1`, `0`, `1`).
 
 ### `dur_eq`
 
-```prism,sig
-fn dur_eq(a, b)
+```prism,sig,h-e847bf930629bce4d6108921e518b654115113bd63837f35f6c00b9d9b88af0d
+dur_eq : (Time.Duration, Time.Duration) -> Bool
 ```
 
 True when the two durations are equal.
 
 ### `instant_nanos`
 
-```prism,sig
-fn instant_nanos(i)
+```prism,sig,h-c48597abd494d09397625045ec13d60cf3023ebee0e4a1ff776e216141ebc307
+instant_nanos : (Time.Instant) -> Int
 ```
 
 The raw monotonic reading in nanoseconds. The absolute value is meaningless across processes; subtract two instants to get an elapsed `Duration`.
 
 ### `elapsed`
 
-```prism,sig
-fn elapsed(earlier, later)
+```prism,sig,h-bfb9a0270af48b7f028de05c74d6d3d741c01ed90f082719636a9b8b13a31392
+elapsed : (Time.Instant, Time.Instant) -> Time.Duration
 ```
 
 The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not `between`, to leave the prelude's numeric `between` range test unshadowed.
 
 ### `instant_add`
 
-```prism,sig
-fn instant_add(i, d)
+```prism,sig,h-e4c31d82b94747aa7503853ce496d12a36f4faaac83f4cbb92bde2c77428122b
+instant_add : (Time.Instant, Time.Duration) -> Time.Instant
 ```
 
 An instant advanced by a duration.
 
 ### `wall_nanos`
 
-```prism,sig
-fn wall_nanos(w)
+```prism,sig,h-c9719d4836df7f1a3d8a1f8afba8cbdac35443cd8c2ecb47a18b5adb79d0fb02
+wall_nanos : (Time.Wall) -> Int
 ```
 
 The reading in nanoseconds since the Unix epoch (UTC).
 
 ### `wall_of_nanos`
 
-```prism,sig
-fn wall_of_nanos(n)
+```prism,sig,h-35956d516b90d73e79f8bc9e4539b793e01c0c1b1066e7fd579a899a2a3dfe26
+wall_of_nanos : (Int) -> Time.Wall
 ```
 
 A wall reading from nanoseconds since the Unix epoch.
 
 ### `wall_unix_secs`
 
-```prism,sig
-fn wall_unix_secs(w)
+```prism,sig,h-1656b3c14bada8632393916bad397a1e67376efefe8d204bfd1e759e5ceea1c4
+wall_unix_secs : (Time.Wall) -> Int
 ```
 
 Whole seconds since the Unix epoch (truncated toward zero).
 
 ### `wall_add`
 
-```prism,sig
-fn wall_add(w, d)
+```prism,sig,h-04a6b3518830c193c927fd9b8ff3a08bb3496c258b409b17fb95ae558dcc26bc
+wall_add : (Time.Wall, Time.Duration) -> Time.Wall
 ```
 
 A wall reading advanced by a duration.
 
 ### `wall_diff`
 
-```prism,sig
-fn wall_diff(earlier, later)
+```prism,sig,h-465b56090d0f6b7592e1f9ebdb859db3fca3b195bd8c30cafd517a6d7b6b1dbb
+wall_diff : (Time.Wall, Time.Wall) -> Time.Duration
 ```
 
 The span from `earlier` to `later` wall readings (`later - earlier`).
 
 ### `wall_cmp`
 
-```prism,sig
-fn wall_cmp(a, b)
+```prism,sig,h-a5983e29c09398a459aa75c6427d1f12f85539e65d03dbaa32d10c189ef19b4a
+wall_cmp : (Time.Wall, Time.Wall) -> Int
 ```
 
 Ordering of two wall readings (`-1`, `0`, `1`).
 
 ### `mono_clock`
 
-```prism,sig
-fn mono_clock()
+```prism,sig,h-0ed87e1fbd737d53bef53da3c80c4b263d7611ca850df519fab4eb30afba8534
+mono_clock : () -> Time.Instant ! {Concurrent.Clock}
 ```
 
 Read the monotonic clock. Deterministic under `run_clock`, real (and recorded) under `run_clock_real`.
 
 ### `wall_clock`
 
-```prism,sig
-fn wall_clock()
+```prism,sig,h-f34519492ab28f197cdc108c5003cceab488b678b2e2c4af6512b0b638363189
+wall_clock : () -> Time.Wall ! {Concurrent.Clock}
 ```
 
 Read the wall clock. Deterministic under `run_clock`, real (and recorded) under `run_clock_real`.
 
 ### `run_clock_real`
 
-```prism,sig
-fn run_clock_real(action)
+```prism,sig,h-41aa6834e74c57af4c435c58e00ee5f0ce1c720057a1748c700398a5fedfd2da
+run_clock_real : forall e0 a. (() -> a ! {Concurrent.Clock, IO, e0}) -> a ! {IO, e0}
 ```
 
 Run `action` against the real OS clock. `now`/`sleep` still thread a virtual counter (they are the scheduler's logical time), so this is a superset of `run_clock`: `wall_now` and `mono_now` read the real clock through the `prim_*` builtins, each a recorded observation, and everything else stays virtual.
 
 ### `format_rfc3339`
 
-```prism,sig
-fn format_rfc3339(w)
+```prism,sig,h-0090ab1abb7645499c9c6ed5ffb047927fba7f223e17ec7621e5e51505601de2
+format_rfc3339 : (Time.Wall) -> String
 ```
 
 Format a wall reading as an RFC 3339 timestamp in UTC, e.g. `2026-07-04T12:34:56Z`. A nonzero sub-second part is emitted as exactly nine fractional digits (nanoseconds); an exact second emits no fraction. The output is canonical: one reading formats to one string, so timestamps are comparable and hashable as text.
 
 ### `parse_rfc3339`
 
-```prism,sig
-fn parse_rfc3339(s)
+```prism,sig,h-4f76facf9f9018ec5fb286b558b0910d5fea2ac1fafd2c703d0648e9d73d326e
+parse_rfc3339 : (String) -> Option(Time.Wall)
 ```
 
 Parse an RFC 3339 timestamp to a wall reading in UTC, or `None` if the string is not a well-formed `YYYY-MM-DDTHH:MM:SS[.frac](Z|(+|-)HH:MM)`. The date/time separators are checked, field ranges are validated, an offset is folded into UTC, and any trailing input is rejected, so the parser is total: a malformed or overlong string is `None`, never a partial or wrapped value.

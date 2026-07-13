@@ -254,6 +254,11 @@ jobs:
           find dist -mindepth 1 -type d -empty -delete
           ls -1 dist
 
+      # Stamp the Arch PKGBUILD with this version and the real tarball sha256s,
+      # into dist/ so it ships as an asset and is covered by SHA256SUMS below.
+      - name: Generate PKGBUILD
+        run: ./scripts/gen-pkgbuild.sh "$VERSION" dist
+
       - name: Checksums and release Merkle root
         run: ./scripts/release-hashes.sh dist
 
@@ -287,6 +292,7 @@ jobs:
             dist/*.rpm
             dist/*.apk
             dist/*.pkg.tar.zst
+            dist/PKGBUILD
             dist/stdlib-merkle-root.txt
             dist/SHA256SUMS
             dist/release-merkle-root.txt

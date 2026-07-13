@@ -20,7 +20,7 @@ use marginalia::Span;
 use crate::syntax::ast::{
     CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface, S,
 };
-use crate::tc::Warning;
+use crate::tc::{Warning, WarningOrigin};
 
 struct Local {
     name: String,
@@ -82,6 +82,7 @@ impl Lints {
             self.warnings.push(Warning {
                 span,
                 msg: format!("`{name}` shadows an existing binding"),
+                origin: WarningOrigin::Surface,
             });
         }
         self.scope.push(Local {
@@ -106,7 +107,11 @@ impl Lints {
         }
         if let Some(msg) = self.deprecated.get(name) {
             let msg = format!("`{name}` is deprecated: {msg}");
-            self.warnings.push(Warning { span, msg });
+            self.warnings.push(Warning {
+                span,
+                msg,
+                origin: WarningOrigin::Surface,
+            });
         }
     }
 
@@ -127,6 +132,7 @@ impl Lints {
                 self.warnings.push(Warning {
                     span: b.span,
                     msg: format!("unused binding `{}`", b.name),
+                    origin: WarningOrigin::Surface,
                 });
             }
         }

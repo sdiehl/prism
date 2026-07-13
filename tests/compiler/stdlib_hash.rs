@@ -5,7 +5,11 @@
 // the whole library (not a reachable subset), and it reaches the committed index
 // page.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
+
+use prism::core::{instance_digest, Digest};
+use prism::syntax::ast::Ty;
 
 fn with_stdlib_hash_env_lock(test: impl FnOnce()) {
     static LOCK: Mutex<()> = Mutex::new(());
@@ -70,6 +74,25 @@ fn covers_the_whole_library() {
                 "missing instance digest for {name}"
             );
         }
+        // Every embedded module must contribute at least one entry, so a module
+        // added to `STDLIB` but dropped from the composed driver source cannot
+        // silently fall outside the root (and lose its docs hash badges). Defs
+        // key by canonical symbol (`Module.name` public, `Module@name` private);
+        // shapes/classes/instances key by bare name, so defs are the reliable
+        // per-module witness.
+        for (module, _) in prism::stdlib::STDLIB {
+            let dot = format!("{module}.");
+            let at = format!("{module}@");
+            let covered = h
+                .defs
+                .keys()
+                .any(|k| k.as_str().starts_with(&dot) || k.as_str().starts_with(&at));
+            assert!(
+                covered,
+                "module {module} contributes no definition to the stdlib root; \
+                 is it missing from stdlib_driver_src?"
+            );
+        }
     });
 }
 
@@ -77,16 +100,15 @@ fn covers_the_whole_library() {
 // method does must move the instance digest. This checks the coherence seed.
 #[test]
 fn instance_digest_folds_method_behavior() {
-    use std::collections::BTreeMap;
-    let a = prism::core::instance_digest(
+    let a = instance_digest(
         "Eq",
-        &prism::syntax::ast::Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), prism::core::Digest::from("hash-one"))]),
+        &Ty::Con("Bool".into(), vec![]),
+        &BTreeMap::from([("eq".to_string(), Digest::from("hash-one"))]),
     );
-    let b = prism::core::instance_digest(
+    let b = instance_digest(
         "Eq",
-        &prism::syntax::ast::Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), prism::core::Digest::from("hash-two"))]),
+        &Ty::Con("Bool".into(), vec![]),
+        &BTreeMap::from([("eq".to_string(), Digest::from("hash-two"))]),
     );
     assert_ne!(a, b);
 }

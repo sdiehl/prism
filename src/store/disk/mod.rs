@@ -40,11 +40,19 @@ use crate::store::codec;
 use crate::sym::Sym;
 
 mod certs;
+mod decisions;
+#[cfg(test)]
+mod faults;
 mod index;
 mod meta;
 mod objects;
+mod queries;
+#[cfg(test)]
+mod testutil;
 mod verified;
 
+#[cfg(test)]
+use faults::FaultPoint;
 pub use index::{CanonicalConflict, CanonicalKey};
 pub use meta::DefMeta;
 pub use verified::VerifiedRecord;
@@ -66,6 +74,11 @@ const LOCK_FILE: &str = "lock";
 // Objects and metadata blobs are sharded git-style by the first byte of the hex
 // hash (two hex characters) so no single directory holds the whole store.
 const SHARD_HEX: usize = 2;
+
+// Every in-flight write carries this prefix. Readers only ever open exact
+// object/index paths, so a file with this prefix is never content: a temp left
+// by a killed writer is inert until some later write in the same directory.
+pub(crate) const TEMP_PREFIX: &str = ".tmp.";
 
 // Line-oriented flat-file conventions shared by every index. A record is one
 // line; fields within a record are tab-separated; a list within a field is
@@ -199,6 +212,60 @@ impl Store {
     #[must_use]
     pub fn has(&self, hash: &str) -> bool {
         StoreHash::new(hash).is_ok_and(|hash| objects::has(&self.root, &hash))
+    }
+
+    /// Resolve a typed compiler query key to its immutable output object hash.
+    ///
+    /// Query entries are cache indexes, never semantic authority. A missing entry
+    /// is a normal miss; a malformed entry is rejected rather than treated as a
+    /// hit.
+    ///
+    /// # Errors
+    /// Fails on malformed keys/entries or a filesystem error.
+    pub fn get_query(&self, kind: &str, key: &str) -> io::Result<Option<String>> {
+        let key = StoreHash::new(key)?;
+        queries::get(&self.root, kind, &key)
+    }
+
+    /// Bind a typed compiler query key to an immutable output object.
+    ///
+    /// Rebinding the same key to different output bytes is corruption: identical
+    /// query inputs must have one byte-identical result.
+    ///
+    /// # Errors
+    /// Fails on malformed hashes, a conflicting existing binding, or a filesystem
+    /// error.
+    pub fn put_query(&self, kind: &str, key: &str, output: &str) -> io::Result<()> {
+        let key = StoreHash::new(key)?;
+        let output = StoreHash::new(output)?;
+        if !objects::has(&self.root, &output) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("query output object {output} is absent"),
+            ));
+        }
+        #[cfg(test)]
+        faults::hit(FaultPoint::AfterObjectBeforeQuery)?;
+        queries::put(&self.root, kind, &key, &output)
+    }
+
+    /// Read the latest successful explanatory record for a query locator.
+    ///
+    /// Decision records are mutable metadata and never authorize cache reuse.
+    /// Missing records are normal for a first build.
+    ///
+    /// # Errors
+    /// Fails on malformed locators, malformed records, or filesystem errors.
+    pub fn get_decision(&self, kind: &str, locator: &str) -> io::Result<Option<Vec<u8>>> {
+        decisions::get(&self.root, kind, locator)
+    }
+
+    /// Atomically replace the explanatory record for a successful query.
+    ///
+    /// # Errors
+    /// Fails on malformed locators or filesystem errors.
+    pub fn put_decision(&self, kind: &str, locator: &str, bytes: &[u8]) -> io::Result<()> {
+        decisions::put(&self.root, kind, locator, bytes)
     }
 
     /// Write (or overwrite, since the layer is mutable) a definition's metadata.
@@ -553,7 +620,7 @@ fn shard_path(layer: &Path, hash: &HashHex<'_>) -> PathBuf {
 // A hash usable as a filesystem key: nonempty hex, long enough to shard. This
 // guards the path construction, not the hash's cryptographic strength.
 
-// Unique temp path in `dir`. The `.tmp.` prefix marks it as never an object or
+// Unique temp path in `dir`. The temp prefix marks it as never an object or
 // index file, so a reader (which only opens exact known paths) ignores a temp
 // left by a killed writer.
 fn unique_temp(dir: &Path) -> PathBuf {
@@ -563,22 +630,57 @@ fn unique_temp(dir: &Path) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    dir.join(format!(".tmp.{pid}.{nanos}.{n}"))
+    dir.join(format!("{TEMP_PREFIX}{pid}.{nanos}.{n}"))
+}
+
+// The directory a store file publishes into; every store path has one.
+fn parent_dir(path: &Path) -> io::Result<&Path> {
+    path.parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "store path has no parent"))
+}
+
+// The pre-publication stage shared by both atomic writers: write `bytes` in
+// full to a fresh unique temp in `dir` and flush it durable. The caller owns
+// the commit (rename or link) and the temp's removal; an error here leaves the
+// temp behind exactly as a killed writer would, which is safe because readers
+// never open temp paths.
+fn write_temp(dir: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    let tmp = unique_temp(dir);
+    let mut f = fs::File::create(&tmp)?;
+    #[cfg(test)]
+    faults::partial_write(&mut f, bytes)?;
+    f.write_all(bytes)?;
+    #[cfg(test)]
+    faults::hit(FaultPoint::BeforeFlush)?;
+    f.sync_all()?;
+    #[cfg(test)]
+    faults::hit(FaultPoint::AfterFlush)?;
+    Ok(tmp)
 }
 
 // Write `bytes` to `path` atomically: full write plus fsync to a unique temp in
-// the same directory, then rename over the destination. The rename is the commit
-// point; a crash before it leaves only the temp.
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "store path has no parent"))?;
-    fs::create_dir_all(dir)?;
-    let tmp = unique_temp(dir);
-    {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
+// the same directory, then hard-link into place. The link is the commit point:
+// it fails rather than replaces when the destination exists, so a published
+// object is never overwritten; a crash before it leaves only the temp.
+pub(crate) fn atomic_write_if_absent(path: &Path, bytes: &[u8]) -> io::Result<bool> {
+    let tmp = write_temp(parent_dir(path)?, bytes)?;
+    #[cfg(test)]
+    faults::hit(FaultPoint::BeforePublish)?;
+    let linked = match fs::hard_link(&tmp, path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    };
+    let _ = fs::remove_file(tmp);
+    linked
+}
+
+// As above, but the commit point is a rename over the destination, for the
+// mutable layers (metadata, indexes) where replacement is the point.
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp = write_temp(parent_dir(path)?, bytes)?;
+    #[cfg(test)]
+    faults::hit(FaultPoint::BeforePublish)?;
     fs::rename(&tmp, path)
 }

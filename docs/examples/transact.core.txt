@@ -1,0 +1,49 @@
+fn attempt(spend) =
+  handle
+    return () to t@733
+    do get@balance@0(t@733) to snap@1
+    handle
+      return () to t@734
+      do get@balance@0(t@734) to t@735
+      return spend to t@736
+      t@735 - t@736 to t@737
+      do set@balance@0(t@737)
+      return () to t@738
+      do get@balance@0(t@738) to t@739
+      return 0 to t@740
+      t@739 >= t@740 to t@741
+      guard(t@741)
+      return () to t@742
+      do get@balance@0(t@742)
+    with
+      fail(k@) =>
+        return snap@1 to t@743
+        do set@balance@0(t@743) to u@
+        return 0 to t@744
+        return 1 to t@745
+        t@744 - t@745
+      return r@ =>
+        return r@
+  with
+    get@balance@0(u@, k@) =>
+      thunk { \s@.
+        return s@ to t@746
+        return s@ to t@747
+        return k@ to t@748
+        (force t@748)(t@747) to t@749
+        (force t@749)(t@746)
+      }
+    set@balance@0(v@, k@) =>
+      thunk { \s@.
+        return v@ to t@750
+        return () to t@751
+        return k@ to t@752
+        (force t@752)(t@751) to t@753
+        (force t@753)(t@750)
+      }
+    return r@ =>
+      return thunk { \s@. return r@ }
+  to run@0
+  return 100 to t@754
+  return run@0 to t@755
+  (force t@755)(t@754)

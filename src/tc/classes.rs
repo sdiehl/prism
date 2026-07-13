@@ -4,8 +4,8 @@ use marginalia::Span;
 
 use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
-    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc, Wanted,
-    Warning,
+    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc,
+    TypecheckSeed, Wanted, Warning, WarningOrigin,
 };
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
@@ -395,7 +395,7 @@ type BuildClassResult = (
     Vec<Warning>,
 );
 
-const fn head_name(t: &Type) -> Option<HeadKey> {
+pub(super) const fn head_name(t: &Type) -> Option<HeadKey> {
     match t {
         Type::Int => Some(HeadKey::Int),
         Type::I64 => Some(HeadKey::I64),
@@ -482,14 +482,15 @@ pub(super) fn build_classes(
     data: &mut BTreeMap<String, DataInfo>,
     ctors: &mut BTreeMap<String, CtorInfo>,
     env: &mut Env,
+    seed: &TypecheckSeed,
 ) -> Result<BuildClassResult, TypeError> {
     let fn_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
-    let mut classes: BTreeMap<Sym, ClassInfo> = BTreeMap::new();
-    let mut instances: BTreeMap<Sym, InstInfo> = BTreeMap::new();
-    let mut inst_keys = InstKeys::new();
+    let mut classes = seed.classes.clone();
+    let mut instances = seed.instances.clone();
+    let mut inst_keys = seed.inst_keys.clone();
     let mut warnings: Vec<Warning> = Vec::new();
-    let mut methods: BTreeMap<Sym, (Sym, usize)> = BTreeMap::new();
-    let mut constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)> = BTreeMap::new();
+    let mut methods = seed.methods.clone();
+    let mut constrained = seed.constrained.clone();
     for c in &prog.classes {
         if classes.contains_key(&Sym::from(&c.name)) {
             return Err(ErrKind::DuplicateClass {
@@ -642,7 +643,7 @@ pub(super) fn build_classes(
             },
         );
     }
-    let canonical = build_canonical(prog, &inst_keys, &instances)?;
+    let canonical = build_canonical(prog, &inst_keys, &instances, &seed.canonical)?;
     Ok((
         classes,
         instances,
@@ -817,6 +818,11 @@ fn orphan_warning(i: &ast::InstanceDecl<Core>, head: &Type) -> Option<Warning> {
             i.class,
             head.show()
         ),
+        origin: if inst_mod.is_empty() {
+            WarningOrigin::RootInstance(Sym::from(&i.name))
+        } else {
+            WarningOrigin::Imported
+        },
     })
 }
 
@@ -829,8 +835,9 @@ fn build_canonical(
     prog: &Program<Core>,
     inst_keys: &InstKeys,
     instances: &BTreeMap<Sym, InstInfo>,
+    seed: &Canon,
 ) -> Result<Canon, TypeError> {
-    let mut canonical: Canon = BTreeMap::new();
+    let mut canonical = seed.clone();
     for c in &prog.canonicals {
         let head = convert_data(&c.head);
         let key = head_name(&head).ok_or_else(|| ErrKind::CanonicalHeadNotType.at(c.span))?;

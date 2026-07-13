@@ -1,0 +1,57 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "point",
+      "scheme": "() -> #{ x : Int, y : Int }",
+      "effects": []
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Int",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "ty": "#{ x : Int, y : Int }"
+    },
+    "2": {
+      "ty": "Int"
+    },
+    "3": {
+      "ty": "Int"
+    },
+    "4": {
+      "ty": "Int"
+    },
+    "5": {
+      "res": {
+        "kind": "unboxed",
+        "index": 0,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "6": {
+      "ty": "#{ x : Int, y : Int }"
+    },
+    "7": {
+      "ty": "() -> #{ x : Int, y : Int }"
+    },
+    "8": {
+      "res": {
+        "kind": "unboxed",
+        "index": 1,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "9": {
+      "ty": "#{ x : Int, y : Int }"
+    },
+    "10": {
+      "ty": "() -> #{ x : Int, y : Int }"
+    }
+  }
+}

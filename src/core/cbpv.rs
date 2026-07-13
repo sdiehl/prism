@@ -1,7 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use super::builtins::{Builtin, FloatOp};
+use super::effect_lower::resume_use::{self, ResumeUse};
+use super::traverse::Visit;
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 use crate::syntax::ast::BinOp;
@@ -9,7 +14,7 @@ use crate::syntax::ast::BinOp;
 // Primitive operators that survive elaboration. Short-circuit `&&`/`||` lower to
 // `If` and never reach a `Prim`, so they have no variant here: a downstream pass
 // cannot observe one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CoreOp {
     Add,
     Sub,
@@ -91,7 +96,7 @@ impl CoreOp {
 // so a `Case` arm can only test a ctor or tuple (or bind/ignore the whole
 // scrutinee). Field positions are plain binders (`Some` names it, `None` ignores
 // it); nested sub-patterns are always flattened out, so they cannot appear here.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CorePat {
     Wild,
     Var(Sym),
@@ -99,13 +104,33 @@ pub enum CorePat {
     Tuple(Vec<Option<Sym>>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+mod f64_bits {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    // Serde's `with` hook requires the value by reference.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub(super) fn serialize<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u64(value.to_bits())
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<f64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        u64::deserialize(deserializer).map(f64::from_bits)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Var(Sym),
     Int(i64),
     I64(i64),
     U64(u64),
-    Float(f64),
+    Float(#[serde(with = "f64_bits")] f64),
     Bool(bool),
     Unit,
     Str(String),
@@ -130,7 +155,7 @@ pub enum Value {
 // re-elaborate `-x` as the `Num` negate method, which must produce
 // byte-identical Core to this node so the swap is invisible. `U64` has no lane:
 // negating an unsigned value is rejected in the typechecker.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NegLane {
     Int,
     I64,
@@ -149,7 +174,7 @@ impl NegLane {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HandleOp {
     pub name: Sym,
     pub params: Vec<Sym>,
@@ -173,6 +198,32 @@ pub struct HandleOp {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CheckedHandler {
     arms: Vec<HandleOp>,
+    // Parallel to `arms`: each clause's resume-usage classification, computed by
+    // the constructor (the sole writer) so it can never go stale against the
+    // clause body. A derived cost fact: deliberately absent from the content
+    // hash, Core JSON, and store codec, which all rebuild handlers through
+    // [`new`](Self::new) and so re-derive it on decode.
+    uses: Vec<ResumeUse>,
+}
+
+impl Serialize for CheckedHandler {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.arms.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CheckedHandler {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let arms = Vec::<HandleOp>::deserialize(deserializer)?;
+        Self::new(arms)
+            .map_err(|name| D::Error::custom(format!("duplicate handler operation {name}")))
+    }
 }
 
 impl CheckedHandler {
@@ -181,16 +232,20 @@ impl CheckedHandler {
     /// once, after the type checker has already rejected duplicates, so a failure
     /// here is a compiler-invariant violation rather than a user error.
     ///
+    /// Also classifies each clause's resume usage ([`ResumeUse`]), the stored
+    /// fact every effect-lowering tier consumes instead of re-scanning bodies.
+    ///
     /// # Errors
     /// Returns the duplicated operation name if two clauses share it.
     pub fn new(arms: Vec<HandleOp>) -> Result<Self, Sym> {
-        let mut seen = std::collections::BTreeSet::new();
+        let mut seen = BTreeSet::new();
         for arm in &arms {
             if !seen.insert(arm.name) {
                 return Err(arm.name);
             }
         }
-        Ok(Self { arms })
+        let uses = arms.iter().map(resume_use::classify).collect();
+        Ok(Self { arms, uses })
     }
 
     /// The clauses, in source order. `Deref` also exposes the slice API directly.
@@ -199,20 +254,27 @@ impl CheckedHandler {
         &self.arms
     }
 
-    /// Mutable clause access for in-place body rewrites that preserve the
-    /// operation set (and therefore the uniqueness invariant).
-    pub fn arms_mut(&mut self) -> &mut [HandleOp] {
-        &mut self.arms
+    /// The stored resume-usage classification of the clause at `i` (parallel to
+    /// [`arms`](Self::arms)).
+    #[must_use]
+    pub fn resume_use(&self, i: usize) -> ResumeUse {
+        self.uses[i]
+    }
+
+    /// The clauses paired with their stored resume-usage facts.
+    pub fn iter_with_use(&self) -> impl Iterator<Item = (&HandleOp, ResumeUse)> {
+        self.arms.iter().zip(self.uses.iter().copied())
     }
 
     /// Rebuild each clause, for Core-to-Core passes that transform bodies without
     /// changing which operations are handled. The mapping preserves operation
-    /// names, so the uniqueness invariant carries over from `self`.
+    /// names, so the uniqueness invariant carries over from `self`; the resume
+    /// classification is recomputed against the new bodies.
     #[must_use]
     pub fn rebuild(&self, f: impl FnMut(&HandleOp) -> HandleOp) -> Self {
-        Self {
-            arms: self.arms.iter().map(f).collect(),
-        }
+        let arms: Vec<HandleOp> = self.arms.iter().map(f).collect();
+        let uses = arms.iter().map(resume_use::classify).collect();
+        Self { arms, uses }
     }
 }
 
@@ -237,7 +299,7 @@ impl<'a> IntoIterator for &'a CheckedHandler {
 // RNG. Folding the family under one `Comp` node keeps the structural Core passes
 // (traversal, hashing, reuse, lint) to a single arm; the interpreter, codegen,
 // and JSON serializer still switch on the op where the behavior differs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IoOp {
     Print,
     PrintF,
@@ -277,7 +339,7 @@ impl IoOp {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Comp {
     Return(Value),
     Bind(Box<Self>, Sym, Box<Self>),
@@ -408,7 +470,7 @@ impl Comp {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoreFn {
     pub name: Sym,
     pub params: Vec<Sym>,
@@ -421,7 +483,7 @@ pub struct CoreFn {
     pub dict_arity: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Core {
     pub fns: Vec<CoreFn>,
 }
@@ -498,7 +560,7 @@ pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
 // those in via `fv`.
 pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
     struct Calls<'a>(&'a mut Vec<Sym>);
-    impl super::traverse::Visit for Calls<'_> {
+    impl Visit for Calls<'_> {
         fn visit_comp(&mut self, c: &Comp) {
             if let Comp::Call(name, args) = c {
                 self.0.push(*name);
@@ -510,7 +572,60 @@ pub(crate) fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
             }
         }
     }
-    super::traverse::Visit::visit_comp(&mut Calls(out), c);
+    Visit::visit_comp(&mut Calls(out), c);
+}
+
+#[cfg(test)]
+mod reachability_tests {
+    use super::{reachable_fns, Comp, Core, CoreFn, Value};
+    use crate::names::ENTRY_POINT;
+    use crate::sym::Sym;
+
+    fn function(name: &str, body: Comp) -> CoreFn {
+        CoreFn {
+            name: Sym::new(name),
+            params: Vec::new(),
+            body,
+            dict_arity: 0,
+        }
+    }
+
+    #[test]
+    fn a_local_binder_does_not_reach_a_same_named_function() {
+        let local = Sym::new("arg");
+        let core = Core {
+            fns: vec![
+                function(
+                    ENTRY_POINT,
+                    Comp::Bind(
+                        Box::new(Comp::Return(Value::Int(1))),
+                        local,
+                        Box::new(Comp::Return(Value::Var(local))),
+                    ),
+                ),
+                function("arg", Comp::Return(Value::Int(2))),
+            ],
+        };
+        assert_eq!(
+            reachable_fns(&core),
+            std::iter::once(Sym::new(ENTRY_POINT)).collect()
+        );
+    }
+
+    #[test]
+    fn a_free_function_value_is_reachable() {
+        let helper = Sym::new("helper");
+        let core = Core {
+            fns: vec![
+                function(ENTRY_POINT, Comp::Return(Value::Var(helper))),
+                function("helper", Comp::Return(Value::Int(2))),
+            ],
+        };
+        assert_eq!(
+            reachable_fns(&core),
+            [Sym::new(ENTRY_POINT), helper].into_iter().collect()
+        );
+    }
 }
 
 #[cfg(test)]

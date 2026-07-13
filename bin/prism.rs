@@ -83,9 +83,21 @@ struct Cli {
     /// Print per-pass rewrite counts to stderr
     #[arg(long, global = true)]
     opt_stats: bool,
+    /// Print compiler-query hit, miss, and write counts
+    #[arg(long, global = true)]
+    compiler_stats: bool,
+    /// Explain native artifact cache decisions after a build
+    #[arg(long, global = true)]
+    explain_cache: bool,
+    /// Worker count for independent compiler queries
+    #[arg(long, value_name = "N", global = true)]
+    query_threads: Option<usize>,
     /// Emit one timing row per compiler phase to stderr
     #[arg(long, global = true)]
     time_compile: bool,
+    /// Disable the persistent compiler artifact cache
+    #[arg(long, global = true)]
+    no_compiler_cache: bool,
     /// Dump Core after each pass to SINK (stdout, stderr, or a directory)
     #[arg(long = "dump-core", value_name = "SINK", global = true)]
     dump_core: Option<String>,
@@ -138,8 +150,9 @@ enum Cmd {
     },
     /// Print one pipeline phase artifact
     ///
-    /// PHASE is one of: tokens, ast, types, core, core-json, core-hash,
-    /// native-kont-table, shape, dupes, namespace, stdlib-hash, fbip, lowered,
+    /// PHASE is one of: tokens, ast, types, hir, interface, module-graph, core,
+    /// core-json, core-hash, native-kont-table, native-kont-state-map, shape,
+    /// dupes, namespace, stdlib-hash, fbip, lowered,
     /// tier, captures, usage-summary, usage-summary-md, usage-summary-json,
     /// llvm, mlir.
     Dump { phase: String, file: PathBuf },
@@ -274,6 +287,11 @@ enum ExecCmd {
 /// Lineage inspection: render a sidecar, explain an output, or verify one.
 #[derive(Subcommand, Debug)]
 enum LineageCmd {
+    /// Explain reuse and recompilation across the durable query graph
+    WhyRecompiled {
+        /// A `.pr` file or project; omitted uses the enclosing project
+        file: Option<PathBuf>,
+    },
     /// Render a build or run `.plineage` sidecar
     Show {
         /// The built artifact or its `.plineage` sidecar
@@ -420,6 +438,7 @@ fn main() -> ExitCode {
     // resolved value threads through every compile call, replacing the old set of
     // process-global knobs.
     let mut cfg = prism::Config::from_env();
+    cfg.session = Some(prism::CompilerSession::new());
     if let Some(s) = &cli.opt {
         let Some(level) = prism::OptLevel::parse(s) else {
             eprintln!("invalid optimization level `-O{s}` (expected 0, 1, or 2)");
@@ -482,8 +501,24 @@ fn main() -> ExitCode {
     if cli.opt_stats {
         cfg.flags.opt_stats = true;
     }
+    if cli.compiler_stats {
+        cfg.flags.compiler_stats = true;
+    }
+    if cli.explain_cache {
+        cfg.flags.explain_cache = true;
+    }
+    if let Some(threads) = cli.query_threads {
+        if threads == 0 {
+            eprintln!("invalid --query-threads 0 (expected a positive integer)");
+            return ExitCode::FAILURE;
+        }
+        cfg.flags.query_threads = threads;
+    }
     if cli.time_compile {
         cfg.flags.time_compile = true;
+    }
+    if cli.no_compiler_cache {
+        cfg.flags.compiler_cache = false;
     }
     if let Some(sink) = cli.dump_core {
         cfg.flags.dump_core = Some(sink.into());
@@ -505,6 +540,15 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
     };
+    if cfg.flags.compiler_stats {
+        if let Some(session) = &cfg.session {
+            let stats = session.stats();
+            eprintln!(
+                "compiler queries: {} hit, {} miss, {} write",
+                stats.hits, stats.misses, stats.writes
+            );
+        }
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         // A runtime fault prints exactly what the native trap prints (the C
@@ -652,6 +696,9 @@ fn dispatch_exec(exec: ExecCmd, cfg: &prism::Config) -> CmdResult {
 // Lineage inspection: render a sidecar, explain an output, or verify one.
 fn dispatch_lineage(lineage: LineageCmd, cfg: &prism::Config) -> CmdResult {
     match lineage {
+        LineageCmd::WhyRecompiled { file } => {
+            cli::lineage::why_recompiled_cmd(file.as_deref(), cfg)
+        }
         LineageCmd::Show { file, json } => cli::lineage::lineage_cmd(&file, json),
         LineageCmd::Why {
             sidecar,

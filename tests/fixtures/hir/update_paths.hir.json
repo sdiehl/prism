@@ -1,0 +1,86 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "heal",
+      "scheme": "(Player) -> Player",
+      "effects": []
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Int",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "res": {
+        "kind": "paths",
+        "chains": [
+          [
+            {
+              "ctor": "Player",
+              "index": 0,
+              "arity": 2
+            },
+            {
+              "ctor": "Vec2",
+              "index": 0,
+              "arity": 2
+            }
+          ],
+          [
+            {
+              "ctor": "Player",
+              "index": 1,
+              "arity": 2
+            }
+          ]
+        ]
+      },
+      "ty": "Player"
+    },
+    "2": {
+      "ty": "Player"
+    },
+    "3": {
+      "ty": "Int"
+    },
+    "4": {
+      "ty": "Int"
+    },
+    "6": {
+      "ty": "Player"
+    },
+    "7": {
+      "ty": "Vec2"
+    },
+    "8": {
+      "ty": "Int"
+    },
+    "9": {
+      "ty": "Int"
+    },
+    "10": {
+      "ty": "Int"
+    },
+    "11": {
+      "res": {
+        "kind": "field",
+        "ctor": "Player",
+        "index": 1,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "12": {
+      "ty": "Player"
+    },
+    "13": {
+      "ty": "(Player) -> Player"
+    },
+    "14": {
+      "ty": "Player"
+    }
+  }
+}

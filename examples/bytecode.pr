@@ -1,0 +1,157 @@
+-- A stack-machine bytecode compiler and VM, in two separate phases rather than
+-- the single-pass tree-walking of `interp.pr` or the direct de Bruijn
+-- reduction of `lambda.pr`. `compile` lowers an arithmetic/let expression tree
+-- into a flat `List(Instr)`: operators become postfix opcodes over an operand
+-- stack, and `Let`/`Var` are resolved at COMPILE TIME into de Bruijn-style
+-- frame depths, exactly the way `lambda.pr` resolves lambda binders, so the
+-- VM never sees a name. `exec` then fetch-decodes that flat list against two
+-- runtime stacks: an operand stack for arithmetic and a frame stack for
+-- locals pushed by `Bind` and popped by `Unbind`. Shadowing works because a
+-- new `Let` always binds at frame depth 0, so `Load(0)` reaches the innermost
+-- binding first, same as `Var(0)` under a fresh de Bruijn binder.
+--
+-- Expected output:
+--   const          : instrs=1 result=42
+--   arithmetic     : instrs=5 result=23
+--   let-double     : instrs=6 result=20
+--   nested-let-sub : instrs=9 result=2
+--   negate-sum     : instrs=4 result=-5
+--   shadowing      : instrs=7 result=2
+--   deep-nesting   : instrs=19 result=10
+
+import Data.List (..)
+
+type Expr
+  = Num(Int)
+  | Add(Expr, Expr)
+  | Sub(Expr, Expr)
+  | Mul(Expr, Expr)
+  | Neg(Expr)
+  | Let(String, Expr, Expr)
+  | Var(String)
+
+type Instr
+  = Push(Int)
+  | IAdd
+  | ISub
+  | IMul
+  | INeg
+  | Load(Int)
+  | Bind
+  | Unbind
+
+-- Compile-time name environment: the list of names currently in scope,
+-- innermost first, so its length-position IS the de Bruijn depth.
+fn depth_of(name, cenv, i) : Int =
+  match cenv of
+    Nil => 0
+    Cons(n, rest) =>
+      if str_eq(n, name) then
+        i
+      else
+        depth_of(name, rest, i + 1)
+
+fn compile(e, cenv) : List(Instr) =
+  match e of
+    Num(n) => Cons(Push(n), Nil)
+    Add(a, b) =>
+      append(compile(a, cenv), append(compile(b, cenv), Cons(IAdd, Nil)))
+    Sub(a, b) =>
+      append(compile(a, cenv), append(compile(b, cenv), Cons(ISub, Nil)))
+    Mul(a, b) =>
+      append(compile(a, cenv), append(compile(b, cenv), Cons(IMul, Nil)))
+    Neg(a) => append(compile(a, cenv), Cons(INeg, Nil))
+    Var(name) => Cons(Load(depth_of(name, cenv, 0)), Nil)
+    Let(name, rhs, body) =>
+      append(
+          compile(rhs, cenv),
+          Cons(
+              Bind,
+              append(compile(body, Cons(name, cenv)), Cons(Unbind, Nil)),
+            ),
+        )
+
+-- The VM: `stack` is the arithmetic operand stack, `frame` is the locals
+-- stack that `Bind`/`Unbind` push and pop in lockstep with lexical scope.
+fn run_instrs(instrs, stack, frame) : Int =
+  match instrs of
+    Nil =>
+      match stack of
+        Cons(v, _) => v
+        Nil => 0
+    Cons(op, rest) =>
+      match op of
+        Push(n) => run_instrs(rest, Cons(n, stack), frame)
+        IAdd =>
+          match stack of
+            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x + y, s2), frame)
+            _ => 0
+        ISub =>
+          match stack of
+            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x - y, s2), frame)
+            _ => 0
+        IMul =>
+          match stack of
+            Cons(y, Cons(x, s2)) => run_instrs(rest, Cons(x * y, s2), frame)
+            _ => 0
+        INeg =>
+          match stack of
+            Cons(x, s2) => run_instrs(rest, Cons(0 - x, s2), frame)
+            _ => 0
+        Load(d) =>
+          match nth(d, frame) of
+            Some(v) => run_instrs(rest, Cons(v, stack), frame)
+            None => run_instrs(rest, Cons(0, stack), frame)
+        Bind =>
+          match stack of
+            Cons(v, s2) => run_instrs(rest, s2, Cons(v, frame))
+            _ => run_instrs(rest, stack, frame)
+        Unbind =>
+          match frame of
+            Cons(_, f2) => run_instrs(rest, stack, f2)
+            _ => run_instrs(rest, stack, frame)
+
+fn exec(code) : Int = run_instrs(code, Nil, Nil)
+
+fn report(label : String, e) =
+  let code = compile(e, Nil)
+  let n = length(code)
+  let result = exec(code)
+  println("{label} : instrs={n} result={result}")
+
+fn main() =
+  -- 42
+  report("const         ", Num(42))
+  -- 3 + 4 * 5 = 23
+  report("arithmetic    ", Add(Num(3), Mul(Num(4), Num(5))))
+  -- let x = 10 in x + x = 20
+  report("let-double    ", Let("x", Num(10), Add(Var("x"), Var("x"))))
+  -- let x = 5 in let y = 3 in x - y = 2
+  report(
+      "nested-let-sub",
+      Let("x", Num(5), Let("y", Num(3), Sub(Var("x"), Var("y")))),
+    )
+  -- -(2 + 3) = -5
+  report("negate-sum    ", Neg(Add(Num(2), Num(3))))
+  -- let x = 1 in let x = 2 in x = 2  (inner shadows outer)
+  report("shadowing     ", Let("x", Num(1), Let("x", Num(2), Var("x"))))
+  -- four nested lets, each shadowing nothing, to exercise deeper frame depths:
+  -- let a=1 in let b=2 in let c=3 in let d=4 in (a+b)+(c+d) = 3+7 = 10
+  let deep = Let(
+      "a",
+      Num(1),
+      Let(
+          "b",
+          Num(2),
+          Let(
+              "c",
+              Num(3),
+              Let(
+                  "d",
+                  Num(4),
+                  Add(Add(Var("a"), Var("b")), Add(Var("c"), Var("d"))),
+                ),
+            ),
+        ),
+    )
+  report("deep-nesting  ", deep)

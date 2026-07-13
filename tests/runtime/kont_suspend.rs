@@ -8,7 +8,7 @@ use std::io::Cursor;
 use std::path::Path;
 
 use prism::eval::kont::{decode_kont, encode_kont};
-use prism::eval::{resume_kont, run_suspending, Checkpoint};
+use prism::eval::{resume_kont_observed, run_observed_with_args, run_suspending, Checkpoint};
 use prism::resolve::default_roots;
 use prism::{
     core_of, interpret_io_on, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
@@ -53,6 +53,11 @@ fn suspend_and_resume_reproduces_output_at_every_cut() {
     // in-memory continuation.
     let core = core_of(COUNTER).expect("compile");
     let want = uninterrupted(&with_prelude(COUNTER));
+    let mut observed_out = Vec::new();
+    let mut observed_input = Cursor::new(Vec::new());
+    let uninterrupted_trace =
+        run_observed_with_args(&core, &mut observed_out, &mut observed_input, Vec::new())
+            .observations;
     assert!(!want.is_empty(), "the program prints");
 
     let mut saw_true_midpoint = false;
@@ -78,7 +83,11 @@ fn suspend_and_resume_reproduces_output_at_every_cut() {
                 let kont2 = decode_kont(&bytes).expect("decode");
                 let mut suffix: Vec<u8> = Vec::new();
                 let mut input2 = Cursor::new(Vec::new());
-                resume_kont(&core, kont2, &mut suffix, &mut input2).expect("resume");
+                let resumed = resume_kont_observed(&core, kont2, &mut suffix, &mut input2);
+                assert_eq!(
+                    resumed.observations, uninterrupted_trace,
+                    "suspend/resume preserves the complete observation trace at budget {budget}"
+                );
                 let suffix = String::from_utf8(suffix).unwrap();
                 assert_eq!(
                     format!("{prefix}{suffix}"),

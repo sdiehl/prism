@@ -188,7 +188,7 @@ impl Elab<'_> {
     // A constrained global at value position: a closure that captures the
     // resolved dictionaries.
     pub(super) fn constrained_value(&mut self, name: &str, id: NodeId) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+        let ds = self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
             Error::InternalInvariant(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         if let Some((class, idx)) = self.checked.methods.get(&Sym::from(name)).copied() {
@@ -227,7 +227,7 @@ impl Elab<'_> {
         vals: Vec<Value>,
         binds: &mut Vec<(Comp, String)>,
     ) -> Result<Comp, Error> {
-        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+        let ds = self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
             Error::InternalInvariant(format!("no dictionary resolution for `{name}` at {id:?}"))
         })?;
         // A `sort`/`sort_by_ord` whose `Ord` is a canonical primitive instance

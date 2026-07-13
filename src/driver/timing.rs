@@ -18,8 +18,8 @@
 //! 2. the phase name ([`Phase::label`]);
 //! 3. wall time, milliseconds to one decimal;
 //! 4. the input artifact key, the source content digest abbreviated for display;
-//! 5. the cache status, always [`CacheStatus::Cold`] for now (no compile cache
-//!    exists yet; the column is here so the format survives one arriving);
+//! 5. the cache status: `cold` when caching is disabled, otherwise `hit`,
+//!    `miss`, or `write`;
 //! 6. an optional output artifact key, present only where a phase has a real,
 //!    cheaply available artifact identity (the elaborated Core root, the emitted
 //!    LLVM bitcode);
@@ -60,7 +60,9 @@ pub(crate) enum Phase {
     OptPre,
     LowerEffects,
     OptLate,
+    #[cfg(feature = "native")]
     EmitLlvm,
+    #[cfg(feature = "native")]
     CcLink,
     Eval,
 }
@@ -77,26 +79,37 @@ impl Phase {
             Self::OptPre => "opt.pre",
             Self::LowerEffects => "lower.effects",
             Self::OptLate => "opt.late",
+            #[cfg(feature = "native")]
             Self::EmitLlvm => "emit.llvm",
+            #[cfg(feature = "native")]
             Self::CcLink => "cc.link",
             Self::Eval => "eval",
         }
     }
 }
 
-/// The cache status column (field 5). The format reserves the spellings `cold`,
-/// `hit`, `miss`, and `write`; a compile cache does not exist yet, so `Cold` is
-/// the only constructed status and the enum grows a variant the day one arrives.
-/// The column exists now so that arrival widens a value set, never the schema.
+/// The cache decision attached to a phase timing row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CacheStatus {
     Cold,
+    #[cfg(feature = "native")]
+    Hit,
+    #[cfg(feature = "native")]
+    Miss,
+    #[cfg(feature = "native")]
+    Write,
 }
 
 impl CacheStatus {
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Cold => "cold",
+            #[cfg(feature = "native")]
+            Self::Hit => "hit",
+            #[cfg(feature = "native")]
+            Self::Miss => "miss",
+            #[cfg(feature = "native")]
+            Self::Write => "write",
         }
     }
 }
@@ -107,14 +120,21 @@ pub(crate) enum ArtifactKind {
     /// The elaborated (pre-optimizer) Core root, a phase's compiled identity.
     Core,
     /// The emitted LLVM bitcode.
+    #[cfg(feature = "native")]
     Llvm,
+    /// A linked native executable.
+    #[cfg(feature = "native")]
+    Native,
 }
 
 impl ArtifactKind {
     const fn label(self) -> &'static str {
         match self {
             Self::Core => "core",
+            #[cfg(feature = "native")]
             Self::Llvm => "llvm",
+            #[cfg(feature = "native")]
+            Self::Native => "native",
         }
     }
 }
@@ -125,14 +145,20 @@ impl ArtifactKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CountKey {
     Defs,
+    #[cfg(feature = "native")]
     IrBytes,
+    #[cfg(feature = "native")]
+    ArtifactBytes,
 }
 
 impl CountKey {
     const fn label(self) -> &'static str {
         match self {
             Self::Defs => "defs",
+            #[cfg(feature = "native")]
             Self::IrBytes => "ir_bytes",
+            #[cfg(feature = "native")]
+            Self::ArtifactBytes => "artifact_bytes",
         }
     }
 }
@@ -209,7 +235,14 @@ impl TimingSink {
 
     // Record one phase, unless it was already emitted on this compile. Streams the
     // row to stderr immediately.
-    fn record(&self, phase: Phase, src: &str, dt: Duration, extras: &RowExtras) {
+    fn record(
+        &self,
+        phase: Phase,
+        src: &str,
+        dt: Duration,
+        status: CacheStatus,
+        extras: &RowExtras,
+    ) {
         // First sight of this phase? A re-elaboration on the same compile repeats
         // phases; the guard is released before any formatting or stderr write.
         let first = {
@@ -229,7 +262,7 @@ impl TimingSink {
             phase.label(),
             millis(dt),
             self.src_key(src),
-            CacheStatus::Cold.label(),
+            status.label(),
         );
         if let Some((kind, digest)) = &extras.out {
             let _ = write!(row, "\tout={}:{}", kind.label(), abbrev(digest));
@@ -269,38 +302,77 @@ pub(crate) fn timed_res<T, E>(
             let result = f();
             let dt = start.elapsed();
             match &result {
-                Ok(value) => sink.record(phase, src, dt, &ok_extras(value)),
-                Err(_) => sink.record(phase, src, dt, &RowExtras::default()),
+                Ok(value) => sink.record(phase, src, dt, CacheStatus::Cold, &ok_extras(value)),
+                Err(_) => sink.record(phase, src, dt, CacheStatus::Cold, &RowExtras::default()),
             }
             result
         }
     }
 }
 
-/// Time an infallible phase. As [`timed_res`], but for a closure that cannot fail
-/// (the optimizer stages return a value, not a `Result`).
-pub(crate) fn timed<T>(
+/// Time a fallible cache-aware phase with an explicit decision label.
+#[cfg(feature = "native")]
+pub(crate) fn timed_res_status<T, E>(
     timing: Option<&TimingSink>,
     phase: Phase,
     src: &str,
-    f: impl FnOnce() -> T,
-    extras: impl FnOnce(&T) -> RowExtras,
-) -> T {
+    status: CacheStatus,
+    f: impl FnOnce() -> Result<T, E>,
+    ok_extras: impl FnOnce(&T) -> RowExtras,
+) -> Result<T, E> {
     match timing {
         None => f(),
         Some(sink) => {
             let start = Instant::now();
-            let value = f();
+            let result = f();
             let dt = start.elapsed();
-            sink.record(phase, src, dt, &extras(&value));
-            value
+            match &result {
+                Ok(value) => sink.record(phase, src, dt, status, &ok_extras(value)),
+                Err(_) => sink.record(phase, src, dt, status, &RowExtras::default()),
+            }
+            result
         }
+    }
+}
+
+/// Record a cache hit that skipped the phase entirely.
+#[cfg(feature = "native")]
+pub(crate) fn cache_hit(
+    timing: Option<&TimingSink>,
+    phase: Phase,
+    src: &str,
+    output_kind: ArtifactKind,
+    output_digest: String,
+) {
+    if let Some(sink) = timing {
+        sink.record(
+            phase,
+            src,
+            Duration::ZERO,
+            CacheStatus::Hit,
+            &RowExtras::default().out(output_kind, output_digest),
+        );
     }
 }
 
 /// The `emit.llvm` row's tail: the size and content digest of the emitted LLVM
 /// bitcode. Best-effort, since it runs only under the flag: a bitcode file that
 /// cannot be read yields a bare tail rather than an error.
+#[cfg(feature = "native")]
+pub(crate) fn native_artifact(binary: &Path) -> RowExtras {
+    std::fs::read(binary).map_or_else(
+        |_| RowExtras::default(),
+        |bytes| {
+            RowExtras::default()
+                .out(
+                    ArtifactKind::Native,
+                    blake3::hash(&bytes).to_hex().to_string(),
+                )
+                .count(CountKey::ArtifactBytes, bytes.len())
+        },
+    )
+}
+
 #[cfg(feature = "native")]
 pub(crate) fn llvm_artifact(bitcode: &Path) -> RowExtras {
     std::fs::read(bitcode).map_or_else(

@@ -1,8 +1,0 @@
--- `deriving (Eq, Ord, Show)` generates one structural instance per class: `eq`
--- compares constructor and fields, `cmp` orders by constructor index then
--- fields, `show` renders the constructor name and its arguments.
-type Color = Red | Green | Blue deriving (Eq, Ord, Show)
-  ==>
-instance eqColor : Eq(Color)   { fn eq(a, b)   = structural equality }
-instance ordColor : Ord(Color) { fn cmp(a, b)  = by constructor, then fields }
-instance showColor : Show(Color) { fn show(a)  = "Red" | "Green" | "Blue" }

@@ -1,0 +1,188 @@
+-- A tree-walking interpreter for a small call-by-value functional language with
+-- NAMED variables, so it complements the de Bruijn `lambda.pr` (no names, one
+-- value type, no primitives) and the accumulator REPL `calc.pr` (no AST). Values
+-- are integers, booleans, and closures; expressions add primitive operators,
+-- conditionals, `let`, first-class curried functions, and a self-capturing
+-- recursive binding `Rec` that needs NO cyclic environment: a `RecFun` re-binds
+-- its own name in the call environment at apply time. Every runtime fault (an
+-- unbound name, applying a non-function, a primitive on the wrong type) SIGNALS
+-- the `Crash` effect, whose `never` handler drops the continuation and reports
+-- the message, so a fault escapes the recursion instead of threading an error
+-- up through every return.
+--
+-- Expected output:
+--   fact 5        = 120
+--   fib 10        = 55
+--   (add 3) 4     = 7
+--   twice inc 5   = 7
+--   2 < 3 ? 10:20 = 10
+--   unbound       = error: unbound variable nope
+--   apply int     = error: applying a non-function
+--   bad primitive = error: primitive on non-integers
+
+type Expr
+  = Num(Int)
+  | Bln(Bool)
+  | Var(String)
+  | Prim(String, Expr, Expr)
+  | If(Expr, Expr, Expr)
+  | Let(String, Expr, Expr)
+  | Lam(String, Expr)
+  | Rec(String, String, Expr, Expr)
+  | App(Expr, Expr)
+
+type Value
+  = IntV(Int)
+  | BoolV(Bool)
+  | Fun(String, Expr, Env)
+  | RecFun(String, String, Expr, Env)
+
+type Env = ENil | EBind(String, Value, Env)
+
+effect Crash
+  oops(String) : Value
+
+fn lookup(env, name) : Value ! {Crash} =
+  match env of
+    ENil => oops("unbound variable {name}")
+    EBind(k, v, rest) =>
+      if str_eq(k, name) then
+        v
+      else
+        lookup(rest, name)
+
+-- Primitives are integer-typed; comparisons yield booleans. A wrong operand
+-- type or an unknown operator signals Crash.
+fn prim(op, a, b) : Value ! {Crash} =
+  match (a, b) of
+    (IntV(x), IntV(y)) =>
+      if str_eq(op, "+") then
+        IntV(x + y)
+      elif str_eq(op, "-") then
+        IntV(x - y)
+      elif str_eq(op, "*") then
+        IntV(x * y)
+      elif str_eq(op, "<") then
+        BoolV(x < y)
+      elif str_eq(op, "==") then
+        BoolV(x == y)
+      else
+        oops("unknown operator {op}")
+    _ => oops("primitive on non-integers")
+
+fn eval(env, e) : Value ! {Crash} =
+  match e of
+    Num(n) => IntV(n)
+    Bln(b) => BoolV(b)
+    Var(x) => lookup(env, x)
+    Prim(op, a, b) => prim(op, eval(env, a), eval(env, b))
+    If(c, t, f) =>
+      match eval(env, c) of
+        BoolV(b) =>
+          if b then
+            eval(env, t)
+          else
+            eval(env, f)
+        _ => oops("if-condition is not a boolean")
+    Let(name, rhs, body) =>
+      let v = eval(env, rhs)
+      eval(EBind(name, v, env), body)
+    Lam(param, body) => Fun(param, body, env)
+    Rec(fname, param, body, rest) =>
+      eval(EBind(fname, RecFun(fname, param, body, env), env), rest)
+    App(f, a) =>
+      match eval(env, f) of
+        Fun(param, body, cenv) =>
+          let arg = eval(env, a)
+          eval(EBind(param, arg, cenv), body)
+        RecFun(fname, param, body, cenv) =>
+          let arg = eval(env, a)
+          let call = EBind(
+              param,
+              arg,
+              EBind(fname, RecFun(fname, param, body, cenv), cenv),
+            )
+          eval(call, body)
+        _ => oops("applying a non-function")
+
+fn show_val(v) =
+  match v of
+    IntV(n) => show(n)
+    BoolV(b) =>
+      if b then
+        "true"
+      else
+        "false"
+    Fun(_, _, _) => "<fun>"
+    RecFun(_, _, _, _) => "<rec-fun>"
+
+fn run(e) =
+  handle show_val(eval(ENil, e)) with
+    never oops(msg) => "error: {msg}"
+    return r => r
+
+-- Small constructors so the sample programs read closer to source than trees.
+fn lam2(p, q, body) = Lam(p, Lam(q, body))
+
+fn app2(f, a, b) = App(App(f, a), b)
+
+fn main() =
+  -- fact n = if n == 0 then 1 else n * fact(n - 1)
+  let fact = Rec(
+      "fact",
+      "n",
+      If(
+          Prim("==", Var("n"), Num(0)),
+          Num(1),
+          Prim("*", Var("n"), App(Var("fact"), Prim("-", Var("n"), Num(1)))),
+        ),
+      App(Var("fact"), Num(5)),
+    )
+  -- fib n = if n < 2 then n else fib(n-1) + fib(n-2)
+  let fib = Rec(
+      "fib",
+      "n",
+      If(
+          Prim("<", Var("n"), Num(2)),
+          Var("n"),
+          Prim(
+              "+",
+              App(Var("fib"), Prim("-", Var("n"), Num(1))),
+              App(Var("fib"), Prim("-", Var("n"), Num(2))),
+            ),
+        ),
+      App(Var("fib"), Num(10)),
+    )
+  -- add = \x. \y. x + y ; (add 3) 4
+  let add = Let(
+      "add",
+      lam2("x", "y", Prim("+", Var("x"), Var("y"))),
+      app2(Var("add"), Num(3), Num(4)),
+    )
+  -- inc = \x. x + 1 ; twice = \f. \x. f (f x) ; twice inc 5
+  let twice = Let(
+      "inc",
+      Lam("x", Prim("+", Var("x"), Num(1))),
+      Let(
+          "twice",
+          lam2("f", "x", App(Var("f"), App(Var("f"), Var("x")))),
+          app2(Var("twice"), Var("inc"), Num(5)),
+        ),
+    )
+  let cond = If(Prim("<", Num(2), Num(3)), Num(10), Num(20))
+  let out_fact = run(fact)
+  let out_fib = run(fib)
+  let out_add = run(add)
+  let out_twice = run(twice)
+  let out_cond = run(cond)
+  let out_unbound = run(Var("nope"))
+  let out_applyint = run(App(Num(1), Num(2)))
+  let out_badprim = run(Prim("+", Bln(true), Num(1)))
+  println("fact 5        = {out_fact}")
+  println("fib 10        = {out_fib}")
+  println("(add 3) 4     = {out_add}")
+  println("twice inc 5   = {out_twice}")
+  println("2 < 3 ? 10:20 = {out_cond}")
+  println("unbound       = {out_unbound}")
+  println("apply int     = {out_applyint}")
+  println("bad primitive = {out_badprim}")

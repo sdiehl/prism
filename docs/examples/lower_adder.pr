@@ -1,0 +1,3 @@
+fn adder(x : Int) : (Int) -> Int = \(y) -> x + y
+
+fn main() = println(adder(10)(5))

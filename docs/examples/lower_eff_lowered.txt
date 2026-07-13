@@ -1,5 +1,21 @@
-fn tick(ev_get, ev_put, s) =
-  (force ev_get)((), s)  to n, s'    -- perform get  -> a call on the evidence
-  s' + 1                 to m
-  (force ev_put)(m, s')  to _, s''   -- perform put  -> a call on the evidence
-  return n, s''
+fn tick(ev@0, ev@1, st@) =
+  (force ev@0)(st@) to 0@st
+  st@ + 1 to t@735
+  (force ev@1)(t@735, 0@st) to 1@st
+  return 1@st
+fn counter(ev@0, ev@1, st@) =
+  tick(ev@0, ev@1, st@) to 2@st
+  tick(ev@0, ev@1, 2@st) to 3@st
+  tick(ev@0, ev@1, 3@st) to 4@st
+  (force ev@0)(4@st)
+fn run_counter(init) =
+  return thunk { \s. return s } to ev@0
+  return thunk { \s2 _s. return s2 } to ev@1
+  thunk { \5@acc.
+    tick(ev@0, ev@1, 5@acc) to %i3
+    tick(ev@0, ev@1, %i3) to %i4
+    tick(ev@0, ev@1, %i4) to %i5
+    (force ev@0)(%i5) to 6@fin
+    return 6@fin
+  } to f
+  (force f)(init)

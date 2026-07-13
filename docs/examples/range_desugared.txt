@@ -1,4 +1,0 @@
--- An arithmetic sequence lowers to a prelude call. With a two-element prefix the
--- step is the difference of the first two.
-[1..5]      ==>   enum_from_to(1, 5)
-[1, 3..9]   ==>   enum_from_then_to(1, 3, 9)

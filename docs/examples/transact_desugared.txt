@@ -1,9 +1,0 @@
--- `transact body else fallback` snapshots every live `var`, runs `body` under a
--- `Fail` handler, and on failure restores the snapshots before yielding
--- `fallback`, so a failed attempt leaves observable state unchanged.
-transact body else fallback
-  ==>
-let saved = snapshot of each live var
-handle body with
-  never fail(_) => restore each var from saved, then fallback
-  return r => r

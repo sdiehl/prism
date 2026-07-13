@@ -17,12 +17,13 @@ use crate::core::{
     HASH_SCHEME,
 };
 use crate::error::Error;
+use crate::hir::NodeRes;
 use crate::lex::lex;
 use crate::parse::parse;
 use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Fip, Program};
-use crate::types::{show_effects, Checked, Type};
+use crate::syntax::ast::{Core as CorePhase, Program};
+use crate::types::{show_effects, Checked, Dict, Type};
 use serde::Serialize;
 
 #[cfg(feature = "mlir")]
@@ -32,11 +33,10 @@ use crate::codegen::{emit_llvm_with_native_kont_table, native_kont_state_map};
 
 #[cfg(feature = "native")]
 use super::build::compiled;
-use super::identity::namespace_root_of;
+use super::identity::{module_interface, namespace_root_of};
 #[cfg(feature = "native")]
-use super::identity::{
-    native_kont_table_for_with_rows, native_kont_table_of, NativeKontIdentityRows,
-};
+use super::identity::{native_kont_table_of, NativeKontIdentityRows};
+use super::module_graph::module_graph;
 use super::report::types_section;
 use super::{
     check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
@@ -55,8 +55,6 @@ const USAGE_SUMMARY_FORMAT: &str = "prism-usage-summary-v1";
 const USAGE_NOALLOC_YES: &str = "yes";
 const USAGE_NOALLOC_NO: &str = "no";
 const USAGE_DISCIPLINE_NONE: &str = "-";
-const USAGE_DISCIPLINE_FBIP: &str = "fbip";
-const USAGE_DISCIPLINE_FIP: &str = "fip";
 // The usage-summary columns, in order, naming both the TSV/markdown headers and the
 // JSON fields.
 const USAGE_SUMMARY_COLUMNS: [&str; 5] = ["name", "noalloc", "discipline", "borrow", "row"];
@@ -90,6 +88,21 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         "ast" => Ok(format!("{:#?}", parse(src)?.program)),
         "types" => Ok(types_section(&check_on(src, roots)?)),
+        "interface" => {
+            let entry = crate::error::SourceMap::new(src).user();
+            module_interface(entry, src, roots)?
+                .to_json()
+                .map_err(|e| Error::CodegenDump(e.to_string()))
+        }
+        "module-graph" => module_graph(src, roots)?
+            .to_json()
+            .map_err(|e| Error::CodegenDump(e.to_string())),
+        // The checked-HIR fixture: the stable boundary a Prism-written
+        // typechecker/elaborator can be diffed against. Per-declaration schemes
+        // and effect rows plus, for every node the checker recorded a fact for,
+        // its resolution, dictionary evidence, numeric lane, and zonked type, as
+        // versioned deterministic JSON.
+        "hir" => Ok(hir_fixture(&check_on(src, roots)?)),
         "core" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(pp_core_pretty(&strip_prelude(core.0, &prelude_fn_names()?)))
@@ -366,9 +379,9 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         #[cfg(feature = "native")]
         "llvm" => {
-            let (_, core, ctors) = compiled(src, roots, cfg)?;
+            let (_, core, ctors, hashes) = compiled(src, roots, cfg)?;
             let native_kont_table =
-                native_kont_table_for_with_rows(src, roots, cfg, NativeKontIdentityRows::Portable)?;
+                native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)?;
             emit_llvm_with_native_kont_table(
                 &core,
                 &ctors,
@@ -379,7 +392,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         #[cfg(feature = "mlir")]
         "mlir" => {
-            let (_, core, ctors) = compiled(src, roots, cfg)?;
+            let (_, core, ctors, _) = compiled(src, roots, cfg)?;
             emit_mlir(&core, &ctors).map_err(Error::CodegenDump)
         }
         other => Err(Error::CodegenDump(format!("unknown phase {other}"))),
@@ -484,11 +497,9 @@ fn usage_rows(
         } else {
             USAGE_NOALLOC_NO
         };
-        let discipline = match decl.fip {
-            Fip::No => USAGE_DISCIPLINE_NONE,
-            Fip::Fbip => USAGE_DISCIPLINE_FBIP,
-            Fip::Fip => USAGE_DISCIPLINE_FIP,
-        };
+        // Keyword (`fip`/`fbip`) from the canonical home; the discipline column
+        // shows `-` when the definition carries no discipline.
+        let discipline = decl.fip.keyword().unwrap_or(USAGE_DISCIPLINE_NONE);
         rows.push(UsageRow {
             name: name.to_string(),
             noalloc,
@@ -602,6 +613,148 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> String {
             .collect(),
     };
     serde_json::to_string_pretty(&doc).unwrap_or_default()
+}
+
+// The schema tag heading every checked-HIR fixture. It versions the envelope so
+// a committed fixture is self-describing and a reader can tell which layout it is
+// parsing; bump it on any incompatible shape change.
+const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v1";
+
+// The versioned checked-HIR fixture document: the schema tag, the checked
+// declarations in source order, and every node the checker recorded a fact for,
+// keyed by decimal NodeId. Serialized through derived structs and BTreeMaps so
+// two runs are byte-identical.
+#[derive(Serialize)]
+struct HirFixture {
+    schema: &'static str,
+    decls: Vec<HirDecl>,
+    nodes: BTreeMap<u32, HirNode>,
+}
+
+#[derive(Serialize)]
+struct HirDecl {
+    name: String,
+    scheme: String,
+    effects: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct HirNode {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    res: Option<HirRes>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evidence: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ty: Option<String>,
+}
+
+// A node's resolution fact, tagged by kind so the three shapes share one field
+// (`kind`) a reader dispatches on.
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+enum HirRes {
+    #[serde(rename = "field")]
+    Field {
+        ctor: String,
+        index: usize,
+        arity: usize,
+    },
+    #[serde(rename = "unboxed")]
+    Unboxed { index: usize, arity: usize },
+    #[serde(rename = "paths")]
+    Paths { chains: Vec<Vec<HirStep>> },
+}
+
+// One rebuild step of an update path: the constructor, the field's index, and
+// the constructor arity.
+#[derive(Serialize)]
+struct HirStep {
+    ctor: String,
+    index: usize,
+    arity: usize,
+}
+
+// Render a checked program's HIR fixture. Declarations come out in source order;
+// nodes come out in ascending NodeId order (the BTreeMap key is the decimal id).
+fn hir_fixture(checked: &Checked) -> String {
+    let decls = checked
+        .decls
+        .iter()
+        .map(|d| HirDecl {
+            name: d.name.clone(),
+            scheme: d.ty.show(),
+            effects: d.effects.iter().map(|s| s.as_str().to_string()).collect(),
+        })
+        .collect();
+    let nodes = checked
+        .facts
+        .iter()
+        .map(|(id, refs)| {
+            (
+                id,
+                HirNode {
+                    res: refs.res.map(render_res),
+                    evidence: refs.evidence.map(|ds| ds.iter().map(render_dict).collect()),
+                    lane: refs.lane.map(Type::show),
+                    ty: refs.ty.map(Type::show),
+                },
+            )
+        })
+        .collect();
+    let fixture = HirFixture {
+        schema: HIR_FIXTURE_SCHEMA,
+        decls,
+        nodes,
+    };
+    serde_json::to_string_pretty(&fixture).unwrap_or_default()
+}
+
+// A resolution fact as its serializable projection.
+fn render_res(res: &NodeRes) -> HirRes {
+    match res {
+        NodeRes::Field(ctor, index, arity) => HirRes::Field {
+            ctor: ctor.clone(),
+            index: *index,
+            arity: *arity,
+        },
+        NodeRes::UnboxedField(index, arity) => HirRes::Unboxed {
+            index: *index,
+            arity: *arity,
+        },
+        NodeRes::Paths(chains) => HirRes::Paths {
+            chains: chains
+                .iter()
+                .map(|chain| {
+                    chain
+                        .iter()
+                        .map(|(ctor, index, arity)| HirStep {
+                            ctor: ctor.clone(),
+                            index: *index,
+                            arity: *arity,
+                        })
+                        .collect()
+                })
+                .collect(),
+        },
+    }
+}
+
+// A dictionary as compact deterministic text, e.g. `Global(showOrd, [Param(0)])`.
+// A rendering, not a parse target: the fixture pins the evidence a future
+// elaborator must reproduce, so stability matters more than round-tripping.
+fn render_dict(dict: &Dict) -> String {
+    match dict {
+        Dict::Global(name, args) => format!("Global({name}, [{}])", render_dicts(args)),
+        Dict::Param(i) => format!("Param({i})"),
+        Dict::Super(inner, class, idx) => format!("Super({}, {class}, {idx})", render_dict(inner)),
+        Dict::Tuple(comps) => format!("Tuple([{}])", render_dicts(comps)),
+    }
+}
+
+fn render_dicts(dicts: &[Dict]) -> String {
+    dicts.iter().map(render_dict).collect::<Vec<_>>().join(", ")
 }
 
 // The compact per-parameter borrow mask: `b` for a borrowed parameter, `-` for

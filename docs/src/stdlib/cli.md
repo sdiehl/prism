@@ -14,7 +14,7 @@ Everything here is pure: a `Parser` reads a `Tokens` structure, and `Tokens` com
 
 ### `CliError`
 
-```prism,def
+```prism,def,h-dfc2effc61d638f0149b2f96f5a2cc3cca28d54e4b5309ae02f6058d07b61ffc
 type CliError
   = MissingFlag(String)
   | MissingArg(String)
@@ -28,7 +28,7 @@ A parse failure, carrying enough to name the offending token and the form expect
 
 ### `OptSpec`
 
-```prism,def
+```prism,def,h-4316ae397faaa7c842e3aefdc429b9ccbc8ef5b7870628599cd6a381dbd10dbd
 type OptSpec = OptSpec {
   long: String,
   short: String,
@@ -42,7 +42,7 @@ The static description of one option, carried by the parser for help and to tell
 
 ### `ArgSpec`
 
-```prism,def
+```prism,def,h-3140231e4b0a0243b5e56038d514b933350d2dc9134f5cde47bea8c343c3cdc0
 type ArgSpec = ArgSpec { meta: String, help: String }
 ```
 
@@ -50,7 +50,7 @@ The static description of one positional argument.
 
 ### `Tokens`
 
-```prism,def
+```prism,def,h-168a5c946ac36aaa2cc310a6bba5404c4b550900e5cad1be29fe0ff93c3b4374
 type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
 ```
 
@@ -58,7 +58,7 @@ argv after lexing: options canonicalized to their long name, and the positionals
 
 ### `Parser`
 
-```prism,def
+```prism,def,h-d9858a14444b8a272adb39d7d64e43e7f77b133536d46eaff6576b1900e547c3
 type Parser(a) = Parser {
   opts: List(OptSpec),
   args: List(ArgSpec),
@@ -70,7 +70,7 @@ A parser for a value of type `a`: the option and positional specs it accepts (th
 
 ### `SubCmd`
 
-```prism,def
+```prism,def,h-0777625f313c23cc6e8c0a08366aa959c16c15ee4577b3063920b78f57ee205c
 type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 ```
 
@@ -78,7 +78,7 @@ One named subcommand: its key on the command line, a one-line description, and t
 
 ### `Body`
 
-```prism,def
+```prism,def,h-0543bea03b6795a75e112bda326d5058feb7841a0735b0ae68ffa4e6423ff965
 type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 ```
 
@@ -86,7 +86,7 @@ A top-level command is either a single parser or a group of subcommands, all pro
 
 ### `Command`
 
-```prism,def
+```prism,def,h-5c857ca90429995dbc96f4edc725021f9bb44c6808f34313c0a6e30dab8b503a
 type Command(a) = Command { name: String, about: String, body: Body(a) }
 ```
 
@@ -94,7 +94,7 @@ A complete command: a program name and one-line description for usage, plus its 
 
 ### `Outcome`
 
-```prism,def
+```prism,def,h-9bf427e751f98e8f03b8056664bd10769b2d881979dbcaf7ab16ac9d6337d731
 type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
 ```
 
@@ -104,140 +104,140 @@ The outcome of parsing argv: a value, a help request (carrying the rendered text
 
 ### `dash`
 
-```prism,sig
-let dash()
+```prism,sig,h-26e1530961c169c060029a271ddbd9b2892c42850ce3af100d79fce31eae8f58
+dash : Int
 ```
 
 ### `help_col`
 
-```prism,sig
-let help_col()
+```prism,sig,h-6ba1afe6c3b53c64c4fdd8bff16af31f395dc6147f225bdce015db57e93970f9
+help_col : Int
 ```
 
 ### `pure_p`
 
-```prism,sig
-fn pure_p(x)
+```prism,sig,h-db52a3efa4dc4259aa822f4ec1a8b71050dae0607dc08c54db7ba0ad6db87230
+pure_p : forall a. (a) -> Cli.Parser(a)
 ```
 
 A parser that consumes nothing and yields `x`. The applicative unit.
 
 ### `map_p`
 
-```prism,sig
-fn map_p(f, p)
+```prism,sig,h-d458891e2d51c04cf84a2876061b940f4a14ac8d2be5fb25a130b2725e2ca3ab
+map_p : forall a b. ((b) -> a, Cli.Parser(b)) -> Cli.Parser(a)
 ```
 
 Map `f` over a parser's result, leaving what it consumes unchanged.
 
 ### `ap_p`
 
-```prism,sig
-fn ap_p(pf, px)
+```prism,sig,h-f4245aeb9fda2b02f47e1659e5f7a77433d6643165e1cd84dd0bc6f82142ed8a
+ap_p : forall a b. (Cli.Parser((a) -> b), Cli.Parser(a)) -> Cli.Parser(b)
 ```
 
 Applicative application: run `pf` then `px`, threading the positional cursor left to right, and apply the function to the argument. This is what lets a curried constructor be filled field by field.
 
 ### `build2`
 
-```prism,sig
-fn build2(f, pa, pb)
+```prism,sig,h-d23f95dc1b996600614cb03efd10545518319228ff2a0b36074de77c022b3e2f
+build2 : forall a b c. ((a) -> (c) -> b, Cli.Parser(a), Cli.Parser(c)) -> Cli.Parser(b)
 ```
 
 Apply a two-argument curried constructor to two parsers.
 
 ### `build3`
 
-```prism,sig
-fn build3(f, pa, pb, pc)
+```prism,sig,h-6faeb427948f4375de0bdce28d329b94cb7d6dd86efb9952e2cf2d66b05c3a43
+build3 : forall a b c d. ((a) -> (b) -> (d) -> c, Cli.Parser(a), Cli.Parser(b), Cli.Parser(d)) -> Cli.Parser(c)
 ```
 
 Apply a three-argument curried constructor to three parsers.
 
 ### `build4`
 
-```prism,sig
-fn build4(f, pa, pb, pc, pd)
+```prism,sig,h-97fec94e769b9a8cc396229b6b52a622127ef229a5ce950fcb2692d3f5a740c9
+build4 : forall a b c d e. ((a) -> (b) -> (c) -> (e) -> d, Cli.Parser(a), Cli.Parser(b), Cli.Parser(c), Cli.Parser(e)) -> Cli.Parser(d)
 ```
 
 Apply a four-argument curried constructor to four parsers.
 
 ### `opt_str`
 
-```prism,sig
-fn opt_str(long, short, meta, help, default)
+```prism,sig,h-b36c1a61558a432025f58bc9b77dfd26c3b03e3b23928c1c5f3409a5e75505e3
+opt_str : (String, String, String, String, String) -> Cli.Parser(String)
 ```
 
 An optional string flag with a default when absent.
 
 ### `req_str`
 
-```prism,sig
-fn req_str(long, short, meta, help)
+```prism,sig,h-0dfe3aacd5eaf04bdfb1bd58916c6b43878a237251ff4558ff618f66b6776da7
+req_str : (String, String, String, String) -> Cli.Parser(String)
 ```
 
 A required string flag: an error when absent.
 
 ### `opt_int`
 
-```prism,sig
-fn opt_int(long, short, meta, help, default)
+```prism,sig,h-554aa1c234df050ed46289b7fd6a94fe293727cc78fef0af29438ced2f0adf1b
+opt_int : (String, String, String, String, Int) -> Cli.Parser(Int)
 ```
 
 An optional integer flag with a default; a non-integer value is an error.
 
 ### `switch`
 
-```prism,sig
-fn switch(long, short, help)
+```prism,sig,h-1f692e6ff36943685d8073161598048a1f2bf7512133ed0e5071c75571da98dc
+switch : (String, String, String) -> Cli.Parser(Bool)
 ```
 
 A boolean switch: true when present, false when absent, never valued.
 
 ### `arg_str`
 
-```prism,sig
-fn arg_str(meta, help)
+```prism,sig,h-9b3aa88d8555c590fde88c3d41a04f8d1183015271df186401416d9dae73921e
+arg_str : (String, String) -> Cli.Parser(String)
 ```
 
 A required string positional, consumed in declaration order.
 
 ### `arg_int`
 
-```prism,sig
-fn arg_int(meta, help)
+```prism,sig,h-6297976011ce21245c2e2aa990b4a7a8c4d8707b5a2b4ebb1650de9a0bbaf998
+arg_int : (String, String) -> Cli.Parser(Int)
 ```
 
 A required integer positional; a non-integer token is an error.
 
 ### `lex`
 
-```prism,sig
-fn lex(specs, argv)
+```prism,sig,h-ef017eaa7f01a702743e4a750c4cd4c39ffbeca733c3f6e3e68b7ca3ec9f0676
+lex : (List(Cli.OptSpec), List(String)) -> Result(Cli.Tokens, Cli.CliError)
 ```
 
 Lex argv against the option specs (which say whether each flag takes a value). Options are canonicalized to their long name; anything not a flag is a positional. `--help`/`-h` are skipped here (detected earlier by `has_help`).
 
 ### `run_argv`
 
-```prism,sig
-fn run_argv(cmd, argv)
+```prism,sig,h-157794a9f598e9b7b31bcd0f3dad7d5121d299bb3058ad3b5eedcb4a26c75054
+run_argv : forall a. (Cli.Command(a), List(String)) -> Cli.Outcome(a)
 ```
 
 Parse argv against a command, yielding a value, a help request, or a usage error. argv is the argument list only (no program name); `cmd.name` supplies the name for usage text.
 
 ### `help_text`
 
-```prism,sig
-fn help_text(cmd)
+```prism,sig,h-f7dd671c97c3f81011e13931ba7cdbff202851f48fea8aaac0c7a9443b909a8f
+help_text : forall a. (Cli.Command(a)) -> String
 ```
 
 The rendered help for a command: dispatches to the plain or group form.
 
 ### `describe`
 
-```prism,sig
-fn describe(err)
+```prism,sig,h-44e2b838a4380920965f36dff3042aa4ff36b75faf23dbfbe027531e11a67b53
+describe : (Cli.CliError) -> String
 ```
 
 A one-line description of a parse error, naming the offending token and the form expected.

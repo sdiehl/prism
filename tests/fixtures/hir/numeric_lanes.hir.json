@@ -1,0 +1,115 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "wide",
+      "scheme": "(I64) -> I64",
+      "effects": []
+    },
+    {
+      "name": "wrap",
+      "scheme": "(U64) -> U64",
+      "effects": []
+    },
+    {
+      "name": "scale",
+      "scheme": "(Float) -> Float",
+      "effects": []
+    },
+    {
+      "name": "main",
+      "scheme": "() -> I64",
+      "effects": []
+    },
+    {
+      "name": "wrap_floor",
+      "scheme": "() -> I64",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "lane": "I64",
+      "ty": "I64"
+    },
+    "2": {
+      "ty": "I64"
+    },
+    "3": {
+      "lane": "I64"
+    },
+    "4": {
+      "lane": "U64",
+      "ty": "U64"
+    },
+    "5": {
+      "ty": "U64"
+    },
+    "6": {
+      "lane": "U64"
+    },
+    "7": {
+      "lane": "Float",
+      "ty": "Float"
+    },
+    "8": {
+      "ty": "Float"
+    },
+    "9": {
+      "lane": "Float"
+    },
+    "11": {
+      "lane": "Float",
+      "ty": "Bool"
+    },
+    "12": {
+      "ty": "Float"
+    },
+    "13": {
+      "ty": "(Float) -> Float"
+    },
+    "14": {
+      "ty": "Float"
+    },
+    "15": {
+      "ty": "Float"
+    },
+    "16": {
+      "ty": "I64"
+    },
+    "17": {
+      "ty": "(I64) -> I64"
+    },
+    "18": {
+      "lane": "I64"
+    },
+    "19": {
+      "ty": "I64"
+    },
+    "20": {
+      "ty": "() -> I64"
+    },
+    "22": {
+      "lane": "U64",
+      "ty": "Bool"
+    },
+    "23": {
+      "ty": "U64"
+    },
+    "24": {
+      "ty": "(U64) -> U64"
+    },
+    "25": {
+      "lane": "U64"
+    },
+    "26": {
+      "lane": "U64"
+    },
+    "27": {
+      "lane": "I64"
+    },
+    "28": {
+      "lane": "I64"
+    }
+  }
+}

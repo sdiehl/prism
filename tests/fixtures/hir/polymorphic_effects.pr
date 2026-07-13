@@ -1,0 +1,15 @@
+-- Effect rows: a declared effect appears in a declaration's effect list, a
+-- higher-order function over an open-row action keeps the row tail in its
+-- inferred scheme, and a handler discharges the effect from `main`'s row.
+
+effect Tick
+  tick() : Int
+
+fn twice(f : (Unit) -> Int ! {Tick | e}) = f(()) + f(())
+
+fn count() : Int ! {Tick} = tick() + tick()
+
+fn main() : Int =
+  handle twice(\(_u) -> tick() + 1) + count() with
+    tick() resume k => k(20)
+    return r => r

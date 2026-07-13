@@ -1,0 +1,10 @@
+fn main() =
+  return 10 to t@737
+  thunk { \x@.
+    return x@ to t@738
+    inc(t@738) to t@739
+    dbl(t@739)
+  } to t@740
+  (force t@740)(t@737) to t@741
+  print t@741 to t@742
+  print_nl

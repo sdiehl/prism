@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt;
 use std::path::Path;
 
 use inkwell::attributes::{Attribute, AttributeLoc};
@@ -10,17 +11,23 @@ use inkwell::module::{Linkage, Module};
 use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
 use inkwell::types::FunctionType;
 use inkwell::values::{
-    BasicMetadataValueEnum, BasicValueEnum, CallSiteValue, FloatValue, FunctionValue, GlobalValue,
-    IntValue, LLVMTailCallKind, PointerValue, StructValue,
+    AnyValue, BasicMetadataValueEnum, BasicValueEnum, CallSiteValue, FloatValue, FunctionValue,
+    GlobalValue, IntValue, LLVMTailCallKind, PointerValue, StructValue,
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
 use super::abi::idx64;
-use super::emit::emit_with_isa;
+use super::emit::{
+    closure_summary_with_isa, emit_closure_adapters_with_isa, emit_closure_dispatch_with_isa,
+    emit_selected_plan_with_isa, emit_selected_with_isa, emit_with_isa,
+    plan_closures_from_summaries_with_isa, plan_closures_with_isa, ClosurePlan, ClosureSummary,
+    SelectedEmissionError,
+};
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::native_kont;
 use super::rt;
 use crate::core::{Core, LoweredCore};
+use crate::sym::Sym;
 use crate::types::CtorInfo;
 
 const LLVM_USED_GLOBAL: &str = "llvm.used";
@@ -884,6 +891,94 @@ impl Isa for Inkwell<'_> {
     }
 }
 
+fn normalize_numbered_symbols(text: &str, prefix: &str) -> String {
+    let mut aliases = BTreeMap::<String, usize>::new();
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(offset) = rest.find(prefix) {
+        output.push_str(&rest[..offset]);
+        output.push_str(prefix);
+        rest = &rest[offset + prefix.len()..];
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            continue;
+        }
+        let original = rest[..digits].to_string();
+        let next = aliases.len();
+        let alias = *aliases.entry(original).or_insert(next);
+        output.push_str(&alias.to_string());
+        rest = &rest[digits..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn normalize_function(text: &str) -> String {
+    let strings = normalize_numbered_symbols(text, "@.str");
+    normalize_numbered_symbols(&strings, "#")
+}
+
+fn defined_functions(module: &Module<'_>) -> BTreeMap<String, String> {
+    module
+        .get_functions()
+        .filter(|function| function.count_basic_blocks() > 0)
+        .map(|function| {
+            (
+                function.get_name().to_string_lossy().into_owned(),
+                normalize_function(&function.print_to_string().to_string()),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn whole_function_map(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<BTreeMap<String, String>, String> {
+    with_module(core, ctors, None, false, |module| {
+        Ok(defined_functions(module))
+    })
+}
+
+pub(crate) fn scc_function_map(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut functions = BTreeMap::new();
+    for members in crate::core::scc_groups(core) {
+        let selected = members.into_iter().collect::<BTreeSet<_>>();
+        let ctx = Context::create();
+        let isa = Inkwell::new(&ctx, false);
+        emit_selected_with_isa(&isa, core, ctors, &selected).map_err(|error| match error {
+            SelectedEmissionError::Codegen(error) => error,
+        })?;
+        if let Some(error) = isa.err.borrow_mut().take() {
+            return Err(error);
+        }
+        functions.extend(defined_functions(&isa.module));
+    }
+
+    let plan_ctx = Context::create();
+    let plan_isa = Inkwell::new(&plan_ctx, false);
+    let plan = plan_closures_with_isa(&plan_isa, core, ctors)?;
+    if let Some(error) = plan_isa.err.borrow_mut().take() {
+        return Err(error);
+    }
+    if plan.has_adapters() {
+        let ctx = Context::create();
+        let isa = Inkwell::new(&ctx, false);
+        emit_closure_adapters_with_isa(&isa, core, ctors, &plan)?;
+        functions.extend(defined_functions(&isa.module));
+    }
+    for arity in plan.dispatch_arities() {
+        let ctx = Context::create();
+        let isa = Inkwell::new(&ctx, false);
+        let _ = emit_closure_dispatch_with_isa(&isa, core, ctors, &plan, arity);
+        functions.extend(defined_functions(&isa.module));
+    }
+    Ok(functions)
+}
+
 fn with_module<T>(
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -941,6 +1036,205 @@ pub fn emit_bitcode(
     bc: &Path,
 ) -> Result<(), String> {
     emit_bitcode_with_native_kont_table(core, ctors, "", false, bc)
+}
+
+/// Write the globally coupled native continuation metadata as its own module.
+///
+/// # Errors
+/// Fails LLVM verification or when the bitcode path cannot be written.
+pub fn emit_native_kont_plan_bitcode(
+    core: &LoweredCore,
+    native_kont_table: &str,
+    bc: &Path,
+) -> Result<(), String> {
+    let ctx = Context::create();
+    let isa = Inkwell::new(&ctx, false);
+    isa.native_kont_table_global(core, native_kont_table);
+    if let Err(error) = isa.module.verify() {
+        return Err(format!("LLVM verifier rejected native kont plan: {error}"));
+    }
+    if isa.module.write_bitcode_to_path(bc) {
+        Ok(())
+    } else {
+        Err(format!("cannot write bitcode to {}", bc.display()))
+    }
+}
+
+/// One independently linkable part of the closure dispatch plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClosurePlanShard {
+    /// Curry-adapter function bodies shared by arity dispatchers.
+    Adapters,
+    /// The dispatcher for one applied argument count.
+    Dispatch(usize),
+}
+
+/// A fully discovered closure plan shared by every independently cacheable
+/// adapter and dispatch shard in one build. Keeping this opaque prevents shard
+/// emission from rediscovering the whole program.
+pub(crate) struct PlannedClosures {
+    plan: ClosurePlan,
+}
+
+impl PlannedClosures {
+    /// Return the exact independently cacheable closure-plan shards.
+    #[must_use]
+    pub(crate) fn shards(&self) -> Vec<(ClosurePlanShard, String)> {
+        let base = self.plan.fingerprint();
+        let mut shards = Vec::new();
+        if self.plan.has_adapters() {
+            shards.push((ClosurePlanShard::Adapters, format!("{base}:adapters")));
+        }
+        shards.extend(self.plan.dispatch_arities().into_iter().map(|arity| {
+            (
+                ClosurePlanShard::Dispatch(arity),
+                format!("{base}:dispatch:{arity}"),
+            )
+        }));
+        shards
+    }
+}
+
+/// Discover the closure metadata contributed by one selected backend SCC.
+///
+/// # Errors
+/// Fails when selected closure discovery encounters invalid Core.
+pub(crate) fn scc_closure_summary(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: &BTreeSet<Sym>,
+) -> Result<ClosureSummary, String> {
+    let ctx = Context::create();
+    let isa = Inkwell::new(&ctx, false);
+    let summary = closure_summary_with_isa(&isa, core, ctors, selected)?;
+    if let Some(error) = isa.err.borrow_mut().take() {
+        return Err(error);
+    }
+    Ok(summary)
+}
+
+/// Fold independently discovered SCC closure summaries into one canonical
+/// adapter and dispatch plan.
+///
+/// # Errors
+/// Fails when a summary is malformed, tags collide, or planning fails.
+pub(crate) fn plan_closures_from_summaries(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+    summaries: &[ClosureSummary],
+) -> Result<PlannedClosures, String> {
+    let ctx = Context::create();
+    let isa = Inkwell::new(&ctx, false);
+    let plan = plan_closures_from_summaries_with_isa(&isa, core, ctors, summaries)?;
+    if let Some(error) = isa.err.borrow_mut().take() {
+        return Err(error);
+    }
+    Ok(PlannedClosures { plan })
+}
+
+/// Emit one shared closure-plan shard from an already discovered plan.
+///
+/// # Errors
+/// Fails during code generation, LLVM verification, or writing the bitcode.
+pub(crate) fn emit_closure_plan_shard_bitcode(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+    plan: &PlannedClosures,
+    shard: ClosurePlanShard,
+    bc: &Path,
+) -> Result<(), String> {
+    let ctx = Context::create();
+    let isa = Inkwell::new(&ctx, false);
+    match shard {
+        ClosurePlanShard::Adapters => {
+            emit_closure_adapters_with_isa(&isa, core, ctors, &plan.plan)?;
+        }
+        ClosurePlanShard::Dispatch(arity) => {
+            let _ = emit_closure_dispatch_with_isa(&isa, core, ctors, &plan.plan, arity);
+        }
+    }
+    if let Some(error) = isa.err.borrow_mut().take() {
+        return Err(error);
+    }
+    if let Err(error) = isa.module.verify() {
+        return Err(format!(
+            "LLVM verifier rejected closure plan shard: {error}"
+        ));
+    }
+    if isa.module.write_bitcode_to_path(bc) {
+        Ok(())
+    } else {
+        Err(format!("cannot write bitcode to {}", bc.display()))
+    }
+}
+
+/// A selected backend SCC either needs the shared closure plan or failed normal
+/// code generation.
+#[derive(Debug)]
+pub enum SccBitcodeError {
+    /// Ordinary code generation failed.
+    Codegen(String),
+}
+
+impl fmt::Display for SccBitcodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codegen(error) => formatter.write_str(error),
+        }
+    }
+}
+
+impl std::error::Error for SccBitcodeError {}
+
+/// Verify and write one independently emit-able backend SCC as LLVM bitcode.
+///
+/// The complete Core remains available for cross-SCC arity declarations, while
+/// only `selected` definitions receive bodies.
+///
+/// # Errors
+/// Fails when the SCC needs the global closure plan, violates a code-generation
+/// invariant, fails LLVM verification, or cannot be written.
+pub fn emit_selected_bitcode(
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+    selected: &BTreeSet<Sym>,
+    native_kont_table: &str,
+    owns_closure_plan: bool,
+    bc: &Path,
+) -> Result<(), SccBitcodeError> {
+    let ctx = Context::create();
+    let isa = Inkwell::new(&ctx, false);
+    if owns_closure_plan {
+        emit_selected_plan_with_isa(&isa, core, ctors, selected)
+            .map_err(SccBitcodeError::Codegen)?;
+    } else {
+        emit_selected_with_isa(&isa, core, ctors, selected).map_err(|error| match error {
+            SelectedEmissionError::Codegen(error) => SccBitcodeError::Codegen(error),
+        })?;
+    }
+    if !native_kont_table.is_empty() {
+        isa.native_kont_table_global(core, native_kont_table);
+    }
+    if let Some(error) = isa.err.borrow_mut().take() {
+        return Err(SccBitcodeError::Codegen(error));
+    }
+    if let Err(error) = isa.module.verify() {
+        let kept = std::env::temp_dir().join("prism_failed_scc.ll");
+        let _ = std::fs::write(&kept, isa.module.print_to_string().to_string());
+        return Err(SccBitcodeError::Codegen(format!(
+            "LLVM verifier rejected backend SCC, kept at {}:\n{}",
+            kept.display(),
+            error
+        )));
+    }
+    if isa.module.write_bitcode_to_path(bc) {
+        Ok(())
+    } else {
+        Err(SccBitcodeError::Codegen(format!(
+            "cannot write bitcode to {}",
+            bc.display()
+        )))
+    }
 }
 
 /// Verify the module with a native kont metadata table and write LLVM bitcode to

@@ -9,10 +9,13 @@
 -- underlying buffer is shared until a write forces a copy (the buffer's own
 -- rc==1 in-place / shared-copy discipline).
 --
--- The surface covers construction, indexing, transpose-by-name, and a
--- contiguity-checked reshape. Elementwise math, broadcasting, and matmul are
--- deliberately absent; when they land, reduction order will be the source loop
--- order (deterministic by construction).
+-- The surface covers construction, indexing, transpose-by-name, a
+-- contiguity-checked reshape, elementwise math (`map_tensor`, `zip_with_tensor`,
+-- `add`/`sub`/`mul`/`div`, `scale`), full reductions (`sum_all`, `prod_all`,
+-- `mean`), and `matmul`. Every reduction and contraction sums in row-major
+-- source-loop order, so results are bit-identical across backends. Broadcasting
+-- is deliberately absent, and the math functions require contiguous operands (a
+-- transposed view must be materialised first).
 --
 -- `t[i, j]` and `t[i, j] := v` are surface sugar for `at_tensor` / `tensor_set`.
 
@@ -169,3 +172,284 @@ pub fn reshape(t : Tensor, new_shape : List(Int)) : Tensor =
           )
       else
         fail()
+
+-- Whether a tensor is contiguous: its strides are the row-major strides of its
+-- shape, so the flat buffer is exactly the row-major element sequence and can be
+-- read and written by flat position. `new`, `from_list`, and the math below all
+-- produce contiguous tensors; a `transpose` view is not contiguous and must be
+-- copied (e.g. through `reshape` after a materialising op) before the elementwise
+-- and matmul functions accept it.
+fn is_contig(t : Tensor) : Bool =
+  match t of
+    MkTensor(_, sh, st, _) => st == rm_strides(sh)
+
+-- Wrap a freshly filled row-major buffer as a contiguous tensor of `sh`.
+fn contig_tensor(sh : List(Int), b : FloatBuf) : Tensor =
+  MkTensor(b, sh, rm_strides(sh), default_axes(length(sh)))
+
+-- Apply `f` to each element of `bi`, writing into `out` at the same flat
+-- position, over `[p, n)`. Pure: raw buffer reads and writes, and `f` is a plain
+-- `Float -> Float`. Tail-recursive, so constant stack over any size.
+fn map_fill(f, bi : FloatBuf, out : FloatBuf, p : Int, n : Int) : FloatBuf =
+  if p >= n then
+    out
+  else
+    map_fill(f, bi, tbuf_set(out, p, f(tbuf_get(bi, p))), p + 1, n)
+
+-- | A tensor of the same shape with `f` applied to every element. Requires a
+-- contiguous input; the result is contiguous.
+pub fn map_tensor(f, t : Tensor) : Tensor ! {Fail} =
+  if is_contig(t) then
+    let sh = shape(t)
+    contig_tensor(sh, map_fill(f, buf(t), tbuf_new(prod(sh), 0.0), 0, prod(sh)))
+  else
+    fail()
+
+-- Combine the pth elements of `ba` and `bb` with `f` into `out`, over `[p, n)`.
+fn zip_fill(
+  f,
+  ba : FloatBuf,
+  bb : FloatBuf,
+  out : FloatBuf,
+  p : Int,
+  n : Int
+) : FloatBuf =
+  if p >= n then
+    out
+  else
+    zip_fill(
+        f,
+        ba,
+        bb,
+        tbuf_set(out, p, f(tbuf_get(ba, p), tbuf_get(bb, p))),
+        p + 1,
+        n,
+      )
+
+-- | Combine two identically-shaped contiguous tensors elementwise with `f`, or
+-- `fail()` if the shapes differ or either is not contiguous. No broadcasting.
+pub fn zip_with_tensor(f, a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  let sh = shape(a)
+  if sh == shape(b) && is_contig(a) && is_contig(b) then
+    contig_tensor(
+        sh,
+        zip_fill(f, buf(a), buf(b), tbuf_new(prod(sh), 0.0), 0, prod(sh)),
+      )
+  else
+    fail()
+
+-- | Elementwise sum of two identically-shaped tensors.
+pub fn add(a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  zip_with_tensor(\(x, y) -> x + y, a, b)
+
+-- | Elementwise difference.
+pub fn sub(a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  zip_with_tensor(\(x, y) -> x - y, a, b)
+
+-- | Elementwise (Hadamard) product, not matrix multiplication.
+pub fn mul(a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  zip_with_tensor(\(x, y) -> x * y, a, b)
+
+-- | Elementwise quotient.
+pub fn div(a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  zip_with_tensor(\(x, y) -> x / y, a, b)
+
+-- | Every element multiplied by a scalar.
+pub fn scale(s : Float, t : Tensor) : Tensor ! {Fail} = map_tensor(\(x) -> x * s, t)
+
+-- Fold `op` over the buffer in flat (row-major) order from `acc`, over `[p, n)`.
+-- The fixed order is what makes the reductions bit-identical across backends.
+fn reduce_fill(op, b : FloatBuf, acc : Float, p : Int, n : Int) : Float =
+  if p >= n then
+    acc
+  else
+    reduce_fill(op, b, op(acc, tbuf_get(b, p)), p + 1, n)
+
+-- | The sum of every element, added in row-major order. Requires a contiguous
+-- tensor (so the summation order is well defined).
+pub fn sum_all(t : Tensor) : Float ! {Fail} =
+  if is_contig(t) then
+    reduce_fill(\(a, x) -> a + x, buf(t), 0.0, 0, size(t))
+  else
+    fail()
+
+-- | The product of every element, in row-major order.
+pub fn prod_all(t : Tensor) : Float ! {Fail} =
+  if is_contig(t) then
+    reduce_fill(\(a, x) -> a * x, buf(t), 1.0, 0, size(t))
+  else
+    fail()
+
+-- | The arithmetic mean of every element.
+pub fn mean(t : Tensor) : Float ! {Fail} = sum_all(t) / to_float(size(t))
+
+-- The element at position `i` of a list, or `fail()` if out of range.
+fn at_or_fail(i : Int, xs : List(Int)) : Int =
+  match nth(i, xs) of
+    None => fail()
+    Some(v) => v
+
+-- The list with the element at position `i` removed.
+fn drop_at(i : Int, xs : List(a)) : List(a) =
+  append(take(i, xs), drop(i + 1, xs))
+
+-- Sum `extent` elements of `b` starting at flat `base`, stepping by `sa` (the
+-- stride of the contracted axis), in index order `0..extent`. The fixed order is
+-- what makes the axis reduction bit-identical across backends.
+fn contract_sum(
+  b : FloatBuf,
+  base : Int,
+  sa : Int,
+  e : Int,
+  extent : Int,
+  acc : Float
+) : Float =
+  if e >= extent then
+    acc
+  else
+    contract_sum(b, base, sa, e + 1, extent, acc + tbuf_get(b, base + e * sa))
+
+-- Fill output flat position `q` with the sum over the contracted axis of the
+-- input elements sharing `q`'s index on every remaining axis, over `[q, total)`.
+-- `out_idx` unravels `q` against the output shape; its dot with the kept input
+-- strides `ks` is the flat base of the contracted fibre.
+fn sum_axis_fill(
+  b : FloatBuf,
+  out : FloatBuf,
+  ostrides : List(Int),
+  osh : List(Int),
+  ks : List(Int),
+  sa : Int,
+  extent : Int,
+  q : Int,
+  total : Int
+) : FloatBuf =
+  if q >= total then
+    out
+  else
+    let out_idx = zip_with(\(s, n) -> q / s % n, ostrides, osh)
+    let base = offset(out_idx, ks)
+    sum_axis_fill(
+        b,
+        tbuf_set(out, q, contract_sum(b, base, sa, 0, extent, 0.0)),
+        ostrides,
+        osh,
+        ks,
+        sa,
+        extent,
+        q + 1,
+        total,
+      )
+
+-- | Reduce over one named axis by summing, removing that axis (rank `r` becomes
+-- `r - 1`); the remaining axes keep their names. The contracted axis is summed in
+-- index order `0..extent` (source loop order), so the result is bit-identical
+-- across backends. `fail()` on a missing axis or a non-contiguous input.
+pub fn sum_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
+  if is_contig(t) then
+    let sh = shape(t)
+    let st = strides(t)
+    let ax = axes(t)
+    let a = index_of(axis_name, ax)
+    let extent = at_or_fail(a, sh)
+    let sa = at_or_fail(a, st)
+    let osh = drop_at(a, sh)
+    let oax = drop_at(a, ax)
+    let ks = drop_at(a, st)
+    let ostrides = rm_strides(osh)
+    let total = prod(osh)
+    MkTensor(
+        sum_axis_fill(
+            buf(t),
+            tbuf_new(total, 0.0),
+            ostrides,
+            osh,
+            ks,
+            sa,
+            extent,
+            0,
+            total,
+          ),
+        osh,
+        ostrides,
+        oax,
+      )
+  else
+    fail()
+
+-- | Reduce over one named axis by averaging: the sum over that axis divided by
+-- its extent, removing the axis. Same source-loop order and contiguity
+-- requirement as `sum_axis`.
+pub fn mean_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
+  let extent = at_or_fail(index_of(axis_name, axes(t)), shape(t))
+  scale(1.0 / to_float(extent), sum_axis(t, axis_name))
+
+-- The dot product of row `i` of `a` (flat base `i * k`) and column `j` of `b`
+-- (flat stride `n`), contracted over `0..k` in order. The fixed summation order
+-- makes `matmul` deterministic across backends and optimization levels.
+fn mm_dot(
+  ba : FloatBuf,
+  bb : FloatBuf,
+  i : Int,
+  j : Int,
+  k : Int,
+  n : Int,
+  p : Int,
+  acc : Float
+) : Float =
+  if p >= k then
+    acc
+  else
+    mm_dot(
+        ba,
+        bb,
+        i,
+        j,
+        k,
+        n,
+        p + 1,
+        acc + tbuf_get(ba, i * k + p) * tbuf_get(bb, p * n + j),
+      )
+
+-- Fill output flat position `q` (row `q / n`, column `q % n`) with its dot
+-- product, over `[q, total)`.
+fn mm_fill(
+  ba : FloatBuf,
+  bb : FloatBuf,
+  out : FloatBuf,
+  k : Int,
+  n : Int,
+  q : Int,
+  total : Int
+) : FloatBuf =
+  if q >= total then
+    out
+  else
+    mm_fill(
+        ba,
+        bb,
+        tbuf_set(out, q, mm_dot(ba, bb, q / n, q % n, k, n, 0, 0.0)),
+        k,
+        n,
+        q + 1,
+        total,
+      )
+
+-- | Matrix product of a rank-2 `[m, k]` tensor with a rank-2 `[k, n]` tensor,
+-- giving `[m, n]`. The contraction sums in source loop order, so the result is
+-- bit-identical across backends. `fail()` unless both operands are contiguous,
+-- rank 2, with matching inner extents.
+pub fn matmul(a : Tensor, b : Tensor) : Tensor ! {Fail} =
+  match shape(a) of
+    Cons(m, Cons(k, Nil)) =>
+      match shape(b) of
+        Cons(k2, Cons(n, Nil)) =>
+          if k == k2 && is_contig(a) && is_contig(b) then
+            contig_tensor(
+                Cons(m, Cons(n, Nil)),
+                mm_fill(buf(a), buf(b), tbuf_new(m * n, 0.0), k, n, 0, m * n),
+              )
+          else
+            fail()
+        _ => fail()
+    _ => fail()

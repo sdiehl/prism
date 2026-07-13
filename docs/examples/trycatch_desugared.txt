@@ -1,8 +1,0 @@
--- `try e catch { N(x) => h, ... }` is subtractive handler sugar: one nested
--- `never` clause per arm, each discharging that error's label. A label not
--- caught here propagates to an enclosing handler.
-try lookup(k) catch { NotFound(k) => 0 }
-  ==>
-handle lookup(k) with
-  never NotFound(k) => 0
-  return r => r

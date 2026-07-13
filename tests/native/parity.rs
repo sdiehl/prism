@@ -24,6 +24,7 @@ use std::process::{Command, Stdio};
 use std::{env, fs};
 
 use prism::error::Error;
+use prism::{build_on, default_roots, Config};
 
 #[cfg(feature = "mlir")]
 use crate::support::have;
@@ -31,12 +32,33 @@ use crate::support::{
     check_native_parity, corpus, corpus_drops, interpreted, leak_free, parallel_check, require_cc,
     shard, shard_by, source, CORPUS_SKIPS,
 };
+#[cfg(feature = "mlir")]
+use prism::build_mlir_on;
 
 // When the corpus oracle is delegated to the sharded `parity` CI matrix, the
 // umbrella `cargo test --all` run sets this so it does not also run the whole
 // corpus serially in the main job. Unset (a normal local `cargo test`, and the
 // sanitizer re-runs) runs the full corpus.
 const CORPUS_SHARDED_ENV: &str = "PRISM_CORPUS_SHARDED";
+
+// Corpus builds run quiet. The effect-lowering fused-path warnings are
+// diagnostics for an interactive `build`; under `--nocapture` they bury the
+// actual test output. These wrappers are `prism::build`/`build_mlir` with
+// `flags.quiet` set, resolving imports from `.` exactly as those do.
+fn quiet_cfg() -> Config {
+    let mut cfg = Config::from_env();
+    cfg.flags.quiet = true;
+    cfg
+}
+
+fn build_quiet(src: &str, out: &Path) -> Result<(), Error> {
+    build_on(src, &default_roots(Path::new(".")), out, &quiet_cfg())
+}
+
+#[cfg(feature = "mlir")]
+fn build_mlir_quiet(src: &str, out: &Path) -> Result<(), Error> {
+    build_mlir_on(src, &default_roots(Path::new(".")), out, &quiet_cfg())
+}
 
 // Build and diff the whole corpus across cores, collecting every failure so one
 // run reports all divergences rather than aborting at the first. The build/run/
@@ -93,7 +115,7 @@ fn native_matches_interpreter() {
         return;
     }
     require_cc();
-    run_corpus("llvm", prism::build);
+    run_corpus("llvm", build_quiet);
 }
 
 // The shards must tile the corpus: disjoint and covering every case exactly once,
@@ -128,7 +150,7 @@ fn mlir_matches_interpreter() {
         "`mlir-translate` not found. The --features mlir parity oracle requires \
          it; install LLVM/MLIR so the MLIR backend is exercised."
     );
-    run_corpus("mlir", prism::build_mlir);
+    run_corpus("mlir", build_mlir_quiet);
 }
 
 // Build `full` natively, run it on `input` over stdin with leak checking, and
@@ -136,7 +158,7 @@ fn mlir_matches_interpreter() {
 // cover the seam the empty-stdin corpus cannot: `read_int`/`read_line` codegen.
 fn native_on_input(tag: &str, full: &str, input: &str) -> std::process::Output {
     let bin = env::temp_dir().join(format!("prism_parity_{tag}_{}", std::process::id()));
-    prism::build(full, &bin).expect("native build failed");
+    build_quiet(full, &bin).expect("native build failed");
     let mut child = Command::new(&bin)
         .env("PRISM_CHECK_LEAKS", "1")
         .stdin(Stdio::piped())
@@ -357,7 +379,7 @@ fn error_int_faults_like_interpreter() {
     let want_stdout = String::from_utf8_lossy(&sink).into_owned();
 
     let bin = env::temp_dir().join(format!("prism_parity_error_int_{}", std::process::id()));
-    prism::build(&full, &bin).expect("native build failed");
+    build_quiet(&full, &bin).expect("native build failed");
     let out = Command::new(&bin).output().expect("spawn failed");
     for ext in ["bc", "ll"] {
         let _ = fs::remove_file(bin.with_extension(ext));
@@ -397,7 +419,7 @@ fn fatal_string_faults_like_interpreter() {
     let want_stdout = String::from_utf8_lossy(&sink).into_owned();
 
     let bin = env::temp_dir().join(format!("prism_parity_fatal_string_{}", std::process::id()));
-    prism::build(&full, &bin).expect("native build failed");
+    build_quiet(&full, &bin).expect("native build failed");
     let out = Command::new(&bin).output().expect("spawn failed");
     for ext in ["bc", "ll"] {
         let _ = fs::remove_file(bin.with_extension(ext));

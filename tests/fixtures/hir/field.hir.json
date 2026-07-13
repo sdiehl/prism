@@ -1,0 +1,79 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "get_x",
+      "scheme": "(Point) -> Int",
+      "effects": []
+    },
+    {
+      "name": "get_y",
+      "scheme": "(Point) -> Int",
+      "effects": []
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Int",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "res": {
+        "kind": "field",
+        "ctor": "Point",
+        "index": 0,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "2": {
+      "ty": "Point"
+    },
+    "3": {
+      "res": {
+        "kind": "field",
+        "ctor": "Point",
+        "index": 1,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "4": {
+      "ty": "Point"
+    },
+    "5": {
+      "ty": "Int"
+    },
+    "6": {
+      "ty": "Int"
+    },
+    "7": {
+      "ty": "(Point) -> Int"
+    },
+    "8": {
+      "ty": "Point"
+    },
+    "9": {
+      "ty": "Int"
+    },
+    "10": {
+      "ty": "Int"
+    },
+    "11": {
+      "ty": "Int"
+    },
+    "12": {
+      "ty": "(Point) -> Int"
+    },
+    "13": {
+      "ty": "Point"
+    },
+    "14": {
+      "ty": "Int"
+    },
+    "15": {
+      "ty": "Int"
+    }
+  }
+}

@@ -40,11 +40,11 @@
         <button id="run" class="run" disabled>Run</button>
         <button id="fmt" disabled>Format</button>
         <button id="dump" class="toggle" disabled>Type signatures</button>
-        <button id="ir" class="toggle" disabled>Core IR</button>
-        <a class="ctl-link" href="../gallery/" title="Interactive examples">Gallery</a>
-        <a class="ctl-link" href="../play/" title="Playground">Playground</a>
-        <a class="ctl-link" href="../repl/" title="REPL">REPL</a>
-        <a id="docs" class="ctl-link" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener" title="Documentation">Docs</a>
+        <button id="showir" class="toggle" disabled>Show IR</button>
+        <a class="navbtn" href="../gallery/" title="Interactive examples">Gallery</a>
+        <a class="navbtn" href="../play/" title="Playground">Playground</a>
+        <a class="navbtn" href="../repl/" title="REPL">REPL</a>
+        <a id="docs" class="navbtn" href="https://sdiehl.github.io/prism/" target="_blank" rel="noopener" title="Documentation">Docs</a>
       </div>
       <a id="gh" href="https://github.com/sdiehl/prism" title="GitHub" aria-label="GitHub" target="_blank" rel="noopener"></a>
     </header>
@@ -66,6 +66,16 @@
       <section class="pane sigpane">
         <div class="label" id="siglabel">Type signatures</div>
         <pre id="sigs" class="out dim"></pre>
+      </section>
+      <section class="pane irpane" id="irview">
+        <div class="irhalf">
+          <div class="label">HIR</div>
+          <pre id="ir-hir" class="out dim"></pre>
+        </div>
+        <div class="irhalf">
+          <div class="label">Core IR</div>
+          <pre id="ir-core" class="out dim"></pre>
+        </div>
       </section>
     </main>
     <div id="tip" class="tip"></div>

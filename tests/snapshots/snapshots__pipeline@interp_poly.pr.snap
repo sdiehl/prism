@@ -1,0 +1,120 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/interp_poly.pr
+---
+== tokens ==
+VOpen Fn Ident("f") LParen Ident("x") RParen Eq Ident("println") LParen InterpStart("") Ident("x") InterpEnd("") RParen VSemi Fn Ident("main") LParen RParen Eq Ident("f") LParen StringLit("hi") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "f",
+            params: [
+                Param {
+                    name: "x",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 276..283,
+                    },
+                    [
+                        Spanned {
+                            node: Call(
+                                Spanned {
+                                    node: Marker(
+                                        Interp,
+                                    ),
+                                    span: 284..284,
+                                },
+                                [
+                                    Spanned {
+                                        node: Str(
+                                            "",
+                                        ),
+                                        span: 284..284,
+                                    },
+                                    Spanned {
+                                        node: Var(
+                                            "x",
+                                        ),
+                                        span: 286..287,
+                                    },
+                                    Spanned {
+                                        node: Str(
+                                            "",
+                                        ),
+                                        span: 284..284,
+                                    },
+                                ],
+                            ),
+                            span: 284..289,
+                        },
+                    ],
+                ),
+                span: 276..290,
+            },
+            wheres: [],
+            span: 266..290,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "f",
+                        ),
+                        span: 304..305,
+                    },
+                    [
+                        Spanned {
+                            node: Str(
+                                "hi",
+                            ),
+                            span: 306..310,
+                        },
+                    ],
+                ),
+                span: 304..311,
+            },
+            wheres: [],
+            span: 292..311,
+        },
+    ],
+}
+
+== types ==
+f : forall a. (a) -> Unit ! {IO}
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+[E1998] Type Error: cannot print a value of polymorphic type: its type is not known here, so no printer can render it. Use `show(x)` with a `Show` constraint, or annotate the argument with a concrete type
+   ╭─[ <source>:5:21 ]
+   │
+ 5 │ fn f(x) = println("{x}")
+   │                     ┬  
+   │                     ╰── cannot print a value of polymorphic type: its type is not known here, so no printer can render it. Use `show(x)` with a `Show` constraint, or annotate the argument with a concrete type
+───╯

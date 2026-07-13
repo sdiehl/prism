@@ -22,6 +22,7 @@ use crate::syntax::ast::Program;
 #[derive(Debug)]
 pub struct Module {
     pub path: Vec<String>,
+    pub source: String,
     pub prog: Program,
 }
 
@@ -274,12 +275,13 @@ pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
         if !visited.insert(path.join(".")) {
             continue;
         }
-        let program = fetch_module(&path, roots)?;
+        let (source, program) = fetch_module(&path, roots)?;
         for imp in &program.imports {
             queue.push_back(imp.path.clone());
         }
         out.push(Module {
             path,
+            source,
             prog: program,
         });
     }
@@ -299,7 +301,7 @@ pub fn load(root: &Program, roots: &[Root]) -> Result<Vec<Module>, Error> {
 // module of the same name wins; if nothing else supplies `P`, it is a genuine
 // self-import and we name the collision rather than emit the misleading
 // unknown-name cascade that loading the self-copy would produce.
-fn fetch_module(path: &[String], roots: &[Root]) -> Result<Program, Error> {
+fn fetch_module(path: &[String], roots: &[Root]) -> Result<(String, Program), Error> {
     let dotted = path.join(".");
     let mut self_collision = false;
     for r in roots {
@@ -311,7 +313,7 @@ fn fetch_module(path: &[String], roots: &[Root]) -> Result<Program, Error> {
             self_collision = true;
             continue;
         }
-        return Ok(program);
+        return Ok((src, program));
     }
     Err(Error::ResolveModule(if self_collision {
         format!(

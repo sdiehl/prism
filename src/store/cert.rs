@@ -46,8 +46,8 @@
 //! means the same thing to every reader. Any claim a build does not verify decodes
 //! as its `Reserved` variant and is reported as recognized-but-untrusted rather than
 //! an error, so an old build reads a newer certificate's envelope without mistaking
-//! it for corruption. A Lean-checked property drawn from `models/Prism.lean` is the
-//! intended next parity-family rung, claim [`CLAIM_LEAN_CHECKED`].
+//! it for corruption. Claim [`CLAIM_LEAN_CHECKED`] is reserved for a Lean-checked
+//! property drawn from `models/Prism.lean`.
 //!
 //! # Totality
 //!
@@ -70,8 +70,8 @@ const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 // The claim vocabulary, pinned as varint discriminants so the binary body and any
 // reader agree on the family. Exactly one is live; the rest are reserved.
 const CLAIM_PARITY_PASSED: u64 = 0;
-/// The reserved discriminant for a Lean-checked property (`models/Prism.lean`),
-/// the intended next rung of the ladder; not emitted or verified this release.
+/// The reserved discriminant for a Lean-checked property (`models/Prism.lean`).
+/// This build neither emits nor verifies it.
 pub const CLAIM_LEAN_CHECKED: u64 = 1;
 // The two lineage claims, over a sidecar digest rather than a core hash. Same
 // global number space as the parity family above; a reader keys the body shape on

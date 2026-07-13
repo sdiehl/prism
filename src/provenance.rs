@@ -18,6 +18,7 @@
 
 use std::fmt::Write as _;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// The hash scheme every event hash, trace digest, and derived content digest in
@@ -28,6 +29,8 @@ pub const EVENT_HASH_SCHEME: &str = "sha256";
 // The domain tag folded into a trace digest, so a trace digest cannot collide with
 // a bare event hash or another sha256 fold that happens over the same bytes.
 const TRACE_FOLD_DOMAIN: &str = "prism-provenance-trace-v1";
+/// Version tag for the complete observable execution artifact.
+pub const OBSERVATION_TRACE_FORMAT: &str = "prism-observation-trace-v1";
 
 // Per-value field tags in the canonical encoding. Scalars are inlined (they carry
 // no delimiter); variable-length values are digested so an embedded newline can
@@ -42,14 +45,14 @@ const VALUE_TAG_UNIT: &str = "unit";
 // the family, referenced by the interpreter's observe sites; a rename here moves
 // every event hash in lockstep rather than letting two sites disagree on a string.
 // Capability prefixes whose event kinds are reserved: no operation label may
-// use them until the boundary release defines their capability protocols, so
+// use them until their capability protocols are defined, so
 // external tooling reading event streams can rely on the prefixes staying
 // meaningless until then. Mirrors the reserved seam effects in `names`.
 pub const RESERVED_EVENT_CAPABILITIES: &[&str] =
     &[crate::names::NET_EFFECT, crate::names::ENTROPY_EFFECT];
 
 /// Canonical capability operation in the provenance protocol.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum CapOp {
     EnvArgsCount,
     EnvArg,
@@ -125,7 +128,7 @@ pub const OP_CONSOLE_EPRINT: CapOp = CapOp::ConsoleEprint;
 /// Held in the protocol's own value vocabulary, not the interpreter's runtime
 /// values, so the encoding is a pure function of the observation and independent
 /// of interpreter internals.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventValue {
     Int(i64),
     Bool(bool),
@@ -162,6 +165,13 @@ impl EventValue {
         }
     }
 
+    /// Canonical identity of content committed at an observation boundary.
+    #[must_use]
+    pub fn content_digest(&self) -> String {
+        self.content_bytes()
+            .map_or_else(|| sha256_hex(&[]), |bytes| sha256_hex(&bytes))
+    }
+
     /// This value as a string argument, when it is one (a path, an environment
     /// variable name).
     #[must_use]
@@ -173,11 +183,27 @@ impl EventValue {
     }
 }
 
+/// One ordered, externally observable execution event.
+///
+/// This is deliberately separate from the replay tape: the tape pins input
+/// reads, while this trace is the complete behavior compared across interpreter,
+/// native code, effect tiers, and cache states.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Observation {
+    Stdout(Vec<u8>),
+    Stderr(Vec<u8>),
+    Capability(CapEvent),
+    FileCommit { path: String, digest: String },
+    Exit(i32),
+    Fault(String),
+    Return(String),
+}
+
 /// One recorded capability observation.
 ///
 /// An operation, its arguments, and its result: the building block of the
 /// provenance protocol.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapEvent {
     /// A canonical operation label from the `OP_*` family.
     pub op: CapOp,
@@ -209,6 +235,109 @@ impl CapEvent {
             sha256_hex(self.canonical().as_bytes())
         )
     }
+}
+
+/// Versioned, self-validating complete behavior of one execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservationTrace {
+    pub format: String,
+    pub observations: Vec<Observation>,
+    pub digest: String,
+}
+
+impl ObservationTrace {
+    #[must_use]
+    pub fn new(observations: Vec<Observation>) -> Self {
+        let digest = observation_digest(&observations);
+        Self {
+            format: OBSERVATION_TRACE_FORMAT.to_string(),
+            observations,
+            digest,
+        }
+    }
+
+    /// Canonical JSON representation used by differential gates and lineage.
+    ///
+    /// # Errors
+    /// Fails only if serialization of this closed protocol structure fails.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Decode and validate a complete observation trace.
+    ///
+    /// # Errors
+    /// Refuses malformed JSON, foreign formats, and altered event sequences.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let trace: Self = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        if trace.format != OBSERVATION_TRACE_FORMAT {
+            return Err(format!(
+                "unsupported observation trace format {:?}",
+                trace.format
+            ));
+        }
+        let derived = observation_digest(&trace.observations);
+        if trace.digest != derived {
+            return Err(format!(
+                "observation trace digest is {}, derived {derived}",
+                trace.digest
+            ));
+        }
+        Ok(trace)
+    }
+
+    /// Projection visible at an operating-system process boundary.
+    ///
+    /// Pipes retain bytes per stream but not cross-stream write ordering, and a
+    /// process status encodes both a normal scalar return and explicit `exit`.
+    /// This projection is therefore the common artifact used by native parity;
+    /// the full trace remains available for interpreter/replay comparisons.
+    #[must_use]
+    pub fn process_projection(&self, exit: i32) -> Self {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        for observation in &self.observations {
+            match observation {
+                Observation::Stdout(bytes) => stdout.extend(bytes),
+                Observation::Stderr(bytes) => stderr.extend(bytes),
+                _ => {}
+            }
+        }
+        Self::from_process(&stdout, &stderr, exit)
+    }
+
+    /// Construct the canonical observation available from a completed process.
+    #[must_use]
+    pub fn from_process(stdout: &[u8], stderr: &[u8], exit: i32) -> Self {
+        let mut observations = Vec::new();
+        if !stdout.is_empty() {
+            observations.push(Observation::Stdout(stdout.to_vec()));
+        }
+        if !stderr.is_empty() {
+            observations.push(Observation::Stderr(stderr.to_vec()));
+        }
+        observations.push(Observation::Exit(exit));
+        Self::new(observations)
+    }
+
+    /// Scheme-tagged identity consumed by lineage trace nodes.
+    #[must_use]
+    pub fn trace_digest(&self) -> TraceDigest {
+        TraceDigest {
+            scheme: EVENT_HASH_SCHEME,
+            hash: self.digest.clone(),
+            events: self.observations.len(),
+        }
+    }
+}
+
+fn observation_digest(observations: &[Observation]) -> String {
+    let bytes =
+        serde_json::to_vec(observations).expect("closed observation protocol always serializes");
+    let mut canonical = OBSERVATION_TRACE_FORMAT.as_bytes().to_vec();
+    canonical.push(0);
+    canonical.extend(bytes);
+    sha256_hex(&canonical)
 }
 
 /// The digest of a whole run's observation sequence.

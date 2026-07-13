@@ -1,5 +1,5 @@
 import { createElement, Github, Play } from "lucide";
-import init, { core_ir, diagnostics, dump, fmt, tokens } from "../pkg/prism.js";
+import init, { core_ir, diagnostics, dump, dump_hir, fmt, tokens } from "../pkg/prism.js";
 import { examples } from "./examples.js";
 import "./styles.css";
 
@@ -32,7 +32,9 @@ const mainEl = document.querySelector("main") as HTMLElement;
 const runBtn = el<HTMLButtonElement>("run");
 const fmtBtn = el<HTMLButtonElement>("fmt");
 const dumpBtn = el<HTMLButtonElement>("dump");
-const irBtn = el<HTMLButtonElement>("ir");
+const showirBtn = el<HTMLButtonElement>("showir");
+const irHir = el<HTMLPreElement>("ir-hir");
+const irCore = el<HTMLPreElement>("ir-core");
 
 runBtn.prepend(createElement(Play));
 // Icons come from lucide (sized 18px in CSS) rather than inline SVG markup, so
@@ -133,32 +135,150 @@ function sync(): void {
   gutter.style.transform = `translateY(${-src.scrollTop}px)`;
 }
 
-// The third pane is a single panel shared by two mutually-exclusive views:
-// "sigs" reuses the `dump` entry point (top-level type signatures only), and
-// "ir" reuses `core_ir` (the fully lowered CBPV core, with rc and reuse). Only
-// one is shown at a time; clicking the active view's button hides the panel. It
-// only repopulates while open, and tracks edits.
-type Panel = "sigs" | "ir" | null;
-const VIEW = {
-  sigs: { label: "Type signatures", empty: "(no top-level declarations)", run: dump },
-  ir: { label: "Core IR", empty: "(no functions)", run: core_ir },
-} as const;
+// The checked-HIR fixture (`dump hir`): per-declaration schemes and effect rows
+// plus the per-node checker facts. The bridge prepends the prelude so a snippet
+// type-checks, so the browser strips it back out for display the same way the
+// Core IR view does: prelude declarations drop by name, and prelude node facts
+// drop by a metavar-normalized multiset subtraction against the prelude-only
+// fixture (node ids and metavar numbering shift when user code is present, but a
+// node's fact is stable once its type/row metavars are canonicalized).
+interface HirDeclJ {
+  name: string;
+  scheme: string;
+  effects: string[];
+}
+interface HirNodeJ {
+  res?: unknown;
+  evidence?: string[];
+  lane?: string;
+  ty?: string;
+}
+interface HirFixture {
+  schema: string;
+  decls: HirDeclJ[];
+  nodes: Record<string, HirNodeJ>;
+}
+const META = /\?r?\d+/g;
+const isMeta = (s: string | undefined): boolean => s !== undefined && /^\?r?\d+$/.test(s);
+const nodeSig = (n: HirNodeJ): string =>
+  JSON.stringify([
+    n.res ?? null,
+    n.evidence ?? null,
+    n.lane ?? null,
+    (n.ty ?? "").replace(META, "?"),
+  ]);
+
+// The prelude projection, computed once from `dump_hir("")` (empty user source):
+// the set of prelude declaration names and the multiset of prelude node facts.
+let preludeNames: Set<string> | null = null;
+let preludeNodes: Map<string, number> | null = null;
+function ensurePrelude(): void {
+  if (preludeNames || !ready) return;
+  preludeNames = new Set();
+  preludeNodes = new Map();
+  try {
+    const p = JSON.parse(dump_hir("")) as HirFixture;
+    for (const d of p.decls) preludeNames.add(d.name);
+    for (const k of Object.keys(p.nodes)) {
+      const s = nodeSig(p.nodes[k]);
+      preludeNodes.set(s, (preludeNodes.get(s) ?? 0) + 1);
+    }
+  } catch {
+    // dump_hir returned a diagnostic rather than JSON; leave the prelude sets
+    // empty so the raw fixture still renders (unstripped) instead of failing.
+  }
+}
+function showRes(res: unknown): string {
+  const r = res as { kind?: string; ctor?: string; index?: number; arity?: number };
+  if (r && r.kind === "field") return `field ${r.ctor}.${r.index}/${r.arity}`;
+  if (r && r.kind === "unboxed") return `unboxed .${r.index}/${r.arity}`;
+  return JSON.stringify(res);
+}
+// Render the prelude-stripped HIR of the current source: the user declarations
+// with their schemes and effect rows, then the checker facts recorded on the
+// user's own nodes.
+function renderHir(): string {
+  const raw = dump_hir(src.value);
+  if (raw.startsWith("error")) return strip(raw);
+  let fix: HirFixture;
+  try {
+    fix = JSON.parse(raw) as HirFixture;
+  } catch {
+    return strip(raw);
+  }
+  ensurePrelude();
+  const names = preludeNames ?? new Set<string>();
+  const decls = fix.decls
+    .filter((d) => !names.has(d.name))
+    .map((d) => {
+      // The scheme already renders a function's latent effect row on its arrow;
+      // only surface the declaration's own row when the scheme doesn't end in
+      // one (e.g. a top-level effectful value binding), to avoid duplication.
+      const hasRow = /! \{[^}]*\}\s*$/.test(d.scheme);
+      const eff = d.effects.length && !hasRow ? `  ! {${d.effects.join(", ")}}` : "";
+      return `${d.name} : ${d.scheme}${eff}`;
+    });
+  const budget = new Map(preludeNodes ?? new Map<string, number>());
+  const facts: string[] = [];
+  for (const k of Object.keys(fix.nodes).sort((a, b) => Number(a) - Number(b))) {
+    const n = fix.nodes[k];
+    const s = nodeSig(n);
+    const left = budget.get(s) ?? 0;
+    if (left > 0) {
+      budget.set(s, left - 1); // a prelude node, absorbed
+      continue;
+    }
+    // Only surface nodes carrying a substantive checker fact: a resolution, a
+    // dictionary evidence chain, or a numeric lane. Nodes whose sole fact is a
+    // bare `ty=` (the literal-node type rows) are dropped as noise; the type is
+    // then shown only as context alongside one of the substantive facts.
+    const lane = n.lane ? `lane=${n.lane}` : "";
+    const res = n.res ? `res=${showRes(n.res)}` : "";
+    const ev = n.evidence?.length ? `ev=${n.evidence.join(", ")}` : "";
+    if (!lane && !res && !ev) continue;
+    const parts: string[] = [];
+    if (n.ty && !isMeta(n.ty)) parts.push(`ty=${n.ty}`);
+    for (const p of [lane, res, ev]) if (p) parts.push(p);
+    facts.push(`#${k}  ${parts.join("  ")}`);
+  }
+  const out = ["-- Declarations", decls.length ? decls.join("\n") : "(no top-level declarations)"];
+  if (facts.length) out.push("", `-- Checker facts (${facts.length} nodes)`, facts.join("\n"));
+  return out.join("\n");
+}
+
+// The right column is a single slot shared by two mutually-exclusive panels.
+// "sigs" reuses `dump` (top-level type signatures) in the shared `#sigs` pane.
+// "showir" swaps in the fixed HIR-over-Core split: the top pane always shows the
+// checked HIR, the bottom pane the fully lowered CBPV core. Only one panel shows
+// at a time; clicking the active view's button hides it. Panels only repopulate
+// while open, and track edits.
+type Panel = "sigs" | "showir" | null;
+function paintPre(pre: HTMLPreElement, r: string): void {
+  pre.textContent = r;
+  pre.className = `out${r.startsWith("error") ? " err" : ""}`;
+}
 let panel: Panel = null;
+function refreshIr(): void {
+  if (panel !== "showir" || !ready) return;
+  paintPre(irHir, renderHir() || "(no declarations)");
+  paintPre(irCore, strip(core_ir(src.value)) || "(no functions)");
+}
 function refreshSigs(): void {
-  if (!panel || !ready) return;
-  const view = VIEW[panel];
-  const r = strip(view.run(src.value));
-  sigs.textContent = r || view.empty;
+  if (!ready || panel !== "sigs") return;
+  const r = strip(dump(src.value));
+  sigs.textContent = r || "(no top-level declarations)";
   sigs.className = `out${r.startsWith("error") ? " err" : ""}`;
 }
 function setPanel(next: Panel): void {
   if (!ready) return;
   panel = next;
-  sigLabel.textContent = next ? VIEW[next].label : "";
-  mainEl.classList.toggle("show-sigs", next !== null);
+  sigLabel.textContent = next === "sigs" ? "Type signatures" : "";
+  mainEl.classList.toggle("show-sigs", next === "sigs");
+  mainEl.classList.toggle("show-ir", next === "showir");
   dumpBtn.classList.toggle("active", next === "sigs");
-  irBtn.classList.toggle("active", next === "ir");
+  showirBtn.classList.toggle("active", next === "showir");
   refreshSigs();
+  refreshIr();
 }
 
 let timer = 0;
@@ -167,6 +287,7 @@ function recheck(): void {
   buildErrLines();
   paint();
   refreshSigs();
+  refreshIr();
 }
 function onEdit(): void {
   paint();
@@ -247,13 +368,13 @@ init().then(() => {
   runBtn.disabled = false;
   fmtBtn.disabled = false;
   dumpBtn.disabled = false;
-  irBtn.disabled = false;
+  showirBtn.disabled = false;
   recheck();
 });
 
 runBtn.onclick = runProgram;
 dumpBtn.onclick = () => setPanel(panel === "sigs" ? null : "sigs");
-irBtn.onclick = () => setPanel(panel === "ir" ? null : "ir");
+showirBtn.onclick = () => setPanel(panel === "showir" ? null : "showir");
 fmtBtn.onclick = () => {
   if (!ready) return;
   const r = strip(fmt(src.value));

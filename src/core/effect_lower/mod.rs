@@ -28,6 +28,7 @@ mod evidence;
 mod flow;
 mod handle;
 mod monadic;
+pub mod resume_use;
 mod runtime;
 mod state;
 mod trampoline;
@@ -143,6 +144,24 @@ pub(super) fn smore(v: Value) -> Value {
 
 pub(super) fn sdone(v: Value) -> Value {
     Value::Ctor(SDONE.into(), DONE_TAG, vec![v])
+}
+
+/// Reconstruct one constructor that effect lowering may add to the checked
+/// constructor table. Returns `false` for any name not owned by this pass.
+pub(crate) fn add_synthetic_ctor(ctors: &mut BTreeMap<String, CtorInfo>, name: &str) -> bool {
+    let ctor = match name {
+        EPURE => synth_ctor(EFF, PURE_TAG, 1),
+        EOP => synth_ctor(EFF, OP_TAG, 4),
+        ERESUME => synth_ctor(EFF, RESUME_TAG, 2),
+        EBOUNCE => synth_ctor(EFF, BOUNCE_TAG, 1),
+        TQNIL => synth_ctor(TQ, TQNIL_TAG, 0),
+        TQCONS => synth_ctor(TQ, TQCONS_TAG, 2),
+        SMORE => synth_ctor(STEP, MORE_TAG, 1),
+        SDONE => synth_ctor(STEP, DONE_TAG, 1),
+        _ => return false,
+    };
+    ctors.insert(name.to_string(), ctor);
+    true
 }
 
 // A latent op with the mask depth at which it is in flight: `depth` handlers of

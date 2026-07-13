@@ -80,9 +80,9 @@ fn wasm_visible_doc_examples_run_without_polymorphic_print_errors() {
     }
 }
 
-// The v0.10 spec additions (unboxed products, OrNull, tensors, usage contracts)
-// include these examples; pin that each one still checks, so a spec snippet can
-// never silently rot ahead of the compiler.
+// These examples cover unboxed products, OrNull, tensors, and usage contracts.
+// Pin that each one still checks, so a spec snippet cannot silently rot ahead of
+// the compiler.
 const SPEC_ADDITION_EXAMPLES: &[&str] = &[
     "docs/examples/unboxed_products.pr",
     "docs/examples/ornull.pr",

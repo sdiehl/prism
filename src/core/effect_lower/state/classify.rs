@@ -4,9 +4,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::diagnostics::DriftLog;
-use super::super::evidence::{resume_set, strip_resume};
+use super::super::evidence::resume_set;
 use super::super::flow::{self, Loc};
+use super::super::resume_use::ResumeUse;
 use super::super::{EarlyExitMode, Lowerer, StateAnswerMode};
 use crate::core::cbpv::{Comp, Core, CoreFn, HandleOp, Value};
 use crate::sym::Sym;
@@ -117,8 +117,8 @@ impl Lowerer {
             // forward/consumer/take handle is single-clause.
             if !clauses.is_empty()
                 && clauses
-                    .iter()
-                    .all(|c| Self::is_fold(c, &self.drift).is_some())
+                    .iter_with_use()
+                    .all(|(c, ru)| Self::is_fold(c, ru).is_some())
             {
                 // The return clause is a state transformer `\s -> body`; the
                 // identity transformer is the writer special case, a get-style
@@ -129,8 +129,8 @@ impl Lowerer {
                 if !return_body.as_deref().is_some_and(is_id_transformer) {
                     self.state_answer = StateAnswerMode::Producer;
                 }
-                for clause in clauses {
-                    let kind = Self::is_fold(clause, &self.drift)?;
+                for (clause, ru) in clauses.iter_with_use() {
+                    let kind = Self::is_fold(clause, ru)?;
                     self.state_a.insert(clause.name, kind);
                     consumed.insert(clause.name);
                     folds += 1;
@@ -140,16 +140,17 @@ impl Lowerer {
             let [clause] = clauses.arms() else {
                 return None;
             };
+            let ru = clauses.resume_use(0);
             if self.is_take(clause) {
                 // A `stake`: parameter-passing, re-emits, and drops the
                 // continuation to stop early. Its return clause is ignored (the
                 // consumer above discards the producer's return value).
                 takes += 1;
-            } else if self.is_forward(clause) {
+            } else if self.is_forward(clause, ru) {
                 if !is_id_return(*return_var, return_body.as_deref()) {
                     return None;
                 }
-            } else if self.is_consumer(clause) {
+            } else if self.is_consumer(clause, ru) {
                 // A tail-resumptive control consumer (a `for`/print loop): unit
                 // state, side effects in the clause, any return clause. Lets a
                 // fold chain and a control chain over distinct streams fuse in
@@ -246,18 +247,17 @@ impl Lowerer {
     }
 
     // A forwarding clause (smap/skeep): tail-resumptive and re-emits its own op,
-    // so it threads the accumulator straight into the outer evidence.
-    pub(super) fn is_forward(&self, op: &HandleOp) -> bool {
-        strip_resume(&op.body, &resume_set(op.resume), &self.drift).is_some()
-            && self.folds(&op.body, op.name)
+    // so it threads the accumulator straight into the outer evidence. Tail
+    // eligibility is the clause's stored classification, not a re-strip.
+    pub(super) fn is_forward(&self, op: &HandleOp, ru: ResumeUse) -> bool {
+        ru.tail && self.folds(&op.body, op.name)
     }
 
     // A control consumer (a `for`/print loop): tail-resumptive but does not
     // re-emit, so its clause is a pure side effect over a unit state that the
     // producer threads unchanged. Its return clause is run on the final state.
-    pub(super) fn is_consumer(&self, op: &HandleOp) -> bool {
-        strip_resume(&op.body, &resume_set(op.resume), &self.drift).is_some()
-            && !self.folds(&op.body, op.name)
+    pub(super) fn is_consumer(&self, op: &HandleOp, ru: ResumeUse) -> bool {
+        ru.tail && !self.folds(&op.body, op.name)
     }
 
     // A `stake`-style early-terminating handler: a parameter-passing clause
@@ -287,8 +287,8 @@ impl Lowerer {
     // `Acc` for a read), or None when the clause is not a fold. A tail-resumptive
     // clause (a forwarder or for/print consumer) is not a fold and disqualifies
     // the program.
-    pub(super) fn is_fold(op: &HandleOp, drift: &DriftLog) -> Option<AKind> {
-        if strip_resume(&op.body, &resume_set(op.resume), drift).is_some() {
+    pub(super) fn is_fold(op: &HandleOp, ru: ResumeUse) -> Option<AKind> {
+        if ru.tail {
             return None;
         }
         let Comp::Return(Value::Thunk(t)) = &op.body else {

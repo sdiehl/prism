@@ -1,0 +1,94 @@
+-- A backtracking regular-expression matcher written in continuation-passing
+-- style. The grammar is the classic five constructors: the empty match, a
+-- single literal character, sequencing, alternation, and Kleene star. Instead
+-- of returning a boolean and a leftover suffix, `matchr` takes a continuation
+-- `k : List(Char) -> Bool` and asks it whether the *rest* of the match can
+-- still succeed; that is what makes `RSeq` and `RStar` compose by nesting
+-- continuations rather than threading explicit state, and what makes `RAlt`
+-- and `RStar` backtrack for free via `||`. `fullmatch` seeds the search with
+-- a continuation that only accepts a fully-consumed subject, so a match that
+-- leaves characters unconsumed is rejected the same way a failed match is.
+--
+-- Expected output:
+--   a(b|c)*d vs abccbd = true
+--   a(b|c)*d vs ad     = true
+--   a(b|c)*d vs abbbbd = true
+--   a(b|c)*d vs abx    = false
+--   a(b|c)*d vs abcd e = false
+--   a*       vs ""     = true
+--   a*       vs aaaaa  = true
+--   a*       vs aaab   = false
+--   abc      vs abc    = true
+--   abc      vs ab     = false
+--   abc      vs abcd   = false
+--   abc      vs abd    = false
+
+type Regex
+  = REps
+  | RChr(Char)
+  | RSeq(Regex, Regex)
+  | RAlt(Regex, Regex)
+  | RStar(Regex)
+
+-- `matchr(re, cs, k)` tries to match `re` against a prefix of `cs`, then hands
+-- whatever characters remain to `k`. The whole match succeeds only if `k`
+-- itself returns true, so failure anywhere downstream backtracks into every
+-- choice point `RAlt` and `RStar` left behind.
+fn matchr(re, cs, k) : Bool =
+  match re of
+    REps => k(cs)
+    RChr(c) =>
+      match cs of
+        Nil => false
+        Cons(h, t) =>
+          if h == c then
+            k(t)
+          else
+            false
+    RSeq(a, b) => matchr(a, cs, \(rest) -> matchr(b, rest, k))
+    RAlt(a, b) => matchr(a, cs, k) || matchr(b, cs, k)
+    RStar(a) => k(cs) || matchr(a, cs, \(rest) -> matchr(RStar(a), rest, k))
+
+-- A full match must consume the subject exactly; leftover characters are a
+-- rejection, matching how `grep -x` or an anchored `^...$` regex behaves.
+fn fullmatch(re, s) : Bool = matchr(re, chars(s), \(rest) -> is_nil(rest))
+
+-- `lit(s)` builds the `RSeq`-chain matching the literal string `s` one
+-- character at a time; it lets the test cases below read like ordinary text
+-- instead of a pyramid of `RChr` constructors.
+fn lit(s) : Regex = lit_chars(chars(s))
+
+fn lit_chars(cs) : Regex =
+  match cs of
+    Nil => REps
+    Cons(c, rest) => RSeq(RChr(c), lit_chars(rest))
+
+fn report(desc : String, re, subject) =
+  let ok = fullmatch(re, subject)
+  let result =
+    if ok then
+      "true"
+    else
+      "false"
+  println("{desc} = {result}")
+
+fn main() =
+  -- a(b|c)*d : a literal 'a', then zero or more of 'b' or 'c', then 'd'.
+  let star_bc = RStar(RAlt(RChr('b'), RChr('c')))
+  let abcd = RSeq(RChr('a'), RSeq(star_bc, RChr('d')))
+  report("a(b|c)*d vs abccbd", abcd, "abccbd")
+  report("a(b|c)*d vs ad    ", abcd, "ad")
+  report("a(b|c)*d vs abbbbd", abcd, "abbbbd")
+  report("a(b|c)*d vs abx   ", abcd, "abx")
+  report("a(b|c)*d vs abcd e", abcd, "abcde")
+  -- a* : zero or more 'a', nothing else.
+  let astar = RStar(RChr('a'))
+  report("a*       vs \"\"    ", astar, "")
+  report("a*       vs aaaaa ", astar, "aaaaa")
+  report("a*       vs aaab  ", astar, "aaab")
+  -- abc : the literal string, built via `lit`.
+  let abc = lit("abc")
+  report("abc      vs abc   ", abc, "abc")
+  report("abc      vs ab    ", abc, "ab")
+  report("abc      vs abcd  ", abc, "abcd")
+  report("abc      vs abd   ", abc, "abd")

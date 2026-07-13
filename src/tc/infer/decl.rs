@@ -144,18 +144,28 @@ impl Tc<'_> {
     // touching any shared environment. Does not reset the context, so a caller
     // can seed several members into one shared context before inferring them.
     fn seed_decl(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
+        // One kind per variable across every annotation of the declaration
+        // (params, return, and constraints share one signature scope).
+        let mut var_kinds = BTreeMap::new();
         for p in &d.params {
             if let Some(ann) = &p.ty {
                 self.check_annot_rows(ann, d.span)?;
+                super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
             }
         }
         if let Some(ann) = &d.ret {
             self.check_annot_rows(ann, d.span)?;
+            super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
         }
         if let Some(ls) = &d.eff {
             self.check_labels(ls, d.span)?;
         }
         for c in &d.constraints {
+            // Constraint heads are classes, not datatypes: their parameter
+            // kinds (higher-kinded for `Functor`/`Foldable`) live in the class
+            // system, which checks them itself, so the per-variable kind pass
+            // does not read constraint types (it would wrongly demand `Type`
+            // for an HKT class parameter).
             self.check_annot_rows(&c.ty, c.span)?;
         }
         let mut ty_ex = BTreeMap::new();
@@ -241,6 +251,8 @@ impl Tc<'_> {
         let val = match &d.ret {
             Some(ann) => {
                 self.check_annot_rows(ann, d.span)?;
+                let mut var_kinds = BTreeMap::new();
+                super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
                 self.convert_annot_fresh(ann)
             }
             None => Type::Exist(self.push_ex()),
@@ -309,6 +321,38 @@ impl Tc<'_> {
         self.cur_row = saved_row;
         checked?;
         self.flush_spans();
+        // Record the principal-body-effect witness while the solutions are
+        // live: the ambient row the body actually accumulated, read before
+        // generalization (`default_open_rows`) re-opens a pure row for context
+        // fit and destroys the closedness fact. The row is closed for the
+        // borrow rule exactly when its tail stayed this declaration's own
+        // ambient (or emptied): a tail that solved to a row variable or
+        // existential also reachable from the parameter or return types means
+        // the body forwards interface effects (a higher-order argument's, or a
+        // returned computation's), which can suspend.
+        let row = self.apply_row(&EffRow::Exist(seed.mu));
+        let closed = match row.tail() {
+            EffRow::Empty => true,
+            tail @ (EffRow::Var(_) | EffRow::Exist(_)) => {
+                let mut in_iface = false;
+                let mut scan = |t: &Type| {
+                    super::super::env::for_each_row_tail(t, &mut |other| in_iface |= other == tail);
+                };
+                for dom in &seed.doms {
+                    scan(&self.apply(dom));
+                }
+                scan(&self.apply(&seed.ret));
+                !in_iface
+            }
+            EffRow::Extend(..) => false,
+        };
+        self.body_witness.insert(
+            d.name.clone(),
+            super::super::BodyWitness {
+                effects: row.label_names(),
+                closed,
+            },
+        );
         Ok(())
     }
 
@@ -406,6 +450,8 @@ impl Tc<'_> {
         let (ty, effs) = self.scoped_effects(|tc| {
             let ty = if let Some(ann) = &d.ret {
                 tc.check_annot_rows(ann, d.span)?;
+                let mut var_kinds = BTreeMap::new();
+                super::super::env::demand_var_kinds(ann, tc.data, &mut var_kinds, d.span)?;
                 let t = tc.convert_annot_fresh(ann);
                 tc.check(env, &d.body, &t)?;
                 Ok(t)

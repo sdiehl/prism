@@ -1,22 +1,26 @@
-define i64 @prism_unwrap(i64 %o) {
+; Function Attrs: nounwind
+define i64 @prism_unwrap(i64 %a0) #0 {
 entry:
-  %cell = inttoptr i64 %o to ptr             ; the value word is a cell pointer
-  %tagp = getelementptr i8, ptr %cell, i64 8
-  %tag  = load i64, ptr %tagp                ; the tag lives at offset 8
-  switch i64 %tag, label %nomatch [
-    i64 0, label %Non
-    i64 1, label %Som
+  %t0 = inttoptr i64 %a0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+    i64 1, label %b3
   ]
-Non:
-  call void @prism_rc_dec(i64 %o)            ; drop the consumed scrutinee
-  ret i64 1                                  ; 0 is the immediate (0 << 1) | 1
-Som:
-  %fp = getelementptr i8, ptr %cell, i64 24
-  %n  = load i64, ptr %fp                    ; field 0 begins at offset 24
-  call void @prism_rc_inc(i64 %n)            ; retain the field that escapes
-  call void @prism_rc_dec(i64 %o)            ; drop the scrutinee
-  ret i64 %n
-nomatch:
-  call void @prism_match_error()             ; exhaustiveness backstop
+
+b2:                                               ; preds = %entry
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 1
+
+b3:                                               ; preds = %entry
+  %t5 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t6 = load i64, ptr %t5, align 8
+  call void @prism_rc_inc(i64 %t6)
+  call void @prism_rc_dec(i64 %a0)
+  ret i64 %t6
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
   unreachable
 }

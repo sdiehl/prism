@@ -38,7 +38,7 @@ A pull pipeline is correct and constant-space per stage, but on the current opti
 
 ### `Step`
 
-```prism,def
+```prism,def,h-d40b7f54803f5f7185f5e87095f350fc57de46c25699cae05521b8063e9b37ef
 type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 ```
 
@@ -46,288 +46,288 @@ type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 
 ### `empty`
 
-```prism,sig
-fn empty()
+```prism,sig,h-ec00ce5f072c9f8fb01b36500567237ff063dcdd39800b90a4c23f8c5a9842be
+empty : forall a. () -> (Unit) -> Sequence.Step(a)
 ```
 
 The empty sequence: yields nothing.
 
 ### `singleton`
 
-```prism,sig
-fn singleton(x)
+```prism,sig,h-af74138faf714cb1995b4e902853c7f9b10178bd6109124c9af645bbccb8ede3
+singleton : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
 The one-element sequence yielding `x`.
 
 ### `range`
 
-```prism,sig
-fn range(lo, hi)
+```prism,sig,h-3eef41aaa63aba2db085cbd0a70ee7bebc89a7e8b1dbfbaac0523503ecdfcd71
+range : (Int, Int) -> (Unit) -> Sequence.Step(Int)
 ```
 
 The ascending integers in `[lo, hi)`. Self-recursive: the continuation is the next `range`, so no element is built until pulled.
 
 ### `from_list`
 
-```prism,sig
-fn from_list(xs)
+```prism,sig,h-3f5f117b07a28be270cbdb2ebffba4b78ee7243a2c42ffc9e1c23d1063309cc0
+from_list : forall a. (List(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
 The container boundary in: the elements of list `xs`, in order.
 
 ### `iterate`
 
-```prism,sig
-fn iterate(x, f)
+```prism,sig,h-aca68d4b50adfc80563a62049dcbb3f8e3a21eb63c936e15da6acc9bd0f7e360
+iterate : forall a. (a, (a) -> a) -> (Unit) -> Sequence.Step(a)
 ```
 
 The infinite sequence `x, f(x), f(f(x)), ...`. Bound it with `take`.
 
 ### `repeat`
 
-```prism,sig,h-54970cfebe2f4dd8906d509325cc09ffc1e946fe63fed6d5f638c772ce35f132
-repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
+```prism,sig,h-fadeb002409772362aa540fb6fe0bd7d334e1a0645f7b54be20fb4d283ee461e
+repeat : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
 The infinite sequence of `x` repeated. Bound it with `take`.
 
 ### `unfold`
 
-```prism,sig
-fn unfold(seed, step)
+```prism,sig,h-c4ff27f30ce1d2f40b8bc48224818a192fdc4cfb34504044498303dfbd5f5228
+unfold : forall a b. (a, (a) -> Option((b, a))) -> (Unit) -> Sequence.Step(b)
 ```
 
 The generator producer: yield `x` for each `Some((x, seed'))` that `step` returns from the running seed, stopping at `None`. Every finite producer is a special case; on pull `Step` a generator is just a fold over the seed, needing no coroutine or handler.
 
 ### `map`
 
-```prism,sig
-fn map(s, f)
+```prism,sig,h-f7b5ef49f33f5b41ca2135b41b29bf290c2ffa333f0f5f5f8e29415fb4de7464
+map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> b) -> (Unit) -> Sequence.Step(b)
 ```
 
 Apply `f` to every element. Type-changing: `Seq(a) -> Seq(b)`.
 
 ### `filter`
 
-```prism,sig
-fn filter(s, p)
+```prism,sig,h-d5524a8949c9241f229b28ff189857a8a91c98360dcc92834ad728978e60fcfa
+filter : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
 Keep only the elements satisfying `p`.
 
 ### `filter_map`
 
-```prism,sig
-fn filter_map(s, f)
+```prism,sig,h-bb4f155156ab254f2c081189e99ed3552d5c295e60579eca61b19b50a5e4eb04
+filter_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> Option(b)) -> (Unit) -> Sequence.Step(b)
 ```
 
 Map and filter in one pass: yield `y` for each `f(x) == Some(y)`, dropping the `None`s.
 
 ### `append`
 
-```prism,sig
-fn append(s, t)
+```prism,sig,h-a1b92027028edba7d916998453526ee3d63fcf419fb9ad10659e65f8be598ae1
+append : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
 Concatenate two sequences: all of `s`, then all of `t`.
 
 ### `flat_map`
 
-```prism,sig
-fn flat_map(s, f)
+```prism,sig,h-fc3d3604cb8dc1e02dffbc7458efb6f07fd29756f350fdc4551a8d21f2554d39
+flat_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> (Unit) -> Sequence.Step(b)) -> (Unit) -> Sequence.Step(b)
 ```
 
 For each element `x`, splice in the sequence `f(x)`.
 
 ### `take`
 
-```prism,sig
-fn take(s, n)
+```prism,sig,h-0b619b2e3b0dbe6c8760af46983bd8844315c2c506a8fd785d0e9105201e7f83
+take : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 ```
 
 The first `n` elements, stopping the producer once the budget is spent.
 
 ### `drop`
 
-```prism,sig
-fn drop(s, n)
+```prism,sig,h-94055a5e74a19397fb58238bbc3348ed17a49309953f12a198ddc43792a1a4ad
+drop : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 ```
 
 Skip the first `n` elements, yielding the rest.
 
 ### `take_while`
 
-```prism,sig
-fn take_while(s, p)
+```prism,sig,h-da09fb7f80324b2a9f93c7a6a857f68f0969b2f258571bd92c2bd339c46e4e10
+take_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
 The longest prefix whose elements satisfy `p`; stops at the first failure.
 
 ### `drop_while`
 
-```prism,sig
-fn drop_while(s, p)
+```prism,sig,h-9603f5e95d4fc1669dce56c9374d83e3fa2267a7f954fedce32d1304fe391181
+drop_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
 Drop the longest prefix satisfying `p`, yielding the rest.
 
 ### `dedup`
 
-```prism,sig
-fn dedup(s)
+```prism,sig,h-8a38f010140ca7d0245c7fc611e09d74a7cc351aac05f4e1aa1e8c135aee992a
+dedup : forall e1 a. ((Unit) -> Sequence.Step(Int) ! {e1}) -> (a) -> Sequence.Step(Int) ! {e1}
 ```
 
 Drop consecutive duplicates, keeping the first of each run (needs `Eq(a)`). Left unsigned so the `Eq(a)` constraint is inferred from `==`.
 
 ### `enumerate`
 
-```prism,sig
-fn enumerate(s)
+```prism,sig,h-136457fb35b8c7a361750a4d922fa00026885decc32bb5c00d3e0d82bf63d53f
+enumerate : forall a. ((Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step((Int, a))
 ```
 
 Pair each element with its zero-based index, yielding `(i, x)`.
 
 ### `scan`
 
-```prism,sig
-fn scan(s, z, f)
+```prism,sig,h-4ba3907627f820890589ca40d543b93691813da297a41aceb74558a7f61db71b
+scan : forall a b. ((Unit) -> Sequence.Step(a), b, (b, a) -> b) -> (Unit) -> Sequence.Step(b)
 ```
 
 The running left-fold, streamed: yield `z`, then each successive accumulator.
 
 ### `interleave`
 
-```prism,sig
-fn interleave(s, t)
+```prism,sig,h-24beee4d1d4269124670c9d322bf20ad879f93977a27e93f5d20727fa46d6b4e
+interleave : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
 Alternate elements of `s` and `t` (`s0, t0, s1, t1, ...`); when one runs out, yield the whole remainder of the other. Streamed, no materialization.
 
 ### `zip`
 
-```prism,sig
-fn zip(s, t)
+```prism,sig,h-5e96a6cf5d90fa4ed1358a5f9161d112650fc7137b1f9fad903ccff662e14851
+zip : forall a b. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b)) -> (Unit) -> Sequence.Step((a, b))
 ```
 
 Pair two sequences element-wise, stopping at the shorter. Genuinely heterogeneous: `Seq(a)` and `Seq(b)` yield `Seq((a, b))`.
 
 ### `zip_with`
 
-```prism,sig
-fn zip_with(s, t, f)
+```prism,sig,h-2564e1bce7fda61915b8d9208c9ef7aa0b258172e4b985007ebe9a16b173fc85
+zip_with : forall a b c. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b), (a, b) -> c) -> (Unit) -> Sequence.Step(c)
 ```
 
 Combine two sequences element-wise with `f`, stopping when either runs out. Heterogeneous in both operand types.
 
 ### `chunk`
 
-```prism,sig
-fn chunk(s, n)
+```prism,sig,h-b7dd8d10385ce876d93ac318a9b9e168eb94356bc8d6bb00195ddf246d21fab1
+chunk : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(List(a))
 ```
 
 Group elements into consecutive lists of length `n` (the final chunk may be shorter). Pulls one group at a time, holding only the current group.
 
 ### `window`
 
-```prism,sig
-fn window(s, n)
+```prism,sig,h-3a0da2c9a1b8a976d58b415b9a5938268e4ae22684565850776aebdd23f66009
+window : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(List(a))
 ```
 
 Every contiguous length-`n` sliding window, in order. Fewer than `n` elements yields nothing. Holds one window (`n` elements) at a time.
 
 ### `fold`
 
-```prism,sig
-fn fold(s, z, f)
+```prism,sig,h-b78dc0e311a5c9815cb95c0be9e270bafa94eaa716ca7677317b0bf4220b67d4
+fold : forall a b. ((Unit) -> Sequence.Step(b), a, (a, b) -> a) -> a
 ```
 
 Left-fold the sequence with `f` from initial accumulator `z`.
 
 ### `for_each`
 
-```prism,sig
-fn for_each(s, f)
+```prism,sig,h-b63f40aad5960bcc848a4541651ddc44662ad02806b7851d4dbd25dbff882880
+for_each : forall e0 a. ((Unit) -> Sequence.Step(a), (a) -> Unit ! {e0}) -> Unit ! {e0}
 ```
 
 Run `f` for its effects on each element, in order. Effect-polymorphic: `f` runs in the ambient row (no handler intervenes), so `for_each(s, \(x) -> println(x))` threads `IO` out. The explicit `{| e}` row matters: unsigned, the self-recursion would infer `f` as pure and reject an effectful body.
 
 ### `sum`
 
-```prism,sig
-fn sum(s)
+```prism,sig,h-0ff3d7da56419889d2230b9329892f8d7406f3e5c079125a0d6f2de4fe84c1ff
+sum : ((Unit) -> Sequence.Step(Int)) -> Int
 ```
 
 Sum a sequence of integers.
 
 ### `product`
 
-```prism,sig
-fn product(s)
+```prism,sig,h-bb0feca86b3c542bff90a8402dfa851dbf8a9e4a31615c9cfae6cd32f52f3b5d
+product : ((Unit) -> Sequence.Step(Int)) -> Int
 ```
 
 Product of a sequence of integers.
 
 ### `count`
 
-```prism,sig
-fn count(s)
+```prism,sig,h-d62036a06888d3f95e83133623a7aab2471fee2b5f9e2d64e9965c415cb6b4f2
+count : forall a. ((Unit) -> Sequence.Step(a)) -> Int
 ```
 
 The number of elements.
 
 ### `to_list`
 
-```prism,sig
-fn to_list(s)
+```prism,sig,h-dd04c4141822df7a1deef31532219e85fc36072f5b4b729db77df3c6a4792dc3
+to_list : forall a. ((Unit) -> Sequence.Step(a)) -> List(a)
 ```
 
 Collect the sequence into a list, in order. The container boundary out.
 
 ### `head`
 
-```prism,sig
-fn head(s)
+```prism,sig,h-5e8647b03c98549a740ba77ca99b1015f6eec41222ef7fbb7542cb344a0db7e4
+head : forall e0 a. ((Unit) -> Sequence.Step(a) ! {e0}) -> Option(a) ! {e0}
 ```
 
 The first element, or `None` if the sequence is empty.
 
 ### `find`
 
-```prism,sig
-fn find(s, p)
+```prism,sig,h-01239cc756a2b7ccd8b2f55e15f37a3a881f920f8b2923080c3db3cfdc00a8e5
+find : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Option(a)
 ```
 
 The first element satisfying `p`, or `None`; stops the producer at the match.
 
 ### `any`
 
-```prism,sig
-fn any(s, p)
+```prism,sig,h-92d3fb25056cc0d1f6110f8160455192a8225df1b06fcb2e405b730e3c42360a
+any : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 ```
 
 True when some element satisfies `p`; short-circuits.
 
 ### `all`
 
-```prism,sig
-fn all(s, p)
+```prism,sig,h-9ba254ddd85b91c7bde73f58c0b2f3ccab7751a25e84defe313b1a10fce84379
+all : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 ```
 
 True when every element satisfies `p`; short-circuits on the first failure.
 
 ### `from_bytes`
 
-```prism,sig
-fn from_bytes(bs)
+```prism,sig,h-8b142a8072a8ff3def9a09f228aa3598a30735a801ad4ad92fe47ff22dd8b5db
+from_bytes : (Wire.Bytes) -> (Unit) -> Sequence.Step(Int)
 ```
 
 The bytes of `bs` as a sequence of ints in `0..255`, in order.
 
 ### `to_bytes`
 
-```prism,sig
-fn to_bytes(s)
+```prism,sig,h-4a02508749790b5cb5d9502e845189344ab5fa6eb171343b2fd1f605cae4081f
+to_bytes : ((Unit) -> Sequence.Step(Int)) -> Wire.Bytes
 ```
 
 Collect a sequence of ints (each masked to a byte) into a `Bytes`. The Bytes container boundary out.

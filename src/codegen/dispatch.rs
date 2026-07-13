@@ -26,7 +26,11 @@ impl<I: Isa> Cg<'_, I> {
         if let Some(&tag) = self.adapters.get(&(target, n)) {
             return tag;
         }
-        let tag = self.lams.len();
+        let index = self.lams.len();
+        let owner = self.lams[target].owner;
+        let tag = self
+            .mint_closure_tag(owner)
+            .expect("curry adapter closure tag is unique");
         let m = self.lams[target].params.len();
         let free_vars = (0..target_fvs + n)
             .map(|i| Sym::new(&closure_cap(i)))
@@ -34,12 +38,13 @@ impl<I: Isa> Cg<'_, I> {
         let params = (0..m - n).map(|i| Sym::new(&closure_rem(i))).collect();
         self.lams.push(LamInfo {
             tag,
+            owner,
             params,
             free_vars,
             body: LamBody::Curry { target },
         });
-        self.adapters.insert((target, n), tag);
-        tag
+        self.adapters.insert((target, n), index);
+        index
     }
 
     // Register (without emitting) the curry adapters and follow-on apply arities
@@ -87,11 +92,12 @@ impl<I: Isa> Cg<'_, I> {
     // arity-0 thunk, so for n == 0 the sole reachable case is m == 0;
     // positive-arity tags route to `_dead` like any non-applicable value.
     pub(super) fn apply_dispatch(&mut self, n: usize) -> String {
-        let lams: Vec<LamInfo> = self
+        let lams: Vec<(usize, LamInfo)> = self
             .lams
             .iter()
-            .filter(|l| n > 0 || l.params.is_empty())
-            .cloned()
+            .enumerate()
+            .filter(|(_, lambda)| n > 0 || lambda.params.is_empty())
+            .map(|(index, lambda)| (index, lambda.clone()))
             .collect();
         let mut params = vec!["%_clos".to_string()];
         params.extend((0..n).map(|i| format!("%_a{i}")));
@@ -112,7 +118,7 @@ impl<I: Isa> Cg<'_, I> {
 
         let cases: Vec<(i64, String)> = lams
             .iter()
-            .map(|l| (idx64(l.tag), format!("_lam{}", l.tag)))
+            .map(|(_, lambda)| (idx64(lambda.tag), format!("_lam{}", lambda.tag)))
             .collect();
         self.isa.switch(&mut b, "%_tag", "_dead", &cases);
         self.isa.open_block(&mut b, "_dead");
@@ -120,7 +126,7 @@ impl<I: Isa> Cg<'_, I> {
         self.isa.unreachable(&mut b);
 
         let mut preds: Vec<(String, String)> = Vec::new();
-        for lam in &lams {
+        for (index, lam) in &lams {
             let tag = lam.tag;
             let m = lam.params.len();
             let fvs = lam.free_vars.len();
@@ -150,7 +156,7 @@ impl<I: Isa> Cg<'_, I> {
                     // closure expecting the remaining m-n. The fvs are still owned
                     // by `%_clos` (the caller drops it after this apply), so dup
                     // them; the args were handed to us and move in.
-                    let adapter = self.curry_adapter(tag, fvs, n);
+                    let adapter = self.curry_adapter(*index, fvs, n);
                     let mut fields = captured;
                     for fv in &fields {
                         self.isa.call_void(&mut b, rt::RC_INC, slice::from_ref(fv));
@@ -162,7 +168,7 @@ impl<I: Isa> Cg<'_, I> {
                         .call_ptr(&mut b, &cp, rt::ALLOC, slice::from_ref(&nf));
                     let tp = format!("%_atp{tag}");
                     self.isa.gep(&mut b, &tp, &cp, TAG_OFF);
-                    let tv = self.isa.const_int(&mut b, idx64(adapter));
+                    let tv = self.isa.const_int(&mut b, idx64(self.lams[adapter].tag));
                     self.isa.store(&mut b, &tv, &tp);
                     for (i, fld) in fields.iter().enumerate() {
                         let off = HDR_BYTES + idx64(i) * WORD_BYTES;

@@ -162,6 +162,32 @@ pub fn write_runtime(dir: &Path) -> io::Result<Vec<PathBuf>> {
     write_runtime_for(dir, RuntimeProfile::NativeBackend)
 }
 
+/// Content digest of every runtime input selected by `profile`.
+///
+/// Native artifact queries include this so a runtime-only edit cannot reuse a
+/// binary linked against stale runtime bytes.
+///
+/// # Panics
+/// Panics if the compiler's static runtime manifest names a missing source file.
+#[cfg(feature = "native")]
+#[must_use]
+pub fn runtime_profile_digest(profile: RuntimeProfile) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for module in profile.modules() {
+        for name in module.files() {
+            hasher.update(&(name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            let (body, _) =
+                runtime_entry(name).expect("runtime profile file missing from manifest");
+            hasher.update(&(body.len() as u64).to_le_bytes());
+            hasher.update(body.as_bytes());
+        }
+    }
+    hasher.update(&(LIBM_ARCHIVE.len() as u64).to_le_bytes());
+    hasher.update(LIBM_ARCHIVE);
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Write the selected runtime profile into `dir` for the C compiler.
 ///
 /// # Errors

@@ -28,19 +28,18 @@ use crate::syntax::ast::{CanonicalDecl, InstanceDecl, Phase, Span, Ty};
 // The classes whose instance choice affects a container's runtime representation
 // and must therefore be reified into container type identity for cross-program
 // coherence: a `Set`/`Map` built under one `Ord`/`Hash` and shipped to a program
-// that canonicalized a different one is silent corruption. Reserved for that
-// later reification pass; no caller reads it yet, and the rest of coherence is
+// that canonicalized a different one is silent corruption. This classification
+// is reserved for cross-program reification; no caller reads it, and the rest is
 // representation-neutral (`Show`, `Functor`, and the like are harmless to mix).
-// This is the one canonical home the reification will consult.
+// This is its one canonical home.
 const REPRESENTATION_AFFECTING: &[&str] = &["Ord", "Hash"];
 
 /// Whether a class's instance choice affects representation.
 ///
 /// A cross-program value of a representation-affecting class must carry that
-/// instance's hash in its type for coherence to survive the boundary. Reserved:
-/// reification is a later release and nothing reads this today; it fixes the
-/// classification in one place so the shape is not a breaking change when that
-/// pass lands.
+/// instance's hash in its type for coherence to survive the boundary. No caller
+/// reads this reserved classification. Keeping it in one place prevents schema
+/// drift.
 #[must_use]
 pub fn is_representation_affecting(class: &str) -> bool {
     REPRESENTATION_AFFECTING.contains(&class)

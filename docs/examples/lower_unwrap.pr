@@ -1,0 +1,8 @@
+type Opt = Non | Som(Int)
+
+fn unwrap(o : Opt) : Int =
+  match o of
+    Non => 0
+    Som(n) => n
+
+fn main() = println(unwrap(Som(7)))

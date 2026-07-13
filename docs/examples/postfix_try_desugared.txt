@@ -1,7 +1,0 @@
--- `e?` over a Result unwraps `Ok(x)` to `x` and short-circuits on `Err`,
--- propagating the error to the enclosing Result-returning function.
-half(n)?
-  ==>
-match half(n) of
-  Ok(x)  => x
-  Err(e) => Err(e)        -- short-circuits the surrounding computation

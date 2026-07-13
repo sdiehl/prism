@@ -1,0 +1,7 @@
+fn sumto(n : Int, acc : Int) : Int =
+  if n == 0 then
+    acc
+  else
+    sumto(n - 1, acc + n)
+
+fn main() = println(sumto(100, 0))
