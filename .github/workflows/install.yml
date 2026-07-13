@@ -41,6 +41,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # The documented runtime prerequisite: native codegen loads LLVM (and its
+      # z3 dependency) at runtime. Linux runners carry system LLVM already.
+      - name: Install LLVM runtime (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm@22 || brew install llvm
       - name: Run the installer against the latest release
         # PRISM_NO_NIX pins the test to the tarball path; runners have no Nix,
         # but the pin keeps the exercised path explicit either way. The token
