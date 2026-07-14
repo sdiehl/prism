@@ -39,6 +39,7 @@ examples/incr_trace.pr: whole-program-free-monad
 examples/incr_warm.pr: whole-program-free-monad
 examples/indexing.pr: whole-program-free-monad
 examples/interaction.pr: state-fusion
+examples/interp.pr: selective-free-monad
 examples/lambda.pr: selective-free-monad
 examples/leaderboard.pr: whole-program-free-monad
 examples/life.pr: whole-program-free-monad
@@ -62,9 +63,11 @@ examples/sandbox.pr: evidence
 examples/scheduler.pr: whole-program-free-monad
 examples/scheduler_policy.pr: whole-program-free-monad
 examples/stable.pr: whole-program-free-monad
+examples/stlc.pr: selective-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
+examples/tensor_ops.pr: selective-free-monad
 examples/time.pr: whole-program-free-monad
 examples/transact.pr: selective-free-monad
 examples/ufcs.pr: state-fusion

@@ -36,9 +36,9 @@ pub mod fixpoint;
 pub mod flags;
 pub mod fmt;
 pub mod fresh;
+pub mod hir;
 pub mod kw;
 pub mod lex;
-#[cfg(feature = "native")]
 pub mod lineage;
 pub mod names;
 pub mod parse;
@@ -78,27 +78,33 @@ pub use docs::{
 };
 #[cfg(feature = "native")]
 pub use driver::{
-    attest_on, build, build_at, build_on, build_on_report, emit_ir, NativeBuildReport,
+    attest_on, build, build_at, build_on, build_on_report, emit_ir,
+    verify_backend_recomposition_on, NativeBuildReport, NativeCacheStatus,
 };
 #[cfg(feature = "mlir")]
 pub use driver::{build_mlir, build_mlir_at, build_mlir_on};
 pub use driver::{
-    check, check_at, check_on, check_on_in, check_validated_on_in, commit_to_store, core_ir,
-    core_ir_full, core_of, debug_on, diff_on, dump, dump_at, dump_on, effect_strategy_full,
-    effect_strategy_on, effect_warnings_full, example_program, interpret, interpret_at,
-    interpret_io_at, interpret_io_on, interpret_io_on_with_args, namespace_identity,
-    namespace_root, off_platform_builtins, public_surface, query_on, rc_balanced, record_on,
+    check, check_at, check_modules_on, check_on, check_on_in, check_validated_on_in,
+    check_with_seed, commit_to_store, core_ir, core_ir_full, core_of, debug_on, diff_on, dump,
+    dump_at, dump_on, effect_strategy_full, effect_strategy_on, effect_warnings_full,
+    example_program, interpret, interpret_at, interpret_io_at, interpret_io_on,
+    interpret_io_on_with_args, module_graph, module_interface, namespace_identity, namespace_root,
+    observe_run_on, off_platform_builtins, public_surface, query_on, rc_balanced, record_on,
     record_on_with_args, record_run_on, replay_on, replay_run_on, report, report_at, report_on,
-    resume_on, shape_digests_of, source_diff_on, source_modules, stdlib_hash, step_ruler_on,
-    store_def_inputs, suspend_line_cuts, suspend_on, with_custom_prelude, with_prelude, BackendOpt,
-    Config, NamespaceIdentity, PublicDef, RecordedRun, Scheduler, StdlibHash, StepRuler,
-    StepRulerRow, SuspendCut, SuspendResult, TimingSink, STEP_RULER_FORMAT,
+    resume_observed_on, resume_on, shape_digests_of, source_diff_on, source_modules, stdlib_hash,
+    step_ruler_on, store_def_inputs, suspend_line_cuts, suspend_on, with_custom_prelude,
+    with_prelude, BackendOpt, CheckedModule, CompilerSession, Config, ModuleCheckReport,
+    ModuleGraph, ModuleGraphNode, ModuleInterface, ModuleInterfaceEntry, ModuleInvalidation,
+    ModuleInvalidationCause, NamespaceIdentity, PublicDef, RecordedRun, RehydratedModuleInterface,
+    Scheduler, SessionStats, StdlibHash, StepRuler, StepRulerRow, SuspendCut, SuspendResult,
+    TimingSink, MODULE_GRAPH_FORMAT, MODULE_INTERFACE_FORMAT, STEP_RULER_FORMAT,
 };
 pub use error::{Error, ErrorCode, ErrorPhase, LexError, ParseError, TypeError};
 pub use flags::{DynFlags, EffectTier};
 pub use fmt::{format, format_check, format_wire_accept};
+pub use provenance::{Observation, ObservationTrace, OBSERVATION_TRACE_FORMAT};
 pub use resolve::{
     default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std, Root,
 };
 pub use sym::Sym;
-pub use types::show_effects;
+pub use types::{show_effects, TypecheckSeed};

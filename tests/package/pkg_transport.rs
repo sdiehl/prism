@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{self, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,8 +21,8 @@ use prism::pkg::transport::{
     push_closure, verify, verify_closure, DiskTransport, GitTransport, Transport, TransportError,
 };
 use prism::pkg::trust::{
-    audit, parse_index, serialize_index, sign, verify_signature, IndexRow, Log, SignedArtifact,
-    Verdict, INDEX_KIND_NAMESPACE,
+    audit, parse_index, publish_cmd, serialize_index, sign, store_log, verify_signature, IndexRow,
+    Log, SignedArtifact, Verdict, INDEX_KIND_NAMESPACE, INDEX_KIND_SOURCE,
 };
 use prism::resolve::SourceBundleArtifactKind;
 use prism::store::disk::Store;
@@ -41,10 +41,7 @@ impl TempDir {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
         let mut path = std::env::temp_dir();
-        path.push(format!(
-            "prism-pkg-{tag}-{}-{nanos}-{n}",
-            std::process::id()
-        ));
+        path.push(format!("prism-pkg-{tag}-{}-{nanos}-{n}", process::id()));
         fs::create_dir_all(&path).unwrap();
         Self { path }
     }
@@ -63,8 +60,8 @@ impl Drop for TempDir {
 fn have(tool: &str) -> bool {
     Command::new(tool)
         .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
 }
@@ -301,7 +298,7 @@ fn package_index_rows_name_the_hash_scheme() {
         name: "http".into(),
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
-        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
+        kind: INDEX_KIND_SOURCE.into(),
         root: "a3f9".repeat(16),
     };
     let body = serialize_index(std::slice::from_ref(&row));
@@ -344,7 +341,7 @@ fn signed_index_round_trips_and_detects_tampering() {
         name: "http".into(),
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
-        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
+        kind: INDEX_KIND_SOURCE.into(),
         root: "a3f9".repeat(16),
     }];
     let body = serialize_index(&rows);
@@ -382,7 +379,7 @@ fn unsigned_mode_produces_no_signature() {
         name: "x".into(),
         tag: "1".into(),
         scheme: HASH_SCHEME.into(),
-        kind: prism::pkg::trust::INDEX_KIND_SOURCE.into(),
+        kind: INDEX_KIND_SOURCE.into(),
         root: "00".repeat(32),
     }]);
     assert!(sign(&body, &flags).unwrap().is_none());
@@ -403,7 +400,7 @@ fn log_is_append_only_and_detects_repoints() {
             "http",
             "2.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "aaaa",
         )
         .unwrap(),
@@ -415,7 +412,7 @@ fn log_is_append_only_and_detects_repoints() {
             "geo",
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "bbbb",
         )
         .unwrap(),
@@ -430,7 +427,7 @@ fn log_is_append_only_and_detects_repoints() {
             "http",
             "2.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "aaaa",
         )
         .unwrap(),
@@ -445,7 +442,7 @@ fn log_is_append_only_and_detects_repoints() {
             "http",
             "2.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "cccc",
         )
         .unwrap(),
@@ -477,7 +474,7 @@ fn publish_unsigned(root: &Path, name: &str, tag: &str) -> IndexRow {
     };
     let full = with_prelude(PROG_STDLIB);
     let roots = default_roots(Path::new("."));
-    let msg = prism::pkg::trust::publish_cmd(&full, &roots, name, tag, &cfg).unwrap();
+    let msg = publish_cmd(&full, &roots, name, tag, &cfg).unwrap();
     assert!(
         msg.contains("git tag"),
         "publish must print the git tag command"
@@ -505,7 +502,7 @@ fn publish_writes_the_pointer_and_a_log_row() {
     assert_eq!(idx, vec![row.clone()]);
 
     // The transparency log recorded it at sequence 0.
-    let log = prism::pkg::trust::store_log(&store_root);
+    let log = store_log(&store_root);
     let entries = log.entries().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].root, row.root);
@@ -518,7 +515,7 @@ fn audit_passes_the_green_path_and_names_each_failure() {
     let row = publish_unsigned(&store_root, "http", "2.0");
 
     let tp = DiskTransport::open(&store_root).unwrap();
-    let log = prism::pkg::trust::store_log(&store_root);
+    let log = store_log(&store_root);
     let baseline = prism::pkg::stdlib_baseline().unwrap();
     let unsigned = DynFlags {
         sign_mode: SignMode::Unsigned,
@@ -607,7 +604,7 @@ fn verify_closure_counts_the_user_objects() {
 fn empty_log_file_is_uninitialized_not_bricked() {
     let tmp = TempDir::new("log-empty");
     let path = tmp.join("log");
-    std::fs::write(&path, "").unwrap();
+    fs::write(&path, "").unwrap();
     let log = Log::at(&path);
     assert!(log.entries().unwrap().is_empty());
     let seq = log
@@ -616,7 +613,7 @@ fn empty_log_file_is_uninitialized_not_bricked() {
             "http",
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "aaaa",
         )
         .unwrap();
@@ -636,26 +633,26 @@ fn header_only_log_appends_without_a_second_header() {
         "http",
         "1.0",
         HASH_SCHEME,
-        prism::pkg::trust::INDEX_KIND_SOURCE,
+        INDEX_KIND_SOURCE,
         "aaaa",
     )
     .unwrap();
-    let text = std::fs::read_to_string(&path).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
     let header = text.lines().next().unwrap().to_string();
     // Reconstruct the crashed state: header line only, then append again.
-    std::fs::write(&path, format!("{header}\n")).unwrap();
+    fs::write(&path, format!("{header}\n")).unwrap();
     let seq = log
         .append(
             "github.com/prism-lang/geo",
             "geo",
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "bbbb",
         )
         .unwrap();
     assert_eq!(seq, 0);
-    let text = std::fs::read_to_string(&path).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
     assert_eq!(
         text.lines().filter(|l| *l == header).count(),
         1,
@@ -675,18 +672,18 @@ fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
     let tmp = TempDir::new("log-hole");
     let path = tmp.join("log");
     let header = "prism-pkg-log\tv5";
-    std::fs::write(&path, format!("{header}\n")).unwrap();
+    fs::write(&path, format!("{header}\n")).unwrap();
     let log = Log::at(&path);
     let d_header = log.head().unwrap().expect("header digests");
     let line0 = format!(
         "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa"
     );
-    std::fs::write(&path, format!("{header}\n{line0}\n")).unwrap();
+    fs::write(&path, format!("{header}\n{line0}\n")).unwrap();
     let d0 = log.head().unwrap().expect("line 0 digests");
     let line2 = format!(
         "2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\tprism-core-hash-v1\tsource-bundle\tcccc"
     );
-    std::fs::write(&path, format!("{header}\n{line0}\n{line2}\n")).unwrap();
+    fs::write(&path, format!("{header}\n{line0}\n{line2}\n")).unwrap();
     let err = log.entries().unwrap_err().to_string();
     assert!(err.contains("sequence hole"), "unexpected error: {err}");
     assert!(
@@ -695,7 +692,7 @@ fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
             "late",
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             "dddd",
         )
         .is_err(),
@@ -715,13 +712,13 @@ fn an_unrecognized_line_is_a_loud_error() {
         "http",
         "1.0",
         HASH_SCHEME,
-        prism::pkg::trust::INDEX_KIND_SOURCE,
+        INDEX_KIND_SOURCE,
         "aaaa",
     )
     .unwrap();
-    let mut text = std::fs::read_to_string(&path).unwrap();
+    let mut text = fs::read_to_string(&path).unwrap();
     text.push_str("not a log line\n");
-    std::fs::write(&path, text).unwrap();
+    fs::write(&path, text).unwrap();
     let err = log.entries().unwrap_err().to_string();
     assert!(err.contains("unrecognized line"), "unexpected error: {err}");
 }
@@ -742,17 +739,17 @@ fn editing_a_line_in_place_breaks_the_chain() {
             name,
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             root,
         )
         .unwrap();
     }
     assert_eq!(log.entries().unwrap().len(), 3);
-    let text = std::fs::read_to_string(&path).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
     // Rewrite the middle entry's root, keeping its seq and shape intact.
     let edited = text.replace("bbbb", "beef");
     assert_ne!(text, edited, "the edit must hit");
-    std::fs::write(&path, edited).unwrap();
+    fs::write(&path, edited).unwrap();
     let err = log.entries().unwrap_err().to_string();
     assert!(err.contains("chain break"), "unexpected error: {err}");
 }
@@ -771,15 +768,15 @@ fn suffix_truncation_moves_the_chain_head() {
             name,
             "1.0",
             HASH_SCHEME,
-            prism::pkg::trust::INDEX_KIND_SOURCE,
+            INDEX_KIND_SOURCE,
             root,
         )
         .unwrap();
     }
     let full_head = log.head().unwrap().expect("chained log has a head");
-    let text = std::fs::read_to_string(&path).unwrap();
+    let text = fs::read_to_string(&path).unwrap();
     let kept: Vec<&str> = text.lines().take(2).collect(); // header + entry 0
-    std::fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
+    fs::write(&path, format!("{}\n", kept.join("\n"))).unwrap();
     assert_eq!(log.entries().unwrap().len(), 1, "truncated log still reads");
     let short_head = log.head().unwrap().expect("still chained");
     assert_ne!(full_head, short_head, "the head is the witness anchor");
@@ -793,7 +790,7 @@ fn a_legacy_log_is_rejected_outright() {
     for legacy_header in ["prism-pkg-log\tv3", "prism-pkg-log\tv4"] {
         let tmp = TempDir::new("log-legacy");
         let path = tmp.join("log");
-        std::fs::write(
+        fs::write(
             &path,
             format!(
                 "{legacy_header}\n0\t1\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa\n"
@@ -816,7 +813,7 @@ fn a_legacy_log_is_rejected_outright() {
                 "geo",
                 "1.0",
                 HASH_SCHEME,
-                prism::pkg::trust::INDEX_KIND_SOURCE,
+                INDEX_KIND_SOURCE,
                 "bbbb",
             )
             .unwrap_err()

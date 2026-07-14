@@ -268,7 +268,13 @@ impl Session {
         resolve_expr(&mut surface, &built.imports)?;
         let e = desugar_expr(&surface)?;
         let (ty, eff, dicts) = infer_expr_dicts(&built.checked, &e)?;
-        let comp = elaborate_expr(&built.checked, &e, &built.arity, &dicts, &built.consts)?;
+        let comp = elaborate_expr(
+            &built.checked,
+            &e,
+            &built.arity,
+            Some(&dicts),
+            &built.consts,
+        )?;
         // The REPL streams `print` to the terminal and reads from real stdin,
         // but `exit(n)` only ends the evaluation: the shell keeps running.
         let stdout = io::stdout();

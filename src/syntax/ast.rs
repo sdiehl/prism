@@ -153,6 +153,23 @@ pub enum Fip {
     Fip,
 }
 
+impl Fip {
+    /// The canonical certificate keyword (`fip`/`fbip`), or `None` when the
+    /// definition carries no discipline. The one home for the spelling: the
+    /// content hash (`hash_meta`), the `dump usage` discipline column, and the
+    /// module interface's usage summary all render through this, so the three
+    /// can never drift. Callers choose how to render `None` (an empty cell, a
+    /// `-`, or an omitted field).
+    #[must_use]
+    pub const fn keyword(self) -> Option<&'static str> {
+        match self {
+            Self::No => None,
+            Self::Fbip => Some("fbip"),
+            Self::Fip => Some("fip"),
+        }
+    }
+}
+
 // `patterns`, `imports`, and `exports` are omitted from the debug dump when
 // empty, matching the derived output for import-free, pattern-free programs.
 impl<P: Phase + fmt::Debug> fmt::Debug for Program<P> {

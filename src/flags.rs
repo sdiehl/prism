@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use crate::core::OptLevel;
 use crate::driver::{BackendOpt, Scheduler};
 
+const DEFAULT_QUERY_THREADS: usize = 1;
+
 /// The lowest rung of the effect-lowering cascade a compile is allowed to take.
 ///
 /// The cascade (`core/effect_lower`) is a cost-decreasing ladder: var/loop
@@ -153,6 +155,19 @@ pub struct DynFlags {
     /// `PRISM_OPT_STATS` (default off): dump per-pass rewrite tick counts to
     /// stderr after the pipeline runs.
     pub opt_stats: bool,
+    /// `PRISM_COMPILER_STATS` (default off): print command-scoped compiler-query
+    /// hit, miss, and write counts.
+    pub compiler_stats: bool,
+    /// `PRISM_EXPLAIN_CACHE` (default off): report the final and backend-IR
+    /// compiler-query decisions after a build.
+    pub explain_cache: bool,
+    /// `PRISM_QUERY_THREADS` (default 1): bounded worker count for independent
+    /// compiler queries. Collection order remains deterministic.
+    pub query_threads: usize,
+    /// `PRISM_SCC_BACKEND` (default on): emit and link SCC-granular backend
+    /// modules. Disabling it forces the whole-program backend oracle; selection
+    /// is contractually unobservable and does not participate in artifact identity.
+    pub scc_backend: bool,
     /// `PRISM_TIME_COMPILE` (default off): emit one structured timing row per
     /// compiler phase to stderr. The knob only records the intent; the CLI reads
     /// it and installs the actual [`TimingSink`](crate::TimingSink) onto the
@@ -192,6 +207,10 @@ pub struct DynFlags {
     /// once and falls back to `auto` (the tier-parity test independently asserts
     /// the forcing engaged, so a typo cannot make the oracle silently vacuous).
     pub effect_tier: EffectTier,
+    /// `PRISM_COMPILER_CACHE` (default on): reuse byte-identical compiler
+    /// artifacts from the content-addressed query store. Set to `0` for the
+    /// from-scratch oracle or when investigating invalidation.
+    pub compiler_cache: bool,
     /// `PRISM_STORE` (default off): after a successful compile, commit the
     /// program's definitions into the on-disk content-addressed store. The store
     /// is a cache, never required for correctness, so it is opt-in and does
@@ -227,6 +246,10 @@ impl Default for DynFlags {
             native_kont_frames: false,
             dump_core: None,
             opt_stats: false,
+            compiler_stats: false,
+            explain_cache: false,
+            query_threads: DEFAULT_QUERY_THREADS,
+            scc_backend: true,
             time_compile: false,
             quiet: false,
             opt_level: OptLevel::default(),
@@ -235,6 +258,7 @@ impl Default for DynFlags {
             fuse: false,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
+            compiler_cache: true,
             store: false,
             store_path: None,
             sign_mode: SignMode::default(),
@@ -259,6 +283,10 @@ impl DynFlags {
             native_kont_frames: env_present("PRISM_NATIVE_KONT_FRAMES"),
             dump_core: std::env::var_os("PRISM_DUMP_CORE"),
             opt_stats: env_present("PRISM_OPT_STATS"),
+            compiler_stats: env_present("PRISM_COMPILER_STATS"),
+            explain_cache: env_present("PRISM_EXPLAIN_CACHE"),
+            query_threads: query_threads_from_env(),
+            scc_backend: env_bool("PRISM_SCC_BACKEND", true),
             time_compile: env_bool("PRISM_TIME_COMPILE", false),
             quiet: env_present("PRISM_QUIET"),
             opt_level: std::env::var("PRISM_OPT_LEVEL")
@@ -273,6 +301,7 @@ impl DynFlags {
                 .and_then(|s| Scheduler::parse(&s))
                 .unwrap_or_default(),
             effect_tier: effect_tier_from_env(),
+            compiler_cache: env_bool("PRISM_COMPILER_CACHE", true),
             store: env_present("PRISM_STORE"),
             store_path: std::env::var_os("PRISM_STORE_PATH").map(PathBuf::from),
             sign_mode: sign_mode_from_env(),
@@ -281,6 +310,17 @@ impl DynFlags {
             sign_allowed_signers: std::env::var_os("PRISM_SIGN_ALLOWED_SIGNERS").map(PathBuf::from),
         }
     }
+}
+
+fn query_threads_from_env() -> usize {
+    std::env::var("PRISM_QUERY_THREADS").map_or(DEFAULT_QUERY_THREADS, |value| {
+        value.parse::<usize>().ok().filter(|n| *n > 0).unwrap_or_else(|| {
+            eprintln!(
+                "ignoring invalid PRISM_QUERY_THREADS={value:?} (expected a positive integer); using {DEFAULT_QUERY_THREADS}"
+            );
+            DEFAULT_QUERY_THREADS
+        })
+    })
 }
 
 // The signing seam from `PRISM_SIGN_MODE`. An unrecognized value is reported once

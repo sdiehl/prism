@@ -13,6 +13,9 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
+use std::fs;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
 use super::pretty::pp_core_pretty;
@@ -28,6 +31,9 @@ mod lint;
 mod rename;
 mod simplify;
 mod specialize;
+
+const PASS_FINGERPRINT_SCHEMA: &[u8] = b"prism-core-pass-fingerprint-v1";
+
 use cse::cse_counted;
 use fuse::fuse_counted;
 use inline::inline_counted;
@@ -141,6 +147,13 @@ impl CorePass {
             // analysis matches on.
             Self::Simplify | Self::Inline | Self::Cse => PassStage::Late,
         }
+    }
+
+    /// Whether this pass transforms each definition independently and therefore
+    /// admits an SCC-local durable query boundary.
+    #[must_use]
+    pub const fn is_scc_local(self) -> bool {
+        matches!(self, Self::EraseNewtypes | Self::Simplify | Self::Cse)
     }
 }
 
@@ -359,10 +372,64 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
     }
 }
 
+/// Fingerprint the exact behavior-bearing pass sequence for one pipeline stage.
+///
+/// Diagnostic switches such as Core dumps and pass statistics are excluded;
+/// disabled passes are removed, explicit pass specs override optimization levels,
+/// and forced fusion is inserted exactly as [`run`] does.
+#[must_use]
+pub fn pass_fingerprint(
+    level: OptLevel,
+    spec: Option<&PassSpec>,
+    stage: PassStage,
+    disabled: &[CorePass],
+    flags: &DynFlags,
+) -> String {
+    let passes = effective_passes(level, spec, stage, disabled, flags);
+    let mut hasher = blake3::Hasher::new();
+    for field in std::iter::once(stage.label()).chain(passes.iter().map(|pass| pass.name())) {
+        hasher.update(&(field.len() as u64).to_le_bytes());
+        hasher.update(field.as_bytes());
+    }
+    hasher.update(PASS_FINGERPRINT_SCHEMA);
+    hasher.finalize().to_hex().to_string()
+}
+
+/// Resolve an optimization level or explicit specification into the exact pass
+/// sequence that changes Core at one stage.
+#[must_use]
+pub fn effective_passes(
+    level: OptLevel,
+    spec: Option<&PassSpec>,
+    stage: PassStage,
+    disabled: &[CorePass],
+    flags: &DynFlags,
+) -> Vec<CorePass> {
+    let mut passes = spec.map_or_else(
+        || {
+            let mut selected = pipeline(level)
+                .into_iter()
+                .filter(|pass| pass.stage() == stage)
+                .collect::<Vec<_>>();
+            if flags.fuse && stage == PassStage::PreLowering && !selected.contains(&CorePass::Fuse)
+            {
+                selected.insert(0, CorePass::Fuse);
+            }
+            selected
+        },
+        |spec| match stage {
+            PassStage::PreLowering => spec.pre.clone(),
+            PassStage::Late => spec.late.clone(),
+        },
+    );
+    passes.retain(|pass| !disabled.contains(pass));
+    passes
+}
+
 // Each `run` that dumps gets a distinct id, so the several pipeline invocations a
 // process makes (prelude compile, program compile, REPL turns) write to separate
 // places instead of clobbering one another.
-static DUMP_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static DUMP_RUN: AtomicUsize = AtomicUsize::new(0);
 
 // Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows.
 // `stdout`/`stderr` stream a banner plus
@@ -385,9 +452,9 @@ fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: 
                 .chars()
                 .map(|c| if c.is_alphanumeric() { c } else { '_' })
                 .collect();
-            let dir = std::path::Path::new(base).join(format!("run-{run}"));
-            if std::fs::create_dir_all(&dir).is_ok() {
-                let _ = std::fs::write(dir.join(format!("{ord:02}-{safe}.core")), text);
+            let dir = Path::new(base).join(format!("run-{run}"));
+            if fs::create_dir_all(&dir).is_ok() {
+                let _ = fs::write(dir.join(format!("{ord:02}-{safe}.core")), text);
             }
         }
     }
@@ -504,11 +571,7 @@ fn run_passes(
         }
     };
     let dump_sink = flags.dump_core.clone();
-    let dump_run = std::sync::atomic::AtomicUsize::fetch_add(
-        &DUMP_RUN,
-        1,
-        std::sync::atomic::Ordering::Relaxed,
-    );
+    let dump_run = AtomicUsize::fetch_add(&DUMP_RUN, 1, Ordering::Relaxed);
     let mut ord = 0;
     if let Some(sink) = &dump_sink {
         dump_core(sink, dump_run, ord, "input", core);

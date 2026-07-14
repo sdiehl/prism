@@ -20,11 +20,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use prism::core::HASH_SCHEME;
 use prism::flags::SignMode;
 use prism::pkg::lock::{Lock, LockEntry};
-use prism::pkg::package_source_roots;
 use prism::pkg::resolve::{resolve_closure, trace, ResolveError};
 use prism::pkg::std_source::encode_source_bundle;
 use prism::pkg::transport::{DiskTransport, Transport};
 use prism::pkg::trust::{serialize_index, IndexRow, SignedArtifact, INDEX_KIND_SOURCE};
+use prism::pkg::{package_source_roots, std_pin_status, stdlib_root, StdPin};
 use prism::project::{hash_pin, DepSource, Dependency};
 use prism::resolve::{SourceBundleArtifactKind, SourceBundleKind, SourceBundleOrigin};
 use prism::store::coherence::is_representation_affecting;
@@ -319,8 +319,6 @@ fn delete_object(root: &Path, hash: &str) {
 // two dependency hashes are, rather than silently coexisting.
 #[test]
 fn std_root_pins_and_verifies() {
-    use prism::pkg::{std_pin_status, stdlib_root, StdPin};
-
     let root = stdlib_root().expect("embedded stdlib elaborates");
     // A blake3 hex digest: non-empty and stable across two computations.
     assert!(!root.is_empty());
@@ -1269,8 +1267,8 @@ fn usage_gate_passes_on_committed_golden() {
 }
 
 // A golden that no longer matches the regenerated summary reports `failed` and names
-// the first differing line. Because the gate is report-only this release, the drift
-// never fails strict mode: `--strict` still exits zero.
+// the first differing line. Because the gate is report-only, drift never fails strict
+// mode: `--strict` still exits zero.
 #[test]
 fn usage_gate_reports_drift_with_named_line_yet_never_fails_strict() {
     let tmp = TempDir::new("usage-gate-drift");

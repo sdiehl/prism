@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use prism::provenance::{trace_digest, OP_FS_WRITE_FILE};
+use prism::provenance::OP_FS_WRITE_FILE;
 
 // A program that observes one file, one environment variable, and its argument
 // count, then prints all three. Every observed input becomes a graph node.
@@ -650,14 +650,45 @@ fn record_and_replay_produce_identical_provenance_events() {
         "a replay must reproduce the recorded provenance events exactly"
     );
     assert_eq!(
-        trace_digest(&recorded.events).hash,
-        trace_digest(&replayed.events).hash,
+        recorded.canonical_trace.digest, replayed.canonical_trace.digest,
         "record and replay must share the trace digest (the trace node id)"
     );
     assert!(
         !recorded.events.is_empty(),
         "the program performs recordable observations"
     );
+    assert_eq!(
+        recorded.canonical_trace, replayed.canonical_trace,
+        "record and replay must have one identical complete observation trace"
+    );
+    let encoded = recorded.canonical_trace.to_json().unwrap();
+    assert_eq!(
+        prism::ObservationTrace::from_json(&encoded).unwrap(),
+        recorded.canonical_trace,
+        "the canonical trace must round-trip with its digest intact"
+    );
+    let mut altered = recorded.canonical_trace.clone();
+    altered
+        .observations
+        .push(prism::Observation::Stdout(b"tampered".to_vec()));
+    assert!(prism::ObservationTrace::from_json(&altered.to_json().unwrap()).is_err());
+}
+
+#[test]
+fn canonical_trace_preserves_runtime_faults_as_terminal_observations() {
+    let full = prism::with_prelude("fn main() : Int = error(7)\n");
+    let roots = prism::default_roots(Path::new("."));
+    let cfg = prism::Config::default();
+    let mut out = Vec::new();
+    let mut input = std::io::Cursor::new(Vec::new());
+    let observed =
+        prism::observe_run_on(&full, &roots, &mut out, &mut input, &cfg, Vec::new()).unwrap();
+
+    assert_eq!(observed.fault.as_deref(), Some("error(7)"));
+    assert!(matches!(
+        observed.canonical_trace.observations.last(),
+        Some(prism::Observation::Fault(fault)) if fault == "error(7)"
+    ));
 }
 
 // A mismatched replay diagnostic: a mismatched replay names the zero-based event index and the
@@ -739,12 +770,17 @@ fn record_and_replay_reproduce_identical_write_events() {
         "the write event must recur identically on replay"
     );
     assert_eq!(
-        trace_digest(&recorded.events).hash,
-        trace_digest(&replayed.events).hash,
+        recorded.canonical_trace.digest, replayed.canonical_trace.digest,
         "a run that writes files keeps the record==replay trace digest"
     );
     assert!(
         recorded.events.iter().any(|e| e.op == OP_FS_WRITE_FILE),
         "the file write is a recorded provenance event"
     );
+    assert_eq!(recorded.canonical_trace, replayed.canonical_trace);
+    assert!(recorded
+        .canonical_trace
+        .observations
+        .iter()
+        .any(|observation| matches!(observation, prism::Observation::FileCommit { path, .. } if path == target.to_str().unwrap())));
 }

@@ -84,8 +84,8 @@ impl Lowerer {
                 };
                 if !clauses.is_empty()
                     && clauses
-                        .iter()
-                        .all(|c| Self::is_fold(c, &self.drift).is_some())
+                        .iter_with_use()
+                        .all(|(c, ru)| Self::is_fold(c, ru).is_some())
                     && !self.value_coincident(body, &evs, &core.fns, &mut BTreeSet::new())
                 {
                     return None;

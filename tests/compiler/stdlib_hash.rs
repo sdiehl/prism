@@ -5,7 +5,11 @@
 // the whole library (not a reachable subset), and it reaches the committed index
 // page.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
+
+use prism::core::{instance_digest, Digest};
+use prism::syntax::ast::Ty;
 
 fn with_stdlib_hash_env_lock(test: impl FnOnce()) {
     static LOCK: Mutex<()> = Mutex::new(());
@@ -96,16 +100,15 @@ fn covers_the_whole_library() {
 // method does must move the instance digest. This checks the coherence seed.
 #[test]
 fn instance_digest_folds_method_behavior() {
-    use std::collections::BTreeMap;
-    let a = prism::core::instance_digest(
+    let a = instance_digest(
         "Eq",
-        &prism::syntax::ast::Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), prism::core::Digest::from("hash-one"))]),
+        &Ty::Con("Bool".into(), vec![]),
+        &BTreeMap::from([("eq".to_string(), Digest::from("hash-one"))]),
     );
-    let b = prism::core::instance_digest(
+    let b = instance_digest(
         "Eq",
-        &prism::syntax::ast::Ty::Con("Bool".into(), vec![]),
-        &BTreeMap::from([("eq".to_string(), prism::core::Digest::from("hash-two"))]),
+        &Ty::Con("Bool".into(), vec![]),
+        &BTreeMap::from([("eq".to_string(), Digest::from("hash-two"))]),
     );
     assert_ne!(a, b);
 }

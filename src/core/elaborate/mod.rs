@@ -10,6 +10,7 @@ use super::cbpv::{
 };
 use crate::error::{Error, TypeError};
 use crate::fresh::Fresh;
+use crate::hir::{self, CheckedHir, NodeRes};
 use crate::kw;
 use crate::names::{
     self, dict_ctor, instance_method, DIV_MOD_METHOD, DIV_QUOT_METHOD, EQ_METHOD, NUM_ADD_METHOD,
@@ -39,7 +40,11 @@ struct Elab<'a> {
     // than calling, so a constant pushes no frame.
     consts: BTreeMap<String, &'a S<Expr<CorePhase>>>,
     checked: &'a Checked,
-    dicts: &'a BTreeMap<NodeId, Vec<Dict>>,
+    // The checked HIR over `checked`: the only view through which the migrated
+    // per-node facts (the resolution family) are read. Side-table lookups for
+    // that family are gone from this module; the fallbacks below serve only
+    // the REPL's re-inferred (non-strict) ids.
+    hir: CheckedHir<'a>,
     effect_ops: BTreeSet<String>,
     // True when the `Output` capability is in scope (the prelude declares it), so
     // `print`/`println` route through the interceptable `out_print`/`out_println`
@@ -132,7 +137,7 @@ impl Elab<'_> {
     }
 
     // Name-based field resolution for REPL re-elaboration, used only when the
-    // checker's `field_res` is absent. Returns the unique (ctor, index, arity)
+    // HIR records no resolution fact (the REPL's re-inferred ids miss). Returns the unique (ctor, index, arity)
     // that declares `field`. A field that no record declares, or that several
     // distinct records declare, cannot be resolved by name alone: pick neither
     // and surface a diagnostic rather than silently extracting the wrong field.
@@ -190,7 +195,7 @@ impl Elab<'_> {
     }
 
     // Field projection is a positional tuple `Case`: the type checker resolved the
-    // field to its index (in `unboxed_field`), so this reuses product
+    // field to its index (the HIR's recorded resolution), so this reuses product
     // destructuring and its refcount handling.
     fn elab_unboxed_field(
         &mut self,
@@ -199,7 +204,7 @@ impl Elab<'_> {
         span: Span,
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let Some(&(fi, n)) = self.checked.unboxed_field.get(&id) else {
+        let Some(&NodeRes::UnboxedField(fi, n)) = self.hir.res(id) else {
             return Err(unboxed_unsupported(span));
         };
         let ce = self.elab(recv, locals)?;
@@ -210,7 +215,7 @@ impl Elab<'_> {
     }
 
     // Name-based chain resolution for REPL re-elaboration, mirroring
-    // `field_index_for`. Checked programs carry exact chains in `path_res`.
+    // `field_index_for`. Checked programs carry exact chains in the HIR.
     fn path_chain_fallback(&self, path: &[PathStep<CorePhase>]) -> Result<Chain, Error> {
         path.iter()
             .map(|seg| {
@@ -242,9 +247,9 @@ impl Elab<'_> {
         ups: &[(Vec<PathStep<CorePhase>>, PathOp<CorePhase>)],
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let chains: Vec<Chain> = match self.checked.path_res.get(&id) {
-            Some(c) => c.clone(),
-            None => ups
+        let chains: Vec<Chain> = match self.hir.res(id) {
+            Some(NodeRes::Paths(c)) => c.clone(),
+            _ => ups
                 .iter()
                 .map(|(p, _)| self.path_chain_fallback(p))
                 .collect::<Result<_, _>>()?,
@@ -364,9 +369,8 @@ impl Elab<'_> {
     }
 
     fn local_ty(&self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Option<Type> {
-        self.checked
-            .span_types
-            .get(&e.id)
+        self.hir
+            .node_type(e.id)
             .filter(|t| {
                 let mut ex = BTreeSet::new();
                 t.free_exist(&mut ex);
@@ -382,7 +386,7 @@ impl Elab<'_> {
         let fixed = match lit.suffix {
             Suffix::I64 => Some(Type::I64),
             Suffix::U64 => Some(Type::U64),
-            Suffix::None => self.checked.fixed.get(&id).cloned(),
+            Suffix::None => self.hir.lane(id).cloned(),
         };
         match fixed {
             Some(Type::I64) => Comp::Return(Value::I64(to_wrapped_i64(&lit.value))),
@@ -471,7 +475,7 @@ impl Elab<'_> {
                     value: -lit.value.clone(),
                     suffix: lit.suffix,
                 };
-                if self.dicts.contains_key(&id) {
+                if self.hir.evidence(id).is_some() {
                     return self.elab_from_int_lit(&negated, id);
                 }
                 return Ok(self.int_value(&negated, id));
@@ -485,7 +489,7 @@ impl Elab<'_> {
         // A `Num`-polymorphic operand dispatches through the `negated` method; a
         // monomorphic lane keeps the direct `Comp::Neg` node (byte-identical to
         // the surface negation, the target the `Num` negate method re-elaborates to).
-        if let Some(ds) = self.dicts.get(&id).cloned() {
+        if let Some(ds) = self.hir.evidence(id).map(<[Dict]>::to_vec) {
             let d0 = ds.first().ok_or_else(|| {
                 Error::InternalInvariant("empty dictionary set for unary minus".into())
             })?;
@@ -504,7 +508,7 @@ impl Elab<'_> {
             let call = self.method_invoke(Sym::from(NUM_CLASS), idx, d0, vec![operand])?;
             return Ok(Comp::Bind(Box::new(c), v.into(), Box::new(call)));
         }
-        let lane = match self.checked.fixed.get(&id).cloned() {
+        let lane = match self.hir.lane(id).cloned() {
             Some(Type::I64) => NegLane::I64,
             Some(Type::Float) => NegLane::Float,
             _ => NegLane::Int,
@@ -541,7 +545,7 @@ impl Elab<'_> {
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
         let ne = op == BinOp::Ne;
-        let (cmp, neg) = if let Some(ds) = self.dicts.get(&id).cloned() {
+        let (cmp, neg) = if let Some(ds) = self.hir.evidence(id).map(<[Dict]>::to_vec) {
             let idx = self
                 .checked
                 .classes
@@ -553,7 +557,7 @@ impl Elab<'_> {
                 .ok_or_else(|| Error::InternalInvariant("no dictionary for `==`".into()))?;
             (self.method_invoke(Sym::from(EQ_CLASS), idx, d0, args)?, ne)
         } else {
-            match self.checked.fixed.get(&id).cloned() {
+            match self.hir.lane(id).cloned() {
                 Some(ty @ (Type::I64 | Type::U64)) => (self.fixed_bin(op, &ty, args)?, false),
                 Some(Type::Float) => (
                     Comp::Prim(
@@ -578,7 +582,7 @@ impl Elab<'_> {
                 ),
                 _ => {
                     if self.strict {
-                        if let Some(t) = self.checked.span_types.get(&a.id) {
+                        if let Some(t) = self.hir.node_type(a.id) {
                             if !matches!(t, Type::Int | Type::Exist(_)) {
                                 return Err(Error::InternalInvariant(format!(
                                     "missing Eq dispatch record at {:?} for type {}",
@@ -628,7 +632,7 @@ impl Elab<'_> {
         let va = self.fresh();
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
-        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+        let ds = self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
             Error::InternalInvariant("no dictionary for comparison operator".into())
         })?;
         let d0 = ds.first().ok_or_else(|| {
@@ -692,7 +696,7 @@ impl Elab<'_> {
         let va = self.fresh();
         let vb = self.fresh();
         let args = vec![Value::Var(va.clone().into()), Value::Var(vb.clone().into())];
-        let ds = self.dicts.get(&id).cloned().ok_or_else(|| {
+        let ds = self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
             Error::InternalInvariant("no dictionary for arithmetic operator".into())
         })?;
         let d0 = ds.first().ok_or_else(|| {
@@ -722,7 +726,7 @@ impl Elab<'_> {
     fn elab_from_int_lit(&mut self, lit: &IntLit, id: NodeId) -> Result<Comp, Error> {
         let int_comp = self.int_value(lit, id);
         let ds =
-            self.dicts.get(&id).cloned().ok_or_else(|| {
+            self.hir.evidence(id).map(<[Dict]>::to_vec).ok_or_else(|| {
                 Error::InternalInvariant("no dictionary for numeric literal".into())
             })?;
         let d0 = ds.first().ok_or_else(|| {
@@ -752,7 +756,7 @@ impl Elab<'_> {
 
     fn elab(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         Ok(match &e.node {
-            Expr::Int(lit) if self.dicts.contains_key(&e.id) => {
+            Expr::Int(lit) if self.hir.evidence(e.id).is_some() => {
                 self.elab_from_int_lit(lit, e.id)?
             }
             Expr::Int(lit) => self.int_value(lit, e.id),
@@ -770,7 +774,7 @@ impl Elab<'_> {
                     Comp::Return(Value::Var(x.clone().into()))
                 } else if let Some(body) = self.consts.get(x).copied() {
                     self.elab(body, &Locals::new())?
-                } else if self.dicts.contains_key(&e.id) {
+                } else if self.hir.evidence(e.id).is_some() {
                     self.constrained_value(x, e.id)?
                 } else if self.needs_dict(x) {
                     return Err(Error::InternalInvariant(format!(
@@ -824,7 +828,7 @@ impl Elab<'_> {
                 self.elab_eq(*op, a, b, e.id, e.span, locals)?
             }
             Expr::Bin(op @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), a, b)
-                if self.dicts.contains_key(&e.id) =>
+                if self.hir.evidence(e.id).is_some() =>
             {
                 self.elab_ord(*op, a, b, e.id, locals)?
             }
@@ -832,7 +836,7 @@ impl Elab<'_> {
                 op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem),
                 a,
                 b,
-            ) if self.dicts.contains_key(&e.id) => self.elab_arith(*op, a, b, e.id, locals)?,
+            ) if self.hir.evidence(e.id).is_some() => self.elab_arith(*op, a, b, e.id, locals)?,
             Expr::Bin(op, a, b) => {
                 let ca = self.elab(a, locals)?;
                 let cb = self.elab(b, locals)?;
@@ -841,7 +845,7 @@ impl Elab<'_> {
                 let lhs_val = Value::Var(va.clone().into());
                 let rhs_val = Value::Var(vb.clone().into());
                 let args = vec![lhs_val.clone(), rhs_val.clone()];
-                let prim = match self.checked.fixed.get(&e.id).cloned() {
+                let prim = match self.hir.lane(e.id).cloned() {
                     Some(ty @ (Type::I64 | Type::U64)) => self.fixed_bin(*op, &ty, args)?,
                     // The tower brought `Float` onto the plain operators; lower to the
                     // float primitive `CoreOp`.
@@ -931,7 +935,7 @@ impl Elab<'_> {
                 let ce = self.elab(recv, locals)?;
                 let ve = self.fresh();
                 let vf = self.fresh();
-                let extract = if let Some((ctor, fi, n)) = self.checked.field_res.get(&e.id) {
+                let extract = if let Some(NodeRes::Field(ctor, fi, n)) = self.hir.res(e.id) {
                     Self::extract_field_of(Value::Var(ve.clone().into()), ctor, *fi, *n, vf)
                 } else {
                     let (ctor, fi, n) = self.field_res_fallback(field)?;
@@ -1100,7 +1104,7 @@ impl Elab<'_> {
     // applied to `given` arguments, or None if it is saturated or its checked
     // type is not a known arrow (then the application is left as-is).
     fn under_arity(&self, id: NodeId, given: usize) -> Option<usize> {
-        let mut ty = self.checked.span_types.get(&id)?;
+        let mut ty = self.hir.node_type(id)?;
         while let Type::Forall(_, b) | Type::RowForall(_, b) = ty {
             ty = b;
         }
@@ -1131,7 +1135,7 @@ impl Elab<'_> {
             // generic dictionary call.
             Expr::Var(name)
                 if !locals.contains_key(name)
-                    && self.dicts.contains_key(&f.id)
+                    && self.hir.evidence(f.id).is_some()
                     && !matches!(name.as_str(), "print" | "println") =>
             {
                 self.dict_call(name, f.id, vals, &mut binds)?
@@ -1168,7 +1172,7 @@ impl Elab<'_> {
                         // no dictionary, raw top-level strings.
                         Some(_) => {
                             if self.route_output {
-                                self.out_perform(v, &args[0], locals, newline)
+                                self.out_perform(v, &args[0], locals, newline)?
                             } else {
                                 let p = self.print_dispatch(v, &args[0], locals)?;
                                 if newline {
@@ -1189,7 +1193,7 @@ impl Elab<'_> {
                         // raw tag integer. A prelude-free program has no `Show`
                         // class and so no dictionary here: it is rejected, with the
                         // raw-printer runtime trap remaining behind that.
-                        None => match self.dicts.get(&f.id).and_then(|ds| ds.first()).cloned() {
+                        None => match self.hir.evidence(f.id).and_then(<[Dict]>::first).cloned() {
                             Some(d) => {
                                 let shown =
                                     self.method_invoke(Sym::from(SHOW_CLASS), 0, &d, vec![v])?;
@@ -1199,14 +1203,20 @@ impl Elab<'_> {
                         },
                     }
                 } else if name == names::DISPLAY_FN && !vals.is_empty() && !args.is_empty() {
-                    // A string-interpolation hole: rendered by the type-directed
-                    // display printer (raw for a top-level string), not the
-                    // quoting `Show` method.
+                    // A string-interpolation hole. A concrete or defaultable type
+                    // renders through the type-directed display printer (raw for a
+                    // top-level string), byte-identical across tiers. A polymorphic
+                    // hole (a rigid type var) has no static printer, so it is
+                    // rejected with the same diagnostic as a polymorphic `print`
+                    // (which points at `show(x)`); never fall back to the integer
+                    // printer, which would misread a non-Int value and diverge
+                    // native output from the interpreter. `display_comp` enforces
+                    // the same rule for its other caller.
                     let v = vals
                         .into_iter()
                         .next()
                         .ok_or_else(|| Error::InternalInvariant("empty display args".into()))?;
-                    self.display_comp(v, &args[0], locals)
+                    self.display_comp(v, &args[0], locals)?
                 } else if self.needs_dict(name) {
                     return Err(Error::InternalInvariant(format!(
                         "no dict record for `{name}` at {:?}",
@@ -1254,9 +1264,8 @@ impl Elab<'_> {
         locals: &Locals,
     ) -> Result<Comp, Error> {
         let accessor = self
-            .checked
-            .span_types
-            .get(&recv.id)
+            .hir
+            .node_type(recv.id)
             .and_then(Indexable::classify)
             .map(Indexable::getter)
             .ok_or_else(|| {
@@ -1286,9 +1295,8 @@ impl Elab<'_> {
         locals: &Locals,
     ) -> Result<Comp, Error> {
         let setter = self
-            .checked
-            .span_types
-            .get(&recv.id)
+            .hir
+            .node_type(recv.id)
             .and_then(Indexable::classify)
             .and_then(Indexable::setter)
             .ok_or_else(|| {
@@ -1469,7 +1477,7 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         arity,
         consts,
         checked,
-        dicts: &checked.dicts,
+        hir: hir::build(checked),
         route_output,
         effect_ops,
         show_fns: Vec::new(),
@@ -1625,7 +1633,7 @@ pub fn konst_fns(prog: &Program<CorePhase>, checked: &Checked) -> Result<Vec<Cor
         .iter()
         .filter(|d| d.konst)
         .map(|d| {
-            let body = elaborate_expr(checked, &d.body, &arity, &checked.dicts, &consts)?;
+            let body = elaborate_expr(checked, &d.body, &arity, None, &consts)?;
             Ok(CoreFn {
                 name: d.name.clone().into(),
                 params: Vec::new(),
@@ -1646,7 +1654,7 @@ pub fn elaborate_expr(
     checked: &Checked,
     e: &S<Expr<CorePhase>>,
     arity: &BTreeMap<String, usize>,
-    dicts: &BTreeMap<NodeId, Vec<Dict>>,
+    dicts: Option<&crate::types::DictTable>,
     consts: &BTreeMap<String, S<Expr<CorePhase>>>,
 ) -> Result<Comp, Error> {
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();
@@ -1656,7 +1664,9 @@ pub fn elaborate_expr(
         arity: arity.clone(),
         consts: consts.iter().map(|(k, v)| (k.clone(), v)).collect(),
         checked,
-        dicts,
+        // A re-inferred expression (the REPL) carries its own evidence under
+        // fresh ids; a konst body shares the program's facts.
+        hir: dicts.map_or_else(|| hir::build(checked), |d| hir::build_for_expr(checked, d)),
         route_output: effect_ops.contains(names::OUTPUT_PRINT_OP) && checked_routes_output(checked),
         effect_ops,
         show_fns: Vec::new(),

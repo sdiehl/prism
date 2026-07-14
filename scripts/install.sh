@@ -17,7 +17,7 @@
 # verification replace the manual checksum path.
 #
 # Overrides:
-#   PRISM_VERSION=v0.10.0   install a specific release (default: latest)
+#   PRISM_VERSION=v0.11.0   install a specific release (default: latest)
 #   PRISM_INSTALL_DIR=DIR   install directory (default: ~/.local/bin)
 #   PRISM_NO_NIX=1          skip the Nix path even if nix is installed
 #
@@ -37,9 +37,15 @@ need_cmd() {
 }
 
 # All downloads: HTTPS only, modern TLS, fail on HTTP errors, retry transient.
+# GitHub API calls send GITHUB_TOKEN when present: unauthenticated api.github.com
+# requests are rate-limited per IP, which 403s on shared runners.
 fetch() {
-  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1" \
-    || err "download failed: $1"
+  case "$1" in
+    "$API"/*) [ -n "${GITHUB_TOKEN:-}" ] && set -- "$1" "$2" -H "Authorization: Bearer $GITHUB_TOKEN" ;;
+  esac
+  url="$1"; out="$2"; shift 2
+  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 "$@" -o "$out" "$url" \
+    || err "download failed: $url"
 }
 
 detect_target() {
@@ -133,7 +139,11 @@ try_nix() {
   ref="github:$REPO"
   [ -z "${PRISM_VERSION:-}" ] || ref="$ref/v${PRISM_VERSION#v}"
   say "nix detected; installing via the flake (hashes verified by the Nix store)"
+  # `nix profile add` replaced `install` (which newer Nix warns is a
+  # deprecated alias); try the new verb first, keep the old one for older Nix.
   if nix --extra-experimental-features 'nix-command flakes' \
+       profile add "$ref" 2>/dev/null \
+     || nix --extra-experimental-features 'nix-command flakes' \
        profile install "$ref"; then
     smoke "$(command -v prism || echo "$HOME/.nix-profile/bin/prism")"
     exit 0

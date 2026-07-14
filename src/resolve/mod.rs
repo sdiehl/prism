@@ -191,8 +191,35 @@ pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Erro
     if root.imports.is_empty() {
         return Ok(resolve(root)?);
     }
+    let modules = load(&root, roots)?;
+    resolve_loaded_modules(root, modules)
+}
 
-    let mut modules = load(&root, roots)?;
+/// Resolve a root against an already parsed and loaded module closure.
+///
+/// # Errors
+/// Fails on a cross-module name clash, undefined export, or an unresolved or
+/// ambiguous qualified reference.
+pub(crate) fn resolve_loaded_modules(
+    root: Program,
+    modules: Vec<Module>,
+) -> Result<Program, Error> {
+    let (root, modules) = resolve_loaded_module_units(root, modules)?;
+    Ok(merge(root, modules))
+}
+
+/// Resolve every module while retaining module boundaries and dependency bodies.
+///
+/// # Errors
+/// Fails on a cross-module name clash, undefined export, or an unresolved or
+/// ambiguous qualified reference.
+pub(crate) fn resolve_loaded_module_units(
+    root: Program,
+    mut modules: Vec<Module>,
+) -> Result<(Program, Vec<Module>), Error> {
+    if root.imports.is_empty() {
+        return Ok((resolve(root)?, modules));
+    }
     let (mods, by_path) = module_infos(&modules)?;
 
     // The root is the empty-path module: its own names (and the prelude prepended
@@ -209,7 +236,7 @@ pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Erro
         Rw::new(&path, &own, &unqual, &quals, &mods).program(&mut m.prog)?;
     }
 
-    Ok(merge(root, modules))
+    Ok((root, modules))
 }
 
 /// The bare names a program's imports open into unqualified scope.

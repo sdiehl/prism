@@ -13,11 +13,10 @@
 //! what enters a definition's content hash, so `@ {once, portable}` and
 //! `@ {portable, once}` can never hash differently.
 //!
-//! In this release exactly one fact is wired: `noalloc` at the root of a `fn`
-//! declaration's return annotation is the allocation certificate (the heir of
-//! the retired `without alloc` / `\ alloc` spellings). Every other fact parses
-//! and is rejected as reserved, so no package can establish an incompatible
-//! meaning before the checker arrives.
+//! Only `noalloc` is wired: at the root of a `fn` declaration's return annotation
+//! it is the allocation certificate (the heir of the retired `without alloc` /
+//! `\ alloc` spellings). Every other fact parses and is rejected as reserved, so
+//! no package can establish an incompatible meaning.
 
 use std::fmt;
 

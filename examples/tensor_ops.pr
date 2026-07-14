@@ -1,0 +1,41 @@
+-- Dense tensor math over a flat `FloatBuf`: matmul, elementwise add/mul, a full
+-- reduction, and reductions over one named axis. Every reduction and contraction
+-- sums in row-major source-loop order, so the printed values are bit-identical on
+-- the interpreter and the native backend. `main` has no effect annotation, so the
+-- `Fail` raised by the shape/contiguity checks is inferred and absorbed at entry.
+import Data.Tensor (..)
+
+fn main() =
+  -- A 2x3 matrix and a 3x2 matrix.
+  let a = from_list([2, 3], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+  let b = from_list([3, 2], [7.0, 8.0, 9.0, 10.0, 11.0, 12.0])
+  -- Matrix product: [2,3] . [3,2] = [2,2], contracted in source loop order.
+  let c = matmul(a, b)
+  println(c[[0, 0]])
+  println(c[[0, 1]])
+  println(c[[1, 0]])
+  println(c[[1, 1]])
+  -- Elementwise math on two same-shaped 2x3 tensors.
+  let d = from_list([2, 3], [6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+  println(sum_all(add(a, d)))
+  println(mul(a, d)[[1, 1]])
+  -- Full reductions over every element.
+  println(sum_all(a))
+  println(mean(a))
+  -- Reduce over axis "0" (down the rows): [2,3] -> [3], keeps axis "1".
+  let s0 = sum_axis(a, "0")
+  println(s0[[0]])
+  println(s0[[1]])
+  println(s0[[2]])
+  -- Reduce over axis "1" (across the columns): [2,3] -> [2], keeps axis "0".
+  let s1 = sum_axis(a, "1")
+  println(s1[[0]])
+  println(s1[[1]])
+  -- Mean over each axis.
+  let m0 = mean_axis(a, "0")
+  println(m0[[0]])
+  println(m0[[1]])
+  println(m0[[2]])
+  let m1 = mean_axis(a, "1")
+  println(m1[[0]])
+  println(m1[[1]])

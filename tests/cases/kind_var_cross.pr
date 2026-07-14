@@ -1,0 +1,11 @@
+-- One variable, two kinds. `Cmd`'s second parameter has kind `Row`, so writing
+-- the same variable `e` at the first (kind `Type`) and second (kind `Row`)
+-- position demands two kinds for one name. The syntactic gate accepted this
+-- (each occurrence looks fine alone, "pinned by inference"), but no inference
+-- ever reconciled the two occurrences; the per-variable kind pass now rejects
+-- it, naming both kinds. One variable has one kind.
+type Cmd(a, e : Row) = MkCmd(Int)
+
+fn f(x : Cmd(e, e)) : Int = 0
+
+fn main() = println(0)

@@ -10,12 +10,16 @@ use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
-use crate::cli::{resolve_input, CmdResult};
-use crate::driver::SOURCE_EXT;
+use crate::cli::{base_of, resolve_input, CmdResult, PRISM_MANIFEST};
+use crate::driver::{ModuleCheckReport, SOURCE_EXT};
 use crate::error::Error;
-use crate::lineage::{Variant, LINEAGE_EXTENSION, LINEAGE_FORMAT, LINEAGE_GRAPH_FORMAT};
+use crate::lineage::{
+    FactLedger, FactOutcome, FactScope, QueryFact, QueryKind, Variant, LINEAGE_EXTENSION,
+    LINEAGE_FORMAT, LINEAGE_GRAPH_FORMAT,
+};
 use crate::parse::parse;
 use crate::store::cert::CertStatus;
+use crate::store::disk::{resolve_store_path, Store};
 use anstyle::{AnsiColor, Color, Style};
 
 // `prism diff` is the project-shaped default: without paths, compare Git HEAD
@@ -565,6 +569,201 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
     Ok(())
 }
 
+// `prism lineage why-recompiled [FILE]`: explain each durable module-query
+// decision from the persisted previous/current fact-graph diff. When the source
+// files are gone, the stored graphs alone still explain the last recording.
+pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
+    let input = if let Some(path) = file {
+        path.to_path_buf()
+    } else {
+        let start = Path::new(".")
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from("."));
+        crate::project::find_manifest(&start).ok_or_else(|| {
+            (
+                Error::ResolveCommand(
+                    "no prism.toml found: pass a `.pr` file or run inside a project".into(),
+                ),
+                String::new(),
+                start.display().to_string(),
+            )
+        })?
+    };
+    let (full, roots, name, _) = match resolve_input(&input, cfg) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            let offline = offline_fact_lines(&input, cfg)
+                .map_err(|e| (e, String::new(), input.display().to_string()))?;
+            let Some(lines) = offline else {
+                return Err(err);
+            };
+            for line in lines {
+                println!("{line}");
+            }
+            return Ok(());
+        }
+    };
+    let session = cfg.session.clone().unwrap_or_default();
+    let mut explain_cfg = cfg.clone();
+    explain_cfg.session = Some(session.clone());
+    let report = crate::check_modules_on(&full, &roots, &explain_cfg)
+        .map_err(|error| (error, full.clone(), name.clone()))?;
+    let fact_lines = module_fact_lines(&roots, &report, cfg)
+        .map_err(|error| (error, full.clone(), name.clone()))?;
+    match fact_lines {
+        Some(lines) => {
+            for line in lines {
+                println!("{line}");
+            }
+        }
+        // Without a durable store there is no ledger; the in-memory decisions
+        // carry the same derivation for this command alone.
+        None => {
+            for decision in report.decisions {
+                if decision.reused {
+                    println!("reused {}", decision.module);
+                } else {
+                    println!(
+                        "recompiled {}: {}",
+                        decision.module,
+                        decision.reasons.join("; ")
+                    );
+                }
+            }
+        }
+    }
+    #[cfg(feature = "native")]
+    crate::driver::explain_downstream_queries(&full, &roots, &explain_cfg)
+        .map_err(|error| (error, full.clone(), name.clone()))?;
+    let downstream = session.decisions();
+    if let Some(lines) = downstream_fact_lines(&roots, &downstream, cfg)
+        .map_err(|error| (error, full.clone(), name.clone()))?
+    {
+        for line in lines {
+            println!("{line}");
+        }
+    } else {
+        for decision in downstream {
+            if decision.reused {
+                println!("reused {} {}", decision.kind.tag(), decision.identity);
+            } else {
+                println!(
+                    "recompiled {} {}: {}",
+                    decision.kind.tag(),
+                    decision.identity,
+                    decision.reasons.join("; ")
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+// The durable store the fact ledger lives in, when the compiler cache is on.
+fn fact_store(cfg: &crate::Config) -> Result<Option<Store>, Error> {
+    if !cfg.flags.compiler_cache || cfg.flags.store {
+        return Ok(None);
+    }
+    Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))
+        .map(Some)
+        .map_err(Error::Io)
+}
+
+// One explanation line per fact, from the previous/current graph alignment.
+fn fact_line(fact: &QueryFact) -> String {
+    let subject = if fact.kind == QueryKind::Module {
+        fact.identity.clone()
+    } else {
+        format!("{} {}", fact.kind.tag(), fact.identity)
+    };
+    if fact.outcome == FactOutcome::Hit {
+        format!("reused {subject}")
+    } else if fact.reasons.is_empty() {
+        format!("recompiled {subject}")
+    } else {
+        format!("recompiled {subject}: {}", fact.reasons.join("; "))
+    }
+}
+
+// Explanation lines for the module queries this command ran, read back from the
+// persisted previous/current fact-graph diff. `None` when no store is enabled.
+fn module_fact_lines(
+    roots: &[crate::Root],
+    report: &ModuleCheckReport,
+    cfg: &crate::Config,
+) -> Result<Option<Vec<String>>, Error> {
+    let Some(store) = fact_store(cfg)? else {
+        return Ok(None);
+    };
+    let ledger = FactLedger::load(&store, &FactScope::of_roots(roots))?;
+    let touched: BTreeSet<&str> = report
+        .decisions
+        .iter()
+        .map(|decision| decision.module.as_str())
+        .collect();
+    let lines = ledger
+        .diff()
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.kind == QueryKind::Module && touched.contains(entry.identity.as_str())
+        })
+        .filter_map(|entry| entry.current.as_ref().map(fact_line))
+        .collect();
+    Ok(Some(lines))
+}
+
+fn downstream_fact_lines(
+    roots: &[crate::Root],
+    decisions: &[crate::driver::QueryDecision],
+    cfg: &crate::Config,
+) -> Result<Option<Vec<String>>, Error> {
+    let Some(store) = fact_store(cfg)? else {
+        return Ok(None);
+    };
+    let touched = decisions
+        .iter()
+        .map(|decision| (decision.kind, decision.identity.clone()))
+        .collect::<BTreeSet<_>>();
+    let ledger = FactLedger::load(&store, &FactScope::of_roots(roots))?;
+    Ok(Some(
+        ledger
+            .diff()
+            .entries
+            .iter()
+            .filter(|entry| touched.contains(&(entry.kind, entry.identity.clone())))
+            .filter_map(|entry| entry.current.as_ref().map(fact_line))
+            .collect(),
+    ))
+}
+
+// The offline arm of `why-recompiled`: when the input file is gone, the scope's
+// persisted fact graphs still explain the last recorded decisions. `None` when
+// the input exists (the failure was something else), the input names a project
+// manifest (its roots cannot be reconstructed without it), no store is enabled,
+// or nothing was ever recorded for the scope.
+fn offline_fact_lines(input: &Path, cfg: &crate::Config) -> Result<Option<Vec<String>>, Error> {
+    if input.exists() || input.file_name().is_some_and(|name| name == PRISM_MANIFEST) {
+        return Ok(None);
+    }
+    let Some(store) = fact_store(cfg)? else {
+        return Ok(None);
+    };
+    let roots = crate::default_roots(&base_of(input));
+    let ledger = FactLedger::load(&store, &FactScope::of_roots(&roots))?;
+    if ledger.current.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(
+        ledger
+            .diff()
+            .entries
+            .iter()
+            .filter_map(|entry| entry.current.as_ref().map(fact_line))
+            .collect(),
+    ))
+}
+
 pub fn lineage_cmd(file: &Path, json: bool) -> CmdResult {
     let graph = crate::lineage::read_lineage(file)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
@@ -701,7 +900,7 @@ pub fn verify_run_sidecar(
     let mut sink: Vec<u8> = Vec::new();
     let replayed = crate::replay_run_on(&full, &roots, &mut sink, &trace_src, cfg)
         .map_err(|e| (e, full, name))?;
-    let digest = crate::provenance::trace_digest(&replayed.events);
+    let digest = replayed.canonical_trace.trace_digest();
     crate::lineage::verify_run_replay(&graph, &digest, replayed.term.as_bytes(), &base)
         .map_err(|e| (e, String::new(), path.display().to_string()))
 }

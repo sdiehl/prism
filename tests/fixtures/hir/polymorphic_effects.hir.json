@@ -1,0 +1,104 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "twice",
+      "scheme": "forall e0. ((Unit) -> Int ! {Tick, e0}) -> Int ! {Tick, e0}",
+      "effects": [
+        "Tick"
+      ]
+    },
+    {
+      "name": "count",
+      "scheme": "() -> Int ! {Tick}",
+      "effects": [
+        "Tick"
+      ]
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Int",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "ty": "Int"
+    },
+    "2": {
+      "ty": "Int"
+    },
+    "3": {
+      "ty": "(Unit) -> Int ! {Tick, ?r0}"
+    },
+    "4": {
+      "ty": "Unit"
+    },
+    "5": {
+      "ty": "Int"
+    },
+    "6": {
+      "ty": "(Unit) -> Int ! {Tick, ?r0}"
+    },
+    "7": {
+      "ty": "Unit"
+    },
+    "8": {
+      "ty": "Int"
+    },
+    "9": {
+      "ty": "Int"
+    },
+    "10": {
+      "ty": "() -> Int"
+    },
+    "11": {
+      "ty": "Int"
+    },
+    "12": {
+      "ty": "() -> Int"
+    },
+    "13": {
+      "ty": "Int"
+    },
+    "14": {
+      "ty": "Int"
+    },
+    "15": {
+      "ty": "Int"
+    },
+    "16": {
+      "ty": "forall e0. ((Unit) -> Int ! {Tick, e0}) -> Int ! {Tick, e0}"
+    },
+    "18": {
+      "ty": "Int"
+    },
+    "19": {
+      "ty": "Int"
+    },
+    "20": {
+      "ty": "() -> Int"
+    },
+    "21": {
+      "ty": "Int"
+    },
+    "22": {
+      "ty": "Int"
+    },
+    "23": {
+      "ty": "() -> Int ! {Tick}"
+    },
+    "24": {
+      "ty": "Int"
+    },
+    "25": {
+      "ty": "(Int) -> Int ! {?r8}"
+    },
+    "26": {
+      "ty": "Int"
+    },
+    "27": {
+      "ty": "Int"
+    }
+  }
+}

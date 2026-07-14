@@ -604,6 +604,23 @@ pub fn core_ir(src: &str) -> String {
     }
 }
 
+/// The checked-HIR fixture of the snippet: the versioned deterministic JSON the
+/// `dump hir` phase emits (schema `prism-hir-fixture-v1`), carrying the
+/// per-declaration schemes and effect rows plus the per-node checker facts
+/// (resolution, dictionary evidence, numeric lane, zonked type).
+///
+/// The prelude is prepended so snippets that reference it type-check; the
+/// browser strips the prelude declarations for display the same way the Core IR
+/// view does. On a front-end error, returns the rendered diagnostic as text.
+#[wasm_bindgen]
+#[must_use]
+pub fn dump_hir(src: &str) -> String {
+    match crate::dump_at("hir", &with_prelude(src), Path::new(".")) {
+        Ok(fixture) => fixture,
+        Err(e) => format!("error: {e}"),
+    }
+}
+
 /// The top-level type signatures of the snippet's own declarations (prelude
 /// signatures elided), or the front-end error as text.
 #[wasm_bindgen]

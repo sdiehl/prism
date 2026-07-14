@@ -1,3 +1,5 @@
+#[path = "lineage_suite/facts.rs"]
+mod facts;
 #[path = "lineage_suite/lineage.rs"]
 mod lineage;
 #[path = "lineage_suite/lineage_tiles.rs"]

@@ -1,0 +1,151 @@
+-- A type checker for the simply typed lambda calculus: no evaluator, only
+-- `infer`, so it complements the evaluators in `interp.pr`, `lambda.pr`, and
+-- `calc.pr`. Types are `Int`, `Bool`, and arrows; terms are variables,
+-- annotated lambdas, application, integer literals and addition, booleans,
+-- and `if`. Typing is a structural recursion over the term with an
+-- association-list environment: a variable looks itself up, a lambda extends
+-- the environment with its annotated parameter type, an application demands
+-- an arrow on the left and the matching argument type on the right, `+`
+-- demands both sides `Int`, and `if` demands a `Bool` condition and two
+-- branches of the SAME type.
+--
+-- Every rule violation SIGNALS the `TypeError` effect via `mismatch`, whose
+-- `never` handler drops the rest of the checker and reports the message, so
+-- one bad subterm aborts the whole inference instead of threading an error
+-- type through every return.
+--
+-- Expected output:
+--   id_int          : Int -> Int
+--   const_bool      : Int -> Bool -> Int
+--   apply id to 5   : Int
+--   if true then .. : Int
+--   add_two         : Int
+--   1 + true        : error: + expects Int on both sides, got Int and Bool
+--   apply non-fun    : error: applying a non-function of type Int
+--   unbound var     : error: unbound variable z
+--   if branch mismatch : error: if branches disagree: Int vs Bool
+--   bad arg type    : error: argument type mismatch: expected Bool, got Int
+
+type Ty = TyInt | TyBool | TyArrow(Ty, Ty)
+
+type Term
+  = TmVar(String)
+  | TmLam(String, Ty, Term)
+  | TmApp(Term, Term)
+  | TmLit(Int)
+  | TmAdd(Term, Term)
+  | TmTru
+  | TmFls
+  | TmIf(Term, Term, Term)
+
+type Env = ENil | EBind(String, Ty, Env)
+
+effect TypeError
+  mismatch(String) : Ty
+
+fn ty_eq(a, b) : Bool =
+  match (a, b) of
+    (TyInt, TyInt) => true
+    (TyBool, TyBool) => true
+    (TyArrow(a1, a2), TyArrow(b1, b2)) => ty_eq(a1, b1) && ty_eq(a2, b2)
+    _ => false
+
+fn show_ty(t) : String =
+  match t of
+    TyInt => "Int"
+    TyBool => "Bool"
+    TyArrow(a, b) =>
+      match a of
+        TyArrow(_, _) => "({show_ty(a)}) -> {show_ty(b)}"
+        _ => "{show_ty(a)} -> {show_ty(b)}"
+
+fn lookup(env, name) : Ty ! {TypeError} =
+  match env of
+    ENil => mismatch("unbound variable {name}")
+    EBind(k, t, rest) =>
+      if str_eq(k, name) then
+        t
+      else
+        lookup(rest, name)
+
+fn infer(env, t) : Ty ! {TypeError} =
+  match t of
+    TmVar(x) => lookup(env, x)
+    TmLam(x, argTy, body) => TyArrow(argTy, infer(EBind(x, argTy, env), body))
+    TmApp(f, a) =>
+      match infer(env, f) of
+        TyArrow(from, to) =>
+          let argTy = infer(env, a)
+          if ty_eq(argTy, from) then
+            to
+          else
+            let want = show_ty(from)
+            let got = show_ty(argTy)
+            mismatch("argument type mismatch: expected {want}, got {got}")
+        other =>
+          let got = show_ty(other)
+          mismatch("applying a non-function of type {got}")
+    TmLit(_) => TyInt
+    TmAdd(a, b) =>
+      let ta = infer(env, a)
+      let tb = infer(env, b)
+      match (ta, tb) of
+        (TyInt, TyInt) => TyInt
+        _ =>
+          let sa = show_ty(ta)
+          let sb = show_ty(tb)
+          mismatch("+ expects Int on both sides, got {sa} and {sb}")
+    TmTru => TyBool
+    TmFls => TyBool
+    TmIf(c, a, b) =>
+      match infer(env, c) of
+        TyBool =>
+          let ta = infer(env, a)
+          let tb = infer(env, b)
+          if ty_eq(ta, tb) then
+            ta
+          else
+            let sa = show_ty(ta)
+            let sb = show_ty(tb)
+            mismatch("if branches disagree: {sa} vs {sb}")
+        cty =>
+          let got = show_ty(cty)
+          mismatch("if condition must be Bool, got {got}")
+
+fn check(t) : String =
+  handle show_ty(infer(ENil, t)) with
+    never mismatch(msg) => "error: {msg}"
+    return r => r
+
+fn main() : Unit ! {IO} =
+  -- \x:Int. x
+  let id_int = TmLam("x", TyInt, TmVar("x"))
+  println("id_int          : {check(id_int)}")
+  -- \x:Int. \y:Bool. x
+  let const_bool = TmLam("x", TyInt, TmLam("y", TyBool, TmVar("x")))
+  println("const_bool      : {check(const_bool)}")
+  -- (\x:Int. x) 5
+  let apply_id = TmApp(id_int, TmLit(5))
+  println("apply id to 5   : {check(apply_id)}")
+  -- if true then 1 else 2
+  let if_int = TmIf(TmTru, TmLit(1), TmLit(2))
+  println("if true then .. : {check(if_int)}")
+  -- \x:Int. x + 2
+  let add_two = TmLam("x", TyInt, TmAdd(TmVar("x"), TmLit(2)))
+  println("add_two         : {check(TmApp(add_two, TmLit(3)))}")
+  -- 1 + true
+  let bad_add = TmAdd(TmLit(1), TmTru)
+  println("1 + true        : {check(bad_add)}")
+  -- 5 applied as a function
+  let apply_non_fun = TmApp(TmLit(5), TmLit(1))
+  println("apply non-fun    : {check(apply_non_fun)}")
+  -- unbound variable z
+  let unbound = TmVar("z")
+  println("unbound var     : {check(unbound)}")
+  -- if true then 1 else false
+  let if_mismatch = TmIf(TmTru, TmLit(1), TmFls)
+  println("if branch mismatch : {check(if_mismatch)}")
+  -- (\x:Bool. x) 5
+  let bad_arg = TmApp(TmLam("x", TyBool, TmVar("x")), TmLit(5))
+  println("bad arg type    : {check(bad_arg)}")
+  ()

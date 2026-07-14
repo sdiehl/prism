@@ -10,8 +10,8 @@ use crate::core::builtins::Builtin;
 use crate::core::{Comp, Core, CoreFn, CorePat};
 use crate::names::ENTRY_POINT;
 use crate::provenance::{
-    CapEvent, CapOp, EventValue, OP_CONSOLE_EPRINT, OP_CONSOLE_NEWLINE, OP_CONSOLE_PRINT,
-    OP_CONSOLE_READ_INT, OP_CONSOLE_READ_LINE, OP_RANDOM_RAND,
+    CapEvent, CapOp, EventValue, Observation, OP_CONSOLE_EPRINT, OP_CONSOLE_NEWLINE,
+    OP_CONSOLE_PRINT, OP_CONSOLE_READ_INT, OP_CONSOLE_READ_LINE, OP_RANDOM_RAND,
 };
 use crate::sym::Sym;
 use crate::types::{CONS, FLOAT_BUF, NIL};
@@ -285,6 +285,7 @@ pub struct Machine<'a> {
     // "this run is being observed"; a live run leaves it `None` and pays nothing.
     // Record and replay of one trace produce an identical stream by determinism.
     events: Option<Vec<CapEvent>>,
+    observations: Option<Vec<Observation>>,
     // Suspension: `step_budget` pauses the loop after that many machine steps (a
     // whole-program checkpoint), `steps` counts them. `None` is the ordinary
     // unbounded run. Steps are pure state transitions, so a given budget stops the
@@ -381,6 +382,7 @@ impl<'a> Machine<'a> {
             observed: 0,
             halted: false,
             events: None,
+            observations: None,
             step_budget: None,
             steps: 0,
             ruler: None,
@@ -425,6 +427,10 @@ impl<'a> Machine<'a> {
             Tape::Live => None,
             Tape::Record(_) | Tape::Replay { .. } => Some(Vec::new()),
         };
+        self.observations = match tape {
+            Tape::Live => None,
+            Tape::Record(_) | Tape::Replay { .. } => Some(Vec::new()),
+        };
         self.tape = tape;
     }
 
@@ -434,11 +440,15 @@ impl<'a> Machine<'a> {
     // replay), so the same event is recorded either way.
     fn record_event(&mut self, op: CapOp, args: Vec<EventValue>, result: &Rv) {
         if let Some(events) = &mut self.events {
-            events.push(CapEvent {
+            let event = CapEvent {
                 op,
                 args,
                 result: event_value_of_rv(result),
-            });
+            };
+            events.push(event.clone());
+            if let Some(observations) = &mut self.observations {
+                observations.push(Observation::Capability(event));
+            }
         }
     }
 
@@ -446,13 +456,42 @@ impl<'a> Machine<'a> {
     // path is the first argument; the committed content (a string or byte buffer, or
     // nothing for a removal) is the result. Recorded in both record and replay, so a
     // run that writes files reproduces the identical events on replay.
-    fn record_write_event(&mut self, op: CapOp, vals: &[Rv]) {
-        let Some(events) = &mut self.events else {
-            return;
-        };
+    fn record_write_event(&mut self, op: CapOp, vals: &[Rv]) -> Result<(), String> {
         let args = vals.first().map(event_value_of_rv).into_iter().collect();
         let result = vals.get(1).map_or(EventValue::Unit, event_value_of_rv);
-        events.push(CapEvent { op, args, result });
+        let event = CapEvent { op, args, result };
+        if let Some(events) = &mut self.events {
+            events.push(event.clone());
+        } else {
+            return Ok(());
+        }
+        let path = vals.first().and_then(|value| match value {
+            Rv::Str(path) => Some(path.as_str()),
+            _ => None,
+        });
+        if let (Some(path), Some(observations)) = (path, self.observations.as_mut()) {
+            if op == crate::provenance::OP_FS_REMOVE_FILE {
+                observations.push(Observation::Capability(event));
+            } else {
+                let committed = std::fs::read(path)
+                    .map_err(|error| format!("observe committed file {path:?}: {error}"))?;
+                observations.push(Observation::FileCommit {
+                    path: path.to_string(),
+                    digest: crate::provenance::sha256_hex(&committed),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn record_output(&mut self, op: CapOp, text: String) {
+        if let Some(observations) = &mut self.observations {
+            observations.push(match op {
+                OP_CONSOLE_EPRINT => Observation::Stderr(text.into_bytes()),
+                OP_CONSOLE_PRINT | OP_CONSOLE_NEWLINE => Observation::Stdout(text.into_bytes()),
+                _ => unreachable!("only console output operations record output"),
+            });
+        }
     }
 
     // True when a replay budget is set and already reached, so the next
@@ -552,16 +591,20 @@ impl<'a> Machine<'a> {
                 ));
             }
             emit(self)?;
+            let output = preview();
+            self.record_output(op, output.clone());
             self.observed += 1;
-            self.mark(op.label(), preview);
+            self.mark(op.label(), || output);
             return Ok(());
         }
         emit(self)?;
         if let Tape::Record(frames) = &mut self.tape {
             frames.push(Obs::Out);
         }
+        let output = preview();
+        self.record_output(op, output.clone());
         self.observed += 1;
-        self.mark(op.label(), preview);
+        self.mark(op.label(), || output);
         Ok(())
     }
 
@@ -700,12 +743,16 @@ impl<'a> Machine<'a> {
                 State::Ret(Rv::Unit)
             }
             Node::PrintNl => {
-                self.observe_out(OP_CONSOLE_NEWLINE, String::new, |m| {
-                    writeln!(m.out_sink).map_err(|e| format!("println: {e}"))?;
-                    m.out_sink.flush().ok();
-                    m.term.push('\n');
-                    Ok(())
-                })?;
+                self.observe_out(
+                    OP_CONSOLE_NEWLINE,
+                    || "\n".to_string(),
+                    |m| {
+                        writeln!(m.out_sink).map_err(|e| format!("println: {e}"))?;
+                        m.out_sink.flush().ok();
+                        m.term.push('\n');
+                        Ok(())
+                    },
+                )?;
                 State::Ret(Rv::Unit)
             }
             Node::Rand => {
@@ -791,7 +838,7 @@ impl<'a> Machine<'a> {
                     // advance the observation count; the write re-runs on replay, so
                     // the event recurs and the trace digest is unchanged.
                     let v = str_builtin(*name, &vals, &self.args)?;
-                    self.record_write_event(op, &vals);
+                    self.record_write_event(op, &vals)?;
                     State::Ret(v)
                 } else if let (Builtin::Eprint, [Rv::Str(s)]) = (*name, vals.as_slice()) {
                     let s = s.clone();
@@ -1157,6 +1204,10 @@ pub struct TracedRun {
     /// observation, in order. A recording and a replay of its trace produce the
     /// identical sequence.
     pub events: Vec<CapEvent>,
+    /// Complete ordered observable behavior captured at the evaluator boundary.
+    pub observations: Vec<Observation>,
+    /// Runtime fault captured by the observation-only entry point.
+    pub fault: Option<String>,
 }
 
 /// Run `core` under a [`Tape`], returning the transcript and the observation
@@ -1195,8 +1246,16 @@ pub fn run_traced_with_args(
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
     let mut m = Machine::new_with_args(&g, out_sink, input, args);
     m.set_tape(tape);
-    m.comp(&Env::default(), &main.body)?;
+    let value = m.comp(&Env::default(), &main.body)?;
+    if let Some(observations) = &mut m.observations {
+        if let Some(exit) = m.exit {
+            observations.push(Observation::Exit(exit));
+        } else {
+            observations.push(Observation::Return(value.show()));
+        }
+    }
     let events = m.events.take().unwrap_or_default();
+    let observations = m.observations.take().unwrap_or_default();
     let frames = match m.tape {
         Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
         Tape::Live => Vec::new(),
@@ -1208,7 +1267,71 @@ pub fn run_traced_with_args(
         observed: m.observed,
         halted: m.halted,
         events,
+        observations,
+        fault: None,
     })
+}
+
+/// Run while preserving runtime faults as terminal observations.
+///
+/// Unlike [`run_traced_with_args`], a language-level runtime fault is returned
+/// in the artifact rather than discarded through `Err`; frontend failures remain
+/// outside this Core-level entry point.
+pub fn run_observed_with_args(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    args: Vec<String>,
+) -> TracedRun {
+    let g = globals(core);
+    let Some(main) = g.get(&Sym::new(ENTRY_POINT)) else {
+        let fault = "no main function".to_string();
+        return TracedRun {
+            term: String::new(),
+            exit: None,
+            frames: Vec::new(),
+            observed: 0,
+            halted: false,
+            events: Vec::new(),
+            observations: vec![Observation::Fault(fault.clone())],
+            fault: Some(fault),
+        };
+    };
+    let mut m = Machine::new_with_args(&g, out_sink, input, args);
+    m.set_tape(Tape::Record(Vec::new()));
+    let result = m.comp(&Env::default(), &main.body);
+    let fault = match result {
+        Ok(value) => {
+            if let Some(observations) = &mut m.observations {
+                if let Some(exit) = m.exit {
+                    observations.push(Observation::Exit(exit));
+                } else {
+                    observations.push(Observation::Return(value.show()));
+                }
+            }
+            None
+        }
+        Err(fault) => {
+            if let Some(observations) = &mut m.observations {
+                observations.push(Observation::Fault(fault.clone()));
+            }
+            Some(fault)
+        }
+    };
+    let frames = match m.tape {
+        Tape::Record(frames) => frames,
+        Tape::Live | Tape::Replay { .. } => unreachable!("observed run records"),
+    };
+    TracedRun {
+        term: m.term,
+        exit: m.exit,
+        frames,
+        observed: m.observed,
+        halted: m.halted,
+        events: m.events.take().unwrap_or_default(),
+        observations: m.observations.take().unwrap_or_default(),
+        fault,
+    }
 }
 
 /// The result of a suspendable run: either the program ran to completion, or it
@@ -1235,6 +1358,7 @@ fn snapshot(m: Machine<'_>, bundle: String, stack: Vec<Frame>, state: State) -> 
         Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
         Tape::Live => Vec::new(),
     };
+    let observations = m.observations.unwrap_or_default();
     kont::Kont {
         bundle,
         stack,
@@ -1244,6 +1368,7 @@ fn snapshot(m: Machine<'_>, bundle: String, stack: Vec<Frame>, state: State) -> 
         observed: m.observed,
         exit: m.exit,
         trace,
+        observations,
     }
 }
 
@@ -1313,6 +1438,7 @@ fn run_suspending_inner(
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
     let root = lower(&main.body);
     let mut m = Machine::new(g, out_sink, input);
+    m.set_tape(Tape::Record(Vec::new()));
     if ruler {
         m.arm_ruler();
     }
@@ -1390,6 +1516,8 @@ pub fn resume_kont(
 ) -> Result<Run, String> {
     let g = globals(core);
     let mut m = Machine::new(&g, out_sink, input);
+    m.set_tape(Tape::Record(kont.trace.clone()));
+    m.observations = Some(kont.observations.clone());
     // Restore the registers the loop threads across the cut so the resumed run
     // continues the same random stream and observation count.
     m.rng = kont.rng;
@@ -1409,6 +1537,76 @@ pub fn resume_kont(
         }),
         // No step budget is set on a resume, so the loop cannot pause again.
         Outcome::Suspended { .. } => Err("resumed continuation paused unexpectedly".into()),
+    }
+}
+
+/// Resume while retaining the snapshot's observation prefix and capturing a
+/// terminal return, exit, or fault in one complete trace.
+pub fn resume_kont_observed(
+    core: &Core,
+    kont: kont::Kont,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+) -> TracedRun {
+    let g = globals(core);
+    let mut m = Machine::new(&g, out_sink, input);
+    m.set_tape(Tape::Record(kont.trace.clone()));
+    m.observations = Some(kont.observations.clone());
+    m.rng = kont.rng;
+    m.fn_name = kont.fn_name;
+    m.observed = kont.observed;
+    m.exit = kont.exit;
+    let state = match kont.state {
+        kont::KontState::Eval(c, env) => State::Eval(c, env),
+        kont::KontState::Ret(v) => State::Ret(v),
+    };
+    let result = m.run_loop(kont.stack, state);
+    let fault = match result {
+        Ok(Outcome::Done(value)) => {
+            if let Some(observations) = &mut m.observations {
+                if let Some(exit) = m.exit {
+                    observations.push(Observation::Exit(exit));
+                } else {
+                    observations.push(Observation::Return(value.show()));
+                }
+            }
+            None
+        }
+        Ok(Outcome::Suspended { .. }) => {
+            let fault = "resumed continuation paused unexpectedly".to_string();
+            if let Some(observations) = &mut m.observations {
+                observations.push(Observation::Fault(fault.clone()));
+            }
+            Some(fault)
+        }
+        Err(fault) => {
+            if let Some(observations) = &mut m.observations {
+                observations.push(Observation::Fault(fault.clone()));
+            }
+            Some(fault)
+        }
+    };
+    let frames = match m.tape {
+        Tape::Record(frames) => frames,
+        Tape::Live | Tape::Replay { .. } => unreachable!("observed resume records"),
+    };
+    let observations = m.observations.take().unwrap_or_default();
+    let term = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            Observation::Stdout(bytes) => Some(String::from_utf8_lossy(bytes)),
+            _ => None,
+        })
+        .collect::<String>();
+    TracedRun {
+        term,
+        exit: m.exit,
+        frames,
+        observed: m.observed,
+        halted: m.halted,
+        events: m.events.take().unwrap_or_default(),
+        observations,
+        fault,
     }
 }
 

@@ -6,8 +6,8 @@ use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::{
     balanced, fip_annots, hash_program, hash_root, insert_rc, lower_effects, pp_core_pretty, reuse,
-    run_opt, run_opt_spec, Comp, Core, DepGraph, Digest, EffectStrategy, ElaboratedCore,
-    LoweredCore, OpGrades, Value, HASH_SCHEME,
+    Comp, Core, DepGraph, Digest, EffectStrategy, ElaboratedCore, LoweredCore, OpGrades, Value,
+    HASH_SCHEME,
 };
 use crate::error::{Error, TypeError};
 use crate::parse::{parse, ParseResult};
@@ -19,47 +19,75 @@ use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
 use crate::types::{show_effects, show_type_with_effects, Checked, CtorInfo};
 
 mod artifact;
+#[cfg(feature = "native")]
+mod backend;
 mod build;
+mod cache;
 mod config;
+mod decision;
 mod diff;
+mod downstream;
 mod dump;
 mod execution;
 mod front;
 mod identity;
+mod input;
+mod interface;
+mod module_graph;
+mod modules;
 #[cfg(feature = "native")]
 mod native;
 mod query;
 mod report;
+mod scheduler;
+mod session;
 mod timing;
 mod verify;
 pub use artifact::{ArtifactField, ArtifactIdentity, ArtifactRow};
+#[cfg(feature = "native")]
+pub(crate) use build::explain_downstream_queries;
 pub use build::rc_balanced;
 #[cfg(feature = "native")]
-pub use build::{build, build_at, build_on, build_on_report, emit_ir, NativeBuildReport};
+pub use build::{
+    build, build_at, build_on, build_on_report, emit_ir, verify_backend_recomposition_on,
+    NativeBuildReport,
+};
 #[cfg(feature = "mlir")]
 pub use build::{build_mlir, build_mlir_at, build_mlir_on};
+#[cfg(feature = "native")]
+pub use cache::NativeCacheStatus;
 pub use config::{BackendOpt, Config, Scheduler};
+pub use decision::ModuleQueryDecision;
 pub use diff::{
     diff_on, source_diff_on, DiffChangedDef, DiffNamedDef, SourceDiff, SOURCE_DIFF_FORMAT,
 };
+#[cfg(feature = "native")]
 pub(crate) use diff::{diff_on_roots, render_source_diff, source_diff_on_roots};
 pub use dump::{dump, dump_at, dump_on};
 pub use execution::{
     debug_on, interpret, interpret_at, interpret_io_at, interpret_io_on, interpret_io_on_with_args,
-    record_on, record_on_with_args, record_run_on, replay_on, replay_run_on, resume_on,
-    step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun, StepRuler, StepRulerRow, SuspendCut,
-    SuspendResult, STEP_RULER_FORMAT,
+    observe_run_on, record_on, record_on_with_args, record_run_on, replay_on, replay_run_on,
+    resume_observed_on, resume_on, step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun,
+    StepRuler, StepRulerRow, SuspendCut, SuspendResult, STEP_RULER_FORMAT,
 };
 use front::{run_front, Front, FrontOpts};
 pub(crate) use identity::stdlib_driver_src;
 pub use identity::{
-    namespace_identity, namespace_root, public_surface, stdlib_hash, NamespaceIdentity, PublicDef,
-    StdlibHash,
+    module_interface, namespace_identity, namespace_root, public_surface, stdlib_hash,
+    ModuleInterface, ModuleInterfaceEntry, NamespaceIdentity, PublicDef, StdlibHash,
+    MODULE_INTERFACE_FORMAT,
 };
 #[cfg(feature = "native")]
 pub(crate) use identity::{BuildIdentity, BuildRoot};
+pub use interface::RehydratedModuleInterface;
+pub use module_graph::{
+    module_graph, ModuleGraph, ModuleGraphNode, ModuleInvalidation, ModuleInvalidationCause,
+    MODULE_GRAPH_FORMAT,
+};
+pub use modules::{check_modules_on, CheckedModule, ModuleCheckReport};
 pub use query::query_on;
 pub use report::{report, report_at, report_on, shape_digests_of};
+pub use session::{CompilerSession, QueryDecision, SessionStats};
 pub use timing::TimingSink;
 #[cfg(feature = "native")]
 pub use verify::attest_on;
@@ -68,6 +96,7 @@ pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
 
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
+pub(super) const ROOT_MODULE_NAME: &str = "<root>";
 
 /// Artifact kind for a whole-program namespace root.
 pub const NAMESPACE_ARTIFACT_KIND: &str = "namespace";
@@ -293,6 +322,21 @@ pub fn check_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
     check_on_in(src, roots, &Config::default())
 }
 
+/// Typecheck one already-resolved module against checked dependency facts.
+///
+/// This is the semantic cutoff primitive used by independent module queries:
+/// dependency implementation bodies are absent, and only the supplied seed can
+/// satisfy their names.
+///
+/// # Errors
+/// Fails on parse, resolution, desugaring, or type errors.
+pub fn check_with_seed(src: &str, seed: &crate::types::TypecheckSeed) -> Result<Checked, Error> {
+    let program = parse(src)?.program;
+    let program = crate::resolve::resolve(program)?;
+    let program = crate::syntax::desugar::desugar(program)?;
+    Ok(crate::tc::check_seeded(&program, seed)?)
+}
+
 /// Like [`check_on`], threading an explicit [`Config`] so the CLI can carry a
 /// timing sink into a `check`.
 ///
@@ -514,40 +558,17 @@ fn lower_opt(
         cfg.timing.as_ref(),
         timing::Phase::LowerEffects,
         "",
-        || lower_effects(core, ctors, &cfg.flags, grades),
+        || downstream::lower_effect_queries(core, ctors, grades, cfg),
         |_| timing::RowExtras::default(),
     )?;
     let empty = std::collections::BTreeSet::new();
-    let (lowered, _stats) = timing::timed(
+    let lowered = timing::timed_res(
         cfg.timing.as_ref(),
         timing::Phase::OptLate,
         "",
-        || {
-            cfg.passes.as_ref().map_or_else(
-                || {
-                    run_opt(
-                        &lowered,
-                        &empty,
-                        cfg.opt,
-                        PassStage::Late,
-                        &cfg.disabled,
-                        &cfg.flags,
-                    )
-                },
-                |spec| {
-                    run_opt_spec(
-                        &lowered,
-                        &empty,
-                        &spec.late,
-                        PassStage::Late,
-                        &cfg.disabled,
-                        &cfg.flags,
-                    )
-                },
-            )
-        },
+        || downstream::run_opt_queries(&lowered, &empty, PassStage::Late, cfg),
         |_| timing::RowExtras::default(),
-    );
+    )?;
     Ok((LoweredCore(lowered), ctors, warning))
 }
 
@@ -561,6 +582,50 @@ fn lowered_core(
     let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
     emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
     Ok((checked, lowered, ctors, sigs))
+}
+
+#[cfg(feature = "native")]
+fn lowered_core_with_identity(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<
+    (
+        Checked,
+        LoweredCore,
+        BTreeMap<String, CtorInfo>,
+        crate::core::Hashes,
+    ),
+    Error,
+> {
+    let (program, checked, identity_core, core) =
+        run_front(src, roots, cfg, FrontOpts::FULL)?.into_compilation();
+    let sigs = borrow_sigs(&program);
+    let hashes = if cfg.scheduler.retarget().is_some() {
+        // Scheduler policy is execution configuration, never source identity.
+        // The full path has already retargeted its surface program, so recover
+        // the policy-neutral identity only for this non-default configuration.
+        let (identity_program, identity_checked, canonical_core) = elaborated(src, roots)?;
+        hash_program(
+            &canonical_core,
+            &hash_meta(
+                &identity_checked,
+                &borrow_sigs(&identity_program),
+                &fip_annots(&identity_program),
+            ),
+        )
+    } else {
+        let metas = hash_meta(&checked, &sigs, &fip_annots(&program));
+        hash_program(&identity_core, &metas)
+    };
+    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
+    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
+    Ok((
+        checked,
+        LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
+        ctors,
+        hashes,
+    ))
 }
 
 // Surface the effect-lowering fallback warning through the standard renderer,
@@ -838,11 +903,7 @@ pub(crate) fn hash_meta(checked: &Checked, sigs: &Sigs, fips: &Fips) -> BTreeMap
         .iter()
         .map(|d| {
             let sym = Sym::new(&d.name);
-            let fip = match fips.get(&sym) {
-                Some(Fip::Fip) => "fip",
-                Some(Fip::Fbip) => "fbip",
-                _ => "",
-            };
+            let fip = fips.get(&sym).copied().and_then(Fip::keyword).unwrap_or("");
             let mask: String = sigs.get(&sym).map_or_else(String::new, |bs| {
                 bs.iter().map(|b| if *b { 'b' } else { '.' }).collect()
             });

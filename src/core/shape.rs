@@ -19,7 +19,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use crate::syntax::ast::{ClassDecl, Ctor, CtorShape, DataDecl, EffectDecl, Kind, Row, Ty};
+use crate::syntax::ast::{
+    ClassDecl, Ctor, CtorShape, DataDecl, EffLabel, EffOp, EffectDecl, Kind, Row, Ty,
+};
 
 use super::hash::{hex, Digest, HASH_PREFIX_HEX, SCHEME};
 
@@ -142,7 +144,7 @@ fn encode_effect(eff: &EffectDecl) -> String {
     e.out.push_str("|effect");
     e.tok(&eff.name);
     // Operations are addressed by name, not position, so encode in name order.
-    let mut ops: Vec<&crate::syntax::ast::EffOp> = eff.ops.iter().collect();
+    let mut ops: Vec<&EffOp> = eff.ops.iter().collect();
     ops.sort_by(|a, b| a.name.cmp(&b.name));
     e.out.push('{');
     for op in ops {
@@ -390,7 +392,7 @@ impl Enc {
             // Effect labels form a set: sort by name so order does not matter.
             Row::Cons(labels, tail) => {
                 self.out.push_str("rc");
-                let mut ls: Vec<&crate::syntax::ast::EffLabel> = labels.iter().collect();
+                let mut ls: Vec<&EffLabel> = labels.iter().collect();
                 ls.sort_by(|a, b| a.name.cmp(&b.name));
                 for l in ls {
                     self.tok(&l.name);
@@ -411,7 +413,7 @@ impl Enc {
 #[cfg(test)]
 mod tests {
     use super::shape_digests;
-    use crate::syntax::ast::{Ctor, DataDecl, Ty};
+    use crate::syntax::ast::{Ctor, DataDecl, Span, Ty};
 
     fn data(name: &str, params: &[&str], ctors: Vec<Ctor>) -> DataDecl {
         DataDecl {
@@ -421,7 +423,7 @@ mod tests {
             ctors,
             deriving: Vec::new(),
             newtype: false,
-            span: crate::syntax::ast::Span::default(),
+            span: Span::default(),
         }
     }
 

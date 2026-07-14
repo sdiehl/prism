@@ -695,6 +695,7 @@ mod tests {
             data,
             eff_ops,
             field_res: BTreeMap::new(),
+            body_witness: BTreeMap::new(),
             unboxed_field: BTreeMap::new(),
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),

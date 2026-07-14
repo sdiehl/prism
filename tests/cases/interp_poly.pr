@@ -1,0 +1,7 @@
+-- A polymorphic interpolation hole has no static printer, so it is rejected
+-- like a polymorphic `print` (pointing at `show(x)`) rather than silently
+-- rendered as an integer, which would misread a non-Int value and diverge
+-- native output from the interpreter.
+fn f(x) = println("{x}")
+
+fn main() = f("hi")

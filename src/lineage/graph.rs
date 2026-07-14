@@ -10,17 +10,17 @@
 //!
 //! Build assembly lives in [`super::build`], run assembly in [`super::run`].
 
-use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-
 use crate::error::Error;
 use crate::provenance::{self, EVENT_HASH_SCHEME};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+pub(crate) use super::node_id::minted_id;
+pub(super) use super::node_id::NodeId;
 
 /// The first named build sidecar format, kept readable through [`LineageGraph::from_v1`].
 pub const LINEAGE_FORMAT: &str = "prism-build-lineage-v1";
@@ -49,7 +49,6 @@ pub(crate) const ARTIFACT_DIGEST_SCHEME: &str = "blake3";
 // Minted node ids (request, compiler identity, diagnostics, cache summary) commit
 // their canonical payload bytes under this scheme; root and artifact nodes reuse
 // the content digest they already carry.
-const MINTED_ID_SCHEME: &str = "sha256";
 const BACKEND_LLVM: &str = "llvm";
 const BACKEND_MLIR: &str = "mlir";
 // Node-kind discriminants, matching the `rename_all = "kebab-case"` serde tags on
@@ -536,11 +535,6 @@ impl DoctestPayload {
     }
 }
 
-/// A digest-derived node identity. Never positional, never a path or name.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct NodeId(pub String);
-
 /// A lineage graph node: a digest-named identity carrying a per-kind payload.
 ///
 /// The `kind` discriminant and its payload serialize as a single adjacently
@@ -667,6 +661,7 @@ impl LineageGraph {
     /// # Errors
     /// Fails if the value is not a `prism-build-lineage-v1` document or a typed
     /// field fails to decode.
+    #[cfg(feature = "native")]
     pub fn from_v1(value: &Value) -> Result<Self, Error> {
         super::build::from_v1(value)
     }
@@ -958,21 +953,6 @@ pub(crate) fn request_kind_tag(kind: RequestKind) -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_default()
-}
-
-pub(crate) fn minted_id(bytes: &[u8]) -> NodeId {
-    NodeId(format!(
-        "{MINTED_ID_SCHEME}:{}",
-        hex(&Sha256::digest(bytes))
-    ))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 // Recompute a content digest under the scheme the node committed to. The two

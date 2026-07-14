@@ -1,0 +1,6 @@
+-- Unboxed record projection: `e.#f` resolves to a positional index and
+-- arity fixed by the record's type field order, with no constructor name.
+
+fn point() : #{ x : Int, y : Int } = #{ x = 1, y = 2 }
+
+fn main() : Int = point().#x + point().#y

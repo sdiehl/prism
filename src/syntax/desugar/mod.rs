@@ -562,15 +562,40 @@ fn once_uses(e: &S<Expr>, name: &str) -> usize {
             total
         }
         // A lambda body may run any number of times, so capturing `name` escapes.
-        Expr::Lam(_, b) => usize::from(once_uses(b, name) > 0) * 2,
+        // A parameter that shadows `name` rebinds it: the body's occurrences are a
+        // different variable and do not count.
+        Expr::Lam(params, b) => {
+            if params.iter().any(|p| p.name == name) {
+                0
+            } else {
+                usize::from(once_uses(b, name) > 0) * 2
+            }
+        }
         Expr::If(c, t, el) => cap(once_uses(c, name) + once_uses(t, name).max(once_uses(el, name))),
-        Expr::Let(_, v, b) => cap(once_uses(v, name) + once_uses(b, name)),
+        // The bound value is in the outer scope; the body sees `name` only when the
+        // let binder does not shadow it.
+        Expr::Let(binder, v, b) => {
+            let body = if binder.as_str() == name {
+                0
+            } else {
+                once_uses(b, name)
+            };
+            cap(once_uses(v, name) + body)
+        }
         Expr::Match(s, arms) => {
             let branch = arms
                 .iter()
                 .map(|a| {
-                    cap(a.guard.as_ref().map_or(0, |g| once_uses(g, name))
-                        + once_uses(&a.body, name))
+                    let mut binds = Vec::new();
+                    pat_binds(&a.pat, &mut binds);
+                    if binds.iter().any(|b| b == name) {
+                        // The arm pattern rebinds `name`; guard and body refer to
+                        // the fresh binding.
+                        0
+                    } else {
+                        cap(a.guard.as_ref().map_or(0, |g| once_uses(g, name))
+                            + once_uses(&a.body, name))
+                    }
                 })
                 .max()
                 .unwrap_or(0);
@@ -880,7 +905,21 @@ fn check_noescape_arg(
 
 /// # Errors
 /// Fails on malformed sugar, reported as a type error.
-pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
+pub fn desugar(prog: Program) -> Result<Program<Core>, TypeError> {
+    desugar_with_scope(prog, &BTreeMap::new(), &BTreeMap::new())
+}
+
+/// Desugar with imported class and helper canonical names supplied by checked
+/// dependency interfaces. This lets a module expand `deriving` without merging
+/// dependency implementation ASTs into its body.
+///
+/// # Errors
+/// Fails on malformed sugar, reported as a type error.
+pub fn desugar_with_scope(
+    mut prog: Program,
+    external_classes: &BTreeMap<String, String>,
+    external_values: &BTreeMap<String, String>,
+) -> Result<Program<Core>, TypeError> {
     shadow_fns(&mut prog);
     inject_fail(&mut prog);
     inject_loop_effects(&mut prog);
@@ -905,7 +944,7 @@ pub fn desugar(mut prog: Program) -> Result<Program<Core>, TypeError> {
     check_portable_captures(&prog)?;
     expand_synonyms(&mut prog)?;
     expand_aliases(&mut prog)?;
-    derive_instances(&mut prog)?;
+    derive_instances(&mut prog, external_classes, external_values)?;
     let ctors: BTreeSet<String> = prog
         .types
         .iter()

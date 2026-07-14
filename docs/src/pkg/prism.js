@@ -184,6 +184,33 @@ export function dump(src) {
 }
 
 /**
+ * The checked-HIR fixture of the snippet: the versioned deterministic JSON the
+ * `dump hir` phase emits (schema `prism-hir-fixture-v1`), carrying the
+ * per-declaration schemes and effect rows plus the per-node checker facts
+ * (resolution, dictionary evidence, numeric lane, zonked type).
+ *
+ * The prelude is prepended so snippets that reference it type-check; the
+ * browser strips the prelude declarations for display the same way the Core IR
+ * view does. On a front-end error, returns the rendered diagnostic as text.
+ * @param {string} src
+ * @returns {string}
+ */
+export function dump_hir(src) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(src, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.dump_hir(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Pretty-print a snippet, or return the parse/lex error as text.
  * @param {string} src
  * @returns {string}
@@ -457,10 +484,11 @@ export function tokens(src) {
 
 /**
  * The content hash of a law's `step` function, the identity the resident shows
- * as its law hash. It is the compiler's own Merkle hash of the elaborated Core,
- * so it moves when and only when the rule's behaviour moves, and is independent
- * of the grid the law runs on. Returns `error: ...` for an unknown law or a
- * front-end failure.
+ * as its law hash.
+ *
+ * It is the compiler's own Merkle hash of the elaborated Core, so it moves when
+ * and only when the rule's behaviour moves, and is independent of the grid the
+ * law runs on. Returns `error: ...` for an unknown law or a front-end failure.
  * @param {string} law
  * @returns {string}
  */
@@ -481,9 +509,11 @@ export function world_law_hash(law) {
 
 /**
  * Evolve a seed grid under a law for `ticks` generations and return the whole
- * trajectory. Each output line is one tick, `<state-hash> <bits>`: the blake3
- * digest of the canonical grid encoding (see `examples/world.pr`) and the raw
- * row-major 0/1 string. Line 0 is the seed itself, so its hash is the seed hash.
+ * trajectory.
+ *
+ * Each output line is one tick, `<state-hash> <bits>`: the blake3 digest of the
+ * canonical grid encoding (see `examples/world.pr`) and the raw row-major 0/1
+ * string. Line 0 is the seed itself, so its hash is the seed hash.
  *
  * `seed_bits` is a `w * h` string of `0`/`1` (the browser generates the pattern,
  * so the seed is data too); `law` selects the step function. Because `trace` is

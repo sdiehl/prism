@@ -29,3 +29,19 @@ fn main() =
   -- Reshape a contiguous tensor; a transposed view would `fail()` here.
   let r = reshape(t, [3, 2])
   println(r[[2, 1]])
+  -- Elementwise math and matmul over contiguous operands. Every reduction and
+  -- contraction sums in row-major source-loop order, so the results are
+  -- bit-identical on both backends.
+  let a = from_list([2, 2], [1.0, 2.0, 3.0, 4.0])
+  let b = from_list([2, 2], [5.0, 6.0, 7.0, 8.0])
+  let c = matmul(a, b)
+  println(c[[0, 0]])
+  println(c[[0, 1]])
+  println(c[[1, 0]])
+  println(c[[1, 1]])
+  println(sum_all(add(a, b)))
+  println(mean(a))
+  println(prod_all(a))
+  println(mul(a, b)[[0, 1]])
+  println(sub(b, a)[[1, 1]])
+  println(sum_all(scale(2.0, a)))

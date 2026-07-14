@@ -1,8 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 
+use im::OrdMap;
 use marginalia::Span;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrKind, TypeError};
+use crate::hir::NodeFacts;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
@@ -16,7 +20,156 @@ mod infer;
 mod pat;
 mod subsume;
 
-pub type Env = BTreeMap<Sym, Type>;
+const EMPTY_SUMMARY_COUNT: usize = 0;
+const SUMMARY_COUNT_INCREMENT: usize = 1;
+
+/// Persistent type environment with free-variable side indexes.
+///
+/// Cloning shares the ordered map, while the indexes let generalization inspect
+/// only bindings that can constrain quantification instead of re-walking every
+/// closed prelude scheme.
+#[derive(Clone, Debug, Default)]
+pub struct Env {
+    types: OrdMap<Sym, Type>,
+    free_exists: BTreeMap<u32, usize>,
+    free_row_exists: BTreeMap<u32, usize>,
+    free_type_vars: BTreeMap<Sym, usize>,
+}
+
+impl Env {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, name: Sym, ty: Type) -> Option<Type> {
+        let summary = type_summary(&ty);
+        let old = self.types.insert(name, ty);
+        if let Some(previous) = &old {
+            self.adjust_summary(&type_summary(previous), false);
+        }
+        self.adjust_summary(&summary, true);
+        old
+    }
+
+    pub(crate) fn remove(&mut self, name: &Sym) -> Option<Type> {
+        let old = self.types.remove(name);
+        if let Some(previous) = &old {
+            self.adjust_summary(&type_summary(previous), false);
+        }
+        old
+    }
+
+    fn adjust_summary(&mut self, summary: &TypeSummary, add: bool) {
+        adjust_counts(&mut self.free_exists, summary.exists.iter().copied(), add);
+        adjust_counts(
+            &mut self.free_row_exists,
+            summary.row_exists.iter().copied(),
+            add,
+        );
+        adjust_counts(
+            &mut self.free_type_vars,
+            summary.type_vars.iter().copied(),
+            add,
+        );
+    }
+
+    fn free_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.free_exists.keys().copied()
+    }
+
+    fn free_row_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.free_row_exists.keys().copied()
+    }
+
+    fn free_type_vars(&self) -> impl Iterator<Item = Sym> + '_ {
+        self.free_type_vars.keys().copied()
+    }
+}
+
+impl Deref for Env {
+    type Target = OrdMap<Sym, Type>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.types
+    }
+}
+
+impl Extend<(Sym, Type)> for Env {
+    fn extend<T: IntoIterator<Item = (Sym, Type)>>(&mut self, iter: T) {
+        for (name, ty) in iter {
+            self.insert(name, ty);
+        }
+    }
+}
+
+impl FromIterator<(Sym, Type)> for Env {
+    fn from_iter<T: IntoIterator<Item = (Sym, Type)>>(iter: T) -> Self {
+        let mut env = Self::new();
+        env.extend(iter);
+        env
+    }
+}
+
+struct TypeSummary {
+    exists: BTreeSet<u32>,
+    row_exists: BTreeSet<u32>,
+    type_vars: BTreeSet<Sym>,
+}
+
+fn type_summary(ty: &Type) -> TypeSummary {
+    let mut exists = BTreeSet::new();
+    ty.free_exist(&mut exists);
+    let mut row_exists = BTreeSet::new();
+    ty.free_exist_row(&mut row_exists);
+    let mut type_vars = BTreeSet::new();
+    env::collect_type_vars(ty, &mut type_vars);
+    TypeSummary {
+        exists,
+        row_exists,
+        type_vars,
+    }
+}
+
+fn adjust_counts<K: Ord>(
+    counts: &mut BTreeMap<K, usize>,
+    keys: impl IntoIterator<Item = K>,
+    add: bool,
+) {
+    for key in keys {
+        if add {
+            *counts.entry(key).or_default() += SUMMARY_COUNT_INCREMENT;
+        } else if let Some(count) = counts.get_mut(&key) {
+            *count -= SUMMARY_COUNT_INCREMENT;
+            if *count == EMPTY_SUMMARY_COUNT {
+                counts.remove(&key);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod env_summary_tests {
+    use super::{Env, Type};
+    use crate::sym::Sym;
+
+    const EXISTENTIAL: u32 = 17;
+
+    #[test]
+    fn replacing_shadowed_bindings_updates_free_variable_counts() {
+        let mut env = Env::new();
+        let first = Sym::from("first");
+        let second = Sym::from("second");
+        env.insert(first, Type::Exist(EXISTENTIAL));
+        env.insert(second, Type::Exist(EXISTENTIAL));
+        assert_eq!(env.free_exists().collect::<Vec<_>>(), [EXISTENTIAL]);
+
+        env.insert(first, Type::Int);
+        assert_eq!(env.free_exists().collect::<Vec<_>>(), [EXISTENTIAL]);
+        env.insert(second, Type::Int);
+        assert!(env.free_exists().next().is_none());
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DataInfo {
@@ -31,7 +184,7 @@ pub struct DataInfo {
     pub ctors: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CtorInfo {
     pub type_name: Sym,
     pub params: Vec<Sym>,
@@ -120,10 +273,65 @@ pub type InstKeys = BTreeMap<(Sym, HeadKey), Vec<Sym>>;
 // name so resolution is deterministic instead of ambiguous.
 pub type Canon = BTreeMap<(Sym, HeadKey), Sym>;
 
+/// Checked dependency facts used to typecheck one module without dependency
+/// implementation bodies.
+#[derive(Clone, Debug, Default)]
+pub struct TypecheckSeed {
+    pub env: Env,
+    pub data: BTreeMap<String, DataInfo>,
+    pub ctors: BTreeMap<String, CtorInfo>,
+    pub eff_ops: BTreeMap<String, EffOpInfo>,
+    pub classes: BTreeMap<Sym, ClassInfo>,
+    pub instances: BTreeMap<Sym, InstInfo>,
+    pub inst_keys: InstKeys,
+    pub canonical: Canon,
+    pub methods: BTreeMap<Sym, (Sym, usize)>,
+    pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
+}
+
+impl TypecheckSeed {
+    /// Clone all checker facts from an already checked dependency closure.
+    #[must_use]
+    pub fn from_checked(checked: &Checked) -> Self {
+        Self {
+            env: checked.env.clone(),
+            data: checked.data.clone(),
+            ctors: checked.ctors.clone(),
+            eff_ops: checked.eff_ops.clone(),
+            classes: checked.classes.clone(),
+            instances: checked.instances.clone(),
+            inst_keys: checked.inst_keys.clone(),
+            canonical: checked.canonical.clone(),
+            methods: checked.methods.clone(),
+            constrained: checked.constrained.clone(),
+        }
+    }
+
+    /// Merge one dependency interface into this seed.
+    pub fn extend(&mut self, other: Self) {
+        self.env
+            .extend(other.env.iter().map(|(name, ty)| (*name, ty.clone())));
+        self.data.extend(other.data);
+        self.ctors.extend(other.ctors);
+        self.eff_ops.extend(other.eff_ops);
+        self.classes.extend(other.classes);
+        self.instances.extend(other.instances);
+        for (key, names) in other.inst_keys {
+            let entries = self.inst_keys.entry(key).or_default();
+            entries.extend(names);
+            entries.sort_by_key(|name| name.as_str());
+            entries.dedup();
+        }
+        self.canonical.extend(other.canonical);
+        self.methods.extend(other.methods);
+        self.constrained.extend(other.constrained);
+    }
+}
+
 // How a constraint is discharged at a use site: a top-level instance dictionary
 // (applied to its context dictionaries) or the i-th hidden dictionary parameter
 // of the enclosing constrained function.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Dict {
     Global(String, Vec<Self>),
     Param(usize),
@@ -176,6 +384,15 @@ pub type PathRes = BTreeMap<NodeId, Vec<Vec<(String, usize, usize)>>>;
 pub struct Warning {
     pub span: Span,
     pub msg: String,
+    pub(crate) origin: WarningOrigin,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum WarningOrigin {
+    Surface,
+    Decl(Sym),
+    RootInstance(Sym),
+    Imported,
 }
 
 #[derive(Clone, Debug)]
@@ -185,22 +402,16 @@ pub struct Checked {
     pub ctors: BTreeMap<String, CtorInfo>,
     pub decls: Vec<DeclInfo>,
     pub eff_ops: BTreeMap<String, EffOpInfo>,
-    pub field_res: BTreeMap<NodeId, (String, usize, usize)>,
-    // For an unboxed record projection (`e.#field`): the field's index in the
-    // record's type field order, and the record arity. Elaboration lowers the
-    // projection to a positional tuple `Case` from this, so it reuses the same RC
-    // and pattern machinery as any product destructuring.
-    pub unboxed_field: BTreeMap<NodeId, (usize, usize)>,
-    pub path_res: PathRes,
-    pub fixed: BTreeMap<NodeId, Type>,
-    pub span_types: BTreeMap<NodeId, Type>,
+    // Every per-node semantic fact checking established (resolution, evidence,
+    // lanes, zonked node types), dense by NodeId. The former six NodeId side
+    // tables, consolidated; elaboration reads it only through a `CheckedHir`.
+    pub facts: NodeFacts,
     pub classes: BTreeMap<Sym, ClassInfo>,
     pub instances: BTreeMap<Sym, InstInfo>,
     pub inst_keys: InstKeys,
     pub canonical: Canon,
     pub methods: BTreeMap<Sym, (Sym, usize)>,
     pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
-    pub dicts: DictTable,
     pub seeds: u32,
     pub warnings: Vec<Warning>,
 }
@@ -311,6 +522,9 @@ struct Tc<'a> {
     path_res: PathRes,
     fixed: BTreeMap<NodeId, Type>,
     span_types: BTreeMap<NodeId, Type>,
+    // Per-declaration principal-body-effect witnesses ([`BodyWitness`]),
+    // recorded by `infer_body` and consumed by `finalize_fn`'s borrow rule.
+    body_witness: BTreeMap<String, BodyWitness>,
     pending: Vec<(NodeId, Type)>,
     // Each `This(e)` site, with the span of the whole expression and the element
     // type synthesized for `e`. After inference solves every existential, the
@@ -420,35 +634,18 @@ fn fn_sig(ty: &Type) -> Option<(&[Type], &EffRow, &Type)> {
     }
 }
 
-// Whether a `borrow`-taking function's effect row proves it cannot suspend or
-// capture across the borrowed argument. Inference generalizes even a pure
-// function to an open row (`{| e}`) so it fits any effect context, so requiring
-// a literally empty row would reject every borrow. The safe cases: the row has
-// no concrete labels (checked by the caller) and its tail is either closed, or a
-// fresh generalization variable that occurs nowhere in the function's interface
-// (neither a parameter nor the result type). A tail variable shared with a
-// parameter's row means the body forwards that higher-order argument's effects;
-// one shared with the result means it returns a computation carrying them. Both
-// can suspend, so neither is a proof of purity.
-//
-// This structural rule uses the generalized scheme because declarations do not
-// yet retain the body's principal, closed effect witness. Once that witness is
-// available, the check can consume it directly.
-fn borrow_row_is_pure(doms: &[Type], ret: &Type, row: &EffRow) -> bool {
-    match row.tail() {
-        EffRow::Empty => true,
-        EffRow::Var(v) => {
-            let mut iface_rows = BTreeSet::new();
-            for dom in doms {
-                env::collect_row_vars(dom, &mut iface_rows);
-            }
-            env::collect_row_vars(ret, &mut iface_rows);
-            !iface_rows.contains(v)
-        }
-        // An unsolved existential tail is not a generalization variable and is
-        // not a proof of purity.
-        EffRow::Exist(_) | EffRow::Extend(..) => false,
-    }
+/// The recorded principal-body-effect witness of one function declaration: the
+/// body's ambient effect row as inference solved it, read before
+/// `default_open_rows` re-opens a pure row for context fit (which destroys the
+/// closedness fact). `effects` are the concrete labels the body accumulated;
+/// `closed` records that the row's tail stayed the declaration's own fresh
+/// ambient (or emptied) rather than solving to a row that also flows through
+/// the interface, so nothing the caller supplies can make the body perform or
+/// suspend. The borrow rule consumes this witness directly instead of
+/// reverse-engineering closedness from the generalized scheme.
+pub(super) struct BodyWitness {
+    pub(super) effects: Effects,
+    pub(super) closed: bool,
 }
 
 // A top-level constant must be effect-free: its initializer runs once at load
@@ -474,6 +671,7 @@ pub(super) fn require_pure_konst(d: &Decl<Core>, effs: &Effects) -> Result<(), T
 fn finalize_fn(
     d: &Decl<Core>,
     ty: Type,
+    witness: &BodyWitness,
     warnings: &mut Vec<Warning>,
 ) -> Result<DeclInfo, TypeError> {
     // The labels of the inferred row. Effect-row inference is principal: it
@@ -485,26 +683,27 @@ fn finalize_fn(
     if d.params.iter().any(|p| p.borrow) {
         // The RC calling convention retains ownership of a borrowed argument
         // across the call, so a `borrow`-taking function must be provably pure.
-        // Concrete labels are the obvious failure; an effect-polymorphic tail
-        // shared with a parameter (the body forwards a higher-order argument's
-        // effects, which can suspend) is the subtle one. A fresh generalization
-        // tail is fine, so pure functions still typecheck.
-        if !inferred.is_empty() {
-            let list: Vec<String> = inferred.iter().map(Sym::to_string).collect();
+        // Concrete labels are the obvious failure; a body whose ambient row
+        // solved to one flowing through the interface (it forwards a
+        // higher-order argument's effects, or returns a computation carrying
+        // them, either of which can suspend) is the subtle one. Both facts are
+        // read off the recorded principal-body-effect witness inference
+        // captured before generalization, not re-derived from the scheme.
+        if !witness.effects.is_empty() {
+            let list: Vec<String> = witness.effects.iter().map(Sym::to_string).collect();
             return Err(ErrKind::BorrowNotPure {
                 name: d.name.clone(),
                 effects: list.join(", "),
             }
             .at(d.span));
         }
-        if let Some((doms, row, ret)) = fn_sig(&ty) {
-            if !borrow_row_is_pure(doms, ret, row) {
-                return Err(ErrKind::BorrowRowNotClosed {
-                    name: d.name.clone(),
-                    row: row.show(),
-                }
-                .at(d.span));
+        if !witness.closed {
+            let row = fn_sig(&ty).map_or_else(String::new, |(_, row, _)| row.show());
+            return Err(ErrKind::BorrowRowNotClosed {
+                name: d.name.clone(),
+                row,
             }
+            .at(d.span));
         }
     }
     if let Some(declared) = &d.eff {
@@ -530,6 +729,7 @@ fn finalize_fn(
                         "in `{}`: effect `{eff}` declared in the annotation but never performed",
                         d.name
                     ),
+                    origin: WarningOrigin::Decl(Sym::from(&d.name)),
                 });
             }
         }
@@ -545,10 +745,22 @@ fn finalize_fn(
 /// # Errors
 /// Fails when the program does not type check.
 pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
-    let (mut data, mut ctors, eff_ops, mut env) = env::build_data(prog)?;
+    check_seeded(prog, &TypecheckSeed::default())
+}
+
+/// Typecheck one program against already checked dependency facts.
+///
+/// # Errors
+/// Fails when the local program or its use of an imported fact does not typecheck.
+pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checked, TypeError> {
+    let (mut data, mut ctors, mut eff_ops, mut env) = env::build_data(prog)?;
+    data.extend(seed.data.clone());
+    ctors.extend(seed.ctors.clone());
+    eff_ops.extend(seed.eff_ops.clone());
+    env.extend(seed.env.iter().map(|(name, ty)| (*name, ty.clone())));
     let seeds = env::seed_var_states(&eff_ops);
     let (classes, instances, inst_keys, canonical, methods, mut constrained, mut warnings) =
-        classes::build_classes(prog, &mut data, &mut ctors, &mut env)?;
+        classes::build_classes(prog, &mut data, &mut ctors, &mut env, seed)?;
     let mut infos = Vec::new();
     // Validate where-clauses and record each constrained function's scheme up
     // front; this is order-independent and must precede inference. Functions are
@@ -601,6 +813,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
+            body_witness: BTreeMap::new(),
             pending: Vec::new(),
             or_null_sites: Vec::new(),
             classes: &classes,
@@ -645,7 +858,13 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                 // in `check_instance`) read the same principal inferred row.
                 let ty = tc.infer_decl(&env, d).map_err(|e| e.in_fn(&d.name))?;
                 env.insert(Sym::from(&d.name), ty.clone());
-                infos.push(finalize_fn(d, ty, &mut warnings)?);
+                let witness =
+                    tc.body_witness
+                        .get(&d.name)
+                        .ok_or_else(|| TypeError::InternalInvariant {
+                            msg: format!("no body-effect witness recorded for `{}`", d.name),
+                        })?;
+                infos.push(finalize_fn(d, ty, witness, &mut warnings)?);
                 continue;
             }
             // A mutually recursive group; the whole group is inferred together,
@@ -662,7 +881,12 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
                         effects: Effects::new(),
                     });
                 } else {
-                    infos.push(finalize_fn(d, ty, &mut warnings)?);
+                    let witness = tc.body_witness.get(&d.name).ok_or_else(|| {
+                        TypeError::InternalInvariant {
+                            msg: format!("no body-effect witness recorded for `{}`", d.name),
+                        }
+                    })?;
+                    infos.push(finalize_fn(d, ty, witness, &mut warnings)?);
                 }
             }
         }
@@ -703,11 +927,7 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         env,
         data,
         ctors,
-        field_res,
-        unboxed_field,
-        path_res,
-        fixed,
-        span_types,
+        facts: NodeFacts::from_tables(field_res, unboxed_field, path_res, fixed, span_types, dicts),
         decls: infos,
         eff_ops,
         classes,
@@ -716,7 +936,6 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
         canonical,
         methods,
         constrained: constrained_final,
-        dicts,
         seeds,
         warnings,
     })
@@ -737,6 +956,15 @@ pub fn infer_expr_env(
 ) -> Result<(Type, Effects), TypeError> {
     let (t, eff, _) = infer_expr_full(checked, extra, e)?;
     Ok((t, eff))
+}
+
+// Parse the canonical signature carried by a checked module interface.
+pub(crate) fn parse_checked_signature(name: &str, signature: &str) -> Result<Type, TypeError> {
+    env::parse_sig(name, signature).map(|(ty, _)| ty)
+}
+
+pub(crate) const fn instance_head_key(ty: &Type) -> Option<HeadKey> {
+    classes::head_name(ty)
 }
 
 /// # Errors
@@ -770,6 +998,7 @@ fn infer_expr_full(
         path_res: PathRes::new(),
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
+        body_witness: BTreeMap::new(),
         pending: Vec::new(),
         or_null_sites: Vec::new(),
         classes: &checked.classes,

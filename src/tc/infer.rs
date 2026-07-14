@@ -503,6 +503,8 @@ impl Tc<'_> {
             Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
+                let mut var_kinds = std::collections::BTreeMap::new();
+                super::env::demand_var_kinds(ann, self.data, &mut var_kinds, span)?;
                 let t = self.convert_annot_fresh(ann);
                 self.check(env, inner, &t)?;
                 Ok(self.apply(&t))

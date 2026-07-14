@@ -9,7 +9,7 @@
 use crate::core::{CorePass, OptLevel, PassSpec};
 use crate::flags::DynFlags;
 
-use super::{ArtifactIdentity, TimingSink};
+use super::{ArtifactIdentity, CompilerSession, TimingSink};
 
 /// Which cooperative scheduler `run_cooperative` resolves to (the `--scheduler`
 /// flag).
@@ -131,6 +131,10 @@ pub struct Config {
     /// Lint, dumps). Read once from the process environment and threaded into the
     /// effect lowerer and optimizer, so no pass reads the environment itself.
     pub flags: DynFlags,
+    /// Optional command-scoped compiler session. Reusing a config carrying the
+    /// same session allows successful frontend queries to hit in memory; absence
+    /// changes cost only, never compiler behavior.
+    pub session: Option<CompilerSession>,
     /// The per-compile timing sink, present only when the CLI installs it for a
     /// top-level `--time-compile`/`PRISM_TIME_COMPILE` compile. Absent on every
     /// [`Config::from_env`] the internal re-elaboration helpers build, so those
@@ -161,6 +165,7 @@ impl Config {
             disabled,
             scheduler: flags.scheduler,
             flags,
+            session: None,
             // A timing sink is never installed from the environment: it is a
             // property of a top-level CLI compile, so only the CLI attaches one.
             // This is what keeps the internal re-elaboration helpers silent.

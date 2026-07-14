@@ -6,7 +6,7 @@
 //! against recorded numbers rather than guesses, so add programs deliberately and
 //! keep the set fixed, so one label means the same thing release over release.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::hint::black_box;
 
 // (label, source), chosen to span distinct front-end costs: tail recursion,
@@ -44,5 +44,46 @@ fn compile(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, compile);
+fn session_config() -> prism::Config {
+    prism::Config {
+        session: Some(prism::CompilerSession::new()),
+        ..prism::Config::default()
+    }
+}
+
+fn query_compile(c: &mut Criterion) {
+    let source = prism::with_prelude(include_str!("../examples/accum.pr"));
+    let edited = format!("{source}\n-- pinned small edit\n");
+    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
+    let mut group = c.benchmark_group("query_compile");
+
+    group.bench_function("cold", |b| {
+        b.iter_batched(
+            session_config,
+            |cfg| prism::check_on_in(black_box(&source), &roots, &cfg).expect("cold check"),
+            BatchSize::SmallInput,
+        );
+    });
+
+    let warm_cfg = session_config();
+    prism::check_on_in(&source, &roots, &warm_cfg).expect("seed warm check");
+    group.bench_function("warm", |b| {
+        b.iter(|| prism::check_on_in(black_box(&source), &roots, &warm_cfg).expect("warm check"));
+    });
+
+    group.bench_function("small_edit", |b| {
+        b.iter_batched(
+            || {
+                let cfg = session_config();
+                prism::check_on_in(&source, &roots, &cfg).expect("seed small-edit check");
+                cfg
+            },
+            |cfg| prism::check_on_in(black_box(&edited), &roots, &cfg).expect("edited check"),
+            BatchSize::SmallInput,
+        );
+    });
+    group.finish();
+}
+
+criterion_group!(benches, compile, query_compile);
 criterion_main!(benches);

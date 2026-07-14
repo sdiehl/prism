@@ -9,6 +9,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 #[derive(Copy, Clone)]
 pub struct Sym {
     id: u32,
@@ -30,6 +32,24 @@ fn interner() -> &'static Mutex<Interner> {
             names: Vec::new(),
         })
     })
+}
+
+impl Serialize for Sym {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Sym {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(|name| Self::new(&name))
+    }
 }
 
 impl Sym {

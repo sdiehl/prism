@@ -8,8 +8,12 @@
 //! (pre-optimizer elaborated Core), so the store commit, the `core-hash` /
 //! `namespace` dumps, package tags, and this module agree by construction.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
+use std::fs;
 use std::sync::OnceLock;
+
+use serde::{Deserialize, Serialize};
 
 use crate::core::fbip::borrow_sigs;
 use crate::core::{fip_annots, hash_program, Digest, ElaboratedCore, HASH_SCHEME};
@@ -17,8 +21,8 @@ use crate::error::Error;
 use crate::resolve::Root;
 #[cfg(feature = "native")]
 use crate::resolve::SourceBundleKind;
-use crate::syntax::ast::{Core as CorePhase, Program};
-use crate::types::Checked;
+use crate::syntax::ast::{Core as CorePhase, Fip, Program};
+use crate::types::{Checked, Type};
 
 #[cfg(feature = "native")]
 use crate::codegen::{native_kont_table, NativeKontIdentityRow};
@@ -26,6 +30,21 @@ use crate::codegen::{native_kont_table, NativeKontIdentityRow};
 use super::{elaborated, hash_meta, with_prelude, WireKind, NAMESPACE_ARTIFACT_KIND};
 #[cfg(feature = "native")]
 use super::{ArtifactField, ArtifactIdentity, Config};
+
+/// Fingerprint of the executable that is executing compiler queries.
+///
+/// Durable frontend artifacts are tied to this byte identity rather than to a
+/// Core hash or package version alone, so a locally rebuilt compiler never
+/// accepts facts produced by older compiler code.
+pub(super) fn compiler_binary_fingerprint() -> Result<&'static str, Error> {
+    static FINGERPRINT: OnceLock<String> = OnceLock::new();
+    if let Some(value) = FINGERPRINT.get() {
+        return Ok(value);
+    }
+    let bytes = fs::read(std::env::current_exe()?)?;
+    let _ = FINGERPRINT.set(blake3::hash(&bytes).to_hex().to_string());
+    Ok(FINGERPRINT.get().expect("compiler fingerprint initialized"))
+}
 
 /// Structured identity for a whole-program namespace artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +190,7 @@ pub(crate) fn namespace_root_of(
 // The definition-layer Merkle fold: a root over definition content hashes only.
 // The reified-continuation bundle uses this (its call sites carry the def-hash
 // map, not the full program), a distinct envelope from the namespace contract.
+#[cfg(feature = "native")]
 pub(crate) fn def_layer_root(hashes: &crate::core::Hashes) -> Digest {
     crate::core::hash_root(
         &hashes
@@ -200,7 +220,7 @@ pub(super) fn native_kont_table_of(
     ))
 }
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", test))]
 pub(super) fn native_kont_table_for(
     src: &str,
     roots: &[Root],
@@ -447,12 +467,12 @@ impl BuildIdentity {
 // resolves and elaborates the module, and is harmless beside the prelude's
 // own glob imports.
 pub(crate) fn stdlib_driver_src() -> String {
-    let mut imports = String::new();
-    for (name, _) in crate::stdlib::STDLIB {
-        imports.push_str("import ");
-        imports.push_str(name);
-        imports.push('\n');
-    }
+    let imports = crate::stdlib::STDLIB
+        .iter()
+        .fold(String::new(), |mut imports, (name, _)| {
+            writeln!(imports, "import {name}").unwrap();
+            imports
+        });
     with_prelude(&imports)
 }
 
@@ -464,6 +484,125 @@ pub struct PublicDef {
     pub name: String,
     pub scheme: &'static str,
     pub hash: String,
+}
+
+/// Version tag for serialized checked module interfaces.
+pub const MODULE_INTERFACE_FORMAT: &str = "prism-module-interface-v3";
+
+/// One deterministic semantic row exported to an importing checker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInterfaceEntry {
+    /// Semantic namespace (`value`, `shape`, `class`, or `instance`).
+    pub kind: String,
+    /// Exported canonical name.
+    pub name: String,
+    /// Canonical generalized signature or structural contract.
+    pub signature: String,
+    /// Digest of this row alone.
+    pub digest: String,
+}
+
+/// Checked public facts an importer may consume without reading dependency
+/// bodies. The digest moves on an exported type/effect/class/instance/usage
+/// change, but not on an implementation-only body edit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInterface {
+    /// Versioned serialization/semantics tag.
+    pub format: String,
+    /// Name-sorted checked interface rows.
+    pub entries: Vec<ModuleInterfaceEntry>,
+    /// Digest over the complete ordered interface.
+    pub digest: String,
+}
+
+impl ModuleInterface {
+    /// Canonical JSON projection used by the durable query store.
+    ///
+    /// # Errors
+    /// Fails only if serialization of this closed data structure fails.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Read a canonical interface projection, refusing foreign format versions
+    /// and a digest that does not match the contained rows.
+    ///
+    /// # Errors
+    /// Fails on malformed JSON, a foreign format, or a digest mismatch.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let interface: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        interface.validate()?;
+        Ok(interface)
+    }
+
+    /// Rehydrate the exported value schemes an importing checker may seed into
+    /// its environment without loading implementation bodies.
+    ///
+    /// # Errors
+    /// Fails if an exported signature is not valid under this interface format.
+    pub fn exported_value_env(&self) -> Result<crate::types::Env, String> {
+        self.validate()?;
+        let mut env = crate::types::Env::new();
+        for entry in self.entries.iter().filter(|entry| entry.kind == "value") {
+            let ty = crate::tc::parse_checked_signature(&entry.name, &entry.signature)
+                .map_err(|e| e.to_string())?;
+            env.insert(crate::sym::Sym::from(entry.name.as_str()), ty);
+        }
+        Ok(env)
+    }
+
+    /// Rehydrate exported checked facts without reading implementation bodies.
+    ///
+    /// # Errors
+    /// Fails if any metadata payload or canonical type signature is malformed.
+    pub fn rehydrate(&self) -> Result<super::interface::RehydratedModuleInterface, String> {
+        super::interface::rehydrate(self)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.format != MODULE_INTERFACE_FORMAT {
+            return Err(format!(
+                "unsupported module interface format {:?}",
+                self.format
+            ));
+        }
+        if !self
+            .entries
+            .windows(2)
+            .all(|pair| (&pair[0].kind, &pair[0].name) < (&pair[1].kind, &pair[1].name))
+        {
+            return Err("module interface entries are not in canonical order".to_string());
+        }
+        for entry in &self.entries {
+            let derived = interface_entry(&entry.kind, &entry.name, &entry.signature).digest;
+            if entry.digest != derived {
+                return Err(format!(
+                    "module interface row {}:{} has digest {}, derived {derived}",
+                    entry.kind, entry.name, entry.digest
+                ));
+            }
+        }
+        let digest = interface_digest(&self.entries);
+        if digest != self.digest {
+            return Err(format!(
+                "module interface digest mismatch: stored {}, derived {digest}",
+                self.digest
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn interface_digest(entries: &[ModuleInterfaceEntry]) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(MODULE_INTERFACE_FORMAT.as_bytes());
+    for entry in entries {
+        for field in [&entry.kind, &entry.name, &entry.signature, &entry.digest] {
+            h.update(&(field.len() as u64).to_le_bytes());
+            h.update(field.as_bytes());
+        }
+    }
+    h.finalize().to_hex().to_string()
 }
 
 /// The public API surface of a program, name-sorted.
@@ -516,6 +655,165 @@ pub fn public_surface(
             hash: hash.into_string(),
         })
         .collect())
+}
+
+/// Build the checked semantic interface consumed by importing modules.
+///
+/// Function rows contain generalized signatures and principal effects, never
+/// behavior hashes. Datatype/effect/class rows contain their structural digest;
+/// root-module instance rows contain class/head/context and canonical status.
+///
+/// # Errors
+/// Fails if either source does not parse, check, or elaborate.
+pub fn module_interface(
+    entry_src: &str,
+    full_src: &str,
+    roots: &[Root],
+) -> Result<ModuleInterface, Error> {
+    let entry = crate::parse::parse(entry_src)?.program;
+    let (program, checked, _) = elaborated(full_src, roots)?;
+    module_interface_from_checked(&entry, None, &program, &checked)
+}
+
+pub(crate) fn module_interface_from_checked(
+    entry: &Program,
+    module_path: Option<&str>,
+    program: &Program<CorePhase>,
+    checked: &Checked,
+) -> Result<ModuleInterface, Error> {
+    let exports = super::interface::exported_names(entry, module_path);
+    let shapes = crate::core::shape_digests(&program.types, &program.effects);
+    let classes = crate::core::class_digests(&program.classes);
+    let mut entries = Vec::new();
+
+    for decl in &checked.decls {
+        let kind = if exports.contains(&decl.name) {
+            "value"
+        } else {
+            "dependency-value"
+        };
+        entries.push(interface_entry(kind, &decl.name, decl.ty.show()));
+    }
+    // Per-export usage facts: a `usage` row per exported value carrying a
+    // caller-visible ownership or discipline contract, so an importer's checker
+    // and codegen see which arguments transfer ownership (the borrow mask) and
+    // which loop discipline the body was certified under (`fip`/`fbip`). The
+    // mask and keyword use the same spelling the content hash does (`hash_meta`,
+    // via the single `Fip::keyword` home) so the two cannot drift. Only a
+    // non-trivial fact (a borrowed parameter or a declared discipline) earns a
+    // row, so an all-owned undisciplined function adds none.
+    let borrows = borrow_sigs(program);
+    let fips = fip_annots(program);
+    for decl in &checked.decls {
+        if !exports.contains(&decl.name) {
+            continue;
+        }
+        let sym = crate::sym::Sym::new(&decl.name);
+        let mask: String = borrows.get(&sym).map_or_else(String::new, |bs| {
+            bs.iter().map(|b| if *b { 'b' } else { '.' }).collect()
+        });
+        let fip = fips.get(&sym).copied().and_then(Fip::keyword);
+        if mask.contains('b') || fip.is_some() {
+            entries.push(interface_entry(
+                "usage",
+                &decl.name,
+                format!("borrow={mask}|fip={}", fip.unwrap_or("")),
+            ));
+        }
+    }
+    for (name, digest) in shapes {
+        let kind = if exports.contains(&name) {
+            "shape"
+        } else {
+            "dependency-shape"
+        };
+        entries.push(interface_entry(kind, &name, digest.as_str()));
+    }
+    for (name, digest) in classes {
+        let kind = if exports.contains(&name) {
+            "class"
+        } else {
+            "dependency-class"
+        };
+        entries.push(interface_entry(kind, &name, digest.as_str()));
+    }
+    entries.extend(
+        super::interface::metadata_entries(entry, module_path, checked)
+            .map_err(|error| Error::CodegenDump(error.to_string()))?,
+    );
+    let root_instances = entry
+        .instances
+        .iter()
+        .map(|instance| instance.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for (name, instance) in &checked.instances {
+        let exported_head = matches!(
+            &instance.head,
+            Type::Con(head, _) if exports.contains(head.as_str())
+        );
+        let owns_module = module_path.map_or_else(
+            || instance.module.is_empty(),
+            |path| instance.module == path,
+        );
+        if !owns_module || (!root_instances.contains(name.as_str()) && !exported_head) {
+            continue;
+        }
+        let context = instance
+            .context
+            .iter()
+            .map(|(class, ty)| format!("{}({})", class.as_str(), ty.show()))
+            .collect::<Vec<_>>()
+            .join(",");
+        let canonical = checked.canonical.values().any(|selected| selected == name);
+        let signature = format!(
+            "{}({})|context={context}|canonical={canonical}",
+            instance.class.as_str(),
+            instance.head.show()
+        );
+        entries.push(interface_entry("instance", name.as_str(), signature));
+    }
+    entries.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+    let digest = interface_digest(&entries);
+    Ok(ModuleInterface {
+        format: MODULE_INTERFACE_FORMAT.to_string(),
+        entries,
+        digest,
+    })
+}
+
+pub(super) fn interface_entry(
+    kind: &str,
+    name: &str,
+    signature: impl Into<String>,
+) -> ModuleInterfaceEntry {
+    let signature = signature.into();
+    let mut h = blake3::Hasher::new();
+    for field in [kind, name, &signature] {
+        h.update(&(field.len() as u64).to_le_bytes());
+        h.update(field.as_bytes());
+    }
+    ModuleInterfaceEntry {
+        kind: kind.to_string(),
+        name: name.to_string(),
+        signature,
+        digest: h.finalize().to_hex().to_string(),
+    }
+}
+
+/// Cached checker facts for the embedded prelude and standard library.
+///
+/// Module queries use this as their immutable foundation instead of rechecking
+/// the shipped standard-library module graph for every project command.
+pub(crate) fn stdlib_typecheck_seed() -> Result<crate::types::TypecheckSeed, Error> {
+    static CACHE: OnceLock<crate::types::TypecheckSeed> = OnceLock::new();
+    if let Some(seed) = CACHE.get() {
+        return Ok(seed.clone());
+    }
+    let src = stdlib_driver_src();
+    let (_, checked, _) = elaborated(&src, &[Root::Embedded(crate::stdlib::STDLIB)])?;
+    let seed = crate::types::TypecheckSeed::from_checked(&checked);
+    let _ = CACHE.set(seed.clone());
+    Ok(CACHE.get().cloned().unwrap_or(seed))
 }
 
 /// A content-addressed fingerprint of the whole standard library.

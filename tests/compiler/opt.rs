@@ -4,8 +4,54 @@
 // checked separately by the parity oracle; this checks that the optimization
 // happened at all.
 
+use std::path::Path;
+
+use prism::core::{lint_core, pass_fingerprint, CorePass, OptLevel, PassSpec, PassStage};
+use prism::{dump, with_prelude, DynFlags};
+
 fn core(src: &str) -> String {
-    prism::dump("core", &prism::with_prelude(src)).expect("core dump")
+    dump("core", &with_prelude(src)).expect("core dump")
+}
+
+#[test]
+fn pass_fingerprint_names_the_exact_effective_pipeline() {
+    let flags = DynFlags::default();
+    let o1 = pass_fingerprint(OptLevel::O1, None, PassStage::PreLowering, &[], &flags);
+    assert_eq!(
+        o1,
+        pass_fingerprint(OptLevel::O1, None, PassStage::PreLowering, &[], &flags,)
+    );
+    assert_ne!(
+        o1,
+        pass_fingerprint(OptLevel::O2, None, PassStage::PreLowering, &[], &flags,)
+    );
+    assert_ne!(
+        o1,
+        pass_fingerprint(
+            OptLevel::O1,
+            None,
+            PassStage::PreLowering,
+            &[CorePass::Specialize],
+            &flags,
+        )
+    );
+    let spec = PassSpec::parse("pre:EraseNewtypes;late:Simplify").unwrap();
+    assert_eq!(
+        pass_fingerprint(
+            OptLevel::O0,
+            Some(&spec),
+            PassStage::PreLowering,
+            &[],
+            &flags,
+        ),
+        pass_fingerprint(
+            OptLevel::O2,
+            Some(&spec),
+            PassStage::PreLowering,
+            &[],
+            &flags,
+        )
+    );
 }
 
 // A constrained function applied to a concrete instance specializes to a clone
@@ -42,7 +88,7 @@ fn main() = println(unwrap(Wrap(42)))",
 // lints what the optimizer produces.
 #[test]
 fn core_lint_clean_on_corpus() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut checked = 0;
     for dir in ["examples", "tests/cases/run", "tests/cases"] {
         let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
@@ -57,9 +103,7 @@ fn core_lint_clean_on_corpus() {
             // Only files that compile produce Core; skip error cases / library
             // files with no `main` rather than asserting they compile.
             if let Ok(core) = prism::core_of(&src) {
-                if let Err(errs) =
-                    prism::core::lint_core(&core, prism::core::PassStage::PreLowering)
-                {
+                if let Err(errs) = lint_core(&core, PassStage::PreLowering) {
                     panic!("{}: ill-formed Core:\n{}", path.display(), errs.join("\n"));
                 }
                 checked += 1;
@@ -74,8 +118,6 @@ fn core_lint_clean_on_corpus() {
 // rules each reject their bad input with a message.
 #[test]
 fn pass_spec_parse() {
-    use prism::{CorePass, PassSpec};
-
     let spec = PassSpec::parse("pre:EraseNewtypes,Specialize;late:Simplify").expect("valid spec");
     assert_eq!(
         spec.pre,

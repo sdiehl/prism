@@ -543,14 +543,7 @@ pub fn check_native_parity(
     // The interpreter reference: its streamed stdout and the exit code its result
     // implies (`canonical_exit`), both compared against the native process.
     let reference = prism::interpret(&full).unwrap();
-    let got = String::from_utf8_lossy(&out.stdout);
     let want = &reference.term;
-    if got != *want {
-        return Err(format!(
-            "{tag} output diverges for {}:\n  native: {got:?}\n  interp: {want:?}",
-            case.display()
-        ));
-    }
     // A program whose `main` returns a tagged-immediate value exits with that
     // value as its code; `canonical_exit` reconstructs it the way the native
     // `main` shim does, so exit-code divergence (the class the `error`/`exit`
@@ -558,16 +551,33 @@ pub fn check_native_parity(
     // A crash by signal reports no code and diverges here as well as truncating
     // stdout above.
     let want_exit = canonical_exit(&reference);
-    match out.status.code() {
-        Some(c) if (c & 0xFF) == i32::from(want_exit) => {}
-        other => {
-            return Err(format!(
-                "{tag} exit code diverges for {}: native {other:?}, interpreter {want_exit}",
-                case.display()
-            ));
-        }
-    }
+    let Some(got_exit) = out.status.code() else {
+        return Err(format!(
+            "{tag} process faulted for {} without an exit code",
+            case.display()
+        ));
+    };
     let leak = String::from_utf8_lossy(&out.stderr);
+    let native_stderr = leak
+        .lines()
+        .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let native_trace = prism::ObservationTrace::from_process(
+        &out.stdout,
+        native_stderr.as_bytes(),
+        got_exit & 0xFF,
+    );
+    let interpreter_trace =
+        prism::ObservationTrace::from_process(want.as_bytes(), &[], i32::from(want_exit));
+    if native_trace != interpreter_trace {
+        return Err(format!(
+            "{tag} observation trace diverges for {}:\n  native: {:?}\n  interp: {:?}",
+            case.display(),
+            native_trace.observations,
+            interpreter_trace.observations
+        ));
+    }
     if !leak_free(&leak) {
         return Err(format!(
             "{}: {tag} did not free all cells: {}",

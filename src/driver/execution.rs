@@ -11,8 +11,10 @@ use std::path::Path;
 
 use crate::debug::trace;
 use crate::error::Error;
-use crate::eval::{run, run_ruler, run_traced, run_traced_with_args, Run, StepMark, Tape};
-use crate::provenance::CapEvent;
+use crate::eval::{
+    run, run_observed_with_args, run_ruler, run_traced, run_traced_with_args, Run, StepMark, Tape,
+};
+use crate::provenance::{CapEvent, ObservationTrace};
 use crate::resolve::{default_roots, Root};
 use serde::Serialize;
 
@@ -195,6 +197,10 @@ pub struct RecordedRun {
     pub events: Vec<CapEvent>,
     /// The full `print` transcript, exactly as it reached the sink.
     pub term: String,
+    /// Complete ordered observable behavior of the run.
+    pub canonical_trace: ObservationTrace,
+    /// Runtime fault when this was produced by [`observe_run_on`].
+    pub fault: Option<String>,
 }
 
 /// Record a run against the real world, returning everything a run-lineage sidecar
@@ -221,6 +227,36 @@ pub fn record_run_on(
         observations: run.frames.len(),
         events: run.events,
         term: run.term,
+        canonical_trace: ObservationTrace::new(run.observations),
+        fault: run.fault,
+    })
+}
+
+/// Observe one run, preserving a runtime fault as the terminal trace event.
+///
+/// This is the differential-oracle entry point: accepted source always yields a
+/// complete trace, whether execution returns, exits, or faults.
+///
+/// # Errors
+/// Fails only while preparing source through the compiler frontend.
+pub fn observe_run_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+) -> Result<RecordedRun, Error> {
+    let core = prepared_core(src, roots, cfg)?;
+    let run = run_observed_with_args(&core, out_sink, input, args);
+    Ok(RecordedRun {
+        exit: run.exit,
+        trace: trace::encode(&run.frames),
+        observations: run.frames.len(),
+        events: run.events,
+        term: run.term,
+        canonical_trace: ObservationTrace::new(run.observations),
+        fault: run.fault,
     })
 }
 
@@ -259,6 +295,8 @@ pub fn replay_run_on(
         observations: run.frames.len(),
         events: run.events,
         term: run.term,
+        canonical_trace: ObservationTrace::new(run.observations),
+        fault: run.fault,
     })
 }
 
@@ -524,6 +562,43 @@ pub fn resume_on(
     let run =
         crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::RuntimeReplay)?;
     Ok(run.exit)
+}
+
+/// Resume a snapshot and return its complete prefix-plus-suffix observation trace.
+///
+/// Runtime faults become terminal trace events; malformed or mismatched snapshots
+/// remain driver errors because no program execution begins.
+///
+/// # Errors
+/// Fails on frontend errors, malformed snapshots, or execution-identity mismatch.
+pub fn resume_observed_on(
+    src: &str,
+    roots: &[Root],
+    snapshot: &[u8],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+) -> Result<RecordedRun, Error> {
+    let kont = crate::eval::kont::decode_kont(snapshot)
+        .map_err(|error| Error::RuntimeReplay(format!("resume: malformed snapshot: {error}")))?;
+    let bundle = execution_bundle(src, roots, cfg)?;
+    if kont.bundle != bundle {
+        return Err(Error::RuntimeReplay(format!(
+            "resume: execution-identity mismatch: snapshot bundle {}, this run {}",
+            kont.bundle, bundle
+        )));
+    }
+    let core = prepared_core(src, roots, cfg)?;
+    let run = crate::eval::resume_kont_observed(&core, kont, out_sink, input);
+    Ok(RecordedRun {
+        exit: run.exit,
+        trace: trace::encode(&run.frames),
+        observations: run.frames.len(),
+        events: run.events,
+        term: run.term,
+        canonical_trace: ObservationTrace::new(run.observations),
+        fault: run.fault,
+    })
 }
 
 // The interpreter transcript for `src` on empty stdin: the reference oracle a

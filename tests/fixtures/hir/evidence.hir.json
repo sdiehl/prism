@@ -1,0 +1,83 @@
+{
+  "schema": "prism-hir-fixture-v1",
+  "decls": [
+    {
+      "name": "le",
+      "scheme": "forall a. (a, a) -> Bool",
+      "effects": []
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Bool",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "2": {
+      "ty": "Bool"
+    },
+    "3": {
+      "evidence": [
+        "Super(Param(0), Before, 0)"
+      ],
+      "ty": "(a, a) -> Bool"
+    },
+    "4": {
+      "ty": "a"
+    },
+    "5": {
+      "ty": "a"
+    },
+    "6": {
+      "ty": "Bool"
+    },
+    "7": {
+      "ty": "Bool"
+    },
+    "8": {
+      "evidence": [
+        "Param(0)"
+      ],
+      "ty": "(a, a) -> Bool"
+    },
+    "9": {
+      "ty": "a"
+    },
+    "10": {
+      "ty": "a"
+    },
+    "11": {
+      "ty": "Bool"
+    },
+    "12": {
+      "evidence": [
+        "Global(beforeInt, [Global(sameInt, [])])"
+      ],
+      "ty": "(Int, Int) -> Bool ! {?r5}"
+    },
+    "13": {
+      "ty": "Int"
+    },
+    "14": {
+      "ty": "Int"
+    },
+    "15": {
+      "ty": "Bool"
+    },
+    "16": {
+      "ty": "Int"
+    },
+    "17": {
+      "ty": "Int"
+    },
+    "18": {
+      "ty": "Bool"
+    },
+    "19": {
+      "ty": "Int"
+    },
+    "20": {
+      "ty": "Int"
+    }
+  }
+}

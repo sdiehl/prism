@@ -26,7 +26,8 @@ header a#gh svg {
 }
 
 select,
-button {
+button,
+.navbtn {
   font-family: var(--ui);
   font-size: 13px;
   color: var(--ink);
@@ -40,16 +41,26 @@ button {
 select {
   max-width: 190px;
 }
+/* Nav links styled as buttons so the toolbar reads as one homogeneous row
+   rather than buttons mixed with bare text links. */
+.navbtn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
 select:hover,
-button:hover {
+button:hover,
+.navbtn:hover {
   border-color: var(--line-strong);
 }
 select:focus-visible,
-button:focus-visible {
+button:focus-visible,
+.navbtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-button:active {
+button:active,
+.navbtn:active {
   background: var(--bg-soft);
 }
 button:disabled {
@@ -91,6 +102,9 @@ main {
 main.show-sigs {
   grid-template-columns: 1fr 1fr minmax(200px, 0.68fr);
 }
+main.show-ir {
+  grid-template-columns: 1fr 1fr minmax(280px, 1.05fr);
+}
 .pane {
   display: flex;
   flex-direction: column;
@@ -105,6 +119,29 @@ main.show-sigs {
 }
 main.show-sigs .sigpane {
   display: flex;
+}
+
+/* Show IR: a fixed, vertically stacked compiler-explorer style split. Two equal
+   read-only halves, HIR on top and Core below, each with a static label. */
+.irpane {
+  display: none;
+  flex-direction: column;
+}
+main.show-ir .irpane {
+  display: flex;
+}
+.irhalf {
+  flex: 1 1 50%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.irhalf + .irhalf {
+  border-top: 1px solid var(--line);
+}
+.irhalf .out {
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 .label {
   font-size: 11px;

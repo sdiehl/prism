@@ -42,6 +42,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism::core::DepGraph;
+#[cfg(feature = "native")]
+use prism::emit_ir;
 use prism::store::disk::{CommitStats, Store};
 use prism::{commit_to_store, default_roots, dump, store_def_inputs, with_prelude, Config};
 
@@ -295,7 +297,6 @@ fn cold_and_incremental_builds_emit_identical_ir() {
     // The store is a passive cache: codegen never reads it, so an incremental
     // build (cache hits for the unchanged closure) must emit the identical
     // whole-program IR a cold build emits.
-    use prism::emit_ir;
     let full = with_prelude(P_EDIT_LEAF);
     let cold = emit_ir(&full).expect("cold IR");
     let warm = emit_ir(&full).expect("warm IR");

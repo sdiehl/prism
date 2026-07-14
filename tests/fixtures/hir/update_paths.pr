@@ -1,0 +1,16 @@
+-- Record update paths: `{ p | pos.x = 9, hp = 100 }` resolves each dotted
+-- path to a rebuild chain of (constructor, field index, arity) steps.
+
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Player = Player { pos: Vec2, hp: Int }
+
+fn heal(p : Player) : Player = { p | pos.x = 9, hp = 100 }
+
+fn main() : Int =
+  let p =
+    Player {
+      pos = Vec2 { x = 1, y = 2 },
+      hp = 3
+    }
+  heal(p).hp

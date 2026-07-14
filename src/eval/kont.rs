@@ -75,6 +75,7 @@ use crate::binary::{
 };
 use crate::core::{CoreOp, CorePat};
 use crate::driver::WireKind;
+use crate::provenance::Observation;
 // The op-family tables are numbered once in the `def` codec; the `kont` wire draws
 // the same numbering so an operator means one thing on both wires.
 use crate::store::codec::{BUILTINS, CORE_OPS, FLOAT_OPS, NEG_LANES};
@@ -124,6 +125,8 @@ pub struct Kont {
     /// The replay trace recorded up to the suspend point, so a resumed run
     /// reproduces the prefix's world reads and stays deterministic across the cut.
     pub trace: Vec<Obs>,
+    /// Complete ordered observations emitted before the suspend point.
+    pub observations: Vec<Observation>,
 }
 
 /// The machine's pending state at a suspend point: mid-evaluation of a computation
@@ -884,6 +887,13 @@ pub fn encode_kont(k: &Kont) -> Result<Vec<u8>, SuspendError> {
     for o in &k.trace {
         put_obs(&mut out, o);
     }
+    put_uvarint(&mut out, k.observations.len() as u64);
+    for observation in &k.observations {
+        let json = serde_json::to_string(observation).map_err(|error| {
+            SuspendError::NonSerializable(format!("observation trace: {error}"))
+        })?;
+        put_str(&mut out, &json);
+    }
 
     put_uvarint(&mut out, enc.table.len() as u64);
     for node in &enc.table {
@@ -1423,6 +1433,13 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
     let trace = (0..trace_len)
         .map(|_| read_obs(&mut r))
         .collect::<Result<Vec<_>, _>>()?;
+    let observation_len = r.bounded_len()?;
+    let observations = (0..observation_len)
+        .map(|_| {
+            let json = r.string()?;
+            serde_json::from_str(&json).map_err(|_| CodecError::Malformed)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let node_count = r.uvarint()?;
     if node_count > MAX_NODES {
@@ -1484,6 +1501,7 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
         observed,
         exit,
         trace,
+        observations,
     })
 }
 
@@ -1640,6 +1658,7 @@ mod tests {
                 Obs::Bool(false),
                 Obs::Out,
             ],
+            observations: vec![crate::provenance::Observation::Stdout(b"hi".to_vec())],
         }
     }
 
@@ -1657,6 +1676,7 @@ mod tests {
         assert_eq!(decoded.observed, k.observed);
         assert_eq!(decoded.exit, k.exit);
         assert_eq!(decoded.trace, k.trace);
+        assert_eq!(decoded.observations, k.observations);
         assert_eq!(decoded.stack.len(), k.stack.len());
     }
 
@@ -1738,6 +1758,7 @@ mod tests {
         super::put_uvarint(&mut buf, 0); // observed
         buf.push(0); // exit: none
         super::put_uvarint(&mut buf, 0); // trace len
+        super::put_uvarint(&mut buf, 0); // observation len
         super::put_uvarint(&mut buf, u64::MAX); // node_count
         assert_eq!(decode_kont(&buf).unwrap_err(), CodecError::TooLarge);
     }

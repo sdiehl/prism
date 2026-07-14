@@ -10,26 +10,25 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, HashHex, Written, OBJECTS_DIR};
+use super::{atomic_write_if_absent, shard_path, HashHex, Written, OBJECTS_DIR};
 
 pub(super) fn put(root: &Path, hash: &HashHex<'_>, bytes: &[u8]) -> io::Result<Written> {
     let path = shard_path(&root.join(OBJECTS_DIR), hash);
-    if path.exists() {
-        let existing = fs::read(&path)?;
-        if existing == bytes {
-            return Ok(Written::Hit);
-        }
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!(
-                "content-hash collision at {}: an object with different bytes already exists \
-                 for hash {hash} (anonymous objects are immutable)",
-                path.display()
-            ),
-        ));
+    if !path.exists() && atomic_write_if_absent(&path, bytes)? {
+        return Ok(Written::New);
     }
-    atomic_write(&path, bytes)?;
-    Ok(Written::New)
+    let existing = fs::read(&path)?;
+    if existing == bytes {
+        return Ok(Written::Hit);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "content-hash collision at {}: an object with different bytes already exists \
+             for hash {hash} (anonymous objects are immutable)",
+            path.display()
+        ),
+    ))
 }
 
 pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Vec<u8>> {
