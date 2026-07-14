@@ -49,6 +49,13 @@ rustix = { version = "1", features = ["fs"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 libm = "0.2.16"
 
+# Runs the playground smoke under node: a `cargo check` compiles the wasm build
+# but never executes it, so a default-path host syscall (a store open, a clock
+# read) is invisible until the browser runs it. This lets CI run `wasm.rs`'s
+# entry point on the wasm target and catch that class before it ships.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [build-dependencies]
 cc = "1"
 lalrpop = "0.23"

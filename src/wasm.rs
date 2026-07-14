@@ -913,6 +913,51 @@ pub fn incr_run(payload: &str) -> String {
     serde_json::json!({ "nodes": nodes }).to_string()
 }
 
+// Browser-path regression guard, run on the wasm target under node in CI. The
+// playground compiles and runs every snippet in wasm, where the durable store's
+// filesystem calls are unsupported; a `cargo check` proves the wasm build
+// compiles but never runs it, so a default-path host syscall slips through.
+// Executing an effectful program end to end through `run` catches any such
+// syscall (a store open, a clock read): the compile path itself must complete
+// without reaching for a filesystem the browser does not have.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_smoke {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    // Effects, a handler, and IO: enough of the compile path to open the durable
+    // cache if it is ever left enabled on wasm. Its output is deterministic.
+    const EFFECTFUL: &str = "\
+effect Ask
+  once ask(Unit) : Int
+
+fn f() : Unit ! {IO} = println(\"f\")
+
+fn g() : Int ! {Ask} = ask(())
+
+fn foo() : Int ! {IO, Ask} =
+  f()
+  g()
+
+fn bar() : Int ! {IO} =
+  handle foo() with
+    once ask(u) => 7
+
+fn main() = println(bar())";
+
+    #[wasm_bindgen_test]
+    fn effectful_snippet_runs_without_host_io() {
+        let out = super::run(EFFECTFUL);
+        assert!(
+            !out.contains("operation not supported") && !out.contains("error:"),
+            "wasm run reached an unsupported host syscall: {out}"
+        );
+        assert!(
+            out.contains('f') && out.contains('7'),
+            "unexpected output: {out}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

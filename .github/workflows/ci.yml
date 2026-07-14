@@ -149,6 +149,19 @@ jobs:
       - name: Check feature set
         run: ${{ matrix.command }}
 
+      # A cargo check compiles the wasm build but never runs it; the playground
+      # does. Execute wasm.rs's entry point on the wasm target under node so a
+      # default-path host syscall (the durable store's filesystem calls) fails
+      # CI here instead of every example in the shipped playground.
+      - name: Install wasm-bindgen test runner
+        if: ${{ matrix.wasm }}
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Run playground smoke on wasm
+        if: ${{ matrix.wasm }}
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: cargo test --no-default-features --features wasm --target wasm32-unknown-unknown --lib wasm_smoke
+
   # The C-runtime sanitizer + structural-backstop parity re-runs, split off `test`
   # so they run in parallel instead of tailing it (free runners: wall-clock, not cost).
   sanitizers:

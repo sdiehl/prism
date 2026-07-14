@@ -146,8 +146,16 @@ fn effect_identity(core: &Core) -> String {
     format!("whole-program:{}", &digest[..16])
 }
 
-const fn cache_enabled(cfg: &Config) -> bool {
-    cfg.flags.compiler_cache && !cfg.flags.store
+// The single predicate for "may this build read or write the durable store".
+// Both query lowering here and the module interface cache consult it, so the
+// wasm carve-out and the flag logic live in exactly one place.
+//
+// The store is a filesystem cache; wasm32 (the browser playground) has no
+// persistent filesystem and each compile is ephemeral, so opening it would fail
+// `create_dir_all` with an unsupported-platform error. The cache is
+// observationally invisible, so skipping it there changes nothing.
+pub(super) const fn cache_enabled(cfg: &Config) -> bool {
+    cfg.flags.compiler_cache && !cfg.flags.store && cfg!(not(target_arch = "wasm32"))
 }
 
 pub(super) fn lower_effect_queries(

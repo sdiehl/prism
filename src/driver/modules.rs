@@ -12,6 +12,7 @@ use crate::types::{check_seeded, Checked, DeclInfo, TypecheckSeed};
 use serde::{Deserialize, Serialize};
 
 use super::decision::{DecisionTracker, ModuleQueryDecision};
+use super::downstream::cache_enabled;
 use super::identity::{
     compiler_binary_fingerprint, module_interface_from_checked, stdlib_typecheck_seed,
     ModuleInterface,
@@ -756,7 +757,7 @@ struct DurableInterfaceCache {
 
 impl DurableInterfaceCache {
     fn open(cfg: &Config) -> Result<Option<Self>, Error> {
-        if !cfg.flags.compiler_cache || cfg.flags.store {
+        if !cache_enabled(cfg) {
             return Ok(None);
         }
         Ok(Some(Self {
