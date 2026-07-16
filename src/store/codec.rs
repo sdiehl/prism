@@ -200,6 +200,12 @@ enum Tag {
     CRefGet,
     CRefSet,
     CNeg,
+    // Appended after the tags above: wire values are this enum's position in
+    // `TAGS`, so a new node's tag goes at the end and every existing object
+    // keeps its bytes.
+    VUnboxedTuple,
+    VUnboxedRecord,
+    CUnboxedProject,
 }
 
 const TAGS: &[Tag] = &[
@@ -238,6 +244,9 @@ const TAGS: &[Tag] = &[
     Tag::CRefGet,
     Tag::CRefSet,
     Tag::CNeg,
+    Tag::VUnboxedTuple,
+    Tag::VUnboxedRecord,
+    Tag::CUnboxedProject,
 ];
 
 impl Tag {
@@ -463,10 +472,21 @@ impl<'a> Encoder<'a> {
                 put_tag(&mut out, Tag::VTuple);
                 put_indices(&mut out, &idxs);
             }
-            // The store does not yet encode unboxed products; callers reject
-            // them before committing Core.
-            Value::UnboxedTuple(_) | Value::UnboxedRecord(_) => {
-                unreachable!("unboxed values are not stored yet")
+            Value::UnboxedTuple(args) => {
+                let idxs = self.values(args);
+                put_tag(&mut out, Tag::VUnboxedTuple);
+                put_indices(&mut out, &idxs);
+            }
+            // A named product: the field order is part of the value, so the
+            // names are written beside their indices rather than derived.
+            Value::UnboxedRecord(fields) => {
+                let idxs = self.values(&fields.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>());
+                put_tag(&mut out, Tag::VUnboxedRecord);
+                put_uvarint(&mut out, fields.len() as u64);
+                for ((name, _), i) in fields.iter().zip(&idxs) {
+                    put_str(&mut out, name.as_str());
+                    put_uvarint(&mut out, u64::from(*i));
+                }
             }
         }
         self.push(out)
@@ -583,8 +603,11 @@ impl<'a> Encoder<'a> {
                 put_uvarint(&mut out, to_wire(NEG_LANES, *lane));
                 put_uvarint(&mut out, u64::from(vi));
             }
-            Comp::UnboxedProject(_, _) => {
-                unreachable!("unboxed record projection is not stored yet")
+            Comp::UnboxedProject(v, field) => {
+                let vi = self.value(v);
+                put_tag(&mut out, Tag::CUnboxedProject);
+                put_uvarint(&mut out, u64::from(vi));
+                put_str(&mut out, field.as_str());
             }
             Comp::Do(op, args) => {
                 let idxs = self.values(args);
@@ -674,6 +697,11 @@ impl<'a> Encoder<'a> {
                 put_tag(&mut out, Tag::CReuse);
                 self.refer(&mut out, *token);
                 put_uvarint(&mut out, u64::from(vi));
+            }
+            // The content-addressed store holds pre-lowering Core only; `InitAt`
+            // is born in effect lowering, downstream of everything serialized here.
+            Comp::InitAt(..) => {
+                unreachable!("InitAt is a post-lowering node; it is never serialized to the store")
             }
         }
         self.push(out)
@@ -825,6 +853,9 @@ enum Node {
     RefNew(u32),
     RefGet(u32),
     RefSet(u32, u32),
+    UnboxedTuple(Vec<u32>),
+    UnboxedRecord(Vec<(String, u32)>),
+    UnboxedProject(u32, String),
 }
 
 fn parse_pat_fields(r: &mut Reader<'_>) -> Result<Vec<bool>, CodecError> {
@@ -867,6 +898,18 @@ fn parse_node(
             Node::Ctor(name, t, r.node_refs(index)?)
         }
         Tag::VTuple => Node::Tuple(r.node_refs(index)?),
+        Tag::VUnboxedTuple => Node::UnboxedTuple(r.node_refs(index)?),
+        Tag::VUnboxedRecord => {
+            let n = r.bounded_len()?;
+            let fields = (0..n)
+                .map(|_| Ok((r.string()?, r.node_ref(index)?)))
+                .collect::<Result<Vec<_>, CodecError>>()?;
+            Node::UnboxedRecord(fields)
+        }
+        Tag::CUnboxedProject => {
+            let v = r.node_ref(index)?;
+            Node::UnboxedProject(v, r.string()?)
+        }
         Tag::CReturn => Node::Return(r.node_ref(index)?),
         Tag::CBind => Node::Bind(r.node_ref(index)?, r.node_ref(index)?),
         Tag::CForce => Node::Force(r.node_ref(index)?),
@@ -1018,6 +1061,14 @@ impl Builder<'_> {
                 self.values(&args, binders)?,
             ),
             Node::Tuple(args) => Value::Tuple(self.values(&args, binders)?),
+            Node::UnboxedTuple(args) => Value::UnboxedTuple(self.values(&args, binders)?),
+            Node::UnboxedRecord(fields) => {
+                let mut out = Vec::with_capacity(fields.len());
+                for (name, i) in fields {
+                    out.push((Sym::new(&name), self.value(i, binders)?));
+                }
+                Value::UnboxedRecord(out)
+            }
             _ => return Err(CodecError::Malformed),
         };
         Ok(v)
@@ -1113,6 +1164,9 @@ impl Builder<'_> {
             Node::Io(op, args) => Comp::Io(op, self.values(&args, binders)?),
             Node::FloatOp(op, v) => Comp::FloatBuiltin(op, self.value(v, binders)?),
             Node::Neg(lane, v) => Comp::Neg(lane, self.value(v, binders)?),
+            Node::UnboxedProject(v, field) => {
+                Comp::UnboxedProject(self.value(v, binders)?, Sym::new(&field))
+            }
             Node::Do(op, args) => Comp::Do(Sym::new(&op), self.values(&args, binders)?),
             Node::StrOp(b, args) => Comp::StrBuiltin(b, self.values(&args, binders)?),
             Node::Case(scrut, arms) => {
@@ -1355,10 +1409,9 @@ mod table_tests {
 
     // Every operator the compiler can put in Core must be encodable: a Builtin
     // or FloatOp added to the enum without an entry here would otherwise panic
-    // at the first `commit_to_store` of a program that reaches it, possibly
-    // long after the variant landed. The tables are append-only (wire order is
-    // identity), so the fix for a failure here is always to APPEND, never to
-    // reorder.
+    // at the first `commit_to_store` of a program that reaches it. The tables are
+    // append-only because wire order is identity, so a missing entry is always
+    // appended and existing entries are never reordered.
     #[test]
     fn every_builtin_is_in_the_codec_table() {
         for b in Builtin::ALL {
@@ -1425,5 +1478,85 @@ mod table_tests {
             decode_def(&def_frame([unit_node(), ret, handle_node(u64::MAX)], 2)).unwrap_err(),
             crate::store::CodecError::Malformed,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    // Every wire tag is its position in `TAGS`, so a tag inserted anywhere but
+    // the end would silently reinterpret every object already in a store. This
+    // pins the prefix; append new tags after it.
+    #[test]
+    fn tag_wire_values_are_append_only() {
+        let expected = [
+            (Tag::VVar, 0),
+            (Tag::VTuple, 10),
+            (Tag::CReturn, 11),
+            (Tag::CNeg, 34),
+            // Appended for unboxed products; anything new goes after these.
+            (Tag::VUnboxedTuple, 35),
+            (Tag::VUnboxedRecord, 36),
+            (Tag::CUnboxedProject, 37),
+        ];
+        for (tag, wire) in expected {
+            assert_eq!(to_wire(TAGS, tag), wire, "a pinned tag moved on the wire");
+        }
+        assert_eq!(TAGS.len(), 38, "a tag was added without pinning its value");
+    }
+
+    // Unboxed products are ordinary elaborated values, so they must survive a
+    // store round trip rather than reaching an `unreachable!`.
+    #[test]
+    fn unboxed_products_round_trip_through_the_codec() {
+        let point = Value::UnboxedRecord(vec![
+            (Sym::new("x"), Value::Int(1)),
+            (Sym::new("y"), Value::Int(2)),
+        ]);
+        let pair = Value::UnboxedTuple(vec![Value::Int(3), point.clone()]);
+        let body = Comp::Bind(
+            Box::new(Comp::Return(pair)),
+            Sym::new("p"),
+            Box::new(Comp::UnboxedProject(point, Sym::new("y"))),
+        );
+        let f = CoreFn {
+            name: Sym::new("main"),
+            params: Vec::new(),
+            dict_arity: 0,
+            body,
+        };
+        let group = [&f];
+        let deps = Hashes::default();
+        let meta: BTreeMap<Sym, String> = BTreeMap::new();
+        let bytes = encode_def(&AnonEntry {
+            group: &group,
+            target: 0,
+            hash: "test-hash",
+            deps: &deps,
+            meta: &meta,
+        });
+        let decoded = decode_def(&bytes).expect("unboxed products decode");
+        assert_eq!(decoded.group.len(), 1);
+        let out = &decoded.group[0].body;
+        let Comp::Bind(rhs, _, rest) = out else {
+            panic!("bind shape lost: {out:?}");
+        };
+        let Comp::Return(Value::UnboxedTuple(fields)) = rhs.as_ref() else {
+            panic!("unboxed tuple lost: {rhs:?}");
+        };
+        assert_eq!(fields.len(), 2);
+        let Value::UnboxedRecord(inner) = &fields[1] else {
+            panic!("nested unboxed record lost: {:?}", fields[1]);
+        };
+        assert_eq!(inner.len(), 2);
+        assert_eq!(inner[0].0.as_str(), "x");
+        assert_eq!(inner[1].0.as_str(), "y");
+        let Comp::UnboxedProject(_, field) = rest.as_ref() else {
+            panic!("projection lost: {rest:?}");
+        };
+        assert_eq!(field.as_str(), "y");
     }
 }

@@ -9,8 +9,13 @@ default-theme = "ayu"
 preferred-dark-theme = "ayu"
 no-section-label = true
 smart-punctuation = true
-additional-css = ["theme/tabs.css", "theme/run.css"]
-additional-js = ["theme/tabs.js", "theme/prism-highlight.js", "theme/prism-run.js"]
+additional-css = ["theme/tabs.css", "theme/run.css", "theme/prism-tooltips.css"]
+additional-js = [
+  "theme/tabs.js",
+  "theme/prism-highlight.js",
+  "theme/prism-run.js",
+  "theme/prism-tooltips.js",
+]
 git-repository-url = "https://github.com/sdiehl/prism"
 edit-url-template = "https://github.com/sdiehl/prism/edit/main/docs/{path}"
 

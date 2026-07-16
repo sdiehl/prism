@@ -26,6 +26,15 @@ pub const EXN_EFFECT: &str = "Exn";
 pub const FAIL_EFFECT: &str = "Fail";
 pub const FAIL_OP: &str = "fail";
 
+// The arena allocation effect (`Arena` stdlib module). `alloc(n)` is the single
+// algebraic operation a `with_arena` handler services out of a bump region; it is
+// graded `once` (single-shot resumption across the arena boundary) and never
+// enters the recordable set (addresses are not reproducible). This is the single
+// source of truth for the op name, read by the allocation-certificate check so an
+// `@ noalloc` function that performs `alloc` is rejected like a fresh `Ctor`.
+pub const ALLOC_EFFECT: &str = "Alloc";
+pub const ALLOC_OP: &str = "alloc";
+
 // The internal loop-control effects. `break`/`continue` desugar to non-resumable
 // performs of these, discharged by the loop's own handlers so the labels never
 // surface. The effect names follow the error convention (clean, for a row that
@@ -218,9 +227,9 @@ pub const WIRE_OPEN_VALUE_ANY: &str = "wire_open_value_any";
 // desugars to one frozen rung type per version and a set of plain adjacent
 // converter functions; these helpers are the single home for the generated
 // names, so the desugar that emits a converter and the ladder-composition that
-// calls it agree without either re-typing a string. (The two-parameter `Migrate`
-// class the design reserves needs a grammar that does not exist yet, so the
-// converters are plain functions, not instances.) The names are only ever
+// calls it agree without either re-typing a string. The grammar has no
+// two-parameter `Migrate` class syntax, so the converters are plain functions,
+// not instances. The names are only ever
 // generated, never parsed back to recover a fact, so this is name synthesis, not
 // a cross-phase string contract.
 
@@ -397,8 +406,9 @@ pub fn bare_name(canon: &str) -> &str {
 }
 
 // A module-private top-level name (e.g. `Data.Map@helper`). The `@` is
-// unforgeable in source so it cannot clash with a user name, and codegen
-// rewrites it to a dot. `module_of` is the inverse.
+// unforgeable in source so it cannot clash with a user name. Native codegen
+// preserves the distinction from the exported `Data.Map.helper` through its
+// reversible name encoding. `module_of` is the structural inverse here.
 #[must_use]
 pub fn private(module: &str, name: &str) -> String {
     format!("{module}@{name}")
@@ -431,6 +441,12 @@ pub const EBIND_FN: &str = "f@";
 pub fn ev(id: i64) -> String {
     format!("ev@{id}")
 }
+
+// The threaded accumulator parameter every state-mode producer gains, trailing
+// its evidence parameters. It sits beside `ev` because the two are laid out
+// together on every fused producer, and one home keeps the state passes from
+// drifting on a binder they must agree on by name.
+pub const STATE_ACC: &str = "st@";
 
 const VAR_GET_PREFIX: &str = "get@";
 const VAR_SET_PREFIX: &str = "set@";
@@ -677,14 +693,86 @@ pub fn lowered(hint: &str, n: u32) -> String {
     format!("{n}@{hint}")
 }
 
-// Fresh-binder prefixes, one per duplicating pass. The `%` lead is unforgeable
+// Fresh-binder prefixes, one per pass that synthesizes local binders. The `%` lead is unforgeable
 // (no source identifier or other synthesized name contains it), so a freshened
 // binder collides with nothing in its surrounding context; the distinct suffix
 // keeps two passes that freshen the same function from minting the same name, so
 // binders stay globally unique across the pipeline.
 pub const FRESH_INLINE: &str = "%i";
 pub const FRESH_SPECIALIZE: &str = "%sp";
+/// Typed witness name used to sequence inserted reference-count operations.
+pub const RC_SEQUENCE_BINDER: &str = "%rcs";
+/// Result binders introduced so an owned loan can be dropped after a borrowed call.
+pub const FRESH_RC: &str = "%rc";
+/// Type/row quantifiers introduced while retaining generic dictionary builders
+/// in a specialized clone. This namespace never reaches compatibility Core.
+pub const FRESH_SPECIALIZE_QUANTIFIER: &str = "%spq";
 pub const FRESH_FUSE: &str = "%fu";
+/// The ambient residual-row quantifier evidence passing appends to each
+/// callable that gains evidence parameters.
+///
+/// A witness-only namespace with its own counter: it never reaches
+/// compatibility Core, so it must not consume the term `Fresh` counter that
+/// fixes generated term names and tick order.
+pub const FRESH_EVIDENCE_ROW: &str = "%evr";
+/// The ambient direct-effect row shared by declarations translated to the
+/// free-monad calling convention. It is witness-only and never reaches
+/// compatibility Core.
+pub const FREE_MONAD_ROW: &str = "%fmr";
+/// The accumulator-type quantifier state fusion appends to a producer whose
+/// accumulator no clause observes. Witness-only, like [`FRESH_EVIDENCE_ROW`].
+pub const FRESH_STATE_TYPE: &str = "%stt";
+
+/// The ambient residual-row quantifier bound *inside* an evidence-carrying
+/// thunk's own type, named by the operations it carries evidence for.
+///
+/// A callable's ambient row is instantiated away at each call site, so its name
+/// is private and a counter suffices. A thunk's is not: the quantifier lives
+/// inside a parameter type, so the caller's thunk and the callee's declared
+/// parameter must agree on it by name, and the two are minted in different
+/// passes that share no counter. Deriving the name from the operation ids is
+/// what makes them agree without one, since both sides already agree on that
+/// set. `ids` must be ascending and deduplicated, which is the one order
+/// evidence is ever laid out in.
+#[must_use]
+pub fn evidence_row(ids: &[i64]) -> String {
+    qualified_by_ops(FRESH_EVIDENCE_ROW, ids)
+}
+
+/// The accumulator-type quantifier a state-fused producer gains when no clause
+/// pins the accumulator to a concrete type, named by the operations fused into
+/// it.
+///
+/// Derived from the operation ids for the same reason [`evidence_row`] is, and
+/// the reason is sharper here: a producer's declared accumulator parameter and
+/// the producer thunk type nested in a caller's parameter are rewritten at
+/// different sites, and Core subtyping compares quantifier lists by exact
+/// equality with no alpha-renaming, so a private counter cannot make the two
+/// agree. `ids` must be ascending and deduplicated.
+#[must_use]
+pub fn state_type(ids: &[i64]) -> String {
+    qualified_by_ops(FRESH_STATE_TYPE, ids)
+}
+
+// A witness-only quantifier name derived from the fused operation ids, so that
+// two sites minting it in different passes agree without sharing a counter.
+fn qualified_by_ops(namespace: &str, ids: &[i64]) -> String {
+    let mut name = String::from(namespace);
+    for id in ids {
+        name.push('@');
+        name.push_str(&id.to_string());
+    }
+    name
+}
+
+// The top-level clone emitted when dictionary specialization fixes a constrained
+// function's leading dictionaries. `n` is the specializer's deterministic
+// request-order counter. Keeping this beside the other synthesized-name schemes
+// prevents the typed and legacy passes from drifting on clone identity.
+#[must_use]
+pub fn specialized_clone(function: &str, n: usize) -> String {
+    format!("{function}$sp{n}")
+}
 
 // The top-level join function stream fusion emits when it ties a driven pipeline's
 // knot. `n` is a compilation-deterministic counter so two fused pipelines in one
@@ -730,6 +818,25 @@ mod tests {
         WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG,
         WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
+
+    #[test]
+    fn specialization_clone_names_use_the_canonical_scheme() {
+        assert_eq!(super::specialized_clone("map", 7), "map$sp7");
+    }
+
+    // Both schemes name a quantifier that two passes must agree on by name
+    // without sharing a counter, so the operation ids alone must determine the
+    // name, and the two families must never collide: a producer's accumulator
+    // type and its ambient residual row sit on the same signature, and Core
+    // subtyping compares quantifiers by exact equality.
+    #[test]
+    fn op_derived_quantifier_names_are_determined_and_disjoint() {
+        assert_eq!(super::evidence_row(&[3, 12]), "%evr@3@12");
+        assert_eq!(super::state_type(&[3, 12]), "%stt@3@12");
+        assert_ne!(super::state_type(&[3, 12]), super::evidence_row(&[3, 12]));
+        assert_ne!(super::state_type(&[3, 12]), super::state_type(&[3, 1, 2]));
+        assert!(is_synthesized(&super::state_type(&[3])));
+    }
 
     // The capability wrappers and Replay drivers are required prelude names
     // the desugarer and elaborator match by string to decide the world-handler

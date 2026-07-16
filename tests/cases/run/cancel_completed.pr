@@ -1,17 +1,39 @@
--- Cancelling an already-completed fiber is a no-op.
+-- Cancelling an already-completed leaf fiber is a no-op and does not run its
+-- cancellation-only cleanup. Conversely, LIFO can cancel a newly forked fiber
+-- before it starts; joining that cancellation must not enter the body.
 
 import Concurrent (..)
 
-fn quick() : Int ! {Async(Int), IO} =
+fn quick_body() : Int ! {Async(Int), IO} =
   println("quick: done")
   7
+
+fn quick() : Int ! {Async(Int), IO} =
+  on_cancel(\() -> println("normal cleanup must not run"), quick_body)
 
 fn scene() : Int ! {Async(Int), IO} =
   let q = fork(quick)
   let v = await(q)
   println("awaited {v}")
   cancel(q)
-  println("cancel of completed fiber was a no-op")
+  println("cancel of completed leaf was a no-op")
   v
 
-fn main() = println(run_async(scene))
+fn never_started() : Int ! {Async(Int), IO} =
+  println("unstarted body must not run")
+  99
+
+fn cancel_before_start() : Int ! {Async(Int), IO} =
+  let w = fork(never_started)
+  cancel(w)
+  match try_await(w) of
+    Completed(v) =>
+      println("unexpected unstarted completion {v}")
+      v
+    Was_Cancelled =>
+      println("unstarted observed Cancelled")
+      0 - 1
+
+fn main() =
+  println(run_async(scene))
+  println(run_lifo(cancel_before_start))

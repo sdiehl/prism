@@ -1,5 +1,5 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, CoeffectRow};
+use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, CoeffectRow};
 use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, grade_word_msg, dot_op_removed, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
 use crate::kw::{self, DEPRECATED, VIEW, MAKE};
@@ -654,7 +654,7 @@ Stmts: S<Expr> = {
     <l:@L> "with" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
         with_stmt(None, c, with_rest(rest, l, r), l, r),
     <l:@L> "with" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms), span: Span::empty(l) },
+        Spanned { id: NodeId::DUMMY, synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms, HandlerMode::Exhaustive), span: Span::empty(l) },
 };
 
 // A function's return annotation. The canonical order is result-first,
@@ -822,8 +822,14 @@ pub Expr: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) },
     <l:@L> "match" <s:Pipe> "of" <arms:MatchArms> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Match(Box::new(s), arms), span: Span::new(l, r) },
+    <l:@L> "handle" <body:Expr> "with" <marker:"ident"> <arms:HandleArms> <r:@R> =>?
+        if marker == "partial" {
+            Ok(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms, HandlerMode::Partial), span: Span::new(l, r) })
+        } else {
+            Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), format!("unknown handler mode `{marker}` (expected `partial`)")) })
+        },
     <l:@L> "handle" <body:Expr> "with" <arms:HandleArms> <r:@R> =>
-        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms), span: Span::new(l, r) },
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms, HandlerMode::Exhaustive), span: Span::new(l, r) },
     <l:@L> "throw" <n:"uid"> <args:("(" <Comma<Expr>> ")")?> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Throw(n, args.unwrap_or_default())), span: Span::new(l, r) },
     <l:@L> "try" <body:ExprOrBlock> ("v;")? "catch" <arms:CatchArms> <r:@R> =>
@@ -1264,6 +1270,8 @@ Atom: S<Expr> = {
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
     <l:@L> "(" ")" <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Unit, span: Span::new(l, r) },
+    <l:@L> "?" <name:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Hole(name), span: Span::new(l, r) },
     <l:@L> <id:"ident"> <r:@R> =>
         Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(id), span: Span::new(l, r) },
     <l:@L> <c:"uid"> <r:@R> =>

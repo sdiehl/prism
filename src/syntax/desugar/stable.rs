@@ -18,12 +18,11 @@
 //! a rung whose recomputed digest no longer matches is the frozen-format compile
 //! error, reseated with `prism wire --accept`.
 //!
-//! The multi-parameter `Migrate(lo, hi)` class the design reserves needs grammar
-//! that does not exist yet, so the ladder is plain functions here, not instances;
-//! the seam is left for that class to fill. The version-dispatched decode (walking
-//! an older frame up by its frame version) is the wire codec's concern: this pass
-//! emits the ladder the codec composes, and `names::stable_decode_ladder` names
-//! the entry point reserved for it.
+//! The grammar has no multi-parameter `Migrate(lo, hi)` class syntax, so the
+//! ladder is plain functions rather than instances. Version-dispatched decode
+//! (walking an older frame up by its frame version) is the wire codec's concern:
+//! this pass emits the ladder the codec composes, and
+//! `names::stable_decode_ladder` names its reserved entry point.
 
 use marginalia::Span;
 

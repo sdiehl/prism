@@ -29,7 +29,7 @@ fn feed(c : Chan, items : List(Int)) : Int ! {Async(Int)} =
     Nil => 0
     Cons(x, rest) =>
       send(c, x)
-      yield(())
+      yield()
       feed(c, rest)
 
 fn worker(
@@ -44,7 +44,7 @@ fn worker(
     let x = recv(input)
     log("{name} squared {x}")
     send(output, x * x)
-    yield(())
+    yield()
     worker(name, input, output, n - 1)
 
 fn collect(c : Chan, n : Int, acc : Int) : Int ! {Async(Int)} =

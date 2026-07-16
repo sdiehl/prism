@@ -1,5 +1,5 @@
 effect Tick
-  tick(Unit) : Int
+  tick() : Int
 
 effect Say
   say(Int) : Unit
@@ -20,8 +20,8 @@ fn pure_use() = twice(\(_u) -> 21)
 -- answers differently per force.
 fn tick_use() =
   let g =
-    handle twice(\(_u) -> tick(())) with
-      tick(u) resume k => \(n) -> k(n)(n + 1)
+    handle twice(\(_u) -> tick()) with
+      tick() resume k => \(n) -> k(n)(n + 1)
       return r => \(_n) -> r
   g(1)
 

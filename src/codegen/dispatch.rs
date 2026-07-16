@@ -1,4 +1,4 @@
-//! Closure-application dispatch: the curry adapters and the `prism_apply_n`
+//! Closure-application dispatch: the curry adapters and the `prismap_n`
 //! dispatchers. `App` nodes call an unknown closure, so every arity an `App`
 //! reaches (and every lambda arity) gets one total dispatcher that resolves
 //! exact / under- / over-application against the closure's tag. Under-application
@@ -48,7 +48,7 @@ impl<I: Isa> Cg<'_, I> {
     }
 
     // Register (without emitting) the curry adapters and follow-on apply arities
-    // a `prism_apply_n` dispatcher will reference. Stateful backends realize each
+    // a `prismap_n` dispatcher will reference. Stateful backends realize each
     // function on first emission, so this must reach a fixpoint before any lambda
     // body is emitted. Applying zero arguments is the identity on the closure
     // (see `apply_dispatch`), so n == 0 needs no adapter; skipping it also keeps
@@ -82,7 +82,7 @@ impl<I: Isa> Cg<'_, I> {
         }
     }
 
-    // One `prism_apply_n` dispatcher, total over every lambda tag, dispatching
+    // One `prismap_n` dispatcher, total over every lambda tag, dispatching
     // per the lambda's parameter count m against the n supplied args: exact
     // (m == n, call it), under (m > n, build a curry adapter closure of arity
     // m-n), or over (m < n, call with the first m then apply the remaining n-m to
@@ -101,7 +101,7 @@ impl<I: Isa> Cg<'_, I> {
             .collect();
         let mut params = vec!["%_clos".to_string()];
         params.extend((0..n).map(|i| format!("%_a{i}")));
-        let header = self.isa.fn_define(&format!("prism_apply_{n}"), &params);
+        let header = self.isa.fn_define(&super::apply_symbol(n), &params);
 
         let mut b = Buf::default();
         self.isa.open_entry(&mut b);
@@ -149,7 +149,7 @@ impl<I: Isa> Cg<'_, I> {
                     let mut call_args = captured;
                     call_args.extend(args);
                     self.isa
-                        .call(&mut b, &r, &format!("prism_lam_{tag}"), &call_args);
+                        .call(&mut b, &r, &super::lam_symbol(tag), &call_args);
                 }
                 Ordering::Greater => {
                     // Under-application: capture (fvs ++ args) into an adapter

@@ -1,4 +1,4 @@
--- Early-termination fusion (effect_lower/state.rs Step protocol).
+-- Early-termination fusion (typed effect lowering's state-rung Step protocol).
 -- stake drops its continuation, so producers thread `Step S` and stop on SDone;
 -- its counter pairs with the downstream fold/collect state. The same program
 -- mixes a fold chain, a scollect, and for-loop (control) consumers, all fused.

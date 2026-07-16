@@ -205,7 +205,7 @@ fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
 // Synthesized ops that are not type-level effects are skipped rather than
 // flagged.
 pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
-    let latent = crate::core::effect_lower::latent_ops(core);
+    let latent = crate::core::latent_ops(core);
     let empty = BTreeSet::new();
     // Validate against each function's inferred row (the labels of its checked
     // type), not the set-pass `effects` seed: the seed cannot count the scoped

@@ -487,6 +487,11 @@ impl Encoder {
             Rv::TBuf(_) => {
                 return Err(SuspendError::NonSerializable("typed buffer".into()));
             }
+            Rv::Ref(_) => {
+                return Err(SuspendError::NonSerializable(
+                    "effect-lowered local reference".into(),
+                ));
+            }
             Rv::Resume(frames) => {
                 let idxs = self.frames(frames)?;
                 put_tag(&mut out, Tag::VResume);
@@ -692,6 +697,18 @@ impl Encoder {
                     put_sym(&mut out, *o);
                 }
                 put_uvarint(&mut out, u64::from(bi));
+            }
+            Node::RcNoop(_)
+            | Node::WithReuse { .. }
+            | Node::Reuse(..)
+            | Node::InitAt(..)
+            | Node::RefNew(_)
+            | Node::RefGet(_)
+            | Node::RefSet(..)
+            | Node::Bump(_) => {
+                return Err(SuspendError::NonSerializable(
+                    "effect-lowered runtime computation".into(),
+                ));
             }
         }
         self.leave();

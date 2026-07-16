@@ -46,6 +46,59 @@ fn stdlib_module_is_importable_qualified() {
 }
 
 #[test]
+fn data_pretty_layout_is_deterministic_and_preserves_invariants() {
+    let nested = r#"import Data.Pretty as P
+fn doc() =
+  P.group(
+    P.cat(
+      P.text("call("),
+      P.cat(
+        P.nest(2, P.cat(P.linebreak(), P.sep([P.text("one"), P.text("two")]))),
+        P.cat(P.linebreak(), P.text(")")),
+      ),
+    ),
+  )
+fn main() =
+  println(P.render(80, doc()))
+  println(P.render(8, doc()))
+"#;
+    assert_eq!(out(nested), "call(one two)\ncall(\n  one\n  two\n)\n");
+
+    let hardline = r#"import Data.Pretty as P
+fn main() =
+  println(
+    P.render(
+      80,
+      P.group(P.cat(P.text("left"), P.cat(P.hardline(), P.text("right")))),
+    ),
+  )
+"#;
+    assert_eq!(out(hardline), "left\nright\n");
+
+    let unicode = r#"import Data.Pretty as P
+fn main() =
+  println(
+    P.render(
+      3,
+      P.group(P.cat(P.text("λ"), P.cat(P.line(), P.text("x")))),
+    ),
+  )
+"#;
+    assert_eq!(out(unicode), "λ x\n");
+
+    let negative_nest = r#"import Data.Pretty as P
+fn main() =
+  println(P.render(1, P.nest(-4, P.sep([P.text("a"), P.text("b")]))))
+"#;
+    assert_eq!(out(negative_nest), "a\nb\n");
+
+    let braces = r#"import Data.Pretty as P
+fn main() = println(P.render(80, P.braces(P.text("x"))))
+"#;
+    assert_eq!(out(braces), "{x}\n");
+}
+
+#[test]
 fn stdlib_selective_import() {
     assert_eq!(
         out("import Data.List (reverse)\nfn main() = print(reverse([1, 2, 3]))"),

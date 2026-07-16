@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
-use crate::core::builtins::{Builtin, FloatOp};
+use crate::core::builtins::{Builtin, FloatOp, OUTPUT_BUILTINS};
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
 use crate::kw;
@@ -17,7 +17,7 @@ use crate::types::ty::{EffRow, Kind, Label, Type, FLOAT_BUF, INT_BUF};
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
 // effects desugaring injects. Anything else named in a row must be declared.
-pub(super) fn is_builtin_effect(name: &str) -> bool {
+pub(crate) fn is_builtin_effect(name: &str) -> bool {
     name == names::IO_EFFECT
         || name == names::EXN_EFFECT
         || name == names::FAIL_EFFECT
@@ -422,10 +422,10 @@ fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), Type
 
 // The AST dual of `types::is_or_null_element`: whether `t` is a written type whose
 // values occupy a single value word that is never the machine zero word. Heap
-// datatypes (any `Con`/`App`/`Tuple`) and the tagged scalars qualify; `Unit` is the
-// zero word, `Float`/`Char` are left out of this first cut, `OrNull` would make the
-// null word ambiguous, and a bare type variable could later be `Unit`, so all are
-// rejected. Keep this in lockstep with the `Type`-level predicate.
+// datatypes (any `Con`/`App`/`Tuple`) and the tagged scalars qualify. `Unit` is the
+// zero word, `Float`/`Char` are excluded, `OrNull` makes the null word ambiguous,
+// and a bare type variable may instantiate to `Unit`, so all are rejected. Keep
+// this in lockstep with the `Type`-level predicate.
 fn or_null_ast_element_ok(t: &ast::Ty) -> bool {
     match t {
         // Tagged scalars (odd words) and heap datatypes, tuples, and applied
@@ -1146,7 +1146,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
         names::REPLAY_DRIVERS.contains(&f.name.as_str())
             || names::INCR_REPLAY_DRIVERS.contains(&f.name.as_str())
     }) {
-        for n in ["print", "println"] {
+        for &n in OUTPUT_BUILTINS {
             env.insert(
                 Sym::from(n),
                 parse_sig(n, "forall a. (a) -> Unit ! {Output}")?.0,
@@ -1310,33 +1310,25 @@ pub(super) fn seed_var_states(eff_ops: &BTreeMap<String, EffOpInfo>) -> u32 {
     hi.map_or(0, |m| m + 1)
 }
 
+// Raise `hi` to the largest existential id reachable in `t`. This rides the
+// canonical `Type::free_exist` traversal rather than re-walking the structure,
+// so the descended variant set (App, Row, Coeffect, and function effect rows
+// included) can never drift from the collector every other pass shares. State
+// markers currently sit at leaf positions both walks reach, so the folded
+// high-water mark is unchanged; the shared descent only removes the latent gap.
 fn max_state_ex(t: &Type, hi: &mut Option<u32>) {
-    match t {
-        Type::Exist(n) => *hi = Some(hi.map_or(*n, |m: u32| m.max(*n))),
-        Type::Forall(_, b) | Type::RowForall(_, b) => max_state_ex(b, hi),
-        Type::Fun(ps, _, r) => {
-            for p in ps {
-                max_state_ex(p, hi);
-            }
-            max_state_ex(r, hi);
-        }
-        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
-            for p in ps {
-                max_state_ex(p, hi);
-            }
-        }
-        Type::UnboxedRecord(fs) => {
-            for (_, t) in fs {
-                max_state_ex(t, hi);
-            }
-        }
-        Type::OrNull(a) => max_state_ex(a, hi),
-        _ => {}
+    let mut exists = BTreeSet::new();
+    t.free_exist(&mut exists);
+    if let Some(&top) = exists.iter().next_back() {
+        *hi = Some(hi.map_or(top, |m: u32| m.max(top)));
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::sym::Sym;
+    use crate::types::ty::{EffRow, Label, Type};
+
     #[test]
     fn builtin_signatures_parse() {
         for (name, sig) in super::builtin_sigs() {
@@ -1365,5 +1357,28 @@ mod tests {
             .expect("signature parses")
             .0;
         assert_eq!(nested.show(), "forall a b. (a, b) -> a");
+    }
+
+    #[test]
+    fn max_state_existential_descends_apps_and_effect_arguments() {
+        let nested = Type::Fun(
+            vec![Type::Exist(3)],
+            EffRow::Extend(
+                Label {
+                    name: Sym::new("State"),
+                    args: vec![Type::App(
+                        Box::new(Type::Exist(7)),
+                        Box::new(Type::Exist(13)),
+                    )],
+                },
+                Box::new(EffRow::Empty),
+            ),
+            Box::new(Type::Exist(5)),
+        );
+        let mut hi = None;
+
+        super::max_state_ex(&nested, &mut hi);
+
+        assert_eq!(hi, Some(13));
     }
 }

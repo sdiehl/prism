@@ -201,7 +201,7 @@ effect Trace
 
 fn task(n : Int, r : Int) : Int ! {Async(Int), Trace} =
   note(n)
-  yield(())
+  yield()
   r
 
 fn tasks() : Int ! {Async(Int), Trace} =

@@ -6,7 +6,7 @@ use super::super::cbpv::{Comp, Core, Value};
 use super::super::fv::{comp as freev, pat_vars};
 #[cfg(debug_assertions)]
 use super::super::traverse::Visit;
-use super::{borrow_mask, borrowed_at, count_val, Set, Sigs};
+use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 
 // Independent verifier: simulate the inserted ops as a linear token machine. Each
 // owned variable starts with one token; dup adds one, drop and every consuming
@@ -36,7 +36,14 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
             .enumerate()
             .map(|(i, p)| (*p, i64::from(!borrowed_at(mask, i))))
             .collect();
-        sim(&f.body, &mut env, sigs).map_err(|e| format!("{}: {e}", f.name))?;
+        let external: Set = f
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| borrowed_at(mask, *index))
+            .map(|(_, param)| *param)
+            .collect();
+        sim(&f.body, &mut env, sigs, &external).map_err(|e| format!("{}: {e}", f.name))?;
         for (v, n) in &env {
             if v.as_str() != "_" && *n != 0 {
                 return Err(format!("{}: {v} ends with {n} tokens", f.name));
@@ -84,11 +91,13 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
                 Comp::Lam(ps, b) => (ps.iter().copied().collect(), b),
                 other => (Set::new(), other),
             };
-            let mut env: BTreeMap<Sym, i64> = freev(body).into_iter().map(|x| (x, 0)).collect();
+            let free = freev(body);
+            let external: Set = free.difference(&params).copied().collect();
+            let mut env: BTreeMap<Sym, i64> = free.into_iter().map(|x| (x, 0)).collect();
             for p in &params {
                 env.insert(*p, 1);
             }
-            sim(body, &mut env, sigs)?;
+            sim(body, &mut env, sigs, &external)?;
             for (x, n) in &env {
                 if x.as_str() != "_" && *n != 0 {
                     return Err(format!("thunk capture {x} ends with {n} tokens"));
@@ -116,7 +125,7 @@ fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), String> {
     Ok(())
 }
 
-fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String> {
+fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> Result<(), String> {
     match c {
         Comp::Dup(Value::Var(x)) => {
             *env.entry(*x).or_insert(0) += 1;
@@ -124,17 +133,19 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         }
         Comp::Drop(Value::Var(x)) => consume(*x, 1, env),
         Comp::Bind(m, x, n) => {
-            sim(m, env, sigs)?;
+            sim(m, env, sigs, external)?;
             if x.as_str() != "_" {
                 env.insert(*x, 1);
             }
-            sim(n, env, sigs)
+            let mut nested_external = external.clone();
+            nested_external.remove(x);
+            sim(n, env, sigs, &nested_external)
         }
         Comp::If(_, t, e) => {
             let mut et = env.clone();
-            sim(t, &mut et, sigs)?;
+            sim(t, &mut et, sigs, external)?;
             let mut ee = env.clone();
-            sim(e, &mut ee, sigs)?;
+            sim(e, &mut ee, sigs, external)?;
             merge(&et, &ee, env)
         }
         Comp::Case(_, arms) => {
@@ -146,7 +157,11 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
                 for v in &pv {
                     ea.insert(*v, 0);
                 }
-                sim(body, &mut ea, sigs)?;
+                let mut arm_external = external.clone();
+                for var in &pv {
+                    arm_external.remove(var);
+                }
+                sim(body, &mut ea, sigs, &arm_external)?;
                 for v in &pv {
                     if ea.get(v).copied().unwrap_or(0) != 0 {
                         return Err(format!("field {v} leaks in arm"));
@@ -186,7 +201,9 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         Comp::WithReuse { token, freed, body } => {
             use_val(freed, env, sigs)?;
             env.insert(*token, 1);
-            sim(body, env, sigs)
+            let mut body_external = external.clone();
+            body_external.remove(token);
+            sim(body, env, sigs, &body_external)
         }
         Comp::App(f, args) => {
             for x in freev(f) {
@@ -203,6 +220,23 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
         }
         Comp::Call(g, args) => {
             let mask = borrow_mask(*g, sigs);
+            let borrowed = borrowed_call_vars(*g, args, sigs)?;
+            let mut consumed = BTreeMap::new();
+            for (index, arg) in args.iter().enumerate() {
+                if !borrowed_at(mask, index) {
+                    count_val(arg, &mut consumed);
+                }
+            }
+            for var in borrowed {
+                let live = env.get(&var).copied().unwrap_or(0);
+                let spent =
+                    i64::try_from(consumed.get(&var).copied().unwrap_or(0)).unwrap_or(i64::MAX);
+                if !external.contains(&var) && live - spent < 1 {
+                    return Err(format!(
+                        "borrowed call argument {var} is not live through call to {g}"
+                    ));
+                }
+            }
             for (i, a) in args.iter().enumerate() {
                 if !borrowed_at(mask, i) {
                     use_val(a, env, sigs)?;
@@ -220,7 +254,13 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String
             consume(*tok, 1, env)?;
             use_val(v, env, sigs)
         }
-        Comp::Mask(_, b) => sim(b, env, sigs),
+        // Post-lowering (arena) node, unreachable in this pre-lowering balance
+        // check; kept total by consuming the cell and constructor values.
+        Comp::InitAt(cell, v) => {
+            use_val(cell, env, sigs)?;
+            use_val(v, env, sigs)
+        }
+        Comp::Mask(_, b) => sim(b, env, sigs, external),
         Comp::Lam(..) | Comp::Handle { .. } | Comp::Dup(_) | Comp::Drop(_) => Ok(()),
     }
 }
@@ -242,4 +282,62 @@ fn merge(
         out.insert(k, va);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::cbpv::CoreFn;
+
+    #[test]
+    fn rejects_a_drop_before_the_last_borrowed_call() {
+        let retained = Sym::new("retained");
+        let observe = Sym::new("observe");
+        let body = Comp::Bind(
+            Box::new(Comp::Drop(Value::Var(retained))),
+            Sym::new("_"),
+            Box::new(Comp::Call(observe, vec![Value::Var(retained)])),
+        );
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller"),
+                params: vec![retained],
+                body,
+                dict_arity: 0,
+            }],
+        };
+        let sigs = std::iter::once((observe, vec![true])).collect();
+
+        let error = balanced(&core, &sigs).expect_err("pre-call drop must end the loan");
+        assert!(error.contains("borrowed call argument retained is not live"));
+    }
+
+    #[test]
+    fn a_shadowing_binder_does_not_inherit_an_external_loan() {
+        let borrowed = Sym::new("borrowed");
+        let observe = Sym::new("observe");
+        let body = Comp::Bind(
+            Box::new(Comp::Return(Value::Unit)),
+            borrowed,
+            Box::new(Comp::Bind(
+                Box::new(Comp::Drop(Value::Var(borrowed))),
+                Sym::new("_"),
+                Box::new(Comp::Call(observe, vec![Value::Var(borrowed)])),
+            )),
+        );
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller"),
+                params: vec![borrowed],
+                body,
+                dict_arity: 0,
+            }],
+        };
+        let sigs = [(Sym::new("caller"), vec![true]), (observe, vec![true])]
+            .into_iter()
+            .collect();
+
+        let error = balanced(&core, &sigs).expect_err("inner binder owns its own loan");
+        assert!(error.contains("borrowed call argument borrowed is not live"));
+    }
 }

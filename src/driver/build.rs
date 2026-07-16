@@ -8,7 +8,6 @@
 
 use std::path::Path;
 
-use crate::core::{balanced, insert_rc, reuse};
 use crate::error::Error;
 #[cfg(feature = "native")]
 use crate::lineage::FactOutcome;
@@ -16,7 +15,7 @@ use crate::resolve::default_roots;
 
 #[cfg(feature = "native")]
 use super::lowered_core_with_identity;
-use super::{lowered_core, Config};
+use super::{reuse_lowered_core, Config};
 
 #[cfg(feature = "native")]
 use std::collections::BTreeMap;
@@ -29,7 +28,7 @@ use crate::codegen::{
     llvm_scc_function_map,
 };
 #[cfg(feature = "native")]
-use crate::core::effect_lower::residual_effects;
+use crate::core::residual_effects;
 #[cfg(feature = "native")]
 use crate::core::LoweredCore;
 #[cfg(feature = "native")]
@@ -486,9 +485,7 @@ pub fn emit_ir(src: &str) -> Result<String, Error> {
 /// # Errors
 /// Fails on front-end errors or an unbalanced rc insertion.
 pub fn rc_balanced(src: &str) -> Result<(), Error> {
-    let (_, lowered, _, sigs) =
-        lowered_core(src, &default_roots(Path::new(".")), &Config::from_env())?;
-    balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs).map_err(Error::CodegenBackend)
+    reuse_lowered_core(src, &default_roots(Path::new(".")), &Config::from_env()).map(|_| ())
 }
 
 /// # Errors

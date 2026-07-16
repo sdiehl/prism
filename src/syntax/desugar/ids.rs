@@ -51,7 +51,8 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
         | Expr::Bool(_)
         | Expr::Unit
         | Expr::Str(_)
-        | Expr::Var(_) => {}
+        | Expr::Var(_)
+        | Expr::Hole(_) => {}
         Expr::Bin(_, a, b) | Expr::Pipe(a, b) | Expr::Index(a, b) => {
             expr(a, next);
             expr(b, next);
@@ -123,7 +124,7 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
                 expr(op.expr_mut(), next);
             }
         }
-        Expr::Handle(b, arms) => {
+        Expr::Handle(b, arms, _) => {
             expr(b, next);
             for a in arms {
                 match a {

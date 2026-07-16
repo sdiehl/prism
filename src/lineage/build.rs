@@ -2,10 +2,8 @@
 //!
 //! A `prism build` (and `check-world`) records the facts it already knows into a
 //! [`BuildLineage`], then [`BuildLineage::to_graph`] lifts them into the shared
-//! [`LineageGraph`]. Older `prism-build-lineage-v1` sidecars are lifted through the
-//! same assembler by [`from_v1`], so a lifted old sidecar is byte-identical to the
-//! graph a fresh build emits. This module also owns the sidecar's on-disk siting
-//! (a `.plineage` beside the artifact) and the reader that decodes either format.
+//! [`LineageGraph`]. This module also owns the sidecar's on-disk siting (a
+//! `.plineage` beside the artifact) and the reader that decodes it.
 
 use std::fs;
 use std::io;
@@ -152,11 +150,10 @@ impl BuildLineage {
     }
 }
 
-// The single graph assembler shared by a fresh build (`to_graph`) and the v1
-// adapter (`from_v1`), so a lifted old sidecar is byte-identical to the graph the
-// same build would emit today. Every edge fans out from the request node: inputs
-// for the roots, an identity edge for the compiler, produced edges for artifacts,
-// and justification edges for the cache summary and diagnostics.
+// The graph assembler behind a fresh build's `to_graph`. Every edge fans out from
+// the request node: inputs for the roots, an identity edge for the compiler,
+// produced edges for artifacts, and justification edges for the cache summary and
+// diagnostics.
 #[allow(clippy::too_many_arguments)]
 fn assemble(
     request: &BuildRequest,
@@ -236,44 +233,6 @@ fn assemble(
     }
 
     graph::finalize(Variant::Build, nodes, edges)
-}
-
-/// Lift a build-lineage-v1 sidecar value into the typed graph.
-///
-/// # Errors
-/// Fails if the value is not a `prism-build-lineage-v1` document or a typed field
-/// fails to decode.
-pub(crate) fn from_v1(value: &Value) -> Result<LineageGraph, Error> {
-    if value.get("format").and_then(Value::as_str) != Some(LINEAGE_FORMAT) {
-        return Err(Error::ResolveLineage(format!(
-            "lineage: not a {LINEAGE_FORMAT} document"
-        )));
-    }
-    let request = graph::decode_field::<BuildRequest>(value, "request")?;
-    let inputs = &value["inputs"];
-    let source = graph::decode_field::<LineageRoot>(inputs, "source")?;
-    let stdlib = graph::decode_field::<LineageRoot>(inputs, "stdlib")?;
-    let packages = graph::decode_field::<Vec<LineageRoot>>(inputs, "packages")?;
-    let compiler = CompilerPayload {
-        fingerprint: value["compiler"]["identity"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-        rows: graph::decode_field::<Vec<CompilerRow>>(&value["compiler"], "rows")?,
-    };
-    let artifacts = graph::decode_field::<Vec<LineageArtifact>>(value, "artifacts")?;
-    let cache = graph::decode_field::<LineageCache>(value, "cache")?;
-    let diagnostics = graph::decode_field::<Vec<String>>(value, "diagnostics").unwrap_or_default();
-    Ok(assemble(
-        &request,
-        &source,
-        &stdlib,
-        &packages,
-        &compiler,
-        &artifacts,
-        &cache,
-        &diagnostics,
-    ))
 }
 
 // The compiler-identity payload for a build or run: the fingerprint plus its rows.
@@ -356,8 +315,8 @@ pub fn write_sidecar(artifact: &Path, lineage: &BuildLineage) -> Result<PathBuf,
 /// a `.plineage`, its sibling sidecar is read.
 ///
 /// # Errors
-/// Fails on filesystem or decode errors. A `prism-build-lineage-v1` sidecar is
-/// lifted through `from_v1`; any other format is rejected.
+/// Fails on filesystem or decode errors, or on any format other than the
+/// [`LINEAGE_GRAPH_FORMAT`] sidecar envelope.
 pub fn read_lineage(file: &Path) -> Result<LineageGraph, Error> {
     let path = sidecar_of(file);
     let text = fs::read_to_string(&path).map_err(Error::Io)?;
@@ -366,7 +325,6 @@ pub fn read_lineage(file: &Path) -> Result<LineageGraph, Error> {
     match value.get("format").and_then(Value::as_str) {
         Some(LINEAGE_GRAPH_FORMAT) => serde_json::from_str::<LineageGraph>(&text)
             .map_err(|e| Error::ResolveLineage(format!("{}: {e}", path.display()))),
-        Some(LINEAGE_FORMAT) => from_v1(&value),
         other => Err(Error::ResolveLineage(format!(
             "{} is not a lineage graph (format {})",
             path.display(),

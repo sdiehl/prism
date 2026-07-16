@@ -94,6 +94,7 @@ Data.Monad.traverse_list : forall a b c. ((a) -> b(c), List(a)) -> b(List(c))
 Data.Result.and_then_result : forall e0 a b c. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0}
 Data.Result.is_err : forall a b. (Result(a, b)) -> Bool
 Data.Result.is_ok : forall a b. (Result(a, b)) -> Bool
+Data.Result.map_err : forall e0 a b c. ((c) -> b ! {e0}, Result(a, c)) -> Result(a, b) ! {e0}
 Data.Result.map_result : forall e0 a b c. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! {e0}
 Data.Result.ok_of_option : forall a b. (a, Option(b)) -> Result(b, a)
 Data.Result.option_of_result : forall a b. (Result(a, b)) -> Option(a)

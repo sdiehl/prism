@@ -14,7 +14,9 @@ use crate::core::Digest;
 use crate::fmt::decl::{fmt_class, fmt_data, fmt_effect, fmt_labels, fmt_ty};
 use crate::syntax::ast::Program;
 
-use super::doctest::{examples_in, Example};
+use super::doctest::{
+    examples_in, is_reference_fence, lang_of, Example, FENCE_PRISM, MOD_ATTR, PRELUDE_DOTTED,
+};
 use super::extract::extract;
 use super::ModSpec;
 
@@ -205,6 +207,44 @@ fn collect_entries(spec: &ModSpec, p: &Program, sigs: &BTreeMap<String, String>)
 // The fence tag for a generated reference block: `def` for a declaration body
 // (its printed form opens with a declaration keyword), `sig` for a bare type
 // signature. Both render as non-runnable reference; neither is a doctest.
+// Stamp each example fence in a docstring with its enclosing module
+// (```` ```prism ```` becomes ```` ```prism,mod=Data.Map ````), so the book
+// preprocessor can rebuild the same runnable program the doctest runner checks
+// (module auto-import plus hidden `# ` lines). Bodies are kept verbatim, hidden
+// lines included: the committed page carries full fidelity and the HTML layer
+// decides what a reader sees. The prelude documents itself and gets no stamp;
+// `sig`/`def` reference blocks are never examples.
+fn stamp_module(doc: &str, module: &str) -> String {
+    if module.is_empty() || module == PRELUDE_DOTTED {
+        return doc.to_string();
+    }
+    let mut out = String::new();
+    let mut in_fence = false;
+    for line in doc.lines() {
+        let trimmed = line.trim_start();
+        if let Some(info) = trimmed.strip_prefix("```") {
+            let opening = !in_fence;
+            in_fence = opening;
+            if opening
+                && lang_of(info) == FENCE_PRISM
+                && !is_reference_fence(info)
+                && !info.contains(MOD_ATTR)
+            {
+                out.push_str(line);
+                out.push(',');
+                out.push_str(MOD_ATTR);
+                out.push_str(module);
+                out.push('\n');
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.truncate(out.trim_end_matches('\n').len());
+    out
+}
+
 fn block_tag(code: &str) -> &'static str {
     let kw = code.split_whitespace().next().unwrap_or("");
     if matches!(
@@ -254,8 +294,12 @@ pub(crate) fn page(
         spec.source_path
     );
     if let Some(desc) = &docs.module {
-        examples.extend(examples_in(&format!("{} (module)", spec.dotted), desc));
-        let _ = writeln!(out, "{desc}\n");
+        examples.extend(examples_in(
+            &format!("{} (module)", spec.dotted),
+            &spec.dotted,
+            desc,
+        ));
+        let _ = writeln!(out, "{}\n", stamp_module(desc, &spec.dotted));
     }
 
     for section in [
@@ -286,8 +330,12 @@ pub(crate) fn page(
             let hclass = hash_class(src, spec, &e.name);
             let _ = writeln!(out, "```prism,{tag}{hclass}\n{}\n```\n", e.code);
             if let Some(doc) = docs.get(e.start) {
-                examples.extend(examples_in(&format!("{}::{}", spec.dotted, e.name), doc));
-                let _ = writeln!(out, "{doc}\n");
+                examples.extend(examples_in(
+                    &format!("{}::{}", spec.dotted, e.name),
+                    &spec.dotted,
+                    doc,
+                ));
+                let _ = writeln!(out, "{}\n", stamp_module(doc, &spec.dotted));
             }
         }
     }

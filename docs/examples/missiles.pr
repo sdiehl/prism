@@ -18,7 +18,7 @@ effect Missiles
   launch(Int) : Unit
 
 effect Warplan
-  choose(Unit) : Bool
+  choose() : Bool
 
 fn first_strike() : Int ! {Missiles} =
   launch(100)
@@ -43,8 +43,8 @@ fn played(us_first : Bool) : Int =
     return moves => moves
 
 fn joshua() : Int =
-  handle played(choose(())) with
-    choose(_u) resume k => k(true) + k(false)
+  handle played(choose()) with
+    choose() resume k => k(true) + k(false)
     return total => total
 
 fn main() =

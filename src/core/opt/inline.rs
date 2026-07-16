@@ -1,8 +1,8 @@
 //! Bounded inliner (late pass).
 //!
 //! Inlines a non-recursive top-level function at its call site when doing so
-//! cannot blow up code size. The first cut inlines only a function called exactly
-//! once (a single `Call` head, and never referenced first-class), so its body
+//! cannot blow up code size. It inlines only a function called exactly once (a
+//! single `Call` head, never referenced first-class), so its body
 //! moves rather than duplicates: no size growth, and no question of duplicating a
 //! side-effecting computation. The callee's binders are alpha-renamed to fresh
 //! names so nothing captures or collides at the call site; its free variables are

@@ -20,7 +20,7 @@ import Concurrent (..)
 -- with a value. Fibers may perform IO.
 fn worker(name : String, v : Int) : Int ! {Async(Int), IO} =
   println("{name}: start")
-  yield(())
+  yield()
   println("{name}: resume, returning {v}")
   v
 

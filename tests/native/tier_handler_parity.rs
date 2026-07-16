@@ -32,6 +32,7 @@ const TIERS: &[EffectTier] = &[EffectTier::Auto, EffectTier::State, EffectTier::
 fn forced(tier: EffectTier) -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.effect_tier = tier;
+    cfg.flags.compiler_cache = false;
     cfg
 }
 

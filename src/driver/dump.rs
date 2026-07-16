@@ -17,7 +17,7 @@ use crate::core::{
     HASH_SCHEME,
 };
 use crate::error::Error;
-use crate::hir::NodeRes;
+use crate::hir::{HandlerResidual, NodeRes};
 use crate::lex::lex;
 use crate::parse::parse;
 use crate::resolve::{default_roots, Root};
@@ -40,7 +40,7 @@ use super::module_graph::module_graph;
 use super::report::types_section;
 use super::{
     check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
-    strip_prelude, Config, WireKind, NAMESPACE_FORMAT,
+    strip_prelude, tooltip_checked_on, typed_effect_facts, Config, WireKind, NAMESPACE_FORMAT,
 };
 
 /// Format tag shared by all three usage-summary projections (`usage-summary`,
@@ -88,6 +88,12 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         "ast" => Ok(format!("{:#?}", parse(src)?.program)),
         "types" => Ok(types_section(&check_on(src, roots)?)),
+        "typespans" => {
+            let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
+            crate::docs::extract_typespans(src, &program, &checked)?
+                .to_json()
+                .map_err(|error| Error::CodegenDump(error.to_string()))
+        }
         "interface" => {
             let entry = crate::error::SourceMap::new(src).user();
             module_interface(entry, src, roots)?
@@ -319,16 +325,8 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // observable in output; `tests/perf_gate.rs` pins it per corpus program
         // so a silent fusion-to-free-monad collapse surfaces as a reviewable diff.
         "tier" => {
-            let (_, checked, core) = frontend(src, roots, cfg)?;
-            Ok(format!(
-                "{}\n",
-                crate::core::effect_strategy(
-                    &core,
-                    &checked.ctors,
-                    &cfg.flags,
-                    &checked.op_grades()
-                )?
-            ))
+            let (strategy, _) = typed_effect_facts(src, roots, cfg)?;
+            Ok(format!("{strategy}\n"))
         }
         // Closure-capture facts: for each of the program's own lambdas and
         // thunks, the bindings it closes over and the scoped operations it
@@ -445,8 +443,7 @@ fn usage_summary_data(
     cfg: &Config,
 ) -> Result<(Vec<UsageRow>, String), Error> {
     let (program, checked, core) = elaborated(src, roots)?;
-    let tier =
-        crate::core::effect_strategy(&core, &checked.ctors, &cfg.flags, &checked.op_grades())?;
+    let (tier, _) = typed_effect_facts(src, roots, cfg)?;
     let prelude = prelude_fn_names()?;
     let mut foreign_modules: BTreeMap<String, bool> = BTreeMap::new();
     let mut own: BTreeSet<Sym> = BTreeSet::new();
@@ -618,7 +615,7 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> String {
 // The schema tag heading every checked-HIR fixture. It versions the envelope so
 // a committed fixture is self-describing and a reader can tell which layout it is
 // parsing; bump it on any incompatible shape change.
-const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v1";
+const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
 
 // The versioned checked-HIR fixture document: the schema tag, the checked
 // declarations in source order, and every node the checker recorded a fact for,
@@ -648,6 +645,20 @@ struct HirNode {
     lane: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handler_residual: Option<HirHandlerResidual>,
+}
+
+/// The operation-local residual proof recorded for a checked handler. Effects
+/// appear separately when the operation subset is opaque; `open_row` records
+/// an unenumerable row tail.
+#[derive(Serialize)]
+struct HirHandlerResidual {
+    forwarded_operations: Vec<String>,
+    forwarded_effects: Vec<String>,
+    residual_operations: Vec<String>,
+    residual_effects: Vec<String>,
+    open_row: bool,
 }
 
 // A node's resolution fact, tagged by kind so the three shapes share one field
@@ -699,6 +710,7 @@ fn hir_fixture(checked: &Checked) -> String {
                     evidence: refs.evidence.map(|ds| ds.iter().map(render_dict).collect()),
                     lane: refs.lane.map(Type::show),
                     ty: refs.ty.map(Type::show),
+                    handler_residual: refs.handler_residual.map(render_handler_residual),
                 },
             )
         })
@@ -709,6 +721,22 @@ fn hir_fixture(checked: &Checked) -> String {
         nodes,
     };
     serde_json::to_string_pretty(&fixture).unwrap_or_default()
+}
+
+fn render_handler_residual(residual: &HandlerResidual) -> HirHandlerResidual {
+    let names = |symbols: &[crate::sym::Sym]| {
+        symbols
+            .iter()
+            .map(|symbol| symbol.as_str().to_string())
+            .collect()
+    };
+    HirHandlerResidual {
+        forwarded_operations: names(residual.forwarded_operations()),
+        forwarded_effects: names(residual.forwarded_effects()),
+        residual_operations: names(residual.residual_operations()),
+        residual_effects: names(residual.residual_effects()),
+        open_row: residual.has_open_row(),
+    }
 }
 
 // A resolution fact as its serializable projection.

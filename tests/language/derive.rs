@@ -1,7 +1,7 @@
 //! Structural deriving: `Hash`, `Serialize`, `Stable`, and `Arbitrary`.
 //!
 //! `Ord` deriving is covered by the snapshot corpus; these gate the four
-//! derivations that landed with the wire work. The cross-backend cases assert
+//! wire-visible derivations. The cross-backend cases assert
 //! the acceptance bar that a derived value hash is byte-identical on the
 //! interpreter and the native backend, produced by the same blake3 scheme.
 

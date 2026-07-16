@@ -15,7 +15,10 @@ effect Gen
 
 type Tree = Leaf(Int) | Branch(Tree, Tree)
 
-type Step = Done | More(Int, () -> Step)
+-- The suspended tail carries every residual effect of the producer. Keeping the
+-- row on the data prevents a continuation from being stored behind a falsely
+-- pure function field when `to_stream` is used with effects beyond `Gen`.
+type Step(e : Row) = Done | More(Int, () -> Step(e) ! {e})
 
 fn leaves(t) : Unit ! {Gen} =
   match t of
@@ -25,7 +28,7 @@ fn leaves(t) : Unit ! {Gen} =
       leaves(r)
 
 -- Resume-on-demand: the continuation `k` becomes the rest of the stream.
-fn to_stream(thunk) =
+fn to_stream(thunk : () -> a ! {| e}) : Step(e) =
   handle thunk() with
     yield(v) resume k => More(v, \() -> k(()))
     return r => Done

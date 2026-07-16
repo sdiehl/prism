@@ -1,7 +1,6 @@
--- Usage facts whose checkers do not exist yet parse but are reserved: the
--- checker rejects them by name until a checker lands, so no program can give a
--- reserved fact a meaning. (`noalloc`, `once`, `portable`, and `noescape` are
--- wired and checked; `unique` here stands in for the still-reserved facts.)
+-- Usage facts without checkers parse as reserved names and are rejected, so no
+-- program can give a reserved fact a meaning. (`noalloc`, `once`, `portable`,
+-- and `noescape` are checked; `unique` stands in for the reserved set.)
 fn apply(f : ((Int) -> Int) @ unique, x : Int) : Int = f(x)
 
 fn main() : Int = apply(\(y) -> y + 1, 41)

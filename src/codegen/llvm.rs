@@ -307,7 +307,10 @@ impl<'ctx> Inkwell<'ctx> {
         let args = [
             self.native_kont_symbol_ptr(symbol).into(),
             self.i64t()
-                .const_int(u64::try_from(arity).unwrap_or(u64::MAX), false)
+                .const_int(
+                    u64::try_from(arity).expect("continuation-frame arity fits in u64"),
+                    false,
+                )
                 .into(),
         ];
         let ty = self
@@ -324,7 +327,10 @@ impl<'ctx> Inkwell<'ctx> {
         let args = [
             self.native_kont_symbol_ptr(symbol).into(),
             self.i64t()
-                .const_int(u64::try_from(arity).unwrap_or(u64::MAX), false)
+                .const_int(
+                    u64::try_from(arity).expect("continuation-frame arity fits in u64"),
+                    false,
+                )
                 .into(),
         ];
         let ty = self
@@ -340,7 +346,10 @@ impl<'ctx> Inkwell<'ctx> {
         }
         let args = [
             self.i64t()
-                .const_int(u64::try_from(index).unwrap_or(u64::MAX), false)
+                .const_int(
+                    u64::try_from(index).expect("continuation-argument index fits in u64"),
+                    false,
+                )
                 .into(),
             value.into(),
         ];
@@ -424,9 +433,10 @@ impl<'ctx> Inkwell<'ctx> {
         ptrs.set_section(Some(native_kont::TABLE_SECTION));
         ptrs.set_alignment(8);
 
-        let len_init = self
-            .i64t()
-            .const_int(u64::try_from(entries.len()).unwrap_or(u64::MAX), false);
+        let len_init = self.i64t().const_int(
+            u64::try_from(entries.len()).expect("continuation-table length fits in u64"),
+            false,
+        );
         let len = self
             .module
             .get_global(native_kont::PTRS_LEN_GLOBAL)

@@ -1,0 +1,24 @@
+-- Allocation as a handler: `with_arena` services every constructor its body
+-- builds. `scratch` builds a linked list and folds it to a sum, entirely inside
+-- the arena; the compiler's arena-lowering pass rewrites each `Cons` cell into an
+-- arena allocation, and only the `Int` result escapes. The output is a pure
+-- function of the source: an arena constructor is byte-identical to a plain one,
+-- so the sum is the same whether or not the handler is installed. Code that never
+-- calls `with_arena` allocates exactly as before.
+
+import Arena (..)
+
+fn build(n : Int, acc : List(Int)) : List(Int) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(n, acc))
+
+fn total(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(h, t) => h + total(t)
+
+fn scratch() : Int = total(build(10, Nil))
+
+fn main() : Unit ! {IO} = println(with_arena(scratch))

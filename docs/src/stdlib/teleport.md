@@ -15,3 +15,20 @@ teleport : forall a. (() -> a @ {once, portable}) -> a
 ```
 
 Run a portable, single-use closure as a mobile unit.
+
+A closure over top-level code and scalar arguments satisfies the contract, and running it through `teleport` is indistinguishable from calling it:
+
+```prism,mod=Teleport
+teleport(\() -> 6 * 7)
+```
+
+```output
+42
+```
+
+Capturing a local binding is refused at compile time: a local does not travel, so the closure could not move to a fresh runtime:
+
+```prism,compile_fail,mod=Teleport
+let n = 6
+teleport(\() -> n * 7)
+```

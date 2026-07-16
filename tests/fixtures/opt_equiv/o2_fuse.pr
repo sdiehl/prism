@@ -1,0 +1,13 @@
+-- Engagement fixture for the O1/O2 and O2/--no-fuse comparisons. O2's
+-- stream-fusion pass collapses this pure Sequence pipeline; O1 and no-fuse
+-- retain the unfused pipeline. Every execution must retain the same ordered
+-- observation trace.
+
+import Sequence as Seq
+
+fn main() : Unit ! {IO} =
+  println(
+      Seq.sum(
+          Seq.filter(Seq.map(Seq.range(1, 40), \(x) -> x * 2), \(x) -> x > 5),
+        ),
+    )

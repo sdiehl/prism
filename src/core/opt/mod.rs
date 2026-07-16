@@ -38,9 +38,13 @@ use cse::cse_counted;
 use fuse::fuse_counted;
 use inline::inline_counted;
 pub use lint::lint;
+#[cfg(test)]
+pub(in crate::core) use rename::freshen as freshen_legacy;
 use simplify::simplify_counted;
 pub use specialize::specialize;
 use specialize::specialize_counted;
+#[cfg(test)]
+pub(in crate::core) use specialize::subst_comp as subst_comp_legacy;
 
 /// Optimization level: the knob that selects which passes run.
 ///

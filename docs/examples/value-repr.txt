@@ -4,7 +4,9 @@
      +-------------------------------------------+---+
 
    t = 1   immediate: an unboxed scalar in the high 63 bits
-           (a small Int is (n << 1) | 1)
+           (a small Int n is (n << 1) | 1; Bool reuses this exact
+           encoding on 0/1, so false = (0 << 1) | 1 = 1 and
+           true = (1 << 1) | 1 = 3)
    t = 0   pointer:   a word-aligned heap-cell address
            (alignment keeps the low bit clear)
    all 0   unit:      the zero word, an immediate with no payload

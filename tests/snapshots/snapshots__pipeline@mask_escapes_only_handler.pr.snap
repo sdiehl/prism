@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/mask_escapes_only_handler.pr
 ---
@@ -104,6 +105,7 @@ Program {
                             },
                         ),
                     ],
+                    Exhaustive,
                 ),
                 span: 299..370,
             },

@@ -8,9 +8,9 @@ Cooperative async/await concurrency as a single handler, polymorphic in the effe
 
 Prism has no shared mutable cell, so the handler only REIFIES each step as a `Cmd`, and a pure `drive` loop threads the run queue, the finished results, the parked awaiters, and the channel buffers. Those parked continuations escape into the scheduler state, so a program using this is whole-program free-monad; it runs in constant native stack under PRISM_TRAMPOLINE.
 
-Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all its descendants; each is stopped at its next suspension point (`yield`, `await`, `send`, `recv`), never mid-step, and unwinds through its `never` finalizers so every resource is released exactly once. Wrap a resource with `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's awaiters observe it through `try_await` (which yields `Was_Cancelled` rather than hanging); a fiber that fails (an unhandled `fail()`) cancels its siblings in a `scope` and re-raises at the scope boundary.
+Cancellation is a cooperative unwind, not a drop. `cancel(f)` marks `f` and all its descendants; each is stopped at its next suspension point (`yield`, `await`, `send`, `recv`), never mid-step, and unwinds through its `never` finalizers so every resource is released exactly once. Wrap a resource with `on_cancel(cleanup, body)` to run `cleanup` on that unwind. A cancelled fiber's awaiters observe it through `try_await` (which yields `Was_Cancelled` rather than hanging). An unhandled failure in any fiber aborts the cooperative run: every other live fiber and descendant is cancelled, runnable cleanups drain, and the failure re-emerges from `run_async`/`run_lifo`.
 
-`scope` is a structured nursery: it forks a list of fibers and joins them all, so no fiber escapes the call, and a failing child fails the whole scope.
+`scope` is a structured join: it forks a list of fibers and awaits them all on successful runs. It is not a failure-isolation boundary; the scheduler-global abort rule also cancels live fibers created outside the `scope`.
 
 A channel carries the shared result type `a`; fibers in one run share `a` (use a sum type for mixed messages or results).
 
@@ -78,8 +78,8 @@ A logical-time capability: `now` reads the current tick and `sleep` advances it.
 
 ### `yield`
 
-```prism,sig,h-7980ded6d67e388b875d1f4a8fd57b8490634955e8a21e6c20c30d27aa1c7698
-yield : forall a. (Unit) -> Unit ! {Concurrent.Async(a)}
+```prism,sig,h-6ae1e31a55c7cf4f3208d1a4193b969afd63e5da46b5331aaea5d53d1c92d71f
+yield : forall a. () -> Unit ! {Concurrent.Async(a)}
 ```
 
 Reschedule the current fiber. A cooperative yield point; also a cancellation point (a cancelled fiber unwinds here instead of resuming).
@@ -108,13 +108,32 @@ recv : forall a. (Concurrent.Chan) -> a ! {Concurrent.Async(a)}
 
 Receive a value from channel `c`, parking until one is available. A cancellation delivered while parked unwinds here.
 
+```prism,mod=Concurrent
+fn producer(c : Chan) : Int ! {Async(Int)} =
+  send(c, 7)
+  0
+
+fn scene() : Int ! {Async(Int)} =
+  let c = channel()
+  let f = fork(\() -> producer(c))
+  let v = recv(c)
+  await(f)
+  v
+
+fn main() = println(run_async(scene))
+```
+
+```output
+7
+```
+
 ### `on_cancel`
 
 ```prism,sig,h-5c0145f447150a4f31e02928a6b3fbe162ee9a8f38fb19a9a1fded0ea6f948c0
 on_cancel : forall e0 a b. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
 ```
 
-Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once before the cancellation propagates outward. This is a forwarding handler: every `Async` operation `body` performs is relayed unchanged to the enclosing `run_async`, so the finalizer is transparent except on the cancel path. Nest these for stacked resources; each `cleanup` runs exactly once, innermost first.
+Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once before the cancellation propagates outward. This is a forwarding handler: every `Async` operation `body` performs is relayed unchanged to the enclosing `run_async`, so the finalizer is transparent except on the cancel path. A normally returning body does not run `cleanup`. Nest these for stacked resources; cancellation runs each installed cleanup exactly once, innermost first. Once an unwind starts, repeated cancellation is masked for that fiber, so a cleanup may suspend and resume normally. A child forked by a cleanup is born cancelled and cannot escape the unwind. If a cleanup itself fails, `try_await` does not manufacture `Was_Cancelled`: the whole scheduler run fails. A cleanup parked with no runnable producer likewise ends in the scheduler's deterministic no-progress failure; a cleanup that keeps producing work may diverge like any other computation.
 
 ### `try_await`
 
@@ -122,19 +141,29 @@ Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once 
 try_await : forall a. (Concurrent.Fiber) -> Concurrent.Outcome(a) ! {Concurrent.Async(a)}
 ```
 
-Await fiber `f`, observing cancellation as a value instead of a signal: `Completed(v)` if `f` finished, `Was_Cancelled` if it was cancelled. Never hangs on a cancelled fiber. A forwarding handler that catches only the `vanished` signal `await` raises for a cancelled target.
+Await fiber `f`, observing cancellation as a value instead of a signal: `Completed(v)` if `f` finished, `Was_Cancelled` if it was cancelled. Never hangs on a cancelled fiber, and does not report `Was_Cancelled` until the target's cancellation unwind (including its `on_cancel` cleanups) has reached the scheduler. A forwarding handler that catches only the `vanished` signal `await` raises for a cancelled target. If that unwind fails or never completes, `try_await` produces no outcome; the enclosing run fails or diverges instead.
 
 ### `run_async`
 
-```prism,sig,h-5cee9b9fe02b84ef8f61a56f29c677925da414139411b9c0a43b943e14d98427
+```prism,sig,h-88e48cd96fb4de8b803dc6b87daf85024d01db3eaebd0034bd28291607ad9658
 run_async : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
-Run `main` and its fibers cooperatively under the FIFO (round-robin) policy, returning `main`'s result. The fibers' effects `e` flow out unchanged, so the caller still handles them.
+Run `main` and its fibers cooperatively under the FIFO (round-robin) policy, returning `main`'s result. The fibers' effects `e` flow out unchanged, so the caller still handles them. The schedule is deterministic, so a run's output is reproducible.
+
+```prism,mod=Concurrent
+fn task() : Int ! {Async(Int)} = await(fork(\() -> 21)) * 2
+
+fn main() = println(run_async(task))
+```
+
+```output
+42
+```
 
 ### `run_cooperative`
 
-```prism,sig,h-5e9b92c645f65aad8d1fbb496eeba15f5c0d1ed7c1b51a8fbc97f2db06d07b31
+```prism,sig,h-75173352698244519c6a748a93ff0e4c12fcfc9b044ab98c95ed5a860f31adb2
 run_cooperative : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -142,7 +171,7 @@ The policy-neutral entry point: run `main` under the deployment's default cooper
 
 ### `run_lifo`
 
-```prism,sig,h-f45c8ea4086b73923518f9b4a0f16a1c0358f96fa6e83c55216766c179cb04b4
+```prism,sig,h-3ba58cccc225b33a641649d11ddee987d85f5f375f92ff84673451d5070e8fa5
 run_lifo : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -154,7 +183,7 @@ A second scheduling policy over the same `Async` effect: LIFO (depth-first), whi
 scope : forall e0 a. (List(() -> a ! {Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
 ```
 
-Structured nursery: run `tasks` concurrently and join them all, returning the results in order. Every task completes before `scope` returns, so no fiber escapes the call. The nursery is fail-fast: if one task fails (an unhandled `fail()`), its siblings are cancelled (their `on_cancel` finalizers run) and the failure is re-raised at the scope boundary.
+Structured join: run `tasks` concurrently and await their results in order. On a successful run every task completes before `scope` returns. `scope` is not a failure-isolation boundary: an unhandled failure in one task triggers the scheduler-global abort rule, which cancels every other live fiber (including fibers created outside this call) and their descendants, drains runnable cancellation cleanups, and re-performs the failure at the enclosing `run_async`/`run_lifo` boundary.
 
 ### `run_clock`
 
@@ -163,3 +192,16 @@ run_clock : forall e0 a. (() -> a ! {Concurrent.Clock, e0}) -> a ! {e0}
 ```
 
 Run `action` against a logical clock starting at 0, returning its result. `now()` reads the current time; `sleep(d)` advances it by `d`. Time is a pure threaded counter (the parameter-passing answer `Int -> a`), so the run is deterministic and reproducible under `Replay`.
+
+```prism,mod=Concurrent
+fn timed() : Int ! {Clock} =
+  sleep(5)
+  sleep(2)
+  now()
+
+fn main() = println(run_clock(timed))
+```
+
+```output
+7
+```

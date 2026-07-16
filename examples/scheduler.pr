@@ -1,6 +1,6 @@
 effect Coop
-  fork(Unit) : Bool
-  yield(Unit) : Unit
+  fork() : Bool
+  yield() : Unit
 
 -- A cooperative scheduler in one handler ("a poor man's concurrency", Claessen
 -- 1999). `fork()` returns twice, true to the child and false to the parent, so
@@ -31,9 +31,9 @@ fn run_q(q : List(Task)) : Unit ! {IO} =
 fn schedule(main : () -> Unit ! {Coop, IO}) : Unit ! {IO} =
   let start =
     handle main() with
-      fork(u) resume k =>
+      fork() resume k =>
         \(q) -> run_q(append(q, [Task(k(true)), Task(k(false))]))
-      yield(u) resume k => \(q) -> run_q(append(q, [Task(k(()))]))
+      yield() resume k => \(q) -> run_q(append(q, [Task(k(()))]))
       return r => \(q) -> run_q(q)
   start(Nil)
 
@@ -42,11 +42,11 @@ fn worker(name : String, n : Int) : Unit ! {Coop, IO} =
     ()
   else
     println("{name}: {n}")
-    yield(())
+    yield()
     worker(name, n - 1)
 
 fn demo() : Unit ! {Coop, IO} =
-  if fork(()) then
+  if fork() then
     worker("A", 3)
   else
     worker("B", 3)

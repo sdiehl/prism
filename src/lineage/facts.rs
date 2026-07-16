@@ -64,9 +64,10 @@ const FACT_NODE_OUTPUT: &str = "query-output";
 
 /// The durable query family a fact belongs to.
 ///
-/// One shared family covers every explanation the compiler emits: module
-/// checking, SCC-local optimization, effect lowering, backend SCC codegen,
-/// closure planning, object emission, and final linking.
+/// Six kinds are active compiler producers: module checking, SCC-local
+/// optimization, backend SCC codegen, closure planning, object emission, and
+/// final linking. [`QueryKind::Effect`] is retained as a historical wire tag so
+/// ledgers written by older compilers remain readable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum QueryKind {
@@ -128,8 +129,8 @@ pub struct FactInput {
     pub identity: String,
 }
 
-/// One recorded query decision. The seven query kinds all share this type; the
-/// kind plus the logical identity is the stable key a diff aligns on.
+/// One recorded query decision. All active and historical query kinds share this
+/// type; the kind plus the logical identity is the stable key a diff aligns on.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct QueryFact {
     pub kind: QueryKind,
@@ -329,6 +330,25 @@ impl FactLedger {
             self.previous.upsert(old);
         }
         self.current.upsert(fact);
+    }
+
+    // Retire every current fact from a producer this compiler no longer runs.
+    // The last active fact becomes the previous side of a Removed diff, keeping
+    // the upgrade explainable while preventing stale facts from masquerading as
+    // current compiler decisions.
+    fn retire_kind(&mut self, kind: QueryKind) {
+        let identities = self
+            .current
+            .facts()
+            .iter()
+            .filter(|fact| fact.kind == kind)
+            .map(|fact| fact.identity.clone())
+            .collect::<Vec<_>>();
+        for identity in identities {
+            if let Some(old) = self.current.take(kind, &identity) {
+                self.previous.upsert(old);
+            }
+        }
     }
 
     fn save(&self, store: &Store, scope: &FactScope) -> Result<(), Error> {
@@ -549,11 +569,23 @@ fn root_descriptor(root: &Root) -> String {
 /// # Errors
 /// Fails on a filesystem error or a malformed existing ledger.
 pub fn record_facts(store: &Store, scope: &FactScope, facts: Vec<QueryFact>) -> Result<(), Error> {
-    if facts.is_empty() {
+    record_facts_retiring(store, scope, facts, &[])
+}
+
+fn record_facts_retiring(
+    store: &Store,
+    scope: &FactScope,
+    facts: Vec<QueryFact>,
+    retired_kinds: &[QueryKind],
+) -> Result<(), Error> {
+    if facts.is_empty() && retired_kinds.is_empty() {
         return Ok(());
     }
     let batch = FactGraph::new(facts);
     let mut ledger = FactLedger::load(store, scope)?;
+    for &kind in retired_kinds {
+        ledger.retire_kind(kind);
+    }
     for fact in batch.facts {
         ledger.record(fact);
     }
@@ -605,6 +637,20 @@ impl FactRecorder {
     /// # Errors
     /// Fails on a filesystem error or a malformed existing ledger.
     pub fn commit(&self, store: &Store, scope: &FactScope) -> Result<(), Error> {
+        self.commit_retiring(store, scope, &[])
+    }
+
+    /// Commit buffered facts and retire stale current facts from inactive query
+    /// producers in the same ledger update.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error or a malformed existing ledger.
+    pub fn commit_retiring(
+        &self,
+        store: &Store,
+        scope: &FactScope,
+        retired_kinds: &[QueryKind],
+    ) -> Result<(), Error> {
         let facts = std::mem::take(
             &mut *self
                 .facts
@@ -613,7 +659,7 @@ impl FactRecorder {
         )
         .into_values()
         .collect();
-        record_facts(store, scope, facts)
+        record_facts_retiring(store, scope, facts, retired_kinds)
     }
 }
 

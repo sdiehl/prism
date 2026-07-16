@@ -21,6 +21,7 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Ordered", include_str!("../lib/std/Data/Ordered.pr")),
     ("Data.Char", include_str!("../lib/std/Data/Char.pr")),
     ("Data.String", include_str!("../lib/std/Data/String.pr")),
+    ("Data.Pretty", include_str!("../lib/std/Data/Pretty.pr")),
     ("Data.Foldable", include_str!("../lib/std/Data/Foldable.pr")),
     ("Data.Monad", include_str!("../lib/std/Data/Monad.pr")),
     ("Data.Checked", include_str!("../lib/std/Data/Checked.pr")),
@@ -43,4 +44,5 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Json", include_str!("../lib/std/Json.pr")),
     ("Sequence", include_str!("../lib/std/Sequence.pr")),
     ("Cli", include_str!("../lib/std/Cli.pr")),
+    ("Arena", include_str!("../lib/std/Arena.pr")),
 ];

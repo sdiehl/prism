@@ -36,7 +36,7 @@ pub(super) fn free_resume(e: &S<Expr>, sh: bool) -> Option<Span> {
                     .or_else(|| free_resume(&a.body, sh2))
             })
         }),
-        Expr::Handle(b, arms) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
+        Expr::Handle(b, arms, _) => fr(b).or_else(|| arms.iter().find_map(free_resume_arm)),
         Expr::Sugar(s) => free_resume_sugar(s),
         _ => {
             let mut found = None;
@@ -156,7 +156,7 @@ pub(super) fn escapes(
 ) -> Option<Span> {
     match &e.node {
         Expr::Let(x, v, b) => {
-            if let (Expr::Handle(hb, _), Expr::Call(h, _)) = (&v.node, &b.node) {
+            if let (Expr::Handle(hb, _, _), Expr::Call(h, _)) = (&v.node, &b.node) {
                 if names::is_var_runner(x) && matches!(&h.node, Expr::Var(n) if n == x) {
                     return escapes(hb, ops, ctors, tainted);
                 }
@@ -220,7 +220,7 @@ pub(super) fn escapes(
         Expr::IndexSet(recv, key, val) => escapes(recv, ops, ctors, &mut tainted.clone())
             .or_else(|| escapes(key, ops, ctors, &mut tainted.clone()))
             .or_else(|| escapes(val, ops, ctors, &mut tainted.clone())),
-        Expr::Handle(b, _)
+        Expr::Handle(b, _, _)
         | Expr::FieldAccess(b, _)
         | Expr::Ann(b, _)
         | Expr::Inst(b, _)
@@ -330,7 +330,7 @@ pub(in crate::syntax::desugar) fn token_escapes(
                 fs.iter()
                     .find_map(|(_, v)| token_escapes(v, token, ctors, &mut tainted.clone()))
             }),
-        Expr::Handle(b, _)
+        Expr::Handle(b, _, _)
         | Expr::FieldAccess(b, _)
         | Expr::Ann(b, _)
         | Expr::Inst(b, _)

@@ -40,6 +40,14 @@ pub type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
 -- must not collide with the `a`, `b`, `c` a scheme's own quantifiers are
 -- canonicalized to, which would capture the result type under the inner
 -- quantifier.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_lookup(w, 1, ord_insert(w, 1, "a", ord_empty(w))))
+-- ```
+-- ```output
+-- Some(a)
+-- ```
 pub fn with_ordering(
   cmp : (k, k) -> Int,
   body : forall brand. (OrdWitness(k, brand)) -> a
@@ -81,6 +89,14 @@ fn look_by(cmp : (k, k) -> Int, key : k, m : Map(k, v, brand)) : Option(v) =
 pub fn ord_empty(_w : OrdWitness(k, brand)) : Map(k, v, brand) = map_empty
 
 -- | Insert under witness `w`; the result carries `w`'s brand.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_size(w, ord_insert(w, 1, "a", ord_empty(w))))
+-- ```
+-- ```output
+-- 1
+-- ```
 pub fn ord_insert(
   w : OrdWitness(k, brand),
   key : k,
@@ -91,6 +107,14 @@ pub fn ord_insert(
     OrdBy(cmp) => ins_by(cmp, key, x, m)
 
 -- | Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_lookup(w, 9, ord_insert(w, 1, "a", ord_empty(w))))
+-- ```
+-- ```output
+-- None
+-- ```
 pub fn ord_lookup(
   w : OrdWitness(k, brand),
   key : k,
@@ -100,12 +124,36 @@ pub fn ord_lookup(
     OrdBy(cmp) => look_by(cmp, key, m)
 
 -- | True when `key` is present under witness `w`.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_member(w, 1, ord_insert(w, 1, "a", ord_empty(w))))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn ord_member(w : OrdWitness(k, brand), key : k, m : Map(k, v, brand)) : Bool =
   is_some(ord_lookup(w, key, m))
 
 -- | The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_to_list(w, ord_insert(w, 2, "b", ord_insert(w, 1, "a", ord_empty(w)))))
+-- ```
+-- ```output
+-- [(1, a), (2, b)]
+-- ```
 pub fn ord_to_list(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : List((k, v)) =
   map_to_list(m)
 
 -- | The number of entries in a `w`-branded map.
+--
+-- ```prism
+-- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+--   ord_size(w, ord_insert(w, 2, "b", ord_insert(w, 1, "a", ord_empty(w)))))
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn ord_size(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : Int = map_size(m)

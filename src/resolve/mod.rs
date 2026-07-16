@@ -297,8 +297,8 @@ pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> R
 /// Map every top-level name a module binds to its canonical form. An exported
 /// name becomes `Data.Map.insert` (dotted, the symbol an importer reaches); a
 /// private name becomes `Data.Map@helper` (the `@` is unforgeable in source and
-/// codegen rewrites it to a dot). The root module (`path == None`) is the
-/// empty-path module: its names stay bare.
+/// native codegen encodes it distinctly from `.`). The root module
+/// (`path == None`) is the empty-path module: its names stay bare.
 fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, CanonicalName> {
     let exports = exports_of(p);
     binders(p)
@@ -795,7 +795,7 @@ impl<'a> Rw<'a> {
                     self.expr(op.expr_mut());
                 }
             }
-            Expr::Handle(body, arms) => {
+            Expr::Handle(body, arms, _) => {
                 self.expr(body);
                 for arm in arms {
                     self.handler_arm(arm);
@@ -834,7 +834,8 @@ impl<'a> Rw<'a> {
             | Expr::Char(_)
             | Expr::Bool(_)
             | Expr::Unit
-            | Expr::Str(_) => {}
+            | Expr::Str(_)
+            | Expr::Hole(_) => {}
         }
     }
 

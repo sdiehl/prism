@@ -42,6 +42,9 @@ pub const GIVEN: &str = "given";
 pub const HANDLE: &str = "handle";
 pub const WITH: &str = "with";
 pub const HANDLER: &str = "handler";
+// Contextual after `handle ... with`, so existing values named `partial` remain
+// legal everywhere else.
+pub const PARTIAL: &str = "partial";
 pub const MASK: &str = "mask";
 pub const VAL: &str = "val";
 pub const RETURN: &str = "return";
@@ -147,3 +150,8 @@ pub const RBRACE: &str = "}";
 pub const LBRACKET: &str = "[";
 pub const RBRACKET: &str = "]";
 pub const COMMA: &str = ",";
+
+// The line-comment marker: `--` opens a comment running to end of line. The lexer
+// matches it through a regex literal inside a proc-macro attribute, which cannot
+// name a const, so this is the shared spelling every other phase scans against.
+pub const LINE_COMMENT: &str = "--";

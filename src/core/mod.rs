@@ -1,7 +1,11 @@
 pub mod builtins;
 pub mod captures;
 mod cbpv;
-pub mod effect_lower;
+pub(crate) mod effect_abi;
+pub(crate) mod effect_analysis;
+pub(crate) mod effect_check;
+pub(crate) mod effect_shape;
+mod effects;
 mod elaborate;
 pub mod fbip;
 pub mod fv;
@@ -14,15 +18,17 @@ pub mod shape;
 pub mod simd;
 pub mod tailrec;
 pub mod traverse;
+pub mod typed;
 
 pub use cbpv::{
     reachable_fns, CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, ElaboratedCore, HandleOp,
     IoOp, LoweredCore, NegLane, Value,
 };
-pub use effect_lower::lower as lower_effects;
-pub use effect_lower::strategy as effect_strategy;
-pub use effect_lower::{EffectStrategy, OpGrades, EFFECT_TIERS};
+pub(crate) use effect_analysis::latent_ops;
+pub(crate) use effect_check::residual_effects;
+pub use effects::{EffectStrategy, OpGrades, EFFECT_TIERS};
 pub use elaborate::{builtin_arities, elaborate, elaborate_expr, konst_fns};
+pub(crate) use elaborate::{elaborate_typed, typed_verification_error};
 pub use fbip::{
     balanced, check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Fips,
 };
@@ -40,3 +46,11 @@ pub use opt::{
 };
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};
 pub use shape::{class_digests, contract_digest, instance_digest, shape_digests};
+pub use typed::{
+    verify as verify_typed_core, CompSig, ConstructorSig, CoreFnSig, CoreInstantiation,
+    CoreQuantifier, CoreType, CoreViolation, EffectLowered as TypedEffectLowered,
+    Elaborated as TypedElaborated, OperationSig, Owned as TypedOwned,
+    ReuseLowered as TypedReuseLowered, TypedBinder, TypedComp, TypedCompKind, TypedCore,
+    TypedCoreFn, TypedCorePhase, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind, VerifyEnv,
+};

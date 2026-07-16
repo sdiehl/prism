@@ -5,7 +5,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::builtins::{Builtin, FloatOp};
-use super::effect_lower::resume_use::{self, ResumeUse};
+use super::effect_shape::{classify_resume, ResumeUse};
 use super::traverse::Visit;
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
@@ -141,9 +141,9 @@ pub enum Value {
     // representation that carries no heap cell (flattened into fields at the ABI).
     // Their observable behavior is identical to the boxed forms, so the choice is
     // invisible; only the runtime layout differs. `UnboxedRecord` (and the
-    // `UnboxedProject` computation) are reserved for a future named-field ABI;
-    // elaboration currently lowers a record positionally to `UnboxedTuple` and its
-    // projection to a product `Case`, so those two nodes are not yet constructed.
+    // `UnboxedProject` computation) reserve the named-field ABI. Elaboration
+    // lowers records positionally to `UnboxedTuple` and projections to product
+    // `Case`, so neither reserved node is constructed.
     UnboxedTuple(Vec<Self>),
     UnboxedRecord(Vec<(Sym, Self)>),
 }
@@ -232,8 +232,8 @@ impl CheckedHandler {
     /// once, after the type checker has already rejected duplicates, so a failure
     /// here is a compiler-invariant violation rather than a user error.
     ///
-    /// Also classifies each clause's resume usage ([`ResumeUse`]), the stored
-    /// fact every effect-lowering tier consumes instead of re-scanning bodies.
+    /// Also classifies each clause's resume usage, the stored fact every typed
+    /// lowering tier consumes instead of re-scanning bodies.
     ///
     /// # Errors
     /// Returns the duplicated operation name if two clauses share it.
@@ -244,7 +244,7 @@ impl CheckedHandler {
                 return Err(arm.name);
             }
         }
-        let uses = arms.iter().map(resume_use::classify).collect();
+        let uses = arms.iter().map(classify_resume).collect();
         Ok(Self { arms, uses })
     }
 
@@ -254,15 +254,8 @@ impl CheckedHandler {
         &self.arms
     }
 
-    /// The stored resume-usage classification of the clause at `i` (parallel to
-    /// [`arms`](Self::arms)).
-    #[must_use]
-    pub fn resume_use(&self, i: usize) -> ResumeUse {
-        self.uses[i]
-    }
-
     /// The clauses paired with their stored resume-usage facts.
-    pub fn iter_with_use(&self) -> impl Iterator<Item = (&HandleOp, ResumeUse)> {
+    pub(crate) fn iter_with_use(&self) -> impl Iterator<Item = (&HandleOp, ResumeUse)> {
         self.arms.iter().zip(self.uses.iter().copied())
     }
 
@@ -273,7 +266,7 @@ impl CheckedHandler {
     #[must_use]
     pub fn rebuild(&self, f: impl FnMut(&HandleOp) -> HandleOp) -> Self {
         let arms: Vec<HandleOp> = self.arms.iter().map(f).collect();
-        let uses = arms.iter().map(resume_use::classify).collect();
+        let uses = arms.iter().map(classify_resume).collect();
         Self { arms, uses }
     }
 }
@@ -394,6 +387,17 @@ pub enum Comp {
     // instead of calling the allocator. The token is the only operand position
     // that may name a reuse token.
     Reuse(Sym, Value),
+    // Initialize `ctor` in place over `cell`, a raw cell already handed out by an
+    // allocator (typically the result of a `Do(alloc, [size])` an arena handler
+    // discharged into a `bump` call). Writes the constructor's tag and fields into
+    // the cell and yields it, exactly like `Reuse` but over an allocator-provided
+    // cell rather than a freed reuse shell, so the allocation and the
+    // initialization are separated without a fresh `prism_alloc`. The only
+    // difference from the plain `ctor` it replaces is which allocator produced the
+    // memory, which the determinism contract requires to be unobservable. Born in
+    // the arena-lowering mode of effect lowering, so it is a runtime node (never
+    // an effect node): the `Do(alloc)` is fully discharged before this runs.
+    InitAt(Value, Value),
     // A local mutable cell, the runtime form of an escape-checked `var`. The
     // effect-lowering pass `erase_local_vars` rewrites a closed var/State handler
     // into these, so a `var` loop runs as a real loop (constant stack, no
@@ -433,6 +437,7 @@ impl Comp {
             Self::Drop(_) => "Drop",
             Self::WithReuse { .. } => "WithReuse",
             Self::Reuse(..) => "Reuse",
+            Self::InitAt(..) => "InitAt",
             Self::RefNew(_) => "RefNew",
             Self::RefGet(_) => "RefGet",
             Self::RefSet(..) => "RefSet",
@@ -463,6 +468,7 @@ impl Comp {
                 | Self::Drop(_)
                 | Self::WithReuse { .. }
                 | Self::Reuse(..)
+                | Self::InitAt(..)
                 | Self::RefNew(_)
                 | Self::RefGet(_)
                 | Self::RefSet(..)

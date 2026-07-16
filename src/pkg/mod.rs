@@ -126,8 +126,8 @@ pub fn std_pin_status(lock: &Lock) -> Result<StdPin, Error> {
 ///
 /// # Errors
 /// Fails when the embedded stdlib cannot be hashed, the local store cannot be
-/// read, the pinned root is absent from the store, or the stored source bundle is
-/// malformed.
+/// read, the pinned root is absent from the store, the stored bundle's bytes do
+/// not hash to the pin, or the stored source bundle is malformed.
 pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error> {
     let Some(pinned) = lock.std_root() else {
         return Ok(Root::Embedded(crate::stdlib::STDLIB));
@@ -150,6 +150,13 @@ pub fn stdlib_source_root(lock: &Lock, store_root: &Path) -> Result<Root, Error>
         }
         Err(e) => return Err(Error::Io(e)),
     };
+    let got = blake3::hash(&bytes).to_hex().to_string();
+    if got != pinned {
+        return Err(Error::ResolvePackage(format!(
+            "stdlib source bundle hash mismatch: prism.lock pins Std root {pinned}, store \
+             contains {got}"
+        )));
+    }
     let modules = decode_source_bundle(&bytes)?;
     Ok(Root::identified_source_bundle(
         std_source_label(pinned),

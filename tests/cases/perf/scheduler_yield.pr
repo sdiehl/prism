@@ -4,7 +4,7 @@ fn spin(k : Int) : Int ! {Async(Int)} =
   if k == 0 then
     0
   else
-    yield(())
+    yield()
     spin(k - 1)
 
 fn app() : Int ! {Async(Int)} = spin(__N__)

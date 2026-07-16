@@ -4,6 +4,13 @@
 -- unqualified scope everywhere.
 
 -- | True when the result is `Ok`.
+--
+-- ```prism
+-- is_ok(Ok(5))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_ok(r) =
   match r of
     Ok(_x) => true
@@ -16,31 +23,73 @@ pub fn is_err(r) =
     Err(_e) => true
 
 -- | Apply `f` to the `Ok` value, leaving an `Err` untouched.
+--
+-- ```prism
+-- map_result(\(x) -> x * 2, Ok(21))
+-- ```
+-- ```output
+-- Ok(42)
+-- ```
 pub fn map_result(f, r) =
   match r of
     Ok(x) => Ok(f(x))
     Err(e) => Err(e)
 
+-- | Apply `f` to the `Err` value, leaving an `Ok` untouched (the error-side
+-- counterpart of `map_result`).
+pub fn map_err(f, r) =
+  match r of
+    Ok(x) => Ok(x)
+    Err(e) => Err(f(e))
+
 -- | Chain a result-returning function, short-circuiting on `Err` (monadic bind
 -- for `Result`).
+--
+-- ```prism
+-- and_then_result(\(x) -> if x > 0 then Ok(x) else Err("neg"), Ok(5))
+-- ```
+-- ```output
+-- Ok(5)
+-- ```
 pub fn and_then_result(f, r) =
   match r of
     Ok(x) => f(x)
     Err(e) => Err(e)
 
 -- | The `Ok` value, or the default `d` when the result is `Err`.
+--
+-- ```prism
+-- result_or(0, Err("boom"))
+-- ```
+-- ```output
+-- 0
+-- ```
 pub fn result_or(d, r) =
   match r of
     Ok(x) => x
     Err(_e) => d
 
 -- | Convert an `Option` to a `Result`, using `err` in place of `None`.
+--
+-- ```prism
+-- ok_of_option("missing", None)
+-- ```
+-- ```output
+-- Err(missing)
+-- ```
 pub fn ok_of_option(err, o) =
   match o of
     None => Err(err)
     Some(x) => Ok(x)
 
 -- | Convert a `Result` to an `Option`, discarding the error.
+--
+-- ```prism
+-- option_of_result(Ok(5))
+-- ```
+-- ```output
+-- Some(5)
+-- ```
 pub fn option_of_result(r) =
   match r of
     Ok(x) => Some(x)

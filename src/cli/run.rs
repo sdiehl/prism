@@ -36,6 +36,7 @@ pub fn run_file_cmd(
     lineage: Option<&Path>,
     args: Vec<String>,
     cfg: &crate::Config,
+    defer_holes: bool,
 ) -> Result<Option<i32>, CmdError> {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
     // Stream `print` to the terminal and read from real stdin so the CLI behaves
@@ -45,6 +46,13 @@ pub fn run_file_cmd(
     let stdin = io::stdin();
     let mut out = stdout.lock();
     let mut input = stdin.lock();
+    if defer_holes && record.is_some() {
+        return Err((
+            Error::ResolveCommand("`--defer-holes` cannot be combined with `--record`".into()),
+            full,
+            name,
+        ));
+    }
     // `--lineage` (which clap already gated on `--record`) records the run, writes
     // its trace, and writes the sidecar that explains that trace.
     if let (Some(record_path), Some(lineage_path)) = (record, lineage) {
@@ -98,8 +106,14 @@ pub fn run_file_cmd(
         eprintln!("recorded {n_obs} observations to {}", path.display());
         return Ok(exit);
     }
-    let run = crate::interpret_io_on_with_args(&full, &roots, &mut out, &mut input, cfg, args)
-        .map_err(|e| (e, full, name))?;
+    let run = if defer_holes {
+        crate::interpret_io_on_with_args_deferred_holes(
+            &full, &roots, &mut out, &mut input, cfg, args,
+        )
+    } else {
+        crate::interpret_io_on_with_args(&full, &roots, &mut out, &mut input, cfg, args)
+    }
+    .map_err(|e| (e, full, name))?;
     drop(out);
     drop(input);
     if run.exit.is_none() {

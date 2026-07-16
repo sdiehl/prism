@@ -9,7 +9,7 @@ Experimental Prism typechecker proof scaffold: syntax and declarative judgments.
 This module is deliberately outside `lakefile.toml`'s default targets. The files
 under `models/Tc/` are a proof map, not a finished verification. They state the
 objects and theorems an end-to-end soundness proof for Prism's Rust typechecker
-would need, leaving the hard parts as `sorry` exercises for future work.
+would need; unresolved proof obligations are explicit `sorry` sites.
 -/
 namespace Prism
 namespace Tc

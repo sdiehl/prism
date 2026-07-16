@@ -31,20 +31,50 @@ pub type Vec(a, n : Nat) = MkVec(List(a))
 pub fn vempty() : Vec(a, 0) = MkVec([])
 
 -- | The one-element vector, length `1`.
+--
+-- ```prism
+-- vto_list(vsingle(42))
+-- ```
+-- ```output
+-- [42]
+-- ```
 pub fn vsingle(x : a) : Vec(a, 1) = MkVec([x])
 
 -- | The underlying list, forgetting the static length.
+--
+-- ```prism
+-- vto_list(vsingle(7))
+-- ```
+-- ```output
+-- [7]
+-- ```
 pub fn vto_list(v : Vec(a, n)) : List(a) =
   match v of
     MkVec(xs) => xs
 
 -- | Apply `f` to every element, preserving the length.
+--
+-- ```prism
+-- vto_list(vmap(\(x) -> x * 2, vsingle(21)))
+-- ```
+-- ```output
+-- [42]
+-- ```
 pub fn vmap(f : (a) -> b, v : Vec(a, n)) : Vec(b, n) =
   match v of
     MkVec(xs) => MkVec(map(f, xs))
 
 -- | Zip two vectors of the SAME length into a vector of pairs. The shared `n`
 -- forces equal lengths; a mismatch is rejected at compile time, naming both.
+--
+-- ```prism
+-- vto_list(vzip(vsingle(1), vsingle(2)))
+-- ```
+-- ```output
+-- [(1, 2)]
+-- ```
+--
+-- A length mismatch is a compile error:
 --
 -- ```prism,compile_fail
 -- vzip(vsingle(1), vempty())
@@ -57,6 +87,13 @@ pub fn vzip(u : Vec(a, n), v : Vec(b, n)) : Vec((a, b), n) =
 
 -- | The first element. `n` is unconstrained, so the empty vector is not ruled
 -- out statically; on an empty vector this raises `Fail`.
+--
+-- ```prism
+-- vhead(vsingle(42))
+-- ```
+-- ```output
+-- 42
+-- ```
 pub fn vhead(v : Vec(a, n)) : a =
   match v of
     MkVec(xs) =>

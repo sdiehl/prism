@@ -1,0 +1,15 @@
+-- A thunk with an open latent row makes the handled operation family opaque.
+-- The thunk's Out effect remains residual without being forwarded by Wrap's
+-- handler, pinning all five fields of the external residual-fact schema.
+
+effect Out
+  out() : Int
+
+effect Wrap
+  wrap(() -> Int ! {Wrap | e}) : Int
+
+fn run() : Int ! {Out, Wrap} =
+  handle wrap(\() -> out()) with partial {
+    wrap(th) resume k => k(0),
+    return r => r
+  }

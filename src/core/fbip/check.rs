@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program};
 use crate::types::{CtorInfo, DeclInfo, Type};
@@ -106,6 +107,10 @@ enum AllocWitness {
     IndirectCall,
     // A primitive/builtin outside the allocation-free allow-list.
     Builtin(Sym),
+    // A performed `alloc` (the arena allocation effect). Serviced by a
+    // `with_arena` handler out of a bump region, but still a fresh cell: arena
+    // allocation is cheap, not absent, so `@ noalloc` must reject it too.
+    AllocOp,
 }
 
 // Collects up to `ALLOC_WITNESS_LIMIT` witnesses while counting the total, so the
@@ -227,11 +232,26 @@ fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut
         | Comp::Drop(v)
         | Comp::RefNew(v)
         | Comp::RefGet(v) => value_alloc(v, out),
-        Comp::RefSet(cell, v) => {
+        // `InitAt` is a post-lowering (arena) node, unreachable in this
+        // pre-lowering check; kept total, and its embedded constructor still
+        // counts as an allocation like a `RefSet`'s stored value.
+        Comp::RefSet(cell, v) | Comp::InitAt(cell, v) => {
             value_alloc(cell, out);
             value_alloc(v, out);
         }
-        Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
+        Comp::Do(op, args) => {
+            // A performed `alloc` materializes a fresh cell (serviced from an
+            // arena when one is installed, from `prism_alloc` otherwise), so it
+            // is an allocation witness like a bare `Ctor`. Every other effect
+            // operation is control, not allocation, and contributes no witness.
+            if op.as_str() == names::ALLOC_OP {
+                out.push(AllocWitness::AllocOp);
+            }
+            for a in args {
+                value_alloc(a, out);
+            }
+        }
+        Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             for a in args {
                 value_alloc(a, out);
             }
@@ -290,6 +310,9 @@ fn witness_clause(w: &AllocWitness, want: Fip) -> String {
         }
         AllocWitness::Builtin(name) => {
             format!("primitive `{name}` is not on the allocation-free allow-list")
+        }
+        AllocWitness::AllocOp => {
+            "`alloc` carves a fresh cell from an arena, which is cheaper but not free".to_string()
         }
     }
 }
@@ -611,6 +634,7 @@ fn max_uses(x: Sym, c: &Comp) -> usize {
             occ(freed) + if *token == x { 0 } else { max_uses(x, body) }
         }
         Comp::Reuse(tok, v) => usize::from(*tok == x) + occ(v),
+        Comp::InitAt(cell, v) => occ(cell) + occ(v),
         Comp::Prim(_, a, b) => occ(a) + occ(b),
         Comp::Call(_, args) | Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             args.iter().map(occ).sum()

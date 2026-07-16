@@ -1,7 +1,7 @@
 import Concurrent (..)
 
 fn worker(v : Int) : Int ! {Async(Int)} =
-  yield(())
+  yield()
   v
 
 fn producer(c : Chan, n : Int) : Int ! {Async(Int)} =
@@ -9,7 +9,7 @@ fn producer(c : Chan, n : Int) : Int ! {Async(Int)} =
     0
   else
     send(c, n)
-    yield(())
+    yield()
     producer(c, n - 1)
 
 fn consumer(c : Chan, k : Int, acc : Int) : Int ! {Async(Int)} =

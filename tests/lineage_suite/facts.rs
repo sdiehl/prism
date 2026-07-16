@@ -152,6 +152,50 @@ fn fact_graph_bytes_are_deterministic_over_repeated_runs() {
 }
 
 #[test]
+fn retired_effect_producer_moves_stale_fact_out_of_current_graph() {
+    let tmp = TempDir::new("retire-effect");
+    let store = Store::open_or_create(tmp.path.join("store")).unwrap();
+    let scope = FactScope::of_roots(&default_roots(&tmp.path));
+    let recorder = FactRecorder::new();
+    let effect = sample_fact(QueryKind::Effect, "whole-program", "legacy");
+    recorder.record(effect.clone());
+    recorder.record(sample_fact(QueryKind::Module, "<root>", "s1"));
+    recorder.commit(&store, &scope).unwrap();
+    assert_eq!(
+        FactLedger::load(&store, &scope)
+            .unwrap()
+            .current
+            .get(QueryKind::Effect, "whole-program"),
+        Some(&effect)
+    );
+
+    let upgraded = FactRecorder::new();
+    upgraded.record(sample_fact(QueryKind::Module, "<root>", "s2"));
+    upgraded
+        .commit_retiring(&store, &scope, &[QueryKind::Effect])
+        .unwrap();
+
+    let ledger = FactLedger::load(&store, &scope).unwrap();
+    assert_eq!(
+        ledger.current.get(QueryKind::Effect, "whole-program"),
+        None,
+        "an inactive producer must not leave a stale current fact"
+    );
+    assert_eq!(
+        ledger.previous.get(QueryKind::Effect, "whole-program"),
+        Some(&effect),
+        "the retired fact remains on the previous side for upgrade explanation"
+    );
+    let diff = ledger.diff();
+    let retired = diff
+        .entries
+        .iter()
+        .find(|entry| entry.kind == QueryKind::Effect)
+        .expect("the historical effect query remains representable");
+    assert_eq!(retired.change, prism::lineage::FactChange::Removed);
+}
+
+#[test]
 fn module_cutoff_is_explained_from_previous_and_current_graphs() {
     let tmp = TempDir::new("cutoff");
     let store_path = tmp.path.join("store");

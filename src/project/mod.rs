@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::HASH_SCHEME;
 use crate::error::Error;
+use crate::flags::DynFlags;
 
 /// The manifest filename a project is keyed by.
 const MANIFEST: &str = "prism.toml";
@@ -230,6 +231,38 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
         }
         dir = dir.parent()?;
     }
+}
+
+/// Overlay the enclosing project's `[flags]` table onto `base`.
+///
+/// Walks up from `start` for a `prism.toml` and applies only its `[flags]` table
+/// (the toml precedence layer, below the environment and CLI). Reading the flags
+/// is deliberately decoupled from full manifest validity: a bare `prism check
+/// file.pr` in a directory whose `prism.toml` carries only `[flags]` (no
+/// `[package]`/`[bin]`) still honors those flags. A manifest that cannot be found
+/// or read, or whose TOML does not parse, or whose `[flags]` is not a table, leaves
+/// `base` untouched (any real structural error is reported by the command's own
+/// project load); only a bad value *inside* `[flags]` is surfaced here, so a flag
+/// typo is never silently dropped.
+#[must_use]
+pub fn flag_overrides(start: &Path, base: DynFlags) -> DynFlags {
+    let Some(manifest_path) = find_manifest(start) else {
+        return base;
+    };
+    let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+        return base;
+    };
+    let Ok(table) = text.parse::<toml::Table>() else {
+        return base;
+    };
+    let Some(flags_table) = table.get("flags").and_then(toml::Value::as_table) else {
+        return base;
+    };
+    let mut flags = base;
+    if let Err(msg) = flags.apply_toml(flags_table) {
+        eprintln!("{msg}");
+    }
+    flags
 }
 
 /// Load the project rooted at `arg`, which may be a project directory or a

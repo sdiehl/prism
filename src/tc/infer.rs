@@ -3,12 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::env::collect_type_vars;
-use super::{Entry, Env, HandlerFrame, IndexOp, RowScope, Tc, Wanted};
+use super::{
+    EffectOperationUses, Entry, Env, HandlerFrame, HoleSite, IndexOp, OperationUses, RowScope, Tc,
+    Wanted,
+};
+use crate::core::builtins::OUTPUT_BUILTINS;
 use crate::error::{suggest, ErrKind, TypeError};
 use crate::kw;
 use crate::names;
 use crate::sym::Sym;
-use crate::syntax::ast::{self, Core, Expr, HandlerArm, NodeId, S};
+use crate::syntax::ast::{self, Core, Expr, HandlerArm, HandlerMode, NodeId, S};
 use crate::types::is_or_null_element;
 use crate::types::ty::{EffRow, Label, Type, LIST, NUM_CLASS, SHOW_CLASS};
 use crate::wired::Indexable;
@@ -21,10 +25,72 @@ mod paths;
 mod records;
 
 impl Tc<'_> {
+    // Record a syntactically direct operation. This is the only source of a
+    // singleton operation summary; all calls through a type/signature row are
+    // expanded conservatively by `note_opaque_row` below.
+    fn note_operation(&mut self, effect: Sym, operation: Sym) {
+        self.operation_uses.insert(effect, operation);
+    }
+
+    // A public effect row carries labels, not operation subsets. Treat each
+    // concrete label as every operation declared by that effect, and preserve
+    // any open tail as an explicit precision barrier.
+    fn note_opaque_row(&mut self, row: &EffRow) {
+        let row = self.apply_row(row);
+        for label in row.labels() {
+            self.operation_uses.insert_all(label.name);
+        }
+        if !matches!(row.tail(), EffRow::Empty) {
+            self.operation_uses.open_row = true;
+        }
+    }
+
+    // After checking a direct thunk-taking operation, its free row has unified
+    // with the ambient accumulator. Preserve every now-visible label except the
+    // operation's own effect as opaque interface provenance; the own operation
+    // keeps the singleton recorded at the call site.
+    fn note_ambient_residual(&mut self, own_effect: Sym) {
+        let Some(tail) = self.cur_row.as_ref().map(|scope| scope.tail) else {
+            self.operation_uses.open_row = true;
+            return;
+        };
+        let row = self.apply_row(&EffRow::Exist(tail));
+        for label in row.labels() {
+            if label.name != own_effect {
+                self.operation_uses.insert_all(label.name);
+            }
+        }
+        self.operation_uses.open_row = true;
+    }
+
+    fn handled_operations(&self, arms: &[HandlerArm<Core>]) -> BTreeMap<Sym, BTreeSet<Sym>> {
+        let mut handled = BTreeMap::<Sym, BTreeSet<Sym>>::new();
+        for arm in arms {
+            if let HandlerArm::Op(operation, ..) = arm {
+                if let Some(info) = self.eff_ops.get(operation) {
+                    handled
+                        .entry(info.effect_name)
+                        .or_default()
+                        .insert(Sym::from(operation));
+                }
+            }
+        }
+        handled
+    }
+
     fn check(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
+        self.with_tooltip_row(e.id, e.span, |tc| tc.check_node(env, e, ty))
+    }
+
+    fn check_node(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
         let span = e.span;
         let id = e.id;
         match (&e.node, ty) {
+            (Expr::Hole(name), _) => {
+                self.record_hole(env, name, span, ty.clone());
+                self.pending.push((id, ty.clone()));
+                Ok(())
+            }
             (_, Type::Forall(n, b)) => {
                 // Skolemize with a fresh identity rendering as `n`: nested
                 // same-name `forall` binders get distinct context entries.
@@ -65,8 +131,29 @@ impl Tc<'_> {
                     EffRow::Exist(r) => (*r, None),
                     other => (self.push_ex_row(), Some(other.clone())),
                 };
-                let checked =
-                    self.with_row_scope(RowScope { tail, prefix }, |tc| tc.check(&env2, body, ret));
+                let propagate_latent_uses = self.cur_row.as_ref().is_some_and(
+                    |scope| matches!(eff.tail(), EffRow::Exist(row) if *row == scope.tail),
+                );
+                // Constructing a lambda does not perform its body's operations.
+                // Keep their effect-label row on the arrow, but delimit the
+                // operation-local accumulator just as the row scope is delimited.
+                // The exception is a thunk row explicitly tied to the ambient by
+                // an operation signature (`fork`-style): invoking that operation
+                // may run the thunk, so those uses belong to the perform site.
+                let outer_uses = std::mem::take(&mut self.operation_uses);
+                let checked = self.with_row_scope(
+                    RowScope {
+                        tail,
+                        prefix,
+                        expected: eff.clone(),
+                    },
+                    |tc| tc.check(&env2, body, ret),
+                );
+                let latent_uses = std::mem::take(&mut self.operation_uses);
+                self.operation_uses = outer_uses;
+                if propagate_latent_uses {
+                    self.operation_uses.merge(latent_uses);
+                }
                 checked?;
                 if let Some(closed) = closed {
                     self.unify_row(&EffRow::Exist(tail), &closed)
@@ -202,9 +289,65 @@ impl Tc<'_> {
     }
 
     pub(super) fn synth(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
-        let t = self.synth_node(env, e)?;
+        let t = self.with_tooltip_row(e.id, e.span, |tc| tc.synth_node(env, e))?;
         self.pending.push((e.id, t.clone()));
         Ok(t)
+    }
+
+    // Delimit one node's evaluation effects into a fresh row, then fold that
+    // exact row back into its parent. Lambdas and handlers already delimit rows
+    // inside inference, so this observes their real semantics instead of trying
+    // to reconstruct effects from syntax after checking. The path is enabled
+    // only for `dump typespans`/docs analysis.
+    fn with_tooltip_row<T>(
+        &mut self,
+        id: NodeId,
+        span: Span,
+        f: impl FnOnce(&mut Self) -> Result<T, TypeError>,
+    ) -> Result<T, TypeError> {
+        if !self.track_tooltips {
+            return f(self);
+        }
+        let row = self.push_ex_row();
+        let expected = self
+            .cur_row
+            .as_ref()
+            .map_or(EffRow::Empty, |scope| scope.expected.clone());
+        let saved = self.cur_row.replace(RowScope {
+            tail: row,
+            prefix: Vec::new(),
+            expected,
+        });
+        let result = f(self);
+        let effects = result.as_ref().ok().map(|_| self.tooltip_effect_rows(row));
+        self.cur_row = saved;
+        let value = result?;
+        let (reported, propagated) =
+            effects.expect("successful tooltip inference has an effect row");
+        self.pending_tooltip_rows.push((id, reported));
+        if !matches!(propagated, EffRow::Empty) {
+            self.absorb_row(&propagated)
+                .map_err(|error| error.at(span))?;
+        }
+        Ok(value)
+    }
+
+    // Remove accumulator-only open tails while preserving a genuinely open
+    // callee row as the canonical tooltip variable `e0`. This detaches the
+    // child's report from its parent before sibling effects are accumulated.
+    fn tooltip_effect_rows(&self, row: u32) -> (EffRow, EffRow) {
+        if !self.touched_tooltip_rows.contains(&row) {
+            return (EffRow::Empty, EffRow::Empty);
+        }
+        let applied = self.apply_row(&EffRow::Exist(row));
+        let labels = applied.labels().into_iter().cloned();
+        let tail = match applied.tail() {
+            EffRow::Empty => EffRow::Empty,
+            EffRow::Exist(id) if self.tooltip_row_scaffolds.contains(id) => EffRow::Empty,
+            EffRow::Exist(_) | EffRow::Var(_) => EffRow::Var(Sym::from("e0")),
+            EffRow::Extend(..) => unreachable!(),
+        };
+        (EffRow::canonical(labels, tail), applied)
     }
 
     // Run `f` under a delimited ambient effect row, restoring the previous row
@@ -215,6 +358,20 @@ impl Tc<'_> {
         let r = f(self);
         self.cur_row = saved;
         r
+    }
+
+    fn record_hole(&mut self, env: &Env, name: &str, span: Span, expected: Type) {
+        let effects = self
+            .cur_row
+            .as_ref()
+            .map_or(EffRow::Empty, |scope| scope.expected.clone());
+        self.hole_sites.push(HoleSite {
+            name: name.to_string(),
+            span,
+            expected,
+            effects,
+            env: env.clone(),
+        });
     }
 
     // After inference has solved every existential, hold each `This(e)` to the
@@ -256,6 +413,11 @@ impl Tc<'_> {
             Expr::Str(_) => Ok(Type::Str),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::Unit => Ok(Type::Unit),
+            Expr::Hole(name) => {
+                let ty = Type::Exist(self.push_ex());
+                self.record_hole(env, name, span, ty.clone());
+                Ok(ty)
+            }
             // `Null` is the null word for any element, so it takes a fresh element
             // existential that later unification pins from context. It is always
             // sound (it carries no `a`), so it records no `or_null_sites` entry.
@@ -327,13 +489,17 @@ impl Tc<'_> {
                 // captured on the arrow type, not bled into the enclosing
                 // function, and re-emerge only when the closure is applied.
                 let row = self.push_ex_row();
+                let outer_uses = std::mem::take(&mut self.operation_uses);
                 let checked = self.with_row_scope(
                     RowScope {
                         tail: row,
                         prefix: Vec::new(),
+                        expected: EffRow::Exist(row),
                     },
                     |tc| tc.check(&env2, body, &Type::Exist(ret)),
                 );
+                let _latent_uses = std::mem::take(&mut self.operation_uses);
+                self.operation_uses = outer_uses;
                 checked?;
                 Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
             }
@@ -368,13 +534,15 @@ impl Tc<'_> {
                     // argument (a rigid type var) raises the constraint. Active
                     // only when the `Show` class is in scope (prelude present); a
                     // prelude-free program keeps the elaborator's own rejection.
-                    if matches!(x.as_str(), "print" | "println")
+                    if OUTPUT_BUILTINS.contains(&x.as_str())
                         && args.len() == 1
                         && self.classes.contains_key(&Sym::from(SHOW_CLASS))
                     {
                         return self.synth_print(env, f, &args[0], span);
                     }
-                    if let Some(info) = self.eff_ops.get(x) {
+                    if let Some(info) = self.eff_ops.get(x).cloned() {
+                        let effect = info.effect_name;
+                        self.note_operation(effect, Sym::from(x));
                         // A parametric op, or a non-parametric op whose signature
                         // carries a free effect-row variable (a thunk-taking op),
                         // instantiates its op type through `perform_ty`, which ties
@@ -382,11 +550,23 @@ impl Tc<'_> {
                         // a thunk argument's extra effects flow out of the perform
                         // site instead of being absorbed into a fresh, unconnected
                         // row and silently dropped.
-                        if !info.eff_params.is_empty() || info.has_free_row_vars() {
-                            let info = info.clone();
+                        let has_free_row = info.has_free_row_vars();
+                        if !info.eff_params.is_empty() || has_free_row {
                             self.synth(env, f)?;
                             let fty = self.perform_ty(&info, span)?;
-                            return self.app_synth(env, &fty, args, span);
+                            let mut direct = OperationUses::default();
+                            direct.insert(info.effect_name, Sym::from(x));
+                            let result =
+                                self.app_synth_with_uses(env, &fty, args, span, Some(&direct));
+                            // A free signature row is an interface boundary. Its
+                            // concrete thunk uses (when the argument is a lambda)
+                            // were merged above, but a closure value can hide any
+                            // residual tail; keep that uncertainty without
+                            // widening the operation's own singleton effect.
+                            if has_free_row {
+                                self.note_ambient_residual(info.effect_name);
+                            }
+                            return result;
                         }
                         // A non-parametric op with no thunk row carries no effect
                         // args, so its row obligation (rule 1) is a bare label; emit
@@ -399,12 +579,20 @@ impl Tc<'_> {
                 }
                 let tf = self.synth(env, f)?;
                 let tf = self.apply(&tf);
-                self.app_synth(env, &tf, args, span)
+                let precise = match &f.node {
+                    Expr::Var(name) => self.precise_calls.get(&Sym::from(name)).cloned(),
+                    _ => None,
+                };
+                self.app_synth_with_uses(env, &tf, args, span, precise.as_ref())
             }
             Expr::Pipe(x, f) => {
                 let tf = self.synth(env, f)?;
                 let tf = self.apply(&tf);
-                self.app_synth(env, &tf, std::slice::from_ref(x), span)
+                let precise = match &f.node {
+                    Expr::Var(name) => self.precise_calls.get(&Sym::from(name)).cloned(),
+                    _ => None,
+                };
+                self.app_synth_with_uses(env, &tf, std::slice::from_ref(x), span, precise.as_ref())
             }
             Expr::Match(s, arms) => {
                 let ts = self.synth(env, s)?;
@@ -499,7 +687,7 @@ impl Tc<'_> {
                 self.synth_record_update(env, base_expr, ctor_name, field_exprs, span)
             }
             Expr::RecordUpdatePath(base, ups) => self.update_path(env, base, ups, id, span),
-            Expr::Handle(body, arms) => self.synth_handle(env, body, arms, span),
+            Expr::Handle(body, arms, mode) => self.synth_handle(env, body, arms, *mode, id, span),
             Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
@@ -567,6 +755,8 @@ impl Tc<'_> {
         env: &Env,
         body: &S<Expr<Core>>,
         arms: &[HandlerArm<Core>],
+        mode: HandlerMode,
+        id: NodeId,
         span: Span,
     ) -> Result<Type, TypeError> {
         // A handler binds each operation at most once, carries at most one
@@ -576,7 +766,13 @@ impl Tc<'_> {
         // the interpreter's arm map and the free-monad cascade would otherwise
         // resolve a duplicate differently (last-wins versus first-wins), making
         // the lowering tier observable.
-        self.validate_handler_arms(arms, span)?;
+        self.validate_handler_arms(arms, mode, span)?;
+        if !self.handler_nodes.insert(id) {
+            return Err(TypeError::InternalInvariant {
+                msg: format!("handler node {} checked more than once", id.0),
+            });
+        }
+        let outer_uses = std::mem::take(&mut self.operation_uses);
         let mut scope = Vec::new();
         let mut seen = BTreeSet::new();
         for arm in arms {
@@ -593,7 +789,8 @@ impl Tc<'_> {
                 }
             }
         }
-        let body_ty = self.synth_handle_body(env, body, &scope, arms, span)?;
+        let (body_ty, body_residual) =
+            self.synth_handle_body(env, body, &scope, arms, mode, span)?;
         let ret_ex = self.push_ex();
         for arm in arms {
             match arm {
@@ -631,8 +828,16 @@ impl Tc<'_> {
                             EffRow::Exist(self.push_ex_row()),
                             Type::Exist(ret_ex),
                         );
-                        env2.insert(Sym::from(k_var), k_ty);
-                        self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
+                        let k_sym = Sym::from(k_var);
+                        env2.insert(k_sym, k_ty);
+                        let previous = self.precise_calls.insert(k_sym, body_residual.clone());
+                        let checked = self.check(&env2, arm_body, &Type::Exist(ret_ex));
+                        if let Some(previous) = previous {
+                            self.precise_calls.insert(k_sym, previous);
+                        } else {
+                            self.precise_calls.remove(&k_sym);
+                        }
+                        checked?;
                     } else {
                         return Err(ErrKind::UnknownEffectOp {
                             op: op_name.clone(),
@@ -647,6 +852,41 @@ impl Tc<'_> {
                 HandlerArm::Sugar(never) => match *never {},
             }
         }
+        let residual = std::mem::take(&mut self.operation_uses);
+        let handled = self.handled_operations(arms);
+        let forwarded_operations = body_residual
+            .by_effect
+            .iter()
+            .filter(|(effect, _)| handled.contains_key(effect))
+            .filter_map(|(_, uses)| match uses {
+                EffectOperationUses::Known(operations) => Some(operations.iter()),
+                EffectOperationUses::All => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        let forwarded_effects = body_residual
+            .by_effect
+            .iter()
+            .filter_map(|(effect, uses)| {
+                (handled.contains_key(effect) && matches!(uses, EffectOperationUses::All))
+                    .then_some(*effect)
+            })
+            .collect();
+        let fact = crate::hir::HandlerResidual::new(
+            forwarded_operations,
+            forwarded_effects,
+            residual.operations(),
+            residual.opaque_effects(),
+            residual.open_row,
+        );
+        if self.handler_residuals.insert(id, fact).is_some() {
+            return Err(TypeError::InternalInvariant {
+                msg: format!("handler node {} produced duplicate residual facts", id.0),
+            });
+        }
+        self.operation_uses = outer_uses;
+        self.operation_uses.merge(residual);
         Ok(self.apply(&Type::Exist(ret_ex)))
     }
 
@@ -656,6 +896,7 @@ impl Tc<'_> {
     fn validate_handler_arms(
         &self,
         arms: &[HandlerArm<Core>],
+        mode: HandlerMode,
         handler_span: Span,
     ) -> Result<(), TypeError> {
         let mut seen_ops: BTreeMap<&str, Span> = BTreeMap::new();
@@ -697,12 +938,14 @@ impl Tc<'_> {
                 HandlerArm::Sugar(never) => match *never {},
             }
         }
-        // Coverage: a handler discharges every effect its arms name, so it must
-        // implement every operation of each such effect. Row discharge is
-        // effect-granular; letting an op-granular subset through would remove
-        // the whole effect from the body's row and leave the unimplemented
-        // operations to escape past their own handler. Partial handlers with a
-        // residual row are a future design, not an accident of row subtraction.
+        if mode == HandlerMode::Partial {
+            return Ok(());
+        }
+
+        // An ordinary handler promises exhaustive coverage and may therefore
+        // discharge every effect it names. The explicit `partial` form makes no
+        // such promise; its omitted operations remain in the residual row and
+        // are forwarded by the typed lowering.
         let mut by_effect: BTreeMap<Sym, BTreeSet<&str>> = BTreeMap::new();
         for arm in arms {
             if let HandlerArm::Op(op_name, _, _, _) = arm {
@@ -756,8 +999,9 @@ impl Tc<'_> {
     ) -> Result<Type, TypeError> {
         let recv_ty = self.synth(env, recv)?;
         let recv_ty = self.apply(&recv_ty);
-        self.absorb_row(&EffRow::singleton(Sym::from(crate::names::FAIL_EFFECT)))
-            .map_err(|e| e.at(span))?;
+        let fail = EffRow::singleton(Sym::from(crate::names::FAIL_EFFECT));
+        self.note_opaque_row(&fail);
+        self.absorb_row(&fail).map_err(|e| e.at(span))?;
         if let Some((kty, elem, _)) = index_container(&recv_ty) {
             self.check(env, key, &kty)?;
             Ok(self.apply(&elem))
@@ -822,21 +1066,32 @@ impl Tc<'_> {
         args: &[S<Expr<Core>>],
         span: Span,
     ) -> Result<Type, TypeError> {
+        self.app_synth_with_uses(env, fty, args, span, None)
+    }
+
+    fn app_synth_with_uses(
+        &mut self,
+        env: &Env,
+        fty: &Type,
+        args: &[S<Expr<Core>>],
+        span: Span,
+        precise: Option<&OperationUses>,
+    ) -> Result<Type, TypeError> {
         match fty {
             Type::Forall(n, b) => {
                 let ex = self.push_ex();
                 let b2 = b.subst_var(*n, &Type::Exist(ex));
-                self.app_synth(env, &b2, args, span)
+                self.app_synth_with_uses(env, &b2, args, span, precise)
             }
             Type::RowForall(n, b) => {
                 let r = self.push_ex_row();
                 let b2 = b.subst_row_var(*n, &EffRow::Exist(r));
-                self.app_synth(env, &b2, args, span)
+                self.app_synth_with_uses(env, &b2, args, span, precise)
             }
             // Applying a usage-annotated closure applies its inner function; the
             // multiplicity contract (`@ once`: at most one use) is enforced by the
             // linear-use pass, not by the call rule.
-            Type::Coeffect(inner, _) => self.app_synth(env, inner, args, span),
+            Type::Coeffect(inner, _) => self.app_synth_with_uses(env, inner, args, span, precise),
             Type::Exist(a) => {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
@@ -848,6 +1103,11 @@ impl Tc<'_> {
                 }
                 // Applying a function value performs its effects: fold the
                 // still-unknown callee row into the ambient obligation.
+                if let Some(uses) = precise {
+                    self.operation_uses.merge(uses.clone());
+                } else {
+                    self.note_opaque_row(&EffRow::Exist(row));
+                }
                 self.absorb_row(&EffRow::Exist(row))
                     .map_err(|e| e.at(span))?;
                 Ok(self.apply(&Type::Exist(ret)))
@@ -878,6 +1138,11 @@ impl Tc<'_> {
                     // The callee's effects become the caller's: fold its row
                     // into the ambient obligation (open-row dedups, and a
                     // flexible callee tail propagates as a row variable).
+                    if let Some(uses) = precise {
+                        self.operation_uses.merge(uses.clone());
+                    } else {
+                        self.note_opaque_row(eff);
+                    }
                     self.absorb_row(eff).map_err(|e| e.at(span))?;
                     Ok(self.apply(r))
                 } else {
@@ -1077,7 +1342,11 @@ impl Tc<'_> {
             }
             .at(span));
         }
-        let t = self.synth(env, body)?;
+        let outer_uses = std::mem::take(&mut self.operation_uses);
+        let body_ty = self.synth(env, body);
+        let mut body_uses = std::mem::take(&mut self.operation_uses);
+        self.operation_uses = outer_uses;
+        let t = body_ty?;
         let args = (0..self.eff_arity(eff_sym))
             .map(|_| Type::Exist(self.push_ex()))
             .collect();
@@ -1085,8 +1354,16 @@ impl Tc<'_> {
             name: eff_sym,
             args,
         };
-        self.absorb_row(&EffRow::Extend(label, Box::new(EffRow::Empty)))
-            .map_err(|e| e.at(span))?;
+        let masked = EffRow::Extend(label, Box::new(EffRow::Empty));
+        // Mask changes which handler frame may subtract an operation, not the
+        // operation's identity. Preserve a direct Known set (so an adjacent
+        // outer partial handler can still cancel it); only introduce OpaqueAll
+        // when the masked body supplied no operation-local evidence for E.
+        if !body_uses.by_effect.contains_key(&eff_sym) {
+            body_uses.insert_all(eff_sym);
+        }
+        self.operation_uses.merge(body_uses);
+        self.absorb_row(&masked).map_err(|e| e.at(span))?;
         if let Some(frame) = self
             .handler_stack
             .iter_mut()
@@ -1108,8 +1385,10 @@ impl Tc<'_> {
         body: &S<Expr<Core>>,
         scope: &[(Sym, Vec<Type>)],
         arms: &[HandlerArm<Core>],
+        mode: HandlerMode,
         span: Span,
-    ) -> Result<Type, TypeError> {
+    ) -> Result<(Type, OperationUses), TypeError> {
+        let handler_uses = std::mem::take(&mut self.operation_uses);
         let body_row = self.push_ex_row();
         // A handler scopes a fresh ambient tail for its body but keeps the
         // enclosing fixed prefix.
@@ -1120,6 +1399,7 @@ impl Tc<'_> {
         let saved_row = self.cur_row.replace(RowScope {
             tail: body_row,
             prefix,
+            expected: EffRow::Exist(body_row),
         });
         // This handler joins the active stack while its body is checked, so a
         // `mask` inside the body can find it and tunnel an effect past it.
@@ -1137,14 +1417,51 @@ impl Tc<'_> {
         let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
         let frame = self.handler_stack.pop().expect("handler frame");
         self.cur_row = saved_row;
+        let mut body_uses = std::mem::take(&mut self.operation_uses);
+        self.operation_uses = handler_uses;
         let body_ty = self.apply(&body_ty?);
+        let handled_operations = self.handled_operations(arms);
+        if mode == HandlerMode::Partial && body_uses.open_row {
+            // The open tail may instantiate to any effect this partial handler
+            // names. Since that uncertainty blocks label discharge, preserve the
+            // same proof in the operation summary as OpaqueAll rather than
+            // subtracting a locally known operation and contradicting the row.
+            for effect in handled_operations.keys() {
+                body_uses.insert_all(*effect);
+            }
+        }
+        let discharge_candidates = match mode {
+            HandlerMode::Exhaustive => frame.handled.clone(),
+            HandlerMode::Partial => handled_operations
+                .iter()
+                .filter_map(|(effect, handled)| {
+                    let covered = if body_uses.open_row {
+                        false
+                    } else {
+                        body_uses.by_effect.get(effect).is_some_and(|uses| {
+                            matches!(uses, EffectOperationUses::Known(uses) if uses.is_subset(handled))
+                        })
+                    };
+                    covered.then_some(*effect)
+                })
+                .collect(),
+        };
         // A masked effect tunnels past this handler: keep it in the residual row
         // rather than discharging it, so the surrounding function still demands
         // an enclosing handler for it.
-        let discharged: BTreeSet<Sym> = frame.handled.difference(&frame.masked).copied().collect();
+        let discharged: BTreeSet<Sym> = discharge_candidates
+            .difference(&frame.masked)
+            .copied()
+            .collect();
         self.discharge_row(body_row, &discharged)
             .map_err(|e| e.at(span))?;
-        Ok(body_ty)
+        let opaque_discharge = match mode {
+            HandlerMode::Exhaustive => frame.handled.clone(),
+            HandlerMode::Partial => BTreeSet::new(),
+        };
+        let residual = body_uses.subtract(&handled_operations, &opaque_discharge, &frame.masked);
+        self.operation_uses.merge(residual.clone());
+        Ok((body_ty, residual))
     }
 }
 

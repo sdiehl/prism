@@ -1,0 +1,13 @@
+effect Ask
+  ask() : Int
+
+class Container(f)
+  wrap : (a) -> f(a)
+
+fn plus_one(x : Int) : Int = x + 1
+
+fn sample(flag : Bool) : Int =
+  if flag then
+    plus_one(ask())
+  else
+    0

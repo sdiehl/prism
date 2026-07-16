@@ -1,5 +1,7 @@
 #[path = "formatter/fmt_break.rs"]
 mod fmt_break;
+#[path = "formatter/fmt_control.rs"]
+mod fmt_control;
 #[path = "formatter/fmt_deriving.rs"]
 mod fmt_deriving;
 #[path = "formatter/fmt_parens.rs"]

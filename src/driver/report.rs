@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::core::fbip::borrow_sigs;
-use crate::core::{elaborate, insert_rc, pp_core_pretty, reuse, Digest, ElaboratedCore};
+use crate::core::{elaborate_typed, insert_rc, pp_core_pretty, reuse, Digest, ElaboratedCore};
 use crate::error::Error;
 use crate::eval::{run, Rv};
 use crate::lex::lex;
@@ -23,7 +23,7 @@ use crate::types::{check as typecheck, Checked};
 #[cfg(feature = "native")]
 use crate::codegen::emit_llvm_with_native_kont_table;
 #[cfg(feature = "native")]
-use crate::core::{fip_annots, hash_program, LoweredCore};
+use crate::core::{fip_annots, hash_program};
 
 #[cfg(feature = "native")]
 use super::identity::{native_kont_table_of, NativeKontIdentityRows};
@@ -31,9 +31,9 @@ use super::query::section;
 #[cfg(feature = "native")]
 use super::query::strip_target;
 use super::verify::{fip_check, replayable_check};
-use super::{frontend, Config};
 #[cfg(feature = "native")]
-use super::{hash_meta, lower_opt};
+use super::{finish_lowered, hash_meta, lower_opt};
+use super::{frontend, Config};
 
 pub(super) fn types_section(checked: &Checked) -> String {
     let mut s = String::new();
@@ -104,13 +104,15 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     };
     section(&mut out, "types", types_section(&checked).trim_end());
 
-    let core = match elaborate(&program, &checked) {
-        Ok(c) => ElaboratedCore(c),
+    let elaboration = match elaborate_typed(&program, &checked) {
+        Ok(elaboration) => elaboration,
         Err(e) => {
             section(&mut out, "core (cbpv)", &render(e));
             return out;
         }
     };
+    let (core, typed, verify_env) = elaboration.into_parts();
+    let core = ElaboratedCore(core);
     section(&mut out, "core (cbpv)", pp_core_pretty(&core).trim_end());
 
     if let Err(e) = fip_check(&program, &checked, &core) {
@@ -131,13 +133,23 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     );
 
     #[cfg(feature = "native")]
-    match lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg) {
-        Ok((lowered, ctors, _)) => {
+    match lower_opt(
+        typed,
+        &verify_env,
+        &checked.ctors,
+        &checked.op_grades(),
+        cfg,
+    )
+    .and_then(|lowered| {
+        let ctors = lowered.ctors.clone();
+        finish_lowered(lowered, &sigs).map(|core| (core, ctors))
+    }) {
+        Ok((lowered, ctors)) => {
             let hashes = hash_program(&core, &hash_meta(&checked, &sigs, &fip_annots(&program)));
             match native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
                 .and_then(|native_kont_table| {
                     emit_llvm_with_native_kont_table(
-                        &LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
+                        &lowered,
                         &ctors,
                         &native_kont_table,
                         cfg.flags.native_kont_frames,

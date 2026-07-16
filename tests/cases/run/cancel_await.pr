@@ -1,23 +1,35 @@
--- Awaiting a cancelled fiber never hangs. `try_await` observes the
--- cancellation as `Was_Cancelled` instead of blocking forever.
+-- Two awaiters of one cancelled fiber both observe `Was_Cancelled`, but only
+-- after its one cancellation cleanup has completed. The target unwind wakes
+-- both parked observers; neither can observe the earlier cancellation request.
 
 import Concurrent (..)
 
-fn looper() : Int ! {Async(Int), IO} =
-  yield(())
-  yield(())
+fn looper_body() : Int ! {Async(Int), IO} =
+  yield()
+  yield()
   99
+
+fn looper() : Int ! {Async(Int), IO} =
+  on_cancel(\() -> println("target cleanup ran"), looper_body)
+
+fn observe(name : String, w : Fiber) : Int ! {Async(Int), IO} =
+  match try_await(w) of
+    Completed(v) =>
+      println("{name} observed completion {v}")
+      v
+    Was_Cancelled =>
+      println("{name} observed Cancelled")
+      0 - 1
 
 fn scene() : Int ! {Async(Int), IO} =
   let w = fork(looper)
-  yield(())
+  let one = fork(\() -> observe("one", w))
+  let two = fork(\() -> observe("two", w))
+  yield()
+  yield()
   cancel(w)
-  match try_await(w) of
-    Completed(v) =>
-      println("completed {v}")
-      v
-    Was_Cancelled =>
-      println("await observed Cancelled")
-      0 - 1
+  await(one)
+  await(two)
+  0 - 1
 
 fn main() = println(run_async(scene))

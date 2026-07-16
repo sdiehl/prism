@@ -291,12 +291,16 @@ fn fold_wheres(d: &mut Decl) {
         return;
     }
     let span = d.body.span;
+    // Zero-width `let` wrappers: the original body alone keeps its span (and
+    // therefore its tooltip); each `where` binding's expression keeps its own
+    // honest parsed span.
+    let anchor = Span::empty(span.start);
     let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
     d.body = std::mem::take(&mut d.wheres)
         .into_iter()
         .rev()
         .fold(body, |acc, (n, v)| {
-            sp(Expr::Let(n, Box::new(v), Box::new(acc)), span)
+            sp(Expr::Let(n, Box::new(v), Box::new(acc)), anchor)
         });
 }
 
@@ -691,7 +695,8 @@ fn pat_binds(p: &S<Pattern>, out: &mut Vec<String>) {
 // `@ portable` parameter of the enclosing function (a relay), or a
 // portable-typed parameter (scalar data). Any other captured free variable (a
 // local closure, a `var` cell, a handler op, a nonportable value) is rejected.
-// Conservative: a scalar bound by a local `let` is not yet admitted.
+// A scalar bound by a local `let` is excluded because this check admits only
+// facts available directly from the enclosing function's signature.
 fn check_portable_captures(prog: &Program) -> Result<(), TypeError> {
     let portable_params: BTreeMap<&str, Vec<usize>> = prog
         .fns

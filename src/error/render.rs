@@ -25,11 +25,19 @@ impl Error {
             | Self::ResolvePackage(_)
             | Self::ResolveLineage(_)
             | Self::ResolveCommand(_) => "Module Error",
+            Self::SemanticPatch(_) => "Patch Error",
             Self::Io(_) => "IO Error",
             Self::RuntimeEvaluation(_) | Self::RuntimeReplay(_) | Self::RuntimeDebugger(_) => {
                 "Runtime Error"
             }
-            Self::InternalInvariant(_) => "Internal Error",
+            Self::TypedCoreEnvironment(_)
+            | Self::TypedCoreConstruction(_)
+            | Self::TypedCoreVerification(_)
+            | Self::TypedCoreErasure(_)
+            | Self::TypedCoreSpecialization(_)
+            | Self::TypedCoreSimplify(_)
+            | Self::TypedCoreEffectLowering(_)
+            | Self::InternalInvariant(_) => "Internal Error",
         }
     }
 

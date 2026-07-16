@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use crate::resolve::Root;
 
 use super::doctest::{
-    actual_output, is_reference_fence, lang_of, mode_of, Mode, FENCE_OUTPUT, FENCE_PRISM,
+    actual_output, is_reference_fence, lang_of, mode_of, unhide, Mode, FENCE_OUTPUT, FENCE_PRISM,
 };
 use super::extract::strip;
 
@@ -30,12 +30,16 @@ const FENCE_MARK: &str = "```";
 // `--` opener plus the optional `|`/`^` doc sigils and spacing.
 const DOC_MARKER_CHARS: [char; 3] = [' ', '|', '^'];
 
-/// A source file to check or rewrite: its path on disk and the source text that
-/// was parsed (used to detect an on-disk change before writing).
+/// A source file to check or rewrite.
+///
+/// Carries its path on disk, the source text that was parsed (used to detect an
+/// on-disk change before writing), and the dotted module it defines (the
+/// doctest auto-import; see `doctest::runnable`).
 #[derive(Debug)]
 pub struct ExpectFile {
     pub path: PathBuf,
     pub source: String,
+    pub module: String,
 }
 
 /// The outcome of an expect pass, reported loudly like `just snap`.
@@ -97,7 +101,7 @@ fn accept_file(
             continue;
         }
         report.checked += 1;
-        match actual_output(&blk.code, roots, base) {
+        match actual_output(&file.module, &blk.code, roots, base) {
             Err(reason) => report.failures.push((blk.origin.clone(), reason)),
             Ok(actual) if actual == blk.expected => {}
             Ok(actual) => {
@@ -164,7 +168,7 @@ fn scan(disp: &str, lines: &[&str]) -> Vec<Block> {
                 if out_close < lines.len() {
                     let mut code = String::new();
                     for l in &lines[open + 1..close] {
-                        code.push_str(strip(l).trim_end());
+                        code.push_str(unhide(strip(l).trim_end()));
                         code.push('\n');
                     }
                     let expected = lines[out_open + 1..out_close]

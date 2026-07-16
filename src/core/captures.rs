@@ -504,7 +504,7 @@ fn descend_ops(c: &Comp, handled: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
         | Comp::Reuse(_, v)
         | Comp::RefNew(v)
         | Comp::RefGet(v) => collect_ops_value(v, handled, acc),
-        Comp::RefSet(a, b) | Comp::Prim(_, a, b) => {
+        Comp::RefSet(a, b) | Comp::Prim(_, a, b) | Comp::InitAt(a, b) => {
             collect_ops_value(a, handled, acc);
             collect_ops_value(b, handled, acc);
         }

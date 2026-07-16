@@ -1,0 +1,136 @@
+{
+  "format": "prism-typespans-v1",
+  "spans": [
+    {
+      "start": 7,
+      "end": 10,
+      "type": "Ask; operations: ask",
+      "level": "effect"
+    },
+    {
+      "start": 13,
+      "end": 16,
+      "type": "ask() : Int",
+      "level": "effect"
+    },
+    {
+      "start": 32,
+      "end": 41,
+      "type": "Container(f : Type -> Type); methods: wrap",
+      "level": "class"
+    },
+    {
+      "start": 42,
+      "end": 43,
+      "type": "f : Type -> Type",
+      "level": "typevar"
+    },
+    {
+      "start": 55,
+      "end": 56,
+      "type": "a : Type",
+      "level": "typevar"
+    },
+    {
+      "start": 61,
+      "end": 62,
+      "type": "f : Type -> Type",
+      "level": "typevar"
+    },
+    {
+      "start": 63,
+      "end": 64,
+      "type": "a : Type",
+      "level": "typevar"
+    },
+    {
+      "start": 70,
+      "end": 78,
+      "type": "(Int) -> Int"
+    },
+    {
+      "start": 79,
+      "end": 80,
+      "type": "Int"
+    },
+    {
+      "start": 83,
+      "end": 86,
+      "type": "Int : Type",
+      "level": "typelevel"
+    },
+    {
+      "start": 90,
+      "end": 93,
+      "type": "Int : Type",
+      "level": "typelevel"
+    },
+    {
+      "start": 96,
+      "end": 101,
+      "type": "Int"
+    },
+    {
+      "start": 96,
+      "end": 97,
+      "type": "Int"
+    },
+    {
+      "start": 100,
+      "end": 101,
+      "type": "Int"
+    },
+    {
+      "start": 106,
+      "end": 112,
+      "type": "(Bool) -> Int ! {Ask}"
+    },
+    {
+      "start": 113,
+      "end": 117,
+      "type": "Bool"
+    },
+    {
+      "start": 120,
+      "end": 124,
+      "type": "Bool : Type",
+      "level": "typelevel"
+    },
+    {
+      "start": 128,
+      "end": 131,
+      "type": "Int : Type",
+      "level": "typelevel"
+    },
+    {
+      "start": 139,
+      "end": 143,
+      "type": "Bool"
+    },
+    {
+      "start": 153,
+      "end": 168,
+      "type": "Int ! {Ask}"
+    },
+    {
+      "start": 153,
+      "end": 161,
+      "type": "(Int) -> Int"
+    },
+    {
+      "start": 162,
+      "end": 167,
+      "type": "Int ! {Ask}"
+    },
+    {
+      "start": 162,
+      "end": 165,
+      "type": "() -> Int"
+    },
+    {
+      "start": 180,
+      "end": 181,
+      "type": "Int"
+    }
+  ]
+}

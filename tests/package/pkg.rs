@@ -378,6 +378,24 @@ fn stale_std_pin_loads_source_bundle_from_store() {
 }
 
 #[test]
+fn stale_std_pin_rejects_corrupt_store_bytes() {
+    let tmp = TempDir::new("std-source-corrupt");
+    let bundle = encode_source_bundle([("StoreOnly", "pub fn answer() : Int = 42\n")]);
+    let root = blake3::hash(&bundle).to_hex().to_string();
+    let store = Store::open_or_create(tmp.root()).unwrap();
+    store.put(&root, b"corrupt source bundle").unwrap();
+
+    let mut lock = Lock::default();
+    lock.pin_std(root.clone());
+    let err = prism::pkg::stdlib_source_root(&lock, &tmp.root())
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("stdlib source bundle hash mismatch"));
+    assert!(err.contains(&root));
+}
+
+#[test]
 fn project_check_uses_locked_std_source_bundle() {
     let tmp = TempDir::new("std-project");
     let project = tmp.path.join("project");

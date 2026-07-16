@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/handler_dup_return.pr
 ---
@@ -120,6 +121,7 @@ Program {
                                         },
                                     ),
                                 ],
+                                Exhaustive,
                             ),
                             span: 200..294,
                         },

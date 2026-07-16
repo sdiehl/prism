@@ -122,7 +122,7 @@ pub fn record_pass(
 /// A scheme bump makes every older record invisible (its `scheme` field no
 /// longer matches `HASH_SCHEME`), and a toolchain/target/backend/flag change
 /// makes every older record invisible (its `identity` field no longer matches),
-/// so a stale verdict is never served across either migration.
+/// so a stale verdict is never served across either identity transition.
 ///
 /// # Errors
 /// Fails on a filesystem error or a malformed record.

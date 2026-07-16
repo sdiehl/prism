@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -34,7 +35,7 @@ pub use node::{Atom, Cmp, HandleInfo, Node};
 pub use tape::{Obs, Tape};
 
 use builtin::{float_builtin, neg_rv, prim, str_builtin};
-use node::lower;
+use node::{lower, lower_runtime};
 use tape::{
     capability_obs, event_args, event_value_of_rv, obs_label, obs_of_rv, rv_of_obs, write_obs,
     ObsKind,
@@ -47,6 +48,7 @@ use tape::{
 const UNIT_REPR: &str = "()";
 const FUNCTION_REPR: &str = "<function>";
 const CONTINUATION_REPR: &str = "<continuation>";
+const LOCAL_REF_REPR: &str = "<local-ref>";
 
 #[derive(Clone, Debug)]
 pub enum Rv {
@@ -75,6 +77,10 @@ pub enum Rv {
     // runtime's rc==1 in-place / shared-copy discipline.
     TBuf(Rc<Vec<u64>>),
     Resume(Rc<[Frame]>),
+    // Verification-only runtime form for an effect-lowered local `var`. Ordinary
+    // source interpretation never constructs it; only the explicit lowered-Core
+    // evaluator does.
+    Ref(Rc<RefCell<Self>>),
 }
 
 // Constructor payloads share structure via Rc, so cloning a value out of an env
@@ -168,6 +174,7 @@ impl Rv {
             Self::Buf(_) => "Buf",
             Self::TBuf(_) => FLOAT_BUF,
             Self::Resume(_) => "Resume",
+            Self::Ref(_) => "Ref",
         }
     }
 
@@ -202,6 +209,7 @@ impl Rv {
             Self::Big(n) => n.to_string(),
             Self::Closure(..) | Self::Thunk(..) => FUNCTION_REPR.into(),
             Self::Resume(..) => CONTINUATION_REPR.into(),
+            Self::Ref(_) => LOCAL_REF_REPR.into(),
             Self::Data(name, fs) => match self.list_elems() {
                 Some(es) => {
                     let es: Vec<_> = es.iter().map(|e| e.render(quote)).collect();
@@ -365,10 +373,29 @@ impl<'a> Machine<'a> {
         input: &'a mut dyn io::BufRead,
         args: Vec<String>,
     ) -> Self {
+        Self::new_with_lowerer(globals, out_sink, input, args, lower)
+    }
+
+    fn new_lowered_with_args(
+        globals: &BTreeMap<Sym, CoreFn>,
+        out_sink: &'a mut dyn io::Write,
+        input: &'a mut dyn io::BufRead,
+        args: Vec<String>,
+    ) -> Self {
+        Self::new_with_lowerer(globals, out_sink, input, args, lower_runtime)
+    }
+
+    fn new_with_lowerer(
+        globals: &BTreeMap<Sym, CoreFn>,
+        out_sink: &'a mut dyn io::Write,
+        input: &'a mut dyn io::BufRead,
+        args: Vec<String>,
+        lowerer: fn(&Comp) -> Cmp,
+    ) -> Self {
         Self {
             fns: globals
                 .iter()
-                .map(|(k, f)| (*k, (Rc::from(f.params.as_slice()), lower(&f.body))))
+                .map(|(k, f)| (*k, (Rc::from(f.params.as_slice()), lowerer(&f.body))))
                 .collect(),
             out: Vec::new(),
             term: String::new(),
@@ -620,6 +647,10 @@ impl<'a> Machine<'a> {
         self.exec(lower(c), env.clone())
     }
 
+    fn comp_lowered(&mut self, env: &Env, c: &Comp) -> Result<Rv, String> {
+        self.exec(lower_runtime(c), env.clone())
+    }
+
     fn exec(&mut self, root: Cmp, env: Env) -> Result<Rv, String> {
         match self.run_loop(Vec::new(), State::Eval(root, env))? {
             Outcome::Done(v) => Ok(v),
@@ -869,6 +900,60 @@ impl<'a> Machine<'a> {
                 stack.push(Frame::Mask(Rc::clone(ops)));
                 State::Eval(Rc::clone(body), env)
             }
+            // Verification-only semantics for the runtime Core forms. RC and
+            // allocation choices are deliberately erased; operand evaluation,
+            // local mutation, constructor identity, and deterministic faults
+            // remain observable.
+            Node::RcNoop(value) => {
+                let _ = atom(&env, value)?;
+                State::Ret(Rv::Unit)
+            }
+            Node::WithReuse { token, freed, body } => {
+                let _ = atom(&env, freed)?;
+                let mut next = env;
+                Rc::make_mut(&mut next).insert(*token, Rv::Unit);
+                State::Eval(Rc::clone(body), next)
+            }
+            Node::Reuse(token, value) => {
+                env.get(token)
+                    .ok_or_else(|| format!("unbound reuse token {token} at runtime"))?;
+                match atom(&env, value)? {
+                    value @ (Rv::Data(..) | Rv::Tuple(_)) => State::Ret(value),
+                    _ => return Err("reuse: non-constructor value".into()),
+                }
+            }
+            Node::InitAt(cell, value) => {
+                let _ = atom(&env, cell)?;
+                match atom(&env, value)? {
+                    value @ (Rv::Data(..) | Rv::Tuple(_)) => State::Ret(value),
+                    _ => return Err("init_at: non-constructor value".into()),
+                }
+            }
+            Node::RefNew(value) => State::Ret(Rv::Ref(Rc::new(RefCell::new(atom(&env, value)?)))),
+            Node::RefGet(cell) => match atom(&env, cell)? {
+                Rv::Ref(cell) => {
+                    let value = cell
+                        .try_borrow()
+                        .map_err(|_| "ref_get: cell is already mutably borrowed")?
+                        .clone();
+                    State::Ret(value)
+                }
+                _ => return Err("ref_get: non-reference cell".into()),
+            },
+            Node::RefSet(cell, value) => match atom(&env, cell)? {
+                Rv::Ref(cell) => {
+                    let value = atom(&env, value)?;
+                    *cell
+                        .try_borrow_mut()
+                        .map_err(|_| "ref_set: cell is already borrowed")? = value;
+                    State::Ret(Rv::Unit)
+                }
+                _ => return Err("ref_set: non-reference cell".into()),
+            },
+            Node::Bump(args) => match atoms(&env, args)?.as_slice() {
+                [Rv::Int(_)] => State::Ret(Rv::Unit),
+                _ => return Err("bump: wrong args in lowered verifier".into()),
+            },
         })
     }
 
@@ -1283,6 +1368,30 @@ pub fn run_observed_with_args(
     input: &mut dyn io::BufRead,
     args: Vec<String>,
 ) -> TracedRun {
+    run_observed_mode(core, out_sink, input, args, false)
+}
+
+/// Verification-only observation entry for effect-lowered / RC / reuse Core.
+///
+/// Ordinary source interpretation intentionally rejects runtime-only Core nodes;
+/// this explicit seam gives optimizer gates their semantics without changing the
+/// source interpreter's accepted IR.
+pub(crate) fn run_observed_lowered_with_args(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    args: Vec<String>,
+) -> TracedRun {
+    run_observed_mode(core, out_sink, input, args, true)
+}
+
+fn run_observed_mode(
+    core: &Core,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+    args: Vec<String>,
+    lowered: bool,
+) -> TracedRun {
     let g = globals(core);
     let Some(main) = g.get(&Sym::new(ENTRY_POINT)) else {
         let fault = "no main function".to_string();
@@ -1297,9 +1406,17 @@ pub fn run_observed_with_args(
             fault: Some(fault),
         };
     };
-    let mut m = Machine::new_with_args(&g, out_sink, input, args);
+    let mut m = if lowered {
+        Machine::new_lowered_with_args(&g, out_sink, input, args)
+    } else {
+        Machine::new_with_args(&g, out_sink, input, args)
+    };
     m.set_tape(Tape::Record(Vec::new()));
-    let result = m.comp(&Env::default(), &main.body);
+    let result = if lowered {
+        m.comp_lowered(&Env::default(), &main.body)
+    } else {
+        m.comp(&Env::default(), &main.body)
+    };
     let fault = match result {
         Ok(value) => {
             if let Some(observations) = &mut m.observations {
@@ -1618,12 +1735,13 @@ mod tests {
     use num_bigint::BigInt;
 
     use crate::core::{Comp, Core, CoreFn, Value};
-    use crate::provenance::{EventValue, OP_PROCESS_SYSTEM};
+    use crate::provenance::{EventValue, Observation, OP_PROCESS_SYSTEM};
 
     use super::builtin::big_of_str;
     use super::{
-        fmt_g, run_traced, runtime_oracle::rt_oracle, splitmix64, Builtin, Obs, Sym, Tape,
-        DEFAULT_SEED, SPLITMIX_GAMMA,
+        fmt_g, run_observed_lowered_with_args, run_observed_with_args, run_traced,
+        runtime_oracle::rt_oracle, splitmix64, Builtin, Obs, Sym, Tape, TracedRun, DEFAULT_SEED,
+        SPLITMIX_GAMMA,
     };
 
     // `fmt_g` renders the shortest decimal that round-trips back to the same
@@ -1673,6 +1791,125 @@ mod tests {
                 dict_arity: 0,
             }],
         }
+    }
+
+    fn observe_lowered(body: Comp) -> TracedRun {
+        let mut output = Vec::new();
+        let mut input = std::io::Cursor::new(Vec::new());
+        run_observed_lowered_with_args(&main_core(body), &mut output, &mut input, Vec::new())
+    }
+
+    #[test]
+    fn lowered_runtime_mutable_refs_sequence() {
+        let cell = Sym::new("cell");
+        let before = Sym::new("before");
+        let ignored = Sym::new("ignored");
+        let after = Sym::new("after");
+        let body = Comp::Bind(
+            Box::new(Comp::RefNew(Value::Int(1))),
+            cell,
+            Box::new(Comp::Bind(
+                Box::new(Comp::RefGet(Value::Var(cell))),
+                before,
+                Box::new(Comp::Bind(
+                    Box::new(Comp::RefSet(Value::Var(cell), Value::Int(9))),
+                    ignored,
+                    Box::new(Comp::Bind(
+                        Box::new(Comp::RefGet(Value::Var(cell))),
+                        after,
+                        Box::new(Comp::Return(Value::Tuple(vec![
+                            Value::Var(before),
+                            Value::Var(after),
+                        ]))),
+                    )),
+                )),
+            )),
+        );
+        assert_eq!(
+            observe_lowered(body).observations,
+            vec![Observation::Return("(1, 9)".into())]
+        );
+    }
+
+    #[test]
+    fn lowered_runtime_reuse_and_init_at_preserve_values() {
+        let token = Sym::new("reuse_token");
+        let reused = Sym::new("reused");
+        let raw_cell = Sym::new("raw_cell");
+        let initialized = Sym::new("initialized");
+        let body = Comp::WithReuse {
+            token,
+            freed: Value::Ctor(Sym::new("Old"), 0, vec![Value::Int(0)]),
+            body: Box::new(Comp::Bind(
+                Box::new(Comp::Reuse(
+                    token,
+                    Value::Ctor(Sym::new("New"), 1, vec![Value::Int(7)]),
+                )),
+                reused,
+                Box::new(Comp::Bind(
+                    Box::new(Comp::StrBuiltin(Builtin::Bump, vec![Value::Int(2)])),
+                    raw_cell,
+                    Box::new(Comp::Bind(
+                        Box::new(Comp::InitAt(
+                            Value::Var(raw_cell),
+                            Value::Tuple(vec![Value::Int(8), Value::Int(9)]),
+                        )),
+                        initialized,
+                        Box::new(Comp::Return(Value::Tuple(vec![
+                            Value::Var(reused),
+                            Value::Var(initialized),
+                        ]))),
+                    )),
+                )),
+            )),
+        };
+        assert_eq!(
+            observe_lowered(body).observations,
+            vec![Observation::Return("(New(7), (8, 9))".into())]
+        );
+    }
+
+    #[test]
+    fn lowered_runtime_rc_nodes_evaluate_operand_then_return_unit() {
+        let dup = Sym::new("dup");
+        let drop = Sym::new("drop");
+        let body = Comp::Bind(
+            Box::new(Comp::Dup(Value::Int(1))),
+            dup,
+            Box::new(Comp::Bind(
+                Box::new(Comp::Drop(Value::Int(2))),
+                drop,
+                Box::new(Comp::Return(Value::Tuple(vec![
+                    Value::Var(dup),
+                    Value::Var(drop),
+                ]))),
+            )),
+        );
+        assert_eq!(
+            observe_lowered(body).observations,
+            vec![Observation::Return("((), ())".into())]
+        );
+    }
+
+    #[test]
+    fn lowered_runtime_ref_type_fault_is_deterministic() {
+        assert_eq!(
+            observe_lowered(Comp::RefGet(Value::Int(0))).observations,
+            vec![Observation::Fault("ref_get: non-reference cell".into())]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "use the explicit lowered verifier")]
+    fn ordinary_observer_still_rejects_runtime_core() {
+        let mut output = Vec::new();
+        let mut input = std::io::Cursor::new(Vec::new());
+        let _ = run_observed_with_args(
+            &main_core(Comp::Dup(Value::Int(1))),
+            &mut output,
+            &mut input,
+            Vec::new(),
+        );
     }
 
     #[test]

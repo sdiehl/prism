@@ -34,24 +34,59 @@ pub fn buf(t : Tensor) : FloatBuf =
     MkTensor(b, _, _, _) => b
 
 -- | The extent of each axis, outermost first.
+--
+-- ```prism
+-- shape(new([2, 3], 0.0))
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
 pub fn shape(t : Tensor) : List(Int) =
   match t of
     MkTensor(_, s, _, _) => s
 
 -- | The flat-offset stride of each axis.
+--
+-- ```prism
+-- strides(new([2, 3], 0.0))
+-- ```
+-- ```output
+-- [3, 1]
+-- ```
 pub fn strides(t : Tensor) : List(Int) =
   match t of
     MkTensor(_, _, st, _) => st
 
 -- | The name of each axis.
+--
+-- ```prism
+-- axes(new([2, 3], 0.0))
+-- ```
+-- ```output
+-- [0, 1]
+-- ```
 pub fn axes(t : Tensor) : List(String) =
   match t of
     MkTensor(_, _, _, ax) => ax
 
 -- | The number of axes.
+--
+-- ```prism
+-- rank(new([2, 3], 0.0))
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn rank(t : Tensor) : Int = length(shape(t))
 
 -- | The total number of elements: the product of the shape.
+--
+-- ```prism
+-- size(new([2, 3], 0.0))
+-- ```
+-- ```output
+-- 6
+-- ```
 pub fn size(t : Tensor) : Int = prod(shape(t))
 
 -- The product of a list of extents (the flat length a shape needs).
@@ -80,6 +115,14 @@ fn offset(idx : List(Int), st : List(Int)) : Int =
   sum(zip_with(\(i, s) -> i * s, idx, st))
 
 -- | A tensor of the given shape with every element set to `fill`, row-major.
+--
+-- ```prism
+-- let t = new([2, 2], 7.0)
+-- t[1, 1]
+-- ```
+-- ```output
+-- 7
+-- ```
 pub fn new(shape : List(Int), fill : Float) : Tensor =
   MkTensor(
       tbuf_new(prod(shape), fill),
@@ -96,6 +139,14 @@ fn fill_from(b : FloatBuf, i : Int, xs : List(Float)) : FloatBuf =
 
 -- | A row-major tensor of the given shape filled from a flat list of values.
 -- Extra list elements past the shape's size are ignored; missing ones stay 0.
+--
+-- ```prism
+-- let t = from_list([2, 2], [1.0, 2.0, 3.0, 4.0])
+-- t[1, 0]
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn from_list(shape : List(Int), xs : List(Float)) : Tensor =
   MkTensor(
       fill_from(tbuf_new(prod(shape), 0.0), 0, xs),
@@ -106,6 +157,13 @@ pub fn from_list(shape : List(Int), xs : List(Float)) : Tensor =
 
 -- | The element at a multi-index, or `fail()` if the offset is out of range.
 -- Backs `t[i, j]`.
+--
+-- ```prism
+-- at_tensor(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [0, 1])
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn at_tensor(t : Tensor, idx : List(Int)) : Float =
   match t of
     MkTensor(b, _, st, _) =>
@@ -117,6 +175,14 @@ pub fn at_tensor(t : Tensor, idx : List(Int)) : Float =
 
 -- | A tensor equal to `t` but with the element at a multi-index set to `v`, or
 -- `fail()` if out of range. Backs `t[i, j] := v`.
+--
+-- ```prism
+-- let t = tensor_set(new([2, 2], 0.0), [0, 1], 5.0)
+-- t[0, 1]
+-- ```
+-- ```output
+-- 5
+-- ```
 pub fn tensor_set(t : Tensor, idx : List(Int), v : Float) : Tensor =
   match t of
     MkTensor(b, sh, st, ax) =>
@@ -150,6 +216,14 @@ fn swap_at(i : Int, j : Int, xs : List(a)) : List(a) =
 -- | Transpose two named axes: a permutation of the shape, strides, and names
 -- with no data movement (the buffer is shared). Reading a transposed tensor
 -- walks the same buffer in the permuted stride order.
+--
+-- ```prism
+-- let t = transpose(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0", "1")
+-- t[0, 1]
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn transpose(t : Tensor, a : String, b : String) : Tensor =
   match t of
     MkTensor(b0, sh, st, ax) =>
@@ -160,6 +234,13 @@ pub fn transpose(t : Tensor, a : String, b : String) : Tensor =
 -- | Reinterpret the elements under a new shape of the same size. Requires the
 -- tensor to be contiguous (row-major strides); a transposed view must be copied
 -- first, so reshaping one is a `fail()`. The new axes get default names.
+--
+-- ```prism
+-- shape(reshape(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [4]))
+-- ```
+-- ```output
+-- [4]
+-- ```
 pub fn reshape(t : Tensor, new_shape : List(Int)) : Tensor =
   match t of
     MkTensor(b, sh, st, _) =>
@@ -198,6 +279,13 @@ fn map_fill(f, bi : FloatBuf, out : FloatBuf, p : Int, n : Int) : FloatBuf =
 
 -- | A tensor of the same shape with `f` applied to every element. Requires a
 -- contiguous input; the result is contiguous.
+--
+-- ```prism
+-- sum_all(map_tensor(\(x) -> x + 1.0, from_list([2], [10.0, 20.0])))
+-- ```
+-- ```output
+-- 32
+-- ```
 pub fn map_tensor(f, t : Tensor) : Tensor ! {Fail} =
   if is_contig(t) then
     let sh = shape(t)
@@ -228,6 +316,13 @@ fn zip_fill(
 
 -- | Combine two identically-shaped contiguous tensors elementwise with `f`, or
 -- `fail()` if the shapes differ or either is not contiguous. No broadcasting.
+--
+-- ```prism
+-- sum_all(zip_with_tensor(\(x, y) -> x + y, from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
+-- ```
+-- ```output
+-- 10
+-- ```
 pub fn zip_with_tensor(f, a : Tensor, b : Tensor) : Tensor ! {Fail} =
   let sh = shape(a)
   if sh == shape(b) && is_contig(a) && is_contig(b) then
@@ -239,6 +334,13 @@ pub fn zip_with_tensor(f, a : Tensor, b : Tensor) : Tensor ! {Fail} =
     fail()
 
 -- | Elementwise sum of two identically-shaped tensors.
+--
+-- ```prism
+-- sum_all(add(from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
+-- ```
+-- ```output
+-- 10
+-- ```
 pub fn add(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   zip_with_tensor(\(x, y) -> x + y, a, b)
 
@@ -247,6 +349,13 @@ pub fn sub(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   zip_with_tensor(\(x, y) -> x - y, a, b)
 
 -- | Elementwise (Hadamard) product, not matrix multiplication.
+--
+-- ```prism
+-- sum_all(mul(from_list([2], [2.0, 3.0]), from_list([2], [4.0, 5.0])))
+-- ```
+-- ```output
+-- 23
+-- ```
 pub fn mul(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   zip_with_tensor(\(x, y) -> x * y, a, b)
 
@@ -255,6 +364,13 @@ pub fn div(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   zip_with_tensor(\(x, y) -> x / y, a, b)
 
 -- | Every element multiplied by a scalar.
+--
+-- ```prism
+-- sum_all(scale(2.0, from_list([2], [1.0, 2.0])))
+-- ```
+-- ```output
+-- 6
+-- ```
 pub fn scale(s : Float, t : Tensor) : Tensor ! {Fail} = map_tensor(\(x) -> x * s, t)
 
 -- Fold `op` over the buffer in flat (row-major) order from `acc`, over `[p, n)`.
@@ -267,6 +383,13 @@ fn reduce_fill(op, b : FloatBuf, acc : Float, p : Int, n : Int) : Float =
 
 -- | The sum of every element, added in row-major order. Requires a contiguous
 -- tensor (so the summation order is well defined).
+--
+-- ```prism
+-- sum_all(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
+-- ```
+-- ```output
+-- 10
+-- ```
 pub fn sum_all(t : Tensor) : Float ! {Fail} =
   if is_contig(t) then
     reduce_fill(\(a, x) -> a + x, buf(t), 0.0, 0, size(t))
@@ -274,6 +397,13 @@ pub fn sum_all(t : Tensor) : Float ! {Fail} =
     fail()
 
 -- | The product of every element, in row-major order.
+--
+-- ```prism
+-- prod_all(from_list([2], [3.0, 4.0]))
+-- ```
+-- ```output
+-- 12
+-- ```
 pub fn prod_all(t : Tensor) : Float ! {Fail} =
   if is_contig(t) then
     reduce_fill(\(a, x) -> a * x, buf(t), 1.0, 0, size(t))
@@ -281,6 +411,13 @@ pub fn prod_all(t : Tensor) : Float ! {Fail} =
     fail()
 
 -- | The arithmetic mean of every element.
+--
+-- ```prism
+-- mean(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
+-- ```
+-- ```output
+-- 2.5
+-- ```
 pub fn mean(t : Tensor) : Float ! {Fail} = sum_all(t) / to_float(size(t))
 
 -- The element at position `i` of a list, or `fail()` if out of range.
@@ -345,6 +482,14 @@ fn sum_axis_fill(
 -- `r - 1`); the remaining axes keep their names. The contracted axis is summed in
 -- index order `0..extent` (source loop order), so the result is bit-identical
 -- across backends. `fail()` on a missing axis or a non-contiguous input.
+--
+-- ```prism
+-- let s = sum_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0")
+-- (at_tensor(s, [0]), at_tensor(s, [1]))
+-- ```
+-- ```output
+-- (4, 6)
+-- ```
 pub fn sum_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
   if is_contig(t) then
     let sh = shape(t)
@@ -380,6 +525,14 @@ pub fn sum_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
 -- | Reduce over one named axis by averaging: the sum over that axis divided by
 -- its extent, removing the axis. Same source-loop order and contiguity
 -- requirement as `sum_axis`.
+--
+-- ```prism
+-- let m = mean_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "1")
+-- (at_tensor(m, [0]), at_tensor(m, [1]))
+-- ```
+-- ```output
+-- (1.5, 3.5)
+-- ```
 pub fn mean_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
   let extent = at_or_fail(index_of(axis_name, axes(t)), shape(t))
   scale(1.0 / to_float(extent), sum_axis(t, axis_name))
@@ -439,6 +592,14 @@ fn mm_fill(
 -- giving `[m, n]`. The contraction sums in source loop order, so the result is
 -- bit-identical across backends. `fail()` unless both operands are contiguous,
 -- rank 2, with matching inner extents.
+--
+-- ```prism
+-- let c = matmul(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), from_list([2, 2], [1.0, 0.0, 0.0, 1.0]))
+-- (c[0, 0], c[1, 1])
+-- ```
+-- ```output
+-- (1, 4)
+-- ```
 pub fn matmul(a : Tensor, b : Tensor) : Tensor ! {Fail} =
   match shape(a) of
     Cons(m, Cons(k, Nil)) =>

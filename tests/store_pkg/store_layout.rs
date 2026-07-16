@@ -277,3 +277,19 @@ fn second_commit_of_an_unchanged_program_writes_zero_objects() {
         first.objects_written + first.objects_hit
     );
 }
+
+#[test]
+fn unboxed_program_commits_without_panicking() {
+    let tmp = TempDir::new("store", "unboxed");
+    let mut cfg = Config::default();
+    cfg.flags.store = true;
+    cfg.flags.store_path = Some(tmp.store_root());
+
+    let src = with_prelude(
+        "fn point() : #{ x : Int, y : Int } = #{ x = 1, y = 2 }\n\nfn main() : Int = point().#x + point().#y\n",
+    );
+    let roots = default_roots(Path::new("."));
+
+    let stats = commit_to_store(&src, &roots, &cfg).expect("unboxed program commits");
+    assert!(stats.objects_written > 0);
+}

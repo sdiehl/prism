@@ -16,6 +16,14 @@ is_some : forall a. (Option(a)) -> Bool
 
 True when the option holds a value.
 
+```prism,mod=Data.Maybe
+is_some(Some(5))
+```
+
+```output
+true
+```
+
 ### `is_none`
 
 ```prism,sig,h-8bd9c3366852121741891bf7b35abe6c372731c38e960114a329c4b108a2cf78
@@ -23,6 +31,14 @@ is_none : forall a. (Option(a)) -> Bool
 ```
 
 True when the option is empty.
+
+```prism,mod=Data.Maybe
+is_none(None)
+```
+
+```output
+true
+```
 
 ### `unwrap_or`
 
@@ -32,8 +48,18 @@ unwrap_or : forall a. (a, Option(a)) -> a
 
 The contained value, or the default `d` when the option is empty.
 
-```prism
-unwrap_or(0, Some(5))
+```prism,mod=Data.Maybe
+(unwrap_or(0, Some(5)), unwrap_or(0, None))
+```
+
+```output
+(5, 0)
+```
+
+The default must match the contained type, and the second argument must be an option:
+
+```prism,compile_fail,mod=Data.Maybe
+unwrap_or(0, 5)
 ```
 
 ### `map_option`
@@ -44,10 +70,12 @@ map_option : forall e0 a b. ((b) -> a ! {e0}, Option(b)) -> Option(a) ! {e0}
 
 Apply `f` to the contained value, leaving `None` untouched.
 
-The default `d` here is not an option, so this example is rejected:
+```prism,mod=Data.Maybe
+map_option(\(x) -> x * 2, Some(21))
+```
 
-```prism,compile_fail
-unwrap_or(0, 5)
+```output
+Some(42)
 ```
 
 ### `and_then`
@@ -58,10 +86,28 @@ and_then : forall e0 a b. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e
 
 Chain an option-returning function, short-circuiting on `None` (monadic bind for `Option`).
 
+```prism,mod=Data.Maybe
+and_then(\(x) -> if x > 0 then Some(x * 10) else None, Some(4))
+```
+
+```output
+Some(40)
+```
+
 ### `map_or`
 
 ```prism,sig,h-dbe0b22a2ff441cabd068950e096805b61b14357c86da80df1e18138409c8761
 map_or : forall e0 a b. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
+```
+
+Apply `f` to the contained value, or return the default `d` when empty: `map_option` and `unwrap_or` in one step.
+
+```prism,mod=Data.Maybe
+map_or(0, \(x) -> x + 1, Some(41))
+```
+
+```output
+42
 ```
 
 ### `option_or`
@@ -70,10 +116,30 @@ map_or : forall e0 a b. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
 option_or : forall a. (Option(a), Option(a)) -> Option(a)
 ```
 
+The option itself when it holds a value, otherwise the alternative `alt`.
+
+```prism,mod=Data.Maybe
+option_or(Some(1), None)
+```
+
+```output
+Some(1)
+```
+
 ### `option_to_list`
 
 ```prism,sig,h-f773538e1b8b76a8d1048e3c0c88d18611d20f58533afdaa455cdc64febcb530
 option_to_list : forall a. (Option(a)) -> List(a)
+```
+
+An empty or one-element list from an option.
+
+```prism,mod=Data.Maybe
+option_to_list(Some(7))
+```
+
+```output
+[7]
 ```
 
 ### `both`
@@ -82,10 +148,30 @@ option_to_list : forall a. (Option(a)) -> List(a)
 both : forall a b. (Option(a), Option(b)) -> Option((a, b))
 ```
 
+Pair two options: `Some` only when both hold values.
+
+```prism,mod=Data.Maybe
+(both(Some(1), Some(2)), both(Some(1), None))
+```
+
+```output
+(Some((1, 2)), None)
+```
+
 ### `option_fold_r`
 
 ```prism,sig,h-eff829fdfa2f4214b1c10a58f54ea974effe5472547167d3f9176f965a7c92ba
 option_fold_r : forall e0 a b. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
+```
+
+Fold an option right-to-left: `g(x, z)` on `Some(x)`, `z` on `None`.
+
+```prism,mod=Data.Maybe
+option_fold_r(\(x, z) -> x + z, 10, Some(5))
+```
+
+```output
+15
 ```
 
 ### `option_fold_l`
@@ -94,14 +180,44 @@ option_fold_r : forall e0 a b. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
 option_fold_l : forall e0 a b. ((a, b) -> a ! {e0}, a, Option(b)) -> a ! {e0}
 ```
 
+Fold an option left-to-right: `g(z, x)` on `Some(x)`, `z` on `None`.
+
+```prism,mod=Data.Maybe
+option_fold_l(\(z, x) -> z + x, 10, Some(5))
+```
+
+```output
+15
+```
+
 ### `option_bind`
 
 ```prism,sig,h-1485e3ef93783a42857fc5d613b20fa2f0f9a84236e4b0be71e4fb319cceef60
 option_bind : forall e0 a b. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0}
 ```
 
+`and_then` with the option first: reads as a pipeline of fallible steps.
+
+```prism,mod=Data.Maybe
+option_bind(Some(4), \(x) -> Some(x * 10))
+```
+
+```output
+Some(40)
+```
+
 ### `option_ap`
 
 ```prism,sig,h-b33c70cd579d304e6df8f2d105232fd7386b4707d274b4b97e0d6e57219f807f
 option_ap : forall e0 a b. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0}
+```
+
+Apply an optional function to an optional value (applicative apply).
+
+```prism,mod=Data.Maybe
+option_ap(Some(\(x) -> x + 1), Some(41))
+```
+
+```output
+Some(42)
 ```

@@ -104,9 +104,8 @@ fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, 
     })
 }
 
-// Like `stat_src`, but at -O2, where stream fusion is default-on. Used by the
-// pull-Sequence fusion guard, whose zero-allocation guarantee holds at the shipped
-// release level, not at the plain -O1 default.
+// Like `stat_src`, but at -O2, where stream fusion is default-on and the pull
+// Sequence guard requires zero allocation.
 fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
     stat_build(full, tag, stat_env, suffix, |src, bin| {
         let mut cfg = prism::Config::from_env();
@@ -299,20 +298,12 @@ fn allocation_is_flat_for_constant_space_programs() {
     assert!(fails.is_empty(), "{}", fails.join("\n"));
 }
 
-// THE SEQUENCE FUSION GUARD. Drives the ACTUAL `lib/std/Sequence.pr` module through
-// `import Sequence as Seq` (the shipped shape, across the import boundary, which
-// is what the acceptance criterion covers) and checks the per-element allocation
-// slope of each pipeline at ZERO: the stream-fusion pass (default-on at -O2)
+// THE SEQUENCE FUSION GUARD. Drives `lib/std/Sequence.pr` through
+// `import Sequence as Seq` and checks each pipeline's per-element allocation
+// slope at zero. The stream-fusion pass (default-on at -O2)
 // collapses the whole pipeline into a `%fuse$` join loop and the dead upstream
-// combinator chain is eliminated, so a curated pipeline materializes no
-// intermediates at all. History for the archaeologist: pre-fusion these rows
-// measured a flat 2 cells/element per stage (one SMore cons plus one step thunk,
-// no reuse and no inlining across the module boundary: slopes 2/4/6), and two
-// inline split-form proxy gates once stood here; they were deleted when the pass
-// landed, because they encoded a combinator shape (thin wrapper delegating to a
-// named helper) that the shipped library does not use and the recognizer
-// deliberately does not chase. A slope regression here means fusion stopped
-// firing through the import boundary; that is a release blocker, not a ratchet.
+// combinator chain is eliminated, so these pipelines materialize no
+// intermediates. A nonzero slope means fusion stopped at the import boundary.
 const PULL_MODULE_BASELINE: &[(&str, &str, i64)] = &[
     ("range|sum", "Seq.sum(Seq.range(1, {HI}))", 0),
     (
@@ -342,9 +333,8 @@ fn pull_sequence_module_allocation_baseline() {
                 )],
             )
         };
-        // Stream fusion is default-on at -O2, which is the level this guarantee
-        // ships at, so measure there. A plain -O1 build still runs the pipeline
-        // unfused; the check is that the shipped release level allocates nothing.
+        // Stream fusion is default-on at -O2, so measure the zero-allocation
+        // guarantee there. A plain -O1 build runs this pipeline unfused.
         let lo = stat_src_o2(&mk(small), name, "PRISM_ALLOC_STATS", "cells allocated");
         let hi = stat_src_o2(&mk(big), name, "PRISM_ALLOC_STATS", "cells allocated");
         match (lo, hi) {
@@ -368,7 +358,7 @@ fn pull_sequence_module_allocation_baseline() {
 // right-nested `wire_cat` (a fresh buffer per element), and decode advances a read
 // cursor instead of re-slicing. A revert to either turns a pass quadratic (bytes
 // copied) or grows its per-element cell count, both silent to parity. These check the
-// shipped -O2 behavior: the incremental byte builder extends in place, the hex
+// -O2 behavior: the incremental byte builder extends in place, the hex
 // codec is flat, and Wire encode/decode stay linear, never quadratic.
 
 // Cells the program allocates at -O2 for input size `n`, or a panic naming the
@@ -608,8 +598,8 @@ fn free_monad_loops_run_in_constant_stack() {
 // (`r(s)(s)`) and a `put`-style `wr` clause (`r(())(v)`) over one accumulator,
 // with the answer the producer value (`return x => \_s -> x`). State fusion
 // recognizes the two-op shape and threads the accumulator through `spin` as an
-// explicit loop: zero `EOp` cells and constant stack, the same tier-1 guarantee
-// as the writer-style fold. Each iteration would otherwise leave a pending-apply
+// explicit loop: zero `EOp` cells and constant stack, the same state-rung
+// guarantee as the writer-style fold. Each iteration would otherwise leave a pending-apply
 // frame on the native stack and reify a continuation cell.
 #[test]
 fn param_passing_effect_loop_runs_in_constant_stack() {
@@ -618,8 +608,8 @@ fn param_passing_effect_loop_runs_in_constant_stack() {
     let full = perf_src_n(PERF_PARAM_PASSING_STATE, n);
     runs_in_bounded_stack(&full, "parameter-passing state loop", 2048)
         .unwrap_or_else(|e| panic!("{e}"));
-    // Tier-1: the two-op State loop fuses, allocating no `EOp` cells (it ran via
-    // the O(n)-cell `@region` driver before get-style fusion landed).
+    // State fusion allocates no `EOp` cells; routing through the `@region` driver
+    // would allocate O(n) cells.
     match stat_src(&full, "param-passing state", "PRISM_EFFOP_STATS", "eff ops allocated") {
         Ok(0) => {}
         Ok(c) => panic!("parameter-passing State loop allocated {c} eff-op cell(s); want 0 (state fusion regressed)"),
@@ -764,15 +754,19 @@ fn guarded_match_fallthrough_is_shared_not_duplicated() {
 // someone is watching the cost): it records the lowering tier of every corpus
 // program as a committed golden and fails when one regresses onto a slower tier.
 //
-// The tier is the whole-program strategy `effect_lower` already computes,
-// surfaced through `prism::effect_strategy_full` (and the `dump tier` phase). A
-// regression (a move to a costlier tier in `EFFECT_TIERS` order) fails loudly and
-// names the functions that lost fusion; an improvement or a corpus change also
-// fails, with instructions to regenerate. Regenerate with `just tier-accept` (or
+// The tier is the whole-program strategy the typed cascade computes, surfaced
+// through `prism::effect_strategy_full` (and the `dump tier` phase). A regression
+// (a move to a costlier tier in `EFFECT_TIERS` order) fails loudly and names the
+// functions that lost fusion; an improvement or a corpus change also fails, with
+// instructions to regenerate. Regenerate with `just tier-accept` (or
 // `PRISM_ACCEPT_TIER_MANIFEST=1`), reviewing the diff exactly like a snapshot.
 
 const TIER_MANIFEST: &str = "tests/tier_manifest.txt";
 const TIER_MANIFEST_ACCEPT: &str = "PRISM_ACCEPT_TIER_MANIFEST";
+// This gate compiles the entire corpus sequentially in one debug test worker.
+// Match the corpus-oracle headroom in `tests/support`: the reservation is
+// virtual, while a too-small stack aborts the process before naming the case.
+const TIER_MANIFEST_STACK: usize = 256 * 1024 * 1024;
 const TIER_MANIFEST_HEADER: &str = r"# Effect-lowering tier manifest. One `<program>\t<tier>` line per corpus
 # program, sorted. The golden pinned by tests/perf_gate.rs::tier_manifest_holds.
 # A tier moving to a costlier one (see prism::EFFECT_TIERS order) is a silent
@@ -826,6 +820,18 @@ fn parse_manifest(text: &str) -> BTreeMap<String, String> {
 
 #[test]
 fn tier_manifest_holds() {
+    let result = std::thread::Builder::new()
+        .name("tier-manifest".into())
+        .stack_size(TIER_MANIFEST_STACK)
+        .spawn(tier_manifest_holds_on_compiler_stack)
+        .expect("spawning tier-manifest compiler stack")
+        .join();
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn tier_manifest_holds_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = root.join(TIER_MANIFEST);
     let current = corpus_tiers();

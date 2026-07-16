@@ -91,7 +91,8 @@ fn collect_refs<'a>(
         | Expr::Char(_)
         | Expr::Bool(_)
         | Expr::Unit
-        | Expr::Str(_) => {}
+        | Expr::Str(_)
+        | Expr::Hole(_) => {}
         Expr::Bin(_, a, b) | Expr::Index(a, b) | Expr::Pipe(a, b) => {
             collect_refs(a, names, bound, out);
             collect_refs(b, names, bound, out);
@@ -167,7 +168,7 @@ fn collect_refs<'a>(
                 collect_refs(op.expr(), names, bound, out);
             }
         }
-        Expr::Handle(body, arms) => {
+        Expr::Handle(body, arms, _) => {
             collect_refs(body, names, bound, out);
             for arm in arms {
                 let base = bound.len();

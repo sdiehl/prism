@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "native")]
 use crate::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
+#[cfg(feature = "native")]
+use crate::codegen::MAIN_SYMBOL;
 
 #[cfg(feature = "native")]
 static ORACLE_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -100,7 +102,7 @@ pub(super) fn rt_oracle(body: &str) -> Option<Vec<String>> {
              long prism_big_of_str(long, int *);\n\
              long prism_big_show(long);\n\
              void print_str(long);\n\
-             long prism_main(void) {{\n{body}\nreturn 1;\n}}\n"
+             long {MAIN_SYMBOL}(void) {{\n{body}\nreturn 1;\n}}\n"
         ),
     )
     .unwrap();

@@ -2,7 +2,9 @@ use super::call::{
     call_shape, callee_parens, dot_parts, dot_recv_parens, is_with_call, paren_if, CallShape,
 };
 use super::pat::fmt_pat_inline;
-use super::{Expr, Fmt, Grade, HandlerArm, Marker, Mode, Pattern, Sugar, SugarArm, INDENT, S};
+use super::{
+    text_width, Expr, Fmt, Grade, HandlerArm, Marker, Mode, Pattern, Sugar, SugarArm, INDENT, S,
+};
 use crate::kw;
 
 // One offside statement and where the chain continues. `prev` is the byte offset
@@ -190,7 +192,7 @@ impl Fmt<'_> {
                     body.as_ref(),
                 )
             }
-            Expr::Handle(body, arms) if cur.synth => (
+            Expr::Handle(body, arms, _) if cur.synth => (
                 format!(
                     "{ind}{} {}\n{}",
                     kw::WITH,
@@ -319,7 +321,7 @@ impl Fmt<'_> {
             let lead = self.lead_comments(prev, body.span.start, indent);
             let rendered = format!(
                 "{head}{}",
-                self.fmt_arm_body(body, indent, head.len(), body.span.start)
+                self.fmt_arm_body(body, indent, text_width(&head), body.span.start)
             );
             arm_strs.push(format!("{lead}{rendered}"));
             prev = body.span.end;

@@ -386,7 +386,7 @@ impl Lints {
                     self.expr(op.expr());
                 }
             }
-            Expr::Handle(b, arms) => {
+            Expr::Handle(b, arms, _) => {
                 self.expr(b);
                 for a in arms {
                     self.arm_body(a);
@@ -398,6 +398,7 @@ impl Lints {
             | Expr::Bool(_)
             | Expr::Unit
             | Expr::Str(_)
+            | Expr::Hole(_)
             | Expr::Marker(_) => {}
         }
     }

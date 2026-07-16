@@ -31,6 +31,14 @@ class FlatElem(a)
 
 The element contract: how a one-word scalar enters and leaves the flat storage. Instances exist for `Float` and `I64`.
 
+```prism,mod=Data.FlatArray
+fa_get(fa_set(fa_new(3, 0.0), 1, 9.0), 1)
+```
+
+```output
+9
+```
+
 ## Instances
 
 ### `flatFloat`
@@ -54,3 +62,11 @@ fa_len : forall a. (Data.FlatArray.FlatArray(a)) -> Int
 ```
 
 The element count, independent of the element type.
+
+```prism,mod=Data.FlatArray
+fa_len(fa_new(3, 0.0))
+```
+
+```output
+3
+```

@@ -1,4 +1,4 @@
--- Fold-consumer fusion (effect_lower/state.rs). Every
+-- Fold-consumer fusion (typed effect lowering's state rung). Every
 -- line drives the state-threading pass: a fold consumer (ssum/sfold/scollect)
 -- reads through the re-emitting transformers smap/skeep with the accumulator
 -- threaded into each, so the chain fuses to one loop. Lists from scollect are

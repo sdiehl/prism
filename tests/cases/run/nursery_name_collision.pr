@@ -10,7 +10,7 @@ effect Trace
 
 fn worker(n : Int) : Int ! {Async(Int), Trace} =
   note(n)
-  yield(())
+  yield()
   n
 
 fn tasks() : Int ! {Async(Int), Trace} =

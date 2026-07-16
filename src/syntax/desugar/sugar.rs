@@ -346,9 +346,16 @@ pub(super) fn expand_interp(
     let Some(last) = pieces.pop() else {
         return Err(ErrKind::EmptyInterpolation.at(span));
     };
-    Ok(pieces.into_iter().rev().fold(last, |acc, p| {
-        call(evar("concat", span), vec![p, acc], span)
-    }))
+    // Zero-width concat machinery, then stamp the literal's span on the
+    // outermost node alone: the whole interpolation hovers as one String (or,
+    // for a lone hole, its display call does), and each hole keeps its own
+    // honest range.
+    let anchor = Span::empty(span.start);
+    let mut out = pieces.into_iter().rev().fold(last, |acc, p| {
+        call(evar("concat", anchor), vec![p, acc], anchor)
+    });
+    out.span = span;
+    Ok(out)
 }
 
 #[must_use]

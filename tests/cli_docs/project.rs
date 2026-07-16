@@ -127,7 +127,10 @@ fn why_recompiled_uses_persisted_module_decisions() {
     let second_stdout = String::from_utf8(second.stdout).unwrap();
     assert!(second_stdout.contains("reused <root>"));
     assert!(second_stdout.contains("reused backend-scc main"));
-    assert!(second_stdout.contains("reused effect whole-program:"));
+    assert!(
+        !second_stdout.contains("effect whole-program"),
+        "the retired legacy effect producer must stay absent: {second_stdout}"
+    );
     assert!(second_stdout.contains("reused closure-plan native-kont-plan"));
     fs::remove_dir_all(store).unwrap();
     fs::remove_file(source).unwrap();

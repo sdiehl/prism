@@ -185,9 +185,10 @@ export function dump(src) {
 
 /**
  * The checked-HIR fixture of the snippet: the versioned deterministic JSON the
- * `dump hir` phase emits (schema `prism-hir-fixture-v1`), carrying the
+ * `dump hir` phase emits (schema `prism-hir-fixture-v2`), carrying the
  * per-declaration schemes and effect rows plus the per-node checker facts
- * (resolution, dictionary evidence, numeric lane, zonked type).
+ * (resolution, dictionary evidence, numeric lane, zonked type, and handler
+ * residual operations).
  *
  * The prelude is prepended so snippets that reference it type-check; the
  * browser strips the prelude declarations for display the same way the Core IR

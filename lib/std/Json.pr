@@ -50,6 +50,13 @@ import Data.Char (is_digit)
 -- exact-or-error decode is a structural distinction rather than a hidden flag: an
 -- object is an association list in parse order (duplicate keys are preserved, not
 -- merged).
+--
+-- ```prism
+-- encode(JObj([("ok", JBool(true)), ("n", JInt(3))]))
+-- ```
+-- ```output
+-- {"n":3,"ok":true}
+-- ```
 pub type Json
   = JNull
   | JBool(Bool)
@@ -64,6 +71,13 @@ pub type Json
 pub type JsonError = JsonError(String, Int, Int)
 
 -- | Render a `JsonError` as `line L col C: message`.
+--
+-- ```prism
+-- json_error_message(JsonError("unexpected character", 1, 5))
+-- ```
+-- ```output
+-- line 1 col 5: unexpected character
+-- ```
 pub fn json_error_message(e : JsonError) : String =
   match e of
     JsonError(m, l, c) => "line {l} col {c}: {m}"
@@ -455,11 +469,25 @@ fn decode_with(lossy : Bool, s : String) : Result(Json, JsonError) =
 -- | Decode a JSON document with exact number semantics: a number decodes only
 -- when its lexeme is already canonical, otherwise a decode error. Total: any
 -- malformed or lossy input is an `Err` with a position.
+--
+-- ```prism
+-- decode("[1, 2, 3]")
+-- ```
+-- ```output
+-- Ok(Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)]))
+-- ```
 pub fn decode(s : String) : Result(Json, JsonError) = decode_with(false, s)
 
 -- | Decode a JSON document, accepting any well-formed number and normalizing it
 -- to `JInt` (exact integer in range) or the nearest `JFloat`. Still total, and
 -- still rejects structurally malformed input.
+--
+-- ```prism
+-- decode_lossy("1e3")
+-- ```
+-- ```output
+-- Ok(Json.JFloat(1000))
+-- ```
 pub fn decode_lossy(s : String) : Result(Json, JsonError) = decode_with(true, s)
 
 -- Canonical encoding.
@@ -557,6 +585,13 @@ fn encode_member(kv : (String, Json)) : String =
 -- | Encode a `Json` value to its canonical byte-deterministic string: object keys
 -- sorted, numbers by the owned formatter, one fixed string escaping, no optional
 -- whitespace. Equal values encode to equal bytes.
+--
+-- ```prism
+-- encode(JObj([("b", JInt(2)), ("a", JInt(1))]))
+-- ```
+-- ```output
+-- {"a":1,"b":2}
+-- ```
 pub fn encode(j : Json) : String =
   match j of
     JNull => "null"
@@ -578,11 +613,25 @@ pub fn encode(j : Json) : String =
 -- The typed layer: structural conversion between declared types and `Json`.
 
 -- | Convert a value to a `Json` tree.
+--
+-- ```prism
+-- to_json([1, 2, 3])
+-- ```
+-- ```output
+-- Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)])
+-- ```
 pub class ToJson(a)
   to_json : (a) -> Json
 
 -- | Recover a value from a `Json` tree, failing (through `Fail`) on a structural
 -- mismatch. A decode of foreign data is one ordinary failure channel.
+--
+-- ```prism
+-- from_json(JInt(41)) + 1
+-- ```
+-- ```output
+-- 42
+-- ```
 pub class FromJson(a)
   from_json : (Json) -> a ! {Fail | e}
 
@@ -665,4 +714,11 @@ fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
     Cons(y, rest) => Cons(from_json(y), from_json_each(rest))
 
 -- | Encode a typed value straight to a canonical JSON string.
+--
+-- ```prism
+-- to_json_string((1, true))
+-- ```
+-- ```output
+-- [1,true]
+-- ```
 pub fn to_json_string(x : a) : String given ToJson(a) = encode(to_json(x))

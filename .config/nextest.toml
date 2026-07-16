@@ -9,8 +9,19 @@ status-level = "fail"
 slow-timeout = { period = "60s", terminate-after = 6 }
 
 [test-groups]
+corpus-compilers = { max-threads = 1 }
 native-oracles = { max-threads = 1 }
 snapshot-goldens = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(typed_spine)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.default.overrides]]
+filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 8 }
 
 [[profile.default.overrides]]
 filter = 'binary(native_parity)'
@@ -50,6 +61,16 @@ slow-timeout = { period = "120s", terminate-after = 8 }
 [[profile.default.overrides]]
 filter = 'binary(snapshots)'
 test-group = 'snapshot-goldens'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(typed_spine)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 8 }
+
+[[profile.ci.overrides]]
+filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
+test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 8 }
 
 [[profile.ci.overrides]]

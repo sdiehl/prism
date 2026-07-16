@@ -46,6 +46,12 @@
     return "play/#code=" + encodeURIComponent(btoa(bin));
   }
 
+  // Generated stdlib examples carry the hidden setup and module import used by
+  // their doctest. Hand-written or unprocessed blocks use the visible source.
+  function sourceOf(code) {
+    return code.dataset.prismSource || code.textContent;
+  }
+
   // The full content hash a reference block carries, as an `h-<hex>` class, or
   // null. Rendered as a subdued pill beside the block's Σ badge (short prefix
   // shown, full hash copied on click).
@@ -131,11 +137,12 @@
       ICON_RUN + '<span class="prism-run-label">' + (ghost ? "Not run" : "Run") + "</span>";
     var runLabel = runBtn.querySelector(".prism-run-label");
 
+    var source = sourceOf(code);
     var open = document.createElement("a");
     open.className = "prism-run-btn prism-run-open";
     open.target = "_blank";
     open.rel = "noopener";
-    open.href = playgroundHref(code.textContent);
+    open.href = playgroundHref(source);
     open.innerHTML = ICON_OPEN + "<span>Open in Playground</span>";
 
     bar.appendChild(runBtn);
@@ -156,7 +163,7 @@
           function (m) {
             var result;
             try {
-              result = m.run(code.textContent);
+              result = m.run(source);
             } catch (e) {
               result = "error: " + ((e && e.message) || e);
             }

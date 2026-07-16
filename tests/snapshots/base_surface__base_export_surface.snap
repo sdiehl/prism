@@ -142,6 +142,7 @@ value Data.Monad.traverse_list
 value Data.Result.and_then_result
 value Data.Result.is_err
 value Data.Result.is_ok
+value Data.Result.map_err
 value Data.Result.map_result
 value Data.Result.ok_of_option
 value Data.Result.option_of_result

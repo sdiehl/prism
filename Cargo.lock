@@ -1150,7 +1150,7 @@ dependencies = [
 
 [[package]]
 name = "prism"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anstyle",
  "ariadne",
@@ -1178,6 +1178,7 @@ dependencies = [
  "serde_json",
  "serde_stacker",
  "sha2",
+ "stacker",
  "thiserror",
  "toml",
  "wasm-bindgen",

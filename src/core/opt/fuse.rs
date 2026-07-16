@@ -34,7 +34,7 @@
 //! redirects one call, never a partial rewrite, so a fused pipeline is a lowering
 //! tier in all but name and the ON/OFF differential oracle gates it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
 use super::super::fv;
@@ -568,22 +568,160 @@ fn stream_pure(s: &StreamExpr, cx: &mut Cx<'_>) -> bool {
         })
 }
 
-// A function is fusion-pure if its body contains no effect node and every function
-// it calls is fusion-pure. Memoized; recursion is broken by seeding the memo with
-// `true` before descending (a function is pure unless a witness proves otherwise).
+// A function is fusion-pure when no path through the call graph from its body reaches
+// a direct effect node or an unknown call head. This is a reachability property, so a
+// single optimistic-seed descent cannot memoize it soundly: under mutual recursion a
+// co-recursive member can be finalized against an in-progress member's provisional
+// verdict, committing a genuinely impure function as pure. We therefore condense the
+// call graph into strongly connected components (Tarjan) and commit one shared verdict
+// per component, and only once the whole component has fully resolved. A component is
+// pure when every member is free of direct effects and unknown heads and every edge
+// leaving the component targets an already-resolved pure function; edges inside the
+// component are mutual recursion and never introduce impurity on their own. The
+// drive-time `comp_pure` re-check below stays as defense in depth.
 fn fn_pure(name: Sym, cx: &mut Cx<'_>) -> bool {
     if let Some(&p) = cx.pure.get(&name) {
         return p;
     }
-    let Some(def) = cx.fns.get(&name).copied() else {
+    if !cx.fns.contains_key(&name) {
         // An unknown call head cannot be proven pure.
         cx.pure.insert(name, false);
         return false;
+    }
+    let mut walk = PurityWalk::default();
+    walk.connect(name, cx);
+    cx.pure.get(&name).copied().unwrap_or(false)
+}
+
+// A function body's own purity contribution: whether it directly performs an effect
+// (or calls an unknown head), plus the known-head functions it calls. The call set is
+// collected by descending the whole body (through thunks, lambdas, arguments, and
+// arms) exactly as the purity check descends, so the reachability fixpoint the walk
+// computes matches the one the recursive check would reach.
+struct BodyInfo {
+    self_bad: bool,
+    callees: Vec<Sym>,
+}
+
+fn body_info(def: &CoreFn, fns: &BTreeMap<Sym, &CoreFn>) -> BodyInfo {
+    struct Scan<'a, 'b> {
+        fns: &'a BTreeMap<Sym, &'b CoreFn>,
+        info: BodyInfo,
+    }
+    impl Visit for Scan<'_, '_> {
+        fn visit_comp(&mut self, c: &Comp) {
+            match c {
+                Comp::Call(f, _) => {
+                    if self.fns.contains_key(f) {
+                        if !self.info.callees.contains(f) {
+                            self.info.callees.push(*f);
+                        }
+                    } else {
+                        self.info.self_bad = true;
+                    }
+                }
+                Comp::Io(..)
+                | Comp::Do(..)
+                | Comp::Handle { .. }
+                | Comp::Mask(..)
+                | Comp::Error(_)
+                | Comp::RefNew(_)
+                | Comp::RefGet(_)
+                | Comp::RefSet(..) => self.info.self_bad = true,
+                _ => {}
+            }
+            self.descend_comp(c);
+        }
+    }
+    let mut scan = Scan {
+        fns,
+        info: BodyInfo {
+            self_bad: false,
+            callees: Vec::new(),
+        },
     };
-    cx.pure.insert(name, true);
-    let p = comp_pure(&def.body, cx);
-    cx.pure.insert(name, p);
-    p
+    scan.visit_comp(&def.body);
+    scan.info
+}
+
+// Scratch state for one strongly-connected-component purity walk (Tarjan). It lives
+// for the duration of a single `fn_pure` memo miss; every node it pushes is popped and
+// finalized into `cx.pure` before the walk returns, so the stack is empty on exit and
+// no provisional index leaks to a later walk.
+#[derive(Default)]
+struct PurityWalk {
+    index: BTreeMap<Sym, u32>,
+    low: BTreeMap<Sym, u32>,
+    stack: Vec<Sym>,
+    on_stack: BTreeSet<Sym>,
+    info: BTreeMap<Sym, BodyInfo>,
+    counter: u32,
+}
+
+impl PurityWalk {
+    fn connect(&mut self, v: Sym, cx: &mut Cx<'_>) {
+        let info = match cx.fns.get(&v).copied() {
+            Some(def) => body_info(def, &cx.fns),
+            None => BodyInfo {
+                self_bad: true,
+                callees: Vec::new(),
+            },
+        };
+        let idx = self.counter;
+        self.counter += 1;
+        self.index.insert(v, idx);
+        self.low.insert(v, idx);
+        self.stack.push(v);
+        self.on_stack.insert(v);
+
+        for &w in &info.callees {
+            if cx.pure.contains_key(&w) {
+                // A finalized successor: its verdict is consulted at pop time.
+            } else if self.on_stack.contains(&w) {
+                let lv = self.low[&v].min(self.index[&w]);
+                self.low.insert(v, lv);
+            } else {
+                self.connect(w, cx);
+                let lv = self.low[&v].min(self.low[&w]);
+                self.low.insert(v, lv);
+            }
+        }
+        self.info.insert(v, info);
+
+        if self.low[&v] == self.index[&v] {
+            let mut comp = Vec::new();
+            loop {
+                let x = self.stack.pop().expect("purity walk stack underflow");
+                self.on_stack.remove(&x);
+                comp.push(x);
+                if x == v {
+                    break;
+                }
+            }
+            let members: BTreeSet<Sym> = comp.iter().copied().collect();
+            let mut pure_scc = true;
+            for x in &comp {
+                let xi = &self.info[x];
+                if xi.self_bad {
+                    pure_scc = false;
+                }
+                for w in &xi.callees {
+                    if members.contains(w) {
+                        continue;
+                    }
+                    // An edge leaving the component targets an already-resolved
+                    // function; anything but a finalized-pure target taints the
+                    // whole component, so a missing verdict is never assumed pure.
+                    if cx.pure.get(w) != Some(&true) {
+                        pure_scc = false;
+                    }
+                }
+            }
+            for x in &comp {
+                cx.pure.insert(*x, pure_scc);
+            }
+        }
+    }
 }
 
 fn comp_pure(c: &Comp, cx: &mut Cx<'_>) -> bool {
@@ -619,7 +757,8 @@ fn comp_pure(c: &Comp, cx: &mut Cx<'_>) -> bool {
                 | Comp::Dup(_)
                 | Comp::Drop(_)
                 | Comp::WithReuse { .. }
-                | Comp::Reuse(..) => self.descend_comp(c),
+                | Comp::Reuse(..)
+                | Comp::InitAt(..) => self.descend_comp(c),
                 Comp::Io(..)
                 | Comp::Do(..)
                 | Comp::Handle { .. }
@@ -1508,5 +1647,75 @@ mod tests {
             &mut BTreeMap::new(),
         )
         .is_none());
+    }
+
+    // Discovery starts at `a`: the old optimistic recursion breaker finalized
+    // `b` as pure while `a` was provisionally true, then found `a`'s effect and
+    // left the stale `b = true` memo behind. Both members must share the SCC's
+    // impure verdict.
+    #[test]
+    fn mutual_recursion_cannot_hide_a_sibling_effect() {
+        let a = Sym::new("a");
+        let b = Sym::new("b");
+        let functions = [
+            CoreFn {
+                name: a,
+                params: Vec::new(),
+                body: Comp::Bind(
+                    Box::new(Comp::Call(b, Vec::new())),
+                    Sym::new("from_b"),
+                    Box::new(Comp::Error(Value::Int(0))),
+                ),
+                dict_arity: 0,
+            },
+            CoreFn {
+                name: b,
+                params: Vec::new(),
+                body: Comp::Call(a, Vec::new()),
+                dict_arity: 0,
+            },
+        ];
+        let mut cx = Cx {
+            fns: functions.iter().map(|f| (f.name, f)).collect(),
+            pure: BTreeMap::new(),
+            fresh: 0,
+            joins: 0,
+            emitted: Vec::new(),
+        };
+
+        assert!(!fn_pure(a, &mut cx));
+        assert_eq!(cx.pure.get(&a), Some(&false));
+        assert_eq!(cx.pure.get(&b), Some(&false));
+    }
+
+    #[test]
+    fn pure_mutual_recursion_keeps_one_pure_scc_verdict() {
+        let a = Sym::new("a");
+        let b = Sym::new("b");
+        let functions = [
+            CoreFn {
+                name: a,
+                params: Vec::new(),
+                body: Comp::Call(b, Vec::new()),
+                dict_arity: 0,
+            },
+            CoreFn {
+                name: b,
+                params: Vec::new(),
+                body: Comp::Call(a, Vec::new()),
+                dict_arity: 0,
+            },
+        ];
+        let mut cx = Cx {
+            fns: functions.iter().map(|f| (f.name, f)).collect(),
+            pure: BTreeMap::new(),
+            fresh: 0,
+            joins: 0,
+            emitted: Vec::new(),
+        };
+
+        assert!(fn_pure(a, &mut cx));
+        assert_eq!(cx.pure.get(&a), Some(&true));
+        assert_eq!(cx.pure.get(&b), Some(&true));
     }
 }

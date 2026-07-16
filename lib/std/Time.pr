@@ -34,10 +34,21 @@ import Concurrent (..)
 
 -- Unit conversions, pinned. A `Duration` is nanoseconds; these name the scale
 -- factors so no bare `1000000000` appears at a use site.
+
+-- | Nanoseconds in one second (the `Duration` scale factor for `seconds`).
+--
+-- ```prism
+-- nanos_per_sec()
+-- ```
+-- ```output
+-- 1000000000
+-- ```
 pub fn nanos_per_sec() : Int = 1000000000
 
+-- | Nanoseconds in one millisecond.
 pub fn nanos_per_milli() : Int = 1000000
 
+-- | Nanoseconds in one microsecond.
 pub fn nanos_per_micro() : Int = 1000
 
 fn secs_per_day() : Int = 86400
@@ -50,6 +61,13 @@ fn secs_per_min() : Int = 60
 pub type Duration = Duration(Int)
 
 -- | The span in whole nanoseconds.
+--
+-- ```prism
+-- dur_nanos(seconds(2))
+-- ```
+-- ```output
+-- 2000000000
+-- ```
 pub fn dur_nanos(d : Duration) : Int =
   match d of
     Duration(n) => n
@@ -58,41 +76,118 @@ pub fn dur_nanos(d : Duration) : Int =
 pub fn nanos(n : Int) : Duration = Duration(n)
 
 -- | A duration of `n` microseconds.
+--
+-- ```prism
+-- dur_nanos(micros(3))
+-- ```
+-- ```output
+-- 3000
+-- ```
 pub fn micros(n : Int) : Duration = Duration(n * nanos_per_micro())
 
 -- | A duration of `n` milliseconds.
 pub fn millis(n : Int) : Duration = Duration(n * nanos_per_milli())
 
 -- | A duration of `n` seconds.
+--
+-- ```prism
+-- dur_nanos(seconds(1))
+-- ```
+-- ```output
+-- 1000000000
+-- ```
 pub fn seconds(n : Int) : Duration = Duration(n * nanos_per_sec())
 
 -- | A duration of `n` minutes.
+--
+-- ```prism
+-- dur_as_secs(minutes(2))
+-- ```
+-- ```output
+-- 120
+-- ```
 pub fn minutes(n : Int) : Duration = Duration(n * nanos_per_sec() * secs_per_min())
 
 -- | A duration of `n` hours.
+--
+-- ```prism
+-- dur_as_secs(hours(1))
+-- ```
+-- ```output
+-- 3600
+-- ```
 pub fn hours(n : Int) : Duration = Duration(n * nanos_per_sec() * secs_per_hour())
 
 -- | The whole-second part of a duration (truncated toward zero).
+--
+-- ```prism
+-- dur_as_secs(dur_add(seconds(90), millis(500)))
+-- ```
+-- ```output
+-- 90
+-- ```
 pub fn dur_as_secs(d : Duration) : Int = dur_nanos(d) / nanos_per_sec()
 
 -- | The whole-millisecond part of a duration (truncated toward zero).
+--
+-- ```prism
+-- dur_as_millis(seconds(2))
+-- ```
+-- ```output
+-- 2000
+-- ```
 pub fn dur_as_millis(d : Duration) : Int = dur_nanos(d) / nanos_per_milli()
 
 -- | Sum of two durations.
+--
+-- ```prism
+-- dur_nanos(dur_add(seconds(1), millis(500)))
+-- ```
+-- ```output
+-- 1500000000
+-- ```
 pub fn dur_add(a : Duration, b : Duration) : Duration =
   Duration(dur_nanos(a) + dur_nanos(b))
 
 -- | Difference of two durations (`a - b`).
+--
+-- ```prism
+-- dur_nanos(dur_sub(seconds(2), millis(500)))
+-- ```
+-- ```output
+-- 1500000000
+-- ```
 pub fn dur_sub(a : Duration, b : Duration) : Duration =
   Duration(dur_nanos(a) - dur_nanos(b))
 
 -- | A duration scaled by an integer factor.
+--
+-- ```prism
+-- dur_nanos(dur_scale(seconds(1), 3))
+-- ```
+-- ```output
+-- 3000000000
+-- ```
 pub fn dur_scale(a : Duration, k : Int) : Duration = Duration(dur_nanos(a) * k)
 
 -- | A duration with the sign flipped.
+--
+-- ```prism
+-- dur_nanos(dur_negate(seconds(1)))
+-- ```
+-- ```output
+-- -1000000000
+-- ```
 pub fn dur_negate(a : Duration) : Duration = Duration(0 - dur_nanos(a))
 
 -- | Ordering of two durations (`-1`, `0`, `1`).
+--
+-- ```prism
+-- dur_cmp(seconds(1), seconds(2))
+-- ```
+-- ```output
+-- -1
+-- ```
 pub fn dur_cmp(a : Duration, b : Duration) : Int =
   let x = dur_nanos(a)
   let y = dur_nanos(b)
@@ -104,6 +199,13 @@ pub fn dur_cmp(a : Duration, b : Duration) : Int =
     0
 
 -- | True when the two durations are equal.
+--
+-- ```prism
+-- dur_eq(millis(1000), seconds(1))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn dur_eq(a : Duration, b : Duration) : Bool = dur_cmp(a, b) == 0
 
 -- | A monotonic clock reading, in nanoseconds from an unspecified origin.
@@ -111,16 +213,37 @@ pub type Instant = Instant(Int)
 
 -- | The raw monotonic reading in nanoseconds. The absolute value is meaningless
 -- across processes; subtract two instants to get an elapsed `Duration`.
+--
+-- ```prism
+-- instant_nanos(Instant(500))
+-- ```
+-- ```output
+-- 500
+-- ```
 pub fn instant_nanos(i : Instant) : Int =
   match i of
     Instant(n) => n
 
 -- | The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not
 -- `between`, to leave the prelude's numeric `between` range test unshadowed.
+--
+-- ```prism
+-- dur_nanos(elapsed(Instant(100), Instant(450)))
+-- ```
+-- ```output
+-- 350
+-- ```
 pub fn elapsed(earlier : Instant, later : Instant) : Duration =
   Duration(instant_nanos(later) - instant_nanos(earlier))
 
 -- | An instant advanced by a duration.
+--
+-- ```prism
+-- instant_nanos(instant_add(Instant(100), micros(1)))
+-- ```
+-- ```output
+-- 1100
+-- ```
 pub fn instant_add(i : Instant, d : Duration) : Instant =
   Instant(instant_nanos(i) + dur_nanos(d))
 
@@ -128,6 +251,13 @@ pub fn instant_add(i : Instant, d : Duration) : Instant =
 pub type Wall = Wall(Int)
 
 -- | The reading in nanoseconds since the Unix epoch (UTC).
+--
+-- ```prism
+-- wall_nanos(wall_of_nanos(1500000000))
+-- ```
+-- ```output
+-- 1500000000
+-- ```
 pub fn wall_nanos(w : Wall) : Int =
   match w of
     Wall(n) => n
@@ -136,16 +266,44 @@ pub fn wall_nanos(w : Wall) : Int =
 pub fn wall_of_nanos(n : Int) : Wall = Wall(n)
 
 -- | Whole seconds since the Unix epoch (truncated toward zero).
+--
+-- ```prism
+-- wall_unix_secs(wall_of_nanos(1500000000))
+-- ```
+-- ```output
+-- 1
+-- ```
 pub fn wall_unix_secs(w : Wall) : Int = wall_nanos(w) / nanos_per_sec()
 
 -- | A wall reading advanced by a duration.
+--
+-- ```prism
+-- wall_nanos(wall_add(wall_of_nanos(0), seconds(1)))
+-- ```
+-- ```output
+-- 1000000000
+-- ```
 pub fn wall_add(w : Wall, d : Duration) : Wall = Wall(wall_nanos(w) + dur_nanos(d))
 
 -- | The span from `earlier` to `later` wall readings (`later - earlier`).
+--
+-- ```prism
+-- dur_nanos(wall_diff(wall_of_nanos(0), wall_of_nanos(500)))
+-- ```
+-- ```output
+-- 500
+-- ```
 pub fn wall_diff(earlier : Wall, later : Wall) : Duration =
   Duration(wall_nanos(later) - wall_nanos(earlier))
 
 -- | Ordering of two wall readings (`-1`, `0`, `1`).
+--
+-- ```prism
+-- wall_cmp(wall_of_nanos(1), wall_of_nanos(2))
+-- ```
+-- ```output
+-- -1
+-- ```
 pub fn wall_cmp(a : Wall, b : Wall) : Int =
   let x = wall_nanos(a)
   let y = wall_nanos(b)
@@ -158,16 +316,28 @@ pub fn wall_cmp(a : Wall, b : Wall) : Int =
 
 -- | Read the monotonic clock. Deterministic under `run_clock`, real (and
 -- recorded) under `run_clock_real`.
+--
+-- ```prism,no_run
+-- run_clock_real(\() -> mono_clock())
+-- ```
 pub fn mono_clock() : Instant = Instant(mono_now())
 
 -- | Read the wall clock. Deterministic under `run_clock`, real (and recorded)
 -- under `run_clock_real`.
+--
+-- ```prism,no_run
+-- format_rfc3339(run_clock_real(\() -> wall_clock()))
+-- ```
 pub fn wall_clock() : Wall = Wall(wall_now())
 
 -- | Run `action` against the real OS clock. `now`/`sleep` still thread a virtual
 -- counter (they are the scheduler's logical time), so this is a superset of
 -- `run_clock`: `wall_now` and `mono_now` read the real clock through the `prim_*`
 -- builtins, each a recorded observation, and everything else stays virtual.
+--
+-- ```prism,no_run
+-- run_clock_real(\() -> wall_unix_secs(wall_clock()))
+-- ```
 pub fn run_clock_real(action : () -> a ! {Clock | e}) : a =
   let g =
     handle action() with
@@ -232,6 +402,13 @@ fn pad0(n : Int, w : Int) : String =
 -- fractional digits (nanoseconds); an exact second emits no fraction. The output
 -- is canonical: one reading formats to one string, so timestamps are comparable
 -- and hashable as text.
+--
+-- ```prism
+-- format_rfc3339(wall_of_nanos(0))
+-- ```
+-- ```output
+-- 1970-01-01T00:00:00Z
+-- ```
 pub fn format_rfc3339(w : Wall) : String =
   let ns = wall_nanos(w)
   let secs = ns / nanos_per_sec()
@@ -334,6 +511,13 @@ fn in_range(x : Int, lo : Int, hi : Int) : Bool = x >= lo && x <= hi
 -- separators are checked, field ranges are validated, an offset is folded into
 -- UTC, and any trailing input is rejected, so the parser is total: a malformed or
 -- overlong string is `None`, never a partial or wrapped value.
+--
+-- ```prism
+-- wall_unix_secs(unwrap_or(wall_of_nanos(0), parse_rfc3339("2000-01-01T00:00:00Z")))
+-- ```
+-- ```output
+-- 946684800
+-- ```
 pub fn parse_rfc3339(s : String) : Option(Wall) =
   if str_len(s) < 20 then
     None

@@ -31,6 +31,14 @@ type Json
 
 A dynamic JSON value. Numbers split into `JInt` and `JFloat` so the exact-or-error decode is a structural distinction rather than a hidden flag: an object is an association list in parse order (duplicate keys are preserved, not merged).
 
+```prism,mod=Json
+encode(JObj([("ok", JBool(true)), ("n", JInt(3))]))
+```
+
+```output
+{"n":3,"ok":true}
+```
+
 ### `JsonError`
 
 ```prism,def,h-30c2231cdfce1cc2d2c181bf78aec84eb991cc25b65e45f73cd0eda736333235
@@ -50,6 +58,14 @@ class ToJson(a)
 
 Convert a value to a `Json` tree.
 
+```prism,mod=Json
+to_json([1, 2, 3])
+```
+
+```output
+Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)])
+```
+
 ### `FromJson`
 
 ```prism,def,h-5c7a20486fefc0fab87a119e41f7fe1738f68627367e2c7ccb0a5f841fdf6a97
@@ -58,6 +74,14 @@ class FromJson(a)
 ```
 
 Recover a value from a `Json` tree, failing (through `Fail`) on a structural mismatch. A decode of foreign data is one ordinary failure channel.
+
+```prism,mod=Json
+from_json(JInt(41)) + 1
+```
+
+```output
+42
+```
 
 ## Instances
 
@@ -155,6 +179,14 @@ json_error_message : (Json.JsonError) -> String
 
 Render a `JsonError` as `line L col C: message`.
 
+```prism,mod=Json
+json_error_message(JsonError("unexpected character", 1, 5))
+```
+
+```output
+line 1 col 5: unexpected character
+```
+
 ### `decode`
 
 ```prism,sig,h-8ffae19d4dbf7d80cfb0c1bf5a8e3515b2b0ea67c090769ee6e1a7ded5e729a7
@@ -162,6 +194,14 @@ decode : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
 Decode a JSON document with exact number semantics: a number decodes only when its lexeme is already canonical, otherwise a decode error. Total: any malformed or lossy input is an `Err` with a position.
+
+```prism,mod=Json
+decode("[1, 2, 3]")
+```
+
+```output
+Ok(Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)]))
+```
 
 ### `decode_lossy`
 
@@ -171,6 +211,14 @@ decode_lossy : (String) -> Result(Json.Json, Json.JsonError)
 
 Decode a JSON document, accepting any well-formed number and normalizing it to `JInt` (exact integer in range) or the nearest `JFloat`. Still total, and still rejects structurally malformed input.
 
+```prism,mod=Json
+decode_lossy("1e3")
+```
+
+```output
+Ok(Json.JFloat(1000))
+```
+
 ### `encode`
 
 ```prism,sig,h-98f2bc05816e96174c7cf50b9d7863390c826959199c07c3d386e7405a50f51e
@@ -179,6 +227,14 @@ encode : (Json.Json) -> String
 
 Encode a `Json` value to its canonical byte-deterministic string: object keys sorted, numbers by the owned formatter, one fixed string escaping, no optional whitespace. Equal values encode to equal bytes.
 
+```prism,mod=Json
+encode(JObj([("b", JInt(2)), ("a", JInt(1))]))
+```
+
+```output
+{"a":1,"b":2}
+```
+
 ### `to_json_string`
 
 ```prism,sig,h-24c511bbf533e34b787aa840538a0cb339035df220668d67190ad2f5a8a4d9f2
@@ -186,3 +242,11 @@ to_json_string : forall a. (a) -> String
 ```
 
 Encode a typed value straight to a canonical JSON string.
+
+```prism,mod=Json
+to_json_string((1, true))
+```
+
+```output
+[1,true]
+```

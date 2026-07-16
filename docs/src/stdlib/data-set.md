@@ -26,6 +26,14 @@ set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 
 Add `x` to the set (a no-op if already present).
 
+```prism,mod=Data.Set
+set_to_list(set_insert(2, set_insert(1, set_empty)))
+```
+
+```output
+[1, 2]
+```
+
 ### `set_member`
 
 ```prism,sig,h-8b2057aac088e1d001aad8d49d91b8a5632e868b4faec568419a7ee44c4236f0
@@ -33,6 +41,14 @@ set_member : forall a b. (b, Map(b, Unit, a)) -> Bool
 ```
 
 True when `x` is a member of the set.
+
+```prism,mod=Data.Set
+set_member(2, set_from_list([1, 2, 3]))
+```
+
+```output
+true
+```
 
 ### `set_delete`
 
@@ -42,6 +58,14 @@ set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 
 Remove `x` from the set (a no-op if absent).
 
+```prism,mod=Data.Set
+set_to_list(set_delete(2, set_from_list([1, 2, 3])))
+```
+
+```output
+[1, 3]
+```
+
 ### `set_size`
 
 ```prism,sig,h-f08191187ed1e148c5aef1c72710594a717537e7434bbf79ee6daca3fb306849
@@ -49,6 +73,14 @@ set_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 The number of elements.
+
+```prism,mod=Data.Set
+set_size(set_from_list([1, 2, 2, 3]))
+```
+
+```output
+3
+```
 
 ### `set_to_list`
 
@@ -58,6 +90,14 @@ set_to_list : forall a b c. (Map(a, b, c)) -> List(a)
 
 The elements in ascending order.
 
+```prism,mod=Data.Set
+set_to_list(set_from_list([3, 1, 2, 1]))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `set_from_list`
 
 ```prism,sig,h-fcfbf7f3609686944a73b208bde6a6d07536165a1a541f0cbd6b1a5c9eda911e
@@ -65,6 +105,14 @@ set_from_list : forall a b. (List(b)) -> Map(b, Unit, a)
 ```
 
 Build a set from a list, dropping duplicates.
+
+```prism,mod=Data.Set
+set_to_list(set_from_list([3, 1, 2, 1]))
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `set_union`
 
@@ -74,6 +122,14 @@ set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a)
 
 Every element in either set.
 
+```prism,mod=Data.Set
+set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `set_intersection`
 
 ```prism,sig,h-88adf960472ad9f216867a47018e1021c5859d8da3f2e1ec94c697c24b8e5d24
@@ -82,6 +138,14 @@ set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, 
 
 The elements in both sets.
 
+```prism,mod=Data.Set
+set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4])))
+```
+
+```output
+[2, 3]
+```
+
 ### `set_difference`
 
 ```prism,sig,h-5ba4260d73a15b2c4f0886eb9a9b65d7f81b681ea1e5ec56ceaa979832657fcc
@@ -89,3 +153,11 @@ set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Un
 ```
 
 The elements of `s1` that are not in `s2`.
+
+```prism,mod=Data.Set
+set_to_list(set_difference(set_from_list([1, 2, 3]), set_from_list([2, 3])))
+```
+
+```output
+[1]
+```

@@ -1,0 +1,23 @@
+-- Shared-function exclusion: `boxed` builds a constructor and is called BOTH from
+-- inside a `with_arena` scope (via `inside`) AND directly from `main` outside any
+-- arena. Because it is reachable from a non-arena path, the arena-lowering pass
+-- must leave `boxed` on the raw allocation path: rewriting it would change the
+-- non-arena call, breaking byte-identity. Only genuinely arena-only helpers may
+-- be reified. The two sums are a deterministic function of the source regardless.
+
+import Arena (..)
+
+type Box2 = Box2(Int, Int)
+
+fn boxed(a : Int, b : Int) : Box2 = Box2(a, b)
+
+fn box_sum(p : Box2) : Int =
+  match p of
+    Box2(a, b) => a + b
+
+fn inside() : Int = box_sum(boxed(3, 4))
+
+fn main() : Unit ! {IO} =
+  let outside = box_sum(boxed(1, 2))
+  let arena = with_arena(inside)
+  println(outside + arena)

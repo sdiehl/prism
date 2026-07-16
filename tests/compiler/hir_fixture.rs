@@ -16,7 +16,8 @@
 // 2. Semantic assertions. Independently of the byte comparison, each golden
 //    is re-parsed as JSON and probed for the fact family it exists to pin
 //    (field resolution, update paths, dictionary and superclass evidence,
-//    numeric lanes, zonked node types, effect rows, unboxed resolution), so
+//    numeric lanes, zonked node types, effect rows, handler residuals, unboxed
+//    resolution), so
 //    an accepted-but-hollow golden cannot silently drop a fact family.
 
 use std::collections::BTreeSet;
@@ -39,7 +40,7 @@ const HIR_FIXTURE_ACCEPT: &str = "PRISM_ACCEPT_HIR_FIXTURES";
 // here rather than imported from the compiler: the test parses the JSON
 // independently, so a schema drift in the emitter cannot re-pin the value it
 // is checked against.
-const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v1";
+const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
 // The dump phase that renders the fixture.
 const HIR_PHASE: &str = "hir";
 
@@ -240,6 +241,38 @@ fn assert_fixture_facts(stem: &str, doc: &Value) {
                 main_effects.is_empty(),
                 "polymorphic_effects: main's row is discharged, got {main_effects:?}"
             );
+        }
+        "handler_residual" => {
+            let residuals: Vec<_> = nodes(doc)
+                .into_iter()
+                .filter_map(|node| node.get("handler_residual"))
+                .collect();
+            assert_eq!(residuals.len(), 1, "one checked handler residual fact");
+            let residual = residuals[0];
+            assert_eq!(residual["forwarded_operations"], serde_json::json!(["two"]));
+            assert_eq!(residual["forwarded_effects"], serde_json::json!([]));
+            assert_eq!(
+                residual["residual_operations"],
+                serde_json::json!(["three", "two"])
+            );
+            assert_eq!(residual["residual_effects"], serde_json::json!([]));
+            assert_eq!(residual["open_row"], false);
+        }
+        "handler_residual_open" => {
+            let residuals: Vec<_> = nodes(doc)
+                .into_iter()
+                .filter_map(|node| node.get("handler_residual"))
+                .collect();
+            assert_eq!(residuals.len(), 1, "one checked open handler residual fact");
+            let residual = residuals[0];
+            assert_eq!(residual["forwarded_operations"], serde_json::json!([]));
+            assert_eq!(residual["forwarded_effects"], serde_json::json!(["Wrap"]));
+            assert_eq!(residual["residual_operations"], serde_json::json!([]));
+            assert_eq!(
+                residual["residual_effects"],
+                serde_json::json!(["Out", "Wrap"])
+            );
+            assert_eq!(residual["open_row"], true);
         }
         "unboxed_fields" => {
             let unboxed = res_of_kind(doc, "unboxed");

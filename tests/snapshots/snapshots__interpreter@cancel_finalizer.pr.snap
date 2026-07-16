@@ -4,7 +4,14 @@ expression: interp_output(path)
 input_file: tests/cases/run/cancel_finalizer.pr
 ---
 worker: before yield
-finalizer ran
+inner cleanup: start
+cleanup child cancelled
+inner cleanup: end
+outer cleanup: start
+outer cleanup: end
+await joined cancellation
 scene done
 0
+failing cleanup: start
+cleanup failure recovered with -9
 => ()

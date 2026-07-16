@@ -319,12 +319,17 @@ long prism_exit(long code) {
     exit((int)code);
 }
 
-extern long prism_main(void);
+/* The user's entry point, emitted by codegen. It carries the `prismfn_` prefix
+ * of every Core function, not this runtime's `prism_`: the two namespaces are
+ * kept disjoint at index 5 precisely so a user function can be named after a
+ * runtime intrinsic without colliding with it. This declaration is the one
+ * place the runtime reaches across that boundary. */
+extern long prismfn_main(void);
 
 int main(int argc, char **argv) {
     prism_argc = argc;
     prism_argv = argv;
-    long r = prism_main();
+    long r = prismfn_main();
     int code = (int)(r & 1 ? r >> 1 : 0);
     if (!(r & 1) && r) prism_rc_dec(r);
     return code;

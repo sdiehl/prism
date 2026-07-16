@@ -32,6 +32,15 @@ Run `body` with a fresh ordering witness carrying `cmp`. The witness's brand is 
 
 The brand binder is spelled `brand` rather than a bare letter on purpose: it must not collide with the `a`, `b`, `c` a scheme's own quantifiers are canonicalized to, which would capture the result type under the inner quantifier.
 
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_lookup(w, 1, ord_insert(w, 1, "a", ord_empty(w))))
+```
+
+```output
+Some(a)
+```
+
 ### `ord_empty`
 
 ```prism,sig,h-cb546ff5601304a5155f307d3d19ee8940bd5fde0ab431873d9bc9f2ff3a8b30
@@ -48,6 +57,15 @@ ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Map(a, c, b)) -
 
 Insert under witness `w`; the result carries `w`'s brand.
 
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_size(w, ord_insert(w, 1, "a", ord_empty(w))))
+```
+
+```output
+1
+```
+
 ### `ord_lookup`
 
 ```prism,sig,h-a4a558866553e9c154efb940b6125d8447ea1f4b7b5b24c4d83baafc01bffeb6
@@ -55,6 +73,15 @@ ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> O
 ```
 
 Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
+
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_lookup(w, 9, ord_insert(w, 1, "a", ord_empty(w))))
+```
+
+```output
+None
+```
 
 ### `ord_member`
 
@@ -64,6 +91,15 @@ ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> B
 
 True when `key` is present under witness `w`.
 
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_member(w, 1, ord_insert(w, 1, "a", ord_empty(w))))
+```
+
+```output
+true
+```
+
 ### `ord_to_list`
 
 ```prism,sig,h-c52ad6bcdae0ef62d47c39d2e2f1b782baec9e951a1a275ac387007bc5902c93
@@ -72,6 +108,15 @@ ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> Lis
 
 The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
 
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_to_list(w, ord_insert(w, 2, "b", ord_insert(w, 1, "a", ord_empty(w)))))
+```
+
+```output
+[(1, a), (2, b)]
+```
+
 ### `ord_size`
 
 ```prism,sig,h-0df8cc4c4e55e5210e4dd1bf33e7dc840eb338afcf826762720b8ffce7a7257a
@@ -79,3 +124,12 @@ ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> Int
 ```
 
 The number of entries in a `w`-branded map.
+
+```prism,mod=Data.Ordered
+with_ordering(\(a, b) -> cmp(a, b), \(w) ->
+  ord_size(w, ord_insert(w, 2, "b", ord_insert(w, 1, "a", ord_empty(w)))))
+```
+
+```output
+2
+```

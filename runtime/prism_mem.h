@@ -16,6 +16,11 @@ extern long prism_live_cells;
 size_t prism_cell_bytes(long n_words);
 
 void *prism_alloc(long n_words);
+/* Arena bump: hand out a raw n-word cell for a constructor the arena-lowering
+ * pass split into `alloc` + `init_at`. It delegates to `prism_alloc`, so an arena
+ * constructor is byte-identical to an ordinary one. Returns the cell as a
+ * `long`, the representation `init_at` fills. */
+long prism_bump(long n_words);
 /* Build a constructor cell { rc, tag, arity, fields... }; shared with the effect,
  * integer, and IO modules that assemble tagged cells (queues, boxed ints, Result
  * values). */

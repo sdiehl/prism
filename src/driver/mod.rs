@@ -1,13 +1,18 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
+use crate::core::typed::{
+    execute_late as execute_typed_late, insert_rc as insert_typed_rc,
+    lower_effects as lower_typed_effects, reuse as reuse_typed, LateExecutorFailure, TypedLowering,
+};
 use crate::core::{
-    balanced, fip_annots, hash_program, hash_root, insert_rc, lower_effects, pp_core_pretty, reuse,
-    Comp, Core, DepGraph, Digest, EffectStrategy, ElaboratedCore, LoweredCore, OpGrades, Value,
-    HASH_SCHEME,
+    balanced, effective_passes, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty,
+    reuse, typed_verification_error, verify_typed_core, Comp, Core, DepGraph, Digest,
+    EffectStrategy, ElaboratedCore, LoweredCore, OpGrades, TypedCore, TypedEffectLowered,
+    TypedElaborated, Value, VerifyEnv, HASH_SCHEME,
 };
 use crate::error::{Error, TypeError};
 use crate::parse::{parse, ParseResult};
@@ -28,6 +33,7 @@ mod decision;
 mod diff;
 mod downstream;
 mod dump;
+mod dupes;
 mod execution;
 mod front;
 mod identity;
@@ -40,6 +46,7 @@ mod native;
 mod query;
 mod report;
 mod scheduler;
+mod semantic_patch;
 mod session;
 mod timing;
 mod verify;
@@ -65,10 +72,12 @@ pub use diff::{
 pub(crate) use diff::{diff_on_roots, render_source_diff, source_diff_on_roots};
 pub use dump::{dump, dump_at, dump_on};
 pub use execution::{
-    debug_on, interpret, interpret_at, interpret_io_at, interpret_io_on, interpret_io_on_with_args,
-    observe_run_on, record_on, record_on_with_args, record_run_on, replay_on, replay_run_on,
-    resume_observed_on, resume_on, step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun,
-    StepRuler, StepRulerRow, SuspendCut, SuspendResult, STEP_RULER_FORMAT,
+    debug_on, interpret, interpret_at, interpret_deferred_holes, interpret_io_at, interpret_io_on,
+    interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes, interpret_on,
+    observe_lowered_run_on, observe_run_on, observe_run_on_deferred_holes, record_on,
+    record_on_with_args, record_run_on, replay_on, replay_run_on, resume_observed_on, resume_on,
+    step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun, StepRuler, StepRulerRow, SuspendCut,
+    SuspendResult, STEP_RULER_FORMAT,
 };
 use front::{run_front, Front, FrontOpts};
 pub(crate) use identity::stdlib_driver_src;
@@ -87,6 +96,14 @@ pub use module_graph::{
 pub use modules::{check_modules_on, CheckedModule, ModuleCheckReport};
 pub use query::query_on;
 pub use report::{report, report_at, report_on, shape_digests_of};
+pub use semantic_patch::{
+    apply_semantic_patch, fetch_semantic_patch, impact_semantic_patch,
+    verify_semantic_patch_behavior, BehaviorCase, BehaviorCaseResult, BehaviorCorpus,
+    BehaviorDivergence, BehaviorReceipt, DeltaReport, EvidenceTier, FetchReport, ImpactReport,
+    InterfaceDelta, PatchRefusal, PatchRefusalBody, PatchRefusalSubject, StagedPatch,
+    PATCH_BEHAVIOR_CORPUS_FORMAT, PATCH_BEHAVIOR_FORMAT, PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT,
+    PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT,
+};
 pub use session::{CompilerSession, QueryDecision, SessionStats};
 pub use timing::TimingSink;
 #[cfg(feature = "native")]
@@ -149,7 +166,7 @@ impl WireKind {
 
     /// The varint discriminant reserved for the compact binary codec. Not emitted
     /// in the text envelope; pinned alongside `tag` so both encodings share one
-    /// family ordering when the binary body lands in `lib/std/Wire.pr`.
+    /// family ordering even though the text envelope does not emit it.
     #[must_use]
     pub const fn varint(self) -> u8 {
         match self {
@@ -260,11 +277,13 @@ pub fn with_custom_prelude(prelude: &str, src: &str) -> String {
 /// Make a documentation snippet runnable without a `main` boilerplate.
 ///
 /// A snippet that already defines `main` is returned unchanged. Otherwise the
-/// whole snippet becomes the body of an implicit `main`, so a bare expression
+/// snippet body becomes an implicit `main`, so a bare expression
 /// (`unwrap_or(0, Some(5))`) or a `let`-block runs like a REPL line and yields a
-/// value. A snippet that is neither (top-level declarations with no `main`, which
-/// cannot sit inside a function body) is returned unchanged, so the caller sees
-/// it has no entry point. Idempotent: wrapping a wrapped snippet is a no-op.
+/// value. Leading imports stay at the top level, letting generated docs and
+/// playground links carry their module context. A snippet that is neither
+/// (top-level declarations with no `main`, which cannot sit inside a function
+/// body) is returned unchanged, so the caller sees it has no entry point.
+/// Idempotent: wrapping a wrapped snippet is a no-op.
 #[must_use]
 pub fn example_program(src: &str) -> String {
     let defines_main = |s: &str| {
@@ -278,12 +297,37 @@ pub fn example_program(src: &str) -> String {
     if defines_main(src) {
         return src.to_string();
     }
-    let body: String = src
+
+    // Imports cannot be indented into a function body. Hoist a leading import
+    // preamble and wrap only the remaining snippet.
+    let lines = src.lines().collect::<Vec<_>>();
+    let mut last_import = None;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("import ") {
+            last_import = Some(index);
+        } else if !trimmed.is_empty() {
+            break;
+        }
+    }
+    let (imports, rest) = last_import.map_or_else(
+        || (String::new(), src.to_string()),
+        |last| {
+            let mut imports = lines[..=last].join("\n");
+            imports.push('\n');
+            let mut rest = lines[last + 1..].join("\n");
+            if src.ends_with('\n') {
+                rest.push('\n');
+            }
+            (imports, rest)
+        },
+    );
+    let body: String = rest
         .lines()
         .map(|l| format!("  {l}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let wrapped = format!("fn {}() =\n{body}", crate::names::ENTRY_POINT);
+    let wrapped = format!("{imports}fn {}() =\n{body}", crate::names::ENTRY_POINT);
     if parse(&wrapped).is_ok() {
         wrapped
     } else {
@@ -350,6 +394,16 @@ pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, E
     Ok(run_front(src, roots, cfg, FrontOpts::CHECK)?.into_checked())
 }
 
+// The checked Core-surface tree plus presentation facts used only by
+// `dump typespans` and the documentation preprocessor.
+fn tooltip_checked_on(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Program<CorePhase>, Checked), Error> {
+    Ok(run_front(src, roots, cfg, FrontOpts::TYPED_TOOLTIPS)?.into_program_checked())
+}
+
 /// The public validity verdict behind `prism check`.
 ///
 /// Type-checks, elaborates, and runs every semantic validator (fip / replayable /
@@ -376,11 +430,18 @@ fn lint_surface(src: &str, prog: &Program) -> Vec<crate::tc::Warning> {
 // this source. Errors abort earlier, so this only runs once a program type checks.
 fn emit_warnings(src: &str, checked: &Checked) {
     for w in &checked.warnings {
-        eprint!(
-            "{}",
-            crate::error::render_warning(src, "<source>", &w.span, &w.msg, true)
-        );
+        emit_warning(src, w);
     }
+}
+
+// Render one non-fatal diagnostic on stderr, with a source caret when the span
+// points into this source. Shared by the batch emitter and the duplicate-detection
+// pass, which surfaces its findings after elaboration (past the batch emit above).
+fn emit_warning(src: &str, w: &crate::tc::Warning) {
+    eprint!(
+        "{}",
+        crate::error::render_warning(src, "<source>", &w.span, &w.msg, true)
+    );
 }
 
 // The full compile path (scheduler retarget, validators, pre-lowering optimizer),
@@ -531,45 +592,307 @@ fn elaborated_validated(
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
 fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<ElaboratedCore, Error> {
-    let (program, checked, core) = frontend(src, roots, cfg)?;
+    prepared_core_with_opts(src, roots, cfg, FrontOpts::FULL)
+}
+
+// Interpreter-only typed-hole lane. Native/wasm/build never call this and keep
+// the ordinary `E1021` refusal before elaboration.
+fn prepared_core_deferred_holes(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<ElaboratedCore, Error> {
+    prepared_core_with_opts(src, roots, cfg, FrontOpts::FULL_DEFERRED_HOLES)
+}
+
+fn prepared_core_with_opts(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+    opts: FrontOpts,
+) -> Result<ElaboratedCore, Error> {
+    let (program, checked, core, typed, verify_env) =
+        run_front(src, roots, cfg, opts)?.into_typed_pre();
     let sigs = borrow_sigs(&program);
-    let (lowered, _, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
-    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
-    balanced(&reuse(&insert_rc(&lowered, &sigs)), &sigs)
-        .map_err(|e| Error::CodegenBackend(format!("ICE: rc imbalance: {e}")))?;
+    let lowered = lower_opt(
+        typed,
+        &verify_env,
+        &checked.ctors,
+        &checked.op_grades(),
+        cfg,
+    )?;
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    finish_lowered(lowered, &sigs)?;
     Ok(core)
 }
 
-// The effect-lowered core, its constructor table, and any fallback warning.
-type Lowered = (LoweredCore, BTreeMap<String, CtorInfo>, Option<String>);
+struct LoweredSpine {
+    core: TypedCore<TypedEffectLowered>,
+    mirror: LoweredCore,
+    verify_env: VerifyEnv,
+    ctors: BTreeMap<String, CtorInfo>,
+    warning: Option<String>,
+    parity_report: bool,
+    parity_deltas: Vec<ParityDelta>,
+}
 
-// Effect-lower `core`, then run the late (post-lowering) optimization passes on
-// the result. The late stage is where the simplifier lives: lowering has already
-// fixed the var/State fusion strategy, so simplifying here cannot defeat it. Every
-// path that produces or shows the lowered native core goes through this, so the
-// compiled binary and the `lowered`/`llvm`/`mlir` dumps stay in step.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParityStage {
+    PostLowering,
+    ReferenceCounted,
+    ReuseLowered,
+}
+
+impl ParityStage {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::PostLowering => "post-lowering",
+            Self::ReferenceCounted => "reference-counted",
+            Self::ReuseLowered => "reuse-lowered",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParityDeltaKind {
+    CoreStructural,
+    ObservationError,
+}
+
+impl ParityDeltaKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::CoreStructural => "core-structural",
+            Self::ObservationError => "observation-error",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ParityDelta {
+    stage: ParityStage,
+    kind: ParityDeltaKind,
+    typed_digest: Option<String>,
+    shadow_digest: Option<String>,
+    detail: Option<String>,
+}
+
+// Effect-lower the verified typed Core, then run the late (post-lowering)
+// optimization passes. The witness-carrying tree is authoritative. Raw late
+// optimization remains temporarily as an implementation-drift observer, but
+// no legacy effect-lowering query or cache artifact is produced.
+const TYPED_LOWER_STACK: usize = 64 * 1024 * 1024;
+
+fn on_typed_lower_stack<T>(f: impl FnOnce() -> T) -> T {
+    stacker::maybe_grow(TYPED_LOWER_STACK, TYPED_LOWER_STACK, f)
+}
+
 fn lower_opt(
-    core: &ElaboratedCore,
+    typed: TypedCore<TypedElaborated>,
+    verify_env: &VerifyEnv,
     ctors: &BTreeMap<String, CtorInfo>,
     grades: &OpGrades,
     cfg: &Config,
-) -> Result<Lowered, Error> {
-    let (lowered, ctors, warning) = timing::timed_res(
+) -> Result<LoweredSpine, Error> {
+    on_typed_lower_stack(|| lower_opt_on_grown_stack(typed, verify_env, ctors, grades, cfg))
+}
+
+fn lower_opt_on_grown_stack(
+    typed: TypedCore<TypedElaborated>,
+    verify_env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    grades: &OpGrades,
+    cfg: &Config,
+) -> Result<LoweredSpine, Error> {
+    let mut typed_flags = cfg.flags.clone();
+    typed_flags.quiet = true;
+    let typed = timing::timed_res(
         cfg.timing.as_ref(),
         timing::Phase::LowerEffects,
         "",
-        || downstream::lower_effect_queries(core, ctors, grades, cfg),
+        || lower_typed_effects(typed, verify_env, ctors, &typed_flags, grades).map_err(Error::from),
         |_| timing::RowExtras::default(),
     )?;
-    let empty = std::collections::BTreeSet::new();
-    let lowered = timing::timed_res(
+    let TypedLowering {
+        core: typed,
+        env: typed_env,
+        ctors: typed_ctors,
+        warning: typed_warning,
+        strategy: _,
+    } = typed;
+    let parity_report = cfg.flags.typed_parity_report;
+    let mut parity_deltas = Vec::new();
+    let typed_erased = typed.clone().erase();
+
+    let passes = effective_passes(
+        cfg.opt,
+        cfg.passes.as_ref(),
+        PassStage::Late,
+        &cfg.disabled,
+        &cfg.flags,
+    );
+    let empty = BTreeSet::new();
+    let (typed, mirror) = timing::timed_res(
         cfg.timing.as_ref(),
         timing::Phase::OptLate,
         "",
-        || downstream::run_opt_queries(&lowered, &empty, PassStage::Late, cfg),
+        || {
+            let (typed, _) =
+                execute_typed_late(typed, &typed_env, &passes).map_err(typed_late_error)?;
+            let mirror = downstream::run_opt_queries(&typed_erased, &empty, PassStage::Late, cfg)?;
+            Ok::<_, Error>((typed, mirror))
+        },
         |_| timing::RowExtras::default(),
     )?;
-    Ok((LoweredCore(lowered), ctors, warning))
+    let typed_erased = typed.clone().erase();
+    observe_core_parity(
+        &mut parity_deltas,
+        parity_report,
+        ParityStage::PostLowering,
+        &typed_erased,
+        &mirror,
+    );
+    Ok(LoweredSpine {
+        core: typed,
+        mirror: LoweredCore(typed_erased),
+        verify_env: typed_env,
+        ctors: typed_ctors,
+        warning: typed_warning,
+        parity_report,
+        parity_deltas,
+    })
+}
+
+fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
+    finish_lowered_with_deltas(lowered, sigs).map(|(core, _)| core)
+}
+
+fn finish_lowered_with_deltas(
+    lowered: LoweredSpine,
+    sigs: &Sigs,
+) -> Result<(LoweredCore, Vec<ParityDelta>), Error> {
+    on_typed_lower_stack(|| finish_lowered_with_deltas_on_grown_stack(lowered, sigs))
+}
+
+fn finish_lowered_with_deltas_on_grown_stack(
+    mut lowered: LoweredSpine,
+    sigs: &Sigs,
+) -> Result<(LoweredCore, Vec<ParityDelta>), Error> {
+    let typed_owned = insert_typed_rc(lowered.core, sigs);
+    verify_typed_core(&typed_owned, &lowered.verify_env).map_err(typed_verification_error)?;
+    let typed_owned_erased = typed_owned.clone().erase();
+    let mirror_owned = insert_rc(&lowered.mirror, sigs);
+    observe_core_parity(
+        &mut lowered.parity_deltas,
+        lowered.parity_report,
+        ParityStage::ReferenceCounted,
+        &typed_owned_erased,
+        &mirror_owned,
+    );
+
+    let typed_reused = reuse_typed(typed_owned);
+    verify_typed_core(&typed_reused, &lowered.verify_env).map_err(typed_verification_error)?;
+    let mirror_reused = reuse(&typed_owned_erased);
+    let final_core = typed_reused.erase();
+    observe_core_parity(
+        &mut lowered.parity_deltas,
+        lowered.parity_report,
+        ParityStage::ReuseLowered,
+        &final_core,
+        &mirror_reused,
+    );
+    balanced(&final_core, sigs)
+        .map_err(|error| Error::CodegenBackend(format!("ICE: rc imbalance: {error}")))?;
+    Ok((LoweredCore(final_core), lowered.parity_deltas))
+}
+
+fn observe_core_parity(
+    deltas: &mut Vec<ParityDelta>,
+    report: bool,
+    stage: ParityStage,
+    typed: &Core,
+    shadow: &Core,
+) {
+    let typed_bytes = serde_json::to_vec(typed);
+    let shadow_bytes = serde_json::to_vec(shadow);
+    match (typed_bytes, shadow_bytes) {
+        (Ok(typed_bytes), Ok(shadow_bytes)) if typed_bytes == shadow_bytes => {}
+        (Ok(typed_bytes), Ok(shadow_bytes)) => record_parity_delta(
+            deltas,
+            report,
+            ParityDelta {
+                stage,
+                kind: ParityDeltaKind::CoreStructural,
+                typed_digest: Some(blake3::hash(&typed_bytes).to_hex().to_string()),
+                shadow_digest: Some(blake3::hash(&shadow_bytes).to_hex().to_string()),
+                detail: Some(format!(
+                    "typed_bytes={} shadow_bytes={}",
+                    typed_bytes.len(),
+                    shadow_bytes.len()
+                )),
+            },
+        ),
+        (typed, shadow) => record_parity_delta(
+            deltas,
+            report,
+            ParityDelta {
+                stage,
+                kind: ParityDeltaKind::ObservationError,
+                typed_digest: None,
+                shadow_digest: None,
+                detail: Some(format!(
+                    "typed={} shadow={}",
+                    typed
+                        .err()
+                        .map_or_else(|| "ok".to_string(), |error| error.to_string()),
+                    shadow
+                        .err()
+                        .map_or_else(|| "ok".to_string(), |error| error.to_string())
+                )),
+            },
+        ),
+    }
+}
+
+fn record_parity_delta(deltas: &mut Vec<ParityDelta>, report: bool, delta: ParityDelta) {
+    if report {
+        let detail = parity_detail_json(delta.detail.as_deref());
+        eprintln!(
+            "TYPED_SHADOW stage={} class={} typed={} shadow={} detail={}",
+            delta.stage.label(),
+            delta.kind.label(),
+            delta.typed_digest.as_deref().unwrap_or("-"),
+            delta.shadow_digest.as_deref().unwrap_or("-"),
+            detail,
+        );
+    }
+    deltas.push(delta);
+}
+
+fn parity_detail_json(detail: Option<&str>) -> String {
+    const LIMIT: usize = 512;
+    let detail = detail.unwrap_or("-");
+    let mut chars = detail.chars();
+    let mut bounded = chars.by_ref().take(LIMIT).collect::<String>();
+    if chars.next().is_some() {
+        bounded.push('…');
+    }
+    serde_json::to_string(&bounded).unwrap_or_else(|_| "\"<unavailable>\"".to_string())
+}
+
+fn typed_late_error(failure: LateExecutorFailure) -> Error {
+    match failure {
+        LateExecutorFailure::UnsupportedPass { occurrence, pass } => {
+            Error::InternalInvariant(format!(
+                "typed post-lowering executor rejected {} at occurrence {occurrence}",
+                pass.name()
+            ))
+        }
+        LateExecutorFailure::Verification { violations, .. } => {
+            typed_verification_error(violations)
+        }
+        LateExecutorFailure::Simplify { failure, .. } => failure.into(),
+    }
 }
 
 fn lowered_core(
@@ -577,11 +900,39 @@ fn lowered_core(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
-    let (program, checked, core) = frontend(src, roots, cfg)?;
+    let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
+    let core = on_typed_lower_stack(|| LoweredCore(lowered.core.clone().erase()));
+    Ok((checked, core, lowered.ctors, sigs))
+}
+
+fn reuse_lowered_core(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
+    let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
+    let ctors = lowered.ctors.clone();
+    let core = finish_lowered(lowered, &sigs)?;
+    Ok((checked, core, ctors, sigs))
+}
+
+fn lowered_front(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Checked, Sigs, LoweredSpine), Error> {
+    let (program, checked, _, typed, verify_env) =
+        run_front(src, roots, cfg, FrontOpts::FULL)?.into_typed_pre();
     let sigs = borrow_sigs(&program);
-    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
-    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
-    Ok((checked, lowered, ctors, sigs))
+    let lowered = lower_opt(
+        typed,
+        &verify_env,
+        &checked.ctors,
+        &checked.op_grades(),
+        cfg,
+    )?;
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    Ok((checked, sigs, lowered))
 }
 
 #[cfg(feature = "native")]
@@ -598,7 +949,7 @@ fn lowered_core_with_identity(
     ),
     Error,
 > {
-    let (program, checked, identity_core, core) =
+    let (program, checked, identity_core, _, typed, verify_env) =
         run_front(src, roots, cfg, FrontOpts::FULL)?.into_compilation();
     let sigs = borrow_sigs(&program);
     let hashes = if cfg.scheduler.retarget().is_some() {
@@ -618,14 +969,17 @@ fn lowered_core_with_identity(
         let metas = hash_meta(&checked, &sigs, &fip_annots(&program));
         hash_program(&identity_core, &metas)
     };
-    let (lowered, ctors, warning) = lower_opt(&core, &checked.ctors, &checked.op_grades(), cfg)?;
-    emit_lower_warning(src, warning.as_deref(), cfg.flags.quiet);
-    Ok((
-        checked,
-        LoweredCore(reuse(&insert_rc(&lowered, &sigs))),
-        ctors,
-        hashes,
-    ))
+    let lowered = lower_opt(
+        typed,
+        &verify_env,
+        &checked.ctors,
+        &checked.op_grades(),
+        cfg,
+    )?;
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    let ctors = lowered.ctors.clone();
+    let core = finish_lowered(lowered, &sigs)?;
+    Ok((checked, core, ctors, hashes))
 }
 
 // Surface the effect-lowering fallback warning through the standard renderer,
@@ -646,6 +1000,204 @@ fn emit_lower_warning(src: &str, warning: Option<&str>, quiet: bool) {
     }
 }
 
+#[cfg(test)]
+mod typed_post_route_tests {
+    use super::*;
+    use crate::flags::EffectTier;
+
+    fn float_core(bits: u64) -> Core {
+        Core {
+            fns: vec![crate::core::CoreFn {
+                name: Sym::new("main"),
+                params: Vec::new(),
+                body: Comp::Return(Value::Float(f64::from_bits(bits))),
+                dict_arity: 0,
+            }],
+        }
+    }
+
+    fn assert_route(source: &str, cfg: &Config) {
+        let (_, core, _, sigs) = reuse_lowered_core(source, &[], cfg).expect("typed route");
+        balanced(&core, &sigs).expect("the final typed term is balanced");
+        crate::core::residual_effects(&core).expect("effect nodes do not cross the final boundary");
+    }
+
+    #[test]
+    fn production_route_finishes_a_pure_program() {
+        assert_route("fn main() : Int = 42\n", &Config::default());
+    }
+
+    #[test]
+    fn production_route_finishes_an_evidence_handler() {
+        assert_route(
+            "effect Ask\n  ask() : Int\n\nfn reader() : Int ! {Ask} = ask() + 1\n\nfn main() : Int =\n  handle reader() with {\n    ask() resume k => k(41),\n    return x => x\n  }\n",
+            &Config::default(),
+        );
+    }
+
+    #[test]
+    fn production_route_finishes_a_whole_program_lowering() {
+        let mut cfg = Config::default();
+        cfg.flags.effect_tier = EffectTier::FreeMonad;
+        cfg.flags.quiet = true;
+        assert_route(
+            "effect Ask\n  ask() : Int\n\nfn make() = \\() -> let answer = ask() in answer\n\nfn main() =\n  let _unused = make()\n  0\n",
+            &cfg,
+        );
+    }
+
+    #[test]
+    fn surviving_shadow_core_identity_is_float_bit_exact() {
+        let nan = float_core(0x7ff8_0000_0000_0001);
+        let same_nan = nan.clone();
+        let other_nan = float_core(0x7ff8_0000_0000_0002);
+        let positive_zero = float_core(0.0f64.to_bits());
+        let negative_zero = float_core((-0.0f64).to_bits());
+
+        let mut deltas = Vec::new();
+        observe_core_parity(
+            &mut deltas,
+            false,
+            ParityStage::PostLowering,
+            &nan,
+            &same_nan,
+        );
+        assert!(deltas.is_empty(), "identical NaN bits are reflexive");
+
+        observe_core_parity(
+            &mut deltas,
+            false,
+            ParityStage::PostLowering,
+            &nan,
+            &other_nan,
+        );
+        observe_core_parity(
+            &mut deltas,
+            false,
+            ParityStage::PostLowering,
+            &positive_zero,
+            &negative_zero,
+        );
+        assert_eq!(
+            deltas
+                .iter()
+                .filter(|delta| delta.kind == ParityDeltaKind::CoreStructural)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn production_route_accepts_the_verified_typed_control_shape() {
+        // A bare `forever` loop can only leave through `return`. Typed control
+        // erasure omits the legacy builder's unreachable `SMore(Unit)` branch,
+        // whose Unit witness is invalid at the function's Int answer type. The
+        // verified typed tree is the sole effect-lowering result.
+        let src = crate::with_prelude(include_str!("../../examples/imperative.pr"));
+        let roots = default_roots(Path::new("."));
+        let mut cfg = Config::default();
+        cfg.flags.compiler_cache = false;
+        cfg.flags.quiet = true;
+        let (program, checked, _, typed, verify_env) =
+            run_front(&src, &roots, &cfg, FrontOpts::FULL)
+                .expect("front")
+                .into_typed_pre();
+        let sigs = borrow_sigs(&program);
+        let lowered = lower_opt(
+            typed,
+            &verify_env,
+            &checked.ctors,
+            &checked.op_grades(),
+            &cfg,
+        )
+        .expect("typed lowering");
+        let (final_core, deltas) =
+            finish_lowered_with_deltas(lowered, &sigs).expect("typed final route");
+        balanced(&final_core, &sigs).expect("balanced typed final");
+        crate::core::residual_effects(&final_core).expect("no residual effect nodes");
+        assert!(
+            deltas
+                .iter()
+                .all(|delta| delta.stage != ParityStage::PostLowering
+                    || delta.kind != ParityDeltaKind::CoreStructural),
+            "{deltas:?}"
+        );
+    }
+
+    #[test]
+    fn num_float_ieee_has_no_post_lowering_structural_delta() {
+        let src = crate::with_prelude(include_str!("../../tests/cases/run/num_float_ieee.pr"));
+        let roots = default_roots(Path::new("."));
+        let mut cfg = Config::default();
+        cfg.flags.compiler_cache = false;
+        cfg.flags.quiet = true;
+        let (program, checked, _, typed, verify_env) =
+            run_front(&src, &roots, &cfg, FrontOpts::FULL)
+                .expect("front")
+                .into_typed_pre();
+        let sigs = borrow_sigs(&program);
+        let lowered = lower_opt(
+            typed,
+            &verify_env,
+            &checked.ctors,
+            &checked.op_grades(),
+            &cfg,
+        )
+        .expect("typed lowering");
+        let (_, deltas) = finish_lowered_with_deltas(lowered, &sigs).expect("typed final route");
+        assert!(
+            !deltas.iter().any(|delta| {
+                delta.stage == ParityStage::PostLowering
+                    && delta.kind == ParityDeltaKind::CoreStructural
+            }),
+            "{deltas:?}"
+        );
+    }
+
+    #[test]
+    fn parity_detail_is_single_line_and_bounded() {
+        let detail = format!("first\nsecond {}", "x".repeat(600));
+        let encoded = parity_detail_json(Some(&detail));
+        assert!(!encoded.contains('\n'));
+        assert!(encoded.contains("\\n"));
+        let decoded: String = serde_json::from_str(&encoded).expect("valid JSON string");
+        assert!(decoded.chars().count() <= 513);
+        assert!(decoded.ends_with('…'));
+    }
+
+    #[test]
+    fn interpreter_preparation_returns_the_unlowered_core() {
+        let src = crate::with_prelude(
+            "effect Ask\n  ask() : Int\n\nfn main() : Int =\n  handle ask() with {\n    ask() resume k => k(42),\n    return x => x\n  }\n",
+        );
+        let roots = default_roots(Path::new("."));
+        let mut cfg = Config::default();
+        cfg.flags.compiler_cache = false;
+        cfg.flags.quiet = true;
+        let (_, _, expected, _, _) = run_front(&src, &roots, &cfg, FrontOpts::FULL)
+            .expect("front")
+            .into_typed_pre();
+        let actual = prepared_core(&src, &roots, &cfg).expect("prepared interpreter core");
+        assert_eq!(
+            serde_json::to_vec(&actual.0).expect("expected bytes"),
+            serde_json::to_vec(&expected.0).expect("actual bytes"),
+            "the interpreter must keep evaluating pre-effect-lowering Core"
+        );
+        assert!(
+            crate::core::residual_effects(&actual).is_err(),
+            "the interpreter must retain the source effect nodes"
+        );
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn report_uses_the_same_verified_final_core() {
+        let output = report::report_on("fn main() : Int = 42\n", &[], &Config::default());
+        assert!(output.contains("== llvm =="));
+        assert!(!output.contains("(skipped:"), "{output}");
+    }
+}
+
 /// The effect-lowering strategy this snippet's program takes.
 ///
 /// A performance classification of how its effects compile (`pure`, `evidence`,
@@ -655,7 +1207,7 @@ fn emit_lower_warning(src: &str, warning: Option<&str>, quiet: bool) {
 /// `full` carries the prelude.
 ///
 /// # Errors
-/// Fails on front-end errors.
+/// Fails on front-end or typed effect-lowering verification errors.
 pub fn effect_strategy_full(full: &str, base: &Path) -> Result<EffectStrategy, Error> {
     effect_strategy_on(full, base, &Config::from_env())
 }
@@ -667,15 +1219,9 @@ pub fn effect_strategy_full(full: &str, base: &Path) -> Result<EffectStrategy, E
 /// forced build actually exercises.
 ///
 /// # Errors
-/// Fails on front-end errors.
+/// Fails on front-end or typed effect-lowering verification errors.
 pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<EffectStrategy, Error> {
-    let (_, checked, core) = frontend(full, &default_roots(base), cfg)?;
-    Ok(crate::core::effect_strategy(
-        &core,
-        &checked.ctors,
-        &cfg.flags,
-        &checked.op_grades(),
-    )?)
+    typed_effect_facts(full, &default_roots(base), cfg).map(|(strategy, _)| strategy)
 }
 
 /// The effect-lowering fallback warnings this snippet's program raises.
@@ -685,12 +1231,32 @@ pub fn effect_strategy_on(full: &str, base: &Path, cfg: &Config) -> Result<Effec
 /// produces. `full` carries the prelude.
 ///
 /// # Errors
-/// Fails on front-end errors.
+/// Fails on front-end or typed effect-lowering verification errors.
 pub fn effect_warnings_full(full: &str, base: &Path) -> Result<Vec<String>, Error> {
     let cfg = Config::from_env();
-    let (_, checked, core) = frontend(full, &default_roots(base), &cfg)?;
-    let (_, _, warning) = lower_effects(&core, &checked.ctors, &cfg.flags, &checked.op_grades())?;
+    let (_, warning) = typed_effect_facts(full, &default_roots(base), &cfg)?;
     Ok(warning.into_iter().collect())
+}
+
+fn typed_effect_facts(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(EffectStrategy, Option<String>), Error> {
+    let mut cfg = cfg.clone();
+    cfg.flags.quiet = true;
+    let (_, checked, _, typed, verify_env) =
+        run_front(src, roots, &cfg, FrontOpts::FULL)?.into_typed_pre();
+    let lowering = on_typed_lower_stack(|| {
+        lower_typed_effects(
+            typed,
+            &verify_env,
+            &checked.ctors,
+            &cfg.flags,
+            &checked.op_grades(),
+        )
+    })?;
+    Ok((lowering.strategy, lowering.warning))
 }
 
 /// The CBPV core IR of the snippet's own functions (prelude elided),
@@ -792,7 +1358,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
             | Comp::Reuse(_, v)
             | Comp::RefNew(v)
             | Comp::RefGet(v) => scan_val(v, out),
-            Comp::RefSet(c, v) => {
+            Comp::RefSet(c, v) | Comp::InitAt(c, v) => {
                 scan_val(c, out);
                 scan_val(v, out);
             }
@@ -869,13 +1435,13 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
 // snippet's IR dump. The prelude is a compile-time constant and its function
 // names do not depend on any environment knob, so the set is memoized once per
 // process rather than re-elaborating the prelude on every dump.
-fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
-    static CACHE: OnceLock<std::collections::HashSet<Sym>> = OnceLock::new();
+fn prelude_fn_names() -> Result<HashSet<Sym>, Error> {
+    static CACHE: OnceLock<HashSet<Sym>> = OnceLock::new();
     if let Some(cached) = CACHE.get() {
         return Ok(cached.clone());
     }
     let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")), &Config::from_env())?;
-    let names: std::collections::HashSet<Sym> = core.0.fns.into_iter().map(|f| f.name).collect();
+    let names: HashSet<Sym> = core.0.fns.into_iter().map(|f| f.name).collect();
     let _ = CACHE.set(names.clone());
     Ok(names)
 }
@@ -883,7 +1449,7 @@ fn prelude_fn_names() -> Result<std::collections::HashSet<Sym>, Error> {
 // Drop the prelude's functions from a core dump, leaving only the snippet's own
 // declarations. The 300-plus prelude functions otherwise bury the user's code;
 // the playground filters them the same way, so CLI `dump` matches it.
-fn strip_prelude(core: Core, prelude: &std::collections::HashSet<Sym>) -> Core {
+fn strip_prelude(core: Core, prelude: &HashSet<Sym>) -> Core {
     Core {
         fns: core
             .fns
@@ -954,13 +1520,24 @@ mod envelope_tests {
     use super::identity::native_kont_table_for;
     #[cfg(feature = "native")]
     use super::{default_roots, dump_on, Config, HASH_SCHEME};
-    use super::{dump, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+    use super::{dump, example_program, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+    #[cfg(feature = "native")]
+    use crate::codegen::MAIN_SYMBOL;
 
     const STORE_PKG_NAME: &str = "StorePkg";
     #[cfg(feature = "native")]
     const STORE_PKG_SOURCE: &str = "pub fn answer() : Int = 41\n";
     #[cfg(feature = "native")]
     const STORE_PKG_ROOT: &str = "abc123";
+
+    #[test]
+    fn example_program_keeps_leading_imports_outside_main() {
+        let source = "import Data.Tensor (..)\n\nstrides(new([2, 3], 0.0))\n";
+        let program = example_program(source);
+        assert!(program.starts_with("import Data.Tensor (..)\nfn main() =\n"));
+        assert!(program.contains("  strides(new([2, 3], 0.0))"));
+        assert_eq!(example_program(&program), program, "wrapping is idempotent");
+    }
 
     /// The five-kind family: textual tags are distinct, varints are the distinct
     /// contiguous discriminants the binary codec will reuse, and `parse` inverts
@@ -1012,6 +1589,7 @@ mod envelope_tests {
     /// Native kont serialization needs this table as its code-identity bridge:
     /// raw native symbols are paired with the same definition hashes used by the
     /// interpreter kont envelope.
+    #[cfg(feature = "native")]
     #[test]
     fn native_kont_table_names_native_symbols_by_hash() {
         let out = dump("native-kont-table", "fn main() = 1\n").expect("native kont table");
@@ -1035,8 +1613,9 @@ mod envelope_tests {
             "native table names source and Std roots:\n{out}"
         );
         assert!(
-            out.lines()
-                .any(|line| line.starts_with("fn      prism_main  ") && line.ends_with("  main")),
+            out.lines().any(|line| {
+                line.starts_with(&format!("fn      {MAIN_SYMBOL}  ")) && line.ends_with("  main")
+            }),
             "native table includes the main symbol and its definition hash:\n{out}"
         );
     }
@@ -1088,7 +1667,10 @@ mod envelope_tests {
             out.contains("slot-format prism-native-abi-word-v1")
                 && out.contains("backend  llvm\n")
                 && out.contains("flag  scheduler  cooperative\n")
-                && out.contains("state prism_count ")
+                && out.contains(&format!(
+                    "state {} ",
+                    crate::codegen::native_symbol("count")
+                ))
                 && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
             "native state map includes concrete entry ABI words:\n{out}"
         );
@@ -1140,8 +1722,10 @@ mod envelope_tests {
             "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
         );
         assert!(
-            out.contains("state prism_count ")
-                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
+            out.contains(&format!(
+                "state {} ",
+                crate::codegen::native_symbol("count")
+            )) && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
             "LLVM IR embeds concrete ABI-word slots for native arguments:\n{out}"
         );
         assert!(
@@ -1151,13 +1735,13 @@ mod envelope_tests {
             "LLVM IR instruments native kont entry ABI values:\n{out}"
         );
         assert!(
-            out.contains("prism_main") && out.contains(" main\\0A"),
+            out.contains(MAIN_SYMBOL) && out.contains(" main\\0A"),
             "LLVM IR table includes the native main symbol and Core name:\n{out}"
         );
         assert!(
             out.contains("@prism_native_kont_ptrs = constant")
                 && out.contains("@prism_native_kont_ptrs_len = constant")
-                && out.contains("ptr @prism_main"),
+                && out.contains(&format!("ptr @{MAIN_SYMBOL}")),
             "LLVM IR embeds an exact function-pointer kont lookup table:\n{out}"
         );
     }

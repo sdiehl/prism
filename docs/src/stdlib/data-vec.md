@@ -40,6 +40,14 @@ vsingle : forall a. (a) -> Data.Vec.Vec(a, 1)
 
 The one-element vector, length `1`.
 
+```prism,mod=Data.Vec
+vto_list(vsingle(42))
+```
+
+```output
+[42]
+```
+
 ### `vto_list`
 
 ```prism,sig,h-8023a90574cbbeda33899928939899d74d25d0ccf100e81db4b41578b095ad46
@@ -47,6 +55,14 @@ vto_list : forall a b. (Data.Vec.Vec(a, b)) -> List(a)
 ```
 
 The underlying list, forgetting the static length.
+
+```prism,mod=Data.Vec
+vto_list(vsingle(7))
+```
+
+```output
+[7]
+```
 
 ### `vmap`
 
@@ -56,6 +72,14 @@ vmap : forall a b c. ((a) -> b, Data.Vec.Vec(a, c)) -> Data.Vec.Vec(b, c)
 
 Apply `f` to every element, preserving the length.
 
+```prism,mod=Data.Vec
+vto_list(vmap(\(x) -> x * 2, vsingle(21)))
+```
+
+```output
+[42]
+```
+
 ### `vzip`
 
 ```prism,sig,h-195446ba2eddaa10d3e9f2579e673b2ea1297a5ce9f1823e995234eaf431c94f
@@ -64,7 +88,17 @@ vzip : forall a b c. (Data.Vec.Vec(a, b), Data.Vec.Vec(c, b)) -> Data.Vec.Vec((a
 
 Zip two vectors of the SAME length into a vector of pairs. The shared `n` forces equal lengths; a mismatch is rejected at compile time, naming both.
 
-```prism,compile_fail
+```prism,mod=Data.Vec
+vto_list(vzip(vsingle(1), vsingle(2)))
+```
+
+```output
+[(1, 2)]
+```
+
+A length mismatch is a compile error:
+
+```prism,compile_fail,mod=Data.Vec
 vzip(vsingle(1), vempty())
 ```
 
@@ -75,3 +109,11 @@ vhead : forall a b. (Data.Vec.Vec(a, b)) -> a ! {Fail}
 ```
 
 The first element. `n` is unconstrained, so the empty vector is not ruled out statically; on an empty vector this raises `Fail`.
+
+```prism,mod=Data.Vec
+vhead(vsingle(42))
+```
+
+```output
+42
+```

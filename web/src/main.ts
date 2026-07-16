@@ -142,6 +142,7 @@ function sync(): void {
 // drop by a metavar-normalized multiset subtraction against the prelude-only
 // fixture (node ids and metavar numbering shift when user code is present, but a
 // node's fact is stable once its type/row metavars are canonicalized).
+const HIR_FIXTURE_SCHEMA = "prism-hir-fixture-v2";
 interface HirDeclJ {
   name: string;
   scheme: string;
@@ -152,9 +153,17 @@ interface HirNodeJ {
   evidence?: string[];
   lane?: string;
   ty?: string;
+  handler_residual?: HirHandlerResidualJ;
+}
+interface HirHandlerResidualJ {
+  forwarded_operations: string[];
+  forwarded_effects: string[];
+  residual_operations: string[];
+  residual_effects: string[];
+  open_row: boolean;
 }
 interface HirFixture {
-  schema: string;
+  schema: typeof HIR_FIXTURE_SCHEMA;
   decls: HirDeclJ[];
   nodes: Record<string, HirNodeJ>;
 }
@@ -166,6 +175,7 @@ const nodeSig = (n: HirNodeJ): string =>
     n.evidence ?? null,
     n.lane ?? null,
     (n.ty ?? "").replace(META, "?"),
+    n.handler_residual ?? null,
   ]);
 
 // The prelude projection, computed once from `dump_hir("")` (empty user source):
@@ -178,6 +188,7 @@ function ensurePrelude(): void {
   preludeNodes = new Map();
   try {
     const p = JSON.parse(dump_hir("")) as HirFixture;
+    if (p.schema !== HIR_FIXTURE_SCHEMA) throw new Error(`incompatible HIR schema: ${p.schema}`);
     for (const d of p.decls) preludeNames.add(d.name);
     for (const k of Object.keys(p.nodes)) {
       const s = nodeSig(p.nodes[k]);
@@ -194,6 +205,18 @@ function showRes(res: unknown): string {
   if (r && r.kind === "unboxed") return `unboxed .${r.index}/${r.arity}`;
   return JSON.stringify(res);
 }
+function showHandlerResidual(residual: HirHandlerResidualJ): string {
+  const forwarded = [
+    ...residual.forwarded_operations,
+    ...residual.forwarded_effects.map((effect) => `${effect}.*`),
+  ];
+  const remaining = [
+    ...residual.residual_operations,
+    ...residual.residual_effects.map((effect) => `${effect}.*`),
+  ];
+  const open = residual.open_row ? " | _" : "";
+  return `forward={${forwarded.join(", ")}} residual={${remaining.join(", ")}${open}}`;
+}
 // Render the prelude-stripped HIR of the current source: the user declarations
 // with their schemes and effect rows, then the checker facts recorded on the
 // user's own nodes.
@@ -205,6 +228,9 @@ function renderHir(): string {
     fix = JSON.parse(raw) as HirFixture;
   } catch {
     return strip(raw);
+  }
+  if (fix.schema !== HIR_FIXTURE_SCHEMA) {
+    return `error: incompatible HIR fixture schema ${String(fix.schema)} (expected ${HIR_FIXTURE_SCHEMA})`;
   }
   ensurePrelude();
   const names = preludeNames ?? new Set<string>();
@@ -229,16 +255,18 @@ function renderHir(): string {
       continue;
     }
     // Only surface nodes carrying a substantive checker fact: a resolution, a
-    // dictionary evidence chain, or a numeric lane. Nodes whose sole fact is a
-    // bare `ty=` (the literal-node type rows) are dropped as noise; the type is
-    // then shown only as context alongside one of the substantive facts.
+    // dictionary evidence chain, numeric lane, or handler residual. Nodes whose
+    // sole fact is a bare `ty=` (the literal-node type rows) are dropped as
+    // noise; the type is then shown only as context alongside one of the
+    // substantive facts.
     const lane = n.lane ? `lane=${n.lane}` : "";
     const res = n.res ? `res=${showRes(n.res)}` : "";
     const ev = n.evidence?.length ? `ev=${n.evidence.join(", ")}` : "";
-    if (!lane && !res && !ev) continue;
+    const residual = n.handler_residual ? `handler=${showHandlerResidual(n.handler_residual)}` : "";
+    if (!lane && !res && !ev && !residual) continue;
     const parts: string[] = [];
     if (n.ty && !isMeta(n.ty)) parts.push(`ty=${n.ty}`);
-    for (const p of [lane, res, ev]) if (p) parts.push(p);
+    for (const p of [lane, res, ev, residual]) if (p) parts.push(p);
     facts.push(`#${k}  ${parts.join("  ")}`);
   }
   const out = ["-- Declarations", decls.length ? decls.join("\n") : "(no top-level declarations)"];

@@ -6,13 +6,34 @@
 -- this is structural sequencing over the container shape, not do-notation.
 
 -- | Collapse one level of nesting: `m(m(a))` to `m(a)`.
+--
+-- ```prism
+-- join([[1, 2], [3, 4]])
+-- ```
+-- ```output
+-- [1, 2, 3, 4]
+-- ```
 pub fn join(mm : m(m(a))) : m(a) given Monad(m) = bind(mm, \(x) -> x)
 
 -- | Lift a binary function over two wrapped values (`Applicative`).
+--
+-- ```prism
+-- map2(\(x, y) -> x + y, Some(1), Some(2))
+-- ```
+-- ```output
+-- Some(3)
+-- ```
 pub fn map2(f : (a, b) -> c, ma : m(a), mb : m(b)) : m(c) given Applicative(m) =
   ap(fmap(\(x) -> \(y) -> f(x, y), ma), mb)
 
 -- | Lift a ternary function over three wrapped values (`Applicative`).
+--
+-- ```prism
+-- map3(\(x, y, z) -> x + y + z, Some(1), Some(2), Some(3))
+-- ```
+-- ```output
+-- Some(6)
+-- ```
 pub fn map3(
   f : (a, b, c) -> d,
   ma : m(a),
@@ -24,6 +45,13 @@ pub fn map3(
 -- | Evaluate a list of wrapped values left to right, collecting the results
 -- (`Applicative`). `Option` short-circuits on `None`; `List` takes the
 -- cartesian product.
+--
+-- ```prism
+-- sequence([Some(1), Some(2), Some(3)])
+-- ```
+-- ```output
+-- Some([1, 2, 3])
+-- ```
 pub fn sequence(ms : List(m(a))) : m(List(a)) given Applicative(m) =
   match ms of
     Nil => pure(Nil)
@@ -31,6 +59,13 @@ pub fn sequence(ms : List(m(a))) : m(List(a)) given Applicative(m) =
 
 -- | Apply `f` to each element and sequence the wrapped results
 -- (`Applicative`). This is `sequence` after a plain `map`.
+--
+-- ```prism
+-- traverse_list(\(x) -> if x > 0 then Some(x) else None, [1, 2, 3])
+-- ```
+-- ```output
+-- Some([1, 2, 3])
+-- ```
 pub fn traverse_list(
   f : (a) -> m(b),
   xs : List(a)

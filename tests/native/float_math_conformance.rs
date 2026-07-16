@@ -36,6 +36,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use prism::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
+use prism::codegen::MAIN_SYMBOL;
 use prism::eval::owned_math as m;
 
 // The op table, shared by the C shim's switch and the Rust reference below. Order
@@ -214,7 +215,7 @@ fn build_helper() -> PathBuf {
             r#"#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-{decls}long prism_main(void) {{
+{decls}long {MAIN_SYMBOL}(void) {{
 unsigned char op; uint64_t xb, yb;
 while (fread(&op, 1, 1, stdin) == 1) {{
 if (fread(&xb, 8, 1, stdin) != 1) break;

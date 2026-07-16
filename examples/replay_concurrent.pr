@@ -17,7 +17,7 @@ import Replay (record, replay)
 
 fn worker(_name : String) : Int ! {Async(Int), Random} =
   let r = rand_below(100)
-  yield(())
+  yield()
   r
 
 fn scene() : Int ! {Async(Int), Random} =

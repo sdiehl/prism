@@ -90,3 +90,10 @@ arb_gen : forall a. () -> Quickcheck.Gen(a)
 ```
 
 The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for `quickcheck`/`gen_at`.
+
+```prism,no_run,mod=Test
+# import Quickcheck (..)
+fn prop(xs : List(Int)) : Bool = reverse(reverse(xs)) == xs
+
+fn main() = println(passed(quickcheck(arb_gen(), prop)))
+```

@@ -1,0 +1,19 @@
+-- A marked partial handler intercepts `one` but keeps E in its residual row,
+-- so `two` forwards to the outer exhaustive handler. Resuming there re-enters
+-- the inner handler exactly once before the non-tail clause finishes.
+effect E
+  one(Int) : Int
+  two(Int) : Int
+
+fn work() : Int ! {E} = one(1) + two(2)
+
+fn run() : Int =
+  handle (handle work() with partial {
+      one(x) resume k => let r = k(x + 9) in r + 1,
+      return r => r
+    }) with
+    one(x) resume k => k(x + 99)
+    two(x) resume k => k(x + 18)
+    return r => r
+
+fn main() = println(run())

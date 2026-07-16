@@ -171,6 +171,7 @@ fn comp(c: &Comp) -> J {
             json!({"c": "withReuse", "tok": token.as_str(), "freed": value(freed), "body": comp(body)})
         }
         Comp::Reuse(tok, v) => json!({"c": "reuse", "tok": tok.as_str(), "v": value(v)}),
+        Comp::InitAt(cell, v) => json!({"c": "initAt", "cell": value(cell), "v": value(v)}),
         Comp::RefNew(v) => json!({"c": "refNew", "v": value(v)}),
         Comp::RefGet(v) => json!({"c": "refGet", "v": value(v)}),
         Comp::RefSet(a, b) => json!({"c": "refSet", "a": value(a), "b": value(b)}),

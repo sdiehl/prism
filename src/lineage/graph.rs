@@ -4,7 +4,7 @@
 //! A lineage graph is a set of digest-named [`Node`]s joined by kinded [`Edge`]s
 //! that fan out from one [`NodeKind::Request`]. This module owns the types, their
 //! content-derived identities, the determinism seal ([`finalize`]), the on-disk
-//! envelope ([`LineageGraph::to_json_string`] / [`LineageGraph::from_v1`]), and the
+//! envelope ([`LineageGraph::to_json_string`]), and the
 //! relation accessors ([`LineageGraph::request`], [`LineageGraph::inputs_of`], ...)
 //! that let explain, diff, and verify read the graph without scanning raw edges.
 //!
@@ -22,7 +22,9 @@ use serde_json::{json, Value};
 pub(crate) use super::node_id::minted_id;
 pub(super) use super::node_id::NodeId;
 
-/// The first named build sidecar format, kept readable through [`LineageGraph::from_v1`].
+/// The build-lineage projection embedded inside a package-world report (see
+/// [`super::build::BuildLineage::to_json`]); not the standalone sidecar envelope,
+/// which is [`LINEAGE_GRAPH_FORMAT`].
 pub const LINEAGE_FORMAT: &str = "prism-build-lineage-v1";
 /// The shared lineage graph envelope every producer emits.
 pub const LINEAGE_GRAPH_FORMAT: &str = "prism-lineage-graph-v1";
@@ -656,16 +658,6 @@ impl LineageGraph {
         serde_json::to_string_pretty(self).map_err(|e| Error::ResolveLineage(e.to_string()))
     }
 
-    /// Lift a build-lineage-v1 sidecar value into the typed graph.
-    ///
-    /// # Errors
-    /// Fails if the value is not a `prism-build-lineage-v1` document or a typed
-    /// field fails to decode.
-    #[cfg(feature = "native")]
-    pub fn from_v1(value: &Value) -> Result<Self, Error> {
-        super::build::from_v1(value)
-    }
-
     // --- Typed relations -------------------------------------------------------
     //
     // Queries read the graph through these accessors rather than scanning raw
@@ -862,14 +854,6 @@ impl LineageGraph {
             })
             .collect()
     }
-}
-
-pub(crate) fn decode_field<T: for<'de> Deserialize<'de>>(
-    value: &Value,
-    field: &str,
-) -> Result<T, Error> {
-    serde_json::from_value(value[field].clone())
-        .map_err(|e| Error::ResolveLineage(format!("lineage: field `{field}`: {e}")))
 }
 
 // Merge nodes that share a digest, pin a run-to-run order over both nodes and

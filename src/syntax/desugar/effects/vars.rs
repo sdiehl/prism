@@ -9,7 +9,7 @@ use super::escape::escapes;
 use super::{rw, Binding, VarOps, Vars};
 use crate::error::{ErrKind, TypeError};
 use crate::names::{self, CONT, RET, STATE, UNIT_ARG, VAL};
-use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, Ty, S};
+use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, HandlerMode, Ty, S};
 use crate::syntax::desugar::{call, evar, lam1, sp, Cx};
 
 pub(super) fn rw_var_decl(
@@ -82,7 +82,10 @@ pub(super) fn rw_var_decl(
         HandlerArm::Return(RET.into(), lam1(STATE, evar(RET, span), span)),
     ];
     let runner = names::var_runner(n);
-    let handled = sp(Expr::Handle(Box::new(rest2), arms), span);
+    let handled = sp(
+        Expr::Handle(Box::new(rest2), arms, HandlerMode::Exhaustive),
+        span,
+    );
     let apply = call(evar(&runner, span), vec![init2], span);
     Ok(sp(
         Expr::Let(runner, Box::new(handled), Box::new(apply)),

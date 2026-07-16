@@ -10,4 +10,22 @@
 -- behavior. Compose it with `Replay.record` for a durable, replayable mobile run.
 
 -- | Run a portable, single-use closure as a mobile unit.
+--
+-- A closure over top-level code and scalar arguments satisfies the contract,
+-- and running it through `teleport` is indistinguishable from calling it:
+--
+-- ```prism
+-- teleport(\() -> 6 * 7)
+-- ```
+-- ```output
+-- 42
+-- ```
+--
+-- Capturing a local binding is refused at compile time: a local does not
+-- travel, so the closure could not move to a fresh runtime:
+--
+-- ```prism,compile_fail
+-- let n = 6
+-- teleport(\() -> n * 7)
+-- ```
 pub fn teleport(f : (() -> a) @ {once, portable}) : a = f()

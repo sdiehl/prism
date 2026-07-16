@@ -31,6 +31,7 @@ use crate::support::{
 fn forced(tier: EffectTier) -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.effect_tier = tier;
+    cfg.flags.compiler_cache = false;
     cfg
 }
 
@@ -39,7 +40,8 @@ fn forced(tier: EffectTier) -> Config {
 // oracle cannot silently become vacuous.
 fn run_forced(tag: &str, tier: EffectTier, floor: usize) {
     require_cc();
-    let auto_cfg = Config::from_env();
+    let mut auto_cfg = Config::from_env();
+    auto_cfg.flags.compiler_cache = false;
     let forced_cfg = forced(tier);
     let base = Path::new(".");
     let cases: Vec<_> = corpus()
@@ -198,6 +200,7 @@ fn forced_state_matches_interpreter() {
 fn native_effects_toggle_matches_native() {
     let mut fast = Config::from_env();
     fast.flags.quiet = true;
+    fast.flags.compiler_cache = false;
     let mut slow = fast.clone();
     slow.flags.native_effects = false;
     run_native_diff("native-effects", "on", &fast, "off", &slow, 3);
@@ -209,6 +212,7 @@ fn trampoline_toggle_matches_native() {
     tramp.flags.native_effects = false;
     tramp.flags.trampoline = true;
     tramp.flags.quiet = true;
+    tramp.flags.compiler_cache = false;
     let mut no_tramp = tramp.clone();
     no_tramp.flags.trampoline = false;
     run_native_diff("trampoline", "on", &tramp, "off", &no_tramp, 3);

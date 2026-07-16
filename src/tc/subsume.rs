@@ -501,6 +501,9 @@ impl Tc<'_> {
         let cur_row = scope.tail;
         let prefix = scope.prefix.clone();
         let eff = self.apply_row(eff);
+        if self.track_tooltips && !matches!(eff, EffRow::Empty) {
+            self.touched_tooltip_rows.insert(cur_row);
+        }
         // A row that already refers to the ambient (a recursive self-call, or a
         // row already folded in) adds nothing and would only form a cycle.
         let mut fv = BTreeSet::new();
@@ -517,6 +520,9 @@ impl Tc<'_> {
         let eff = self.strip_prefix(&eff, &prefix)?;
         let opened = if matches!(eff.tail(), EffRow::Empty) {
             let fresh = self.push_ex_row();
+            if self.track_tooltips {
+                self.tooltip_row_scaffolds.insert(fresh);
+            }
             replace_tail(&eff, EffRow::Exist(fresh))
         } else {
             eff
@@ -700,7 +706,14 @@ mod tests {
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
+            track_tooltips: false,
+            pending_tooltip_rows: Vec::new(),
+            tooltip_rows: BTreeMap::new(),
+            touched_tooltip_rows: BTreeSet::new(),
+            tooltip_row_scaffolds: BTreeSet::new(),
             pending: Vec::new(),
+            hole_sites: Vec::new(),
+            holes: Vec::new(),
             or_null_sites: Vec::new(),
             classes,
             instances,
@@ -716,6 +729,10 @@ mod tests {
             row_ctx: Vec::new(),
             cur_row: None,
             handler_stack: Vec::new(),
+            operation_uses: super::super::OperationUses::default(),
+            precise_calls: BTreeMap::new(),
+            handler_nodes: BTreeSet::new(),
+            handler_residuals: BTreeMap::new(),
         }
     }
 

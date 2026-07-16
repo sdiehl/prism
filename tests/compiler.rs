@@ -1,5 +1,7 @@
 #[path = "compiler/alloc_certificate.rs"]
 mod alloc_certificate;
+#[path = "compiler/arena.rs"]
+mod arena;
 #[path = "compiler/base_surface.rs"]
 mod base_surface;
 #[path = "compiler/expect.rs"]
@@ -24,3 +26,5 @@ mod stdlib;
 mod store_codec;
 #[path = "compiler/store_oracle.rs"]
 mod store_oracle;
+#[path = "compiler/typespans.rs"]
+mod typespans;

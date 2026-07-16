@@ -38,6 +38,14 @@ shape : (Data.Tensor.Tensor) -> List(Int)
 
 The extent of each axis, outermost first.
 
+```prism,mod=Data.Tensor
+shape(new([2, 3], 0.0))
+```
+
+```output
+[2, 3]
+```
+
 ### `strides`
 
 ```prism,sig,h-7ace8776e12005e49dfa25656ac9088e181a429a00972a9df839ec97212943ba
@@ -45,6 +53,14 @@ strides : (Data.Tensor.Tensor) -> List(Int)
 ```
 
 The flat-offset stride of each axis.
+
+```prism,mod=Data.Tensor
+strides(new([2, 3], 0.0))
+```
+
+```output
+[3, 1]
+```
 
 ### `axes`
 
@@ -54,6 +70,14 @@ axes : (Data.Tensor.Tensor) -> List(String)
 
 The name of each axis.
 
+```prism,mod=Data.Tensor
+axes(new([2, 3], 0.0))
+```
+
+```output
+[0, 1]
+```
+
 ### `rank`
 
 ```prism,sig,h-57bc683253254dd4c179492614b19db1f919ee3e9be745760bc64eed30242aa1
@@ -61,6 +85,14 @@ rank : (Data.Tensor.Tensor) -> Int
 ```
 
 The number of axes.
+
+```prism,mod=Data.Tensor
+rank(new([2, 3], 0.0))
+```
+
+```output
+2
+```
 
 ### `size`
 
@@ -70,6 +102,14 @@ size : (Data.Tensor.Tensor) -> Int
 
 The total number of elements: the product of the shape.
 
+```prism,mod=Data.Tensor
+size(new([2, 3], 0.0))
+```
+
+```output
+6
+```
+
 ### `new`
 
 ```prism,sig,h-0931be4e634cad3ea30f9ef14c89aa2415332b47d286bb3e3b283db9d5e40c7b
@@ -77,6 +117,15 @@ new : (List(Int), Float) -> Data.Tensor.Tensor
 ```
 
 A tensor of the given shape with every element set to `fill`, row-major.
+
+```prism,mod=Data.Tensor
+let t = new([2, 2], 7.0)
+t[1, 1]
+```
+
+```output
+7
+```
 
 ### `from_list`
 
@@ -86,6 +135,15 @@ from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor
 
 A row-major tensor of the given shape filled from a flat list of values. Extra list elements past the shape's size are ignored; missing ones stay 0.
 
+```prism,mod=Data.Tensor
+let t = from_list([2, 2], [1.0, 2.0, 3.0, 4.0])
+t[1, 0]
+```
+
+```output
+3
+```
+
 ### `at_tensor`
 
 ```prism,sig,h-4e467ac95f04a35c9409f5dec8468f0ea17ed31568a03a80bbe502a2407c06d5
@@ -93,6 +151,14 @@ at_tensor : (Data.Tensor.Tensor, List(Int)) -> Float ! {Fail}
 ```
 
 The element at a multi-index, or `fail()` if the offset is out of range. Backs `t[i, j]`.
+
+```prism,mod=Data.Tensor
+at_tensor(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [0, 1])
+```
+
+```output
+2
+```
 
 ### `tensor_set`
 
@@ -102,6 +168,15 @@ tensor_set : (Data.Tensor.Tensor, List(Int), Float) -> Data.Tensor.Tensor ! {Fai
 
 A tensor equal to `t` but with the element at a multi-index set to `v`, or `fail()` if out of range. Backs `t[i, j] := v`.
 
+```prism,mod=Data.Tensor
+let t = tensor_set(new([2, 2], 0.0), [0, 1], 5.0)
+t[0, 1]
+```
+
+```output
+5
+```
+
 ### `transpose`
 
 ```prism,sig,h-ea27421ec526053ecc7e28f4b56d8f1dfa09b77ab5925d23258a39f064a0989c
@@ -109,6 +184,15 @@ transpose : (Data.Tensor.Tensor, String, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Transpose two named axes: a permutation of the shape, strides, and names with no data movement (the buffer is shared). Reading a transposed tensor walks the same buffer in the permuted stride order.
+
+```prism,mod=Data.Tensor
+let t = transpose(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0", "1")
+t[0, 1]
+```
+
+```output
+3
+```
 
 ### `reshape`
 
@@ -118,6 +202,14 @@ reshape : (Data.Tensor.Tensor, List(Int)) -> Data.Tensor.Tensor ! {Fail}
 
 Reinterpret the elements under a new shape of the same size. Requires the tensor to be contiguous (row-major strides); a transposed view must be copied first, so reshaping one is a `fail()`. The new axes get default names.
 
+```prism,mod=Data.Tensor
+shape(reshape(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [4]))
+```
+
+```output
+[4]
+```
+
 ### `map_tensor`
 
 ```prism,sig,h-cf1dcec23253fb31b02c77ae07bd6bca23a98c359f7db2300e859053740c0a10
@@ -125,6 +217,14 @@ map_tensor : forall e0. ((Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor) -> D
 ```
 
 A tensor of the same shape with `f` applied to every element. Requires a contiguous input; the result is contiguous.
+
+```prism,mod=Data.Tensor
+sum_all(map_tensor(\(x) -> x + 1.0, from_list([2], [10.0, 20.0])))
+```
+
+```output
+32
+```
 
 ### `zip_with_tensor`
 
@@ -134,6 +234,14 @@ zip_with_tensor : forall e0. ((Float, Float) -> Float ! {Fail, e0}, Data.Tensor.
 
 Combine two identically-shaped contiguous tensors elementwise with `f`, or `fail()` if the shapes differ or either is not contiguous. No broadcasting.
 
+```prism,mod=Data.Tensor
+sum_all(zip_with_tensor(\(x, y) -> x + y, from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
+```
+
+```output
+10
+```
+
 ### `add`
 
 ```prism,sig,h-4bab1c77b8228a1146b05a0056864bdf7c61c2613b0da4f96bec288fc7bf36e0
@@ -141,6 +249,14 @@ add : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Elementwise sum of two identically-shaped tensors.
+
+```prism,mod=Data.Tensor
+sum_all(add(from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
+```
+
+```output
+10
+```
 
 ### `sub`
 
@@ -158,6 +274,14 @@ mul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 
 Elementwise (Hadamard) product, not matrix multiplication.
 
+```prism,mod=Data.Tensor
+sum_all(mul(from_list([2], [2.0, 3.0]), from_list([2], [4.0, 5.0])))
+```
+
+```output
+23
+```
+
 ### `div`
 
 ```prism,sig,h-49699a14f9c83b2a4c128e3f6d3beecb36d99ed18922a21398987aa9697455cf
@@ -174,6 +298,14 @@ scale : (Float, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 
 Every element multiplied by a scalar.
 
+```prism,mod=Data.Tensor
+sum_all(scale(2.0, from_list([2], [1.0, 2.0])))
+```
+
+```output
+6
+```
+
 ### `sum_all`
 
 ```prism,sig,h-97cb276526732016c178f23a32b97ae77887a6891f342113b041c81b2e44448b
@@ -181,6 +313,14 @@ sum_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
 The sum of every element, added in row-major order. Requires a contiguous tensor (so the summation order is well defined).
+
+```prism,mod=Data.Tensor
+sum_all(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
+```
+
+```output
+10
+```
 
 ### `prod_all`
 
@@ -190,6 +330,14 @@ prod_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 
 The product of every element, in row-major order.
 
+```prism,mod=Data.Tensor
+prod_all(from_list([2], [3.0, 4.0]))
+```
+
+```output
+12
+```
+
 ### `mean`
 
 ```prism,sig,h-2471f21934c1fd5e10fe21641a473a0526c08338aa541ca64f07d3b16e0caac8
@@ -197,6 +345,14 @@ mean : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
 The arithmetic mean of every element.
+
+```prism,mod=Data.Tensor
+mean(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
+```
+
+```output
+2.5
+```
 
 ### `sum_axis`
 
@@ -206,6 +362,15 @@ sum_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 
 Reduce over one named axis by summing, removing that axis (rank `r` becomes `r - 1`); the remaining axes keep their names. The contracted axis is summed in index order `0..extent` (source loop order), so the result is bit-identical across backends. `fail()` on a missing axis or a non-contiguous input.
 
+```prism,mod=Data.Tensor
+let s = sum_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0")
+(at_tensor(s, [0]), at_tensor(s, [1]))
+```
+
+```output
+(4, 6)
+```
+
 ### `mean_axis`
 
 ```prism,sig,h-d528f334e963ef97feff4925aa21704245e238917d20373754961978aa859a2b
@@ -214,6 +379,15 @@ mean_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 
 Reduce over one named axis by averaging: the sum over that axis divided by its extent, removing the axis. Same source-loop order and contiguity requirement as `sum_axis`.
 
+```prism,mod=Data.Tensor
+let m = mean_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "1")
+(at_tensor(m, [0]), at_tensor(m, [1]))
+```
+
+```output
+(1.5, 3.5)
+```
+
 ### `matmul`
 
 ```prism,sig,h-90dcd6d991b9674b27ffc5bd401c371ea1eadfe3bddad7e9c13693dc0b45f54f
@@ -221,3 +395,12 @@ matmul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 Matrix product of a rank-2 `[m, k]` tensor with a rank-2 `[k, n]` tensor, giving `[m, n]`. The contraction sums in source loop order, so the result is bit-identical across backends. `fail()` unless both operands are contiguous, rank 2, with matching inner extents.
+
+```prism,mod=Data.Tensor
+let c = matmul(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), from_list([2, 2], [1.0, 0.0, 0.0, 1.0]))
+(c[0, 0], c[1, 1])
+```
+
+```output
+(1, 4)
+```

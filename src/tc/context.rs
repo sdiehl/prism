@@ -608,6 +608,9 @@ fn avoid_forall_capture(t: &Type, target_names: &BTreeSet<Sym>) -> Type {
                 .collect(),
         ),
         Type::OrNull(a) => Type::OrNull(Box::new(avoid_forall_capture(a, target_names))),
+        Type::Coeffect(a, r) => {
+            Type::Coeffect(Box::new(avoid_forall_capture(a, target_names)), r.clone())
+        }
         Type::Row(row) => Type::Row(row.map_args(&|arg| avoid_forall_capture(arg, target_names))),
         other => other.clone(),
     }
@@ -624,82 +627,113 @@ fn fresh_type_name(taken: &BTreeSet<Sym>) -> Sym {
     }
 }
 
-fn collect_type_names(t: &Type, out: &mut BTreeSet<Sym>) {
+// The generalizer's name collectors used to be four independent structural
+// walks that disagreed on which `Type`/`EffRow` variants they descend (three
+// skipped `Coeffect`; the row-name walk also skipped `App`/`OrNull`/the unboxed
+// products), so a variable reachable only through one of those wrappers could be
+// seen by one collector and missed by another. That mismatch is a latent
+// capture/under-quantification bug, so every collector now rides one shared
+// walker (`walk_gen`), which descends exactly the variant set the canonical
+// `Type::free_ty_vars` does. A collector implements only the hooks it needs.
+trait GenVisit {
+    /// A type-variable occurrence; `bound` is set when an enclosing `Forall`
+    /// within the walked term binds it.
+    fn ty_var(&mut self, _n: Sym, _bound: bool) {}
+    /// A `Forall` binder name.
+    fn ty_binder(&mut self, _n: Sym) {}
+    /// A `RowForall` binder name.
+    fn row_binder(&mut self, _n: Sym) {}
+    /// A row's tail variable.
+    fn row_tail(&mut self, _n: Sym) {}
+}
+
+// One pre-order walk descending every `Type` variant (mirrors `walk_ty_vars` in
+// `types::ty`): parameters, result, then row arguments, so first-appearance
+// ordering stays stable for the ordered collector. `bound` tracks the enclosing
+// `Forall` binders so free and bound type-variable occurrences are distinguished.
+fn walk_gen(t: &Type, bound: &mut Vec<Sym>, v: &mut impl GenVisit) {
     match t {
-        Type::Var(n) | Type::Forall(n, _) => {
-            out.insert(*n);
-            if let Type::Forall(_, body) = t {
-                collect_type_names(body, out);
-            }
+        Type::Var(n) => v.ty_var(*n, bound.contains(n)),
+        Type::Forall(n, b) => {
+            v.ty_binder(*n);
+            bound.push(*n);
+            walk_gen(b, bound, v);
+            bound.pop();
         }
-        Type::RowForall(_, body) => collect_type_names(body, out),
-        Type::Fun(params, row, ret) => {
-            for param in params {
-                collect_type_names(param, out);
-            }
-            row.for_each_arg(&mut |arg| collect_type_names(arg, out));
-            collect_type_names(ret, out);
+        Type::RowForall(n, b) => {
+            v.row_binder(*n);
+            walk_gen(b, bound, v);
         }
-        Type::Con(_, params) | Type::Tuple(params) | Type::UnboxedTuple(params) => {
-            for param in params {
-                collect_type_names(param, out);
+        Type::Fun(ps, row, r) => {
+            for p in ps {
+                walk_gen(p, bound, v);
+            }
+            walk_gen(r, bound, v);
+            walk_gen_row(row, bound, v);
+        }
+        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
+            for p in ps {
+                walk_gen(p, bound, v);
             }
         }
         Type::UnboxedRecord(fs) => {
             for (_, t) in fs {
-                collect_type_names(t, out);
+                walk_gen(t, bound, v);
             }
         }
-        Type::App(head, arg) => {
-            collect_type_names(head, out);
-            collect_type_names(arg, out);
+        Type::App(h, a) => {
+            walk_gen(h, bound, v);
+            walk_gen(a, bound, v);
         }
-        Type::OrNull(a) => collect_type_names(a, out),
-        Type::Row(row) => row.for_each_arg(&mut |arg| collect_type_names(arg, out)),
+        Type::OrNull(a) | Type::Coeffect(a, _) => walk_gen(a, bound, v),
+        Type::Row(r) => walk_gen_row(r, bound, v),
         _ => {}
     }
 }
 
-// Free type variables of a type, in first-appearance order, deduped. It does not
-// descend a `forall`, so a rank-n bound variable is correctly excluded
-// (consistent with the environment set the caller filters against). It reaches
-// type arguments carried by an effect row (a parametric effect like `Async(a)`),
-// as `free_exist` does, so a signature variable appearing only in a row (e.g.
-// `! {Async(a)}`) is still re-quantified. The arrow order is parameters, result,
-// then row arguments, matching the order `seed_decl` allocates them, so an
-// all-existential scheme's historical names are reproduced.
-fn free_type_vars_ordered(t: &Type, out: &mut Vec<Sym>) {
-    match t {
-        Type::Var(n) => {
-            if !out.contains(n) {
-                out.push(*n);
-            }
-        }
-        Type::Fun(ps, row, r) => {
-            for p in ps {
-                free_type_vars_ordered(p, out);
-            }
-            free_type_vars_ordered(r, out);
-            row.for_each_arg(&mut |a| free_type_vars_ordered(a, out));
-        }
-        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
-            for p in ps {
-                free_type_vars_ordered(p, out);
-            }
-        }
-        Type::UnboxedRecord(fs) => {
-            for (_, t) in fs {
-                free_type_vars_ordered(t, out);
-            }
-        }
-        Type::App(h, a) => {
-            free_type_vars_ordered(h, out);
-            free_type_vars_ordered(a, out);
-        }
-        Type::OrNull(a) => free_type_vars_ordered(a, out),
-        Type::Row(r) => r.for_each_arg(&mut |a| free_type_vars_ordered(a, out)),
-        _ => {}
+// A row descends into its label arguments (types) and reports a tail row
+// variable; rows carry no binders of their own.
+fn walk_gen_row(row: &EffRow, bound: &mut Vec<Sym>, v: &mut impl GenVisit) {
+    row.for_each_arg(&mut |a| walk_gen(a, bound, v));
+    if let EffRow::Var(n) = row.tail() {
+        v.row_tail(*n);
     }
+}
+
+// Every type-variable name and every `Forall` binder appearing in a type, for
+// the capture-avoidance freshness set (a superset is safe: it only makes a
+// generated name more conservative).
+struct TypeNames<'a>(&'a mut BTreeSet<Sym>);
+impl GenVisit for TypeNames<'_> {
+    fn ty_var(&mut self, n: Sym, _bound: bool) {
+        self.0.insert(n);
+    }
+    fn ty_binder(&mut self, n: Sym) {
+        self.0.insert(n);
+    }
+}
+
+fn collect_type_names(t: &Type, out: &mut BTreeSet<Sym>) {
+    walk_gen(t, &mut Vec::new(), &mut TypeNames(out));
+}
+
+// Free type variables of a type, in first-appearance order, deduped. A variable
+// bound by an enclosing `forall` is excluded (rank-n bound variables stay bound);
+// a variable free under such a `forall` is still collected. It reaches type
+// arguments carried by an effect row (a parametric effect like `Async(a)`), so a
+// signature variable appearing only in a row (e.g. `! {Async(a)}`) is still
+// re-quantified.
+struct OrderedFreeVars<'a>(&'a mut Vec<Sym>);
+impl GenVisit for OrderedFreeVars<'_> {
+    fn ty_var(&mut self, n: Sym, bound: bool) {
+        if !bound && !self.0.contains(&n) {
+            self.0.push(n);
+        }
+    }
+}
+
+fn free_type_vars_ordered(t: &Type, out: &mut Vec<Sym>) {
+    walk_gen(t, &mut Vec::new(), &mut OrderedFreeVars(out));
 }
 
 fn var_name(i: usize) -> String {
@@ -711,32 +745,58 @@ fn var_name(i: usize) -> String {
     }
 }
 
+// Every row-variable name in a type: each row tail variable and each `RowForall`
+// binder. Used to keep a freshly generated row name from capturing an existing
+// one, so (as with the type names above) collecting extra names is safe.
+struct RowNames<'a>(&'a mut BTreeSet<String>);
+impl GenVisit for RowNames<'_> {
+    fn row_binder(&mut self, n: Sym) {
+        self.0.insert(n.to_string());
+    }
+    fn row_tail(&mut self, n: Sym) {
+        self.0.insert(n.to_string());
+    }
+}
+
 fn collect_row_names(t: &Type, out: &mut BTreeSet<String>) {
-    match t {
-        Type::Fun(ps, row, r) => {
-            for p in ps {
-                collect_row_names(p, out);
-            }
-            if let EffRow::Var(n) = row.tail() {
-                out.insert(n.to_string());
-            }
-            collect_row_names(r, out);
-        }
-        Type::RowForall(n, b) => {
-            out.insert(n.to_string());
-            collect_row_names(b, out);
-        }
-        Type::Forall(_, b) => collect_row_names(b, out),
-        Type::Con(_, ps) | Type::Tuple(ps) => {
-            for p in ps {
-                collect_row_names(p, out);
-            }
-        }
-        Type::Row(r) => {
-            if let EffRow::Var(n) = r.tail() {
-                out.insert(n.to_string());
-            }
-        }
-        _ => {}
+    walk_gen(t, &mut Vec::new(), &mut RowNames(out));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_row_names, collect_type_names, free_type_vars_ordered};
+    use crate::coeffect::CoeffectRow;
+    use crate::sym::Sym;
+    use crate::types::ty::{EffRow, Type};
+    use std::collections::BTreeSet;
+
+    // A type variable reachable only through a `T @ {once}` (Coeffect) wrapper
+    // must still be enumerated for generalization; before the collectors shared
+    // one walker, the Coeffect arm was skipped and the variable was never
+    // quantified.
+    #[test]
+    fn coeffect_hidden_var_is_generalizable() {
+        let once = CoeffectRow::new(&["once"]).unwrap();
+        let ty = Type::Coeffect(Box::new(Type::Var(Sym::from("a"))), once);
+        let mut ordered = Vec::new();
+        free_type_vars_ordered(&ty, &mut ordered);
+        assert_eq!(ordered, vec![Sym::from("a")]);
+        let mut names = BTreeSet::new();
+        collect_type_names(&ty, &mut names);
+        assert!(names.contains(&Sym::from("a")));
+    }
+
+    // A row variable buried inside `App(f, Row{..})` must count as taken, so a
+    // freshly generated row name cannot capture it. The row-name walk used to
+    // skip `App`, missing exactly this occurrence.
+    #[test]
+    fn row_var_under_app_is_taken() {
+        let ty = Type::App(
+            Box::new(Type::Var(Sym::from("f"))),
+            Box::new(Type::Row(EffRow::Var(Sym::from("e")))),
+        );
+        let mut rows = BTreeSet::new();
+        collect_row_names(&ty, &mut rows);
+        assert!(rows.contains("e"));
     }
 }

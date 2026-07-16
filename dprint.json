@@ -20,7 +20,8 @@
     "node_modules",
     "LICENSE",
     "models/.lake",
-    "models/fixtures/*.json"
+    "models/fixtures/*.json",
+    "docs/src/stdlib"
   ],
   "plugins": [
     "https://plugins.dprint.dev/markdown-0.17.8.wasm",

@@ -47,18 +47,53 @@ type Map(k, v, ord) = Tip | Bin(Int, k, v, Map(k, v, ord), Map(k, v, ord))
 type Canonical = MkCanonical
 
 -- | The identity function.
+--
+-- ```prism
+-- id(42)
+-- ```
+-- ```output
+-- 42
+-- ```
 fn id(x) = x
 
 -- | The constant function: returns `x`, ignoring `y`.
+--
+-- ```prism
+-- const(1, 2)
+-- ```
+-- ```output
+-- 1
+-- ```
 fn const(x, _y) = x
 
 -- | Function composition: `compose(f, g, x)` is `f(g(x))`.
+--
+-- ```prism
+-- compose(\(x) -> x + 1, \(x) -> x * 2, 5)
+-- ```
+-- ```output
+-- 11
+-- ```
 fn compose(f, g, x) = f(g(x))
 
 -- | `f` with its first two arguments swapped.
+--
+-- ```prism
+-- flip(\(a, b) -> a - b, 3, 10)
+-- ```
+-- ```output
+-- 7
+-- ```
 fn flip(f, x, y) = f(y, x)
 
 -- | Boolean negation.
+--
+-- ```prism
+-- not(true)
+-- ```
+-- ```output
+-- false
+-- ```
 fn not(b) =
   if b then
     false
@@ -72,6 +107,13 @@ fn and(a, b) = a && b
 fn or(a, b) = a || b
 
 -- | Exclusive or.
+--
+-- ```prism
+-- xor(true, false)
+-- ```
+-- ```output
+-- true
+-- ```
 fn xor(a, b) =
   if a then
     not(b)
@@ -79,6 +121,13 @@ fn xor(a, b) =
     b
 
 -- | Absolute value.
+--
+-- ```prism
+-- abs(-5)
+-- ```
+-- ```output
+-- 5
+-- ```
 fn abs(n) =
   if n < 0 then
     0 - n
@@ -86,6 +135,13 @@ fn abs(n) =
     n
 
 -- | The greater of two values.
+--
+-- ```prism
+-- max(3, 7)
+-- ```
+-- ```output
+-- 7
+-- ```
 fn max(a, b) =
   if a > b then
     a
@@ -93,6 +149,13 @@ fn max(a, b) =
     b
 
 -- | The lesser of two values.
+--
+-- ```prism
+-- min(3, 7)
+-- ```
+-- ```output
+-- 3
+-- ```
 fn min(a, b) =
   if a < b then
     a
@@ -100,9 +163,23 @@ fn min(a, b) =
     b
 
 -- | Constrain `x` to the range `[lo, hi]`.
+--
+-- ```prism
+-- clamp(0, 10, 15)
+-- ```
+-- ```output
+-- 10
+-- ```
 fn clamp(lo, hi, x) = max(lo, min(hi, x))
 
 -- | The sign of `n`, as `-1`, `0`, or `1`.
+--
+-- ```prism
+-- signum(-4)
+-- ```
+-- ```output
+-- -1
+-- ```
 fn signum(n) =
   if n > 0 then
     1
@@ -112,15 +189,43 @@ fn signum(n) =
     0
 
 -- | The remainder `a % b`.
+--
+-- ```prism
+-- mod(10, 3)
+-- ```
+-- ```output
+-- 1
+-- ```
 fn mod(a, b) = a % b
 
 -- | True when `n` is even.
+--
+-- ```prism
+-- even(4)
+-- ```
+-- ```output
+-- true
+-- ```
 fn even(n) = mod(n, 2) == 0
 
 -- | True when `n` is odd.
+--
+-- ```prism
+-- odd(4)
+-- ```
+-- ```output
+-- false
+-- ```
 fn odd(n) = not(even(n))
 
 -- | The greatest common divisor (Euclid's algorithm).
+--
+-- ```prism
+-- gcd(12, 18)
+-- ```
+-- ```output
+-- 6
+-- ```
 fn gcd(a, b) =
   if b == 0 then
     a
@@ -128,6 +233,13 @@ fn gcd(a, b) =
     gcd(b, mod(a, b))
 
 -- | The least common multiple.
+--
+-- ```prism
+-- lcm(4, 6)
+-- ```
+-- ```output
+-- 12
+-- ```
 fn lcm(a, b) = a / gcd(a, b) * b
 
 fn int_pow_go(base, n, acc) =
@@ -143,6 +255,13 @@ fn int_pow_go(base, n, acc) =
 -- truncating division rule: `0` whenever the magnitude of the base exceeds 1,
 -- the exact reciprocal for a base of `1` or `-1`, and the division-by-zero
 -- fault for a base of `0` (which is exactly what `0 ^ -1` is).
+--
+-- ```prism
+-- int_pow(2, 10)
+-- ```
+-- ```output
+-- 1024
+-- ```
 fn int_pow(base, n) =
   if n < 0 then
     1 / int_pow_go(base, -n, 1)
@@ -150,6 +269,13 @@ fn int_pow(base, n) =
     int_pow_go(base, n, 1)
 
 -- | `n!`, the factorial of `n`.
+--
+-- ```prism
+-- factorial(5)
+-- ```
+-- ```output
+-- 120
+-- ```
 fn factorial(n) =
   if n == 0 then
     1
@@ -157,6 +283,13 @@ fn factorial(n) =
     n * factorial(n - 1)
 
 -- | The nth Fibonacci number (naive, exponential).
+--
+-- ```prism
+-- fib(10)
+-- ```
+-- ```output
+-- 55
+-- ```
 fn fib(n) =
   if n <= 1 then
     n
@@ -176,38 +309,88 @@ let e = 2.718281828459045
 let tau = 6.283185307179586
 
 -- | A random integer in `[0, n)`, over the seeded SplitMix64 stream.
+--
+-- ```prism,no_run
+-- rand_below(6)
+-- ```
 fn rand_below(n) = mod(rand(), n)
 
 -- | A random integer in `[lo, hi)`.
+--
+-- ```prism,no_run
+-- rand_range(10, 20)
+-- ```
 fn rand_range(lo, hi) = lo + mod(rand(), hi - lo)
 
 -- | A random boolean.
 fn rand_bool() = mod(rand(), 2) == 0
 
 -- | True when `lo <= x <= hi`.
+--
+-- ```prism
+-- between(1, 10, 5)
+-- ```
+-- ```output
+-- true
+-- ```
 fn between(lo, hi, x) = lo <= x && x <= hi
 
 -- | The first component of a pair.
+--
+-- ```prism
+-- fst((1, 2))
+-- ```
+-- ```output
+-- 1
+-- ```
 fn fst(p) =
   match p of
     (x, _) => x
 
 -- | The second component of a pair.
+--
+-- ```prism
+-- snd((1, 2))
+-- ```
+-- ```output
+-- 2
+-- ```
 fn snd(p) =
   match p of
     (_, y) => y
 
 -- | A pair with its two components swapped.
+--
+-- ```prism
+-- swap((1, 2))
+-- ```
+-- ```output
+-- (2, 1)
+-- ```
 fn swap(p) =
   match p of
     (x, y) => (y, x)
 
 -- | Apply `f` to the first component and `g` to the second.
+--
+-- ```prism
+-- pair_map(\(x) -> x + 1, \(y) -> y * 2, (10, 20))
+-- ```
+-- ```output
+-- (11, 40)
+-- ```
 fn pair_map(f, g, p) =
   match p of
     (x, y) => (f(x), g(y))
 
 -- | `()` when `b` holds, otherwise `fail()` (short-circuits a failable block).
+--
+-- ```prism
+-- optional(\() -> guard(false))
+-- ```
+-- ```output
+-- None
+-- ```
 fn guard(b) =
   if b then
     ()
@@ -215,18 +398,39 @@ fn guard(b) =
     fail()
 
 -- | Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
+--
+-- ```prism
+-- optional(\() -> 42)
+-- ```
+-- ```output
+-- Some(42)
+-- ```
 fn optional(thunk) =
   handle thunk() with
     never fail() => None
     return r => Some(r)
 
 -- | True when `thunk` runs to completion without calling `fail()`.
+--
+-- ```prism
+-- succeeds(\() -> 42)
+-- ```
+-- ```output
+-- true
+-- ```
 fn succeeds(thunk : () -> a ! {Fail | e}) =
   handle thunk() with
     never fail() => false
     return r => true
 
 -- | Run `thunk`, returning its result or the default `d` if it calls `fail()`.
+--
+-- ```prism
+-- default(\() -> at_list([1, 2], 9), 0)
+-- ```
+-- ```output
+-- 0
+-- ```
 fn default(thunk, d) =
   handle thunk() with
     never fail() => d
@@ -234,6 +438,13 @@ fn default(thunk, d) =
 
 -- | The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so
 -- `xs.at_list(i) ?? d` defaults cleanly through `??`.
+--
+-- ```prism
+-- at_list([10, 20, 30], 1)
+-- ```
+-- ```output
+-- 20
+-- ```
 fn at_list(xs : List(a), i : Int) : a =
   match nth(i, xs) of
     Some(x) => x
@@ -246,12 +457,26 @@ fn at_map(m : Map(k, v), key : k) : v given Ord(k) =
     None => fail()
 
 -- | The value inside `Some`, or `fail()` for `None`; `o.force() ?? d` defaults.
+--
+-- ```prism
+-- force(Some(5))
+-- ```
+-- ```output
+-- 5
+-- ```
 fn force(o) =
   match o of
     Some(x) => x
     None => fail()
 
 -- | The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
+--
+-- ```prism
+-- at_array(array_of_list([5, 6, 7]), 2)
+-- ```
+-- ```output
+-- 7
+-- ```
 fn at_array(a : Array(e), i : Int) : e =
   if i >= 0 && i < array_len(a) then
     array_get(a, i)
@@ -259,12 +484,26 @@ fn at_array(a : Array(e), i : Int) : e =
     fail()
 
 -- | The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`.
+--
+-- ```prism
+-- at_hashmap(hm_from_list([("a", 1)]), "a")
+-- ```
+-- ```output
+-- 1
+-- ```
 fn at_hashmap(m : HashMap(v), k : String) : v =
   match hm_lookup(m, k) of
     Some(x) => x
     None => fail()
 
 -- | The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`.
+--
+-- ```prism
+-- at_byte("hi", 0)
+-- ```
+-- ```output
+-- 104
+-- ```
 fn at_byte(s : String, i : Int) : Int =
   if i >= 0 && i < byte_len(s) then
     byte_at(s, i)
@@ -273,6 +512,13 @@ fn at_byte(s : String, i : Int) : Int =
 
 -- | A new list with element `i` replaced by `v` (out of range: unchanged). Backs
 -- `xs[i] := v` and the `[i]` optic path on lists.
+--
+-- ```prism
+-- list_set([1, 2, 3], 1, 9)
+-- ```
+-- ```output
+-- [1, 9, 3]
+-- ```
 fn list_set(xs, i, v) =
   match xs of
     Nil => Nil
@@ -285,10 +531,24 @@ fn list_set(xs, i, v) =
 -- | Sort a list in ascending order, a stable O(n log n) merge sort. Primitive
 -- element types are specialized to a native kernel at the call site; any other
 -- `Ord` type uses the generic path.
+--
+-- ```prism
+-- sort([3, 1, 2])
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 fn sort(xs : List(a)) : List(a) given Ord(a) = sort_by_ord(xs)
 
 -- | Iterate `body` from state `s` while `cond(s)` holds, returning the final
 -- state. Tail-recursive (constant stack).
+--
+-- ```prism
+-- while_loop(\(s) -> s < 10, \(s) -> s + 3, 0)
+-- ```
+-- ```output
+-- 12
+-- ```
 fn while_loop(cond, body, s) =
   if cond(s) then
     while_loop(cond, body, body(s))
@@ -296,6 +556,13 @@ fn while_loop(cond, body, s) =
     s
 
 -- | Fold `f(i, s)` over `i` in `[lo, hi)`, threading the state `s`.
+--
+-- ```prism
+-- for_range(0, 5, \(i, s) -> s + i, 0)
+-- ```
+-- ```output
+-- 10
+-- ```
 fn for_range(lo, hi, f, s) =
   if lo >= hi then
     s
@@ -422,6 +689,13 @@ fn srange_go(lo, hi) =
     srange_go(lo + 1, hi)
 
 -- | A stream of the integers in `[lo, hi)`, for the `Emit` combinators.
+--
+-- ```prism
+-- scollect(srange(1, 5))
+-- ```
+-- ```output
+-- [1, 2, 3, 4]
+-- ```
 fn srange(lo, hi) = \(_u) -> srange_go(lo, hi)
 
 -- | Helper for `sof`: emit each element of `xs`.
@@ -433,10 +707,24 @@ fn sof_go(xs) =
       sof_go(rest)
 
 -- | A stream of the elements of the list `xs`.
+--
+-- ```prism
+-- scollect(sof([9, 8, 7]))
+-- ```
+-- ```output
+-- [9, 8, 7]
+-- ```
 fn sof(xs) = \(_u) -> sof_go(xs)
 
 -- | The ascending list `[lo, lo+1, ..., hi]` (empty when `lo > hi`). Backs the
 -- `[a..z]` list syntax.
+--
+-- ```prism
+-- enum_from_to(1, 5)
+-- ```
+-- ```output
+-- [1, 2, 3, 4, 5]
+-- ```
 fn enum_from_to(lo, hi) =
   if lo > hi then
     Nil
@@ -454,6 +742,13 @@ fn enum_seq(x, step, hi) =
 
 -- | The list from `a`, stepping by `b - a`, up to `hi`. Backs the `[a,b..z]`
 -- list syntax.
+--
+-- ```prism
+-- enum_from_then_to(1, 3, 9)
+-- ```
+-- ```output
+-- [1, 3, 5, 7, 9]
+-- ```
 fn enum_from_then_to(a, b, hi) =
   let step = b - a
   if step == 0 then
@@ -468,6 +763,13 @@ fn smap_go(s, f) =
     return r => r
 
 -- | Map `f` over every element of a stream, fusing (no intermediate list).
+--
+-- ```prism
+-- scollect(smap(srange(1, 4), \(x) -> x * x))
+-- ```
+-- ```output
+-- [1, 4, 9]
+-- ```
 fn smap(s, f) = \(_u) -> smap_go(s, f)
 
 -- | Helper for `skeep`.
@@ -479,6 +781,13 @@ fn skeep_go(s, p) =
     return r => r
 
 -- | Keep only the stream elements satisfying `p`, fusing.
+--
+-- ```prism
+-- scollect(skeep(srange(1, 6), \(x) -> even(x)))
+-- ```
+-- ```output
+-- [2, 4]
+-- ```
 fn skeep(s, p) = \(_u) -> skeep_go(s, p)
 
 -- | Helper for `stake`.
@@ -491,12 +800,26 @@ fn stake_go(s, n) =
   g(n)
 
 -- | The first `n` elements of a stream, stopping the producer early.
+--
+-- ```prism
+-- scollect(stake(srange(1, 100), 3))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 fn stake(s, n) = \(_u) -> stake_go(s, n)
 
 -- | Left-fold a stream with `f` from the initial accumulator `z`, fusing. The
 -- stream row is pinned to `{Emit(a) | e}` so the handler discharges `Emit`
 -- (leaving `{e}`); without the annotation `Emit` slips into a bare row variable
 -- and leaks past the fold into the caller's row.
+--
+-- ```prism
+-- sfold(srange(1, 5), 0, \(acc, x) -> acc + x)
+-- ```
+-- ```output
+-- 10
+-- ```
 fn sfold(s : (Unit) -> r ! {Emit(a) | e}, z, f) =
   let g =
     handle s(()) with
@@ -505,17 +828,42 @@ fn sfold(s : (Unit) -> r ! {Emit(a) | e}, z, f) =
   g(z)
 
 -- | Sum a stream of numbers.
+--
+-- ```prism
+-- ssum(srange(1, 5))
+-- ```
+-- ```output
+-- 10
+-- ```
 fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 
 -- | Collect a stream into a list, in emission order.
+--
+-- ```prism
+-- scollect(srange(1, 4))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 
 -- | Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude
 -- (as well as `Data.List`) because optic-path desugaring synthesizes calls to it
 -- by bare name.
+--
+-- ```prism
+-- concat_map(\(x) -> [x, x], [1, 2])
+-- ```
+-- ```output
+-- [1, 1, 2, 2]
+-- ```
 fn concat_map(f, xs) = flatten(map(f, xs))
 
 -- | Print `s` to standard error, followed by a newline.
+--
+-- ```prism,no_run
+-- eprintln("uh oh")
+-- ```
 fn eprintln(s) = eprint(concat(s, "\n"))
 
 -- | Helper for `array_of_list`: push each element of `xs` onto `arr`.
@@ -525,10 +873,24 @@ fn push_all(arr, xs) =
     Cons(h, t) => push_all(array_push(arr, h), t)
 
 -- | Build a growable `Array` from a list.
+--
+-- ```prism
+-- array_to_list(array_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 fn array_of_list(xs : List(a)) : Array(a) = push_all(array_empty(), xs)
 
 -- | Join a list of strings into one with a single allocation (an O(n) builder
 -- that replaces a right-nested chain of `concat`).
+--
+-- ```prism
+-- concat_all(["a", "b", "c"])
+-- ```
+-- ```output
+-- abc
+-- ```
 fn concat_all(xs : List(String)) : String = string_of_array(array_of_list(xs))
 
 -- | A separate-chaining hash table with `String` keys, built on the growable
@@ -551,6 +913,13 @@ fn str_hash(s : String) : U64 = fnv_from(s, 0, 14695981039346656037u64)
 fn bucket_of(k : String, n : Int) : Int = int_of_u64(str_hash(k) % to_u64(n))
 
 -- | An empty hash map.
+--
+-- ```prism
+-- hm_size(hm_new())
+-- ```
+-- ```output
+-- 0
+-- ```
 fn hm_new() : HashMap(v) = HM { buckets = array_new(8, Nil), size = 0 }
 
 -- | Helper: look up `k` in an association-list bucket (matches pairs directly so
@@ -567,17 +936,38 @@ fn assoc_get(pairs, k) =
             assoc_get(rest, k)
 
 -- | The value bound to `k` as `Some`, or `None`.
+--
+-- ```prism
+-- hm_lookup(hm_insert(hm_new(), "a", 1), "a")
+-- ```
+-- ```output
+-- Some(1)
+-- ```
 fn hm_lookup(hm : HashMap(v), k : String) : Option(v) =
   let bs = hm.buckets
   assoc_get(array_get(bs, bucket_of(k, array_len(bs))), k)
 
 -- | True when `k` is present.
+--
+-- ```prism
+-- hm_member(hm_from_list([("a", 1)]), "a")
+-- ```
+-- ```output
+-- true
+-- ```
 fn hm_member(hm : HashMap(v), k : String) : Bool =
   match hm_lookup(hm, k) of
     Some(_) => true
     None => false
 
 -- | The value bound to `k`, or the default `d`.
+--
+-- ```prism
+-- hm_get_or(0, hm_from_list([("a", 1)]), "b")
+-- ```
+-- ```output
+-- 0
+-- ```
 fn hm_get_or(d, hm : HashMap(v), k : String) : v =
   match hm_lookup(hm, k) of
     Some(x) => x
@@ -613,6 +1003,13 @@ fn buckets_to_list(bs, i, n) =
     append(array_get(bs, i), buckets_to_list(bs, i + 1, n))
 
 -- | The `(key, value)` pairs, in bucket order.
+--
+-- ```prism
+-- hm_to_list(hm_from_list([("a", 1)]))
+-- ```
+-- ```output
+-- [(a, 1)]
+-- ```
 fn hm_to_list(hm : HashMap(v)) : List((String, v)) =
   buckets_to_list(hm.buckets, 0, array_len(hm.buckets))
 
@@ -625,9 +1022,23 @@ fn pair_keys(ps) =
         (k, _) => Cons(k, pair_keys(rest))
 
 -- | The keys of the map.
+--
+-- ```prism
+-- hm_keys(hm_from_list([("a", 1), ("b", 2)]))
+-- ```
+-- ```output
+-- [a, b]
+-- ```
 fn hm_keys(hm : HashMap(v)) : List(String) = pair_keys(hm_to_list(hm))
 
 -- | The number of entries.
+--
+-- ```prism
+-- hm_size(hm_from_list([("a", 1), ("b", 2)]))
+-- ```
+-- ```output
+-- 2
+-- ```
 fn hm_size(hm : HashMap(v)) : Int = hm.size
 
 -- | Helper for `hm_insert`: re-insert every pair into a fresh table.
@@ -640,6 +1051,13 @@ fn hm_reinsert(hm, pairs) =
 
 -- | Insert or overwrite `k`, doubling the bucket count and rehashing once the
 -- load factor exceeds 1.
+--
+-- ```prism
+-- hm_lookup(hm_insert(hm_new(), "a", 1), "a")
+-- ```
+-- ```output
+-- Some(1)
+-- ```
 fn hm_insert(hm : HashMap(v), k : String, x : v) : HashMap(v) =
   let next = hm_put_raw(hm, k, x)
   if next.size > array_len(next.buckets) then
@@ -651,6 +1069,13 @@ fn hm_insert(hm : HashMap(v), k : String, x : v) : HashMap(v) =
     next
 
 -- | Remove `k` (a no-op if absent).
+--
+-- ```prism
+-- hm_size(hm_delete(hm_from_list([("a", 1), ("b", 2)]), "a"))
+-- ```
+-- ```output
+-- 1
+-- ```
 fn hm_delete(hm : HashMap(v), k : String) : HashMap(v) =
   let bs = hm.buckets
   let i = bucket_of(k, array_len(bs))
@@ -681,6 +1106,13 @@ fn pair_values(ps) =
         (_, value) => Cons(value, pair_values(rest))
 
 -- | The values of the map.
+--
+-- ```prism
+-- hm_values(hm_from_list([("a", 1), ("b", 2)]))
+-- ```
+-- ```output
+-- [1, 2]
+-- ```
 fn hm_values(hm : HashMap(v)) : List(v) = pair_values(hm_to_list(hm))
 
 -- | Helper for `hm_from_list`.
@@ -692,10 +1124,24 @@ fn hm_from_list_go(hm, ps) =
         (k, x) => hm_from_list_go(hm_insert(hm, k, x), rest)
 
 -- | Build a hash map from `(key, value)` pairs (later pairs win).
+--
+-- ```prism
+-- hm_lookup(hm_from_list([("a", 1), ("b", 2)]), "b")
+-- ```
+-- ```output
+-- Some(2)
+-- ```
 fn hm_from_list(ps : List((String, v))) : HashMap(v) =
   hm_from_list_go(hm_new(), ps)
 
 -- | Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
+--
+-- ```prism
+-- hm_get_or(0, hm_adjust(\(x) -> x + 100, hm_from_list([("a", 1)]), "a"), "a")
+-- ```
+-- ```output
+-- 101
+-- ```
 fn hm_adjust(f, hm : HashMap(v), k : String) : HashMap(v) =
   match hm_lookup(hm, k) of
     None => hm
@@ -709,6 +1155,13 @@ fn array_foldl_go(f, acc, arr, i) =
     array_foldl_go(f, f(acc, array_get(arr, i)), arr, i + 1)
 
 -- | Left-fold `f` over the elements of an array from `acc`.
+--
+-- ```prism
+-- array_foldl(\(a, x) -> a + x, 0, array_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- 6
+-- ```
 fn array_foldl(f, acc, arr) = array_foldl_go(f, acc, arr, 0)
 
 -- | Helper for `array_to_list`.
@@ -719,6 +1172,13 @@ fn array_to_list_go(arr, i, acc) =
     array_to_list_go(arr, i - 1, Cons(array_get(arr, i), acc))
 
 -- | The elements of an array as a list, in order.
+--
+-- ```prism
+-- array_to_list(array_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 fn array_to_list(arr : Array(a)) : List(a) =
   array_to_list_go(arr, array_len(arr) - 1, Nil)
 
@@ -733,6 +1193,13 @@ fn args_go(i, n) =
 fn args() : List(String) = args_go(0, args_count())
 
 -- | Three-way comparison of two ints: `-1`, `0`, or `1` (the `Ord(Int)` kernel).
+--
+-- ```prism
+-- int_cmp(3, 7)
+-- ```
+-- ```output
+-- -1
+-- ```
 fn int_cmp(a, b) =
   if a < b then
     0 - 1
@@ -742,10 +1209,24 @@ fn int_cmp(a, b) =
     0
 
 -- | Equality. `eq` backs `==`/`/=`.
+--
+-- ```prism
+-- eq(1, 1)
+-- ```
+-- ```output
+-- true
+-- ```
 class Eq(a)
   eq : (a, a) -> Bool
 
 -- | Total order. `cmp(x, y)` returns `-1`, `0`, or `1`; backs `<`/`<=`/`>`/`>=`.
+--
+-- ```prism
+-- cmp("a", "b")
+-- ```
+-- ```output
+-- -1
+-- ```
 class Ord(a) given Eq(a)
   cmp : (a, a) -> Int
 
@@ -754,6 +1235,13 @@ class Ord(a) given Eq(a)
 -- polymorphic context (where the runtime representation alone cannot tell, say,
 -- a `Bool` from an `Int`). Derive it with `deriving (Show)`; strings render
 -- quoted and escaped, records with their field names.
+--
+-- ```prism
+-- show([1, 2, 3])
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 class Show(a)
   show : (a) -> String
 
@@ -762,11 +1250,25 @@ class Show(a)
 -- compiler hashes code with (a constructor token followed by its fields' own
 -- digests), so structurally equal values hash equal, byte-for-byte identically on
 -- the interpreter and native backends. The leaf instances below anchor the fold.
+--
+-- ```prism
+-- hash(5)
+-- ```
+-- ```output
+-- 35cd3e4aa36a8426c38411dc5c717031a7359ce9674f005cf9e1bf27780e902c
+-- ```
 class Hash(a)
   hash : (a) -> String
 
 -- | Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances
 -- cover homogeneous powers; a mixed `Int ^ Float` is a type error.
+--
+-- ```prism
+-- pow(2, 10)
+-- ```
+-- ```output
+-- 1024
+-- ```
 class Pow(a)
   pow : (a, a) -> a
 
@@ -776,6 +1278,13 @@ class Pow(a)
 -- operand dispatches here. `Div` is split off so a type with addition but no
 -- sensible division stays representable. No implicit coercion: an operand's lane
 -- is fixed by its type, and only literals adapt to context.
+--
+-- ```prism
+-- plus(3, 4)
+-- ```
+-- ```output
+-- 7
+-- ```
 class Num(a)
   plus : (a, a) -> a
   minus : (a, a) -> a
@@ -786,6 +1295,13 @@ class Num(a)
 -- | Division and remainder, the `/` and `%` operators. Integer lanes truncate
 -- toward zero with the remainder taking the dividend's sign and fault on a zero
 -- divisor; `Float` division is IEEE (never faults) and `%` is `fmod`.
+--
+-- ```prism
+-- quotient(7, 2)
+-- ```
+-- ```output
+-- 3
+-- ```
 class Div(a)
   quotient : (a, a) -> a
   modulo : (a, a) -> a
@@ -1113,6 +1629,13 @@ instance traversableOption : Traversable(Option)
   fn traverse(g, o) = map_option(g, o)
 
 -- | Insert `x` into an already-sorted list, keeping it sorted (`Ord`).
+--
+-- ```prism
+-- insert_by_ord(3, [1, 2, 4])
+-- ```
+-- ```output
+-- [1, 2, 3, 4]
+-- ```
 fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => Cons(x, Nil)
@@ -1124,6 +1647,13 @@ fn insert_by_ord(x : a, xs : List(a)) : List(a) given Ord(a) =
 
 -- | Stable merge of two already-sorted lists. The recursive `Cons` becomes a
 -- loop by tail-recursion-modulo-cons, and Perceus reuses the consumed cells.
+--
+-- ```prism
+-- merge_by_ord([1, 3], [2, 4])
+-- ```
+-- ```output
+-- [1, 2, 3, 4]
+-- ```
 fn merge_by_ord(xs : List(a), ys : List(a)) : List(a) given Ord(a) =
   match xs of
     Nil => ys

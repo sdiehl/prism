@@ -4,24 +4,59 @@
 -- opens this module.
 
 -- | True for an ASCII decimal digit (`0`-`9`).
+--
+-- ```prism
+-- is_digit(char_at("7", 0))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_digit(c : Int) : Bool = c >= 48 && c <= 57
 
 -- | True for an ASCII upper-case letter (`A`-`Z`).
+--
+-- ```prism
+-- is_upper(char_at("A", 0))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_upper(c : Int) : Bool = c >= 65 && c <= 90
 
 -- | True for an ASCII lower-case letter (`a`-`z`).
 pub fn is_lower(c : Int) : Bool = c >= 97 && c <= 122
 
 -- | True for an ASCII letter.
+--
+-- ```prism
+-- is_alpha(char_at("z", 0))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_alpha(c : Int) : Bool = is_upper(c) || is_lower(c)
 
 -- | True for an ASCII letter or digit.
 pub fn is_alnum(c : Int) : Bool = is_alpha(c) || is_digit(c)
 
 -- | True for ASCII whitespace (space, tab, newline, or carriage return).
+--
+-- ```prism
+-- is_space(char_at(" ", 0))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_space(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
 
 -- | Lower-case an ASCII letter; any other codepoint is returned unchanged.
+--
+-- ```prism
+-- chr(to_lower_c(char_at("A", 0)))
+-- ```
+-- ```output
+-- 97
+-- ```
 pub fn to_lower_c(c : Int) : Int =
   if is_upper(c) then
     c + 32
@@ -29,6 +64,13 @@ pub fn to_lower_c(c : Int) : Int =
     c
 
 -- | Upper-case an ASCII letter; any other codepoint is returned unchanged.
+--
+-- ```prism
+-- chr(to_upper_c(char_at("a", 0)))
+-- ```
+-- ```output
+-- 65
+-- ```
 pub fn to_upper_c(c : Int) : Int =
   if is_lower(c) then
     c - 32

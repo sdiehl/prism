@@ -587,7 +587,7 @@ impl Enc<'_> {
                 self.refer(*tok);
                 self.val(v);
             }
-            Comp::RefSet(a, b) => {
+            Comp::RefSet(a, b) | Comp::InitAt(a, b) => {
                 self.val(a);
                 self.val(b);
             }

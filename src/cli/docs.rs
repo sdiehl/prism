@@ -13,9 +13,9 @@ const DOCS_BACKEND: &str = "docs";
 // The mdbook preprocessor entry point. `prism mdbook supports <renderer>` exits 0
 // (every renderer is supported); otherwise the `[context, book]` JSON arrives on
 // stdin and the rewritten book JSON is written to stdout. Failures (a block that
-// should type-check but does not) print to stderr, and `PRISM_MDBOOK_STRICT` makes
-// them fail the build.
-pub fn mdbook_cmd(args: &[String]) -> CmdResult {
+// should type-check but does not) print to stderr, and `strict`
+// (`PRISM_MDBOOK_STRICT`, resolved into `DynFlags`) makes them fail the build.
+pub fn mdbook_cmd(args: &[String], strict: bool) -> CmdResult {
     if args.first().map(String::as_str) == Some("supports") {
         return Ok(());
     }
@@ -29,7 +29,7 @@ pub fn mdbook_cmd(args: &[String]) -> CmdResult {
         eprintln!("prism mdbook: {w}");
     }
     print!("{book}");
-    if !warnings.is_empty() && std::env::var_os("PRISM_MDBOOK_STRICT").is_some() {
+    if !warnings.is_empty() && strict {
         return Err((
             Error::CodegenDocs(format!(
                 "{} doc block(s) did not type-check",

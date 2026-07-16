@@ -7,6 +7,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
 
+// Whole-corpus gates repeatedly invoke the in-process compiler. Debug builds
+// can exceed libtest's smaller worker stack even though the same corpus passes
+// in release and on the public compiler's 8 MiB main-thread stack. Match that
+// finite production budget so genuine recursion regressions still fail.
+const COMPILER_STACK: usize = 8 * 1024 * 1024;
+
+fn on_compiler_stack(name: &'static str, gate: fn()) {
+    let result = std::thread::Builder::new()
+        .name(name.into())
+        .stack_size(COMPILER_STACK)
+        .spawn(gate)
+        .unwrap_or_else(|error| panic!("spawning {name}: {error}"))
+        .join();
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 #[test]
 fn pipeline() {
     insta::glob!("cases/*.pr", |path| {
@@ -241,8 +259,9 @@ fn bounded_stack_rule_is_fip_only() {
 fn fip_tail_recursion_lowers_to_a_loop() {
     let src = prism::with_prelude("fip fn spin(x) = spin(x)\nfn main() = println((spin(1) : Int))");
     let ir = prism::emit_ir(&src).expect("tail-recursive fip must be accepted");
+    let spin = prism::codegen::native_symbol("spin");
     let start = ir
-        .find("define i64 @prism_spin(")
+        .find(&format!("define i64 @{spin}("))
         .expect("spin must be emitted");
     let rest = &ir[start..];
     let block = &rest[..rest.find("\n}").map_or(rest.len(), |e| e + 2)];
@@ -250,8 +269,8 @@ fn fip_tail_recursion_lowers_to_a_loop() {
         block.contains("musttail call"),
         "spin must loop via musttail, not recurse:\n{block}"
     );
-    let total = block.matches("call i64 @prism_spin").count();
-    let tail = block.matches("musttail call i64 @prism_spin").count();
+    let total = block.matches(&format!("call i64 @{spin}")).count();
+    let tail = block.matches(&format!("musttail call i64 @{spin}")).count();
     assert_eq!(
         total, tail,
         "every self-call must be a tail loop, not a stack frame:\n{block}"
@@ -280,18 +299,22 @@ fn recursive_fip_examples_lower_to_loops() {
         rest[..rest.find("\n}").map_or(rest.len(), |e| e + 2)].to_string()
     };
     // rev_onto: its own body must self-call only via musttail.
-    let rev = block("prism_rev_onto");
-    let rev_total = rev.matches("call i64 @prism_rev_onto").count();
-    let rev_tail = rev.matches("musttail call i64 @prism_rev_onto").count();
+    let rev_onto = prism::codegen::native_symbol("rev_onto");
+    let rev = block(&rev_onto);
+    let rev_total = rev.matches(&format!("call i64 @{rev_onto}")).count();
+    let rev_tail = rev
+        .matches(&format!("musttail call i64 @{rev_onto}"))
+        .count();
     assert!(
         rev_tail >= 1 && rev_total == rev_tail,
         "rev_onto must loop:\n{rev}"
     );
     // bump: the recursion lives in the `.trmc` hole-passing helper, looping via
-    // musttail; the wrapper `prism_bump` itself does not self-recurse.
-    let trmc = block("prism_bump.trmc");
+    // musttail; the `bump` wrapper itself does not self-recurse.
+    let bump_trmc = prism::codegen::trmc_symbol("bump");
+    let trmc = block(&bump_trmc);
     assert!(
-        trmc.contains("musttail call i64 @prism_bump.trmc"),
+        trmc.contains(&format!("musttail call i64 @{bump_trmc}")),
         "bump must lower to a TRMC loop:\n{trmc}"
     );
 }
@@ -586,6 +609,10 @@ fn interpreter() {
 // hiding it behind `print(show(x))` (the original blind spot).
 #[test]
 fn print_kind_coverage() {
+    on_compiler_stack("print-kind-coverage", print_kind_coverage_on_compiler_stack);
+}
+
+fn print_kind_coverage_on_compiler_stack() {
     let root = env!("CARGO_MANIFEST_DIR");
     let mut seen = std::collections::BTreeSet::new();
     for dir in ["tests/cases/run", "examples"] {
@@ -801,6 +828,10 @@ fn streams_example() {
 
 #[test]
 fn rc_balanced() {
+    on_compiler_stack("rc-balanced", rc_balanced_on_compiler_stack);
+}
+
+fn rc_balanced_on_compiler_stack() {
     let root = env!("CARGO_MANIFEST_DIR");
     for dir in ["tests/cases", "tests/cases/run", "examples"] {
         let entries = fs::read_dir(format!("{root}/{dir}")).unwrap();
@@ -817,6 +848,43 @@ fn rc_balanced() {
             if let Err(err) = prism::rc_balanced(&full) {
                 panic!("{}: {err}", path.display());
             }
+        }
+    }
+}
+
+// Every successfully checked corpus program crosses the typed elaboration
+// boundary. The boundary itself compares the erased tree with its raw
+// compatibility input before hashing; this named corpus gate makes that exact
+// (and therefore hash) neutrality invariant a permanent test obligation.
+#[test]
+fn typed_core_erasure_is_corpus_hash_neutral() {
+    on_compiler_stack(
+        "typed-core-corpus-hash",
+        typed_core_erasure_is_corpus_hash_neutral_on_compiler_stack,
+    );
+}
+
+fn typed_core_erasure_is_corpus_hash_neutral_on_compiler_stack() {
+    for path in corpus_files() {
+        let src = fs::read_to_string(&path).unwrap();
+        let full = prism::with_prelude(&src);
+        if prism::check(&full).is_err() {
+            continue;
+        }
+        if let Err(error) = prism::dump("core-hash", &full) {
+            if matches!(
+                error,
+                prism::error::Error::TypedCoreEnvironment(_)
+                    | prism::error::Error::TypedCoreConstruction(_)
+                    | prism::error::Error::TypedCoreVerification(_)
+                    | prism::error::Error::TypedCoreErasure(_)
+                    | prism::error::Error::TypedCoreSpecialization(_)
+            ) {
+                panic!("{}: {error}", path.display());
+            }
+            // Some type-correct negative fixtures intentionally fail a later raw
+            // elaboration or backend precondition. They never reach typed Core
+            // and therefore have no erasure-neutrality judgment to check.
         }
     }
 }
@@ -852,6 +920,13 @@ fn corpus_files() -> impl Iterator<Item = PathBuf> {
 // keep the manifest about the programs whose fusion actually matters.
 #[test]
 fn effect_strategy_manifest() {
+    on_compiler_stack(
+        "effect-strategy-manifest",
+        effect_strategy_manifest_on_compiler_stack,
+    );
+}
+
+fn effect_strategy_manifest_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut lines: Vec<String> = Vec::new();
     for path in corpus_files() {
@@ -867,7 +942,7 @@ fn effect_strategy_manifest() {
         lines.push(format!("{key}: {strat}"));
     }
     lines.sort();
-    insta::assert_snapshot!(lines.join("\n"));
+    insta::assert_snapshot!("effect_strategy_manifest", lines.join("\n"));
 }
 
 // A program that drops onto the free monad must say so, not fall back silently.
@@ -898,6 +973,13 @@ fn free_monad_fallback_warns() {
 // var/loop optimization fires and stays a permanent ratchet after.
 #[test]
 fn optimization_coverage() {
+    on_compiler_stack(
+        "optimization-coverage",
+        optimization_coverage_on_compiler_stack,
+    );
+}
+
+fn optimization_coverage_on_compiler_stack() {
     let mut seen = std::collections::BTreeSet::new();
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
@@ -934,6 +1016,10 @@ fn optimization_coverage() {
 
 #[test]
 fn fmt_idempotent() {
+    on_compiler_stack("fmt-idempotent", fmt_idempotent_on_compiler_stack);
+}
+
+fn fmt_idempotent_on_compiler_stack() {
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
         let Ok(once) = prism::format(&src) else {
@@ -949,6 +1035,10 @@ fn fmt_idempotent() {
 // sugar marker that round-trips to the wrong tree, which idempotency cannot see.
 #[test]
 fn fmt_preserves_core() {
+    on_compiler_stack("fmt-preserves-core", fmt_preserves_core_on_compiler_stack);
+}
+
+fn fmt_preserves_core_on_compiler_stack() {
     for path in corpus_files() {
         let src = fs::read_to_string(&path).unwrap();
         let Ok(core) = prism::dump("core", &prism::with_prelude(&src)) else {

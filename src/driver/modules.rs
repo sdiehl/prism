@@ -24,9 +24,13 @@ use super::{Config, PRELUDE, ROOT_MODULE_NAME};
 const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v1";
 const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v1";
 const CHECKED_INTERFACE_QUERY: &str = "checked-interface";
-const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v1";
+const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v2";
 const CHECKED_BODY_QUERY: &str = "checked-body";
-const CHECKED_BODY_FORMAT: &str = "prism-checked-body-v1";
+// v2 carries the checked handler-residual facts (known operations, opaque
+// effect labels, and an open-row marker). A v1 body cannot be promoted by
+// defaulting those facts away: typed residual lowering must never reconstruct
+// operation provenance from an effect-label-only interface.
+const CHECKED_BODY_FORMAT: &str = "prism-checked-body-v2";
 const STANDARD_FOUNDATION_SCHEMA: &[u8] = b"prism-standard-foundation-input-v1";
 const INJECTED_FOUNDATION_NAME: &str = "__query_injected_foundation";
 const INJECTED_FOUNDATION_SOURCE: &str = "fn __query_injected_foundation() : Unit = ()\n";
@@ -727,6 +731,7 @@ impl CheckedBody {
             constrained: seed.constrained,
             seeds: self.seeds,
             warnings: Vec::new(),
+            holes: Vec::new(),
         };
         Ok((checked, self.public_interface))
     }
