@@ -9,4 +9,7 @@ grandchild finalizer ran
 child finalizer ran
 scene done
 0
+main descendant: parked
+main descendant cleanup ran
+main cancellation recovered with -7
 => ()

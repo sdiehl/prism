@@ -29,8 +29,8 @@ use prism::{build_on, default_roots, Config};
 #[cfg(feature = "mlir")]
 use crate::support::have;
 use crate::support::{
-    check_native_parity, corpus, corpus_drops, interpreted, leak_free, parallel_check, require_cc,
-    shard, shard_by, source, CORPUS_SKIPS,
+    check_native_parity, cleanup_bin, corpus, corpus_drops, interpreted, leak_free, parallel_check,
+    require_cc, shard, shard_by, source, temp_bin, CORPUS_SKIPS,
 };
 #[cfg(feature = "mlir")]
 use prism::build_mlir_on;
@@ -48,6 +48,7 @@ const CORPUS_SHARDED_ENV: &str = "PRISM_CORPUS_SHARDED";
 fn quiet_cfg() -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.quiet = true;
+    cfg.flags.compiler_cache = false;
     cfg
 }
 
@@ -116,6 +117,173 @@ fn native_matches_interpreter() {
     }
     require_cc();
     run_corpus("llvm", build_quiet);
+}
+
+// A closure can reach a LocalPartial entry through both a static helper return
+// and an ANF variable. The two-point closure-shape flow must reject that split:
+// monadifying `invoke` while its argument remains a fused bare closure used to
+// compile successfully and then segfault natively.
+#[test]
+fn hidden_local_boundary_closure_matches_interpreter() {
+    require_cc();
+    let full = prism::with_prelude(
+        "effect Log
+  log(Int) : Int
+
+fn weight(x) = x * 3
+fn invoke(f) = f()
+fn make() = \\() -> 7
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f())
+
+fn logged(f) =
+  let fs = [\\() -> log(weight(1)), \\() -> log(weight(2)), \\() -> log(weight(3))]
+  let n =
+    handle run_all(fs, 0) with
+      log(value) resume k => k(value)
+      return result => result
+  n + invoke(f)
+
+fn square(n) = n * n
+
+fn main() =
+  let f = make()
+  println(weight(srange(1, 100).smap(square).ssum()))
+  println(logged(f))
+",
+    );
+    let expected = interpreted(&full);
+    assert_eq!(expected, "985050\n25\n");
+
+    let bin = temp_bin("hidden-local-boundary", "closure");
+    build_quiet(&full, &bin).expect("native build failed");
+    let output = Command::new(&bin)
+        .env("PRISM_CHECK_LEAKS", "1")
+        .output()
+        .expect("native run failed");
+    cleanup_bin(&bin);
+    assert!(
+        output.status.success(),
+        "native exited {:#?}",
+        output.status
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert!(leak_free(&String::from_utf8_lossy(&output.stderr)));
+}
+
+// Applying a callback can itself return the closure that crosses the local
+// convention boundary. The interpreter and native backend must agree after the
+// analysis declines that split; treating every application as scalar used to
+// leave the returned closure under two incompatible calling conventions.
+#[test]
+fn dynamically_returned_local_boundary_closure_matches_interpreter() {
+    require_cc();
+    let full = prism::with_prelude(
+        "effect Log
+  log(Int) : Int
+
+fn weight(x) = x * 3
+fn invoke(f) = f()
+fn make_through(m) = m()
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f())
+
+fn logged(f) =
+  let fs = [\\() -> log(weight(1)), \\() -> log(weight(2)), \\() -> log(weight(3))]
+  let n =
+    handle run_all(fs, 0) with
+      log(value) resume k => k(value)
+      return result => result
+  n + invoke(f)
+
+fn square(n) = n * n
+
+fn main() =
+  let f = make_through(\\() -> \\() -> 7)
+  println(weight(srange(1, 100).smap(square).ssum()))
+  println(logged(f))
+",
+    );
+    let expected = interpreted(&full);
+    assert_eq!(expected, "985050\n25\n");
+
+    let bin = temp_bin("dynamic-local-boundary", "closure");
+    build_quiet(&full, &bin).expect("native build failed");
+    let output = Command::new(&bin)
+        .env("PRISM_CHECK_LEAKS", "1")
+        .output()
+        .expect("native run failed");
+    cleanup_bin(&bin);
+    assert!(
+        output.status.success(),
+        "native exited {:#?}",
+        output.status
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert!(leak_free(&String::from_utf8_lossy(&output.stderr)));
+}
+
+// A resumption supplies the value seen at the handled operation site. When that
+// value is a closure, the convention boundary must follow it through the
+// continuation just as it follows an ordinary function return.
+#[test]
+fn resumed_local_boundary_closure_matches_interpreter() {
+    require_cc();
+    let full = prism::with_prelude(
+        "effect Log
+  log(Int) : Int
+
+effect AskFn
+  ask_fn() : (Unit) -> Int
+
+fn invoke(f) = f(())
+
+fn run_all(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_all(rest, acc + f(()))
+
+fn logged(value) =
+  let fs = [\\(_u) -> log(1), \\(_u) -> log(2)]
+  let n =
+    handle run_all(fs, 0) with
+      log(item) resume k => k(item)
+      return result => result
+  n + invoke(value)
+
+fn request() = ask_fn()
+
+fn answered() =
+  handle request() with
+    ask_fn() resume k => k(\\(_u) -> 40)
+    return result => result
+
+fn main() = println(logged(answered()))
+",
+    );
+    let expected = interpreted(&full);
+    assert_eq!(expected, "43\n");
+
+    let bin = temp_bin("resumed-local-boundary", "closure");
+    build_quiet(&full, &bin).expect("native build failed");
+    let output = Command::new(&bin)
+        .env("PRISM_CHECK_LEAKS", "1")
+        .output()
+        .expect("native run failed");
+    cleanup_bin(&bin);
+    assert!(
+        output.status.success(),
+        "native exited {:#?}",
+        output.status
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert!(leak_free(&String::from_utf8_lossy(&output.stderr)));
 }
 
 // The shards must tile the corpus: disjoint and covering every case exactly once,
@@ -493,8 +661,8 @@ fn polymorphic_print_requires_show_constraint() {
     }
 }
 
-// The Show migration's observable payoff: inside a `given Show(a)` function a
-// polymorphic `print` dispatches through the dictionary, so `a = Bool` prints
+// Inside a `given Show(a)` function, polymorphic `print` dispatches through the
+// dictionary, so `a = Bool` prints
 // `true`/`false` (never the raw tag integer the raw printer would emit), and every
 // type routes the same way on both backends. Diff native against the interpreter on
 // a wrapper exercised at several types.

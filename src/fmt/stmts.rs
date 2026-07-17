@@ -1,5 +1,5 @@
 use super::breaks::{block_trailing_call, forces_break};
-use super::{Expr, Fmt, Mode, Sugar, INDENT, LINE_WIDTH, S};
+use super::{text_width, Expr, Fmt, Mode, Sugar, INDENT, LINE_WIDTH, S};
 use crate::kw;
 
 impl Fmt<'_> {
@@ -12,7 +12,7 @@ impl Fmt<'_> {
             && !self.has_comments(e.span.start, e.span.end)
         {
             if let Some(s) = self.fmt_expr_inline(e, Mode::Layout) {
-                if indent * INDENT.len() + s.len() <= LINE_WIDTH {
+                if indent * INDENT.len() + text_width(&s) <= LINE_WIDTH {
                     return s;
                 }
             }
@@ -38,11 +38,11 @@ impl Fmt<'_> {
         let breakable = !self.has_comments(from, value.span.end) && !forces_break(value);
         if breakable {
             if let Some(inline) = self.fmt_expr_inline(value, Mode::Layout) {
-                if head.len() + inline.len() <= LINE_WIDTH {
+                if text_width(&head) + text_width(&inline) <= LINE_WIDTH {
                     return format!("{head}{inline}");
                 }
                 let inner = INDENT.repeat(indent + 1);
-                if inner.len() + inline.len() <= LINE_WIDTH {
+                if text_width(&inner) + text_width(&inline) <= LINE_WIDTH {
                     return format!("{ind}{} {name} =\n{inner}{inline}", kw::LET);
                 }
             }
@@ -60,7 +60,7 @@ impl Fmt<'_> {
                     self.fmt_block(value, indent + 1, from)
                 );
             }
-            if let Some(broken) = self.render_expr(value, ind.len(), head.len()) {
+            if let Some(broken) = self.render_expr(value, text_width(&ind), text_width(&head)) {
                 return format!("{head}{broken}");
             }
         }

@@ -191,3 +191,11 @@ fn path_update_each_restores() {
     assert!(out.contains("bag.each.count"), "nested each lost: {out:?}");
     roundtrips(src);
 }
+
+#[test]
+fn typed_hole_restores_and_roundtrips() {
+    let src = "fn main() : Int = ?todo\n";
+    let out = prism::format(src).expect("typed hole must format");
+    assert!(out.contains("?todo"), "typed hole spelling lost: {out:?}");
+    roundtrips(src);
+}

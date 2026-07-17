@@ -349,23 +349,23 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [910 x i8] c"scheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.11.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:1584453b001560909b8c2ef5b34f2b21004f42fb909f8c44ed4f368b6dd87056\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_find  94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b  find\0Afn      prism_main  060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9  main\0Afn      prism_unwrap_or  500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14  unwrap_or\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1062 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.11.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:1584453b001560909b8c2ef5b34f2b21004f42fb909f8c44ed4f368b6dd87056\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_find 94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b find arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_main 060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9 main arity 0 slots abi-word[]\0Astate prism_unwrap_or 500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14 unwrap_or arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
-@.kont_symbol0 = private constant [11 x i8] c"prism_find\00"
+@prism_native_kont_table = constant [916 x i8] c"scheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.12.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:4e53a683d5f48d3d99d1a4fd2ea38fc0c3d67b8ab2272e4ad6469ad156b75a8d\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_find  94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b  find\0Afn      prismfn_main  060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9  main\0Afn      prismfn_unwrap_or  500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14  unwrap_or\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1068 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Acompiler  0.12.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:edddc5133340247e60f89d87babea3326670a0cd1abe7b9a9ff8f9c1f4940fe3\0Aflag  stdlib-root  prism-core-hash-v1:4e53a683d5f48d3d99d1a4fd2ea38fc0c3d67b8ab2272e4ad6469ad156b75a8d\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_find 94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b find arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_main 060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9 main arity 0 slots abi-word[]\0Astate prismfn_unwrap_or 500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14 unwrap_or arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [13 x i8] c"prismfn_find\00"
 @.kont_hash0 = private constant [65 x i8] c"94d57dee77dbc8df6cc8fc58e28d20facbe84a922c0f4f223e0dc324ddf4c17b\00"
 @.kont_name0 = private constant [5 x i8] c"find\00"
-@.kont_symbol1 = private constant [11 x i8] c"prism_main\00"
+@.kont_symbol1 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash1 = private constant [65 x i8] c"060a492dc6de15ebe82db3f06d15a9b72ebfe1943324df4bced95348d24015e9\00"
 @.kont_name1 = private constant [5 x i8] c"main\00"
-@.kont_symbol2 = private constant [16 x i8] c"prism_unwrap_or\00"
+@.kont_symbol2 = private constant [18 x i8] c"prismfn_unwrap_or\00"
 @.kont_hash2 = private constant [65 x i8] c"500c52a2e432658caeda41e12b9d4f5364224342c1bd9b06525685752e62ef14\00"
 @.kont_name2 = private constant [10 x i8] c"unwrap_or\00"
-@prism_native_kont_ptrs = constant [3 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_find, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }, { ptr, ptr, ptr, ptr } { ptr @prism_unwrap_or, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs = constant [3 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_find, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol1, ptr @.kont_hash1, ptr @.kont_name1 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_unwrap_or, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 3, section ",.prism_kont", align 8
 @llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
 
 ; Function Attrs: nounwind
-define i64 @prism_find(i64 %a0) #0 {
+define i64 @prismfn_find(i64 %a0) #0 {
 entry:
   %t1 = icmp ne i64 %a0, 1
   br i1 %t1, label %b0, label %b1
@@ -396,7 +396,7 @@ declare void @prism_rc_dec(i64) #0
 declare ptr @prism_alloc(i64) #0
 
 ; Function Attrs: nounwind
-define i64 @prism_unwrap_or(i64 %a0, i64 %a1) #0 {
+define i64 @prismfn_unwrap_or(i64 %a0, i64 %a1) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -430,12 +430,12 @@ declare void @prism_match_error() #0
 declare void @prism_rc_inc(i64) #0
 
 ; Function Attrs: nounwind
-define i64 @prism_main() #0 {
+define i64 @prismfn_main() #0 {
 entry:
-  %t1 = call i64 @prism_find(i64 3)
-  %t3 = call i64 @prism_unwrap_or(i64 %t1, i64 1)
-  %t5 = call i64 @prism_find(i64 1)
-  %t7 = call i64 @prism_unwrap_or(i64 %t5, i64 201)
+  %t1 = call i64 @prismfn_find(i64 3)
+  %t3 = call i64 @prismfn_unwrap_or(i64 %t1, i64 1)
+  %t5 = call i64 @prismfn_find(i64 1)
+  %t7 = call i64 @prismfn_unwrap_or(i64 %t5, i64 201)
   %t8 = and i64 %t3, %t7
   %t10 = and i64 %t8, 1
   %t11 = icmp eq i64 %t10, 1

@@ -139,7 +139,7 @@ impl Elab<'_> {
             // by forcing and applying that closure to no arguments from each
             // position, turning the copies into O(1) references. The nullary
             // lambda matters for the native backend: codegen realizes every thunk
-            // as a closure invoked through `prism_apply_n`, so an arity-0 lambda
+            // as a closure invoked through `prismap_n`, so an arity-0 lambda
             // applied to zero arguments is a shape it already lowers, whereas a
             // thunk directly wrapping a general computation is not. Beta on the
             // empty argument list makes this observably identical to running

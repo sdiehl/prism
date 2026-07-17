@@ -10,7 +10,7 @@
 -- The perf gate pins that the combined program allocates exactly as many eff-op
 -- cells as the escape alone.
 effect Log
-  log(Int) : Int
+  alog(Int) : Int
 
 fn weight(x) = x * 3
 
@@ -20,9 +20,10 @@ fn run_all(fs, acc) =
     Cons(f, rest) => run_all(rest, acc + f())
 
 fn logged() =
-  let fs = [\() -> log(weight(1)), \() -> log(weight(2)), \() -> log(weight(3))]
+  let fs =
+    [\() -> alog(weight(1)), \() -> alog(weight(2)), \() -> alog(weight(3))]
   handle run_all(fs, 0) with
-    log(n) resume k => k(n)
+    alog(n) resume k => k(n)
     return r => r
 
 fn square(n) = n * n

@@ -278,6 +278,16 @@ fn run_thunk(s : St(e), action : () -> a ! {IncrRaw | e}) : (St(e), a) =
 -- demand graph. The node table lives only for this scope. The ambient row `e`
 -- (the replayable effects the memo thunks perform beyond reading nodes) flows out
 -- unchanged, exactly as `run_async` passes its fibers' row through.
+--
+-- ```prism
+-- run_incr() fn
+--   let a = input(10)
+--   let b = memo(\() -> get(a) * 2)
+--   get(b)
+-- ```
+-- ```output
+-- 20
+-- ```
 pub fn run_incr(action : () -> a ! {IncrRaw | e}) : a =
   let r = run_thunk(St(map_empty, Nil, 0, map_empty, false, Nil), action)
   snd(r)
@@ -296,16 +306,43 @@ fn decode_exn(bs : Bytes) : a given Serialize(a) =
     (v, _rest) => v
 
 -- | Create an input node holding `v`. Its key is its creation order in the run.
+--
+-- ```prism
+-- run_incr(\() -> get(input(42)))
+-- ```
+-- ```output
+-- 42
+-- ```
 pub fn input(v : a) : Incr(a) given Serialize(a) = IncrRef(incr_input(encode(v)))
 
 -- | Read a node, recording a dependency edge from the memo currently being
 -- computed (if any) to this node.
+--
+-- ```prism
+-- run_incr() fn
+--   let a = input(3)
+--   let b = input(4)
+--   get(a) + get(b)
+-- ```
+-- ```output
+-- 7
+-- ```
 pub fn get(node : Incr(a)) : a given Serialize(a) =
   match node of
     IncrRef(key) => decode_exn(incr_get(key))
 
 -- | Update an input node. A no-op when `v` is equal (by content) to the node's
 -- current value.
+--
+-- ```prism
+-- run_incr() fn
+--   let a = input(1)
+--   set(a, 10)
+--   get(a)
+-- ```
+-- ```output
+-- 10
+-- ```
 pub fn set(node : Incr(a), v : a) : Unit given Serialize(a) =
   match node of
     IncrRef(key) => incr_set(key, encode(v))
@@ -325,6 +362,16 @@ pub fn set(node : Incr(a), v : a) : Unit given Serialize(a) =
 -- ```
 --
 -- A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
+--
+-- ```prism
+-- run_incr() fn
+--   let a = input(10)
+--   let plus1 = memo(\() -> get(a) + 1)
+--   get(plus1)
+-- ```
+-- ```output
+-- 11
+-- ```
 pub fn memo(thunk : () -> a ! {IncrRaw | e}) : Incr(a) given Serialize(a) =
   IncrRef(incr_memo(after(thunk, encode)))
 
@@ -542,6 +589,12 @@ fn store_save(root, tag, s) =
 -- stay scratch and recompute. Within those bounds a warm run's output is
 -- byte-identical to a cold run, and deleting or corrupting the snapshot changes
 -- only cost, never the result.
+--
+-- ```prism,no_run
+-- run_incr_durable("totals.snap", "report") fn
+--   let a = input(10)
+--   get(memo(\() -> get(a) * 2))
+-- ```
 pub fn run_incr_durable(
   path : String,
   tag : String,
@@ -563,6 +616,12 @@ pub fn run_incr_durable(
 -- to `Fail`, so only the creation-prefix memos are warmed and persisted; a warm
 -- run's output is byte-identical to a cold run; and a missing, dangling, or
 -- corrupt store entry cold-starts, changing only cost, never the result.
+--
+-- ```prism,no_run
+-- run_incr_store(".prism-store", "report") fn
+--   let a = input(10)
+--   get(memo(\() -> get(a) * 2))
+-- ```
 pub fn run_incr_store(
   root : String,
   tag : String,
@@ -1124,6 +1183,12 @@ fn t_store_save(root, tag, s) =
 -- a durable warm hit REPLAYS that output instead of re-running the thunk, so a
 -- warm run's console is byte-identical to a cold run's, effects included. A
 -- missing, corrupt, foreign, or wrong-version snapshot is a silent cold start.
+--
+-- ```prism,no_run
+-- run_incr_durable_replay("run.snap", "job") fn
+--   let a = input(41)
+--   get(memo(\() -> get(a) + 1))
+-- ```
 pub fn run_incr_durable_replay(
   path : String,
   tag : String,
@@ -1140,6 +1205,12 @@ pub fn run_incr_durable_replay(
 -- memo table (results and output traces) rides the real store's object layer,
 -- keyed by `tag`, rather than a snapshot file. Every guarantee of the file form
 -- carries over; a missing, dangling, or corrupt store entry cold-starts.
+--
+-- ```prism,no_run
+-- run_incr_store_replay(".prism-store", "job") fn
+--   let a = input(41)
+--   get(memo(\() -> get(a) + 1))
+-- ```
 pub fn run_incr_store_replay(
   root : String,
   tag : String,

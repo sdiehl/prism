@@ -34,8 +34,33 @@ pub(super) fn wants_break(e: &Expr) -> bool {
         Expr::RecordUpdatePath(_, ups) => {
             ups.len() > 1 && ups.iter().any(|(p, _)| p.iter().any(path_step_traverses))
         }
+        // A `try`/`catch` that nests another handler or `try` (in the tried body
+        // or a catch arm) reads as an unbroken run of inline braces; stack it so
+        // the nesting is visible. The innermost, control-free `try` still prints
+        // inline when short.
+        Expr::Sugar(Sugar::TryCatch(body, arms)) => {
+            contains_control(&body.node) || arms.iter().any(|a| contains_control(&a.body.node))
+        }
         _ => false,
     }
+}
+
+const fn is_nested_control(e: &Expr) -> bool {
+    matches!(e, Expr::Handle(..) | Expr::Sugar(Sugar::TryCatch(..)))
+}
+
+// Does `e` itself, or anything nested within it, open a handler or `try`/`catch`?
+fn contains_control(e: &Expr) -> bool {
+    if is_nested_control(e) {
+        return true;
+    }
+    let mut found = false;
+    e.each_child(&mut |child| {
+        if !found {
+            found = contains_control(&child.node);
+        }
+    });
+    found
 }
 
 const fn is_record_lit(e: &Expr) -> bool {

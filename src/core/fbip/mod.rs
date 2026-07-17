@@ -53,9 +53,9 @@ pub fn borrow_sigs(prog: &Program<CorePhase>) -> Sigs {
 }
 
 // A borrow-position call arg is always a `Value::Var` (call sites bind every
-// argument to a let before the call, so the caller's dead-variable analysis
-// drops it when dead), and the caller retains ownership across the call, so it
-// is not a consuming use and is skipped here.
+// argument to a let before the call). The caller retains one ownership token
+// through the call and drops it afterward when the loan is its last use, so the
+// call itself is not a consuming use.
 fn borrow_mask(name: Sym, sigs: &Sigs) -> Option<&[bool]> {
     sigs.get(&name).map(Vec::as_slice)
 }
@@ -66,10 +66,33 @@ fn borrowed_at(mask: Option<&[bool]>, i: usize) -> bool {
     mask.is_some_and(|m| m.get(i).copied().unwrap_or(false))
 }
 
+fn borrowed_call_vars(name: Sym, args: &[Value], sigs: &Sigs) -> Result<Set, String> {
+    let mask = borrow_mask(name, sigs);
+    args.iter()
+        .enumerate()
+        .filter(|(index, _)| borrowed_at(mask, *index))
+        .map(|(_, arg)| match arg {
+            Value::Var(var) => Ok(*var),
+            _ => Err(format!(
+                "borrowed argument to {name} is not a let-bound variable"
+            )),
+        })
+        .collect()
+}
+
 fn count_val(v: &Value, out: &mut BTreeMap<Sym, usize>) {
     match v {
         Value::Var(x) => *out.entry(*x).or_default() += 1,
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().for_each(|f| count_val(f, out)),
+        Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
+            for field in fs {
+                count_val(field, out);
+            }
+        }
+        Value::UnboxedRecord(fs) => {
+            for (_, field) in fs {
+                count_val(field, out);
+            }
+        }
         Value::Thunk(c) => {
             for x in freev(c) {
                 *out.entry(x).or_default() += 1;

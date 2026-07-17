@@ -51,6 +51,29 @@ let bound_u64_max : Int = 2 ^ 64 - 1
 -- is total: the `checked_*` family reports overflow as `None`, `saturating_*`
 -- clamps, `wrapping_*` wraps, and `overflowing_*` pairs the wrapped result with
 -- an overflow flag. See the module header for the laws relating the families.
+--
+-- The four families, shown on an `I64` add that overflows the lane maximum:
+--
+-- ```prism
+-- (
+--   checked_add(to_i64(9223372036854775807), to_i64(1)),
+--   saturating_add(to_i64(9223372036854775807), to_i64(1)),
+--   wrapping_add(to_i64(9223372036854775807), to_i64(1)),
+--   overflowing_add(to_i64(9223372036854775807), to_i64(1)),
+-- )
+-- ```
+-- ```output
+-- (None, 9223372036854775807, -9223372036854775808, (-9223372036854775808, true))
+-- ```
+--
+-- A zero divisor is `None`, never a trap:
+--
+-- ```prism
+-- checked_div(10, 0)
+-- ```
+-- ```output
+-- None
+-- ```
 class Checked(a)
   checked_add : (a, a) -> Option(a)
   checked_sub : (a, a) -> Option(a)
@@ -222,8 +245,22 @@ instance checkedInt : Checked(Int)
 
 -- | Narrow an unbounded `Int` to `I64`, or `None` when it falls outside the
 -- `I64` range. The inverse widening is the builtin `int_of_i64`, which is total.
+--
+-- ```prism
+-- (int_to_i64(42), int_to_i64(2 ^ 63))
+-- ```
+-- ```output
+-- (Some(42), None)
+-- ```
 pub fn int_to_i64(n : Int) : Option(I64) = i64_check(n)
 
 -- | Narrow an unbounded `Int` to `U64`, or `None` when it falls outside the
 -- `U64` range. The inverse widening is the builtin `int_of_u64`, which is total.
+--
+-- ```prism
+-- (int_to_u64(42), int_to_u64(0 - 1))
+-- ```
+-- ```output
+-- (Some(42), None)
+-- ```
 pub fn int_to_u64(n : Int) : Option(U64) = u64_check(n)

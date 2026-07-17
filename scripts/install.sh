@@ -17,7 +17,7 @@
 # verification replace the manual checksum path.
 #
 # Overrides:
-#   PRISM_VERSION=v0.11.0   install a specific release (default: latest)
+#   PRISM_VERSION=v0.12.0   install a specific release (default: latest)
 #   PRISM_INSTALL_DIR=DIR   install directory (default: ~/.local/bin)
 #   PRISM_NO_NIX=1          skip the Nix path even if nix is installed
 #

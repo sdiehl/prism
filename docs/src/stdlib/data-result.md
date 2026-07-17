@@ -16,6 +16,14 @@ is_ok : forall a b. (Result(a, b)) -> Bool
 
 True when the result is `Ok`.
 
+```prism,mod=Data.Result
+is_ok(Ok(5))
+```
+
+```output
+true
+```
+
 ### `is_err`
 
 ```prism,sig,h-7ed51dcc882c4cd38297f2d76f3c4105515cf5f395e617a4825c88ee0de6c277
@@ -32,6 +40,22 @@ map_result : forall e0 a b c. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! 
 
 Apply `f` to the `Ok` value, leaving an `Err` untouched.
 
+```prism,mod=Data.Result
+map_result(\(x) -> x * 2, Ok(21))
+```
+
+```output
+Ok(42)
+```
+
+### `map_err`
+
+```prism,sig,h-1dcac52079d72fd6ba539a1f34809805b31e60e3db9ceeded5daef2da825d07c
+map_err : forall e0 a b c. ((c) -> b ! {e0}, Result(a, c)) -> Result(a, b) ! {e0}
+```
+
+Apply `f` to the `Err` value, leaving an `Ok` untouched (the error-side counterpart of `map_result`).
+
 ### `and_then_result`
 
 ```prism,sig,h-762e3c763cebc49e596b3f8653d3571398616e314c9bd9a09d32efb59c4acf63
@@ -39,6 +63,14 @@ and_then_result : forall e0 a b c. ((a) -> Result(b, c) ! {e0}, Result(a, c)) ->
 ```
 
 Chain a result-returning function, short-circuiting on `Err` (monadic bind for `Result`).
+
+```prism,mod=Data.Result
+and_then_result(\(x) -> if x > 0 then Ok(x) else Err("neg"), Ok(5))
+```
+
+```output
+Ok(5)
+```
 
 ### `result_or`
 
@@ -48,6 +80,14 @@ result_or : forall a b. (a, Result(a, b)) -> a
 
 The `Ok` value, or the default `d` when the result is `Err`.
 
+```prism,mod=Data.Result
+result_or(0, Err("boom"))
+```
+
+```output
+0
+```
+
 ### `ok_of_option`
 
 ```prism,sig,h-a3bca133e1a3a87cc96f4222ebeff1b6bea496a2fcb635b34b923f95fbcd167f
@@ -56,6 +96,14 @@ ok_of_option : forall a b. (a, Option(b)) -> Result(b, a)
 
 Convert an `Option` to a `Result`, using `err` in place of `None`.
 
+```prism,mod=Data.Result
+ok_of_option("missing", None)
+```
+
+```output
+Err(missing)
+```
+
 ### `option_of_result`
 
 ```prism,sig,h-e24057e16a4870c67ff0a2e5446602e20dbb8463b4ef14276179adfa98f023a5
@@ -63,3 +111,11 @@ option_of_result : forall a b. (Result(a, b)) -> Option(a)
 ```
 
 Convert a `Result` to an `Option`, discarding the error.
+
+```prism,mod=Data.Result
+option_of_result(Ok(5))
+```
+
+```output
+Some(5)
+```

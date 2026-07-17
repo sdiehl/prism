@@ -28,6 +28,14 @@ bytes_length : (Wire.Bytes) -> Int
 
 The number of bytes in a `Bytes`.
 
+```prism,mod=Data.Bytes
+bytes_length(string_to_bytes("Hello"))
+```
+
+```output
+5
+```
+
 ### `bytes_index`
 
 ```prism,sig,h-b8392f569bb2d3dae57a63c64fcd37827d2b17fd0c05f40c6d64e27c59865477
@@ -35,6 +43,14 @@ bytes_index : (Wire.Bytes, Int) -> Int
 ```
 
 The byte at index `i` (0-based). Out of range traps, like array indexing.
+
+```prism,mod=Data.Bytes
+bytes_index(string_to_bytes("ABC"), 0)
+```
+
+```output
+65
+```
 
 ### `bytes_empty`
 
@@ -52,6 +68,14 @@ bytes_push : (Wire.Bytes, Int) -> Wire.Bytes
 
 Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded linearly this is the byte-string builder; a uniquely owned buffer is extended in place (FBIP), a shared one copied.
 
+```prism,mod=Data.Bytes
+bytes_to_string(bytes_push(bytes_empty, 65))
+```
+
+```output
+Some(A)
+```
+
 ### `bytes_slice`
 
 ```prism,sig,h-b405e23d6b24ba8d72dffa247f48c7b1c5edec283c298a4bba05c91c143111fd
@@ -59,6 +83,14 @@ bytes_slice : (Wire.Bytes, Int, Int) -> Wire.Bytes
 ```
 
 The `len` bytes starting at `start` (0-based), as a fresh `Bytes`. `start` and `len` are clamped to the bounds, so an over-long or out-of-range window yields the in-range remainder rather than trapping.
+
+```prism,mod=Data.Bytes
+bytes_to_string(bytes_slice(string_to_bytes("hello"), 1, 3))
+```
+
+```output
+Some(ell)
+```
 
 ### `bytes_concat`
 
@@ -68,6 +100,14 @@ bytes_concat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 
 Concatenate two byte strings.
 
+```prism,mod=Data.Bytes
+bytes_to_string(bytes_concat(string_to_bytes("foo"), string_to_bytes("bar")))
+```
+
+```output
+Some(foobar)
+```
+
 ### `bytes_eq`
 
 ```prism,sig,h-a8ae3bad5fa552bd130d93e6a59936bf1c085e47a6a6a49200d84758b6fe4709
@@ -76,6 +116,14 @@ bytes_eq : (Wire.Bytes, Wire.Bytes) -> Bool
 
 Structural equality of two byte strings.
 
+```prism,mod=Data.Bytes
+bytes_eq(string_to_bytes("a"), string_to_bytes("a"))
+```
+
+```output
+true
+```
+
 ### `bytes_compare`
 
 ```prism,sig,h-81db8c1e0f8ba18dfb69d7020c252abbcca23df85eeff1f70b458688647c448b
@@ -83,6 +131,14 @@ bytes_compare : (Wire.Bytes, Wire.Bytes) -> Int
 ```
 
 Lexicographic comparison (`-1`/`0`/`1`) of two byte strings.
+
+```prism,mod=Data.Bytes
+bytes_compare(string_to_bytes("a"), string_to_bytes("b"))
+```
+
+```output
+-1
+```
 
 ### `bytes_hash`
 
@@ -100,6 +156,14 @@ string_to_bytes : (String) -> Wire.Bytes
 
 Total: a string's raw UTF-8 bytes as a `Bytes`.
 
+```prism,mod=Data.Bytes
+hex_encode(string_to_bytes("Hi"))
+```
+
+```output
+4869
+```
+
 ### `bytes_to_string`
 
 ```prism,sig,h-774a7f4187b74a7ba1bb38e4ae9a31e10ff25afb2344c5624365d67d73252230
@@ -107,6 +171,14 @@ bytes_to_string : (Wire.Bytes) -> Option(String)
 ```
 
 Validate the bytes as UTF-8 and, when well-formed, recover the `String`; `None` on any ill-formed sequence. The single deterministic conversion seam back from `Bytes` to `String`.
+
+```prism,mod=Data.Bytes
+bytes_to_string(string_to_bytes("hey"))
+```
+
+```output
+Some(hey)
+```
 
 ### `hex_encode`
 
@@ -116,6 +188,14 @@ hex_encode : (Wire.Bytes) -> String
 
 Lowercase hex encoding: two hex digits per byte.
 
+```prism,mod=Data.Bytes
+hex_encode(string_to_bytes("Hi"))
+```
+
+```output
+4869
+```
+
 ### `hex_decode`
 
 ```prism,sig,h-45d3456280c481e4fbea11dc8448aeaed4d0041ef0e2f68a0ea291c8de9afabe
@@ -123,6 +203,14 @@ hex_decode : (String) -> Option(Wire.Bytes)
 ```
 
 Decode a hex string to bytes, or `None` on an odd length or a non-hex character. Upper and lower case digits are both accepted.
+
+```prism,mod=Data.Bytes
+map_option(bytes_length, hex_decode("4869"))
+```
+
+```output
+Some(2)
+```
 
 ### `base64_encode`
 
@@ -132,6 +220,14 @@ base64_encode : (Wire.Bytes) -> String
 
 Standard base64 encoding with `=` padding.
 
+```prism,mod=Data.Bytes
+base64_encode(string_to_bytes("Hi"))
+```
+
+```output
+SGk=
+```
+
 ### `base64_decode`
 
 ```prism,sig,h-16e71f64164e397a4ae9dd244ad3d39cf54648903e7bfb33c67849bfdd137723
@@ -139,6 +235,14 @@ base64_decode : (String) -> Option(Wire.Bytes)
 ```
 
 Decode standard base64 (with `=` padding) to bytes, or `None` on a length that is not a multiple of four, a stray character, or misplaced padding.
+
+```prism,mod=Data.Bytes
+map_option(bytes_length, base64_decode("SGk="))
+```
+
+```output
+Some(2)
+```
 
 ### `read_bytes`
 
@@ -148,6 +252,10 @@ read_bytes : (String) -> Wire.Bytes ! {FileSystem}
 
 Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `fs_read_bytes` op the default world handler discharges, via the prelude's `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a recorded run reproduces the same bytes.
 
+```prism,no_run,mod=Data.Bytes
+bytes_length(read_bytes("data.bin"))
+```
+
 ### `write_bytes`
 
 ```prism,sig,h-56066d50a267914de29f298ce3330a9722ab4e2d342ec692e353213bdc3aa0ce
@@ -155,3 +263,7 @@ write_bytes : (String, Wire.Bytes) -> Result(Unit, String) ! {IO}
 ```
 
 Write `bs` verbatim to the file at `path`, returning `Ok(())` on success or `Err(msg)` on failure. The write is the same off-platform output as `write_file`, over the raw byte buffer so no byte is reinterpreted.
+
+```prism,no_run,mod=Data.Bytes
+write_bytes("out.bin", string_to_bytes("hi"))
+```

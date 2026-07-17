@@ -1,0 +1,65 @@
+{
+  "schema": "prism-hir-fixture-v2",
+  "decls": [
+    {
+      "name": "run",
+      "scheme": "() -> Int ! {E}",
+      "effects": [
+        "E"
+      ]
+    }
+  ],
+  "nodes": {
+    "1": {
+      "ty": "Int",
+      "handler_residual": {
+        "forwarded_operations": [
+          "two"
+        ],
+        "forwarded_effects": [],
+        "residual_operations": [
+          "three",
+          "two"
+        ],
+        "residual_effects": [],
+        "open_row": false
+      }
+    },
+    "2": {
+      "ty": "Int"
+    },
+    "3": {
+      "ty": "Int"
+    },
+    "4": {
+      "ty": "() -> Int"
+    },
+    "5": {
+      "ty": "Int"
+    },
+    "6": {
+      "ty": "() -> Int"
+    },
+    "7": {
+      "ty": "Int"
+    },
+    "8": {
+      "ty": "Int"
+    },
+    "9": {
+      "ty": "() -> Int"
+    },
+    "10": {
+      "ty": "Int"
+    },
+    "11": {
+      "ty": "(Int) -> Int ! {E, ?r2}"
+    },
+    "12": {
+      "ty": "Int"
+    },
+    "13": {
+      "ty": "Int"
+    }
+  }
+}

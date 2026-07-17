@@ -3,7 +3,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use prism::lineage::{FactLedger, FactScope, QueryKind};
+use prism::lineage::{
+    record_fact, FactInput, FactLedger, FactOutcome, FactScope, QueryFact, QueryKind,
+};
 use prism::store::disk::Store;
 use prism::{
     build_on_report, check_modules_on, with_prelude, CompilerSession, Config, NativeCacheStatus,
@@ -19,8 +21,8 @@ const RUNTIME_OBJECT_QUERIES: &str = "queries/runtime-object";
 const OPTIMIZED_SCC_QUERIES: &str = "queries/optimized-scc";
 const LLVM_SCC_QUERIES: &str = "queries/llvm-scc-bitcode";
 const CLOSURE_SUMMARY_QUERIES: &str = "queries/llvm-scc-closure-summary";
-const EFFECT_PLAN_QUERIES: &str = "queries/effect-lowering-plan";
-const EFFECT_RESULT_QUERIES: &str = "queries/effect-lowering-result";
+const RETIRED_EFFECT_PLAN_QUERIES: &str = "queries/effect-lowering-plan";
+const RETIRED_EFFECT_RESULT_QUERIES: &str = "queries/effect-lowering-result";
 
 fn query_bindings(root: &Path, kind: &str) -> BTreeMap<String, String> {
     fs::read_dir(root.join(kind))
@@ -47,7 +49,7 @@ fn assert_bindings_contain(superset_root: &Path, subset_root: &Path, kind: &str,
 }
 
 #[test]
-fn persisted_fact_graph_spans_the_complete_native_query_chain() {
+fn persisted_fact_graph_spans_all_active_native_query_producers() {
     require_cc();
     let tmp = TempDir::new("compiler-cache", "query-fact-chain");
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
@@ -64,6 +66,7 @@ fn persisted_fact_graph_spans_the_complete_native_query_chain() {
     ));
     let after = before.replace("k(41)", "k(42)");
     let mut cfg = Config::default();
+    cfg.flags.quiet = true;
     cfg.flags.compiler_cache = true;
     cfg.flags.store_path = Some(tmp.store_root());
 
@@ -86,7 +89,6 @@ fn persisted_fact_graph_spans_the_complete_native_query_chain() {
         [
             QueryKind::Module,
             QueryKind::Optimizer,
-            QueryKind::Effect,
             QueryKind::BackendScc,
             QueryKind::ClosurePlan,
             QueryKind::Object,
@@ -94,7 +96,7 @@ fn persisted_fact_graph_spans_the_complete_native_query_chain() {
         ]
         .into_iter()
         .collect(),
-        "one fact graph must explain the complete native query chain"
+        "one fact graph must explain the six active native query producers"
     );
     assert!(
         ledger
@@ -134,9 +136,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let optimized_sccs = fs::read_dir(tmp.store_root().join(OPTIMIZED_SCC_QUERIES))
         .unwrap()
         .count();
-    let effect_plans = fs::read_dir(tmp.store_root().join(EFFECT_PLAN_QUERIES))
-        .unwrap()
-        .count();
     let llvm_sccs = fs::read_dir(tmp.store_root().join(LLVM_SCC_QUERIES))
         .unwrap()
         .count();
@@ -148,7 +147,11 @@ fn warm_native_build_materializes_byte_identical_binary() {
     assert!(closure_summaries > 0);
     assert!(runtime_objects > 1);
     assert!(optimized_sccs > 1);
-    assert_eq!(effect_plans, 1);
+    assert!(!tmp.store_root().join(RETIRED_EFFECT_PLAN_QUERIES).exists());
+    assert!(!tmp
+        .store_root()
+        .join(RETIRED_EFFECT_RESULT_QUERIES)
+        .exists());
     let cold = fs::read(&bin).unwrap();
     let cold_run = Command::new(&bin).output().unwrap();
     let cold_trace = prism::ObservationTrace::from_process(
@@ -218,12 +221,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
             .count(),
         optimized_sccs
     );
-    assert_eq!(
-        fs::read_dir(tmp.store_root().join(EFFECT_PLAN_QUERIES))
-            .unwrap()
-            .count(),
-        effect_plans
-    );
 
     fs::remove_file(&bin).unwrap();
     let formatted_only = format!("{src}\n-- query identity ignores trivia\n");
@@ -250,13 +247,6 @@ fn warm_native_build_materializes_byte_identical_binary() {
             .count(),
         closure_summaries,
         "formatting-only edits must write no closure summaries"
-    );
-    assert_eq!(
-        fs::read_dir(tmp.store_root().join(EFFECT_PLAN_QUERIES))
-            .unwrap()
-            .count(),
-        effect_plans,
-        "formatting-only edits must write no effect-lowering plans"
     );
 
     fs::remove_file(&bin).unwrap();
@@ -334,6 +324,81 @@ fn warm_native_build_materializes_byte_identical_binary() {
         cached_trace,
         "backend partitioning must be unobservable"
     );
+}
+
+#[test]
+fn surviving_shadow_reporting_preserves_warm_cache_artifacts() {
+    require_cc();
+    let tmp = TempDir::new("compiler-cache", "typed-shadow-report");
+    let src = with_prelude(include_str!("../../examples/imperative.pr"));
+    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
+    let mut cfg = Config::default();
+    cfg.flags.compiler_cache = true;
+    cfg.flags.quiet = true;
+    cfg.flags.store_path = Some(tmp.store_root());
+
+    let cold_bin = tmp.join("cold");
+    let cold_report = build_on_report(&src, &roots, &cold_bin, &cfg).unwrap();
+    assert_eq!(cold_report.cache, NativeCacheStatus::Write);
+    assert_eq!(cold_report.bitcode_cache, NativeCacheStatus::Write);
+    let cold_run = Command::new(&cold_bin).output().unwrap();
+    let cold_trace = prism::ObservationTrace::from_process(
+        &cold_run.stdout,
+        &cold_run.stderr,
+        cold_run.status.code().unwrap(),
+    );
+    let semantic_bindings = [
+        OPTIMIZED_SCC_QUERIES,
+        LLVM_SCC_QUERIES,
+        CLOSURE_SUMMARY_QUERIES,
+    ]
+    .into_iter()
+    .filter(|kind| tmp.store_root().join(kind).is_dir())
+    .map(|kind| (kind, query_bindings(&tmp.store_root(), kind)))
+    .collect::<Vec<_>>();
+    assert!(
+        !tmp.store_root().join(RETIRED_EFFECT_PLAN_QUERIES).exists()
+            && !tmp
+                .store_root()
+                .join(RETIRED_EFFECT_RESULT_QUERIES)
+                .exists(),
+        "typed effect lowering must publish no retired legacy query family"
+    );
+
+    let mut reporting_cfg = cfg.clone();
+    reporting_cfg.flags.typed_parity_report = true;
+    let observed_bin = tmp.join("observed");
+    let observed_report = build_on_report(&src, &roots, &observed_bin, &reporting_cfg).unwrap();
+    assert_eq!(observed_report.cache, NativeCacheStatus::Write);
+    assert_eq!(observed_report.bitcode_cache, NativeCacheStatus::Hit);
+    let observed_bytes = fs::read(&observed_bin).unwrap();
+    let observed_run = Command::new(&observed_bin).output().unwrap();
+    assert_eq!(
+        prism::ObservationTrace::from_process(
+            &observed_run.stdout,
+            &observed_run.stderr,
+            observed_run.status.code().unwrap(),
+        ),
+        cold_trace,
+        "surviving post-lowering shadow reporting must not change program behavior"
+    );
+    for (kind, cold_bindings) in semantic_bindings {
+        assert_eq!(
+            query_bindings(&tmp.store_root(), kind),
+            cold_bindings,
+            "classified shadow reporting changed semantic cache artifacts for {kind}"
+        );
+    }
+
+    fs::remove_file(&observed_bin).unwrap();
+    let warm_report = build_on_report(&src, &roots, &observed_bin, &cfg).unwrap();
+    assert_eq!(
+        warm_report.cache,
+        NativeCacheStatus::Hit,
+        "the reporting-only flag must not participate in artifact identity"
+    );
+    assert_eq!(warm_report.bitcode_cache, NativeCacheStatus::Disabled);
+    assert_eq!(fs::read(observed_bin).unwrap(), observed_bytes);
 }
 
 #[test]
@@ -416,7 +481,6 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
         OPTIMIZED_SCC_QUERIES,
         LLVM_SCC_QUERIES,
         CLOSURE_SUMMARY_QUERIES,
-        EFFECT_PLAN_QUERIES,
         NATIVE_OBJECT_QUERIES,
         RUNTIME_OBJECT_QUERIES,
     ] {
@@ -473,11 +537,6 @@ fn sequential_and_parallel_scc_artifacts_are_identical() {
     assert_eq!(
         fs::read(sequential_bin).unwrap(),
         fs::read(parallel_bin).unwrap()
-    );
-    assert_eq!(
-        query_bindings(&sequential.store_root(), EFFECT_PLAN_QUERIES),
-        query_bindings(&parallel.store_root(), EFFECT_PLAN_QUERIES),
-        "worker count must not alter effect-lowering plans"
     );
 }
 
@@ -596,104 +655,123 @@ fn scc_backend_matches_the_whole_program_oracle() {
 }
 
 #[test]
-fn effectful_lowering_result_is_reused_byte_identically() {
+fn effectful_build_publishes_no_legacy_effect_queries_and_retires_stale_facts() {
     require_cc();
-    let tmp = TempDir::new("compiler-cache", "effect-result");
+    let fresh = TempDir::new("compiler-cache", "no-effect-query");
+    let upgrade = TempDir::new("compiler-cache", "retire-effect-query");
     let body = fs::read_to_string("examples/eff_state.pr").unwrap();
     let src = with_prelude(&body);
     let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
     let mut cfg = Config::default();
+    cfg.flags.quiet = true;
     cfg.flags.compiler_cache = true;
     cfg.flags.effect_tier = prism::EffectTier::FreeMonad;
-    cfg.flags.store_path = Some(tmp.store_root());
+    cfg.flags.store_path = Some(fresh.store_root());
+    cfg.session = Some(CompilerSession::new());
 
-    let first_bin = tmp.join("first");
+    let first_bin = fresh.join("first");
     let first_report = build_on_report(&src, &roots, &first_bin, &cfg).unwrap();
     assert_eq!(first_report.bitcode_cache, NativeCacheStatus::Write);
-    assert_eq!(
-        fs::read_dir(tmp.store_root().join(EFFECT_RESULT_QUERIES))
-            .unwrap()
-            .count(),
-        1
-    );
+    assert!(!fresh
+        .store_root()
+        .join(RETIRED_EFFECT_PLAN_QUERIES)
+        .exists());
+    assert!(!fresh
+        .store_root()
+        .join(RETIRED_EFFECT_RESULT_QUERIES)
+        .exists());
     let first = Command::new(&first_bin).output().unwrap();
-    let second_bin = tmp.join("second");
-    let second_report = build_on_report(&src, &roots, &second_bin, &cfg).unwrap();
-    assert_eq!(second_report.bitcode_cache, NativeCacheStatus::Hit);
-    let second = Command::new(second_bin).output().unwrap();
+    let first_bytes = fs::read(&first_bin).unwrap();
+    fs::remove_file(&first_bin).unwrap();
+    let second_report = build_on_report(&src, &roots, &first_bin, &cfg).unwrap();
+    assert_eq!(second_report.cache, NativeCacheStatus::Hit);
+    assert_eq!(second_report.bitcode_cache, NativeCacheStatus::Disabled);
+    let second = Command::new(&first_bin).output().unwrap();
+    assert_eq!(fs::read(&first_bin).unwrap(), first_bytes);
     assert_eq!(second.stdout, first.stdout);
     assert_eq!(second.stderr, first.stderr);
     assert_eq!(second.status.code(), first.status.code());
-}
-
-#[test]
-fn corrupt_effect_lowering_result_is_rejected() {
-    require_cc();
-    let tmp = TempDir::new("compiler-cache", "corrupt-effect-result");
-    let body = fs::read_to_string("examples/eff_state.pr").unwrap();
-    let src = with_prelude(&body);
-    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
-    let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
-
-    build_on_report(&src, &roots, &tmp.join("first"), &cfg).unwrap();
-    let query = fs::read_dir(tmp.store_root().join(EFFECT_RESULT_QUERIES))
+    assert!(cfg
+        .session
+        .as_ref()
         .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let binding = fs::read_to_string(query).unwrap();
-    let object_hash = binding.lines().nth(1).unwrap();
-    let object = tmp
-        .store_root()
-        .join("objects")
-        .join(&object_hash[..2])
-        .join(&object_hash[2..]);
-    fs::write(object, b"corrupt").unwrap();
+        .decisions()
+        .iter()
+        .all(|decision| decision.kind != QueryKind::Effect));
 
-    let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("effect-lowering result object hash mismatch"),
-        "unexpected error: {error}"
+    let stale_plan = upgrade.store_root().join(RETIRED_EFFECT_PLAN_QUERIES);
+    let stale_result = upgrade.store_root().join(RETIRED_EFFECT_RESULT_QUERIES);
+    fs::create_dir_all(&stale_plan).unwrap();
+    fs::create_dir_all(&stale_result).unwrap();
+    fs::write(stale_plan.join("legacy-plan"), "stale plan binding").unwrap();
+    fs::write(stale_result.join("legacy-result"), "stale result binding").unwrap();
+    let store = Store::open_or_create(upgrade.store_root()).unwrap();
+    let scope = FactScope::of_roots(&roots);
+    let legacy_effect = QueryFact {
+        kind: QueryKind::Effect,
+        identity: "whole-program:legacy".to_string(),
+        inputs: vec![FactInput {
+            name: "query-key".to_string(),
+            identity: "legacy-key".to_string(),
+        }],
+        output: Some("legacy-output".to_string()),
+        outcome: FactOutcome::Hit,
+        reasons: Vec::new(),
+    };
+    record_fact(&store, &scope, legacy_effect.clone()).unwrap();
+
+    let mut upgrade_cfg = cfg;
+    upgrade_cfg.flags.store_path = Some(upgrade.store_root());
+    upgrade_cfg.session = Some(CompilerSession::new());
+    let upgrade_bin = upgrade.join("program");
+    build_on_report(&src, &roots, &upgrade_bin, &upgrade_cfg).unwrap();
+    assert!(upgrade_cfg
+        .session
+        .as_ref()
+        .unwrap()
+        .decisions()
+        .iter()
+        .all(|decision| decision.kind != QueryKind::Effect));
+    assert_eq!(
+        query_bindings(&upgrade.store_root(), RETIRED_EFFECT_PLAN_QUERIES),
+        BTreeMap::from([("legacy-plan".to_string(), "stale plan binding".to_string())]),
+        "old plan bindings are inert and remain Store-GC-owned"
     );
-}
-
-#[test]
-fn corrupt_effect_lowering_plan_is_rejected() {
-    require_cc();
-    let tmp = TempDir::new("compiler-cache", "corrupt-effect-plan");
-    let src = with_prelude("fn main() = println(42)");
-    let roots = [prism::Root::Embedded(prism::stdlib::STDLIB)];
-    let mut cfg = Config::default();
-    cfg.flags.compiler_cache = true;
-    cfg.flags.store_path = Some(tmp.store_root());
-
-    build_on_report(&src, &roots, &tmp.join("first"), &cfg).unwrap();
-    let query = fs::read_dir(tmp.store_root().join(EFFECT_PLAN_QUERIES))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let binding = fs::read_to_string(query).unwrap();
-    let object_hash = binding.lines().nth(1).unwrap();
-    let object = tmp
-        .store_root()
-        .join("objects")
-        .join(&object_hash[..2])
-        .join(&object_hash[2..]);
-    fs::write(object, b"corrupt").unwrap();
-
-    let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
+    assert_eq!(
+        query_bindings(&upgrade.store_root(), RETIRED_EFFECT_RESULT_QUERIES),
+        BTreeMap::from([(
+            "legacy-result".to_string(),
+            "stale result binding".to_string()
+        )]),
+        "old result bindings are inert and remain Store-GC-owned"
+    );
+    let ledger = FactLedger::load(&store, &scope).unwrap();
     assert!(
-        error
-            .to_string()
-            .contains("effect-lowering plan object hash mismatch"),
-        "unexpected error: {error}"
+        ledger
+            .current
+            .facts()
+            .iter()
+            .all(|fact| fact.kind != QueryKind::Effect),
+        "the upgraded compiler must retire stale current Effect facts"
+    );
+    assert_eq!(
+        ledger
+            .previous
+            .get(QueryKind::Effect, "whole-program:legacy"),
+        Some(&legacy_effect)
+    );
+    let upgraded = Command::new(upgrade_bin).output().unwrap();
+    assert_eq!(
+        prism::ObservationTrace::from_process(
+            &upgraded.stdout,
+            &upgraded.stderr,
+            upgraded.status.code().unwrap(),
+        ),
+        prism::ObservationTrace::from_process(
+            &first.stdout,
+            &first.stderr,
+            first.status.code().unwrap(),
+        )
     );
 }
 

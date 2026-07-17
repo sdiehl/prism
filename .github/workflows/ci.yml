@@ -82,9 +82,8 @@ jobs:
             echo "tidy $f"
             clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime
           done
-      # The arena allocator is standalone (not yet wired into codegen), so it
-      # carries its own self-test behind -DPRISM_ARENA_TEST. Build and run it so
-      # the create/alloc/reset/destroy paths stay honest even before wiring.
+      # The arena allocator is standalone and excluded from the linked runtime.
+      # Its self-test covers the create/alloc/reset/destroy paths directly.
       - name: C runtime arena self-test
         run: |
           ${PRISM_CC:-clang} -std=c11 -O2 -DPRISM_ARENA_TEST -Iruntime \
@@ -432,6 +431,13 @@ jobs:
         with:
           lake-package-directory: models
           build-args: --wfail
+
+      # The fixture oracle above is curated. Exercise the same compiler-to-JSON
+      # boundary on deterministic generated pure/effectful programs as well, with
+      # final-value mains so a Unit result from println cannot pass vacuously.
+      - name: Generated Lean differential fuzz
+        timeout-minutes: 10
+        run: cargo test --test lean_fuzz generated_programs_match_lean_final_values -- --ignored --exact --nocapture
 
       # Runs the whole fixture corpus through both the verified CEK machine (via
       # `dump core-json` piped to the `oracle` exe) and `prism run`, and fails on

@@ -19,6 +19,10 @@ use std::{env, fs, thread};
 use prism::error::Error;
 use prism::eval::{Run, Rv};
 
+/// Type-directed generator of small well-typed programs for the differential
+/// determinism gate; shared so every fuzz harness diffs the same fragment.
+pub mod fuzzgen;
+
 /// A clean run under `PRISM_CHECK_LEAKS` writes exactly this to stderr.
 const LEAK_OK: &str = "prism: 0 cells leaked";
 /// The env var that turns on the runtime's live-cell balance report.
@@ -156,7 +160,7 @@ fn fits_tagged_immediate(n: i64) -> bool {
 }
 
 /// The process exit code the interpreter's result implies, derived exactly as the
-/// native `main` shim derives it from `prism_main`'s return word so the two are
+/// native `main` shim derives it from `prismfn_main`'s return word so the two are
 /// directly comparable. An explicit `exit(n)` wins; otherwise a tagged-immediate
 /// integer or boolean return becomes the code and every other value (Unit, a heap
 /// cell, a bignum too wide to tag) exits 0. The OS reports only the low 8 bits, so
@@ -304,7 +308,7 @@ pub fn corpus_drops() -> Vec<String> {
 }
 
 /// Remove a case's native binary and its intermediate `.bc`/`.ll` artifacts.
-fn cleanup_bin(bin: &Path) {
+pub fn cleanup_bin(bin: &Path) {
     for ext in ["bc", "ll"] {
         let _ = fs::remove_file(bin.with_extension(ext));
     }

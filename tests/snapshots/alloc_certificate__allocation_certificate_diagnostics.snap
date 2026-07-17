@@ -1,7 +1,9 @@
 ---
-source: tests/alloc_certificate.rs
+source: tests/compiler/alloc_certificate.rs
 expression: out
 ---
+=== alloc effect ===
+allocation certificate `@ noalloc` failed for function `grab`: in `grab`, `alloc` carves a fresh cell from an arena, which is cheaper but not free
 === closure value ===
 allocation certificate `@ noalloc` failed for function `make`: in `make`, a lambda is materialized as a fresh closure cell
 === explicit fbip allocation ===

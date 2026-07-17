@@ -67,6 +67,15 @@ long prism_ctor(long tag, long n, const long *fields) {
     return (long)p;
 }
 
+/* Arena bump. The arena-lowering pass rewrites a constructor built under a
+ * `with_arena` scope into `alloc(n)` + `init_at`, and the handler discharges the
+ * `alloc` into this call. This runtime delegates to `prism_alloc`, so an arena
+ * constructor is byte-identical to a plain one. `runtime/prism_arena.c` contains
+ * the standalone region allocator exercised by the runtime tests. */
+long prism_bump(long n_words) {
+    return (long)prism_alloc(n_words);
+}
+
 /* A box is an arity-0 cell whose single payload word holds one opaque i64: the
  * raw double bits for a float. Boxing makes a float a self-describing cell, so a
  * float field of a constructor is safe for prism_rc_dec to free without

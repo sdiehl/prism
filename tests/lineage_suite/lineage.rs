@@ -238,19 +238,18 @@ fn artifact_verification_preserves_recorded_subdirectories() {
 }
 
 #[test]
-fn v1_adapter_round_trips_to_the_same_graph() {
+fn build_lineage_projection_keeps_its_embedded_format() {
     let tmp = TempDir::new("adapter");
     let artifact = tmp.path.join("artifact");
     fs::write(&artifact, b"adapter bytes").unwrap();
     let lineage = sample_lineage("std", "pkg", &artifact);
 
-    let v1 = lineage.to_json();
-    assert_eq!(v1["format"].as_str(), Some("prism-build-lineage-v1"));
-    let lifted = LineageGraph::from_v1(&v1).unwrap();
+    // `to_json` is the build-lineage projection embedded inside a package-world
+    // report; the standalone sidecar envelope is the graph format instead.
+    let projection = lineage.to_json();
     assert_eq!(
-        lifted,
-        lineage.to_graph(),
-        "an old sidecar must lift to the graph a fresh build emits"
+        projection["format"].as_str(),
+        Some("prism-build-lineage-v1")
     );
 }
 

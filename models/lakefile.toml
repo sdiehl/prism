@@ -41,8 +41,8 @@ name = "Replay"
 [[lean_lib]]
 name = "Certificates"
 
-# Experimental typechecker soundness scaffold. Not in `defaultTargets`: this tree
-# intentionally contains `sorry`s as proof obligations for future work.
+# Experimental typechecker soundness scaffold. Not in `defaultTargets` because
+# this tree contains explicit `sorry` proof obligations.
 [[lean_lib]]
 name = "Tc"
 

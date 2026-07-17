@@ -42,8 +42,6 @@
 
 <a id="lattner-adve-2004"></a> Lattner, C., & Adve, V. (2004). LLVM: A compilation framework for lifelong program analysis & transformation. _International Symposium on Code Generation and Optimization (CGO)_.
 
-<a id="lattner-mlir-2021"></a> Lattner, C., Amini, M., Bondhugula, U., Cohen, A., Davis, A., Pienaar, J., Riddle, R., Shpeisman, T., Vasilache, N., & Zinenko, O. (2021). MLIR: Scaling compiler infrastructure for the end of Moore's law. _International Symposium on Code Generation and Optimization (CGO)_.
-
 <a id="leijen-2005"></a> Leijen, D. (2005). Extensible records with scoped labels. _Trends in Functional Programming (TFP)_.
 
 <a id="leijen-2017"></a> Leijen, D. (2017). Type directed compilation of row-typed algebraic effects. _Principles of Programming Languages (POPL)_.
@@ -52,7 +50,7 @@
 
 <a id="levy-2004"></a> Levy, P. B. (2004). _Call-by-push-value: A functional/imperative synthesis_. Springer.
 
-<a id="lorenzen-leijen-2021"></a> Lorenzen, A., & Leijen, D. (2021). Reference counting with frame-limited reuse. _International Conference on Functional Programming (ICFP)_.
+<a id="lorenzen-leijen-2022"></a> Lorenzen, A., & Leijen, D. (2022). Reference counting with frame limited reuse. _Proceedings of the ACM on Programming Languages, 6_(ICFP), 357-380.
 
 <a id="lorenzen-fp2-2023"></a> Lorenzen, A., Leijen, D., & Swierstra, W. (2023). FP^2: Fully in-place functional programming. _Proceedings of the ACM on Programming Languages, 7_(ICFP).
 

@@ -333,6 +333,15 @@ impl Store {
         index::get_ref(&self.root, name)
     }
 
+    /// Remove a mutable ref, leaving its immutable target object in place.
+    /// Missing refs are a successful no-op.
+    ///
+    /// # Errors
+    /// Fails on a filesystem error.
+    pub fn remove_ref(&self, name: &str) -> io::Result<()> {
+        index::remove_ref(&self.root, name)
+    }
+
     /// Record reverse-dependency edges (each entry `hash -> hashes that directly
     /// depend on it`), merged into the existing `deps` index under the lock.
     ///

@@ -21,6 +21,13 @@ import Wire (Bytes, bytes_of_buf, bytes_buf, bytes_at)
 
 -- | Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)`
 -- and return the updated destination.
+--
+-- ```prism
+-- blit("XY", 0, 2, "abcd", 1)
+-- ```
+-- ```output
+-- aXYd
+-- ```
 pub class Blit(s)
   blit : (s, Int, Int, s, Int) -> s
 

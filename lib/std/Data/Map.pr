@@ -71,6 +71,13 @@ pub fn map_balance(m) =
     m
 
 -- | Insert `key` with `value`, overwriting any existing binding, and rebalance.
+--
+-- ```prism
+-- map_lookup(1, map_insert(1, "a", map_empty))
+-- ```
+-- ```output
+-- Some(a)
+-- ```
 pub fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
   match m of
     Tip => map_node(key, value, Tip, Tip)
@@ -84,6 +91,13 @@ pub fn map_insert(key : k, value : v, m : Map(k, v)) : Map(k, v) given Ord(k) =
         map_node(k2, value, l, r)
 
 -- | The value bound to `key` as `Some`, or `None` when absent.
+--
+-- ```prism
+-- map_lookup(2, map_from_list([(1, "a"), (2, "b")]))
+-- ```
+-- ```output
+-- Some(b)
+-- ```
 pub fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
   match m of
     Tip => None
@@ -97,16 +111,37 @@ pub fn map_lookup(key : k, m : Map(k, v)) : Option(v) given Ord(k) =
         Some(v)
 
 -- | True when `key` is present in the map.
+--
+-- ```prism
+-- map_member(2, map_from_list([(1, "a"), (2, "b")]))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn map_member(key : k, m : Map(k, v)) : Bool given Ord(k) =
   is_some(map_lookup(key, m))
 
 -- | The number of entries.
+--
+-- ```prism
+-- map_size(map_from_list([(1, "a"), (2, "b")]))
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn map_size(m) =
   match m of
     Tip => 0
     Bin(_, _, _, l, r) => 1 + map_size(l) + map_size(r)
 
 -- | The smallest key and its value as `Some`, or `None` when empty.
+--
+-- ```prism
+-- map_min(map_from_list([(2, "b"), (1, "a")]))
+-- ```
+-- ```output
+-- Some((1, a))
+-- ```
 pub fn map_min(m) =
   match m of
     Tip => None
@@ -114,6 +149,13 @@ pub fn map_min(m) =
     Bin(_, _, _, l, _) => map_min(l)
 
 -- | Remove `key` (a no-op if absent), rebalancing the tree.
+--
+-- ```prism
+-- map_to_list(map_delete(1, map_from_list([(1, "a"), (2, "b")])))
+-- ```
+-- ```output
+-- [(2, b)]
+-- ```
 pub fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
   match m of
     Tip => Tip
@@ -136,19 +178,47 @@ pub fn map_delete(key : k, m : Map(k, v)) : Map(k, v) given Ord(k) =
                     map_balance(map_node(mk, mv, l, map_delete(mk, r)))
 
 -- | The `(key, value)` pairs in ascending key order.
+--
+-- ```prism
+-- map_to_list(map_from_list([(2, "b"), (1, "a")]))
+-- ```
+-- ```output
+-- [(1, a), (2, b)]
+-- ```
 pub fn map_to_list(m) =
   match m of
     Tip => Nil
     Bin(_, k, v, l, r) => append(map_to_list(l), Cons((k, v), map_to_list(r)))
 
 -- | The keys in ascending order.
+--
+-- ```prism
+-- map_keys(map_from_list([(2, "b"), (1, "a")]))
+-- ```
+-- ```output
+-- [1, 2]
+-- ```
 pub fn map_keys(m) = map(fst, map_to_list(m))
 
 -- | The values in ascending key order.
+--
+-- ```prism
+-- map_values(map_from_list([(1, "a"), (2, "b")]))
+-- ```
+-- ```output
+-- [a, b]
+-- ```
 pub fn map_values(m) = map(snd, map_to_list(m))
 
 -- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier
 -- one with the same key.
+--
+-- ```prism
+-- map_to_list(map_from_list([(2, "b"), (1, "a")]))
+-- ```
+-- ```output
+-- [(1, a), (2, b)]
+-- ```
 pub fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
   foldl(
       \(acc, p) -> match p of { (ka, va) => map_insert(ka, va, acc) },
@@ -157,6 +227,13 @@ pub fn map_from_list(xs : List((k, v))) : Map(k, v) given Ord(k) =
     )
 
 -- | Apply `f` to every value, keeping keys and tree structure.
+--
+-- ```prism
+-- map_values(map_map_values(\(v) -> v + 1, map_from_list([(1, 10), (2, 20)])))
+-- ```
+-- ```output
+-- [11, 21]
+-- ```
 pub fn map_map_values(f, m) =
   match m of
     Tip => Tip

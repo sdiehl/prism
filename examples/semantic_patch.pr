@@ -1,0 +1,4 @@
+-- | A small target for exercising digest-pinned semantic edits.
+fn seed_increment(x : Int) : Int = x + 2
+
+fn main() = println(seed_increment(41))

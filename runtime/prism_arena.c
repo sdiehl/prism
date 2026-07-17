@@ -1,9 +1,8 @@
 /* prism_arena.c: a region (arena) allocator.
  *
- * Standalone and self-contained: this file is NOT yet wired into prism_rt.c or
- * codegen. It is the runtime substrate the `with_arena` handler will bump into
- * once effect lowering can direct allocations into a region; kept apart so the allocator
- * can be built, tested, and reasoned about on its own.
+ * Standalone and self-contained: the linked runtime does not include this file.
+ * Runtime tests build it directly so the allocator can be tested and reasoned
+ * about independently of `prism_rt.c` and codegen.
  *
  * The design is the textbook region allocator (Hanson, "C Interfaces and
  * Implementations", ch. 6; Tofte/Talpin regions): a singly linked list of

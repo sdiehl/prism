@@ -16,6 +16,14 @@ str_join : (String, List(String)) -> String
 
 Join a list of strings, placing `sep` between adjacent elements.
 
+```prism,mod=Data.String
+str_join(", ", ["a", "b", "c"])
+```
+
+```output
+a, b, c
+```
+
 ### `str_repeat`
 
 ```prism,sig,h-4d5fbb419379aba1af0cadc8121ba2dd67a661569781d517c996ecadc0f75dea
@@ -23,6 +31,14 @@ str_repeat : (String, Int) -> String
 ```
 
 `s` repeated `n` times (the empty string when `n <= 0`).
+
+```prism,mod=Data.String
+str_repeat("ab", 3)
+```
+
+```output
+ababab
+```
 
 ### `pad_left`
 
@@ -32,6 +48,14 @@ pad_left : (String, Int) -> String
 
 Right-align `s` to width `w` by prepending spaces (unchanged if already wider).
 
+```prism,mod=Data.String
+pad_left("42", 5)
+```
+
+```output
+   42
+```
+
 ### `pad_right`
 
 ```prism,sig,h-974489581eed676fee5c11ffb31af0b9c11a04635c5973482e4771462dd286ea
@@ -40,6 +64,14 @@ pad_right : (String, Int) -> String
 
 Left-align `s` to width `w` by appending spaces (unchanged if already wider).
 
+```prism,mod=Data.String
+pad_right("42", 5)
+```
+
+```output
+42
+```
+
 ### `lines_of`
 
 ```prism,sig,h-d817e4c50bb622f36a5bfdb270fa0afa9f989f3a614e6449018c19bd955daac4
@@ -47,6 +79,15 @@ lines_of : (List(String)) -> String
 ```
 
 Join a list of strings with newlines between them.
+
+```prism,mod=Data.String
+lines_of(["one", "two"])
+```
+
+```output
+one
+two
+```
 
 ### `occurs_at`
 
@@ -64,6 +105,14 @@ starts_with : (String, String) -> Bool
 
 True when `s` begins with `prefix`.
 
+```prism,mod=Data.String
+starts_with("foo", "foobar")
+```
+
+```output
+true
+```
+
 ### `ends_with`
 
 ```prism,sig,h-41c21216c603ad08418c58414254bcab2a39c63c90e626eb13f25b84dfdec1bf
@@ -71,6 +120,14 @@ ends_with : (String, String) -> Bool
 ```
 
 True when `s` ends with `suffix`.
+
+```prism,mod=Data.String
+ends_with("bar", "foobar")
+```
+
+```output
+true
+```
 
 ### `index_of_go`
 
@@ -88,6 +145,14 @@ index_of : (String, String) -> Int
 
 The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent.
 
+```prism,mod=Data.String
+index_of("bar", "foobar")
+```
+
+```output
+3
+```
+
 ### `contains`
 
 ```prism,sig,h-4f975f111eef69478c71eaf666624804cbefdac9f4981890e88d5bac244f077b
@@ -95,6 +160,14 @@ contains : (String, String) -> Bool
 ```
 
 True when `needle` occurs anywhere in `s`.
+
+```prism,mod=Data.String
+contains("oob", "foobar")
+```
+
+```output
+true
+```
 
 ### `map_case`
 
@@ -112,6 +185,14 @@ to_upper : (String) -> String
 
 ASCII upper-case of `s` (non-letters unchanged).
 
+```prism,mod=Data.String
+to_upper("Hello")
+```
+
+```output
+HELLO
+```
+
 ### `to_lower`
 
 ```prism,sig,h-1c391da3ddabefebcfab2524904b69615c51821c040b68176275d77cd996d8a4
@@ -119,6 +200,14 @@ to_lower : (String) -> String
 ```
 
 ASCII lower-case of `s` (non-letters unchanged).
+
+```prism,mod=Data.String
+to_lower("Hello")
+```
+
+```output
+hello
+```
 
 ### `ltrim_idx`
 
@@ -152,6 +241,14 @@ trim : (String) -> String
 
 Strip leading and trailing ASCII whitespace.
 
+```prism,mod=Data.String
+trim("  hi  ")
+```
+
+```output
+hi
+```
+
 ### `index_of_from`
 
 ```prism,sig,h-3cfed0914fc9310bc393e1acdc15020aaa69b992080ffdbc5f2b68b5baeb266b
@@ -176,6 +273,14 @@ split : (Int, String) -> List(String)
 
 Split `s` into the pieces between each occurrence of character `c`.
 
+```prism,mod=Data.String
+split(char_at(",", 0), "a,b,c")
+```
+
+```output
+[a, b, c]
+```
+
 ### `str_of_char`
 
 ```prism,sig,h-22c4f68428340cf1c813774c140e5dc38f51c7068eafc5b6b4cfc2fc139fd91d
@@ -183,6 +288,14 @@ str_of_char : (Char) -> String
 ```
 
 The single-character string containing `c`.
+
+```prism,mod=Data.String
+str_of_char(chr(65))
+```
+
+```output
+A
+```
 
 ### `chars_from`
 
@@ -199,3 +312,11 @@ chars : (String) -> List(Char)
 ```
 
 The list of characters in `s`.
+
+```prism,mod=Data.String
+chars("hi")
+```
+
+```output
+[104, 105]
+```

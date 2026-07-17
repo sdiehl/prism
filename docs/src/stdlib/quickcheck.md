@@ -46,13 +46,29 @@ run_seeded : forall e0 a. (U64, () -> a ! {Random, e0}) -> a ! {e0}
 
 Run `action` with the `Random` effect served by a seeded SplitMix64 stream, so the result is a pure function of `seed`. This is the REPLAYABLE handler the runner installs; call it directly to reproduce a single draw off a seed.
 
+```prism,mod=Quickcheck
+run_seeded(1u64, \() -> gen_run(gen_int, 5))
+```
+
+```output
+1
+```
+
 ### `gen_run`
 
 ```prism,sig,h-bbc03f98f71b7d1cbd36265d971132775f29f2f998ccc14cc72394efd4ed2446
 gen_run : forall a. (Quickcheck.Gen(a), Int) -> a ! {Random}
 ```
 
-Draw one value from `g` at the given size, performing `Random`.
+Draw one value from `g` at the given size, performing `Random`. Discharge the `Random` with `run_seeded` (or use `gen_at`) to run it.
+
+```prism,mod=Quickcheck
+run_seeded(1u64, \() -> gen_run(gen_const(9), 5))
+```
+
+```output
+9
+```
 
 ### `gen_at`
 
@@ -62,6 +78,14 @@ gen_at : forall a. (Quickcheck.Gen(a), U64, Int) -> a
 
 Draw a value from `g` deterministically off `seed` at `size`, no IO. This is the reproduce-a-counterexample entry point.
 
+```prism,mod=Quickcheck
+gen_at(gen_int, 42u64, 10)
+```
+
+```output
+-6
+```
+
 ### `gen_const`
 
 ```prism,sig,h-8f6fc853b174b6f7a2b7c582e175a2f7de82903afa2134f63fc3539800fdbe47
@@ -69,6 +93,14 @@ gen_const : forall a. (a) -> Quickcheck.Gen(a)
 ```
 
 The generator that ignores size and randomness and always yields `x`.
+
+```prism,mod=Quickcheck
+gen_at(gen_const(7), 1u64, 5)
+```
+
+```output
+7
+```
 
 ### `gen_map`
 
@@ -78,6 +110,14 @@ gen_map : forall a b. ((a) -> b, Quickcheck.Gen(a)) -> Quickcheck.Gen(b)
 
 Map `f` over every value a generator produces.
 
+```prism,mod=Quickcheck
+gen_at(gen_map(\(x) -> x + 1, gen_const(4)), 1u64, 5)
+```
+
+```output
+5
+```
+
 ### `gen_map2`
 
 ```prism,sig,h-8f6f565e4499cd6079c007d34ba46938582e77703dcc942338f585d284647260
@@ -85,6 +125,14 @@ gen_map2 : forall a b c. ((a, b) -> c, Quickcheck.Gen(a), Quickcheck.Gen(b)) -> 
 ```
 
 Combine two generators with `f`, drawing both at the same size.
+
+```prism,mod=Quickcheck
+gen_at(gen_map2(\(a, b) -> a + b, gen_const(2), gen_const(3)), 1u64, 5)
+```
+
+```output
+5
+```
 
 ### `gen_bind`
 
@@ -94,6 +142,14 @@ gen_bind : forall a b. (Quickcheck.Gen(a), (a) -> Quickcheck.Gen(b)) -> Quickche
 
 Monadic bind: draw an `a`, then draw from the generator `f` picks for it.
 
+```prism,mod=Quickcheck
+gen_at(gen_bind(gen_const(3), \(x) -> gen_const(x * 2)), 1u64, 5)
+```
+
+```output
+6
+```
+
 ### `gen_sized`
 
 ```prism,sig,h-be59c643ecf5dbf74ea08761d1c2a24c811e0727661bd903b32483f013468a54
@@ -101,6 +157,14 @@ gen_sized : forall a. ((Int) -> Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 ```
 
 Build a generator that sees the current size, for recursive shapes that branch on remaining fuel.
+
+```prism,mod=Quickcheck
+gen_at(gen_sized(\(sz) -> gen_const(sz)), 1u64, 12)
+```
+
+```output
+12
+```
 
 ### `gen_resize`
 
@@ -110,6 +174,14 @@ gen_resize : forall a. (Int, Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 
 Run `g` at a fixed size, ignoring the ambient one (shrink a recursive position by resizing it smaller).
 
+```prism,mod=Quickcheck
+gen_at(gen_resize(4, gen_sized(\(sz) -> gen_const(sz))), 1u64, 99)
+```
+
+```output
+4
+```
+
 ### `gen_choose`
 
 ```prism,sig,h-fad0d246d7adb5b4bff8c642f126d532caa8fa264b9193a4c3c9ace45a5dcbb8
@@ -117,6 +189,14 @@ gen_choose : forall a. (Quickcheck.Gen(a), List(Quickcheck.Gen(a))) -> Quickchec
 ```
 
 Pick one of `g0`/`rest` uniformly, then draw from it (one arm per constructor, the shape a derived sum-type instance uses).
+
+```prism,mod=Quickcheck
+gen_at(gen_choose(gen_const(1), [gen_const(2)]), 5u64, 3)
+```
+
+```output
+1
+```
 
 ### `gen_one_of`
 
@@ -126,6 +206,14 @@ gen_one_of : forall a. (a, List(a)) -> Quickcheck.Gen(a)
 
 Pick one of the given values uniformly (`x0` or one of `rest`).
 
+```prism,mod=Quickcheck
+gen_at(gen_one_of(10, [20, 30]), 5u64, 3)
+```
+
+```output
+30
+```
+
 ### `gen_int`
 
 ```prism,sig,h-11147e2d21e0b3a31f8dc884b2e89d6846cc7d2ad4e84abb4f1a4ac670860a62
@@ -133,6 +221,14 @@ gen_int : Quickcheck.Gen(Int)
 ```
 
 Generator of `Int`, biased toward the edge cases (`0`, `1`, `-1`, and a full-width draw) alongside small readable values.
+
+```prism,mod=Quickcheck
+gen_at(gen_int, 42u64, 10)
+```
+
+```output
+-6
+```
 
 ### `gen_i64`
 
@@ -157,6 +253,14 @@ gen_bool : Quickcheck.Gen(Bool)
 ```
 
 Generator of `Bool`.
+
+```prism,mod=Quickcheck
+gen_at(gen_bool, 7u64, 3)
+```
+
+```output
+false
+```
 
 ### `gen_float`
 
@@ -190,6 +294,14 @@ gen_list : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(List(a))
 
 Generator of a `List(a)` whose length is bounded by size.
 
+```prism,mod=Quickcheck
+gen_at(gen_list(gen_const(1)), 7u64, 4)
+```
+
+```output
+[1, 1]
+```
+
 ### `gen_option`
 
 ```prism,sig,h-328001aac35378fd0f0cc943f18fd4c4e7449f5796e2fa6084b8507c818dadcd
@@ -197,6 +309,14 @@ gen_option : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(Option(a))
 ```
 
 Generator of `Option(a)`: `None` a quarter of the time, else `Some`.
+
+```prism,mod=Quickcheck
+gen_at(gen_option(gen_const(5)), 3u64, 3)
+```
+
+```output
+Some(5)
+```
 
 ### `gen_pair`
 
@@ -206,6 +326,14 @@ gen_pair : forall a b. (Quickcheck.Gen(a), Quickcheck.Gen(b)) -> Quickcheck.Gen(
 
 Generator of a pair, both drawn at the same size.
 
+```prism,mod=Quickcheck
+gen_at(gen_pair(gen_const(1), gen_const(2)), 1u64, 3)
+```
+
+```output
+(1, 2)
+```
+
 ### `gen_triple`
 
 ```prism,sig,h-a401bb3df9b28c5625827dca88e09480651772e239947c402646e77958c23630
@@ -213,6 +341,14 @@ gen_triple : forall a b c. (Quickcheck.Gen(a), Quickcheck.Gen(b), Quickcheck.Gen
 ```
 
 Generator of a triple, all drawn at the same size.
+
+```prism,mod=Quickcheck
+gen_at(gen_triple(gen_const(1), gen_const(2), gen_const(3)), 1u64, 3)
+```
+
+```output
+(1, 2, 3)
+```
 
 ### `default_config`
 
@@ -222,6 +358,14 @@ default_config : Quickcheck.Config
 
 The default configuration: a fixed base seed, 100 cases, sizes up to 20.
 
+```prism,mod=Quickcheck
+default_config.count
+```
+
+```output
+100
+```
+
 ### `check_with`
 
 ```prism,sig,h-43741e0ff8c3dfa236f413d2fcf2ad2b7c80559984bf11ba8b6b78bda6fb886a
@@ -229,6 +373,14 @@ check_with : forall a. (Quickcheck.Config, Quickcheck.Gen(a), (a) -> Bool) -> Qu
 ```
 
 Run `prop` over `cfg.count` inputs from `gen`, returning the first counterexample or the count that passed. Deterministic in `cfg.seed`.
+
+```prism,mod=Quickcheck
+check_with(default_config, gen_const(2), \(x) -> x == 2)
+```
+
+```output
+Quickcheck.Passed(100)
+```
 
 ### `quickcheck`
 
@@ -238,6 +390,14 @@ quickcheck : forall a. (Quickcheck.Gen(a), (a) -> Bool) -> Quickcheck.Outcome(a)
 
 Run `prop` over the default configuration.
 
+```prism,mod=Quickcheck
+quickcheck(gen_int, \(x) -> x + 0 == x)
+```
+
+```output
+Quickcheck.Passed(100)
+```
+
 ### `passed`
 
 ```prism,sig,h-9aefbed0dc87f112e8eaef1a07fa582c4428f3fdb8dc465d8ec2dcd5d5ac8224
@@ -246,6 +406,14 @@ passed : forall a. (Quickcheck.Outcome(a)) -> Bool
 
 True when a run found no counterexample.
 
+```prism,mod=Quickcheck
+passed(quickcheck(gen_int, \(x) -> x + 1 > x))
+```
+
+```output
+true
+```
+
 ### `show_outcome`
 
 ```prism,sig,h-bfc4ce38dd8b1220876ce6e8f153624f33a900c0c33ccc35e8d8337818f58ea1
@@ -253,3 +421,13 @@ show_outcome : forall a. (String, Quickcheck.Outcome(a)) -> String
 ```
 
 Render an outcome for `name` as one report line (pass) or a block naming the counterexample and the seed and size that reproduce it.
+
+```prism,mod=Quickcheck
+show_outcome("positivity", Failed(0, 12, 42u64, 5))
+```
+
+```output
+positivity: FAILED after 12 tests.
+  counterexample: 0
+  reproduce: seed 42 size 5
+```

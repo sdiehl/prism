@@ -3,8 +3,26 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/cancel_sibling_fail.pr
 ---
+outsider: parked
 sibling: running
-failer: about to fail
-sibling finalizer ran
-run recovered with -1
+fifo failer: about to fail
+grandchild: parked
+outsider cleanup: waiting
+sibling cleanup ran
+grandchild cleanup ran
+fifo root cleanup ran
+outsider cleanup ran
+fifo recovered with -1
+outsider: parked
+sibling: running
+grandchild: parked
+lifo failer: about to fail
+grandchild cleanup ran
+sibling cleanup ran
+outsider cleanup: waiting
+lifo root cleanup ran
+outsider cleanup ran
+lifo recovered with -2
+awaited sibling completed
+queued main recovered with -3
 => ()

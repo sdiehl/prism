@@ -487,6 +487,12 @@ pub struct PublicDef {
 }
 
 /// Version tag for serialized checked module interfaces.
+///
+/// Unlike the driver's cache-bust query salts, this is a real content-identity
+/// version: it is hashed into `interface_digest`, so its value must not be
+/// renumbered casually (a change reseats every interface digest). `v3` is simply
+/// the current format; there is no legacy reader, a non-`v3` document is rejected
+/// outright in `validate`.
 pub const MODULE_INTERFACE_FORMAT: &str = "prism-module-interface-v3";
 
 /// One deterministic semantic row exported to an importing checker.

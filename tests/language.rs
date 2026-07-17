@@ -32,3 +32,5 @@ mod rigid_sig_vars;
 mod skolem_escape;
 #[path = "language/soundness.rs"]
 mod soundness;
+#[path = "language/typed_holes.rs"]
+mod typed_holes;

@@ -529,20 +529,20 @@ fn main() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [997 x i8] c"scheme  prism-core-hash-v1\0Abundle  c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Acompiler  0.11.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Aflag  stdlib-root  prism-core-hash-v1:1584453b001560909b8c2ef5b34f2b21004f42fb909f8c44ed4f368b6dd87056\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prism_csucc  b7bec3b6cacd5291916fbdcee8f348e9e4e35616b1864c76c920c51a833df739  csucc\0Afn      prism_czero  79ede7033ca8ce5cdd1c6afc679e3a6804876465407b6f3a11b1ce4467dec08f  czero\0Afn      prism_main  07fe92ebf23251ca33b06c4d5994d157b369c11fcf9adc32b86471767f5b3e3c  main\0Afn      prism_toInt  f30b4c09a4822a474566e9460289ba7b1723a0a23b4edaa1f8304dfb12d36747  toInt\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1156 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Acompiler  0.11.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Aflag  stdlib-root  prism-core-hash-v1:1584453b001560909b8c2ef5b34f2b21004f42fb909f8c44ed4f368b6dd87056\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prism_csucc b7bec3b6cacd5291916fbdcee8f348e9e4e35616b1864c76c920c51a833df739 csucc arity 1 slots abi-word[arg0=%a0:word]\0Astate prism_czero 79ede7033ca8ce5cdd1c6afc679e3a6804876465407b6f3a11b1ce4467dec08f czero arity 0 slots abi-word[]\0Astate prism_main 07fe92ebf23251ca33b06c4d5994d157b369c11fcf9adc32b86471767f5b3e3c main arity 0 slots abi-word[]\0Astate prism_toInt f30b4c09a4822a474566e9460289ba7b1723a0a23b4edaa1f8304dfb12d36747 toInt arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
-@.kont_symbol0 = private constant [12 x i8] c"prism_csucc\00"
+@prism_native_kont_table = constant [1005 x i8] c"scheme  prism-core-hash-v1\0Abundle  c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Acompiler  0.12.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Aflag  stdlib-root  prism-core-hash-v1:4e53a683d5f48d3d99d1a4fd2ea38fc0c3d67b8ab2272e4ad6469ad156b75a8d\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_csucc  b7bec3b6cacd5291916fbdcee8f348e9e4e35616b1864c76c920c51a833df739  csucc\0Afn      prismfn_czero  79ede7033ca8ce5cdd1c6afc679e3a6804876465407b6f3a11b1ce4467dec08f  czero\0Afn      prismfn_main  07fe92ebf23251ca33b06c4d5994d157b369c11fcf9adc32b86471767f5b3e3c  main\0Afn      prismfn_toInt  f30b4c09a4822a474566e9460289ba7b1723a0a23b4edaa1f8304dfb12d36747  toInt\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1164 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Acompiler  0.12.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:c134a04c6c5098a42e1eee11fa94d64448b463193a72f32766cc53e8619e9456\0Aflag  stdlib-root  prism-core-hash-v1:4e53a683d5f48d3d99d1a4fd2ea38fc0c3d67b8ab2272e4ad6469ad156b75a8d\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_csucc b7bec3b6cacd5291916fbdcee8f348e9e4e35616b1864c76c920c51a833df739 csucc arity 1 slots abi-word[arg0=%a0:word]\0Astate prismfn_czero 79ede7033ca8ce5cdd1c6afc679e3a6804876465407b6f3a11b1ce4467dec08f czero arity 0 slots abi-word[]\0Astate prismfn_main 07fe92ebf23251ca33b06c4d5994d157b369c11fcf9adc32b86471767f5b3e3c main arity 0 slots abi-word[]\0Astate prismfn_toInt f30b4c09a4822a474566e9460289ba7b1723a0a23b4edaa1f8304dfb12d36747 toInt arity 1 slots abi-word[arg0=%a0:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol0 = private constant [14 x i8] c"prismfn_csucc\00"
 @.kont_hash0 = private constant [65 x i8] c"b7bec3b6cacd5291916fbdcee8f348e9e4e35616b1864c76c920c51a833df739\00"
 @.kont_name0 = private constant [6 x i8] c"csucc\00"
-@.kont_symbol2 = private constant [11 x i8] c"prism_main\00"
+@.kont_symbol2 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash2 = private constant [65 x i8] c"07fe92ebf23251ca33b06c4d5994d157b369c11fcf9adc32b86471767f5b3e3c\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
-@prism_native_kont_ptrs = constant [2 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prism_csucc, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prism_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs = constant [2 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_csucc, ptr @.kont_symbol0, ptr @.kont_hash0, ptr @.kont_name0 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 2, section ",.prism_kont", align 8
 @llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
 
 ; Function Attrs: nounwind
-define i64 @prism_csucc(i64 %a0) #0 {
+define i64 @prismfn_csucc(i64 %a0) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8
@@ -591,7 +591,7 @@ declare ptr @prism_alloc(i64) #0
 declare ptr @prism_reuse_alloc(i64, i64) #0
 
 ; Function Attrs: nounwind
-define i64 @prism_main() #0 {
+define i64 @prismfn_main() #0 {
 entry:
   %t1 = call ptr @prism_alloc(i64 0)
   %t2 = getelementptr inbounds i8, ptr %t1, i64 8
@@ -603,9 +603,9 @@ entry:
   %t9 = getelementptr inbounds i8, ptr %t6, i64 24
   store i64 %t4, ptr %t9, align 8
   %t10 = ptrtoint ptr %t6 to i64
-  %t11 = call i64 @prism_csucc(i64 %t10)
-  %t12 = call i64 @prism_csucc(i64 %t11)
-  %t13 = call i64 @prism_csucc(i64 %t12)
+  %t11 = call i64 @prismfn_csucc(i64 %t10)
+  %t12 = call i64 @prismfn_csucc(i64 %t11)
+  %t13 = call i64 @prismfn_csucc(i64 %t12)
   %t14 = inttoptr i64 %t13 to ptr
   %t15 = getelementptr inbounds i8, ptr %t14, i64 8
   %t16 = load i64, ptr %t15, align 8
@@ -622,7 +622,7 @@ b2:                                               ; preds = %entry
   %t23 = getelementptr inbounds i8, ptr %t22, i64 8
   store i64 6217696733472061813, ptr %t23, align 8
   %t25 = ptrtoint ptr %t22 to i64
-  %t27 = call i64 @prism_apply_2(i64 %t18, i64 %t25, i64 1)
+  %t27 = call i64 @prismap_2(i64 %t18, i64 %t25, i64 1)
   call void @prism_rc_dec(i64 %t18)
   br label %b0
 
@@ -643,7 +643,7 @@ b0:                                               ; preds = %b2
 declare void @prism_rc_dec(i64) #0
 
 ; Function Attrs: nounwind
-define i64 @prism_apply_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
+define i64 @prismap_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
@@ -657,13 +657,13 @@ entry:
   ]
 
 _lam4180332117194187166:                          ; preds = %entry
-  %_r4180332117194187166 = call i64 @prism_lam_4180332117194187166(i64 %_a0, i64 %_a1)
+  %_r4180332117194187166 = call i64 @prismlam_4180332117194187166(i64 %_a0, i64 %_a1)
   br label %_merge
 
 _lam4254598669854025665:                          ; preds = %entry
   %_fp4254598669854025665_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv4254598669854025665_0 = load i64, ptr %_fp4254598669854025665_0, align 8
-  %_r4254598669854025665 = call i64 @prism_lam_4254598669854025665(i64 %_fv4254598669854025665_0, i64 %_a0, i64 %_a1)
+  %_r4254598669854025665 = call i64 @prismlam_4254598669854025665(i64 %_fv4254598669854025665_0, i64 %_a0, i64 %_a1)
   br label %_merge
 
 _lam6217696733472061813:                          ; preds = %entry
@@ -700,19 +700,19 @@ declare void @prism_print_int(i64) #0
 declare void @prism_print_nl() #0
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_4254598669854025665(i64 %_fv0, i64 %_p0, i64 %_p1) #0 {
+define i64 @prismlam_4254598669854025665(i64 %_fv0, i64 %_p0, i64 %_p1) #0 {
 entry:
   call void @prism_rc_inc(i64 %_p0)
   call void @prism_rc_inc(i64 %_fv0)
-  %t2 = call i64 @prism_apply_2(i64 %_fv0, i64 %_p0, i64 %_p1)
+  %t2 = call i64 @prismap_2(i64 %_fv0, i64 %_p0, i64 %_p1)
   call void @prism_rc_dec(i64 %_fv0)
-  %t3 = call i64 @prism_apply_1(i64 %_p0, i64 %t2)
+  %t3 = call i64 @prismap_1(i64 %_p0, i64 %t2)
   call void @prism_rc_dec(i64 %_p0)
   ret i64 %t3
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_apply_1(i64 %_clos, i64 %_a0) #0 {
+define i64 @prismap_1(i64 %_clos, i64 %_a0) #0 {
 entry:
   %_cp = inttoptr i64 %_clos to ptr
   %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
@@ -749,13 +749,13 @@ _lam4254598669854025665:                          ; preds = %entry
   br label %_merge
 
 _lam6217696733472061813:                          ; preds = %entry
-  %_r6217696733472061813 = call i64 @prism_lam_6217696733472061813(i64 %_a0)
+  %_r6217696733472061813 = call i64 @prismlam_6217696733472061813(i64 %_a0)
   br label %_merge
 
 _lam7170891667029511803:                          ; preds = %entry
   %_fp7170891667029511803_0 = getelementptr inbounds i8, ptr %_cp, i64 24
   %_fv7170891667029511803_0 = load i64, ptr %_fp7170891667029511803_0, align 8
-  %_r7170891667029511803 = call i64 @prism_lam_7170891667029511803(i64 %_fv7170891667029511803_0, i64 %_a0)
+  %_r7170891667029511803 = call i64 @prismlam_7170891667029511803(i64 %_fv7170891667029511803_0, i64 %_a0)
   br label %_merge
 
 _lam6383443721983455069:                          ; preds = %entry
@@ -763,7 +763,7 @@ _lam6383443721983455069:                          ; preds = %entry
   %_fv6383443721983455069_0 = load i64, ptr %_fp6383443721983455069_0, align 8
   %_fp6383443721983455069_1 = getelementptr inbounds i8, ptr %_cp, i64 32
   %_fv6383443721983455069_1 = load i64, ptr %_fp6383443721983455069_1, align 8
-  %_r6383443721983455069 = call i64 @prism_lam_6383443721983455069(i64 %_fv6383443721983455069_0, i64 %_fv6383443721983455069_1, i64 %_a0)
+  %_r6383443721983455069 = call i64 @prismlam_6383443721983455069(i64 %_fv6383443721983455069_0, i64 %_fv6383443721983455069_1, i64 %_a0)
   br label %_merge
 
 _dead:                                            ; preds = %entry
@@ -776,14 +776,14 @@ _merge:                                           ; preds = %_lam638344372198345
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_4180332117194187166(i64 %_p0, i64 %_p1) #0 {
+define i64 @prismlam_4180332117194187166(i64 %_p0, i64 %_p1) #0 {
 entry:
   call void @prism_rc_dec(i64 %_p0)
   ret i64 %_p1
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_6217696733472061813(i64 %_p0) #0 {
+define i64 @prismlam_6217696733472061813(i64 %_p0) #0 {
 entry:
   %t1 = and i64 %_p0, 3
   %t3 = and i64 %t1, 1
@@ -817,19 +817,19 @@ b2:                                               ; preds = %b1, %b3
 declare i64 @prism_rt_int_add(i64, i64) #0
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_7170891667029511803(i64 %_fv0, i64 %_p0) #0 {
+define i64 @prismlam_7170891667029511803(i64 %_fv0, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
-  %t0 = call i64 @prism_lam_4180332117194187166(i64 %_fv0, i64 %_p0)
+  %t0 = call i64 @prismlam_4180332117194187166(i64 %_fv0, i64 %_p0)
   ret i64 %t0
 }
 
 ; Function Attrs: nounwind
-define i64 @prism_lam_6383443721983455069(i64 %_fv0, i64 %_fv1, i64 %_p0) #0 {
+define i64 @prismlam_6383443721983455069(i64 %_fv0, i64 %_fv1, i64 %_p0) #0 {
 entry:
   call void @prism_rc_inc(i64 %_fv0)
   call void @prism_rc_inc(i64 %_fv1)
-  %t0 = call i64 @prism_lam_4254598669854025665(i64 %_fv0, i64 %_fv1, i64 %_p0)
+  %t0 = call i64 @prismlam_4254598669854025665(i64 %_fv0, i64 %_fv1, i64 %_p0)
   ret i64 %t0
 }
 

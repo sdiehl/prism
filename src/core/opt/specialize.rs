@@ -122,7 +122,7 @@ impl Specializer {
             return *name;
         }
         self.counter += 1;
-        let clone_name = Sym::from(&format!("{}$sp{}", f.as_str(), self.counter));
+        let clone_name = Sym::from(&names::specialized_clone(f.as_str(), self.counter));
         self.memo.insert(key, clone_name);
         let orig = self.bodies[&f].clone();
         let k = insts.len();

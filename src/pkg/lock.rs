@@ -30,7 +30,6 @@ use crate::project::DepSource;
 // The lock is its own format family, versioned independently of the store index
 // files it is modeled on; the separators match theirs (TAB between fields, space
 // within a field's list) but are declared here because this is a distinct file.
-const LOCK_HEADER_V1: &str = "prism-lock\tv1";
 const LOCK_HEADER: &str = "prism-lock\tv2";
 const FIELD_SEP: char = '\t';
 const TOKEN_SEP: char = ' ';
@@ -147,8 +146,7 @@ impl Lock {
     /// source token.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let mut lines = text.lines();
-        let header = lines.next();
-        if header != Some(LOCK_HEADER_V1) && header != Some(LOCK_HEADER) {
+        if lines.next() != Some(LOCK_HEADER) {
             return Err(Error::ResolvePackage(format!(
                 "prism.lock: missing or unrecognized header (expected {LOCK_HEADER:?})"
             )));
@@ -158,20 +156,14 @@ impl Lock {
         let mut entries = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let fields: Vec<&str> = line.split(FIELD_SEP).collect();
-            match (header, fields.as_slice()) {
-                (Some(LOCK_HEADER_V1), [name, hash]) if *name == STD_ROOT_NAME => {
-                    std_scheme = Some(HASH_SCHEME.to_string());
-                    std_root = Some((*hash).to_string());
-                    continue;
-                }
-                (Some(LOCK_HEADER), [name, scheme, hash]) if *name == STD_ROOT_NAME => {
+            if let [name, scheme, hash] = fields.as_slice() {
+                if *name == STD_ROOT_NAME {
                     std_scheme = Some((*scheme).to_string());
                     std_root = Some((*hash).to_string());
                     continue;
                 }
-                _ => {}
             }
-            entries.push(parse_row(header, line)?);
+            entries.push(parse_row(line)?);
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(Self {
@@ -228,16 +220,10 @@ fn token_field(tokens: &[&str]) -> Result<String, Error> {
     Ok(tokens.join(&TOKEN_SEP.to_string()))
 }
 
-fn parse_row(header: Option<&str>, line: &str) -> Result<LockEntry, Error> {
+fn parse_row(line: &str) -> Result<LockEntry, Error> {
     let fields: Vec<&str> = line.splitn(4, FIELD_SEP).collect();
-    match (header, fields.as_slice()) {
-        (Some(LOCK_HEADER_V1), [name, hash, source]) => Ok(LockEntry {
-            name: (*name).to_string(),
-            scheme: HASH_SCHEME.to_string(),
-            hash: (*hash).to_string(),
-            source: parse_source_field(source)?,
-        }),
-        (Some(LOCK_HEADER), [name, scheme, hash, source]) => Ok(LockEntry {
+    match fields.as_slice() {
+        [name, scheme, hash, source] => Ok(LockEntry {
             name: (*name).to_string(),
             scheme: (*scheme).to_string(),
             hash: (*hash).to_string(),
@@ -374,18 +360,6 @@ mod tests {
             source: DepSource::Path(PathBuf::from("../a b")),
         });
         assert!(lock.render().is_err());
-    }
-
-    #[test]
-    fn legacy_v1_rows_parse_as_current_scheme() {
-        let text = "prism-lock\tv1\nstd\tdeadbeef\ngeo\t7c21\tpath ../geo\n";
-        let lock = Lock::parse(text).unwrap();
-        assert_eq!(lock.std_root(), Some("deadbeef"));
-        assert_eq!(lock.std_scheme(), Some(HASH_SCHEME));
-        let geo = lock.get("geo").unwrap();
-        assert_eq!(geo.scheme, HASH_SCHEME);
-        assert_eq!(geo.hash, "7c21");
-        lock.validate_current_scheme().unwrap();
     }
 
     #[test]

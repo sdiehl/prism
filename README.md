@@ -38,7 +38,7 @@ curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22     # Debian/Ubuntu
 Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.11.0 sh
+curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.12.0 sh
 ```
 
 The installer verifies the release tarball's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking, and installs to `~/.local/bin` without sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
@@ -48,17 +48,17 @@ Also available: `brew install sdiehl/prism/prism`, `docker run ghcr.io/sdiehl/pr
 ```shell
 # Debian / Ubuntu (LLVM repository, then package)
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.11.0/prism_0.11.0_amd64.deb && sudo apt install ./prism_0.11.0_amd64.deb
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.12.0/prism_0.12.0_amd64.deb && sudo apt install ./prism_0.12.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.11.0/prism-0.11.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.12.0/prism-0.12.0-1.x86_64.rpm
 
 # Arch (prebuilt package or local PKGBUILD)
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.11.0/prism-0.11.0-1-x86_64.pkg.tar.zst
-curl -fLO https://raw.githubusercontent.com/sdiehl/prism/v0.11.0/packaging/arch/PKGBUILD && makepkg -si
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.12.0/prism-0.12.0-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.12.0/PKGBUILD && makepkg -si
 
 # Alpine
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.11.0/prism_0.11.0_x86_64.apk && sudo apk add --allow-untrusted ./prism_0.11.0_x86_64.apk
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.12.0/prism_0.12.0_x86_64.apk && sudo apk add --allow-untrusted ./prism_0.12.0_x86_64.apk
 ```
 
 ### From Source

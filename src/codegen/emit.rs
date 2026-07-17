@@ -23,7 +23,7 @@ use super::rt;
 #[cfg(feature = "mlir")]
 use crate::core::builtins::BUILTINS;
 use crate::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
-use crate::core::effect_lower::{is_free_monad_driver, EOP};
+use crate::core::effect_abi::{is_free_monad_driver, EOP};
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
 use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
 use crate::names::{closure_cap, generated_param};
@@ -70,7 +70,7 @@ pub(super) struct LamInfo {
 // TRMC (tail recursion modulo constructor / addition). A function whose
 // recursive call feeds exactly one constructor field in tail position, like
 // `Cons(y, map(f, rest))`, is split into `prism_N` (a thin wrapper) and
-// `prism_N.trmc(args.., hole)`: each step allocates the constructor with a zero
+// `prismtrmc_N(args.., hole)`: each step allocates the constructor with a zero
 // placeholder in the recursive field, stores the cell into the incoming hole,
 // and musttail-recurses on the placeholder's address. Base cases store their
 // result into the hole. The wrapper passes a stack slot as the first hole and
@@ -109,7 +109,7 @@ pub(super) struct Cg<'a, I> {
     // take and return `f64` rather than the `i64` of `used_rt`, so they carry a
     // distinct declaration (see `declare_f`).
     used_fcall: BTreeSet<String>,
-    // Arities at which `prism_apply_n` is actually called. A 0-arg `App` (and any
+    // Arities at which `prismap_n` is actually called. A 0-arg `App` (and any
     // arity with no matching lambda) still needs the function emitted, or it is
     // an undefined symbol at link time.
     pub(super) used_apply: BTreeSet<usize>,
@@ -468,7 +468,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                     avs.push(self.value(regs, a)?);
                 }
                 self.used_apply.insert(args.len());
-                let f = format!("prism_apply_{}", args.len());
+                let f = super::apply_symbol(args.len());
                 let t = self.dst(|i, b, d| i.call(b, d, &f, &avs));
                 self.rc_dec(&clos);
                 Ok(t)
@@ -571,12 +571,12 @@ impl<'a, I: Isa> Cg<'a, I> {
             )),
             Comp::Handle { .. } => Err(
                 "`handle` reached codegen unlowered: effect lowering must run before emission \
-                 (see core::lower_effects)"
+                 (see typed effect lowering)"
                     .into(),
             ),
             Comp::Mask(..) => Err(
                 "`mask` reached codegen unlowered: effect lowering must run before emission \
-                 (see core::lower_effects)"
+                 (see typed effect lowering)"
                     .into(),
             ),
             Comp::StrBuiltin(b, args) => {
@@ -639,6 +639,27 @@ impl<'a, I: Isa> Cg<'a, I> {
                 };
                 let fvs = self.values(regs, fields)?;
                 Ok(self.reuse_obj(&t, tag, &fvs))
+            }
+            // Initialize a constructor in place over an allocator-provided cell:
+            // the same tag+field store `Reuse` emits, minus the allocation (the
+            // cell already exists, from the arena `bump`). `cell` is an ordinary
+            // owned value rather than a reuse token, so it evaluates through
+            // `value`; everything downstream is byte-identical to a plain `Ctor`.
+            Comp::InitAt(cell, ctor) => {
+                let c = self.value(regs, cell)?;
+                let (tag, fields) = match ctor {
+                    Value::Ctor(_, tg, fs) => (idx64(*tg), fs),
+                    Value::Tuple(fs) => (0, fs),
+                    _ => return Err("initat: non-constructor value".into()),
+                };
+                let fvs = self.values(regs, fields)?;
+                // The cell flows as a raw i64 (the `bump` result), but `fill_obj`
+                // writes through a pointer, exactly as `alloc_obj` does with the
+                // pointer `prism_alloc` returns. Reinterpret the word as a pointer
+                // first; the store sequence is then byte-identical to a plain
+                // `Value::Ctor`.
+                let cp = self.dst(|i, b, d| i.inttoptr(b, d, &c));
+                Ok(self.fill_obj(&cp, tag, &fvs))
             }
             // Mutable-cell ops for an erased `var`. The cell flows as an ordinary
             // owned value; `value` returns the dup'd reference the rc pass gave
@@ -1101,10 +1122,10 @@ impl<'a, I: Isa> Cg<'a, I> {
         Ok(format!("{header}{}{}", self.b.body, self.isa.fn_close()))
     }
 
-    // `.` cannot occur in a source identifier, so the helper symbol is
-    // unforgeable. Both LLVM and MLIR accept it unquoted.
+    // The helper family has a disjoint native prefix, and its Core-name suffix
+    // uses the same reversible encoding as ordinary functions.
     fn trmc_function(&mut self, f: &CoreFn, body: &Comp, mode: TrmcMode) -> Result<String, String> {
-        let sym = format!("{}.trmc", Self::sym(f.name.as_str()));
+        let sym = super::trmc_symbol(f.name.as_str());
         self.b.reset();
         let mut regs = Regs::new();
         let mut params = Self::bind_a_params(&mut regs, &f.params);
@@ -1174,7 +1195,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         }
 
         self.cur_arity = all_params.len();
-        let header = self.isa.fn_define(&format!("prism_lam_{tag}"), &all_params);
+        let header = self.isa.fn_define(&super::lam_symbol(tag), &all_params);
         self.isa.open_entry(&mut self.b);
         match body {
             LamBody::Core(c) => self.lower_tail(&regs, &c)?,
@@ -1190,7 +1211,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 }
                 let target_tag = self.lams[target].tag;
                 let r = self.dst(|i, b, d| {
-                    i.call(b, d, &format!("prism_lam_{target_tag}"), &all_params);
+                    i.call(b, d, &super::lam_symbol(target_tag), &all_params);
                 });
                 self.isa.ret(&mut self.b, &r);
             }
@@ -1291,6 +1312,8 @@ pub(super) struct ClosurePlan {
 impl ClosurePlan {
     pub(super) fn fingerprint(&self) -> String {
         let mut hasher = blake3::Hasher::new();
+        // Cache-bust counter for the closure-plan shard key, not a compat version:
+        // a bump misses stale codegen shards; no old plan is ever read back.
         hasher.update(b"prism-closure-plan-v2");
         for lambda in &self.lams {
             hasher.update(&lambda.tag.to_le_bytes());

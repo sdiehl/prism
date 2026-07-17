@@ -17,29 +17,78 @@
 import Data.Maybe (is_some)
 
 -- | The sum of a container of ints (`0` when empty).
+--
+-- ```prism
+-- sum([1, 2, 3, 4])
+-- ```
+-- ```output
+-- 10
+-- ```
 pub fn sum(t : f(Int)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + x, 0, t)
 
 -- | The product of a container of ints (`1` when empty).
+--
+-- ```prism
+-- product([1, 2, 3, 4])
+-- ```
+-- ```output
+-- 24
+-- ```
 pub fn product(t : f(Int)) : Int given Foldable(f) =
   fold_l(\(acc, x) -> acc * x, 1, t)
 
 -- | The number of elements.
+--
+-- ```prism
+-- length([1, 2, 3])
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn length(t : f(a)) : Int given Foldable(f) =
   fold_l(\(acc, _x) -> acc + 1, 0, t)
 
 -- | True when the container has no elements.
+--
+-- ```prism
+-- is_empty([1, 2, 3])
+-- ```
+-- ```output
+-- false
+-- ```
 pub fn is_empty(t : f(a)) : Bool given Foldable(f) =
   fold_l(\(_acc, _x) -> false, true, t)
 
 -- | True when every element satisfies `p` (vacuously true when empty).
+--
+-- ```prism
+-- all(\(x) -> x > 0, [1, 2, 3])
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn all(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
   fold_l(\(acc, x) -> acc && p(x), true, t)
 
 -- | True when some element satisfies `p`.
+--
+-- ```prism
+-- any(\(x) -> x > 2, [1, 2, 3])
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn any(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
   fold_l(\(acc, x) -> acc || p(x), false, t)
 
 -- | The first element satisfying `p` as `Some` (leftmost match), or `None`.
+--
+-- ```prism
+-- find(\(x) -> x > 1, [1, 2, 3])
+-- ```
+-- ```output
+-- Some(2)
+-- ```
 pub fn find(p : (a) -> Bool, t : f(a)) : Option(a) given Foldable(f) =
   fold_l(
       \(acc, x) -> if is_some(acc) then acc elif p(x) then Some(x) else None,
@@ -48,9 +97,23 @@ pub fn find(p : (a) -> Bool, t : f(a)) : Option(a) given Foldable(f) =
     )
 
 -- | True when `x` is an element (`Eq`).
+--
+-- ```prism
+-- elem(2, [1, 2, 3])
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn elem(x : a, t : f(a)) : Bool given Eq(a), Foldable(f) =
   fold_l(\(acc, y) -> acc || x == y, false, t)
 
--- | The elements as a `List`, in fold order.
+-- | The elements as a `List`, in fold order (`Option` yields zero or one).
+--
+-- ```prism
+-- to_list(Some(5))
+-- ```
+-- ```output
+-- [5]
+-- ```
 pub fn to_list(t : f(a)) : List(a) given Foldable(f) =
   fold_r(\(x, acc) -> Cons(x, acc), Nil, t)

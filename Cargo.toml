@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.11.0"
+version = "0.12.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -31,6 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde_stacker = "0.1"
 sha2 = "0.11"
+stacker = "0.1"
 thiserror = "2.0"
 toml = { version = "1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }

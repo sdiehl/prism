@@ -24,6 +24,7 @@ pub mod docs;
 pub mod exec;
 pub mod fmt;
 pub mod lineage;
+pub mod patch;
 pub mod pkg;
 pub mod render;
 pub mod run;
@@ -37,6 +38,12 @@ pub type CmdError = (Error, String, String);
 pub type CmdResult = Result<(), CmdError>;
 
 const PRISM_MANIFEST: &str = "prism.toml";
+
+// A CLI path argument names a project when it is a directory or points directly
+// at a `prism.toml`; otherwise it is a single-file program.
+fn is_project(arg: &Path) -> bool {
+    arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST)
+}
 
 pub fn read(file: &Path) -> Result<String, Error> {
     std::fs::read_to_string(file).map_err(Error::Io)
@@ -75,8 +82,7 @@ pub type Resolved = (String, Vec<crate::Root>, String, PathBuf);
 // package name. A `.pr` file is a single-file program whose imports resolve
 // relative to its own directory and whose default binary is its stem.
 pub fn resolve_input(arg: &Path, cfg: &crate::Config) -> Result<Resolved, CmdError> {
-    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST);
-    if is_project {
+    if is_project(arg) {
         let project = crate::project::load_project(arg)
             .map_err(|e| (e, String::new(), arg.display().to_string()))?;
         let src =
@@ -140,7 +146,6 @@ fn read_lock(project_root: &Path) -> Result<Lock, Error> {
 // `prism build`. `out` overrides the default name (source stem for a file, the
 // package name for a project).
 pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Config) -> CmdResult {
-    let is_project = arg.is_dir() || arg.file_name().is_some_and(|name| name == PRISM_MANIFEST);
     let lineage_request = project_lineage_request(arg)?;
     let (full, roots, name, default_out) = resolve_input(arg, cfg)?;
     let out = out.unwrap_or(default_out);
@@ -157,7 +162,7 @@ pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Co
             println!("  compiling {m}");
         }
     }
-    if is_project {
+    if is_project(arg) {
         crate::check_modules_on(&full, &roots, cfg).map_err(|e| (e, full.clone(), name.clone()))?;
     }
     let report = build_dispatch(mlir, &full, &roots, &out, cfg)
@@ -199,8 +204,7 @@ pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Co
 }
 
 fn project_lineage_request(arg: &Path) -> Result<Option<crate::lineage::BuildRequest>, CmdError> {
-    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST);
-    if !is_project {
+    if !is_project(arg) {
         return Ok(None);
     }
     let project = crate::project::load_project(arg)
@@ -304,13 +308,25 @@ pub fn report_cmd(file: &Path, cfg: &crate::Config) -> CmdResult {
 // separate because `export` writes this text back out and must not materialize the
 // prelude into it.
 pub fn user_source(arg: &Path) -> Result<String, CmdError> {
-    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST);
-    if is_project {
+    if is_project(arg) {
         let project = crate::project::load_project(arg)
             .map_err(|e| (e, String::new(), arg.display().to_string()))?;
         read(&project.entry).map_err(|e| (e, String::new(), file_name(&project.entry)))
     } else {
         read(arg).map_err(|e| (e, String::new(), file_name(arg)))
+    }
+}
+
+// The source file a patch commit is allowed to replace: the manifest entry for a
+// project input, or the explicit `.pr` file itself.
+pub fn user_entry_path(arg: &Path) -> Result<PathBuf, CmdError> {
+    let is_project = arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST);
+    if is_project {
+        let project = crate::project::load_project(arg)
+            .map_err(|e| (e, String::new(), arg.display().to_string()))?;
+        Ok(project.entry)
+    } else {
+        Ok(arg.to_path_buf())
     }
 }
 

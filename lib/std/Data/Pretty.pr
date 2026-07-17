@@ -1,0 +1,169 @@
+-- | A Leijen-style pretty printer. Build a layout-independent `Doc` from the
+-- combinators below, then `render` it to a string at a chosen page width.
+--
+-- Rendering is a pure function of the document and the width, so a document
+-- lays out identically on every backend and replays byte for byte. The strict
+-- renderer carries a `Flat`/`Brk` mode through a work list; its `fits`
+-- lookahead stops at the next forced break or as soon as the width is exceeded.
+--
+-- Import explicitly (`import Data.Pretty`); these names are not in the
+-- prelude's unqualified scope. Widths count Unicode code points, matching
+-- `str_len`; they are not terminal display-cell measurements.
+
+-- | A layout document. Its representation is hidden so indentation and break
+-- invariants are established only by the public combinators.
+opaque type Doc
+  = DNil
+  | DText(String)
+  | DSoft(String)
+  | DHard
+  | DCat(Doc, Doc)
+  | DNest(Int, Doc)
+  | DGroup(Doc)
+
+-- The layout mode of a pending item: flat (breaks render as their flat string)
+-- or broken (breaks render as newlines). `Brk`, not `Break`, is reserved-safe.
+type Mode = Flat | Brk
+
+-- One pending unit of work: an indentation, a mode, and a document.
+type Item = Item(Int, Mode, Doc)
+
+-- The resolved output: text runs separated by indented newlines.
+type SDoc = SNil | SText(String, SDoc) | SLine(Int, SDoc)
+
+-- `n` spaces (empty for n <= 0).
+fn spaces(n) =
+  if n <= 0 then
+    ""
+  else
+    concat(" ", spaces(n - 1))
+
+-- Does the flat layout of the remaining work fit in `w` columns before the next
+-- newline? It returns at the first hard break or the first overflow, so the
+-- lookahead never scans past one line.
+fn fits(w, items) =
+  if w < 0 then
+    false
+  else
+    match items of
+      Nil => true
+      Cons(Item(i, m, d), rest) =>
+        match d of
+          DNil => fits(w, rest)
+          DText(s) => fits(w - str_len(s), rest)
+          DSoft(s) =>
+            match m of
+              Flat => fits(w - str_len(s), rest)
+              Brk => true
+          DHard => true
+          DCat(a, b) => fits(w, Cons(Item(i, m, a), Cons(Item(i, m, b), rest)))
+          DNest(j, x) => fits(w, Cons(Item(i + j, m, x), rest))
+          DGroup(x) => fits(w, Cons(Item(i, Flat, x), rest))
+
+-- The best layout: keep each group flat when it fits, expand it otherwise.
+-- `k` is the current column.
+fn best(w, k, items) =
+  match items of
+    Nil => SNil
+    Cons(Item(i, m, d), rest) =>
+      match d of
+        DNil => best(w, k, rest)
+        DText(s) => SText(s, best(w, k + str_len(s), rest))
+        DSoft(s) =>
+          match m of
+            Flat => SText(s, best(w, k + str_len(s), rest))
+            Brk => SLine(i, best(w, i, rest))
+        DHard => SLine(i, best(w, i, rest))
+        DCat(a, b) => best(w, k, Cons(Item(i, m, a), Cons(Item(i, m, b), rest)))
+        DNest(j, x) => best(w, k, Cons(Item(i + j, m, x), rest))
+        DGroup(x) =>
+          if fits(w - k, Cons(Item(i, Flat, x), rest)) then
+            best(w, k, Cons(Item(i, Flat, x), rest))
+          else
+            best(w, k, Cons(Item(i, Brk, x), rest))
+
+fn layout(sd) =
+  match sd of
+    SNil => ""
+    SText(s, r) => concat(s, layout(r))
+    SLine(i, r) => concat("\n", concat(spaces(i), layout(r)))
+
+-- | Render a document to a string at page width `w`.
+--
+-- ```prism
+-- import Data.Pretty (render, group, cat, text, line)
+-- render(80, group(cat(text("hello"), cat(line(), text("world")))))
+-- ```
+-- ```output
+-- hello world
+-- ```
+pub fn render(w, d) = layout(best(w, 0, Cons(Item(0, Brk, d), Nil)))
+
+-- | Render at the conventional width of 80 columns.
+pub fn pretty(d) = render(80, d)
+
+-- | Literal text. The string must not contain a newline; use `hardline` for a
+-- forced break.
+pub fn text(s) = DText(s)
+
+-- | The empty document.
+pub fn empty() = DNil
+
+-- | A break that is a space when flat and a newline when broken.
+pub fn line() = DSoft(" ")
+
+-- | A break that is nothing when flat and a newline when broken.
+pub fn linebreak() = DSoft("")
+
+-- | A `line` inside its own group: a space if it fits, a newline otherwise.
+pub fn softline() = DGroup(DSoft(" "))
+
+-- | A `linebreak` inside its own group: nothing if it fits, a newline otherwise.
+pub fn softbreak() = DGroup(DSoft(""))
+
+-- | A newline that no group can flatten away.
+pub fn hardline() = DHard
+
+-- | One document then another.
+pub fn cat(a, b) = DCat(a, b)
+
+-- | Indent every break inside `d` by at least zero columns. Negative
+-- indentation is clamped to zero.
+pub fn nest(n, d) = DNest(max(0, n), d)
+
+-- | Try to lay `d` out flat; fall back to its broken form if it does not fit.
+pub fn group(d) = DGroup(d)
+
+-- | Concatenate a list of documents end to end.
+pub fn concat_docs(ds) =
+  match ds of
+    Nil => DNil
+    Cons(d, rest) => DCat(d, concat_docs(rest))
+
+-- Put `s` between each pair of documents in `ds`.
+fn intersperse(s, ds) =
+  match ds of
+    Nil => DNil
+    Cons(x, Nil) => x
+    Cons(x, rest) => DCat(x, DCat(s, intersperse(s, rest)))
+
+-- | Documents separated by a single space, all on one line.
+pub fn hsep(ds) = intersperse(DText(" "), ds)
+
+-- | Documents separated by `line` breaks (spaces or newlines under a group).
+pub fn vsep(ds) = intersperse(DSoft(" "), ds)
+
+-- | `vsep` wrapped in a group: one line if it fits, one per element otherwise.
+pub fn sep(ds) = DGroup(vsep(ds))
+
+-- | `d` between the opening `l` and closing `r`.
+pub fn enclose(l, r, d) = DCat(l, DCat(d, r))
+
+-- | `d` in parentheses.
+pub fn parens(d) = enclose(DText("("), DText(")"), d)
+
+-- | `d` in square brackets.
+pub fn brackets(d) = enclose(DText("["), DText("]"), d)
+
+-- | `d` in curly braces.
+pub fn braces(d) = enclose(DText("\{"), DText("\}"), d)

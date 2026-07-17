@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v1`
-- **Hash**: `1584453b001560909b8c2ef5b34f2b21004f42fb909f8c44ed4f368b6dd87056`
-- **Compiler version**: Prism v0.11.0
+- **Hash**: `4e53a683d5f48d3d99d1a4fd2ea38fc0c3d67b8ab2272e4ad6469ad156b75a8d`
+- **Compiler version**: Prism v0.12.0
 
 ## Modules
 
@@ -19,6 +19,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.Ordered](./data-ordered.md) - Explicit ordering witnesses: the branded, statically coherent path to ordered maps.
 - [Data.Char](./data-char.md) - ASCII character classification.
 - [Data.String](./data-string.md) - String operations, byte-oriented and ASCII-accurate.
+- [Data.Pretty](./data-pretty.md) - A Leijen-style pretty printer. Build a layout-independent `Doc` from the combinators below, then `render` it to a string at a chosen page width.
 - [Data.Foldable](./data-foldable.md) - Generic operations over any `Foldable` container.
 - [Data.Monad](./data-monad.md) - Generic operations derived from the `Applicative` and `Monad` classes.
 - [Data.Checked](./data-checked.md) - Safe arithmetic families over the machine-integer lanes.
@@ -38,3 +39,4 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Json](./json.md) - JSON: a dynamic value tree, a total parser, a canonical encoder, and a typed layer.
 - [Sequence](./sequence.md) - The one lazy iteration protocol: pull-based sequences with natural names.
 - [Cli](./cli.md) - CLI: an applicative command-line parser as a first-class value.
+- [Arena](./arena.md) - Arena: allocation as an algebraic effect.

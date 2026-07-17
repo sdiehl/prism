@@ -140,11 +140,10 @@ pub fn repr_of_type(ty: &Type) -> Repr {
 ///
 /// So `Null` (the zero word) can never be confused with a present `This(v)`. Heap
 /// pointers are non-zero by construction and tagged immediates are odd, so both
-/// qualify; `Unit` is the zero word and is rejected, `Float` and `Char` are left
-/// out of this first cut, an unboxed product spans multiple words, and a bare type
-/// variable could later be instantiated to `Unit`, so only concrete, single-word,
-/// non-zero types are admitted. Nested `OrNull` is rejected: the null word is
-/// ambiguous.
+/// qualify. `Unit` is the zero word, `Float` and `Char` are excluded, an unboxed
+/// product spans multiple words, and a bare type variable may instantiate to
+/// `Unit`; only concrete, single-word, non-zero types are admitted. Nested
+/// `OrNull` is rejected because the null word would be ambiguous.
 #[must_use]
 pub const fn is_or_null_element(a: &Type) -> bool {
     matches!(

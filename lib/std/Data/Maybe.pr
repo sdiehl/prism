@@ -4,12 +4,26 @@
 -- unqualified scope everywhere.
 
 -- | True when the option holds a value.
+--
+-- ```prism
+-- is_some(Some(5))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_some(o) =
   match o of
     None => false
     Some(_x) => true
 
 -- | True when the option is empty.
+--
+-- ```prism
+-- is_none(None)
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn is_none(o) =
   match o of
     None => true
@@ -18,7 +32,17 @@ pub fn is_none(o) =
 -- | The contained value, or the default `d` when the option is empty.
 --
 -- ```prism
--- unwrap_or(0, Some(5))
+-- (unwrap_or(0, Some(5)), unwrap_or(0, None))
+-- ```
+-- ```output
+-- (5, 0)
+-- ```
+--
+-- The default must match the contained type, and the second argument must be
+-- an option:
+--
+-- ```prism,compile_fail
+-- unwrap_or(0, 5)
 -- ```
 pub fn unwrap_or(d, o) =
   match o of
@@ -27,10 +51,11 @@ pub fn unwrap_or(d, o) =
 
 -- | Apply `f` to the contained value, leaving `None` untouched.
 --
--- The default `d` here is not an option, so this example is rejected:
---
--- ```prism,compile_fail
--- unwrap_or(0, 5)
+-- ```prism
+-- map_option(\(x) -> x * 2, Some(21))
+-- ```
+-- ```output
+-- Some(42)
 -- ```
 pub fn map_option(f, o) =
   match o of
@@ -39,26 +64,66 @@ pub fn map_option(f, o) =
 
 -- | Chain an option-returning function, short-circuiting on `None` (monadic
 -- bind for `Option`).
+--
+-- ```prism
+-- and_then(\(x) -> if x > 0 then Some(x * 10) else None, Some(4))
+-- ```
+-- ```output
+-- Some(40)
+-- ```
 pub fn and_then(f, o) =
   match o of
     None => None
     Some(x) => f(x)
 
+-- | Apply `f` to the contained value, or return the default `d` when empty:
+-- `map_option` and `unwrap_or` in one step.
+--
+-- ```prism
+-- map_or(0, \(x) -> x + 1, Some(41))
+-- ```
+-- ```output
+-- 42
+-- ```
 pub fn map_or(d, f, o) =
   match o of
     None => d
     Some(x) => f(x)
 
+-- | The option itself when it holds a value, otherwise the alternative `alt`.
+--
+-- ```prism
+-- option_or(Some(1), None)
+-- ```
+-- ```output
+-- Some(1)
+-- ```
 pub fn option_or(alt, o) =
   match o of
     None => alt
     Some(x) => Some(x)
 
+-- | An empty or one-element list from an option.
+--
+-- ```prism
+-- option_to_list(Some(7))
+-- ```
+-- ```output
+-- [7]
+-- ```
 pub fn option_to_list(o) =
   match o of
     None => Nil
     Some(x) => Cons(x, Nil)
 
+-- | Pair two options: `Some` only when both hold values.
+--
+-- ```prism
+-- (both(Some(1), Some(2)), both(Some(1), None))
+-- ```
+-- ```output
+-- (Some((1, 2)), None)
+-- ```
 pub fn both(o1, o2) =
   match o1 of
     None => None
@@ -67,21 +132,53 @@ pub fn both(o1, o2) =
         None => None
         Some(y) => Some((x, y))
 
+-- | Fold an option right-to-left: `g(x, z)` on `Some(x)`, `z` on `None`.
+--
+-- ```prism
+-- option_fold_r(\(x, z) -> x + z, 10, Some(5))
+-- ```
+-- ```output
+-- 15
+-- ```
 pub fn option_fold_r(g, z, o) =
   match o of
     None => z
     Some(x) => g(x, z)
 
+-- | Fold an option left-to-right: `g(z, x)` on `Some(x)`, `z` on `None`.
+--
+-- ```prism
+-- option_fold_l(\(z, x) -> z + x, 10, Some(5))
+-- ```
+-- ```output
+-- 15
+-- ```
 pub fn option_fold_l(g, z, o) =
   match o of
     None => z
     Some(x) => g(z, x)
 
+-- | `and_then` with the option first: reads as a pipeline of fallible steps.
+--
+-- ```prism
+-- option_bind(Some(4), \(x) -> Some(x * 10))
+-- ```
+-- ```output
+-- Some(40)
+-- ```
 pub fn option_bind(o, g) =
   match o of
     None => None
     Some(x) => g(x)
 
+-- | Apply an optional function to an optional value (applicative apply).
+--
+-- ```prism
+-- option_ap(Some(\(x) -> x + 1), Some(41))
+-- ```
+-- ```output
+-- Some(42)
+-- ```
 pub fn option_ap(fo, xo) =
   match fo of
     None => None

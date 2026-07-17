@@ -1,24 +1,71 @@
--- A cancelled fiber runs its `on_cancel` (`never`) finalizer exactly
--- once. The worker parks at `yield`; the parent cancels it; on its next turn it
--- unwinds through the finalizer, which prints once, and never runs its tail.
+-- A cancelled fiber runs nested `on_cancel` (`never`) finalizers exactly once,
+-- innermost first. Each cleanup yields while the fiber is already unwinding:
+-- cancellation is masked during cleanup, so both cleanups finish rather than
+-- being stopped again. `try_await` joins the completed unwind before returning.
 
 import Concurrent (..)
 
 fn guarded() : Int ! {Async(Int), IO} =
   println("worker: before yield")
-  yield(())
+  yield()
   println("worker: after yield (must not print)")
   99
 
-fn worker() : Int ! {Async(Int), IO} =
-  on_cancel(\() -> println("finalizer ran"), guarded)
+fn cleanup_child() : Int ! {Async(Int), IO} =
+  println("cleanup child body must not run")
+  7
+
+fn inner_cleanup() : Unit ! {Async(Int), IO} =
+  println("inner cleanup: start")
+  yield()
+  let child = fork(cleanup_child)
+  match try_await(child) of
+    Completed(v) => println("unexpected cleanup child completion {v}")
+    Was_Cancelled => println("cleanup child cancelled")
+  println("inner cleanup: end")
+
+fn outer_cleanup() : Unit ! {Async(Int), IO} =
+  println("outer cleanup: start")
+  yield()
+  println("outer cleanup: end")
+
+fn inner_guarded() : Int ! {Async(Int), IO} = on_cancel(inner_cleanup, guarded)
+
+fn worker() : Int ! {Async(Int), IO} = on_cancel(outer_cleanup, inner_guarded)
 
 fn scene() : Int ! {Async(Int), IO} =
   let w = fork(worker)
-  yield(())
+  yield()
   cancel(w)
-  yield(())
+  match try_await(w) of
+    Completed(v) => println("unexpected completion {v}")
+    Was_Cancelled => println("await joined cancellation")
   println("scene done")
   0
 
-fn main() = println(run_async(scene))
+fn failing_cleanup() : Unit ! {Async(Int), IO, Fail} =
+  println("failing cleanup: start")
+  fail()
+
+fn failing_body() : Int ! {Async(Int), IO, Fail} =
+  guard(true)
+  yield()
+  12
+
+fn failing_worker() : Int ! {Async(Int), IO, Fail} =
+  on_cancel(failing_cleanup, failing_body)
+
+fn failing_scene() : Int ! {Async(Int), IO, Fail} =
+  let w = fork(failing_worker)
+  yield()
+  cancel(w)
+  cancel(w)
+  match try_await(w) of
+    Completed(v) => println("unexpected failing cleanup completion {v}")
+    Was_Cancelled => println("unexpected failing cleanup cancellation")
+  0
+
+fn main() =
+  println(run_async(scene))
+  let failed = default(\() -> run_async(failing_scene), 0 - 9)
+  println("cleanup failure recovered with {failed}")

@@ -46,6 +46,14 @@ int_to_i64 : (Int) -> Option(I64)
 
 Narrow an unbounded `Int` to `I64`, or `None` when it falls outside the `I64` range. The inverse widening is the builtin `int_of_i64`, which is total.
 
+```prism,mod=Data.Checked
+(int_to_i64(42), int_to_i64(2 ^ 63))
+```
+
+```output
+(Some(42), None)
+```
+
 ### `int_to_u64`
 
 ```prism,sig,h-6e87b62a8b669371031114015bc8edd72d218526db755dce46c19aa03451b680
@@ -53,3 +61,11 @@ int_to_u64 : (Int) -> Option(U64)
 ```
 
 Narrow an unbounded `Int` to `U64`, or `None` when it falls outside the `U64` range. The inverse widening is the builtin `int_of_u64`, which is total.
+
+```prism,mod=Data.Checked
+(int_to_u64(42), int_to_u64(0 - 1))
+```
+
+```output
+(Some(42), None)
+```

@@ -116,6 +116,15 @@ pub type Loss = Loss(List(String))
 -- declaration order. Decode is total: it fails through `Fail` on a truncated or
 -- malformed body rather than panicking, so hostile input is one ordinary failure
 -- channel.
+--
+-- `decode(encode(x))` recovers the value (and the bytes that followed it):
+--
+-- ```prism
+-- (fst(decode(encode(42))) : Int)
+-- ```
+-- ```output
+-- 42
+-- ```
 pub class Serialize(a)
   encode : (a) -> Bytes
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
@@ -140,8 +149,18 @@ pub class Stable(a)
 -- remaining bytes (compacting away a non-zero cursor with a single slice). The
 -- representation seam between the buffer and the `Bytes` view; `Data.Bytes` builds
 -- its utility layer over these three, never the `Bytes` constructor directly.
+-- | Wrap a whole buffer (cursor at 0) as a byte body.
+--
+-- ```prism
+-- wire_len(bytes_of_buf(buf_empty()))
+-- ```
+-- ```output
+-- 0
+-- ```
 pub fn bytes_of_buf(b : Buf) : Bytes = Bytes(b, 0)
 
+-- | Recover the buffer of a body's remaining bytes, compacting away a non-zero
+-- cursor with a single slice.
 pub fn bytes_buf(bs : Bytes) : Buf =
   match bs of
     Bytes(b, off) =>
@@ -150,8 +169,15 @@ pub fn bytes_buf(bs : Bytes) : Buf =
       else
         buf_slice(b, off, buf_len(b) - off)
 
--- The i-th byte of a body, from the cursor. Bounds are the caller's contract (the
--- readers check emptiness first); an out-of-range index traps.
+-- | The i-th byte of a body, from the cursor. Bounds are the caller's contract
+-- (the readers check emptiness first); an out-of-range index traps.
+--
+-- ```prism
+-- bytes_at(bytes_of_list([10, 20, 30]), 1)
+-- ```
+-- ```output
+-- 20
+-- ```
 pub fn bytes_at(bs : Bytes, i : Int) : Int =
   match bs of
     Bytes(b, off) => buf_get(b, off + i)
@@ -160,6 +186,13 @@ pub fn bytes_at(bs : Bytes, i : Int) : Int =
 pub let wire_empty : Bytes = Bytes(buf_empty(), 0)
 
 -- | Concatenate two byte bodies into a fresh buffer.
+--
+-- ```prism
+-- bytes_to_list(wire_cat(bytes_of_list([1, 2]), bytes_of_list([3])))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 pub fn wire_cat(a : Bytes, b : Bytes) : Bytes =
   bytes_of_buf(buf_cat(bytes_buf(a), bytes_buf(b)))
 
@@ -180,9 +213,23 @@ fn wire_uncons(bs : Bytes) : (Int, Bytes) =
 -- | True when a body has no bytes left. The reader uses it to reject trailing
 -- bytes after a value, and a peer uses it to tell a reference frame (no body)
 -- from an inline one.
+--
+-- ```prism
+-- wire_is_empty(wire_empty)
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn wire_is_empty(bs : Bytes) : Bool = wire_len(bs) == 0
 
 -- | The number of bytes in a body.
+--
+-- ```prism
+-- wire_len(bytes_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn wire_len(bs : Bytes) : Int =
   match bs of
     Bytes(b, off) => buf_len(b) - off
@@ -202,6 +249,13 @@ fn buf_append_go(acc : Buf, b : Buf, i : Int, n : Int) : Buf =
 -- | Build a body from a `List(Int)` of byte values (each masked into `0..255`),
 -- and read a body back out as that list. These bridge the buffer representation
 -- to the older list view for callers that thread bytes as ordinary data.
+--
+-- ```prism
+-- bytes_to_list(bytes_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 pub fn bytes_of_list(xs : List(Int)) : Bytes =
   bytes_of_buf(list_to_buf(buf_empty(), xs))
 
@@ -252,10 +306,24 @@ fn get_uvarint(bs : Bytes) : (Int, Bytes) = get_uvarint_go(bs, 1, 0, 0)
 
 -- | Encode a constructor tag (a small non-negative integer) as a varint. The
 -- derived `Serialize` for a sum prefixes its body with this.
+--
+-- ```prism
+-- bytes_to_list(wire_tag(300))
+-- ```
+-- ```output
+-- [172, 2]
+-- ```
 pub fn wire_tag(i : Int) : Bytes = put_uvarint(i)
 
 -- | Peel a constructor tag off the front of a body, returning it and the rest.
 -- The derived `Serialize` for a sum reads this before dispatching on the tag.
+--
+-- ```prism
+-- fst(wire_get_tag(wire_tag(300)))
+-- ```
+-- ```output
+-- 300
+-- ```
 pub fn wire_get_tag(bs : Bytes) : (Int, Bytes) = get_uvarint(bs)
 
 -- Zigzag a signed integer to a non-negative one so small negatives stay small
@@ -562,18 +630,41 @@ instance serializeMap : Serialize(Map(k, v, ord)) given Ord(k), Serialize(k), Se
 -- here as the wire library's single home for it, checked against the compiler
 -- constant by the `library_hook_names_resolve_to_module_definitions` drift guard
 -- in `src/names.rs`.
+
+-- | The scheme tag stamped on every frame; a foreign scheme is rejected before
+-- anything else in the envelope is read.
+--
+-- ```prism
+-- wire_scheme_tag
+-- ```
+-- ```output
+-- prism-core-hash-v1
+-- ```
 pub let wire_scheme_tag : String = "prism-core-hash-v1"
 
 -- The five reserved kinds. `value` is implemented now; `def`, `protocol`, `kont`,
 -- and `cert` are reserved so the frame shape exists before their bodies do.
+
+-- | The frame kind for an inline or referenced value (the one implemented today).
+--
+-- ```prism
+-- wire_kind_value
+-- ```
+-- ```output
+-- 0
+-- ```
 pub let wire_kind_value : Int = 0
 
+-- | The reserved frame kind naming a definition by its digest.
 pub let wire_kind_def : Int = 1
 
+-- | The reserved frame kind naming a protocol by its digest.
 pub let wire_kind_protocol : Int = 2
 
+-- | The reserved frame kind naming a continuation by its digest.
 pub let wire_kind_kont : Int = 3
 
+-- | The reserved frame kind naming a certificate by its digest.
 pub let wire_kind_cert : Int = 4
 
 -- A length-prefixed string, reusing the `String` codec, for the scheme tag and
@@ -583,6 +674,13 @@ fn put_frame_str(s : String) : Bytes = encode(s)
 fn get_frame_str(bs : Bytes) : (String, Bytes) = decode(bs)
 
 -- | Build a frame around a body. `wire_ref` builds the bodyless reference form.
+--
+-- ```prism
+-- bytes_to_list(wire_open(wire_frame(wire_kind_value, "dig", bytes_of_list([7, 8])), wire_kind_value, "dig"))
+-- ```
+-- ```output
+-- [7, 8]
+-- ```
 pub fn wire_frame(kind : Int, digest : String, body : Bytes) : Bytes =
   wire_cat(
       put_frame_str(wire_scheme_tag),
@@ -591,6 +689,13 @@ pub fn wire_frame(kind : Int, digest : String, body : Bytes) : Bytes =
 
 -- | A pure reference: a frame that carries its contract digest and no body. Its
 -- identity is the digest; a peer resolves the body from its store or requests it.
+--
+-- ```prism
+-- wire_is_reference(wire_ref(wire_kind_value, "d"), wire_kind_value, "d")
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn wire_ref(kind : Int, digest : String) : Bytes =
   wire_frame(kind, digest, wire_empty)
 
@@ -628,6 +733,13 @@ pub fn wire_is_reference(bs : Bytes, kind : Int, digest : String) : Bool =
 -- discipline is left to the body decoder, exactly as `wire_open` leaves it. A
 -- version-dispatched reader uses the returned digest to pick which frozen rung
 -- the body decodes as.
+--
+-- ```prism
+-- fst(wire_open_value_any(wire_frame(wire_kind_value, "dig", wire_empty)))
+-- ```
+-- ```output
+-- dig
+-- ```
 pub fn wire_open_value_any(bs : Bytes) : (String, Bytes) =
   match get_frame_str(bs) of
     (scheme, r1) =>
@@ -647,6 +759,13 @@ pub fn wire_open_value_any(bs : Bytes) : (String, Bytes) =
 -- for code that already holds a compiler-computed digest (a `stable` block's
 -- generated frame helpers) or is exercising a hand-built frame in a test. Ordinary
 -- `Stable` code uses `wire_encode_stable`, which supplies the digest from the type.
+--
+-- ```prism
+-- (wire_decode_value_with_digest(wire_encode_value_with_digest("d", 42), "d") : Int)
+-- ```
+-- ```output
+-- 42
+-- ```
 pub fn wire_encode_value_with_digest(
   digest : String,
   x : a
@@ -697,14 +816,21 @@ pub fn wire_decode_stable(bs : Bytes) : a given Stable(a), Serialize(a) =
 -- The version ladder. Frozen versions are spanned by O(n) adjacent converters
 -- composed along the ladder, never the N-squared matrix. `upgrade` is total (it
 -- defaults new fields); `downgrade` is partial and honest (it reports the fields
--- it had to drop as a `Loss`). The `Migrate(lo, hi)` class this would package is
--- deferred to the multi-parameter-class grammar; until then the ladder is these
--- plain functions, which the `stable` block desugar composes.
+-- it had to drop as a `Loss`). The grammar has no multi-parameter
+-- `Migrate(lo, hi)` class syntax, so the ladder is the plain functions composed by
+-- the `stable` block desugar.
 
 -- | The empty `Loss`: a downgrade that dropped nothing.
 pub let no_loss : Loss = Loss(Nil)
 
 -- | A `Loss` naming the fields a downgrade dropped.
+--
+-- ```prism
+-- loss_names(dropped(["port", "tls"]))
+-- ```
+-- ```output
+-- [port, tls]
+-- ```
 pub fn dropped(names : List(String)) : Loss = Loss(names)
 
 -- | The field names inside a `Loss`.
@@ -714,18 +840,46 @@ pub fn loss_names(l : Loss) : List(String) =
 
 -- | True when a `Loss` dropped nothing, so the downgrade was lossless. The safe
 -- subset of a version step is exactly the values whose downgrade is lossless.
+--
+-- ```prism
+-- (lossless(no_loss), lossless(dropped(["x"])))
+-- ```
+-- ```output
+-- (true, false)
+-- ```
 pub fn lossless(l : Loss) : Bool = length(loss_names(l)) == 0
 
 -- | Merge two losses along a composed downgrade.
+--
+-- ```prism
+-- loss_names(loss_union(dropped(["a"]), dropped(["b"])))
+-- ```
+-- ```output
+-- [a, b]
+-- ```
 pub fn loss_union(a : Loss, b : Loss) : Loss =
   Loss(append(loss_names(a), loss_names(b)))
 
 -- | Compose two adjacent upgrades into one spanning upgrade.
+--
+-- ```prism
+-- compose_upgrade(\(x) -> x + 1, \(y) -> y * 2)(3)
+-- ```
+-- ```output
+-- 8
+-- ```
 pub fn compose_upgrade(lo_mid : (a) -> b, mid_hi : (b) -> c) : (a) -> c =
   \(x) -> mid_hi(lo_mid(x))
 
 -- | Compose two adjacent downgrades into one spanning downgrade, unioning the
 -- losses each step reported.
+--
+-- ```prism
+-- compose_downgrade(\(z) -> (z - 1, dropped(["hi"])), \(m) -> (m, no_loss))(10)
+-- ```
+-- ```output
+-- (9, Wire.Loss([hi]))
+-- ```
 pub fn compose_downgrade(
   hi_mid : (c) -> (b, Loss),
   mid_lo : (b) -> (a, Loss)
@@ -741,6 +895,13 @@ pub type Policy = Reject | LargestSafeSubset
 -- | Apply a mismatch policy to a downgrade. `Reject` fails through `Fail`;
 -- `LargestSafeSubset` runs the downgrade and returns the lowered value with the
 -- fields it had to drop.
+--
+-- ```prism
+-- reconcile(LargestSafeSubset, \(x) -> (x - 1, no_loss), 5)
+-- ```
+-- ```output
+-- (4, Wire.Loss([]))
+-- ```
 pub fn reconcile(p : Policy, down : (hi) -> (lo, Loss), x : hi) : (lo, Loss) =
   match p of
     Reject => fail()

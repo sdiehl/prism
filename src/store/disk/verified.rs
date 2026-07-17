@@ -96,7 +96,15 @@ pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Vec<VerifiedRec
                     passed: *status == STATUS_PASS,
                 });
             }
-            _ => {}
+            // A line whose field count does not match its header version is a
+            // corrupt record; reject it rather than silently dropping the verdict,
+            // matching the store's other index parsers.
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("malformed verification record at {}", path.display()),
+                ));
+            }
         }
     }
     Ok(out)

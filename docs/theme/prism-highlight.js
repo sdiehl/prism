@@ -38,6 +38,9 @@
     // (prism was unknown then), so its textContent is the raw source.
     var paint = hljs.highlightElement || hljs.highlightBlock;
     document.querySelectorAll("code.language-prism").forEach(function (el) {
+      // Successfully checked blocks were already tokenized by the compiler and carry
+      // nested type ranges. Re-highlighting would replace that checked HTML.
+      if (el.classList.contains("prism-typed")) return;
       paint.call(hljs, el);
     });
   }

@@ -51,6 +51,13 @@ fn sm_next(s : U64) : U64 = s + splitmix_gamma
 -- | Run `action` with the `Random` effect served by a seeded SplitMix64 stream,
 -- so the result is a pure function of `seed`. This is the REPLAYABLE handler the
 -- runner installs; call it directly to reproduce a single draw off a seed.
+--
+-- ```prism
+-- run_seeded(1u64, \() -> gen_run(gen_int, 5))
+-- ```
+-- ```output
+-- 1
+-- ```
 pub fn run_seeded(seed : U64, action : () -> a ! {Random | e}) =
   let f =
     handle action() with
@@ -67,38 +74,95 @@ fn nat_below(n : Int) = int_of_u64(to_u64(rand()) % to_u64(n))
 -- depth); make it explicit so derived instances for recursive types stay finite.
 pub type Gen(a) = Gen((Int) -> a ! {Random})
 
--- | Draw one value from `g` at the given size, performing `Random`.
+-- | Draw one value from `g` at the given size, performing `Random`. Discharge the
+-- `Random` with `run_seeded` (or use `gen_at`) to run it.
+--
+-- ```prism
+-- run_seeded(1u64, \() -> gen_run(gen_const(9), 5))
+-- ```
+-- ```output
+-- 9
+-- ```
 pub fn gen_run(g : Gen(a), size : Int) =
   match g of
     Gen(f) => f(size)
 
 -- | Draw a value from `g` deterministically off `seed` at `size`, no IO. This is
 -- the reproduce-a-counterexample entry point.
+--
+-- ```prism
+-- gen_at(gen_int, 42u64, 10)
+-- ```
+-- ```output
+-- -6
+-- ```
 pub fn gen_at(g : Gen(a), seed : U64, size : Int) : a =
   run_seeded(seed, \() -> gen_run(g, size))
 
 -- | The generator that ignores size and randomness and always yields `x`.
+--
+-- ```prism
+-- gen_at(gen_const(7), 1u64, 5)
+-- ```
+-- ```output
+-- 7
+-- ```
 pub fn gen_const(x : a) : Gen(a) = Gen(\(_size) -> x)
 
 -- | Map `f` over every value a generator produces.
+--
+-- ```prism
+-- gen_at(gen_map(\(x) -> x + 1, gen_const(4)), 1u64, 5)
+-- ```
+-- ```output
+-- 5
+-- ```
 pub fn gen_map(f : (a) -> b, g : Gen(a)) : Gen(b) =
   Gen(\(size) -> f(gen_run(g, size)))
 
 -- | Combine two generators with `f`, drawing both at the same size.
+--
+-- ```prism
+-- gen_at(gen_map2(\(a, b) -> a + b, gen_const(2), gen_const(3)), 1u64, 5)
+-- ```
+-- ```output
+-- 5
+-- ```
 pub fn gen_map2(f : (a, b) -> c, ga : Gen(a), gb : Gen(b)) : Gen(c) =
   Gen(\(size) -> f(gen_run(ga, size), gen_run(gb, size)))
 
 -- | Monadic bind: draw an `a`, then draw from the generator `f` picks for it.
+--
+-- ```prism
+-- gen_at(gen_bind(gen_const(3), \(x) -> gen_const(x * 2)), 1u64, 5)
+-- ```
+-- ```output
+-- 6
+-- ```
 pub fn gen_bind(g : Gen(a), f : (a) -> Gen(b)) : Gen(b) =
   Gen(\(size) -> gen_run(f(gen_run(g, size)), size))
 
 -- | Build a generator that sees the current size, for recursive shapes that
 -- branch on remaining fuel.
+--
+-- ```prism
+-- gen_at(gen_sized(\(sz) -> gen_const(sz)), 1u64, 12)
+-- ```
+-- ```output
+-- 12
+-- ```
 pub fn gen_sized(f : (Int) -> Gen(a)) : Gen(a) =
   Gen(\(size) -> gen_run(f(size), size))
 
 -- | Run `g` at a fixed size, ignoring the ambient one (shrink a recursive
 -- position by resizing it smaller).
+--
+-- ```prism
+-- gen_at(gen_resize(4, gen_sized(\(sz) -> gen_const(sz))), 1u64, 99)
+-- ```
+-- ```output
+-- 4
+-- ```
 pub fn gen_resize(n : Int, g : Gen(a)) : Gen(a) = Gen(\(_size) -> gen_run(g, n))
 
 -- Total non-empty indexing: `first` when `i <= 0`, else walk `rest`, falling
@@ -115,11 +179,25 @@ fn nth_nonempty(first : a, rest : List(a), i : Int) : a =
 
 -- | Pick one of `g0`/`rest` uniformly, then draw from it (one arm per
 -- constructor, the shape a derived sum-type instance uses).
+--
+-- ```prism
+-- gen_at(gen_choose(gen_const(1), [gen_const(2)]), 5u64, 3)
+-- ```
+-- ```output
+-- 1
+-- ```
 pub fn gen_choose(g0 : Gen(a), rest : List(Gen(a))) : Gen(a) =
   Gen() fn(size)
     gen_run(nth_nonempty(g0, rest, nat_below(1 + length(rest))), size)
 
 -- | Pick one of the given values uniformly (`x0` or one of `rest`).
+--
+-- ```prism
+-- gen_at(gen_one_of(10, [20, 30]), 5u64, 3)
+-- ```
+-- ```output
+-- 30
+-- ```
 pub fn gen_one_of(x0 : a, rest : List(a)) : Gen(a) =
   Gen(\(_size) -> nth_nonempty(x0, rest, nat_below(1 + length(rest))))
 
@@ -146,6 +224,13 @@ fn int_at(size : Int) =
 
 -- | Generator of `Int`, biased toward the edge cases (`0`, `1`, `-1`, and a
 -- full-width draw) alongside small readable values.
+--
+-- ```prism
+-- gen_at(gen_int, 42u64, 10)
+-- ```
+-- ```output
+-- -6
+-- ```
 pub let gen_int : Gen(Int) = Gen(int_at)
 
 -- | Generator of `I64`, reusing the `Int` distribution.
@@ -155,6 +240,13 @@ pub let gen_i64 : Gen(I64) = gen_map(\(x) -> to_i64(x), gen_int)
 pub let gen_u64 : Gen(U64) = gen_map(\(x) -> to_u64(x), gen_int)
 
 -- | Generator of `Bool`.
+--
+-- ```prism
+-- gen_at(gen_bool, 7u64, 3)
+-- ```
+-- ```output
+-- false
+-- ```
 pub let gen_bool : Gen(Bool) = Gen(\(_size) -> nat_below(2) == 0)
 
 -- The nasty float draw: zeros, one, and the three non-finite values, so a
@@ -200,10 +292,24 @@ fn list_of(g : Gen(a), size : Int, n : Int) =
     Cons(gen_run(g, size), list_of(g, size, n - 1))
 
 -- | Generator of a `List(a)` whose length is bounded by size.
+--
+-- ```prism
+-- gen_at(gen_list(gen_const(1)), 7u64, 4)
+-- ```
+-- ```output
+-- [1, 1]
+-- ```
 pub fn gen_list(g : Gen(a)) : Gen(List(a)) =
   Gen(\(size) -> list_of(g, size, nat_below(size + 1)))
 
 -- | Generator of `Option(a)`: `None` a quarter of the time, else `Some`.
+--
+-- ```prism
+-- gen_at(gen_option(gen_const(5)), 3u64, 3)
+-- ```
+-- ```output
+-- Some(5)
+-- ```
 pub fn gen_option(g : Gen(a)) : Gen(Option(a)) =
   Gen() fn(size)
     if nat_below(4) == 0 then
@@ -212,10 +318,24 @@ pub fn gen_option(g : Gen(a)) : Gen(Option(a)) =
       Some(gen_run(g, size))
 
 -- | Generator of a pair, both drawn at the same size.
+--
+-- ```prism
+-- gen_at(gen_pair(gen_const(1), gen_const(2)), 1u64, 3)
+-- ```
+-- ```output
+-- (1, 2)
+-- ```
 pub fn gen_pair(ga : Gen(a), gb : Gen(b)) : Gen((a, b)) =
   Gen(\(size) -> (gen_run(ga, size), gen_run(gb, size)))
 
 -- | Generator of a triple, all drawn at the same size.
+--
+-- ```prism
+-- gen_at(gen_triple(gen_const(1), gen_const(2), gen_const(3)), 1u64, 3)
+-- ```
+-- ```output
+-- (1, 2, 3)
+-- ```
 pub fn gen_triple(ga : Gen(a), gb : Gen(b), gc : Gen(c)) : Gen((a, b, c)) =
   Gen(\(size) -> (gen_run(ga, size), gen_run(gb, size), gen_run(gc, size)))
 
@@ -225,6 +345,13 @@ pub fn gen_triple(ga : Gen(a), gb : Gen(b), gc : Gen(c)) : Gen((a, b, c)) =
 pub type Config = Cfg { seed: U64, count: Int, max_size: Int }
 
 -- | The default configuration: a fixed base seed, 100 cases, sizes up to 20.
+--
+-- ```prism
+-- default_config.count
+-- ```
+-- ```output
+-- 100
+-- ```
 pub let default_config : Config =
   Cfg { seed = 2463534242u64, count = 100, max_size = 20 }
 
@@ -257,14 +384,35 @@ fn check_go(
 
 -- | Run `prop` over `cfg.count` inputs from `gen`, returning the first
 -- counterexample or the count that passed. Deterministic in `cfg.seed`.
+--
+-- ```prism
+-- check_with(default_config, gen_const(2), \(x) -> x == 2)
+-- ```
+-- ```output
+-- Quickcheck.Passed(100)
+-- ```
 pub fn check_with(cfg : Config, gen : Gen(a), prop : (a) -> Bool) : Outcome(a) =
   check_go(cfg, gen, prop, 0)
 
 -- | Run `prop` over the default configuration.
+--
+-- ```prism
+-- quickcheck(gen_int, \(x) -> x + 0 == x)
+-- ```
+-- ```output
+-- Quickcheck.Passed(100)
+-- ```
 pub fn quickcheck(gen : Gen(a), prop : (a) -> Bool) : Outcome(a) =
   check_with(default_config, gen, prop)
 
 -- | True when a run found no counterexample.
+--
+-- ```prism
+-- passed(quickcheck(gen_int, \(x) -> x + 1 > x))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn passed(o : Outcome(a)) : Bool =
   match o of
     Passed(_) => true
@@ -272,6 +420,15 @@ pub fn passed(o : Outcome(a)) : Bool =
 
 -- | Render an outcome for `name` as one report line (pass) or a block naming the
 -- counterexample and the seed and size that reproduce it.
+--
+-- ```prism
+-- show_outcome("positivity", Failed(0, 12, 42u64, 5))
+-- ```
+-- ```output
+-- positivity: FAILED after 12 tests.
+--   counterexample: 0
+--   reproduce: seed 42 size 5
+-- ```
 pub fn show_outcome(name : String, o : Outcome(a)) : String given Show(a) =
   match o of
     Passed(n) => concat_all([name, ": OK, passed ", show(n), " tests."])

@@ -16,7 +16,7 @@ fn producer(c : Chan, n : Int) : Int ! {Async(Int)} =
     0
   else
     send(c, n)
-    yield(())
+    yield()
     producer(c, n - 1)
 
 fn consumer(c : Chan, count : Int, acc : Int) : Int ! {Async(Int), IO} =

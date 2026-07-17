@@ -1,20 +1,14 @@
-//! The SIMD operation registry: names, identity, and shape, ahead of execution.
+//! The registry-only SIMD operation set: names, identity, and shape.
 //!
-//! This is scaffolding in the exact mold of the `builtins!`/`float_ops!`
-//! registries: each row is the single home for a vector op's stable enum
-//! variant, surface name, content-hash tag, append-only wire index, arity, and
-//! lane type. Nothing here is wired yet: the elaborator does not recognize the
-//! surface names, no backend selects instructions, and no interpreter fallback
-//! exists. The registry exists now so the identity space is pinned before any
-//! program can observe it: hash tags are frozen by test, wire indices are
-//! guarded dense-and-unique, and when execution lands (LLVM selection plus the
-//! interpreter's portable scalar fallback as the parity oracle) it slots into
-//! rows whose identities cannot have drifted in the meantime.
+//! Each row is the single home for a vector op's stable enum variant, surface
+//! name, content-hash tag, append-only wire index, arity, and lane type. The
+//! elaborator, backends, and interpreter do not recognize these operations, so
+//! programs cannot execute them. Tests freeze the hash tags and require the wire
+//! indices to be dense and unique.
 //!
 //! The op set is the SSE2-compatible 128-bit baseline only: two f64 lanes or two
-//! i64 lanes per vector (`Repr::Vec128`, two words). Wider vectors, runtime CPU
-//! dispatch, and float32 lanes are out of scope until the baseline is green on
-//! both backends.
+//! i64 lanes per vector (`Repr::Vec128`, two words). It excludes wider vectors,
+//! runtime CPU dispatch, and float32 lanes.
 
 /// The 128-bit lane interpretation of a vector operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,8 +34,8 @@ macro_rules! simd_ops {
     ( $(
         $variant:ident $name:literal $tag:literal $wire:literal $arity:literal $lane:ident ;
     )* ) => {
-        /// A baseline 128-bit vector operation. Registry only: not yet
-        /// recognized by the elaborator or lowered by any backend.
+        /// A baseline 128-bit vector operation. Registry-only: unavailable to
+        /// elaboration and backend lowering.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum SimdOp { $( $variant, )* }
 

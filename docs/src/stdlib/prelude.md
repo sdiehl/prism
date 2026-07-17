@@ -67,6 +67,14 @@ class Eq(a)
 
 Equality. `eq` backs `==`/`/=`.
 
+```prism
+eq(1, 1)
+```
+
+```output
+true
+```
+
 ### `Ord`
 
 ```prism,def,h-2af84651fc6223ec85f83dda45323ccc11b0543e83b7cfdd94999cc951d1c363
@@ -75,6 +83,14 @@ class Ord(a) given Eq(a)
 ```
 
 Total order. `cmp(x, y)` returns `-1`, `0`, or `1`; backs `<`/`<=`/`>`/`>=`.
+
+```prism
+cmp("a", "b")
+```
+
+```output
+-1
+```
 
 ### `Show`
 
@@ -85,6 +101,14 @@ class Show(a)
 
 Canonical rendering to a `String`, dispatched by dictionary. `show(x)` reads `x`'s `Show` instance, so a value prints canonically even in a polymorphic context (where the runtime representation alone cannot tell, say, a `Bool` from an `Int`). Derive it with `deriving (Show)`; strings render quoted and escaped, records with their field names.
 
+```prism
+show([1, 2, 3])
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `Hash`
 
 ```prism,def,h-af56efed0cf692e03764e98bedaa4fd7cf00d0b23c9f116057576cc9b4241391
@@ -94,6 +118,14 @@ class Hash(a)
 
 A content hash of a value, as a lowercase blake3 hex digest. `deriving (Hash)` folds a value structurally into the same content-addressing scheme the compiler hashes code with (a constructor token followed by its fields' own digests), so structurally equal values hash equal, byte-for-byte identically on the interpreter and native backends. The leaf instances below anchor the fold.
 
+```prism
+hash(5)
+```
+
+```output
+35cd3e4aa36a8426c38411dc5c717031a7359ce9674f005cf9e1bf27780e902c
+```
+
 ### `Pow`
 
 ```prism,def,h-390c82aeb07696d244298074c027bf9c4c286a6a6ab345b0328b0d903e689bdd
@@ -102,6 +134,14 @@ class Pow(a)
 ```
 
 Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances cover homogeneous powers; a mixed `Int ^ Float` is a type error.
+
+```prism
+pow(2, 10)
+```
+
+```output
+1024
+```
 
 ### `Num`
 
@@ -116,6 +156,14 @@ class Num(a)
 
 The additive-multiplicative core of the numerical tower: `+`, `-`, `*`, and unary minus (`negated`) over one lane. A monomorphic operand keeps its direct lane primitive (the dictionary never survives specialization); a `given Num(a)` operand dispatches here. `Div` is split off so a type with addition but no sensible division stays representable. No implicit coercion: an operand's lane is fixed by its type, and only literals adapt to context.
 
+```prism
+plus(3, 4)
+```
+
+```output
+7
+```
+
 ### `Div`
 
 ```prism,def,h-005e9fb85bd7ff213416440c6f77ada7e962916c413fb372fac4c5cecbd9145c
@@ -125,6 +173,14 @@ class Div(a)
 ```
 
 Division and remainder, the `/` and `%` operators. Integer lanes truncate toward zero with the remainder taking the dividend's sign and fault on a zero divisor; `Float` division is IEEE (never faults) and `%` is `fmod`.
+
+```prism
+quotient(7, 2)
+```
+
+```output
+3
+```
 
 ### `Functor`
 
@@ -579,6 +635,14 @@ id : forall a. (a) -> a
 
 The identity function.
 
+```prism
+id(42)
+```
+
+```output
+42
+```
+
 ### `const`
 
 ```prism,sig,h-5abe0b4f9ddbcb2ad17e09c2aa77485358d1eb345c5025c0aa0ccfef999637fe
@@ -586,6 +650,14 @@ const : forall a b. (a, b) -> a
 ```
 
 The constant function: returns `x`, ignoring `y`.
+
+```prism
+const(1, 2)
+```
+
+```output
+1
+```
 
 ### `compose`
 
@@ -595,6 +667,14 @@ compose : forall e0 a b c. ((b) -> a ! {e0}, (c) -> b ! {e0}, c) -> a ! {e0}
 
 Function composition: `compose(f, g, x)` is `f(g(x))`.
 
+```prism
+compose(\(x) -> x + 1, \(x) -> x * 2, 5)
+```
+
+```output
+11
+```
+
 ### `flip`
 
 ```prism,sig,h-0f1006e43b9938c7b3b735c1cbd50f385d3e345fefe7c497a72ed8b4d4bed0d3
@@ -603,6 +683,14 @@ flip : forall e0 a b c. ((b, c) -> a ! {e0}, c, b) -> a ! {e0}
 
 `f` with its first two arguments swapped.
 
+```prism
+flip(\(a, b) -> a - b, 3, 10)
+```
+
+```output
+7
+```
+
 ### `not`
 
 ```prism,sig,h-b4763e98b2287a73bdd41a7b22b7e5dc17aad8aba2fc542b260d36c689e2a131
@@ -610,6 +698,14 @@ not : (Bool) -> Bool
 ```
 
 Boolean negation.
+
+```prism
+not(true)
+```
+
+```output
+false
+```
 
 ### `and`
 
@@ -635,6 +731,14 @@ xor : (Bool, Bool) -> Bool
 
 Exclusive or.
 
+```prism
+xor(true, false)
+```
+
+```output
+true
+```
+
 ### `abs`
 
 ```prism,sig,h-a95c8be4a45c836d443466cc9e5fdc4df5d4695d3958a0bbed5b3279d88e67c6
@@ -642,6 +746,14 @@ abs : (Int) -> Int
 ```
 
 Absolute value.
+
+```prism
+abs(-5)
+```
+
+```output
+5
+```
 
 ### `max`
 
@@ -651,6 +763,14 @@ max : (Int, Int) -> Int
 
 The greater of two values.
 
+```prism
+max(3, 7)
+```
+
+```output
+7
+```
+
 ### `min`
 
 ```prism,sig,h-3c38676c6482b16563c6337e1f16b0b5c76369d28a2fab3d7bb6b5ac17130286
@@ -658,6 +778,14 @@ min : (Int, Int) -> Int
 ```
 
 The lesser of two values.
+
+```prism
+min(3, 7)
+```
+
+```output
+3
+```
 
 ### `clamp`
 
@@ -667,6 +795,14 @@ clamp : (Int, Int, Int) -> Int
 
 Constrain `x` to the range `[lo, hi]`.
 
+```prism
+clamp(0, 10, 15)
+```
+
+```output
+10
+```
+
 ### `signum`
 
 ```prism,sig,h-714357d0e71b27e83064dd5f690a7b3003d48b3bc950c5f6a6a8183e9be31e22
@@ -674,6 +810,14 @@ signum : (Int) -> Int
 ```
 
 The sign of `n`, as `-1`, `0`, or `1`.
+
+```prism
+signum(-4)
+```
+
+```output
+-1
+```
 
 ### `mod`
 
@@ -683,6 +827,14 @@ mod : (Int, Int) -> Int
 
 The remainder `a % b`.
 
+```prism
+mod(10, 3)
+```
+
+```output
+1
+```
+
 ### `even`
 
 ```prism,sig,h-ed82ce411a2f366f87900c3b2edb69477c660c937567ee6fd3750cb7280acac7
@@ -690,6 +842,14 @@ even : (Int) -> Bool
 ```
 
 True when `n` is even.
+
+```prism
+even(4)
+```
+
+```output
+true
+```
 
 ### `odd`
 
@@ -699,6 +859,14 @@ odd : (Int) -> Bool
 
 True when `n` is odd.
 
+```prism
+odd(4)
+```
+
+```output
+false
+```
+
 ### `gcd`
 
 ```prism,sig,h-6762be2dad3ed63c465014051e8c5a7aed084b00d6f0231a0ccd6c8fe479a712
@@ -707,6 +875,14 @@ gcd : (Int, Int) -> Int
 
 The greatest common divisor (Euclid's algorithm).
 
+```prism
+gcd(12, 18)
+```
+
+```output
+6
+```
+
 ### `lcm`
 
 ```prism,sig,h-038170a52079f2d7b043f0b9b12cc023cce6e71f3b2b977a4675a46366176075
@@ -714,6 +890,14 @@ lcm : (Int, Int) -> Int
 ```
 
 The least common multiple.
+
+```prism
+lcm(4, 6)
+```
+
+```output
+12
+```
 
 ### `int_pow_go`
 
@@ -729,6 +913,14 @@ int_pow : (Int, Int) -> Int
 
 Integer exponentiation, the `Pow(Int)` instance: bignum-correct because `*` promotes past 63 bits, and tail recursive so a large exponent folds in constant stack. `a ^ b` over ints lowers here through the `Pow` class. A negative exponent is defined as `1 / a ^ (-b)` under the language's one truncating division rule: `0` whenever the magnitude of the base exceeds 1, the exact reciprocal for a base of `1` or `-1`, and the division-by-zero fault for a base of `0` (which is exactly what `0 ^ -1` is).
 
+```prism
+int_pow(2, 10)
+```
+
+```output
+1024
+```
+
 ### `factorial`
 
 ```prism,sig,h-a6d57530ba017dd802de264a084509d1ff53a6c5a7470acad280a1cb427124b1
@@ -737,6 +929,14 @@ factorial : (Int) -> Int
 
 `n!`, the factorial of `n`.
 
+```prism
+factorial(5)
+```
+
+```output
+120
+```
+
 ### `fib`
 
 ```prism,sig,h-f3232afb129702cdf1668cf55753134cc0715350bd337e13aef3af2f2a1b1f13
@@ -744,6 +944,14 @@ fib : (Int) -> Int
 ```
 
 The nth Fibonacci number (naive, exponential).
+
+```prism
+fib(10)
+```
+
+```output
+55
+```
 
 ### `pi`
 
@@ -777,6 +985,10 @@ rand_below : (Int) -> Int ! {Random}
 
 A random integer in `[0, n)`, over the seeded SplitMix64 stream.
 
+```prism,no_run
+rand_below(6)
+```
+
 ### `rand_range`
 
 ```prism,sig,h-025725f987854d36a5d1f9d87bbac22d505ee26c9928cf6fc1cceec2431b1afd
@@ -784,6 +996,10 @@ rand_range : (Int, Int) -> Int ! {Random}
 ```
 
 A random integer in `[lo, hi)`.
+
+```prism,no_run
+rand_range(10, 20)
+```
 
 ### `rand_bool`
 
@@ -801,6 +1017,14 @@ between : (Int, Int, Int) -> Bool
 
 True when `lo <= x <= hi`.
 
+```prism
+between(1, 10, 5)
+```
+
+```output
+true
+```
+
 ### `fst`
 
 ```prism,sig,h-d6d5b8cb46f9c1aa07f13f3a00cb7ab7de6300490f03cadfd17f7ab4cf9af2ee
@@ -808,6 +1032,14 @@ fst : forall a b. ((a, b)) -> a
 ```
 
 The first component of a pair.
+
+```prism
+fst((1, 2))
+```
+
+```output
+1
+```
 
 ### `snd`
 
@@ -817,6 +1049,14 @@ snd : forall a b. ((a, b)) -> b
 
 The second component of a pair.
 
+```prism
+snd((1, 2))
+```
+
+```output
+2
+```
+
 ### `swap`
 
 ```prism,sig,h-6e01f332704d7e0005066c531d43ce5cfa555681401f4e706216f08888235ed9
@@ -824,6 +1064,14 @@ swap : forall a b. ((a, b)) -> (b, a)
 ```
 
 A pair with its two components swapped.
+
+```prism
+swap((1, 2))
+```
+
+```output
+(2, 1)
+```
 
 ### `pair_map`
 
@@ -833,6 +1081,14 @@ pair_map : forall e0 a b c d. ((b) -> a ! {e0}, (d) -> c ! {e0}, (b, d)) -> (a, 
 
 Apply `f` to the first component and `g` to the second.
 
+```prism
+pair_map(\(x) -> x + 1, \(y) -> y * 2, (10, 20))
+```
+
+```output
+(11, 40)
+```
+
 ### `guard`
 
 ```prism,sig,h-e4f311b7d819769d3362a6d27d02f0873241ede09993eee6bb7a0a5f9c8a93b6
@@ -840,6 +1096,14 @@ guard : (Bool) -> Unit ! {Fail}
 ```
 
 `()` when `b` holds, otherwise `fail()` (short-circuits a failable block).
+
+```prism
+optional(\() -> guard(false))
+```
+
+```output
+None
+```
 
 ### `optional`
 
@@ -849,6 +1113,14 @@ optional : forall e0 a. (() -> a ! {e0}) -> Option(a) ! {e0}
 
 Run `thunk`, returning `Some(result)`, or `None` if it calls `fail()`.
 
+```prism
+optional(\() -> 42)
+```
+
+```output
+Some(42)
+```
+
 ### `succeeds`
 
 ```prism,sig,h-c65c9ddea6bcbe92d0b217395f56dbd767488be3ed58f1f11ab287371b00d850
@@ -856,6 +1128,14 @@ succeeds : forall e0 a. (() -> a ! {Fail, e0}) -> Bool ! {e0}
 ```
 
 True when `thunk` runs to completion without calling `fail()`.
+
+```prism
+succeeds(\() -> 42)
+```
+
+```output
+true
+```
 
 ### `default`
 
@@ -865,6 +1145,14 @@ default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
 
 Run `thunk`, returning its result or the default `d` if it calls `fail()`.
 
+```prism
+default(\() -> at_list([1, 2], 9), 0)
+```
+
+```output
+0
+```
+
 ### `at_list`
 
 ```prism,sig,h-e30f7acfd8076758db383f40882d3d563b6d927d01ae8225f35500458e8127a1
@@ -872,6 +1160,14 @@ at_list : forall a. (List(a), Int) -> a ! {Fail}
 ```
 
 The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so `xs.at_list(i) ?? d` defaults cleanly through `??`.
+
+```prism
+at_list([10, 20, 30], 1)
+```
+
+```output
+20
+```
 
 ### `at_map`
 
@@ -889,6 +1185,14 @@ force : forall a. (Option(a)) -> a ! {Fail}
 
 The value inside `Some`, or `fail()` for `None`; `o.force() ?? d` defaults.
 
+```prism
+force(Some(5))
+```
+
+```output
+5
+```
+
 ### `at_array`
 
 ```prism,sig,h-2c6ca7c234b144b8fa70a44d0aaffcf794cd102b8241ab3867b07738ac2ca259
@@ -896,6 +1200,14 @@ at_array : forall a. (Array(a), Int) -> a ! {Fail}
 ```
 
 The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
+
+```prism
+at_array(array_of_list([5, 6, 7]), 2)
+```
+
+```output
+7
+```
 
 ### `at_hashmap`
 
@@ -905,6 +1217,14 @@ at_hashmap : forall a. (HashMap(a), String) -> a ! {Fail}
 
 The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`.
 
+```prism
+at_hashmap(hm_from_list([("a", 1)]), "a")
+```
+
+```output
+1
+```
+
 ### `at_byte`
 
 ```prism,sig,h-766cb2860a0204498ec0f2183ef8519724f0485295e67558924b33a7dab4e7cb
@@ -912,6 +1232,14 @@ at_byte : (String, Int) -> Int ! {Fail}
 ```
 
 The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`.
+
+```prism
+at_byte("hi", 0)
+```
+
+```output
+104
+```
 
 ### `list_set`
 
@@ -921,6 +1249,14 @@ list_set : forall a. (List(a), Int, a) -> List(a)
 
 A new list with element `i` replaced by `v` (out of range: unchanged). Backs `xs[i] := v` and the `[i]` optic path on lists.
 
+```prism
+list_set([1, 2, 3], 1, 9)
+```
+
+```output
+[1, 9, 3]
+```
+
 ### `sort`
 
 ```prism,sig,h-26e1fa3607bc7a6ea804b784d2ff00079ec197556fd423d2ca737f0f5ebc356f
@@ -928,6 +1264,14 @@ sort : forall a. (List(a)) -> List(a)
 ```
 
 Sort a list in ascending order, a stable O(n log n) merge sort. Primitive element types are specialized to a native kernel at the call site; any other `Ord` type uses the generic path.
+
+```prism
+sort([3, 1, 2])
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `while_loop`
 
@@ -937,6 +1281,14 @@ while_loop : forall e0 a. ((a) -> Bool ! {e0}, (a) -> a ! {e0}, a) -> a ! {e0}
 
 Iterate `body` from state `s` while `cond(s)` holds, returning the final state. Tail-recursive (constant stack).
 
+```prism
+while_loop(\(s) -> s < 10, \(s) -> s + 3, 0)
+```
+
+```output
+12
+```
+
 ### `for_range`
 
 ```prism,sig,h-d539af89806cdbdbf87999436afbb37965271719a864e149de98bd73b9f7d099
@@ -944,6 +1296,14 @@ for_range : forall e0 a. (Int, Int, (Int, a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
 Fold `f(i, s)` over `i` in `[lo, hi)`, threading the state `s`.
+
+```prism
+for_range(0, 5, \(i, s) -> s + i, 0)
+```
+
+```output
+10
+```
 
 ### `repeat_while`
 
@@ -1065,6 +1425,14 @@ srange : forall a. (Int, Int) -> (a) -> Unit ! {Emit(Int)}
 
 A stream of the integers in `[lo, hi)`, for the `Emit` combinators.
 
+```prism
+scollect(srange(1, 5))
+```
+
+```output
+[1, 2, 3, 4]
+```
+
 ### `sof_go`
 
 ```prism,sig,h-f3413a8eb9f831b0dea309e5d88ec5b63db4b12970dc74baf37aa2c805bbc2f2
@@ -1081,6 +1449,14 @@ sof : forall a b. (List(a)) -> (b) -> Unit ! {Emit(a)}
 
 A stream of the elements of the list `xs`.
 
+```prism
+scollect(sof([9, 8, 7]))
+```
+
+```output
+[9, 8, 7]
+```
+
 ### `enum_from_to`
 
 ```prism,sig,h-a3321483377d803d4e5454904e49a2916055a4b2b1f1f73db85d7f5e8845dc14
@@ -1088,6 +1464,14 @@ enum_from_to : (Int, Int) -> List(Int)
 ```
 
 The ascending list `[lo, lo+1, ..., hi]` (empty when `lo > hi`). Backs the `[a..z]` list syntax.
+
+```prism
+enum_from_to(1, 5)
+```
+
+```output
+[1, 2, 3, 4, 5]
+```
 
 ### `enum_seq`
 
@@ -1105,6 +1489,14 @@ enum_from_then_to : (Int, Int, Int) -> List(Int)
 
 The list from `a`, stepping by `b - a`, up to `hi`. Backs the `[a,b..z]` list syntax.
 
+```prism
+enum_from_then_to(1, 3, 9)
+```
+
+```output
+[1, 3, 5, 7, 9]
+```
+
 ### `smap_go`
 
 ```prism,sig,h-678710e1c26a10c07e904c915ea8dc9c8ee0dce97441b6d89539fa98cad8df46
@@ -1120,6 +1512,14 @@ smap : forall e1 a b c d. ((Unit) -> a ! {Emit(b), e1}, (c) -> b ! {Emit(b), e1}
 ```
 
 Map `f` over every element of a stream, fusing (no intermediate list).
+
+```prism
+scollect(smap(srange(1, 4), \(x) -> x * x))
+```
+
+```output
+[1, 4, 9]
+```
 
 ### `skeep_go`
 
@@ -1137,6 +1537,14 @@ skeep : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, (b) -> Bool ! {Emit(b), e
 
 Keep only the stream elements satisfying `p`, fusing.
 
+```prism
+scollect(skeep(srange(1, 6), \(x) -> even(x)))
+```
+
+```output
+[2, 4]
+```
+
 ### `stake_go`
 
 ```prism,sig,h-6585d6a38b9a310cbe0120d16b71d9f4c8415c66212e1d91d944b385f803046d
@@ -1153,6 +1561,14 @@ stake : forall e1 a b c. ((Unit) -> b ! {Emit(a), e1}, Int) -> (c) -> Unit ! {Em
 
 The first `n` elements of a stream, stopping the producer early.
 
+```prism
+scollect(stake(srange(1, 100), 3))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `sfold`
 
 ```prism,sig,h-40d3277e4d15540265cb660f36e685e61c6684058af099f80bc09ba81028c6d8
@@ -1160,6 +1576,14 @@ sfold : forall e0 a b c. ((Unit) -> b ! {Emit(c), e0}, a, (a, c) -> a ! {e0}) ->
 ```
 
 Left-fold a stream with `f` from the initial accumulator `z`, fusing. The stream row is pinned to `{Emit(a) | e}` so the handler discharges `Emit` (leaving `{e}`); without the annotation `Emit` slips into a bare row variable and leaks past the fold into the caller's row.
+
+```prism
+sfold(srange(1, 5), 0, \(acc, x) -> acc + x)
+```
+
+```output
+10
+```
 
 ### `ssum`
 
@@ -1169,6 +1593,14 @@ ssum : forall e0 a. ((Unit) -> a ! {Emit(Int), e0}) -> Int ! {e0}
 
 Sum a stream of numbers.
 
+```prism
+ssum(srange(1, 5))
+```
+
+```output
+10
+```
+
 ### `scollect`
 
 ```prism,sig,h-e44202e58e952ff2a502443c739e9de42c95f96e79a1da11fc8b3bf9c70b1f3e
@@ -1176,6 +1608,14 @@ scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
 ```
 
 Collect a stream into a list, in emission order.
+
+```prism
+scollect(srange(1, 4))
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `concat_map`
 
@@ -1185,6 +1625,14 @@ concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 
 Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude (as well as `Data.List`) because optic-path desugaring synthesizes calls to it by bare name.
 
+```prism
+concat_map(\(x) -> [x, x], [1, 2])
+```
+
+```output
+[1, 1, 2, 2]
+```
+
 ### `eprintln`
 
 ```prism,sig,h-4509379839352457c29bc1eba18c2349d608fa7a8727e63dae881f6a32f2abbf
@@ -1192,6 +1640,10 @@ eprintln : (String) -> Unit ! {IO}
 ```
 
 Print `s` to standard error, followed by a newline.
+
+```prism,no_run
+eprintln("uh oh")
+```
 
 ### `push_all`
 
@@ -1209,6 +1661,14 @@ array_of_list : forall a. (List(a)) -> Array(a)
 
 Build a growable `Array` from a list.
 
+```prism
+array_to_list(array_of_list([1, 2, 3]))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `concat_all`
 
 ```prism,sig,h-fdd8bf8c74e492b857c1e27e446c8bb1adf40de91bca04419b69d6534192c480
@@ -1216,6 +1676,14 @@ concat_all : (List(String)) -> String
 ```
 
 Join a list of strings into one with a single allocation (an O(n) builder that replaces a right-nested chain of `concat`).
+
+```prism
+concat_all(["a", "b", "c"])
+```
+
+```output
+abc
+```
 
 ### `fnv_from`
 
@@ -1249,6 +1717,14 @@ hm_new : forall a. () -> HashMap(a)
 
 An empty hash map.
 
+```prism
+hm_size(hm_new())
+```
+
+```output
+0
+```
+
 ### `assoc_get`
 
 ```prism,sig,h-ef0a4a2f3fc7b6051d8c89902afbaecea50f57943126cc1c6e6151ea344c91ea
@@ -1265,6 +1741,14 @@ hm_lookup : forall a. (HashMap(a), String) -> Option(a)
 
 The value bound to `k` as `Some`, or `None`.
 
+```prism
+hm_lookup(hm_insert(hm_new(), "a", 1), "a")
+```
+
+```output
+Some(1)
+```
+
 ### `hm_member`
 
 ```prism,sig,h-e4f1d17dd007091de5a830162c92751e3f9ac4fcdd5b7bd22c0b35ad09213022
@@ -1273,6 +1757,14 @@ hm_member : forall a. (HashMap(a), String) -> Bool
 
 True when `k` is present.
 
+```prism
+hm_member(hm_from_list([("a", 1)]), "a")
+```
+
+```output
+true
+```
+
 ### `hm_get_or`
 
 ```prism,sig,h-c0e0b465ef0005b2b376d36c0e5ec8a58daf69b3ee09ff8e86529e1e55c03a9d
@@ -1280,6 +1772,14 @@ hm_get_or : forall a. (a, HashMap(a), String) -> a
 ```
 
 The value bound to `k`, or the default `d`.
+
+```prism
+hm_get_or(0, hm_from_list([("a", 1)]), "b")
+```
+
+```output
+0
+```
 
 ### `assoc_put`
 
@@ -1313,6 +1813,14 @@ hm_to_list : forall a. (HashMap(a)) -> List((String, a))
 
 The `(key, value)` pairs, in bucket order.
 
+```prism
+hm_to_list(hm_from_list([("a", 1)]))
+```
+
+```output
+[(a, 1)]
+```
+
 ### `pair_keys`
 
 ```prism,sig,h-948b307de48a3841730da193d013e20b239e62442dfd0e54a72cfdae2be2a76f
@@ -1329,6 +1837,14 @@ hm_keys : forall a. (HashMap(a)) -> List(String)
 
 The keys of the map.
 
+```prism
+hm_keys(hm_from_list([("a", 1), ("b", 2)]))
+```
+
+```output
+[a, b]
+```
+
 ### `hm_size`
 
 ```prism,sig,h-6bac9606e34fc134654e050130ec31e11180c80c72d16443bb0a73548b5ad749
@@ -1336,6 +1852,14 @@ hm_size : forall a. (HashMap(a)) -> Int
 ```
 
 The number of entries.
+
+```prism
+hm_size(hm_from_list([("a", 1), ("b", 2)]))
+```
+
+```output
+2
+```
 
 ### `hm_reinsert`
 
@@ -1353,6 +1877,14 @@ hm_insert : forall a. (HashMap(a), String, a) -> HashMap(a)
 
 Insert or overwrite `k`, doubling the bucket count and rehashing once the load factor exceeds 1.
 
+```prism
+hm_lookup(hm_insert(hm_new(), "a", 1), "a")
+```
+
+```output
+Some(1)
+```
+
 ### `hm_delete`
 
 ```prism,sig,h-b9c1cc1da7834af948ef37ea4491c67c53382f0c326d29dfc86bd92edd0baccc
@@ -1360,6 +1892,14 @@ hm_delete : forall a. (HashMap(a), String) -> HashMap(a)
 ```
 
 Remove `k` (a no-op if absent).
+
+```prism
+hm_size(hm_delete(hm_from_list([("a", 1), ("b", 2)]), "a"))
+```
+
+```output
+1
+```
 
 ### `assoc_del`
 
@@ -1385,6 +1925,14 @@ hm_values : forall a. (HashMap(a)) -> List(a)
 
 The values of the map.
 
+```prism
+hm_values(hm_from_list([("a", 1), ("b", 2)]))
+```
+
+```output
+[1, 2]
+```
+
 ### `hm_from_list_go`
 
 ```prism,sig,h-3b0f2d31edaa06762ff41d0b84892983f45cbb94a1e6c4e6514ea4092a56b93d
@@ -1401,6 +1949,14 @@ hm_from_list : forall a. (List((String, a))) -> HashMap(a)
 
 Build a hash map from `(key, value)` pairs (later pairs win).
 
+```prism
+hm_lookup(hm_from_list([("a", 1), ("b", 2)]), "b")
+```
+
+```output
+Some(2)
+```
+
 ### `hm_adjust`
 
 ```prism,sig,h-039d035bc636a1db0235eea88b616e2dceea0fd53780f1ef277607c8f0c33ef9
@@ -1408,6 +1964,14 @@ hm_adjust : forall e0 a. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {
 ```
 
 Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
+
+```prism
+hm_get_or(0, hm_adjust(\(x) -> x + 100, hm_from_list([("a", 1)]), "a"), "a")
+```
+
+```output
+101
+```
 
 ### `array_foldl_go`
 
@@ -1425,6 +1989,14 @@ array_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0}
 
 Left-fold `f` over the elements of an array from `acc`.
 
+```prism
+array_foldl(\(a, x) -> a + x, 0, array_of_list([1, 2, 3]))
+```
+
+```output
+6
+```
+
 ### `array_to_list_go`
 
 ```prism,sig,h-15069c7ca4b05fd6bf410f6af04890d8423d7c426f8266505efc96cb87fbf499
@@ -1440,6 +2012,14 @@ array_to_list : forall a. (Array(a)) -> List(a)
 ```
 
 The elements of an array as a list, in order.
+
+```prism
+array_to_list(array_of_list([1, 2, 3]))
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `args_go`
 
@@ -1464,6 +2044,14 @@ int_cmp : (Int, Int) -> Int
 ```
 
 Three-way comparison of two ints: `-1`, `0`, or `1` (the `Ord(Int)` kernel).
+
+```prism
+int_cmp(3, 7)
+```
+
+```output
+-1
+```
 
 ### `str_escape`
 
@@ -1499,6 +2087,14 @@ insert_by_ord : forall a. (a, List(a)) -> List(a)
 
 Insert `x` into an already-sorted list, keeping it sorted (`Ord`).
 
+```prism
+insert_by_ord(3, [1, 2, 4])
+```
+
+```output
+[1, 2, 3, 4]
+```
+
 ### `merge_by_ord`
 
 ```prism,sig,h-fc2923e62d9fcb2c58ef53103f6defd89c9f6c4475db94d0409430af54476724
@@ -1506,6 +2102,14 @@ merge_by_ord : forall a. (List(a), List(a)) -> List(a)
 ```
 
 Stable merge of two already-sorted lists. The recursive `Cons` becomes a loop by tail-recursion-modulo-cons, and Perceus reuses the consumed cells.
+
+```prism
+merge_by_ord([1, 3], [2, 4])
+```
+
+```output
+[1, 2, 3, 4]
+```
 
 ### `sort_by_ord`
 

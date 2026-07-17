@@ -200,6 +200,7 @@ arg     ->  [ varid ":=" ] expr                      -- an argument may be passe
          |  atom
 atom    ->  integer | float | char | string | "true" | "false" | "(" ")"
          |  "break" | "continue"                      -- loop control
+         |  "?" varid                                  -- named typed hole
          |  varid | conid | qualid
          |  "(" expr ")" | "(" expr ":" type ")"
          |  "(" expr "," expr , ... ")"               -- tuple

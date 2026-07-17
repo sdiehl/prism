@@ -1,0 +1,121 @@
+/* Compiler-baked Prism highlighting and inferred-type hover ranges. */
+.prism-typed-block code {
+  position: relative;
+}
+
+.prism-type-span {
+  border-radius: 2px;
+  outline: none;
+}
+
+.prism-type-span.prism-type-active {
+  background: rgba(89, 194, 255, 0.16);
+  box-shadow: inset 0 -1px rgba(89, 194, 255, 0.65);
+}
+
+.prism-type-span:focus-visible {
+  box-shadow: inset 0 -1px #59c2ff;
+}
+
+.prism-type-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(42rem, calc(100vw - 16px));
+  padding: 0.38rem 0.62rem;
+  border: 1px solid #3b4552;
+  border-radius: 6px;
+  background: #111820;
+  color: #d9e0e8;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+/* Non-value hovers each keep their own accent: type constructors (kinds),
+   classes, type variables, effects, and typed holes read differently at a
+   glance. A thick accent edge plus a colored label carry the distinction on
+   the shared dark panel, so the registers separate in light and dark themes
+   alike. */
+.prism-tooltip-label {
+  font-weight: 700;
+}
+
+.prism-type-tooltip-typelevel {
+  border-color: #b48ead;
+  border-left-width: 4px;
+  background: #3a2c4a;
+  color: #efe3f5;
+}
+
+.prism-type-tooltip-typelevel .prism-tooltip-label {
+  color: #dcb5d4;
+}
+
+.prism-type-tooltip-class {
+  border-color: #d08770;
+  border-left-width: 4px;
+  background: #462e22;
+  color: #f6e4da;
+}
+
+.prism-type-tooltip-class .prism-tooltip-label {
+  color: #eba98c;
+}
+
+.prism-type-tooltip-typevar {
+  border-color: #8fbcbb;
+  border-left-width: 4px;
+  background: #1f403e;
+  color: #dff0ef;
+}
+
+.prism-type-tooltip-typevar .prism-tooltip-label {
+  color: #a9dcda;
+}
+
+.prism-type-tooltip-effect {
+  border-color: #ebcb8b;
+  border-left-width: 4px;
+  background: #453a1c;
+  color: #f7eed6;
+}
+
+.prism-type-tooltip-effect .prism-tooltip-label {
+  color: #f2d9a0;
+}
+
+.prism-type-tooltip-coeffect {
+  border-color: #a3be8c;
+  border-left-width: 4px;
+  background: #2c4023;
+  color: #e8f2df;
+}
+
+.prism-type-tooltip-coeffect .prism-tooltip-label {
+  color: #c0dba6;
+}
+
+.prism-type-tooltip-hole {
+  border-color: #bf616a;
+  border-left-width: 4px;
+  background: #4a242b;
+  color: #f6dee1;
+}
+
+.prism-type-tooltip-hole .prism-tooltip-label {
+  color: #e39aa2;
+}
+
+.prism-type-tooltip-patternvar {
+  border-color: #81a1c1;
+  border-left-width: 4px;
+  background: #1e2f45;
+  color: #dbe6f2;
+}
+
+.prism-type-tooltip-patternvar .prism-tooltip-label {
+  color: #a8c3e0;
+}

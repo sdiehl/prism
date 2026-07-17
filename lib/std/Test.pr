@@ -21,6 +21,13 @@ pub class Arbitrary(a)
 
 -- | The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for
 -- `quickcheck`/`gen_at`.
+--
+-- ```prism,no_run
+-- # import Quickcheck (..)
+-- fn prop(xs : List(Int)) : Bool = reverse(reverse(xs)) == xs
+--
+-- fn main() = println(passed(quickcheck(arb_gen(), prop)))
+-- ```
 pub fn arb_gen() : Gen(a) given Arbitrary(a) = Gen(\(size) -> arbitrary(size))
 
 instance arbitraryInt : Arbitrary(Int)

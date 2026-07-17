@@ -111,7 +111,7 @@ pub const BACKEND_LLVM: &str = "llvm";
 /// The property a certificate claims about its subject digest.
 ///
 /// One member is live ([`ParityPassed`](Self::ParityPassed)); [`Reserved`](Self::Reserved)
-/// carries any discriminant this build does not yet verify, so a newer
+/// carries any discriminant outside this build's verified claim set, so the
 /// certificate's envelope still decodes here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Claim {
@@ -119,7 +119,7 @@ pub enum Claim {
     /// (the parity oracle passed) under the recorded scheme.
     ParityPassed,
     /// A claim this build recognizes structurally but cannot verify: the reserved
-    /// slot for future rungs (Lean-checked and beyond). The wrapped discriminant is
+    /// slot for external claims (Lean-checked and beyond). The wrapped discriminant is
     /// preserved so the frame round-trips.
     Reserved(u64),
 }
@@ -248,8 +248,8 @@ pub enum CertStatus {
     /// A recognized, verifiable certificate. Carries the one-line description to
     /// append to the audit's per-root line.
     Verified(String),
-    /// A well-formed certificate whose claim this build does not yet verify (a
-    /// reserved rung). Not a failure; the description names the reserved claim.
+    /// A well-formed certificate whose claim is outside this build's verified
+    /// claim set. Not a failure; the description names the reserved claim.
     Unverifiable(String),
     /// A corrupt, foreign-scheme, or mismatched certificate: a named failure.
     Failed(String),
@@ -293,7 +293,7 @@ pub fn check_cert(store: &Store, subject: &str) -> CertStatus {
             cert.scheme, cert.compiler
         )),
         Claim::Reserved(n) => CertStatus::Unverifiable(format!(
-            "{} (claim reserved for a future release)",
+            "{} (claim is recognized but unverified by this build)",
             reserved_claim_name(n)
         )),
     }

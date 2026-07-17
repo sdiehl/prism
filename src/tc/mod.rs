@@ -6,7 +6,8 @@ use marginalia::Span;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrKind, TypeError};
-use crate::hir::NodeFacts;
+pub use crate::error::{HoleBinding, HoleCandidate, HoleReport};
+use crate::hir::{HandlerResidual, NodeFacts};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
@@ -16,6 +17,7 @@ mod classes;
 mod context;
 mod coverage;
 mod env;
+pub(crate) use env::is_builtin_effect;
 mod infer;
 mod pat;
 mod subsume;
@@ -168,6 +170,379 @@ mod env_summary_tests {
         assert_eq!(env.free_exists().collect::<Vec<_>>(), [EXISTENTIAL]);
         env.insert(second, Type::Int);
         assert!(env.free_exists().next().is_none());
+    }
+}
+
+#[cfg(test)]
+mod typed_hole_tests {
+    use super::{check, check_allow_holes};
+    use crate::parse::parse;
+    use crate::resolve::resolve;
+    use crate::syntax::desugar::desugar;
+
+    fn core(src: &str) -> crate::syntax::ast::Program<crate::syntax::ast::Core> {
+        let surface = parse(src).expect("parse typed-hole fixture").program;
+        let resolved = resolve(surface).expect("resolve typed-hole fixture");
+        desugar(resolved).expect("desugar typed-hole fixture")
+    }
+
+    #[test]
+    fn report_is_structured_ranked_and_effect_aware() {
+        let program = core("fn choose(x : Int, y : Bool) : Int ! {} = ?answer");
+        let checked = check_allow_holes(&program).expect("holes are retained in allow mode");
+        let [hole] = checked.holes.as_slice() else {
+            panic!("expected one hole report, got {:?}", checked.holes);
+        };
+        assert_eq!(hole.name, "answer");
+        assert_eq!(hole.expected, "Int");
+        assert_eq!(hole.effects, "{}");
+        assert!(hole.bindings.iter().any(|b| b.name == "x" && b.ty == "Int"));
+        assert_eq!(hole.candidates.first().map(|c| c.name.as_str()), Some("x"));
+        assert!(hole.candidates[0].exact);
+        let json = serde_json::to_value(hole).expect("hole payload serializes");
+        assert_eq!(json["expected"], "Int");
+        assert_eq!(json["effects"], "{}");
+    }
+
+    #[test]
+    fn ordinary_check_rejects_holes_with_the_dedicated_code() {
+        let program = core("fn main() : Int = ?todo");
+        let error = check(&program).expect_err("ordinary checking must reject holes");
+        assert_eq!(error.code(), Some(crate::error::TYPED_HOLE.as_str()));
+    }
+
+    #[test]
+    fn inferred_context_reports_an_open_effect_row() {
+        let program = core("fn main() : Int = ?todo");
+        let checked = check_allow_holes(&program).expect("allow mode");
+        assert_eq!(checked.holes[0].effects, "{| e0}");
+    }
+
+    #[test]
+    fn annotated_lambda_reports_its_open_effect_permission() {
+        let program = core(
+            "fn main() : (() -> Int ! {Exn | e}) = \
+             ((\\() -> ?todo) : () -> Int ! {Exn | e})",
+        );
+        let checked = check_allow_holes(&program).expect("allow mode");
+        assert_eq!(checked.holes[0].expected, "Int");
+        assert_eq!(checked.holes[0].effects, "{Exn | e0}");
+    }
+
+    #[test]
+    fn polymorphic_candidates_are_ranked_by_real_subsumption() {
+        let program = core(
+            "fn identity(x) = x\n\
+             fn main() : ((Int) -> Int) ! {} = ?answer",
+        );
+        let checked = check_allow_holes(&program).expect("allow mode");
+        let identity = checked.holes[0]
+            .candidates
+            .iter()
+            .find(|candidate| candidate.name == "identity")
+            .expect("polymorphic identity subsumes Int -> Int");
+        assert!(
+            !identity.exact,
+            "instantiation is compatible, not identical"
+        );
+    }
+}
+
+#[cfg(test)]
+mod residual_operation_tests {
+    use super::{check, Checked};
+    use crate::hir::{build, HandlerResidual};
+    use crate::parse::parse;
+    use crate::resolve::resolve;
+    use crate::syntax::ast::{Core, Expr, NodeId, Program};
+    use crate::syntax::desugar::desugar;
+
+    fn core(src: &str) -> Program<Core> {
+        let surface = parse(src).expect("parse residual fixture").program;
+        let resolved = resolve(surface).expect("resolve residual fixture");
+        desugar(resolved).expect("desugar residual fixture")
+    }
+
+    fn checked(src: &str) -> (Program<Core>, Checked) {
+        let program = core(src);
+        let checked = check(&program).expect("check residual fixture");
+        (program, checked)
+    }
+
+    fn function_body(program: &Program<Core>, name: &str) -> NodeId {
+        program
+            .fns
+            .iter()
+            .find(|function| function.name == name)
+            .expect("fixture function")
+            .body
+            .id
+    }
+
+    fn residual<'a>(
+        program: &Program<Core>,
+        checked: &'a Checked,
+        function: &str,
+    ) -> &'a HandlerResidual {
+        build(checked)
+            .handler_residual(function_body(program, function))
+            .expect("handler residual fact")
+    }
+
+    fn names(symbols: &[crate::sym::Sym]) -> Vec<&'static str> {
+        symbols.iter().map(|symbol| symbol.as_str()).collect()
+    }
+
+    const ADJACENT: &str = "
+effect E
+  one() : Int
+  two() : Int
+
+fn run() : Int ! {} =
+  handle (handle one() + two() with partial {
+    one() resume k => k(1),
+    return r => r
+  }) with partial {
+    two() resume k => k(2),
+    return r => r
+  }
+";
+
+    #[test]
+    fn adjacent_inline_partials_cancel_known_operation_subsets() {
+        let (program, checked) = checked(ADJACENT);
+        assert!(checked.decls[0].effects.is_empty());
+        let outer = residual(&program, &checked, "run");
+        assert!(outer.forwarded_operations().is_empty());
+        assert!(outer.residual_operations().is_empty());
+        assert!(outer.forwarded_effects().is_empty());
+        assert!(!outer.has_open_row());
+
+        let run = program
+            .fns
+            .iter()
+            .find(|function| function.name == "run")
+            .expect("run");
+        let Expr::Handle(inner, ..) = &run.body.node else {
+            panic!("run body must be the outer handler");
+        };
+        let inner = build(&checked)
+            .handler_residual(inner.id)
+            .expect("inner residual");
+        assert_eq!(names(inner.forwarded_operations()), ["two"]);
+        assert_eq!(names(inner.residual_operations()), ["two"]);
+    }
+
+    #[test]
+    fn signature_rows_remain_opaque_across_adjacent_partials() {
+        let source = ADJACENT.replace(
+            "fn run() : Int ! {} =\n  handle (handle one() + two()",
+            "fn work() : Int ! {E} = one() + two()\n\nfn run() : Int ! {E} =\n  handle (handle work()",
+        );
+        let (program, checked) = checked(&source);
+        let run = checked
+            .decls
+            .iter()
+            .find(|decl| decl.name == "run")
+            .expect("run declaration");
+        assert!(run.effects.iter().any(|effect| effect.as_str() == "E"));
+        let outer = residual(&program, &checked, "run");
+        assert_eq!(names(outer.forwarded_effects()), ["E"]);
+        assert_eq!(names(outer.residual_effects()), ["E"]);
+
+        let pure = source.replace("fn run() : Int ! {E}", "fn run() : Int ! {}");
+        let program = core(&pure);
+        check(&program).expect_err("an opaque signature row must not become locally pure");
+    }
+
+    #[test]
+    fn handler_arm_uses_are_unioned_into_the_residual() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+  two() : Int
+
+fn run() : Int ! {E} =
+  handle one() with partial {
+    one() resume k => two(),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert!(fact.forwarded_operations().is_empty());
+        assert_eq!(names(fact.residual_operations()), ["two"]);
+    }
+
+    #[test]
+    fn mask_forces_the_skipped_effect_to_remain_opaque() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+  two() : Int
+
+fn run() : Int ! {E} =
+  handle mask<E>(one()) with partial {
+    one() resume k => k(1),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert_eq!(names(fact.forwarded_operations()), ["one"]);
+        assert_eq!(names(fact.residual_operations()), ["one"]);
+    }
+
+    #[test]
+    fn outer_partial_cancels_the_known_operation_masked_past_inner() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+  two() : Int
+
+fn run() : Int ! {} =
+  handle (handle mask<E>(one()) with partial {
+    one() resume k => k(1),
+    return r => r
+  }) with partial {
+    one() resume k => k(1),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert!(fact.residual_operations().is_empty());
+        assert!(fact.residual_effects().is_empty());
+    }
+
+    #[test]
+    fn pure_mask_does_not_borrow_prior_same_effect_precision() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+  two() : Int
+
+fn run() : Int ! {E} =
+  handle (handle one() + mask<E>(5) with partial {
+    one() resume k => k(1),
+    return r => r
+  }) with partial {
+    one() resume k => k(1),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert_eq!(names(fact.forwarded_effects()), ["E"]);
+        assert_eq!(names(fact.residual_effects()), ["E"]);
+    }
+
+    #[test]
+    fn parametric_direct_operation_keeps_singleton_precision() {
+        let (_, checked) = checked(
+            r"effect Choice(a)
+  first(a) : a
+  second(a) : a
+
+fn run() : Int ! {} =
+  handle first(1) with partial {
+    first(x) resume k => k(x),
+    return r => r
+  }",
+        );
+        assert!(checked.decls[0].effects.is_empty());
+    }
+
+    #[test]
+    fn thunk_operation_retains_its_latent_effect_row() {
+        let (program, checked) = checked(
+            r"effect Out
+  out() : Int
+
+effect Wrap
+  wrap(() -> Int ! {Wrap | e}) : Int
+
+fn run() : Int ! {Out, Wrap} =
+  handle wrap(\() -> out()) with partial {
+    wrap(th) resume k => k(0),
+    return r => r
+  }",
+        );
+        let run = checked
+            .decls
+            .iter()
+            .find(|decl| decl.name == "run")
+            .expect("run declaration");
+        assert!(run.effects.iter().any(|effect| effect.as_str() == "Out"));
+        assert!(run.effects.iter().any(|effect| effect.as_str() == "Wrap"));
+        let fact = residual(&program, &checked, "run");
+        assert!(fact.residual_operations().is_empty());
+        assert_eq!(names(fact.forwarded_effects()), ["Wrap"]);
+        assert_eq!(names(fact.residual_effects()), ["Out", "Wrap"]);
+        assert!(fact.has_open_row());
+    }
+
+    #[test]
+    fn synthesized_lambda_keeps_latent_operations_out_of_handler_residual() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+  two() : Int
+
+fn make() : (() -> Int ! {E}) =
+  handle (\() -> two()) with partial {
+    one() resume k => k(1),
+    return f => f
+  }",
+        );
+        let make = checked
+            .decls
+            .iter()
+            .find(|decl| decl.name == "make")
+            .expect("make declaration");
+        assert!(make.effects.is_empty());
+        let fact = residual(&program, &checked, "make");
+        assert!(fact.residual_operations().is_empty());
+        assert!(fact.residual_effects().is_empty());
+    }
+
+    #[test]
+    fn builtin_opaque_residual_is_valid_checked_hir() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+
+fn run() : Unit ! {IO} =
+  handle one() with partial {
+    one() resume k => let _ = k(1) in mask<IO>(()),
+    return r => ()
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert_eq!(names(fact.residual_effects()), ["IO"]);
+    }
+
+    #[test]
+    fn operation_precision_does_not_cross_declaration_boundaries() {
+        let (program, checked) = checked(
+            r"effect Out
+  out() : Int
+
+effect Wrap
+  wrap(() -> Int ! {Wrap | e}) : Int
+
+effect E
+  one() : Int
+  two() : Int
+
+fn leaves_open() : Int ! {Out, Wrap} = wrap(\() -> out())
+
+fn clean() : Int ! {} =
+  handle one() with partial {
+    one() resume k => k(1),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "clean");
+        assert!(fact.residual_operations().is_empty());
+        assert!(fact.residual_effects().is_empty());
+        assert!(!fact.has_open_row());
     }
 }
 
@@ -414,6 +789,9 @@ pub struct Checked {
     pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     pub seeds: u32,
     pub warnings: Vec<Warning>,
+    /// Source-ordered typed-hole reports. Ordinary checking rejects a non-empty
+    /// list; interpreter-only deferred checking returns it to the caller.
+    pub holes: Vec<HoleReport>,
 }
 
 impl Checked {
@@ -510,6 +888,17 @@ struct IndexOp {
     val: Option<Type>,
 }
 
+// Inference-time form of a hole report. Types and the environment remain live
+// until `resolve_all` has solved the surrounding constraints, then `flush_holes`
+// zonks and serializes them before the checker context is reset.
+struct HoleSite {
+    name: String,
+    span: Span,
+    expected: Type,
+    effects: EffRow,
+    env: Env,
+}
+
 struct Tc<'a> {
     ctx: Vec<Entry>,
     next: u32,
@@ -522,10 +911,20 @@ struct Tc<'a> {
     path_res: PathRes,
     fixed: BTreeMap<NodeId, Type>,
     span_types: BTreeMap<NodeId, Type>,
+    // Canonical `type ! row` strings for the opt-in `dump typespans` analysis.
+    // Ordinary checking leaves these tables empty, so tooltip collection cannot
+    // perturb the established inference path or checked-HIR fixture.
+    track_tooltips: bool,
+    pending_tooltip_rows: Vec<(NodeId, EffRow)>,
+    tooltip_rows: BTreeMap<NodeId, String>,
+    touched_tooltip_rows: BTreeSet<u32>,
+    tooltip_row_scaffolds: BTreeSet<u32>,
     // Per-declaration principal-body-effect witnesses ([`BodyWitness`]),
     // recorded by `infer_body` and consumed by `finalize_fn`'s borrow rule.
     body_witness: BTreeMap<String, BodyWitness>,
     pending: Vec<(NodeId, Type)>,
+    hole_sites: Vec<HoleSite>,
+    holes: Vec<HoleReport>,
     // Each `This(e)` site, with the span of the whole expression and the element
     // type synthesized for `e`. After inference solves every existential, the
     // element is zonked and checked to have a non-null, single-word representation
@@ -578,6 +977,122 @@ struct Tc<'a> {
     // operation tunnels past that one handler and stays in the residual row
     // (the handler it skips is the innermost enclosing one, by construction).
     handler_stack: Vec<HandlerFrame>,
+    // Operation-local effect uses for the expression currently being checked.
+    // Public rows remain effect-granular; this private summary lets adjacent
+    // partial handlers cancel complementary, syntactically known operations.
+    operation_uses: OperationUses,
+    // Exact summaries for handler continuation binders. Calling `resume` runs
+    // the already-recorded residual body, so its deliberately open function row
+    // must not turn a known local summary into an opaque one.
+    precise_calls: BTreeMap<Sym, OperationUses>,
+    // Every handler expression must produce exactly one checked-HIR residual
+    // fact. The marker set lets the HIR lint detect a missing or stale fact.
+    handler_nodes: BTreeSet<NodeId>,
+    handler_residuals: BTreeMap<NodeId, HandlerResidual>,
+}
+
+// A private operation-level refinement of an effect row. Each effect maps to
+// the operations this expression may perform. A call through a public function
+// row contributes every declared operation of each named effect; direct op
+// syntax contributes only that op. `open_row` preserves an unenumerable row
+// tail and prevents a partial handler from claiming complete discharge.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OperationUses {
+    by_effect: BTreeMap<Sym, EffectOperationUses>,
+    open_row: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EffectOperationUses {
+    Known(BTreeSet<Sym>),
+    All,
+}
+
+impl OperationUses {
+    fn insert(&mut self, effect: Sym, operation: Sym) {
+        match self
+            .by_effect
+            .entry(effect)
+            .or_insert_with(|| EffectOperationUses::Known(BTreeSet::new()))
+        {
+            EffectOperationUses::Known(operations) => {
+                operations.insert(operation);
+            }
+            EffectOperationUses::All => {}
+        }
+    }
+
+    fn insert_all(&mut self, effect: Sym) {
+        self.by_effect.insert(effect, EffectOperationUses::All);
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.open_row |= other.open_row;
+        for (effect, operations) in other.by_effect {
+            match (
+                self.by_effect
+                    .entry(effect)
+                    .or_insert_with(|| EffectOperationUses::Known(BTreeSet::new())),
+                operations,
+            ) {
+                (slot, EffectOperationUses::All) => *slot = EffectOperationUses::All,
+                (EffectOperationUses::Known(into), EffectOperationUses::Known(from)) => {
+                    into.extend(from);
+                }
+                (EffectOperationUses::All, EffectOperationUses::Known(_)) => {}
+            }
+        }
+    }
+
+    fn subtract(
+        mut self,
+        handled: &BTreeMap<Sym, BTreeSet<Sym>>,
+        exhaustive: &BTreeSet<Sym>,
+        masked: &BTreeSet<Sym>,
+    ) -> Self {
+        for (effect, operations) in handled {
+            if masked.contains(effect) {
+                continue;
+            }
+            let remove_effect = self
+                .by_effect
+                .get_mut(effect)
+                .is_some_and(|uses| match uses {
+                    EffectOperationUses::Known(uses) => {
+                        for operation in operations {
+                            uses.remove(operation);
+                        }
+                        uses.is_empty()
+                    }
+                    EffectOperationUses::All => exhaustive.contains(effect),
+                });
+            if remove_effect {
+                self.by_effect.remove(effect);
+            }
+        }
+        self
+    }
+
+    fn operations(&self) -> Vec<Sym> {
+        self.by_effect
+            .values()
+            .filter_map(|uses| match uses {
+                EffectOperationUses::Known(operations) => Some(operations),
+                EffectOperationUses::All => None,
+            })
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    fn opaque_effects(&self) -> Vec<Sym> {
+        self.by_effect
+            .iter()
+            .filter_map(|(effect, uses)| {
+                matches!(uses, EffectOperationUses::All).then_some(*effect)
+            })
+            .collect()
+    }
 }
 
 // One active handler while its body is checked: the effects its arms handle,
@@ -603,6 +1118,10 @@ struct SelfRef {
 struct RowScope {
     tail: u32,
     prefix: Vec<Label>,
+    // The contextual permission reported at a hole. This is separate from the
+    // mutable accumulator above: an explicitly pure context stays `{}` even
+    // while the accumulator is represented by a fresh row existential.
+    expected: EffRow,
 }
 
 // The concrete effects a declaration performs: the labels of its inferred
@@ -748,11 +1267,57 @@ pub fn check(prog: &Program<Core>) -> Result<Checked, TypeError> {
     check_seeded(prog, &TypecheckSeed::default())
 }
 
+/// Typecheck a program and retain typed-hole reports instead of rejecting them.
+/// This is deliberately separate from [`check`]: only the interpreter's explicit
+/// deferred-hole mode should call it.
+///
+/// # Errors
+/// Fails for ordinary type errors; typed holes are returned in [`Checked::holes`].
+pub fn check_allow_holes(prog: &Program<Core>) -> Result<Checked, TypeError> {
+    check_seeded_mode(prog, &TypecheckSeed::default(), false)
+}
+
+/// Typecheck while collecting each expression node's canonical inferred type
+/// and evaluation-effect row. This is deliberately crate-private: it is the
+/// analysis path for `dump typespans` and documentation tooltips, never an
+/// alternate compilation policy.
+pub(crate) fn check_tooltips(prog: &Program<Core>) -> Result<Checked, TypeError> {
+    // Tooltips are an observation surface, not a judgment: a typed hole is
+    // retained (its report carries the inferred type the hover shows) rather
+    // than promoted to the error `check` raises.
+    check_seeded_mode(prog, &TypecheckSeed::default(), true)
+}
+
 /// Typecheck one program against already checked dependency facts.
 ///
 /// # Errors
 /// Fails when the local program or its use of an imported fact does not typecheck.
 pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checked, TypeError> {
+    let checked = check_seeded_allow_holes(prog, seed)?;
+    if checked.holes.is_empty() {
+        Ok(checked)
+    } else {
+        Err(hole_error(&checked.holes))
+    }
+}
+
+/// Seeded form of [`check_allow_holes`].
+///
+/// # Errors
+/// Fails for ordinary type errors; typed holes themselves are returned in
+/// [`Checked::holes`].
+pub fn check_seeded_allow_holes(
+    prog: &Program<Core>,
+    seed: &TypecheckSeed,
+) -> Result<Checked, TypeError> {
+    check_seeded_mode(prog, seed, false)
+}
+
+fn check_seeded_mode(
+    prog: &Program<Core>,
+    seed: &TypecheckSeed,
+    track_tooltips: bool,
+) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, mut eff_ops, mut env) = env::build_data(prog)?;
     data.extend(seed.data.clone());
     ctors.extend(seed.ctors.clone());
@@ -798,8 +1363,12 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
     let path_res;
     let fixed;
     let span_types;
+    let tooltip_rows;
+    let handler_nodes;
+    let handler_residuals;
     let dicts;
     let constrained_final;
+    let mut holes;
     {
         let mut tc = Tc {
             ctx: (0..seeds).map(Entry::Ex).collect(),
@@ -813,8 +1382,15 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
             path_res: PathRes::new(),
             fixed: BTreeMap::new(),
             span_types: BTreeMap::new(),
+            track_tooltips,
+            pending_tooltip_rows: Vec::new(),
+            tooltip_rows: BTreeMap::new(),
+            touched_tooltip_rows: BTreeSet::new(),
+            tooltip_row_scaffolds: BTreeSet::new(),
             body_witness: BTreeMap::new(),
             pending: Vec::new(),
+            hole_sites: Vec::new(),
+            holes: Vec::new(),
             or_null_sites: Vec::new(),
             classes: &classes,
             instances: &instances,
@@ -830,6 +1406,10 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
             row_ctx: Vec::new(),
             cur_row: None,
             handler_stack: Vec::new(),
+            operation_uses: OperationUses::default(),
+            precise_calls: BTreeMap::new(),
+            handler_nodes: BTreeSet::new(),
+            handler_residuals: BTreeMap::new(),
         };
         // Check each strongly-connected component after its callee components, so
         // a forward reference (notably one into a stdlib module merged after the
@@ -909,9 +1489,14 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
         path_res = tc.path_res;
         fixed = tc.fixed;
         span_types = tc.span_types;
+        tooltip_rows = tc.tooltip_rows;
+        handler_nodes = tc.handler_nodes;
+        handler_residuals = tc.handler_residuals;
         dicts = tc.dicts;
         constrained_final = tc.constrained;
+        holes = tc.holes;
     }
+    holes.sort_by_key(|h| (h.start, h.end, h.name.clone()));
     // Restore declaration order: `infos` was filled in dependency order, but
     // consumers (signatures listing, snapshots) expect source order.
     {
@@ -927,7 +1512,17 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
         env,
         data,
         ctors,
-        facts: NodeFacts::from_tables(field_res, unboxed_field, path_res, fixed, span_types, dicts),
+        facts: NodeFacts::from_tables(
+            field_res,
+            unboxed_field,
+            path_res,
+            fixed,
+            span_types,
+            dicts,
+            tooltip_rows,
+            handler_nodes,
+            handler_residuals,
+        ),
         decls: infos,
         eff_ops,
         classes,
@@ -938,7 +1533,29 @@ pub fn check_seeded(prog: &Program<Core>, seed: &TypecheckSeed) -> Result<Checke
         constrained: constrained_final,
         seeds,
         warnings,
+        holes,
     })
+}
+
+/// Render the dedicated diagnostic corresponding to one or more hole reports.
+#[must_use]
+pub fn hole_error(holes: &[HoleReport]) -> TypeError {
+    let Some(first) = holes.first() else {
+        return TypeError::InternalInvariant {
+            msg: "typed-hole diagnostic requested without a hole".into(),
+        };
+    };
+    let mut error = ErrKind::TypedHole {
+        report: first.clone(),
+    }
+    .at(first.span());
+    for hole in &holes[1..] {
+        error = error.note(format!(
+            "also `?{}` at {}..{}: expected {} with effects {}",
+            hole.name, hole.start, hole.end, hole.expected, hole.effects
+        ));
+    }
+    error
 }
 
 /// # Errors
@@ -954,8 +1571,25 @@ pub fn infer_expr_env(
     extra: &Env,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects), TypeError> {
-    let (t, eff, _) = infer_expr_full(checked, extra, e)?;
-    Ok((t, eff))
+    let (t, eff, _, holes) = infer_expr_full(checked, extra, e)?;
+    if holes.is_empty() {
+        Ok((t, eff))
+    } else {
+        Err(hole_error(&holes))
+    }
+}
+
+/// Infer an expression while returning, rather than rejecting, typed holes.
+///
+/// # Errors
+/// Fails for ordinary type errors.
+pub fn infer_expr_allow_holes(
+    checked: &Checked,
+    extra: &Env,
+    e: &S<Expr<Core>>,
+) -> Result<(Type, Effects, Vec<HoleReport>), TypeError> {
+    let (ty, effects, _, holes) = infer_expr_full(checked, extra, e)?;
+    Ok((ty, effects, holes))
 }
 
 // Parse the canonical signature carried by a checked module interface.
@@ -973,6 +1607,22 @@ pub fn infer_expr_dicts(
     checked: &Checked,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects, DictTable), TypeError> {
+    let (ty, effects, dicts, holes) = infer_expr_full(checked, &Env::new(), e)?;
+    if holes.is_empty() {
+        Ok((ty, effects, dicts))
+    } else {
+        Err(hole_error(&holes))
+    }
+}
+
+/// Dictionary-producing expression inference for deferred interpreter holes.
+///
+/// # Errors
+/// Fails for ordinary type errors.
+pub fn infer_expr_dicts_allow_holes(
+    checked: &Checked,
+    e: &S<Expr<Core>>,
+) -> Result<(Type, Effects, DictTable, Vec<HoleReport>), TypeError> {
     infer_expr_full(checked, &Env::new(), e)
 }
 
@@ -980,7 +1630,7 @@ fn infer_expr_full(
     checked: &Checked,
     extra: &Env,
     e: &S<Expr<Core>>,
-) -> Result<(Type, Effects, DictTable), TypeError> {
+) -> Result<(Type, Effects, DictTable, Vec<HoleReport>), TypeError> {
     let mut env = checked.env.clone();
     env.extend(extra.iter().map(|(k, v)| (*k, v.clone())));
     // Re-inference shares `eff_ops`, whose var-state markers lowered to the
@@ -998,8 +1648,15 @@ fn infer_expr_full(
         path_res: PathRes::new(),
         fixed: BTreeMap::new(),
         span_types: BTreeMap::new(),
+        track_tooltips: false,
+        pending_tooltip_rows: Vec::new(),
+        tooltip_rows: BTreeMap::new(),
+        touched_tooltip_rows: BTreeSet::new(),
+        tooltip_row_scaffolds: BTreeSet::new(),
         body_witness: BTreeMap::new(),
         pending: Vec::new(),
+        hole_sites: Vec::new(),
+        holes: Vec::new(),
         or_null_sites: Vec::new(),
         classes: &checked.classes,
         instances: &checked.instances,
@@ -1015,13 +1672,19 @@ fn infer_expr_full(
         row_ctx: Vec::new(),
         cur_row: None,
         handler_stack: Vec::new(),
+        operation_uses: OperationUses::default(),
+        precise_calls: BTreeMap::new(),
+        handler_nodes: BTreeSet::new(),
+        handler_residuals: BTreeMap::new(),
     };
     let (t, effs) = tc.scoped_effects(|tc| {
         let t = tc.synth(&env, e)?;
         tc.resolve_all()?;
         Ok(t)
     })?;
+    tc.flush_holes();
     let t = tc.apply(&t);
     let g = tc.generalize(&env, &t);
-    Ok((g, effs, tc.dicts))
+    tc.holes.sort_by_key(|h| (h.start, h.end, h.name.clone()));
+    Ok((g, effs, tc.dicts, tc.holes))
 }

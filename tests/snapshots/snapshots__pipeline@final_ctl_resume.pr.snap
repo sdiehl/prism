@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/final_ctl_resume.pr
 ---
@@ -102,6 +103,7 @@ Program {
                                     },
                                 ),
                             ],
+                            Exhaustive,
                         ),
                         span: 185..265,
                     },

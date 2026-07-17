@@ -30,9 +30,9 @@ Seq.to_list(Seq.filter(Seq.map(Seq.range(1, 100), \(x) -> x * x), even))
 
 A selective `import Sequence (unfold, iterate)` also works for names that do not clash with the prelude.
 
-## Fusion status (baseline: unfused)
+## Fusion and allocation
 
-A pull pipeline is correct and constant-space per stage, but on the current optimizer it is NOT yet fused: each transformer stage allocates one `SMore` cons and one step thunk per element, so a k-stage pipeline over n elements allocates ~2*k*n heap cells (`PRISM_ALLOC_STATS` counts them; the algebraic-effect `EOp` counter reads zero here because a pull sequence performs no effects). The `tests/perf_gate.rs` pull-allocation cases pin those current numbers as the baseline; a dedicated stream-fusion pass (Coutts-style stream/unstream with case-of-case) is the separate work that ratchets them toward O(1). For contrast, the eager `Data.List` surface already fuses to ~1 cell per element with FBIP reuse recycling the uniquely-owned spine, so it is the faster tier today when strict, non-incremental traversal is acceptable; pull `Sequence` earns its keep on laziness (early exit through `take`/`find`, infinite producers) rather than on allocation, until fusion lands.
+A pull pipeline is correct and constant-space per stage. At `-O1`, each transformer stage allocates one `SMore` cons and one step thunk per element. At `-O2`, stream fusion collapses the supported `range`/`map`/`filter`/`take` and fold pipelines through the module boundary, so they allocate no intermediate step cells. The performance gates pin that zero slope; shapes outside the recognizer retain the per-stage allocation. The algebraic-effect `EOp` counter remains zero because pulling a sequence performs no effects. The eager `Data.List` surface fuses through FBIP reuse and remains the natural choice for strict traversal, while `Sequence` provides early exit and infinite producers.
 
 ## Types
 
@@ -52,6 +52,15 @@ empty : forall a. () -> (Unit) -> Sequence.Step(a)
 
 The empty sequence: yields nothing.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.empty())
+```
+
+```output
+[]
+```
+
 ### `singleton`
 
 ```prism,sig,h-af74138faf714cb1995b4e902853c7f9b10178bd6109124c9af645bbccb8ede3
@@ -59,6 +68,15 @@ singleton : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
 The one-element sequence yielding `x`.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.singleton(42))
+```
+
+```output
+[42]
+```
 
 ### `range`
 
@@ -68,6 +86,15 @@ range : (Int, Int) -> (Unit) -> Sequence.Step(Int)
 
 The ascending integers in `[lo, hi)`. Self-recursive: the continuation is the next `range`, so no element is built until pulled.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.range(1, 5))
+```
+
+```output
+[1, 2, 3, 4]
+```
+
 ### `from_list`
 
 ```prism,sig,h-3f5f117b07a28be270cbdb2ebffba4b78ee7243a2c42ffc9e1c23d1063309cc0
@@ -75,6 +102,15 @@ from_list : forall a. (List(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
 The container boundary in: the elements of list `xs`, in order.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.from_list([1, 2, 3]))
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `iterate`
 
@@ -84,6 +120,15 @@ iterate : forall a. (a, (a) -> a) -> (Unit) -> Sequence.Step(a)
 
 The infinite sequence `x, f(x), f(f(x)), ...`. Bound it with `take`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.take(Seq.iterate(1, \(x) -> x * 2), 4))
+```
+
+```output
+[1, 2, 4, 8]
+```
+
 ### `repeat`
 
 ```prism,sig,h-fadeb002409772362aa540fb6fe0bd7d334e1a0645f7b54be20fb4d283ee461e
@@ -91,6 +136,15 @@ repeat : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
 The infinite sequence of `x` repeated. Bound it with `take`.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.take(Seq.repeat(7), 3))
+```
+
+```output
+[7, 7, 7]
+```
 
 ### `unfold`
 
@@ -100,6 +154,15 @@ unfold : forall a b. (a, (a) -> Option((b, a))) -> (Unit) -> Sequence.Step(b)
 
 The generator producer: yield `x` for each `Some((x, seed'))` that `step` returns from the running seed, stopping at `None`. Every finite producer is a special case; on pull `Step` a generator is just a fold over the seed, needing no coroutine or handler.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.unfold(1, \(n) -> if n <= 3 then Some((n, n + 1)) else None))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `map`
 
 ```prism,sig,h-f7b5ef49f33f5b41ca2135b41b29bf290c2ffa333f0f5f5f8e29415fb4de7464
@@ -107,6 +170,15 @@ map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> b) -> (Unit) -> Sequence.S
 ```
 
 Apply `f` to every element. Type-changing: `Seq(a) -> Seq(b)`.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.map(Seq.range(1, 4), \(x) -> x * x))
+```
+
+```output
+[1, 4, 9]
+```
 
 ### `filter`
 
@@ -116,6 +188,15 @@ filter : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequen
 
 Keep only the elements satisfying `p`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.filter(Seq.range(1, 7), \(x) -> mod(x, 2) == 0))
+```
+
+```output
+[2, 4, 6]
+```
+
 ### `filter_map`
 
 ```prism,sig,h-bb4f155156ab254f2c081189e99ed3552d5c295e60579eca61b19b50a5e4eb04
@@ -123,6 +204,15 @@ filter_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> Option(b)) -> (Unit
 ```
 
 Map and filter in one pass: yield `y` for each `f(x) == Some(y)`, dropping the `None`s.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.filter_map(Seq.range(1, 5), \(x) -> if x > 2 then Some(x * 10) else None))
+```
+
+```output
+[30, 40]
+```
 
 ### `append`
 
@@ -132,6 +222,15 @@ append : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) -> (
 
 Concatenate two sequences: all of `s`, then all of `t`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.append(Seq.range(1, 3), Seq.range(10, 12)))
+```
+
+```output
+[1, 2, 10, 11]
+```
+
 ### `flat_map`
 
 ```prism,sig,h-fc3d3604cb8dc1e02dffbc7458efb6f07fd29756f350fdc4551a8d21f2554d39
@@ -139,6 +238,15 @@ flat_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> (Unit) -> Sequence.St
 ```
 
 For each element `x`, splice in the sequence `f(x)`.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.flat_map(Seq.range(1, 4), \(x) -> Seq.range(0, x)))
+```
+
+```output
+[0, 0, 1, 0, 1, 2]
+```
 
 ### `take`
 
@@ -148,6 +256,15 @@ take : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 
 The first `n` elements, stopping the producer once the budget is spent.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.take(Seq.range(1, 100), 3))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `drop`
 
 ```prism,sig,h-94055a5e74a19397fb58238bbc3348ed17a49309953f12a198ddc43792a1a4ad
@@ -155,6 +272,15 @@ drop : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 ```
 
 Skip the first `n` elements, yielding the rest.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.drop(Seq.range(1, 6), 2))
+```
+
+```output
+[3, 4, 5]
+```
 
 ### `take_while`
 
@@ -164,6 +290,15 @@ take_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Se
 
 The longest prefix whose elements satisfy `p`; stops at the first failure.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.take_while(Seq.range(1, 10), \(x) -> x < 4))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `drop_while`
 
 ```prism,sig,h-9603f5e95d4fc1669dce56c9374d83e3fa2267a7f954fedce32d1304fe391181
@@ -171,6 +306,15 @@ drop_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Se
 ```
 
 Drop the longest prefix satisfying `p`, yielding the rest.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.drop_while(Seq.range(1, 6), \(x) -> x < 3))
+```
+
+```output
+[3, 4, 5]
+```
 
 ### `dedup`
 
@@ -180,6 +324,15 @@ dedup : forall e1 a. ((Unit) -> Sequence.Step(Int) ! {e1}) -> (a) -> Sequence.St
 
 Drop consecutive duplicates, keeping the first of each run (needs `Eq(a)`). Left unsigned so the `Eq(a)` constraint is inferred from `==`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.dedup(Seq.from_list([1, 1, 2, 2, 2, 3])))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `enumerate`
 
 ```prism,sig,h-136457fb35b8c7a361750a4d922fa00026885decc32bb5c00d3e0d82bf63d53f
@@ -187,6 +340,15 @@ enumerate : forall a. ((Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step((I
 ```
 
 Pair each element with its zero-based index, yielding `(i, x)`.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.enumerate(Seq.from_list(["a", "b"])))
+```
+
+```output
+[(0, a), (1, b)]
+```
 
 ### `scan`
 
@@ -196,6 +358,15 @@ scan : forall a b. ((Unit) -> Sequence.Step(a), b, (b, a) -> b) -> (Unit) -> Seq
 
 The running left-fold, streamed: yield `z`, then each successive accumulator.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.scan(Seq.range(1, 4), 0, \(acc, x) -> acc + x))
+```
+
+```output
+[0, 1, 3, 6]
+```
+
 ### `interleave`
 
 ```prism,sig,h-24beee4d1d4269124670c9d322bf20ad879f93977a27e93f5d20727fa46d6b4e
@@ -203,6 +374,15 @@ interleave : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) 
 ```
 
 Alternate elements of `s` and `t` (`s0, t0, s1, t1, ...`); when one runs out, yield the whole remainder of the other. Streamed, no materialization.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.interleave(Seq.range(1, 4), Seq.range(10, 12)))
+```
+
+```output
+[1, 10, 2, 11, 3]
+```
 
 ### `zip`
 
@@ -212,6 +392,15 @@ zip : forall a b. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b)) -> (U
 
 Pair two sequences element-wise, stopping at the shorter. Genuinely heterogeneous: `Seq(a)` and `Seq(b)` yield `Seq((a, b))`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.zip(Seq.range(1, 4), Seq.from_list(["a", "b", "c"])))
+```
+
+```output
+[(1, a), (2, b), (3, c)]
+```
+
 ### `zip_with`
 
 ```prism,sig,h-2564e1bce7fda61915b8d9208c9ef7aa0b258172e4b985007ebe9a16b173fc85
@@ -219,6 +408,15 @@ zip_with : forall a b c. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b)
 ```
 
 Combine two sequences element-wise with `f`, stopping when either runs out. Heterogeneous in both operand types.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.zip_with(Seq.range(1, 4), Seq.range(10, 13), \(a, b) -> a + b))
+```
+
+```output
+[11, 13, 15]
+```
 
 ### `chunk`
 
@@ -228,6 +426,15 @@ chunk : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(L
 
 Group elements into consecutive lists of length `n` (the final chunk may be shorter). Pulls one group at a time, holding only the current group.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.chunk(Seq.range(1, 6), 2))
+```
+
+```output
+[[1, 2], [3, 4], [5]]
+```
+
 ### `window`
 
 ```prism,sig,h-3a0da2c9a1b8a976d58b415b9a5938268e4ae22684565850776aebdd23f66009
@@ -235,6 +442,15 @@ window : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(
 ```
 
 Every contiguous length-`n` sliding window, in order. Fewer than `n` elements yields nothing. Holds one window (`n` elements) at a time.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.window(Seq.range(1, 5), 2))
+```
+
+```output
+[[1, 2], [2, 3], [3, 4]]
+```
 
 ### `fold`
 
@@ -244,6 +460,15 @@ fold : forall a b. ((Unit) -> Sequence.Step(b), a, (a, b) -> a) -> a
 
 Left-fold the sequence with `f` from initial accumulator `z`.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.fold(Seq.range(1, 5), 0, \(acc, x) -> acc + x)
+```
+
+```output
+10
+```
+
 ### `for_each`
 
 ```prism,sig,h-b63f40aad5960bcc848a4541651ddc44662ad02806b7851d4dbd25dbff882880
@@ -251,6 +476,17 @@ for_each : forall e0 a. ((Unit) -> Sequence.Step(a), (a) -> Unit ! {e0}) -> Unit
 ```
 
 Run `f` for its effects on each element, in order. Effect-polymorphic: `f` runs in the ambient row (no handler intervenes), so `for_each(s, \(x) -> println(x))` threads `IO` out. The explicit `{| e}` row matters: unsigned, the self-recursion would infer `f` as pure and reject an effectful body.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.for_each(Seq.range(1, 4), \(x) -> println(show(x)))
+```
+
+```output
+1
+2
+3
+```
 
 ### `sum`
 
@@ -260,6 +496,15 @@ sum : ((Unit) -> Sequence.Step(Int)) -> Int
 
 Sum a sequence of integers.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.sum(Seq.range(1, 5))
+```
+
+```output
+10
+```
+
 ### `product`
 
 ```prism,sig,h-bb0feca86b3c542bff90a8402dfa851dbf8a9e4a31615c9cfae6cd32f52f3b5d
@@ -267,6 +512,15 @@ product : ((Unit) -> Sequence.Step(Int)) -> Int
 ```
 
 Product of a sequence of integers.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.product(Seq.range(1, 5))
+```
+
+```output
+24
+```
 
 ### `count`
 
@@ -276,6 +530,15 @@ count : forall a. ((Unit) -> Sequence.Step(a)) -> Int
 
 The number of elements.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.count(Seq.range(1, 100))
+```
+
+```output
+99
+```
+
 ### `to_list`
 
 ```prism,sig,h-dd04c4141822df7a1deef31532219e85fc36072f5b4b729db77df3c6a4792dc3
@@ -283,6 +546,15 @@ to_list : forall a. ((Unit) -> Sequence.Step(a)) -> List(a)
 ```
 
 Collect the sequence into a list, in order. The container boundary out.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.to_list(Seq.map(Seq.range(1, 4), \(x) -> x + 100))
+```
+
+```output
+[101, 102, 103]
+```
 
 ### `head`
 
@@ -292,6 +564,15 @@ head : forall e0 a. ((Unit) -> Sequence.Step(a) ! {e0}) -> Option(a) ! {e0}
 
 The first element, or `None` if the sequence is empty.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.head(Seq.range(5, 10))
+```
+
+```output
+Some(5)
+```
+
 ### `find`
 
 ```prism,sig,h-01239cc756a2b7ccd8b2f55e15f37a3a881f920f8b2923080c3db3cfdc00a8e5
@@ -299,6 +580,15 @@ find : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Option(a)
 ```
 
 The first element satisfying `p`, or `None`; stops the producer at the match.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.find(Seq.range(1, 100), \(x) -> x > 10)
+```
+
+```output
+Some(11)
+```
 
 ### `any`
 
@@ -308,6 +598,15 @@ any : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 
 True when some element satisfies `p`; short-circuits.
 
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.any(Seq.range(1, 5), \(x) -> x == 3)
+```
+
+```output
+true
+```
+
 ### `all`
 
 ```prism,sig,h-9ba254ddd85b91c7bde73f58c0b2f3ccab7751a25e84defe313b1a10fce84379
@@ -315,6 +614,15 @@ all : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 ```
 
 True when every element satisfies `p`; short-circuits on the first failure.
+
+```prism,mod=Sequence
+# import Sequence as Seq
+Seq.all(Seq.range(1, 5), \(x) -> x < 10)
+```
+
+```output
+true
+```
 
 ### `from_bytes`
 

@@ -11,10 +11,22 @@
 //! `prism docs --test` extracts every example and executes it, keeping the
 //! documentation compilable and in sync with the code. Non-`prism` fences
 //! (```` ```text ````, ```` ```console ````) are never treated as doctests.
+//!
+//! Two conveniences keep examples down to their intuition-pump line:
+//!
+//! - **Auto-import.** An example runs with its enclosing module glob-imported
+//!   (`import Data.Tensor (..)` for an example in `Data.Tensor`), so the names
+//!   being documented are simply in scope. The prelude documents itself and
+//!   needs no import; an example that already imports its module is left alone
+//!   (a duplicate glob would be harmless, but the intent reads better).
+//! - **Hidden lines.** A code line beginning `# ` compiles as part of the
+//!   example but never appears in rendered documentation: setup a reader does
+//!   not need (an extra binding, a sample value) stays out of the page.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::driver::{example_program, interpret_at, with_prelude};
+use crate::driver::{example_program, interpret_on, with_prelude};
 use crate::names::ENTRY_POINT;
 use crate::resolve::Root;
 
@@ -28,6 +40,17 @@ pub(crate) const FENCE_OUTPUT: &str = "output";
 // Fence attributes that make a `prism` block a non-runnable reference block
 // (generated signatures / declarations), never a doctest.
 const REFERENCE_ATTRS: [&str; 2] = ["sig", "def"];
+/// The hidden-line marker inside a ```` ```prism ```` fence: the line compiles
+/// but is stripped from rendered docs (the doc-example convention Rust uses).
+pub(crate) const HIDDEN_PREFIX: &str = "# ";
+/// The fence attribute naming an example's enclosing module
+/// (```` ```prism,mod=Data.Map ````). Stamped by the page renderer and consumed
+/// by the book preprocessor, so both rebuild the same runnable program the
+/// doctest runner checks.
+pub(crate) const MOD_ATTR: &str = "mod=";
+/// The prelude's dotted module name in doc specs; it documents itself, so its
+/// examples never get an auto-import.
+pub(crate) const PRELUDE_DOTTED: &str = "Prelude";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Mode {
@@ -37,12 +60,85 @@ pub(crate) enum Mode {
     CompileFail,
 }
 
-/// One runnable example lifted from a docstring, tagged with where it came from.
+/// One runnable example lifted from a docstring, tagged with where it came from
+/// and the dotted module it documents (empty when none, e.g. an index page).
 #[derive(Clone, Debug)]
 pub(crate) struct Example {
     pub origin: String,
+    pub module: String,
     pub code: String,
     pub mode: Mode,
+}
+
+/// Strip the hidden-line marker: `# code` compiles as `code`, a lone `#` as a
+/// blank line, anything else unchanged. The marker sits at column 0 of the
+/// code line and any code indentation follows it (`# ` then `  body`), so the
+/// layout-sensitive indent survives the strip.
+pub(crate) fn unhide(line: &str) -> &str {
+    line.strip_prefix(HIDDEN_PREFIX)
+        .map_or_else(|| if line == "#" { "" } else { line }, |code| code)
+}
+
+/// Whether a code line is hidden from rendered docs (see [`HIDDEN_PREFIX`]).
+pub(crate) fn is_hidden(line: &str) -> bool {
+    line == "#" || line.starts_with(HIDDEN_PREFIX)
+}
+
+/// Split an example into its leading `import` lines and the remaining code.
+/// Imports must sit at the top of a program, so a doctest's own imports
+/// (typically hidden `# import X (..)` preamble) are hoisted above the
+/// implicit-`main` wrap rather than swallowed into the body. Returns the count
+/// of leading lines consumed (imports and the blank lines between them) and the
+/// remaining code.
+pub(crate) fn split_imports(code: &str) -> (usize, String) {
+    let lines: Vec<&str> = code.lines().collect();
+    let mut last_import = None;
+    for (index, line) in lines.iter().enumerate() {
+        let t = line.trim();
+        if t.starts_with("import ") {
+            last_import = Some(index);
+        } else if !t.is_empty() {
+            break;
+        }
+    }
+    let Some(last) = last_import else {
+        return (0, code.to_string());
+    };
+    let mut rest = lines[last + 1..].join("\n");
+    if code.ends_with('\n') {
+        rest.push('\n');
+    }
+    (last + 1, rest)
+}
+
+/// Add the enclosing module import used by a doctest without adding its
+/// implicit `main`. The browser stores this source beside the concise visible
+/// snippet and performs the final wrapping when the reader runs it.
+pub(crate) fn imported(module: &str, code: &str) -> String {
+    if module.is_empty() || module == PRELUDE_DOTTED || code.contains(&format!("import {module}")) {
+        return code.to_string();
+    }
+    format!("import {module} (..)\n\n{code}")
+}
+
+/// The program a doctest actually runs: the example's own leading imports, then
+/// the rest wrapped as an implicit `main` where needed, all under the enclosing
+/// module's glob import. Imports go outside the wrap (an import inside a
+/// function body would not parse); the module import is skipped for the
+/// prelude, for module-less origins, and when the example already imports the
+/// module itself.
+pub(crate) fn runnable(module: &str, code: &str) -> String {
+    let imported = imported(module, code);
+    let (consumed, rest) = split_imports(&imported);
+    let mut own = String::new();
+    for line in imported
+        .lines()
+        .take(consumed)
+        .filter(|line| !line.trim().is_empty())
+    {
+        writeln!(own, "{line}").expect("writing to a String cannot fail");
+    }
+    format!("{own}{}", example_program(&rest))
 }
 
 /// The result of running a batch of doctests.
@@ -85,8 +181,10 @@ pub(crate) fn is_reference_fence(info: &str) -> bool {
 }
 
 /// Pull every ```` ```prism ```` fenced block out of one docstring, tagging each
-/// with `origin` for diagnostics.
-pub(crate) fn examples_in(origin: &str, doc: &str) -> Vec<Example> {
+/// with `origin` for diagnostics and `module` (the enclosing dotted module) for
+/// the auto-import. Hidden-line markers are stripped here, so `code` is always
+/// the compilable text.
+pub(crate) fn examples_in(origin: &str, module: &str, doc: &str) -> Vec<Example> {
     let mut out = Vec::new();
     let mut lines = doc.lines();
     while let Some(line) = lines.next() {
@@ -103,12 +201,13 @@ pub(crate) fn examples_in(origin: &str, doc: &str) -> Vec<Example> {
             if body.trim_start().starts_with("```") {
                 break;
             }
-            code.push_str(body);
+            code.push_str(unhide(body));
             code.push('\n');
         }
         if is_doctest {
             out.push(Example {
                 origin: origin.to_string(),
+                module: module.to_string(),
                 code,
                 mode,
             });
@@ -117,10 +216,9 @@ pub(crate) fn examples_in(origin: &str, doc: &str) -> Vec<Example> {
     out
 }
 
-/// Compile (and, where applicable, run) each example, collecting a report. Type
-/// checking resolves against `roots`; running an example that defines `main`
-/// resolves imports relative to `base`.
-pub(crate) fn run(examples: &[Example], roots: &[Root], base: &Path) -> Report {
+/// Compile (and, where applicable, run) each example against the same explicit
+/// module search path.
+pub(crate) fn run(examples: &[Example], roots: &[Root], _base: &Path) -> Report {
     let mut r = Report::default();
     for ex in examples {
         if ex.mode == Mode::Ignore {
@@ -129,7 +227,7 @@ pub(crate) fn run(examples: &[Example], roots: &[Root], base: &Path) -> Report {
         }
         // An example without `main` (a bare expression or `let`-block) is wrapped
         // as the body of an implicit `main`, so it runs like a REPL line.
-        let full = with_prelude(&example_program(&ex.code));
+        let full = with_prelude(&runnable(&ex.module, &ex.code));
         let checked = check_quiet(&full, roots);
         if ex.mode == Mode::CompileFail {
             match checked {
@@ -148,7 +246,7 @@ pub(crate) fn run(examples: &[Example], roots: &[Root], base: &Path) -> Report {
             Ok(checked) => {
                 let has_main = checked.decls.iter().any(|d| d.name == ENTRY_POINT);
                 if ex.mode == Mode::Check && has_main {
-                    match interpret_at(&full, base) {
+                    match interpret_on(&full, roots) {
                         Ok(_) => r.passed += 1,
                         Err(e) => r
                             .failures
@@ -178,7 +276,7 @@ pub(crate) fn ran_outputs(
         if ex.mode != Mode::Check {
             continue;
         }
-        if let Ok(lines) = actual_output(&ex.code, roots, base) {
+        if let Ok(lines) = actual_output(&ex.module, &ex.code, roots, base) {
             out.push((ex.origin.clone(), lines.join("\n")));
         }
     }
@@ -192,16 +290,17 @@ pub(crate) fn ran_outputs(
 /// compile/run failure. Shared by the expect-block checker and `--accept`
 /// rewriter (`super::accept`) so both agree on what "actual output" means.
 pub(crate) fn actual_output(
+    module: &str,
     code: &str,
     roots: &[Root],
-    base: &Path,
+    _base: &Path,
 ) -> Result<Vec<String>, String> {
-    let full = with_prelude(&example_program(code));
+    let full = with_prelude(&runnable(module, code));
     let checked = check_quiet(&full, roots).map_err(|e| format!("compile error: {e}"))?;
     if !checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
         return Err("example has no `main` and no expression to run".into());
     }
-    let run = interpret_at(&full, base).map_err(|e| format!("run error: {e}"))?;
+    let run = interpret_on(&full, roots).map_err(|e| format!("run error: {e}"))?;
     let text = if run.term.is_empty() {
         run.value.show()
     } else {

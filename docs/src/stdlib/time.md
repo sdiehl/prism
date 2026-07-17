@@ -46,17 +46,31 @@ A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
 nanos_per_sec : () -> Int
 ```
 
+Nanoseconds in one second (the `Duration` scale factor for `seconds`).
+
+```prism,mod=Time
+nanos_per_sec()
+```
+
+```output
+1000000000
+```
+
 ### `nanos_per_milli`
 
 ```prism,sig,h-3e9da0b72233cbc671737eff6c08561e4160f1bab33815f46a19f46c8fe89bc1
 nanos_per_milli : () -> Int
 ```
 
+Nanoseconds in one millisecond.
+
 ### `nanos_per_micro`
 
 ```prism,sig,h-b53a496fc633478f0f6dc42e2a9a870cf5ba9b49de5524d4a70ef4e76fe00968
 nanos_per_micro : () -> Int
 ```
+
+Nanoseconds in one microsecond.
 
 ### `dur_nanos`
 
@@ -65,6 +79,14 @@ dur_nanos : (Time.Duration) -> Int
 ```
 
 The span in whole nanoseconds.
+
+```prism,mod=Time
+dur_nanos(seconds(2))
+```
+
+```output
+2000000000
+```
 
 ### `nanos`
 
@@ -82,6 +104,14 @@ micros : (Int) -> Time.Duration
 
 A duration of `n` microseconds.
 
+```prism,mod=Time
+dur_nanos(micros(3))
+```
+
+```output
+3000
+```
+
 ### `millis`
 
 ```prism,sig,h-28200c6d0e094e1561895f4174976ef2874d509413f0220e62bdef617fbf3607
@@ -98,6 +128,14 @@ seconds : (Int) -> Time.Duration
 
 A duration of `n` seconds.
 
+```prism,mod=Time
+dur_nanos(seconds(1))
+```
+
+```output
+1000000000
+```
+
 ### `minutes`
 
 ```prism,sig,h-6360729a62ed435f269d8d043428efa9f890df340a3d2ef17c405020bbc51a7e
@@ -105,6 +143,14 @@ minutes : (Int) -> Time.Duration
 ```
 
 A duration of `n` minutes.
+
+```prism,mod=Time
+dur_as_secs(minutes(2))
+```
+
+```output
+120
+```
 
 ### `hours`
 
@@ -114,6 +160,14 @@ hours : (Int) -> Time.Duration
 
 A duration of `n` hours.
 
+```prism,mod=Time
+dur_as_secs(hours(1))
+```
+
+```output
+3600
+```
+
 ### `dur_as_secs`
 
 ```prism,sig,h-0f135a31bdeb3ae2bbb90a2deb900365ccebffb040fe4a477efe15717220b40b
@@ -121,6 +175,14 @@ dur_as_secs : (Time.Duration) -> Int
 ```
 
 The whole-second part of a duration (truncated toward zero).
+
+```prism,mod=Time
+dur_as_secs(dur_add(seconds(90), millis(500)))
+```
+
+```output
+90
+```
 
 ### `dur_as_millis`
 
@@ -130,6 +192,14 @@ dur_as_millis : (Time.Duration) -> Int
 
 The whole-millisecond part of a duration (truncated toward zero).
 
+```prism,mod=Time
+dur_as_millis(seconds(2))
+```
+
+```output
+2000
+```
+
 ### `dur_add`
 
 ```prism,sig,h-aae31de146d51d19a6211b7f2fa1bc54318e1fcd255889ef6417d06eb864df0d
@@ -137,6 +207,14 @@ dur_add : (Time.Duration, Time.Duration) -> Time.Duration
 ```
 
 Sum of two durations.
+
+```prism,mod=Time
+dur_nanos(dur_add(seconds(1), millis(500)))
+```
+
+```output
+1500000000
+```
 
 ### `dur_sub`
 
@@ -146,6 +224,14 @@ dur_sub : (Time.Duration, Time.Duration) -> Time.Duration
 
 Difference of two durations (`a - b`).
 
+```prism,mod=Time
+dur_nanos(dur_sub(seconds(2), millis(500)))
+```
+
+```output
+1500000000
+```
+
 ### `dur_scale`
 
 ```prism,sig,h-fa09df9664d13fce70b778bfdadf3f9284cc5b5feec9aab3601f7c01b96614f0
@@ -153,6 +239,14 @@ dur_scale : (Time.Duration, Int) -> Time.Duration
 ```
 
 A duration scaled by an integer factor.
+
+```prism,mod=Time
+dur_nanos(dur_scale(seconds(1), 3))
+```
+
+```output
+3000000000
+```
 
 ### `dur_negate`
 
@@ -162,6 +256,14 @@ dur_negate : (Time.Duration) -> Time.Duration
 
 A duration with the sign flipped.
 
+```prism,mod=Time
+dur_nanos(dur_negate(seconds(1)))
+```
+
+```output
+-1000000000
+```
+
 ### `dur_cmp`
 
 ```prism,sig,h-079d85906375b4a86c39e0bae086f77032e54c84f8e7f780bd2d3dab5b2ff568
@@ -169,6 +271,14 @@ dur_cmp : (Time.Duration, Time.Duration) -> Int
 ```
 
 Ordering of two durations (`-1`, `0`, `1`).
+
+```prism,mod=Time
+dur_cmp(seconds(1), seconds(2))
+```
+
+```output
+-1
+```
 
 ### `dur_eq`
 
@@ -178,6 +288,14 @@ dur_eq : (Time.Duration, Time.Duration) -> Bool
 
 True when the two durations are equal.
 
+```prism,mod=Time
+dur_eq(millis(1000), seconds(1))
+```
+
+```output
+true
+```
+
 ### `instant_nanos`
 
 ```prism,sig,h-c48597abd494d09397625045ec13d60cf3023ebee0e4a1ff776e216141ebc307
@@ -185,6 +303,14 @@ instant_nanos : (Time.Instant) -> Int
 ```
 
 The raw monotonic reading in nanoseconds. The absolute value is meaningless across processes; subtract two instants to get an elapsed `Duration`.
+
+```prism,mod=Time
+instant_nanos(Instant(500))
+```
+
+```output
+500
+```
 
 ### `elapsed`
 
@@ -194,6 +320,14 @@ elapsed : (Time.Instant, Time.Instant) -> Time.Duration
 
 The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not `between`, to leave the prelude's numeric `between` range test unshadowed.
 
+```prism,mod=Time
+dur_nanos(elapsed(Instant(100), Instant(450)))
+```
+
+```output
+350
+```
+
 ### `instant_add`
 
 ```prism,sig,h-e4c31d82b94747aa7503853ce496d12a36f4faaac83f4cbb92bde2c77428122b
@@ -202,6 +336,14 @@ instant_add : (Time.Instant, Time.Duration) -> Time.Instant
 
 An instant advanced by a duration.
 
+```prism,mod=Time
+instant_nanos(instant_add(Instant(100), micros(1)))
+```
+
+```output
+1100
+```
+
 ### `wall_nanos`
 
 ```prism,sig,h-c9719d4836df7f1a3d8a1f8afba8cbdac35443cd8c2ecb47a18b5adb79d0fb02
@@ -209,6 +351,14 @@ wall_nanos : (Time.Wall) -> Int
 ```
 
 The reading in nanoseconds since the Unix epoch (UTC).
+
+```prism,mod=Time
+wall_nanos(wall_of_nanos(1500000000))
+```
+
+```output
+1500000000
+```
 
 ### `wall_of_nanos`
 
@@ -226,6 +376,14 @@ wall_unix_secs : (Time.Wall) -> Int
 
 Whole seconds since the Unix epoch (truncated toward zero).
 
+```prism,mod=Time
+wall_unix_secs(wall_of_nanos(1500000000))
+```
+
+```output
+1
+```
+
 ### `wall_add`
 
 ```prism,sig,h-04a6b3518830c193c927fd9b8ff3a08bb3496c258b409b17fb95ae558dcc26bc
@@ -233,6 +391,14 @@ wall_add : (Time.Wall, Time.Duration) -> Time.Wall
 ```
 
 A wall reading advanced by a duration.
+
+```prism,mod=Time
+wall_nanos(wall_add(wall_of_nanos(0), seconds(1)))
+```
+
+```output
+1000000000
+```
 
 ### `wall_diff`
 
@@ -242,6 +408,14 @@ wall_diff : (Time.Wall, Time.Wall) -> Time.Duration
 
 The span from `earlier` to `later` wall readings (`later - earlier`).
 
+```prism,mod=Time
+dur_nanos(wall_diff(wall_of_nanos(0), wall_of_nanos(500)))
+```
+
+```output
+500
+```
+
 ### `wall_cmp`
 
 ```prism,sig,h-a5983e29c09398a459aa75c6427d1f12f85539e65d03dbaa32d10c189ef19b4a
@@ -249,6 +423,14 @@ wall_cmp : (Time.Wall, Time.Wall) -> Int
 ```
 
 Ordering of two wall readings (`-1`, `0`, `1`).
+
+```prism,mod=Time
+wall_cmp(wall_of_nanos(1), wall_of_nanos(2))
+```
+
+```output
+-1
+```
 
 ### `mono_clock`
 
@@ -258,6 +440,10 @@ mono_clock : () -> Time.Instant ! {Concurrent.Clock}
 
 Read the monotonic clock. Deterministic under `run_clock`, real (and recorded) under `run_clock_real`.
 
+```prism,no_run,mod=Time
+run_clock_real(\() -> mono_clock())
+```
+
 ### `wall_clock`
 
 ```prism,sig,h-f34519492ab28f197cdc108c5003cceab488b678b2e2c4af6512b0b638363189
@@ -265,6 +451,10 @@ wall_clock : () -> Time.Wall ! {Concurrent.Clock}
 ```
 
 Read the wall clock. Deterministic under `run_clock`, real (and recorded) under `run_clock_real`.
+
+```prism,no_run,mod=Time
+format_rfc3339(run_clock_real(\() -> wall_clock()))
+```
 
 ### `run_clock_real`
 
@@ -274,6 +464,10 @@ run_clock_real : forall e0 a. (() -> a ! {Concurrent.Clock, IO, e0}) -> a ! {IO,
 
 Run `action` against the real OS clock. `now`/`sleep` still thread a virtual counter (they are the scheduler's logical time), so this is a superset of `run_clock`: `wall_now` and `mono_now` read the real clock through the `prim_*` builtins, each a recorded observation, and everything else stays virtual.
 
+```prism,no_run,mod=Time
+run_clock_real(\() -> wall_unix_secs(wall_clock()))
+```
+
 ### `format_rfc3339`
 
 ```prism,sig,h-0090ab1abb7645499c9c6ed5ffb047927fba7f223e17ec7621e5e51505601de2
@@ -282,6 +476,14 @@ format_rfc3339 : (Time.Wall) -> String
 
 Format a wall reading as an RFC 3339 timestamp in UTC, e.g. `2026-07-04T12:34:56Z`. A nonzero sub-second part is emitted as exactly nine fractional digits (nanoseconds); an exact second emits no fraction. The output is canonical: one reading formats to one string, so timestamps are comparable and hashable as text.
 
+```prism,mod=Time
+format_rfc3339(wall_of_nanos(0))
+```
+
+```output
+1970-01-01T00:00:00Z
+```
+
 ### `parse_rfc3339`
 
 ```prism,sig,h-4f76facf9f9018ec5fb286b558b0910d5fea2ac1fafd2c703d0648e9d73d326e
@@ -289,3 +491,11 @@ parse_rfc3339 : (String) -> Option(Time.Wall)
 ```
 
 Parse an RFC 3339 timestamp to a wall reading in UTC, or `None` if the string is not a well-formed `YYYY-MM-DDTHH:MM:SS[.frac](Z|(+|-)HH:MM)`. The date/time separators are checked, field ranges are validated, an offset is folded into UTC, and any trailing input is rejected, so the parser is total: a malformed or overlong string is `None`, never a partial or wrapped value.
+
+```prism,mod=Time
+wall_unix_secs(unwrap_or(wall_of_nanos(0), parse_rfc3339("2000-01-01T00:00:00Z")))
+```
+
+```output
+946684800
+```

@@ -8,7 +8,9 @@ use crate::syntax::ast::{self, Core, Decl};
 use crate::types::ty::{EffRow, Effects, Type};
 
 use super::super::env::Annot;
-use super::super::{ClassInfo, Env, InstInfo, RowScope, SelfRef, Tc};
+use super::super::{
+    ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport, InstInfo, RowScope, SelfRef, Tc,
+};
 
 // The existentials and scaffolding a declaration's body is inferred against: its
 // parameter domains, return type, class constraints, parametric-effect scope,
@@ -21,6 +23,7 @@ struct DeclSeed {
     cur: Vec<(String, Type)>,
     scope: Vec<(Sym, Vec<Type>)>,
     mu: u32,
+    expected_row: EffRow,
     self_ty: Type,
 }
 
@@ -49,6 +52,136 @@ impl Tc<'_> {
         for (id, t) in std::mem::take(&mut self.pending) {
             let t = self.apply(&t);
             self.span_types.insert(id, t);
+        }
+        let pending: BTreeMap<_, _> = std::mem::take(&mut self.pending_tooltip_rows)
+            .into_iter()
+            .collect();
+        for (id, row) in pending {
+            if let Some(ty) = self.span_types.get(&id).cloned() {
+                let rendered = self.report_tooltip(&ty, &row);
+                self.tooltip_rows.insert(id, rendered);
+            }
+        }
+        self.touched_tooltip_rows.clear();
+        self.tooltip_row_scaffolds.clear();
+    }
+
+    // Turn inference-time hole sites into stable public reports while their
+    // context solutions are still live. Candidate compatibility uses the real
+    // subsumption relation in a rolled-back context, so ranking cannot constrain
+    // either the hole or a later candidate.
+    pub(in crate::tc) fn flush_holes(&mut self) {
+        for site in std::mem::take(&mut self.hole_sites) {
+            let expected = self.apply(&site.expected);
+            let expected_s = self.report_type(&expected);
+            let effects = self.report_row(&site.effects);
+            let mut bindings: Vec<HoleBinding> = site
+                .env
+                .iter()
+                .filter(|(name, _)| !name.as_str().contains('@'))
+                .map(|(name, ty)| HoleBinding {
+                    name: name.to_string(),
+                    ty: self.report_type(&self.apply(ty)),
+                })
+                .collect();
+            bindings.sort_by(|a, b| a.name.cmp(&b.name));
+
+            let mut candidates = Vec::new();
+            for binding in &bindings {
+                let Some(candidate) = site.env.get(&Sym::from(&binding.name)).cloned() else {
+                    continue;
+                };
+                let candidate = self.apply(&candidate);
+                let exact = candidate == expected;
+                let saved_ctx = self.ctx.clone();
+                let saved_next = self.next;
+                let fits = self.subtype(&candidate, &expected).is_ok();
+                self.ctx = saved_ctx;
+                self.next = saved_next;
+                if fits {
+                    candidates.push(HoleCandidate {
+                        name: binding.name.clone(),
+                        ty: binding.ty.clone(),
+                        exact,
+                    });
+                }
+            }
+            candidates.sort_by(|a, b| (!a.exact, &a.name).cmp(&(!b.exact, &b.name)));
+            self.holes.push(HoleReport {
+                name: site.name,
+                start: site.span.start,
+                end: site.span.end,
+                expected: expected_s,
+                effects,
+                bindings,
+                candidates,
+            });
+        }
+    }
+
+    fn report_type(&self, ty: &Type) -> String {
+        self.generalize(&Env::new(), ty).show()
+    }
+
+    fn report_row(&self, row: &EffRow) -> String {
+        let shown = self.generalize(&Env::new(), &Type::Row(self.apply_row(row)));
+        let mut body = &shown;
+        while let Type::Forall(_, next) | Type::RowForall(_, next) = body {
+            body = next;
+        }
+        match body {
+            Type::Row(row) => Self::show_report_row(row),
+            _ => Self::show_report_row(&self.apply_row(row)),
+        }
+    }
+
+    // Generalize the node type and evaluation row together so metavariables use
+    // the same canonical naming pass, then render the row even when it is empty.
+    // This is the docs generator's canonical type printer plus the tooltip-only
+    // rule that `! {}` is never omitted.
+    fn report_tooltip(&self, ty: &Type, row: &EffRow) -> String {
+        let pair = Type::Tuple(vec![self.apply(ty), Type::Row(self.apply_row(row))]);
+        let shown = self.generalize(&Env::new(), &pair);
+        let mut body = &shown;
+        while let Type::Forall(_, next) | Type::RowForall(_, next) = body {
+            body = next;
+        }
+        match body {
+            Type::Tuple(parts) if parts.len() == 2 => match &parts[1] {
+                // A pure expression reads as its type alone: the empty row is
+                // the default, so `! {}` would be noise on most spans.
+                Type::Row(row) => {
+                    let shown_row = Self::show_report_row(row);
+                    if shown_row == "{}" {
+                        parts[0].show()
+                    } else {
+                        format!("{} ! {}", parts[0].show(), shown_row)
+                    }
+                }
+                _ => unreachable!("tooltip pair carries an effect row"),
+            },
+            _ => unreachable!("tooltip generalization preserves its pair"),
+        }
+    }
+
+    fn show_report_row(row: &EffRow) -> String {
+        let mut labels: Vec<String> = row
+            .labels()
+            .into_iter()
+            .map(super::super::Label::show)
+            .collect();
+        labels.sort();
+        let tail = match row.tail() {
+            EffRow::Empty => None,
+            EffRow::Var(name) => Some(name.to_string()),
+            EffRow::Exist(id) => Some(format!("?r{id}")),
+            EffRow::Extend(..) => unreachable!(),
+        };
+        match (labels.is_empty(), tail) {
+            (true, None) => "{}".into(),
+            (true, Some(tail)) => format!("{{| {tail}}}"),
+            (false, None) => format!("{{{}}}", labels.join(", ")),
+            (false, Some(tail)) => format!("{{{} | {tail}}}", labels.join(", ")),
         }
     }
 
@@ -213,11 +346,9 @@ impl Tc<'_> {
         // discovered by inference and a declared-but-unperformed effect still
         // warns in `finalize_fn`.
         let mut scope: Vec<(Sym, Vec<Type>)> = Vec::new();
+        let mut expected_labels = Vec::new();
         if let Some(ls) = &d.eff {
             for al in ls {
-                if al.args.is_empty() {
-                    continue;
-                }
                 let args: Vec<Type> = al
                     .args
                     .iter()
@@ -227,10 +358,21 @@ impl Tc<'_> {
                         self.convert_annot(t, &mut a)
                     })
                     .collect();
-                scope.push((Sym::from(&al.name), args));
+                if !args.is_empty() {
+                    scope.push((Sym::from(&al.name), args.clone()));
+                }
+                expected_labels.push(super::super::Label {
+                    name: Sym::from(&al.name),
+                    args,
+                });
             }
         }
         let mu = self.push_ex_row();
+        let expected_row = if d.eff.is_some() {
+            EffRow::canonical(expected_labels, EffRow::Empty)
+        } else {
+            EffRow::Exist(mu)
+        };
         let self_ty = Type::fun_eff(doms.clone(), EffRow::Exist(mu), ret.clone());
         Ok(DeclSeed {
             doms,
@@ -238,6 +380,7 @@ impl Tc<'_> {
             cur,
             scope,
             mu,
+            expected_row,
             self_ty,
         })
     }
@@ -264,6 +407,7 @@ impl Tc<'_> {
             cur: Vec::new(),
             scope: Vec::new(),
             mu,
+            expected_row: EffRow::Empty,
             self_ty: val,
         })
     }
@@ -282,12 +426,18 @@ impl Tc<'_> {
     // self-type so its recursive call still discharges the constraint against the
     // enclosing dictionary parameter (`cur_self`) rather than re-resolving it.
     // Reset the per-declaration obligation buffers (class constraints, numeric
-    // defaulting candidates, index-op resolutions) before checking a new body.
+    // defaulting candidates, index-op resolutions, and local operation-use
+    // refinement) before checking a new body. Handler residual facts accumulate
+    // program-wide, but no in-progress use or continuation summary may cross a
+    // declaration/SCC-member boundary.
     fn clear_obligations(&mut self) {
         self.wanted.clear();
         self.num_default.clear();
         self.neg_default.clear();
         self.index_ops.clear();
+        self.operation_uses = super::super::OperationUses::default();
+        self.precise_calls.clear();
+        debug_assert!(self.handler_stack.is_empty());
     }
 
     fn infer_body(&mut self, env: &Env, d: &Decl<Core>, seed: &DeclSeed) -> Result<(), TypeError> {
@@ -306,6 +456,7 @@ impl Tc<'_> {
         let saved_row = self.cur_row.replace(RowScope {
             tail: seed.mu,
             prefix: Vec::new(),
+            expected: seed.expected_row.clone(),
         });
         let checked = self.in_row_scope(&seed.scope, |tc| {
             tc.with_self(
@@ -321,6 +472,7 @@ impl Tc<'_> {
         self.cur_row = saved_row;
         checked?;
         self.flush_spans();
+        self.flush_holes();
         // Record the principal-body-effect witness while the solutions are
         // live: the ambient row the body actually accumulated, read before
         // generalization (`default_open_rows`) re-opens a pure row for context
@@ -417,10 +569,29 @@ impl Tc<'_> {
         f: impl FnOnce(&mut Self) -> Result<R, TypeError>,
     ) -> Result<(R, Effects), TypeError> {
         let mu = self.push_ex_row();
+        self.scoped_effects_with_tail(mu, EffRow::Exist(mu), f)
+    }
+
+    pub(in crate::tc) fn scoped_effects_expected<R>(
+        &mut self,
+        expected: EffRow,
+        f: impl FnOnce(&mut Self) -> Result<R, TypeError>,
+    ) -> Result<(R, Effects), TypeError> {
+        let mu = self.push_ex_row();
+        self.scoped_effects_with_tail(mu, expected, f)
+    }
+
+    fn scoped_effects_with_tail<R>(
+        &mut self,
+        mu: u32,
+        expected: EffRow,
+        f: impl FnOnce(&mut Self) -> Result<R, TypeError>,
+    ) -> Result<(R, Effects), TypeError> {
         let (r, effs) = self.with_row_scope(
             RowScope {
                 tail: mu,
                 prefix: Vec::new(),
+                expected,
             },
             |tc| {
                 let r = f(tc);
@@ -447,7 +618,7 @@ impl Tc<'_> {
     ) -> Result<(Type, Effects), TypeError> {
         self.reset_ctx();
         self.clear_obligations();
-        let (ty, effs) = self.scoped_effects(|tc| {
+        let (ty, effs) = self.scoped_effects_expected(EffRow::Empty, |tc| {
             let ty = if let Some(ann) = &d.ret {
                 tc.check_annot_rows(ann, d.span)?;
                 let mut var_kinds = BTreeMap::new();
@@ -463,6 +634,7 @@ impl Tc<'_> {
             Ok(ty)
         })?;
         self.flush_spans();
+        self.flush_holes();
         let t = self.apply(&ty);
         Ok((self.generalize(env, &t), effs))
     }
@@ -506,7 +678,7 @@ impl Tc<'_> {
                 env2.insert(Sym::from(&p.name), t.clone());
             }
             let qual = format!("{}.{}", inst.name, m.name);
-            let ((), effs) = self.scoped_effects(|tc| {
+            let ((), effs) = self.scoped_effects_expected(exp_row.clone(), |tc| {
                 let ctx = info
                     .context
                     .iter()
@@ -519,6 +691,7 @@ impl Tc<'_> {
                 .map_err(|e| e.in_fn(&qual))
             })?;
             self.flush_spans();
+            self.flush_holes();
             let undeclared: Vec<String> = effs
                 .iter()
                 .filter(|eff| !declared_labels.contains(eff))

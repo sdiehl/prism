@@ -39,7 +39,7 @@ alias State = List(Msg)
 -- and send/recv over the one shared channel. Discharged by `run_chaos`.
 effect Chaos
   fork(() -> Unit ! {Chaos}) : Unit
-  yield(Unit) : Unit
+  yield() : Unit
   send(Msg) : Unit
   recv() : Msg
 
@@ -58,7 +58,7 @@ type Cmd
 fn step_root(body : () -> State ! {Chaos}) : Cmd =
   handle body() with
     fork(child) resume k => Forked(child, \() -> k(()))
-    yield(u) resume k => Yielded(\() -> k(()))
+    yield() resume k => Yielded(\() -> k(()))
     send(v) resume k => Sent(v, \() -> k(()))
     recv() resume k => Recved(k)
     return r => Finished(r)
@@ -67,7 +67,7 @@ fn step_root(body : () -> State ! {Chaos}) : Cmd =
 fn step_worker(body : () -> Unit ! {Chaos}) : Cmd =
   handle body() with
     fork(child) resume k => Forked(child, \() -> k(()))
-    yield(u) resume k => Yielded(\() -> k(()))
+    yield() resume k => Yielded(\() -> k(()))
     send(v) resume k => Sent(v, \() -> k(()))
     recv() resume k => Recved(k)
     return r => Exited
@@ -181,7 +181,7 @@ fn compute(i : Int, acc : Int, iters : Int) : Int ! {Chaos} =
   if iters <= 0 then
     acc
   else
-    yield(())
+    yield()
     compute(i, mod(acc * 31 + i * 7 + iters, modulus), iters - 1)
 
 fn worker(i : Int) : Unit ! {Chaos} = send((i, compute(i, i, work_iters)))

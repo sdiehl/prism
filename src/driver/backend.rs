@@ -25,6 +25,8 @@ use super::session::QueryDecision;
 use super::Config;
 
 const LLVM_SCC_QUERY: &str = "llvm-scc-bitcode";
+// The `-v2` is a cache-bust counter, not a compat version: hashed into the query
+// key so a format change misses stale entries. No old version is read back.
 const LLVM_SCC_QUERY_SCHEMA: &[u8] = b"prism-llvm-scc-bitcode-query-v2";
 const LLVM_SCC_OBJECT_FORMAT: &str = "prism-llvm-scc-bitcode-v1";
 const CLOSURE_SUMMARY_QUERY: &str = "llvm-scc-closure-summary";

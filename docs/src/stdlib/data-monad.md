@@ -16,6 +16,14 @@ join : forall a b. (a(a(b))) -> a(b)
 
 Collapse one level of nesting: `m(m(a))` to `m(a)`.
 
+```prism,mod=Data.Monad
+join([[1, 2], [3, 4]])
+```
+
+```output
+[1, 2, 3, 4]
+```
+
 ### `map2`
 
 ```prism,sig,h-e5dbe81bf850f5a7060477ed1a6db80101ca5a2d1daed1ac57a682411e40b171
@@ -23,6 +31,14 @@ map2 : forall a b c d. ((a, b) -> c, d(a), d(b)) -> d(c)
 ```
 
 Lift a binary function over two wrapped values (`Applicative`).
+
+```prism,mod=Data.Monad
+map2(\(x, y) -> x + y, Some(1), Some(2))
+```
+
+```output
+Some(3)
+```
 
 ### `map3`
 
@@ -32,6 +48,14 @@ map3 : forall a b c d e. ((a, b, c) -> d, e(a), e(b), e(c)) -> e(d)
 
 Lift a ternary function over three wrapped values (`Applicative`).
 
+```prism,mod=Data.Monad
+map3(\(x, y, z) -> x + y + z, Some(1), Some(2), Some(3))
+```
+
+```output
+Some(6)
+```
+
 ### `sequence`
 
 ```prism,sig,h-9c4d0067ebd9b99d25fd41cc36609444bb7b519759335bd6b0e31491961bbfa9
@@ -40,6 +64,14 @@ sequence : forall a b. (List(a(b))) -> a(List(b))
 
 Evaluate a list of wrapped values left to right, collecting the results (`Applicative`). `Option` short-circuits on `None`; `List` takes the cartesian product.
 
+```prism,mod=Data.Monad
+sequence([Some(1), Some(2), Some(3)])
+```
+
+```output
+Some([1, 2, 3])
+```
+
 ### `traverse_list`
 
 ```prism,sig,h-b48a784a2c143341151dbc5bdbfcbbc19697f61d18534dbfb2c4aebfb93777b8
@@ -47,3 +79,11 @@ traverse_list : forall a b c. ((a) -> b(c), List(a)) -> b(List(c))
 ```
 
 Apply `f` to each element and sequence the wrapped results (`Applicative`). This is `sequence` after a plain `map`.
+
+```prism,mod=Data.Monad
+traverse_list(\(x) -> if x > 0 then Some(x) else None, [1, 2, 3])
+```
+
+```output
+Some([1, 2, 3])
+```

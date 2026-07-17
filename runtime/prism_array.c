@@ -130,7 +130,8 @@ long prism_string_of_array(long arr) {
     long *p = (long *)arr;
     long n = arr_len(p);
     long total = 0;
-    for (long i = 0; i < n; i++) total += prism_str_len_bytes(p[PRISM_ARR_ELEM0 + i]);
+    for (long i = 0; i < n; i++)
+        total = prism_ckd_ladd(total, prism_str_len_bytes(p[PRISM_ARR_ELEM0 + i]));
     long *out = prism_str_alloc(total);
     char *o = (char *)(out + PRISM_HDR_WORDS);
     long off = 0;
@@ -220,7 +221,7 @@ long prism_string_of_raw(const unsigned char *raw, long n) {
     long out_len = 0;
     for (long i = 0; i < n;) {
         long adv;
-        out_len += prism_utf8_seq(raw, i, n, &adv) ? adv : 3;
+        out_len = prism_ckd_ladd(out_len, prism_utf8_seq(raw, i, n, &adv) ? adv : 3);
         i += adv;
     }
     long *out = prism_str_alloc(out_len);

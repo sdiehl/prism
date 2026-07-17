@@ -545,6 +545,12 @@ builtins! {
     TaqSnoc "taq_snoc" "TaqSnoc" 67 RAW;
     TaqConcat "taq_concat" "TaqConcat" 68 RAW;
     TaqUncons "taq_uncons" "TaqUncons" 69 RAW;
+    // Arena bump: hand out a raw cell for a constructor the arena-lowering pass
+    // split into `alloc` + `init_at`. The `with_arena` handler discharges the
+    // `alloc` operation into this call. `IMM0` untags the word count; the result
+    // is the raw cell pointer. Native-only (no interpreter allocation): it appears
+    // only in effect-lowered Core, which the interpreter never runs.
+    Bump "prim_arena_bump" "Bump" 105 IMM0 surface 1 Int "(Int) -> Arena.Cell";
     ]
 }
 
@@ -578,6 +584,11 @@ impl Builtin {
     pub fn sym(self) -> String {
         match self {
             Self::Concat => "prism_str_concat".into(),
+            // Surface `prim_arena_bump`, one C symbol `prism_bump` shared with
+            // the region substrate later. Keeping the surface name clear of user
+            // names is not what stops a user's `fn bump` from colliding with this
+            // symbol; the disjoint native namespaces are (see `codegen`).
+            Self::Bump => "prism_bump".into(),
             // The typed-buffer C runtime (`runtime/prism_tbuf.c`) moves raw 8-byte
             // words and is element-kind-agnostic, so the i64-element builtins call
             // the same symbols as the f64-element ones; only the surface types and
@@ -790,6 +801,7 @@ mod tag_tests {
                 (Builtin::TaqSnoc, "TaqSnoc"),
                 (Builtin::TaqConcat, "TaqConcat"),
                 (Builtin::TaqUncons, "TaqUncons"),
+                (Builtin::Bump, "Bump"),
             ],
             Builtin::hash_tag,
         );

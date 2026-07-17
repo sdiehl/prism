@@ -16,6 +16,10 @@ record : forall e0 a. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) !
 
 Run `action` against the real world, logging every capability observation (console, file, random, and environment reads) into a trace. Returns `(result, trace)`; feed the trace to `replay` to reproduce the run without IO.
 
+```prism,no_run,mod=Replay
+record(\(u) -> rng_rand() + rng_rand())
+```
+
 ### `replay`
 
 ```prism,sig,h-57bce7a2d56cafc58de03cc5614762039486d5d7272f06a64ecaa0a0fadccde1
@@ -23,6 +27,11 @@ replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a !
 ```
 
 Re-run `action` against a recorded `trace`, performing no real IO: each capability read is served from the trace and output is dropped, reproducing the original result. Fails if the trace does not match the action.
+
+```prism,no_run,mod=Replay
+let (first, trace) = record(\(u) -> rng_rand())
+replay(trace, \(u) -> rng_rand()) == first
+```
 
 ### `serialize`
 
@@ -32,6 +41,11 @@ serialize : (List(Replay@TraceEntry)) -> String
 
 Encode a trace to a self-delimiting string for durable storage, read back with `deserialize`.
 
+```prism,no_run,mod=Replay
+let (r, trace) = record(\(u) -> rng_rand())
+write_file("run.trace", serialize(trace))
+```
+
 ### `deserialize`
 
 ```prism,sig,h-d65506ba0c83ad17894a90cb9cff4d39a894cdf3aba717b340739b00a0dc01f1
@@ -40,6 +54,16 @@ deserialize : (String) -> List(Replay@TraceEntry)
 
 Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 
+The frames are self-delimiting (tag, length, `:`, payload), so the encoding round-trips through text:
+
+```prism,mod=Replay
+serialize(deserialize("I2:42S3:abc"))
+```
+
+```output
+I2:42S3:abc
+```
+
 ### `durable`
 
 ```prism,sig,h-a2d7a52a3be9221d23d4405432332c6d1629470c45ec9a860cb452e5f3d41dc1
@@ -47,3 +71,7 @@ durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, 
 ```
 
 Durable record/replay against a persisted log at `path`: replay the recorded prefix with no real IO, then perform each new observation for real, appending a frame per observation so an interrupted run resumes where it left off, exactly once at the crash boundary.
+
+```prism,no_run,mod=Replay
+durable("target/run.log", \(u) -> rng_rand() + rng_rand())
+```

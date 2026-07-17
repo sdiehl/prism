@@ -184,6 +184,9 @@ impl Visit for ReuseLint {
 fn spends(token: Sym, c: &Comp) -> usize {
     match c {
         Comp::Reuse(t, v) => usize::from(*t == token) + spends_val(token, v),
+        // A post-lowering (arena) node, unreachable in this pre-lowering reuse
+        // lint; it spends no reuse token, but stay total over its value positions.
+        Comp::InitAt(cell, v) => spends_val(token, cell) + spends_val(token, v),
         Comp::Bind(m, _, n) => spends(token, m) + spends(token, n),
         Comp::If(v, t, e) => spends_val(token, v) + spends(token, t).max(spends(token, e)),
         Comp::Case(v, arms) => {

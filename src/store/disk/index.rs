@@ -299,6 +299,15 @@ pub(super) fn get_ref(root: &Path, name: &str) -> io::Result<Option<String>> {
     Ok(load_refs(root)?.remove(name))
 }
 
+pub(super) fn remove_ref(root: &Path, name: &str) -> io::Result<()> {
+    let _lock = Lock::acquire(root)?;
+    let mut map = load_refs(root)?;
+    if map.remove(name).is_some() {
+        write_refs(root, &map)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

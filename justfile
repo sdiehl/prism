@@ -24,6 +24,12 @@ test:
 parity:
     PRISM_COMPILER_CACHE=0 cargo test --test native_parity parity::
 
+# Whole runnable corpus across every supported optimizer configuration. Kept
+# ignored in the ordinary unit sweep because it recompiles each case at eight
+# pass configurations; the authoritative release gate invokes it explicitly.
+opt-equiv *FLAGS:
+    PRISM_COMPILER_CACHE=0 PRISM_QUIET=1 cargo test {{FLAGS}} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --ignored --exact
+
 perf:
     PRISM_COMPILER_CACHE=0 cargo test --test native_perf perf_gate::
 
@@ -130,6 +136,7 @@ _gate *FLAGS:
 # Full correctness gate before declaring done (release profile).
 gate:
     @just _gate --release
+    @just opt-equiv --release
 
 # The gate in the debug profile: slower, but skips the one-time release compile.
 gate-debug:
@@ -256,12 +263,32 @@ docker TAG="prism:dev":
 dist VERSION: (pkg VERSION)
     just docker "prism:{{VERSION}}"
 
+# Refresh the committed Arch PKGBUILD (pkgver + real sha256sums) from a published
+# release's tarball sidecars, then commit the result. Run after the Release workflow
+# publishes vVERSION; the same script stamps the shipped dist/PKGBUILD asset in CI.
+pkgbuild VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    gh release download "v{{VERSION}}" -D "$tmp" --clobber \
+      -p "prism-{{VERSION}}-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+      -p "prism-{{VERSION}}-aarch64-unknown-linux-gnu.tar.gz.sha256"
+    scripts/gen-pkgbuild.sh "{{VERSION}}" "$tmp" packaging/arch/PKGBUILD
+
 smoke: build
     ./target/debug/prism run --examples
 
 # Regenerate the committed Lean differential-oracle fixture manifest (pins fixtures, core-json, hashes, expected result); CI diffs it, rerun after a shift.
 fixtures: build
     cd models && ./gen_fixtures.sh
+
+# Build the Lean CEK oracle, then compare it against the Rust interpreter on a
+# deterministic generated source corpus. The test itself is ignored in ordinary
+# Rust-only sweeps because Lean is a separate toolchain; this recipe and Lean CI
+# invoke it explicitly, so missing/stuck/empty oracle runs fail rather than skip.
+lean-fuzz: build
+    cd models && lake build
+    cargo test --test lean_fuzz generated_programs_match_lean_final_values -- --ignored --exact --nocapture
 
 # Accept the effect-lowering tier manifest after a reviewed tier improvement or corpus change; it then diffs like a snapshot. Review the diff before committing.
 tier-accept:

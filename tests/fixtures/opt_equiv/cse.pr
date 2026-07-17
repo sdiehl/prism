@@ -1,0 +1,10 @@
+-- Engagement fixture for the optimizer-equivalence gate. The two identical
+-- pure scalar multiplications give CSE one observable rewrite opportunity;
+-- disabling CSE must change lowered Core without changing the trace.
+
+fn twice_product(a : Int, b : Int) : Int =
+  let p = a * b
+  let q = a * b
+  p + q
+
+fn main() = println(twice_product(6, 7))

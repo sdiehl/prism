@@ -1,4 +1,5 @@
 use marginalia::Span;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::code;
@@ -163,6 +164,72 @@ impl TypeError {
     }
 }
 
+/// One binding visible at a typed hole, rendered with the canonical type printer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoleBinding {
+    pub name: String,
+    pub ty: String,
+}
+
+/// A binding whose type subsumes the type expected at a hole.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoleCandidate {
+    pub name: String,
+    pub ty: String,
+    pub exact: bool,
+}
+
+/// Stable, serializable payload for a named typed hole.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+// Test-only `Default`: the diagnostic-code uniqueness test synthesizes a throwaway
+// value of every `ErrKind` variant to read its code, and `TypedHole` carries a
+// `HoleReport`. Non-test builds gain no impl, so the public API is unchanged.
+#[cfg_attr(test, derive(Default))]
+pub struct HoleReport {
+    pub name: String,
+    pub start: usize,
+    pub end: usize,
+    pub expected: String,
+    pub effects: String,
+    pub bindings: Vec<HoleBinding>,
+    pub candidates: Vec<HoleCandidate>,
+}
+
+impl HoleReport {
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        Span::new(self.start, self.end)
+    }
+}
+
+impl std::fmt::Display for HoleReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "typed hole `?{}`: expected {} with effects {}; ",
+            self.name, self.expected, self.effects
+        )?;
+        if self.candidates.is_empty() {
+            write!(f, "candidates: none")?;
+        } else {
+            let candidates = self
+                .candidates
+                .iter()
+                .map(|candidate| {
+                    if candidate.exact {
+                        format!("{} : {} (exact)", candidate.name, candidate.ty)
+                    } else {
+                        format!("{} : {}", candidate.name, candidate.ty)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            write!(f, "candidates: {candidates}")?;
+        }
+        write!(f, "; {} binding(s) in scope", self.bindings.len())
+    }
+}
+
 /// The structured catalogue of typechecker error kinds.
 ///
 /// One variant per semantic failure the checker reports. Each carries the facts
@@ -193,6 +260,8 @@ pub enum ErrKind {
     },
     #[error("unknown type `{name}`")]
     UnknownType { name: String },
+    #[error("{report}")]
+    TypedHole { report: HoleReport },
     #[error(
         "`OrNull` requires a non-null, single-word element (a heap type or tagged scalar); {found} does not qualify"
     )]
@@ -620,6 +689,12 @@ pub enum ErrKind {
     TooManyArgs { fn_name: String, takes: usize },
     #[error("call to `{fn_name}` is missing argument `{param}`")]
     MissingArgument { fn_name: String, param: String },
+    #[error("definitions {names} are identical in behavior; keep one and call it from the others")]
+    DuplicateBehavior { names: String },
+    #[error(
+        "`{name}` reimplements the standard library function `{stdlib}`; call `{stdlib}` instead"
+    )]
+    RedundantStdlibDef { name: String, stdlib: String },
 }
 
 impl ErrKind {
@@ -631,9 +706,10 @@ impl ErrKind {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::NotIndexable { .. } => "E1099",
-            Self::UnboundVar { .. } => "E2000",
+            Self::UnboundVar { .. } => code::SCOPE_UNBOUND,
             Self::PolyRecursionMismatch { .. } => "E1000",
             Self::UnknownType { .. } => "E1001",
+            Self::TypedHole { .. } => code::TYPED_HOLE.as_str(),
             Self::OrNullBadElement { .. } => "E1019",
             Self::TooManyTypeArgs { .. } => "E1002",
             Self::KindMismatch { .. } => "E1003",
@@ -708,7 +784,7 @@ impl ErrKind {
             Self::DuplicateHandlerArm { .. } => "E5008",
             Self::DuplicateReturnArm => "E5009",
             Self::HandlerArmArity { .. } => "E5010",
-            Self::IncompleteHandler { .. } => "E5011",
+            Self::IncompleteHandler { .. } => code::INCOMPLETE_HANDLER.as_str(),
             Self::DuplicateDecl { .. } => "E6000",
             Self::DefCycle { .. } => "E6001",
             Self::UnknownSynonym { .. } => "E6002",
@@ -772,6 +848,8 @@ impl ErrKind {
             Self::PositionalAfterNamed { .. } => "E6056",
             Self::TooManyArgs { .. } => "E6057",
             Self::MissingArgument { .. } => "E6058",
+            Self::DuplicateBehavior { .. } => "E6063",
+            Self::RedundantStdlibDef { .. } => "E6064",
         }
     }
 
@@ -796,6 +874,19 @@ impl TypeError {
             | Self::TypeFailure { span, .. } => Some(span),
             Self::Kind(diag) => Some(&diag.span),
             Self::InternalInvariant { .. } => None,
+        }
+    }
+
+    /// The structured typed-hole payload, when this is the dedicated hole
+    /// diagnostic.
+    #[must_use]
+    pub const fn hole_report(&self) -> Option<&HoleReport> {
+        match self {
+            Self::Kind(diag) => match &diag.kind {
+                ErrKind::TypedHole { report } => Some(report),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -863,5 +954,277 @@ impl TypeError {
                 msg: format!("in `{fn_name}`: {self}"),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::ErrKind;
+
+    /// Well below the catalogue's true size (over a hundred variants), so a table
+    /// that has silently shrunk fails loudly instead of passing vacuously.
+    const MIN_DISTINCT_CODES: usize = 100;
+
+    /// Build one value of every [`ErrKind`] variant, so the uniqueness test can
+    /// read the real [`ErrKind::code`] mapping rather than scanning this file's
+    /// source text (which couples the check to formatting).
+    ///
+    /// The generated `match` has no wildcard arm, so a newly added variant fails
+    /// to compile here until it is listed below; the check can therefore never
+    /// silently miss one. Field payloads never reach `ErrKind::code`, so a default
+    /// of each is enough to read the variant's stable code.
+    macro_rules! every_errkind {
+        ( $( $variant:ident $( { $( $field:ident ),+ $(,)? } )? ),+ $(,)? ) => {{
+            // A wildcard-free match over every listed variant. It performs no
+            // work; it exists so the compiler rejects the macro call when a real
+            // `ErrKind` variant is omitted, and it is invoked below so the helper
+            // is exercised rather than dead code.
+            fn assert_every_variant_listed(kind: &ErrKind) {
+                match kind {
+                    $( ErrKind::$variant $( { $( $field: _ ),+ } )? => () ),+
+                }
+            }
+            let kinds = vec![
+                $( ErrKind::$variant $( { $( $field: Default::default() ),+ } )? ),+
+            ];
+            kinds.iter().for_each(assert_every_variant_listed);
+            kinds
+        }};
+    }
+
+    /// The `ErrKind::code` table has ~150 arms; a copy-paste typo could silently
+    /// reuse a diagnostic code across two variants. Enumerate the variants
+    /// structurally, read each one's real code, and assert every code maps to
+    /// exactly one error kind.
+    #[test]
+    fn errkind_codes_are_unique() {
+        let kinds: Vec<ErrKind> = every_errkind![
+            NotIndexable { ty },
+            UnboundVar { name },
+            PolyRecursionMismatch {
+                name,
+                expected,
+                found
+            },
+            UnknownType { name },
+            TypedHole { report },
+            OrNullBadElement { found },
+            TooManyTypeArgs { name, takes, given },
+            KindMismatch {
+                index,
+                name,
+                expected,
+                actual
+            },
+            KindVarConflict { var, first, second },
+            ImpredicativeTypeArg { head },
+            IntLiteralOutOfRange { ty },
+            UnknownRecordCtor { ctor },
+            NotRecordCtor { ctor },
+            MissingFields { fields, ctor },
+            FieldAccessNonRecord { ty },
+            UnboxedUnsupported { what },
+            ConflictingUpdatePaths { a, b },
+            OpticPathSurvived,
+            FieldPathNonRecord { seg, ty },
+            UpdatePathMultiCtor { ty, n },
+            NotIndexAssignable { ty },
+            NegateUnsigned,
+            ArgCountMismatch { expected, got },
+            ApplyNonFunction { ty },
+            WhereClauseNeedsAnnotations { name },
+            UnknownClass { class },
+            InstSelectNeedsName,
+            ConstraintArgCountMismatch {
+                name,
+                expected,
+                got
+            },
+            NoClassConstraints { name },
+            AmbiguousConstraint { class, ty, name },
+            InstanceMethodImpure {
+                inst,
+                method,
+                effects
+            },
+            CyclicInstance { class, ty },
+            InstanceTooDeep { class, ty },
+            UnknownInstance { name },
+            InstanceClassMismatch { name, found, class },
+            AmbiguousInstance { class, ty, listed },
+            NoInstance { class, ty },
+            InstanceHeadMismatch {
+                inst,
+                class,
+                head,
+                ty
+            },
+            CannotInferConstraint { class },
+            CannotDischargeConstraint { class, var },
+            SuperclassCycle { path },
+            DuplicateClass { name },
+            ClassMethodNotFunction { method },
+            ClassMethodMissingParam { method, param },
+            ClassMethodClash { method },
+            InstanceNameClash { name },
+            UnknownSuperclass { class, sup },
+            InstanceHeadNotType,
+            InstanceHeadArgsNotVars,
+            InstanceContextNotHeadVars,
+            DuplicateInstanceMethod { method, instance },
+            ClassHasNoMethod { class, method },
+            InstanceMethodAnnotated { method, class },
+            MethodArityMismatch {
+                method,
+                class,
+                arity,
+                got
+            },
+            InstanceMissingMethods { instance, methods },
+            CanonicalHeadNotType,
+            NotAnInstance { name, class, ty },
+            DuplicateCanonical { class, ty },
+            MultipleInstances {
+                n,
+                class,
+                head,
+                listed
+            },
+            UnreachableMatchArm,
+            NonExhaustiveMatch { witness },
+            SuffixedLiteralPattern,
+            UnknownRecordConstructor { ctor_name },
+            UnknownField { field, ctor },
+            UnknownConstructor { name },
+            CtorArity {
+                name,
+                expected,
+                got
+            },
+            NoFieldOnType { field, ctor_name },
+            EffectArity { name, want, got },
+            UnknownEffect { name },
+            KonstNotPure { name, effects },
+            BorrowNotPure { name, effects },
+            BorrowRowNotClosed { name, row },
+            UndeclaredEffect { name, eff },
+            UnknownEffectOp { op },
+            EffectInstMismatch { actual, expected },
+            UnknownEffectInMask { eff },
+            DuplicateHandlerArm { op },
+            DuplicateReturnArm,
+            HandlerArmArity {
+                op,
+                declared,
+                provided
+            },
+            IncompleteHandler { effect, missing },
+            DuplicateDecl { kind, name },
+            DefCycle { kind, path },
+            UnknownSynonym { name },
+            UnknownAlias { name },
+            SynonymArity { name, want, got },
+            UnknownEffectInAlias { eff, alias },
+            ReservedEffectName { name, reason },
+            DuplicateEffectOp { op, first, second },
+            PatternClashesCtor { name },
+            ClassPatternHasMake { name },
+            ClassPatternViewNotMethod { name, class },
+            PatternViewUnknownMethod { method, class },
+            ViewMethodNotFunction { method },
+            ViewMethodArity { method },
+            PatternForUnknownType { name, ty },
+            PatternClauseNotLambda { clause, pat },
+            StableHandWritten { head },
+            UnknownDerivingClass { class },
+            NotDerivable { class, ty },
+            LensNeedsRecord { ty },
+            LensNeedsNamedFields { ty, ctor },
+            StableFieldNotStable {
+                ty,
+                field,
+                field_ty
+            },
+            EmptyInterpolation,
+            StableNeedsClass { name, class },
+            RungExtendsNonAdjacent { rung, base, block },
+            RungFieldNeedsDefault {
+                field,
+                rung,
+                field_ty
+            },
+            FrozenShapeChanged { display, rung },
+            RungNeedsConverter {
+                to,
+                from,
+                block,
+                dir
+            },
+            HandlerGradeExceeded {
+                op,
+                grade,
+                limit,
+                did
+            },
+            OpPolymorphicReturn { op },
+            NeverClauseResumes,
+            UnknownHandlerOp { op, handler },
+            HandlerMixesEffects {
+                handler,
+                first,
+                second
+            },
+            HandlerNoOps { handler },
+            HandlerEscapes { handler },
+            UnknownPathCtor { ctor },
+            PathCtorNeedsField { ctor },
+            VarEscapes { var },
+            ViewPatternNested { name },
+            PatternArity { name, arity, got },
+            ViewMatchNotExhaustive { name },
+            WithNotLast,
+            InstanceNotValue { name },
+            PatternNotValue { name },
+            TryNotWholeStatement,
+            PatternNoMake { name },
+            InstanceNoOp { instance, op },
+            IndexAssignBaseNotVar,
+            CannotAssign { name },
+            NotDeclaredError { name },
+            CatchArmArity { name, arity, got },
+            InvalidProbeName,
+            CoeffectFactUnimplemented { fact },
+            CoeffectRowMisplaced,
+            OnceUsedMoreThanOnce { fn_name, param },
+            PortableCapturesNonportable { subject },
+            NoescapeTokenEscapes { token, callee },
+            NoescapeUncheckable { callee },
+            NoParameter { fn_name, param },
+            ArgGivenTwice { param, fn_name },
+            PositionalAfterNamed { fn_name },
+            TooManyArgs { fn_name, takes },
+            MissingArgument { fn_name, param },
+            DuplicateBehavior { names },
+            RedundantStdlibDef { name, stdlib },
+        ];
+
+        let mut seen: BTreeMap<&'static str, String> = BTreeMap::new();
+        for kind in &kinds {
+            let code = kind.code();
+            let variant = format!("{kind:?}");
+            if let Some(prev) = seen.insert(code, variant.clone()) {
+                panic!(
+                    "diagnostic code {code} is assigned to two ErrKind variants ({prev} and {variant})"
+                );
+            }
+        }
+
+        assert!(
+            seen.len() > MIN_DISTINCT_CODES,
+            "expected the full code table, found {}",
+            seen.len()
+        );
     }
 }

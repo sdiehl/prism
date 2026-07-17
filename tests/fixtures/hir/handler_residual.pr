@@ -1,0 +1,13 @@
+-- A partial handler discharges only `one`; the checked-HIR fixture records
+-- the operation-local proof that `two` forwards and remains residual.
+
+effect E
+  one() : Int
+  three() : Int
+  two() : Int
+
+fn run() : Int ! {E} =
+  handle one() + two() with partial {
+    one() resume k => three() + k(1),
+    return r => r
+  }

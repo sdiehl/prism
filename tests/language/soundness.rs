@@ -82,7 +82,11 @@ fn partial_handler_is_rejected() {
     let Error::Type(ty) = &err else {
         panic!("expected a type error, got: {err}");
     };
-    assert_eq!(ty.code(), Some("E5011"), "got: {err}");
+    assert_eq!(
+        ty.code(),
+        Some(prism::error::INCOMPLETE_HANDLER.as_str()),
+        "got: {err}"
+    );
 }
 
 // A `borrow` parameter cannot escape through a callback whose effect row is open

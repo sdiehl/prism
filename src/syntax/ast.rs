@@ -1028,6 +1028,15 @@ pub enum HandlerArm<P: Phase = Surface> {
     Sugar(P::Arm),
 }
 
+/// Whether a handler must cover every operation of each effect it names or may
+/// leave omitted operations in its residual row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HandlerMode {
+    #[default]
+    Exhaustive,
+    Partial,
+}
+
 impl<P: Phase> HandlerArm<P> {
     pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
         match self {
@@ -1163,6 +1172,9 @@ pub enum Expr<P: Phase = Surface> {
     Unit,
     Str(String),
     Var(String),
+    /// A named typed hole (`?name`). The checker records its expected type,
+    /// ambient effect row, and the bindings that could fill it.
+    Hole(String),
     Bin(BinOp, Box<S<Self>>, Box<S<Self>>),
     // Unary minus. Binds looser than application, projection, and postfix but
     // tighter than every binary operator, so `-f(x)` is `-(f(x))` and `-x * y`
@@ -1193,7 +1205,7 @@ pub enum Expr<P: Phase = Surface> {
     // single-constructor records (reused in place by the reuse pass); the optic
     // steps desugar to `fmap`/`match`/`index_set`.
     RecordUpdatePath(Box<S<Self>>, Vec<(Vec<PathStep<P>>, PathOp<P>)>),
-    Handle(Box<S<Self>>, Vec<HandlerArm<P>>),
+    Handle(Box<S<Self>>, Vec<HandlerArm<P>>, HandlerMode),
     Mask(String, Box<S<Self>>),
     Inst(Box<S<Self>>, Vec<String>),
     // `recv[key]`: a failable indexed read, dispatched at elaboration on the
@@ -1281,7 +1293,7 @@ impl<P: Phase> Expr<P> {
                     f(op.expr());
                 }
             }
-            Self::Handle(body, arms) => {
+            Self::Handle(body, arms, _) => {
                 f(body);
                 for a in arms {
                     a.each_child(f);
@@ -1295,6 +1307,7 @@ impl<P: Phase> Expr<P> {
             | Self::Unit
             | Self::Str(_)
             | Self::Var(_)
+            | Self::Hole(_)
             | Self::Marker(_) => {}
         }
     }

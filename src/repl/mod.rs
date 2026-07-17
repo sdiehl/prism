@@ -22,16 +22,17 @@ use crate::core::{builtin_arities, elaborate, elaborate_expr, CoreFn};
 use crate::driver::PRELUDE;
 use crate::error::Error;
 use crate::eval::{globals, Machine};
+use crate::fmt::decl::fmt_class;
 use crate::lex::Token as K;
 use crate::lex::{lex_raw, Token};
 use crate::parse::{incomplete, parse, parse_expr, ParseResult};
-use crate::resolve::{default_roots, import_bindings, resolve_expr, resolve_modules_in};
+use crate::resolve::{binders, default_roots, import_bindings, resolve_expr, resolve_modules_in};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core, Expr, S};
+use crate::syntax::ast::{ClassDecl, Core, Expr, ImportDecl, Program, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
 use crate::types::{
-    check, infer_expr, infer_expr_dicts, show_effects, show_type_with_effects, Checked, CtorInfo,
-    Type,
+    check, check_allow_holes, infer_expr, infer_expr_dicts, infer_expr_dicts_allow_holes,
+    show_effects, show_type_with_effects, Checked, CtorInfo, Type,
 };
 
 // Canonical commands. Any unambiguous prefix resolves to one (`:lo` -> :load,
@@ -130,6 +131,192 @@ struct Built {
     // canonical symbols, so a typed-in expression resolves `map` the same way a
     // file body does (the program resolver only reaches declared bodies).
     imports: BTreeMap<String, String>,
+    // Resolved surface declarations retained for canonical `:info` rendering.
+    // `Checked::classes` carries semantic facts, not the source declaration, so
+    // it intentionally has no formatter-facing spelling for superclasses.
+    classes: BTreeMap<String, ClassDecl>,
+    // The same resolved/checker artifacts partitioned by the syntactic positions
+    // the line editor completes. Rebuilt with the session, never maintained by
+    // hand alongside it.
+    completion: CompletionScope,
+    // Every directly imported module spelling (full path and short alias) to its
+    // canonical path. Used by module-aware completion and `:browse M`.
+    modules: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Default)]
+struct CompletionScope {
+    values: BTreeSet<String>,
+    types: BTreeSet<String>,
+    info: BTreeSet<String>,
+    modules: BTreeSet<String>,
+    importable_modules: BTreeSet<String>,
+}
+
+fn module_bindings(imports: &[ImportDecl]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut ambiguous = BTreeSet::new();
+    for import in imports {
+        let path = import.path.join(".");
+        out.insert(path.clone(), path.clone());
+        let short = import
+            .alias
+            .clone()
+            .or_else(|| import.path.last().cloned())
+            .unwrap_or_default();
+        if short == path || ambiguous.contains(&short) {
+            continue;
+        }
+        match out.get(&short) {
+            Some(previous) if previous != &path => {
+                out.remove(&short);
+                ambiguous.insert(short);
+            }
+            Some(_) => {}
+            None => {
+                out.insert(short, path.clone());
+            }
+        }
+    }
+    out
+}
+
+fn add_completion_name(
+    scope: &mut CompletionScope,
+    shown: &str,
+    canonical: &str,
+    values: &BTreeSet<String>,
+    types: &BTreeSet<String>,
+    classes: &BTreeSet<String>,
+    effects: &BTreeSet<String>,
+) {
+    let is_value = values.contains(canonical);
+    let is_type = types.contains(canonical);
+    let is_info = is_value || is_type || classes.contains(canonical) || effects.contains(canonical);
+    if is_value {
+        scope.values.insert(shown.to_string());
+    }
+    if is_type {
+        scope.types.insert(shown.to_string());
+    }
+    if is_info {
+        scope.info.insert(shown.to_string());
+    }
+}
+
+fn completion_scope(
+    program: &Program<Core>,
+    checked: &Checked,
+    imports: &BTreeMap<String, String>,
+    root_binders: &BTreeSet<String>,
+    import_decls: &[ImportDecl],
+) -> (CompletionScope, BTreeMap<String, String>) {
+    let value_symbols: BTreeSet<String> = checked
+        .env
+        .keys()
+        .map(ToString::to_string)
+        .chain(checked.ctors.keys().cloned())
+        .chain(checked.eff_ops.keys().cloned())
+        .chain(checked.methods.keys().map(ToString::to_string))
+        .collect();
+    let mut type_symbols: BTreeSet<String> = checked.data.keys().cloned().collect();
+    type_symbols.extend(Type::SCALARS.iter().map(Type::show));
+    let class_symbols: BTreeSet<String> = checked.classes.keys().map(ToString::to_string).collect();
+    let effect_symbols: BTreeSet<String> = program.effects.iter().map(|e| e.name.clone()).collect();
+    let alias_symbols: BTreeSet<String> = program
+        .aliases
+        .iter()
+        .map(|a| a.name.clone())
+        .chain(program.synonyms.iter().map(|a| a.name.clone()))
+        .collect();
+    type_symbols.extend(alias_symbols.iter().cloned());
+
+    let mut scope = CompletionScope::default();
+
+    // Root declarations and compiler/prelude bindings already have their source
+    // spelling. Imported private symbols carry `@` and are deliberately excluded:
+    // they are present in the merged checker environment but never resolvable at
+    // the REPL prompt.
+    for canonical in value_symbols
+        .iter()
+        .chain(type_symbols.iter())
+        .chain(class_symbols.iter())
+        .chain(effect_symbols.iter())
+    {
+        if !canonical.contains(['.', '@']) || root_binders.contains(canonical) {
+            add_completion_name(
+                &mut scope,
+                canonical,
+                canonical,
+                &value_symbols,
+                &type_symbols,
+                &class_symbols,
+                &effect_symbols,
+            );
+        }
+    }
+    // Unqualified imports are the resolver's own exact live-scope map.
+    for (shown, canonical) in imports {
+        add_completion_name(
+            &mut scope,
+            shown,
+            canonical,
+            &value_symbols,
+            &type_symbols,
+            &class_symbols,
+            &effect_symbols,
+        );
+    }
+
+    let modules = module_bindings(import_decls);
+    for (shown, path) in &modules {
+        scope.modules.insert(shown.clone());
+        // A directly imported module exposes its public canonical symbols under
+        // the full path and its short alias. Private names use `@`, not this dot
+        // prefix, so this scan cannot leak them into completion.
+        let prefix = format!("{path}.");
+        for canonical in value_symbols
+            .iter()
+            .chain(type_symbols.iter())
+            .chain(class_symbols.iter())
+            .chain(effect_symbols.iter())
+            .filter(|name| name.starts_with(&prefix))
+        {
+            add_completion_name(
+                &mut scope,
+                canonical,
+                canonical,
+                &value_symbols,
+                &type_symbols,
+                &class_symbols,
+                &effect_symbols,
+            );
+            if shown != path {
+                let suffix = &canonical[prefix.len()..];
+                add_completion_name(
+                    &mut scope,
+                    &format!("{shown}.{suffix}"),
+                    canonical,
+                    &value_symbols,
+                    &type_symbols,
+                    &class_symbols,
+                    &effect_symbols,
+                );
+            }
+        }
+    }
+    // The embedded module table is the resolver's lowest-priority root and is
+    // always importable in the standalone REPL. Direct imports are included too,
+    // covering a project module already discovered through a loaded session file.
+    scope.importable_modules.extend(
+        crate::stdlib::STDLIB
+            .iter()
+            .map(|(name, _)| (*name).to_string()),
+    );
+    scope.importable_modules.extend(modules.values().cloned());
+    scope.info.extend(scope.values.iter().cloned());
+    scope.info.extend(scope.types.iter().cloned());
+    (scope, modules)
 }
 
 #[derive(Clone)]
@@ -144,6 +331,7 @@ enum Seg {
 struct Flags {
     types: bool,
     timing: bool,
+    holes: bool,
 }
 
 impl Default for Flags {
@@ -151,6 +339,7 @@ impl Default for Flags {
         Self {
             types: true,
             timing: false,
+            holes: false,
         }
     }
 }
@@ -200,6 +389,8 @@ impl Session {
     fn build(&self) -> Result<(String, Built), Error> {
         let src = self.compose()?;
         let ParseResult { program, .. } = parse(&src)?;
+        let root_binders = binders(&program);
+        let import_decls = program.imports.clone();
         // The prelude opens the `Data.*` stdlib modules with glob imports, so the
         // session must resolve modules against the stdlib roots before desugaring,
         // exactly as the batch driver's `frontend` does. Without this, names that
@@ -210,7 +401,18 @@ impl Session {
         let imports = import_bindings(&program, &roots)?;
         let program = resolve_modules_in(program, &roots)?;
         let program = desugar(program)?;
-        let checked = check(&program)?;
+        let checked = if self.flags.holes {
+            check_allow_holes(&program)?
+        } else {
+            check(&program)?
+        };
+        let (completion, modules) =
+            completion_scope(&program, &checked, &imports, &root_binders, &import_decls);
+        let classes = program
+            .classes
+            .iter()
+            .map(|class| (class.name.clone(), class.clone()))
+            .collect();
         let core = elaborate(&program, &checked)?;
         let mut arity: BTreeMap<String, usize> = checked
             .decls
@@ -232,6 +434,9 @@ impl Session {
                 arity,
                 consts,
                 imports,
+                classes,
+                completion,
+                modules,
             },
         ))
     }
@@ -267,7 +472,12 @@ impl Session {
         let mut surface = parse_expr(&text)?;
         resolve_expr(&mut surface, &built.imports)?;
         let e = desugar_expr(&surface)?;
-        let (ty, eff, dicts) = infer_expr_dicts(&built.checked, &e)?;
+        let (ty, eff, dicts) = if self.flags.holes {
+            let (ty, eff, dicts, _) = infer_expr_dicts_allow_holes(&built.checked, &e)?;
+            (ty, eff, dicts)
+        } else {
+            infer_expr_dicts(&built.checked, &e)?
+        };
         let comp = elaborate_expr(
             &built.checked,
             &e,
@@ -304,11 +514,75 @@ fn show_eval(flags: Flags, (val, ty, eff): &(String, String, String), elapsed: I
     }
 }
 
-type Names = Rc<RefCell<BTreeSet<String>>>;
+type Scopes = Rc<RefCell<CompletionScope>>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletionKind {
+    Values,
+    Types,
+    Info,
+    Modules,
+    ImportableModules,
+    Files,
+}
+
+fn completion_kind(line: &str, pos: usize) -> CompletionKind {
+    let before = &line[..pos];
+    if let Some(rest) = before.strip_prefix(':') {
+        if let Some((word, _)) = rest.split_once(char::is_whitespace) {
+            return match resolve(&format!(":{word}")) {
+                Ok(":load" | ":edit") => CompletionKind::Files,
+                Ok(":kind") => CompletionKind::Types,
+                Ok(":browse") => CompletionKind::Modules,
+                Ok(":info") => CompletionKind::Info,
+                _ => CompletionKind::Values,
+            };
+        }
+    }
+    if before.trim_start().starts_with("import ") {
+        CompletionKind::ImportableModules
+    } else {
+        CompletionKind::Values
+    }
+}
+
+fn name_candidates(
+    scope: &CompletionScope,
+    kind: CompletionKind,
+    line: &str,
+    pos: usize,
+) -> (usize, Vec<Pair>) {
+    let names = match kind {
+        CompletionKind::Values => &scope.values,
+        CompletionKind::Types => &scope.types,
+        CompletionKind::Info => &scope.info,
+        CompletionKind::Modules => &scope.modules,
+        CompletionKind::ImportableModules => &scope.importable_modules,
+        CompletionKind::Files => return (pos, Vec::new()),
+    };
+    // Dots are part of a module-qualified name, so `Data.L` replaces as one
+    // token rather than completing only the suffix after the final dot.
+    let start = line[..pos]
+        .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+        .map_or(0, |i| i + 1);
+    let word = &line[start..pos];
+    if word.is_empty() {
+        return (pos, Vec::new());
+    }
+    let cands = names
+        .iter()
+        .filter(|name| name.starts_with(word))
+        .map(|name| Pair {
+            display: name.clone(),
+            replacement: name.clone(),
+        })
+        .collect();
+    (start, cands)
+}
 
 struct PrismHelper {
     files: FilenameCompleter,
-    names: Names,
+    scopes: Scopes,
     hints: HistoryHinter,
 }
 
@@ -321,13 +595,6 @@ impl Completer for PrismHelper {
         pos: usize,
         ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        if let Some(rest) = line.strip_prefix(':') {
-            if let Some((word, _)) = rest.split_once(' ') {
-                if matches!(resolve(&format!(":{word}")), Ok(":load" | ":edit")) {
-                    return self.files.complete(line, pos, ctx);
-                }
-            }
-        }
         if line.starts_with(':') && !line[..pos].contains(' ') {
             let cands = COMMANDS
                 .iter()
@@ -339,24 +606,11 @@ impl Completer for PrismHelper {
                 .collect();
             return Ok((0, cands));
         }
-        let start = line[..pos]
-            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
-            .map_or(0, |i| i + 1);
-        let word = &line[start..pos];
-        if word.is_empty() {
-            return Ok((pos, Vec::new()));
+        let kind = completion_kind(line, pos);
+        if kind == CompletionKind::Files {
+            return self.files.complete(line, pos, ctx);
         }
-        let cands = self
-            .names
-            .borrow()
-            .iter()
-            .filter(|n| n.starts_with(word))
-            .map(|n| Pair {
-                display: n.clone(),
-                replacement: n.clone(),
-            })
-            .collect();
-        Ok((start, cands))
+        Ok(name_candidates(&self.scopes.borrow(), kind, line, pos))
     }
 }
 
@@ -570,11 +824,13 @@ fn highlight(line: &str, pos: usize) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-fn refresh_names(names: &Names, session: &Session, built: &Built) {
-    let mut set: BTreeSet<String> = built.arity.keys().cloned().collect();
-    set.extend(built.checked.ctors.keys().cloned());
-    set.extend(session.lets.iter().map(|(n, _)| n.clone()));
-    *names.borrow_mut() = set;
+fn refresh_scope(scopes: &Scopes, session: &Session, built: &Built) {
+    let mut scope = built.completion.clone();
+    for (name, _) in &session.lets {
+        scope.values.insert(name.clone());
+        scope.info.insert(name.clone());
+    }
+    *scopes.borrow_mut() = scope;
 }
 
 pub fn repl(show_banner: bool) {
@@ -586,12 +842,16 @@ pub fn repl(show_banner: bool) {
             return;
         }
     };
-    // Everything in the bare prelude, so `:browse` can subtract it later.
+    // Everything in the bare prelude, so `:browse` can subtract it later. Read
+    // from the exact same sources `browse` iterates (`checked.decls` and
+    // `checked.ctors`, not `arity`, which only covers a subset) so the baseline
+    // and the later diff never drift apart.
     session.base = built
-        .arity
-        .keys()
-        .chain(built.checked.ctors.keys())
-        .cloned()
+        .checked
+        .decls
+        .iter()
+        .map(|d| d.name.clone())
+        .chain(built.checked.ctors.keys().cloned())
         .collect();
     if show_banner {
         banner(built.arity.len() + built.consts.len());
@@ -602,11 +862,11 @@ pub fn repl(show_banner: bool) {
         eprintln!("could not start interactive shell");
         return;
     };
-    let names: Names = Rc::new(RefCell::new(BTreeSet::new()));
-    refresh_names(&names, &session, &built);
+    let scopes: Scopes = Rc::new(RefCell::new(CompletionScope::default()));
+    refresh_scope(&scopes, &session, &built);
     rl.set_helper(Some(PrismHelper {
         files: FilenameCompleter::new(),
-        names: Rc::clone(&names),
+        scopes: Rc::clone(&scopes),
         hints: HistoryHinter::new(),
     }));
     let hist = env::var_os("HOME").map(|h| PathBuf::from(h).join(".prism_history"));
@@ -636,7 +896,7 @@ pub fn repl(show_banner: bool) {
                 if !step(&mut session, &mut built, line) {
                     break;
                 }
-                refresh_names(&names, &session, &built);
+                refresh_scope(&scopes, &session, &built);
             }
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => break,
             Err(e) => {
@@ -669,9 +929,10 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
     // expression if it does not start with a declaration keyword.
     let line = unblock(line);
     if is_decl(&line) {
+        let msg = decl_success_message(&line);
         let mut cand = session.segs.clone();
         upsert_decl(&mut cand, line.into_owned());
-        commit(session, built, cand, "<repl>");
+        commit_as(session, built, cand, "<repl>", &msg);
         return true;
     }
     if (line.starts_with("let ") || bare_bind(&line).is_some()) && parse_expr(&line).is_err() {
@@ -708,6 +969,7 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
 
 fn is_decl(line: &str) -> bool {
     [
+        "import ",
         "fn ",
         "type ",
         "effect ",
@@ -763,6 +1025,15 @@ fn upsert_decl(segs: &mut Vec<Seg>, text: String) {
     segs.push(Seg::Text(text));
 }
 
+// An `import`'s success message names the module, so the REPL confirms what
+// was written rather than a bare "ok"; every other declaration keeps "ok".
+fn decl_success_message(text: &str) -> String {
+    match decl_key(text) {
+        Some((kw, name)) if kw == "import" => format!("Imported {name} successfully"),
+        _ => "ok".to_string(),
+    }
+}
+
 // The (keyword, name) identifying a declaration. Instances have no simple name,
 // so they always append.
 fn decl_key(text: &str) -> Option<(String, String)> {
@@ -796,11 +1067,24 @@ fn command(session: &mut Session, built: &mut Built, cmd: &str, arg: &str) -> bo
             None => eprintln!("no active file; load one with :load <file>"),
         },
         ":edit" => edit(session, built, arg),
-        ":browse" => browse(session, built),
+        ":browse" => browse(session, built, arg),
         ":core" => core(session),
         ":info" => info(session, built, arg),
         ":kind" => kind(built, arg),
-        ":set" => set(session, arg),
+        ":set" => {
+            let holes_before = session.flags.holes;
+            set(session, arg);
+            if holes_before != session.flags.holes {
+                match session.build() {
+                    Ok((_, rebuilt)) => *built = rebuilt,
+                    Err(e) => {
+                        session.flags.holes = holes_before;
+                        let src = session.compose().unwrap_or_default();
+                        report(&e, &src, "<repl>");
+                    }
+                }
+            }
+        }
         _ => eprintln!("unknown command `{cmd}`; type :help for a list"),
     }
     true
@@ -810,18 +1094,18 @@ fn help() {
     println!(":t <expr>      show the type and effects of an expression");
     println!(":kind <type>   show the kind of a type constructor");
     println!(":info <name>   describe a binding, type, or class");
-    println!(":browse        list the bindings this session added");
+    println!(":browse [M]    list session bindings, or the public names in module M");
     println!(":core          dump the lowered core IR of this session");
     println!(":load <file>   load declarations from a file");
     println!(":reload        re-read the active file from disk");
     println!(":edit [file]   open a file (or scratch) in $EDITOR, then load it");
-    println!(":set [+-]ts    toggle options (bare :set lists them)");
+    println!(":set [+-]tsh   toggle options (bare :set lists them)");
     println!(":quit          quit");
     println!("any unambiguous prefix works, ghci style (:r, :lo, :e)");
     println!(":{{ ... :}}       enter a multi-line block (also auto-detected)");
     println!("let x = e      bind a variable (re-evaluated per use); `it` is the last result");
     println!("<expr>         evaluate an expression");
-    println!("fn/type/class/instance ... add a declaration to the session");
+    println!("import/fn/type/class/instance ... add a declaration to the session");
     println!("example        map(\\(x) -> x * x, [1..5])");
 }
 
@@ -840,17 +1124,37 @@ fn core(session: &Session) {
 
 // List what the session added on top of the prelude: declarations, then
 // constructors, then `let` bindings.
-fn browse(session: &Session, built: &Built) {
+fn browse(session: &Session, built: &Built, module: &str) {
+    if !module.is_empty() {
+        return browse_module(built, module);
+    }
     let mut any = false;
+    // Bare names only: a dotted/`@` canonical name is reachable qualified, not
+    // in scope, so a module imported without `(..)` does not appear here even
+    // though its declarations are checked and live in `built.checked`.
     for d in &built.checked.decls {
-        if !session.base.contains(&d.name) {
+        if !d.name.contains(['.', '@']) && !session.base.contains(&d.name) {
             println!("{} : {}", d.name, d.ty.show());
             any = true;
         }
     }
     for (n, c) in &built.checked.ctors {
-        if !session.base.contains(n) {
+        if !n.contains(['.', '@']) && !session.base.contains(n) {
             println!("{n} : {}", ctor_type(c).show());
+            any = true;
+        }
+    }
+    // Names an explicit `import M (..)` or `import M (a, b)` opened unqualified
+    // this session, resolved back to their checked types.
+    for (name, canonical) in &built.imports {
+        if session.base.contains(name) {
+            continue;
+        }
+        if let Some(d) = built.checked.decls.iter().find(|d| &d.name == canonical) {
+            println!("{name} : {}", d.ty.show());
+            any = true;
+        } else if let Some(c) = built.checked.ctors.get(canonical) {
+            println!("{name} : {}", ctor_type(c).show());
             any = true;
         }
     }
@@ -860,6 +1164,53 @@ fn browse(session: &Session, built: &Built) {
     }
     if !any {
         println!("nothing defined yet");
+    }
+}
+
+fn browse_module(built: &Built, module: &str) {
+    let Some(path) = built.modules.get(module) else {
+        eprintln!("'{module}' is not an open module");
+        return;
+    };
+    let prefix = format!("{path}.");
+    let mut rows = Vec::new();
+    for decl in &built.checked.decls {
+        if let Some(name) = decl.name.strip_prefix(&prefix) {
+            rows.push((
+                name.to_string(),
+                format!(
+                    "{name} : {}",
+                    show_type_with_effects(&decl.ty, &decl.effects)
+                ),
+            ));
+        }
+    }
+    for (canonical, ctor) in &built.checked.ctors {
+        if let Some(name) = canonical.strip_prefix(&prefix) {
+            rows.push((
+                name.to_string(),
+                format!("{name} : {}", ctor_type(ctor).show()),
+            ));
+        }
+    }
+    for canonical in built.checked.data.keys() {
+        if let Some(name) = canonical.strip_prefix(&prefix) {
+            rows.push((name.to_string(), format!("type {name}")));
+        }
+    }
+    for canonical in built.classes.keys() {
+        if let Some(name) = canonical.strip_prefix(&prefix) {
+            rows.push((name.to_string(), format!("class {name}")));
+        }
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    rows.dedup_by(|a, b| a.1 == b.1);
+    if rows.is_empty() {
+        println!("module {path} exports no browsable names");
+    } else {
+        for (_, row) in rows {
+            println!("{row}");
+        }
     }
 }
 
@@ -875,11 +1226,28 @@ fn ctor_type(c: &CtorInfo) -> Type {
 }
 
 fn info(session: &Session, built: &Built, name: &str) {
+    let out = info_lines(session, built, name);
+    if out.is_empty() {
+        eprintln!("'{name}' is not in scope");
+    } else {
+        for line in out {
+            println!("{line}");
+        }
+    }
+}
+
+fn info_lines(session: &Session, built: &Built, query: &str) -> Vec<String> {
     let ck = &built.checked;
+    let mut out: Vec<String> = Vec::new();
+    // Session lets shadow imports in expression resolution, so they must do the
+    // same for `:info` rather than being canonicalized through an import first.
+    if let Some((_, rhs)) = session.lets.iter().find(|(name, _)| name == query) {
+        out.push(format!("{query} = {rhs}"));
+        return out;
+    }
     // A bare query (`map`) names a glob-imported binding stored under its
     // canonical symbol (`Data.List.map`); resolve it the way an expression would.
-    let name = built.imports.get(name).map_or(name, String::as_str);
-    let mut out: Vec<String> = Vec::new();
+    let name = built.imports.get(query).map_or(query, String::as_str);
     if let Some(d) = ck.decls.iter().find(|d| d.name == name) {
         out.push(format!(
             "{name} : {}",
@@ -909,23 +1277,10 @@ fn info(session: &Session, built: &Built, name: &str) {
         };
         out.push(format!("type {head} = {}", d.ctors.join(" | ")));
     }
-    if let Some(c) = ck.classes.get(&Sym::from(name)) {
-        let mut s = format!("class {name} {}", c.param);
-        for (m, ty) in &c.methods {
-            let _ = write!(s, "\n  {m} : {}", ty.show());
-        }
-        out.push(s);
+    if let Some(class) = built.classes.get(name) {
+        out.push(fmt_class(class));
     }
-    if let Some((_, rhs)) = session.lets.iter().find(|(n, _)| n == name) {
-        out.push(format!("{name} = {rhs}"));
-    }
-    if out.is_empty() {
-        eprintln!("'{name}' is not in scope");
-    } else {
-        for s in out {
-            println!("{s}");
-        }
-    }
+    out
 }
 
 // The kind of a named type constructor, from its parameter count.
@@ -961,6 +1316,9 @@ const TOGGLES: &[Toggle] = &[
         &mut f.types
     }),
     ('s', "timing", "show evaluation time", |f| &mut f.timing),
+    ('h', "holes", "defer typed holes to runtime faults", |f| {
+        &mut f.holes
+    }),
 ];
 
 // `:set +t -s` toggles options. Bare `:set` lists them with their state.
@@ -979,7 +1337,7 @@ fn set(session: &mut Session, arg: &str) {
             Some('+') => (true, chars.as_str()),
             Some('-') => (false, chars.as_str()),
             _ => {
-                eprintln!("usage: :set +t -s  (bare :set lists options)");
+                eprintln!("usage: :set +t -s +h  (bare :set lists options)");
                 continue;
             }
         };
@@ -1063,12 +1421,24 @@ fn load_file(session: &mut Session, built: &mut Built, path: &str) {
 // Probe a candidate segment list, committing only on a successful build, so a
 // bad :load or declaration never poisons the session. Returns whether it took.
 fn commit(session: &mut Session, built: &mut Built, cand: Vec<Seg>, name: &str) -> bool {
+    commit_as(session, built, cand, name, "ok")
+}
+
+// Same as `commit`, but with a caller-chosen success message: `import Teleport`
+// reads better as "Imported Teleport successfully" than a bare "ok".
+fn commit_as(
+    session: &mut Session,
+    built: &mut Built,
+    cand: Vec<Seg>,
+    name: &str,
+    msg: &str,
+) -> bool {
     let probe = Session::probe(cand, Vec::new());
     match probe.build() {
         Ok((_, b)) => {
             session.segs = probe.segs;
             *built = b;
-            println!("ok");
+            println!("{msg}");
             true
         }
         Err(Error::Io(e)) => {
@@ -1127,6 +1497,14 @@ fn report(e: &Error, src: &str, name: &str) {
 mod tests {
     use super::*;
 
+    fn fresh() -> (Session, Built) {
+        let session = Session::probe(Vec::new(), Vec::new());
+        let (_, built) = session
+            .build()
+            .expect("bare prelude must build in a fresh REPL");
+        (session, built)
+    }
+
     // A fresh REPL session must build the bare prelude on launch. The prelude
     // opens the `Data.*` stdlib modules with glob imports, so `build` has to
     // resolve modules against the stdlib roots; regressing that (e.g. dropping
@@ -1134,12 +1512,122 @@ mod tests {
     // dies before the first prompt.
     #[test]
     fn prelude_loads_on_launch() {
-        let (_, built) = Session::probe(Vec::new(), Vec::new())
-            .build()
-            .expect("bare prelude must build on REPL launch");
+        let (_, built) = fresh();
         // A successful build already proves imports resolved: `at_list` (a prelude
         // function) calls `nth` from the `Data.List` stdlib module, so an
         // unresolved import would have failed above with an unbound-variable error.
         assert!(built.arity.contains_key("at_list"));
+    }
+
+    #[test]
+    fn interactive_import_is_live_transactional_and_idempotent() {
+        let (mut session, mut built) = fresh();
+        assert!(!built.imports.contains_key("vempty"));
+
+        assert!(step(&mut session, &mut built, "import Data.Vec (..)"));
+        assert_eq!(
+            built.imports.get("vempty").map(String::as_str),
+            Some("Data.Vec.vempty")
+        );
+        assert_eq!(session.segs.len(), 1);
+        let once = session.compose().unwrap();
+
+        assert!(step(&mut session, &mut built, "import Data.Vec (..)"));
+        assert_eq!(session.segs.len(), 1, "re-import replaces the same segment");
+        assert_eq!(session.compose().unwrap(), once);
+
+        let before_imports = built.imports.clone();
+        assert!(step(&mut session, &mut built, "import Missing.Module (..)"));
+        assert_eq!(
+            session.compose().unwrap(),
+            once,
+            "failed import rolls back source state"
+        );
+        assert_eq!(
+            built.imports, before_imports,
+            "failed import rolls back resolver state"
+        );
+    }
+
+    #[test]
+    fn completion_routes_over_the_rebuilt_resolver_scope() {
+        let (mut session, mut built) = fresh();
+        step(&mut session, &mut built, "import Data.Vec (..)");
+
+        assert!(built.completion.values.contains("vempty"));
+        assert!(built.completion.types.contains("Vec"));
+        assert!(built.completion.modules.contains("Data.Vec"));
+        assert!(built.completion.modules.contains("Vec"));
+        assert!(built.completion.importable_modules.contains("Json"));
+        assert!(
+            built
+                .completion
+                .values
+                .iter()
+                .all(|name| !name.contains('@')),
+            "private resolver symbols must not complete"
+        );
+
+        let line = ":kind Ve";
+        assert_eq!(completion_kind(line, line.len()), CompletionKind::Types);
+        let (_, pairs) =
+            name_candidates(&built.completion, CompletionKind::Types, line, line.len());
+        assert!(pairs.iter().any(|pair| pair.replacement == "Vec"));
+
+        let line = ":browse Data.V";
+        assert_eq!(completion_kind(line, line.len()), CompletionKind::Modules);
+        let (_, pairs) =
+            name_candidates(&built.completion, CompletionKind::Modules, line, line.len());
+        assert_eq!(
+            pairs
+                .iter()
+                .map(|pair| pair.replacement.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Data.Vec"]
+        );
+    }
+
+    #[test]
+    fn info_class_uses_the_canonical_superclass_printer() {
+        let mut session = Session::probe(
+            vec![Seg::Text(
+                "class Parent(a)\n\nclass Child(a) given Parent(a)".to_string(),
+            )],
+            Vec::new(),
+        );
+        let (_, built) = session.build().expect("class declarations type check");
+        let lines = info_lines(&session, &built, "Child");
+        assert_eq!(lines, vec!["class Child(a) given Parent(a)"]);
+
+        session.lets.push(("map".into(), "41".into()));
+        assert_eq!(
+            info_lines(&session, &built, "map"),
+            vec!["map = 41"],
+            "a live let shadows the prelude import in :info"
+        );
+    }
+
+    #[test]
+    fn hole_toggle_changes_expression_evaluation_policy() {
+        let (mut session, built) = fresh();
+        let error = session
+            .eval_chained(&built, "?todo")
+            .expect_err("holes are rejected by default");
+        let Error::Type(error) = error else {
+            panic!("expected a type error, got {error}");
+        };
+        assert_eq!(error.code(), Some(crate::error::TYPED_HOLE.as_str()));
+
+        session.flags.holes = true;
+        let error = session
+            .eval_chained(&built, "?todo")
+            .expect_err("reaching a deferred hole faults");
+        let Error::RuntimeEvaluation(fault) = error else {
+            panic!("expected a runtime fault, got {error}");
+        };
+        assert_eq!(
+            fault,
+            crate::error::typed_hole_fault("todo", marginalia::Span::new(0, 5))
+        );
     }
 }

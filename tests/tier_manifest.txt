@@ -5,6 +5,8 @@
 # with `just tier-accept`. Do not hand-edit.
 examples/accum.pr	pure
 examples/ad.pr	pure
+examples/arena.pr	evidence
+examples/arena_shared.pr	evidence
 examples/array.pr	pure
 examples/async.pr	whole-program-free-monad
 examples/async_capability.pr	whole-program-free-monad
@@ -110,6 +112,7 @@ examples/replay_concurrent.pr	whole-program-free-monad
 examples/same_fringe.pr	whole-program-free-monad
 examples/scheduler.pr	whole-program-free-monad
 examples/scheduler_policy.pr	whole-program-free-monad
+examples/semantic_patch.pr	pure
 examples/show.pr	pure
 examples/smallest_free.pr	pure
 examples/sort.pr	pure
@@ -207,6 +210,7 @@ tests/cases/run/generic_fold.pr	pure
 tests/cases/run/grade_ops.pr	selective-free-monad
 tests/cases/run/guards.pr	pure
 tests/cases/run/handler_funval.pr	evidence
+tests/cases/run/handler_partial_forward.pr	selective-free-monad
 tests/cases/run/higher.pr	pure
 tests/cases/run/ho_row_inst.pr	pure
 tests/cases/run/identifiable.pr	pure

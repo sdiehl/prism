@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use super::breaks::{block_trailing_call, forces_break};
-use super::{Fmt, Mode, INDENT, LINE_WIDTH};
+use super::{text_width, Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::coeffect::CoeffectFact;
 use crate::kw;
 use crate::syntax::ast::{
@@ -168,7 +168,7 @@ pub(crate) fn fmt_data(d: &DataDecl) -> String {
     // constructors. A sum with more than three constructors is always stacked (the
     // canonical aligned form below), and any declaration over the width budget
     // wraps regardless of count.
-    if flat.len() <= LINE_WIDTH && d.ctors.len() <= 3 {
+    if text_width(&flat) <= LINE_WIDTH && d.ctors.len() <= 3 {
         return flat;
     }
     // Two or more constructors stack one per line with the `=` and every `|`
@@ -422,7 +422,7 @@ impl Fmt<'_> {
             if !bodied && (mode == Mode::Flat || !forces_break(&d.body)) {
                 if let Some(body) = self.fmt_expr_inline(&d.body, mode) {
                     let line = format!("{sig} {body}");
-                    if line.len() <= LINE_WIDTH {
+                    if text_width(&line) <= LINE_WIDTH {
                         return line;
                     }
                 }
@@ -501,7 +501,7 @@ impl Fmt<'_> {
         // decided from the flat signature length, so it is idempotent and a short
         // signature stays on one line.
         let flat_sig = format!("{key} {}({}){ret_ann}{na}{wh} =", d.name, params.join(", "));
-        let sig = if flat_sig.len() > LINE_WIDTH && params.len() >= 2 {
+        let sig = if text_width(&flat_sig) > LINE_WIDTH && params.len() >= 2 {
             let ps: Vec<String> = params.iter().map(|p| format!("{INDENT}{p}")).collect();
             format!(
                 "{key} {}(\n{}\n){ret_ann}{na}{wh} =",
@@ -523,7 +523,7 @@ impl Fmt<'_> {
         if !bodied && !block_trailing && stay_inline && d.wheres.is_empty() {
             if let Some(body) = self.fmt_expr_inline(&d.body, mode) {
                 let line = format!("{sig} {body}");
-                if line.len() <= LINE_WIDTH {
+                if text_width(&line) <= LINE_WIDTH {
                     return line;
                 }
             }
@@ -557,7 +557,7 @@ impl Fmt<'_> {
         for (n, v) in wheres {
             if let Some(inl) = self.fmt_expr_inline(v, Mode::Layout) {
                 let line = format!("{ind}{n} = {inl}");
-                if line.len() <= LINE_WIDTH {
+                if text_width(&line) <= LINE_WIDTH {
                     write!(s, "\n{line}").unwrap();
                     continue;
                 }

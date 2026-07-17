@@ -16,9 +16,8 @@ of the proof reviewable before anyone attempts the proofs.
 theorem canonicalRow_nodup (labels : List (String × List Ty)) (tail : Row) :
     NoDupLabels (canonicalRow labels tail) := by
   /-
-  This is intentionally left as the first `sorry` site. This has baffled every
-  AI assistant and person that has tried to do it; maybe someone smarter than me
-  can accomplish it.
+  This obligation is isolated because canonical-row normalization and tail
+  preservation meet here.
   -/
   sorry
 
@@ -82,8 +81,8 @@ theorem inferExpr_sound (Γ : TermEnv) (e : Expr) (τ : Ty) (eff : Row) :
 
 /-!
 Subsystem obligations corresponding to the Rust `src/tc` modules. These use
-abstract predicates for now; future work should replace each with a real judgment
-over the resolved/desugared Prism AST and the corresponding `Checked` side table.
+abstract predicates rather than judgments over the resolved/desugared Prism AST
+and the corresponding `Checked` side table.
 -/
 
 inductive DeclsWellTyped : Program → Checked → Prop where

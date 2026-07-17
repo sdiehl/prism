@@ -43,6 +43,10 @@ fn rec_bool(k, t, x) = k(x)(Cons(TBool(x), t))
 -- | Run `action` against the real world, logging every capability observation
 -- (console, file, random, and environment reads) into a trace. Returns
 -- `(result, trace)`; feed the trace to `replay` to reproduce the run without IO.
+--
+-- ```prism,no_run
+-- record(\(u) -> rng_rand() + rng_rand())
+-- ```
 pub fn record(action) =
   let g =
     handle action(()) with
@@ -91,6 +95,11 @@ fn rep_bool(k, t) =
 -- | Re-run `action` against a recorded `trace`, performing no real IO: each
 -- capability read is served from the trace and output is dropped, reproducing the
 -- original result. Fails if the trace does not match the action.
+--
+-- ```prism,no_run
+-- let (first, trace) = record(\(u) -> rng_rand())
+-- replay(trace, \(u) -> rng_rand()) == first
+-- ```
 pub fn replay(trace, action) =
   let g =
     handle action(()) with
@@ -124,6 +133,11 @@ fn enc_entry(e) =
 
 -- | Encode a trace to a self-delimiting string for durable storage, read back
 -- with `deserialize`.
+--
+-- ```prism,no_run
+-- let (r, trace) = record(\(u) -> rng_rand())
+-- write_file("run.trace", serialize(trace))
+-- ```
 pub fn serialize(trace) = str_join("", map(enc_entry, trace))
 
 fn un_int(o) =
@@ -154,6 +168,16 @@ fn de_go(s, i, colon) =
     Cons(de_entry(tag, payload), de_go(s, c + 1 + len, colon))
 
 -- | Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
+--
+-- The frames are self-delimiting (tag, length, `:`, payload), so the encoding
+-- round-trips through text:
+--
+-- ```prism
+-- serialize(deserialize("I2:42S3:abc"))
+-- ```
+-- ```output
+-- I2:42S3:abc
+-- ```
 pub fn deserialize(s) = de_go(s, 0, char_at(":", 0))
 
 -- Durable record/replay driver. A persisted log freezes the observations of an
@@ -226,6 +250,10 @@ fn out_step(path, k, t, real) =
 -- prefix with no real IO, then perform each new observation for real, appending a
 -- frame per observation so an interrupted run resumes where it left off, exactly
 -- once at the crash boundary.
+--
+-- ```prism,no_run
+-- durable("target/run.log", \(u) -> rng_rand() + rng_rand())
+-- ```
 pub fn durable(path, action) =
   let loaded =
     if prim_file_exists(path) then

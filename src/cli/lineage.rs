@@ -15,7 +15,7 @@ use crate::driver::{ModuleCheckReport, SOURCE_EXT};
 use crate::error::Error;
 use crate::lineage::{
     FactLedger, FactOutcome, FactScope, QueryFact, QueryKind, Variant, LINEAGE_EXTENSION,
-    LINEAGE_FORMAT, LINEAGE_GRAPH_FORMAT,
+    LINEAGE_GRAPH_FORMAT,
 };
 use crate::parse::parse;
 use crate::store::cert::CertStatus;
@@ -510,7 +510,7 @@ pub fn is_lineage_sidecar(path: &Path) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         })
-        .is_some_and(|format| format == LINEAGE_FORMAT || format == LINEAGE_GRAPH_FORMAT)
+        .is_some_and(|format| format == LINEAGE_GRAPH_FORMAT)
 }
 
 // `lineage verify SIDECAR [--certify OUT]`: rehash the recorded artifacts. A world
@@ -937,7 +937,7 @@ pub fn verify_lineage_cmd(
     Ok(())
 }
 
-// Write a minted certificate and name where it landed. Certificates are a few
+// Write a minted certificate and name where it was stored. Certificates are a few
 // hundred bytes; a filesystem error is the only failure.
 fn write_certificate(out: &Path, cert: &[u8]) -> CmdResult {
     fs::write(out, cert).map_err(|e| (Error::Io(e), String::new(), out.display().to_string()))?;

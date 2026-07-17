@@ -14,8 +14,8 @@ use super::{call, evar, lam1, sp, Cx};
 use crate::error::{ErrKind, TypeError};
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
-    Arm, BinOp, Core, Expr, HandlerArm, Marker, Param, PathOp, PathStep, Pattern, Qualifier, Sugar,
-    SugarArm, Surface, S,
+    Arm, BinOp, Core, Expr, HandlerArm, HandlerMode, Marker, Param, PathOp, PathStep, Pattern,
+    Qualifier, Sugar, SugarArm, Surface, S,
 };
 
 mod defaults;
@@ -113,7 +113,16 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
         }
         Expr::Var(x) => match env.get(x) {
             Some(Binding::Var(ops)) => {
-                return Ok(call(evar(&ops.get, span), vec![sp(Expr::Unit, span)], span));
+                // Tooltip discipline: the synthesized `get` callee and unit
+                // argument are zero-width (position-anchored for diagnostics),
+                // so the get call is the one node carrying the occurrence's
+                // span and the occurrence hovers as the cell's value type.
+                let anchor = Span::empty(span.start);
+                return Ok(call(
+                    evar(&ops.get, anchor),
+                    vec![sp(Expr::Unit, anchor)],
+                    span,
+                ));
             }
             Some(Binding::Instance(_)) => {
                 return Err(ErrKind::InstanceNotValue { name: x.clone() }.at(span));
@@ -126,6 +135,7 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
                 Expr::Var(x.clone())
             }
         },
+        Expr::Hole(name) => Expr::Hole(name.clone()),
         Expr::Let(x, v, b) => {
             let v2 = rw(v, env, cx)?;
             let mut env2 = env.clone();
@@ -170,10 +180,10 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
             }
             Expr::Match(Box::new(s2), arms2)
         }
-        Expr::Handle(b, arms) => {
+        Expr::Handle(b, arms, mode) => {
             let b2 = rw(b, env, cx)?;
             let (arms2, vals) = rw_arms(arms, env, cx)?;
-            let handled = sp(Expr::Handle(Box::new(b2), arms2), span);
+            let handled = sp(Expr::Handle(Box::new(b2), arms2, *mode), span);
             return Ok(wrap_vals(vals, handled, span));
         }
         // `a ^ b` is sugar for the `Pow` class method `pow(a, b)`. The head is a
@@ -387,7 +397,13 @@ fn rw_sugar(
         Sugar::Assign(x, v) => {
             let v2 = rw(v, env, cx)?;
             match env.get(x) {
-                Some(Binding::Var(ops)) => Ok(call(evar(&ops.put, span), vec![v2], span)),
+                // Zero-width callee: the put call alone carries the
+                // assignment's span (its `Unit` is the honest hover).
+                Some(Binding::Var(ops)) => Ok(call(
+                    evar(&ops.put, Span::empty(span.start)),
+                    vec![v2],
+                    span,
+                )),
                 _ => Err(ErrKind::CannotAssign { name: x.clone() }.at(span)),
             }
         }
@@ -433,7 +449,10 @@ fn rw_sugar(
                     a.body.clone(),
                     a.span,
                 );
-                acc = sp(Expr::Handle(Box::new(acc), harms), a.span);
+                acc = sp(
+                    Expr::Handle(Box::new(acc), harms, HandlerMode::Exhaustive),
+                    a.span,
+                );
             }
             rw(&acc, env, cx)
         }
@@ -462,7 +481,10 @@ fn rw_sugar(
                 HandlerArm::Sugar(SugarArm::Once("emit".into(), vec![x.clone()], inner)),
                 HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
             ];
-            let consumer = sp(Expr::Handle(Box::new(run), arms), span);
+            let consumer = sp(
+                Expr::Handle(Box::new(run), arms, HandlerMode::Exhaustive),
+                span,
+            );
             let full = wrap_if(has_break, names::BREAK_OP, consumer, span);
             rw(&full, env, cx)
         }
@@ -494,10 +516,14 @@ fn rw_sugar(
         // eff-op cell per element. Both paths evaluate `s` once, in emission order,
         // and produce the identical list; this one just stays on the fused tier.
         Sugar::Comp(head, x, s, quals) if quals.is_empty() => {
-            let f = lam1(x, (**head).clone(), head.span);
-            let mapped = call(evar(names::SMAP_FN, span), vec![(**s).clone(), f], span);
+            // Zero-width machinery: the collecting call alone carries the
+            // comprehension's span, so `[h for x in s]` hovers as its list
+            // type; `h` and `s` keep their own honest spans.
+            let anchor = Span::empty(span.start);
+            let f = lam1(x, (**head).clone(), Span::empty(head.span.start));
+            let mapped = call(evar(names::SMAP_FN, anchor), vec![(**s).clone(), f], anchor);
             rw(
-                &call(evar(names::SCOLLECT_FN, span), vec![mapped], span),
+                &call(evar(names::SCOLLECT_FN, anchor), vec![mapped], span),
                 env,
                 cx,
             )
@@ -531,7 +557,11 @@ fn rw_sugar(
         // failure; a `Fail` raised by `b` itself escapes to the outer context.
         Sugar::Default(a, b) => {
             let arms = final_handler(names::FAIL_OP.into(), Vec::new(), (**b).clone(), span);
-            rw(&sp(Expr::Handle(a.clone(), arms), span), env, cx)
+            rw(
+                &sp(Expr::Handle(a.clone(), arms, HandlerMode::Exhaustive), span),
+                env,
+                cx,
+            )
         }
         // `transact body else fallback`: snapshot every live `var` with its get
         // op, run body in a `Fail`-discarding handler, and on failure restore
@@ -561,7 +591,10 @@ fn rw_sugar(
                 );
             }
             let arms = final_handler(names::FAIL_OP.into(), Vec::new(), restore, span);
-            let mut handled = sp(Expr::Handle(body.clone(), arms), span);
+            let mut handled = sp(
+                Expr::Handle(body.clone(), arms, HandlerMode::Exhaustive),
+                span,
+            );
             for ((get, _), snap) in vars.iter().zip(&snaps).rev() {
                 let get_call = call(evar(get, span), vec![sp(Expr::Unit, span)], span);
                 handled = sp(
@@ -590,8 +623,11 @@ fn rw_sugar(
         }
         // `a?.b` is `force(a).b`: a `None` makes `force` raise `Fail`, so the
         // access is failable and chains short-circuit to the nearest handler.
+        // The synthesized `force` machinery is zero-width so the field access
+        // alone carries the segment's span: hovering `a?.b` reads as the field.
         Sugar::OptChain(a, field) => {
-            let forced = call(evar(names::FORCE_FN, span), vec![(**a).clone()], span);
+            let anchor = Span::empty(span.start);
+            let forced = call(evar(names::FORCE_FN, anchor), vec![(**a).clone()], anchor);
             let access = sp(Expr::FieldAccess(Box::new(forced), field.clone()), span);
             rw(&access, env, cx)
         }
@@ -604,15 +640,20 @@ fn rw_sugar(
                 ("enum_from_to", vec![pre[0].clone()])
             };
             args.push((**hi).clone());
-            rw(&call(evar(f, span), args, span), env, cx)
+            // Zero-width callee: the enum call alone carries the range's span,
+            // so `[a..z]` hovers as its list type.
+            rw(&call(evar(f, Span::empty(span.start)), args, span), env, cx)
         }
         // `f >> g` lowers to `\x -> g(f(x))`, `f << g` to `\x -> f(g(x))`. The
         // bound name is unforgeable, so the synthesized lambda cannot capture.
         Sugar::Compose(forward, f, g) => {
             let (outer, inner) = if *forward { (g, f) } else { (f, g) };
-            let xv = evar(COMPOSE, span);
-            let inner_call = call((**inner).clone(), vec![xv], span);
-            let body = call((**outer).clone(), vec![inner_call], span);
+            // Zero-width internals: the lambda alone carries the composition's
+            // span, so `f >> g` hovers as the composed function type.
+            let anchor = Span::empty(span.start);
+            let xv = evar(COMPOSE, anchor);
+            let inner_call = call((**inner).clone(), vec![xv], anchor);
+            let body = call((**outer).clone(), vec![inner_call], anchor);
             let param = Param {
                 name: COMPOSE.into(),
                 ty: None,
@@ -689,7 +730,10 @@ fn loop_ctl_handler(op: &str, body: S<Expr>, span: Span) -> S<Expr> {
         HandlerArm::Sugar(SugarArm::Never(op.into(), Vec::new(), sp(Expr::Unit, span))),
         HandlerArm::Return(RET.into(), sp(Expr::Unit, span)),
     ];
-    sp(Expr::Handle(Box::new(body), arms), span)
+    sp(
+        Expr::Handle(Box::new(body), arms, HandlerMode::Exhaustive),
+        span,
+    )
 }
 
 // Wrap `body` in `loop_ctl_handler` for `op` only when the loop actually uses
@@ -729,7 +773,10 @@ pub(super) fn wrap_return(body: S<Expr>, cx: &mut Cx) -> S<Expr> {
         evar(&v, span),
         span,
     );
-    sp(Expr::Handle(Box::new(body), arms), span)
+    sp(
+        Expr::Handle(Box::new(body), arms, HandlerMode::Exhaustive),
+        span,
+    )
 }
 
 // Loop-control keywords a body performs at this loop's level: `(break, continue)`.
@@ -938,7 +985,7 @@ impl CtlScan {
                     self.go(op.expr());
                 }
             }
-            Expr::Handle(b, arms) => {
+            Expr::Handle(b, arms, _) => {
                 self.go(b);
                 for a in arms {
                     self.arm(a);
@@ -954,6 +1001,7 @@ impl CtlScan {
             | Expr::Unit
             | Expr::Str(_)
             | Expr::Var(_)
+            | Expr::Hole(_)
             | Expr::Marker(_) => {}
         }
     }

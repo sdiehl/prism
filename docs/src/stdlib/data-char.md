@@ -16,6 +16,14 @@ is_digit : (Int) -> Bool
 
 True for an ASCII decimal digit (`0`-`9`).
 
+```prism,mod=Data.Char
+is_digit(char_at("7", 0))
+```
+
+```output
+true
+```
+
 ### `is_upper`
 
 ```prism,sig,h-22a64a1fa706766c6162c4ed890f841fd6fdd429c488627d33d640fcc02cd94f
@@ -23,6 +31,14 @@ is_upper : (Int) -> Bool
 ```
 
 True for an ASCII upper-case letter (`A`-`Z`).
+
+```prism,mod=Data.Char
+is_upper(char_at("A", 0))
+```
+
+```output
+true
+```
 
 ### `is_lower`
 
@@ -40,6 +56,14 @@ is_alpha : (Int) -> Bool
 
 True for an ASCII letter.
 
+```prism,mod=Data.Char
+is_alpha(char_at("z", 0))
+```
+
+```output
+true
+```
+
 ### `is_alnum`
 
 ```prism,sig,h-59c21a0e7e1a538c4380af20b86bf85d7d500aa8a135b378cc637fe0fbdbdf41
@@ -56,6 +80,14 @@ is_space : (Int) -> Bool
 
 True for ASCII whitespace (space, tab, newline, or carriage return).
 
+```prism,mod=Data.Char
+is_space(char_at(" ", 0))
+```
+
+```output
+true
+```
+
 ### `to_lower_c`
 
 ```prism,sig,h-7621d65659a704009528ba12eac220d2c34bf980b4c1e322ae8f5a7fdac31e1c
@@ -64,6 +96,14 @@ to_lower_c : (Int) -> Int
 
 Lower-case an ASCII letter; any other codepoint is returned unchanged.
 
+```prism,mod=Data.Char
+chr(to_lower_c(char_at("A", 0)))
+```
+
+```output
+97
+```
+
 ### `to_upper_c`
 
 ```prism,sig,h-de5ea33bdd4d20748795f39ef5b0457e8bf19aed8be665f0af78d3af92c7f87e
@@ -71,3 +111,11 @@ to_upper_c : (Int) -> Int
 ```
 
 Upper-case an ASCII letter; any other codepoint is returned unchanged.
+
+```prism,mod=Data.Char
+chr(to_upper_c(char_at("a", 0)))
+```
+
+```output
+65
+```

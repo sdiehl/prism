@@ -351,6 +351,15 @@ fn find_sub(subs : List(SubCmd(a)), key) =
 -- | Parse argv against a command, yielding a value, a help request, or a usage
 -- error. argv is the argument list only (no program name); `cmd.name` supplies
 -- the name for usage text.
+--
+-- ```prism
+-- # let p = build2(\(host) -> \(port) -> (host, port), req_str("host", "H", "HOST", "server host"), opt_int("port", "p", "N", "listen port", 8080))
+-- # let cmd = Command { name = "serve", about = "run the server", body = Plain(p) }
+-- run_argv(cmd, ["--host", "example.com"])
+-- ```
+-- ```output
+-- Cli.Parsed((example.com, 8080))
+-- ```
 pub fn run_argv(cmd : Command(a), argv) =
   match cmd.body of
     Plain(p) => run_plain(cmd, p, argv)
@@ -396,6 +405,22 @@ fn has_help(argv) =
         has_help(rest)
 
 -- | The rendered help for a command: dispatches to the plain or group form.
+--
+-- ```prism
+-- # let p = build2(\(host) -> \(port) -> (host, port), req_str("host", "H", "HOST", "server host"), opt_int("port", "p", "N", "listen port", 8080))
+-- # let cmd = Command { name = "serve", about = "run the server", body = Plain(p) }
+-- print(help_text(cmd))
+-- ```
+-- ```output
+-- Usage: serve [--host HOST] [--port N] [--help]
+--
+-- run the server
+--
+-- Options:
+--   -H, --host HOST       server host
+--   -p, --port N          listen port
+--   -h, --help            show this help and exit
+-- ```
 pub fn help_text(cmd : Command(a)) =
   match cmd.body of
     Plain(p) => plain_help(cmd, p)
@@ -486,6 +511,13 @@ fn sub_help(cmd : Command(a), sc : SubCmd(a)) =
 
 -- | A one-line description of a parse error, naming the offending token and the
 -- form expected.
+--
+-- ```prism
+-- describe(MissingFlag("host"))
+-- ```
+-- ```output
+-- error: required flag '--host' was not provided
+-- ```
 pub fn describe(err) =
   match err of
     MissingFlag(f) =>

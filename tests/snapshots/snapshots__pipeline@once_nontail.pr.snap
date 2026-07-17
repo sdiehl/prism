@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/once_nontail.pr
 ---
@@ -126,6 +127,7 @@ Program {
                                         },
                                     ),
                                 ],
+                                Exhaustive,
                             ),
                             span: 211..288,
                         },

@@ -1,13 +1,13 @@
 #include "prism_kont.h"
 
-long prism_main(void);
-long prism_add(long x, long y);
+long prismfn_main(void);
+long prismfn_add(long x, long y);
 
 const char prism_native_kont_table[] =
     "scheme  @KONT_TEST_SCHEME@\n"
     "bundle  @KONT_TEST_BUNDLE@\n"
     "fn      @KONT_TEST_SYMBOL@  @KONT_TEST_HASH@  @KONT_TEST_CORE_NAME@\n"
-    "fn      prism_add  @KONT_TEST_HASH@  add\n";
+    "fn      prismfn_add  @KONT_TEST_HASH@  add\n";
 
 const char prism_native_kont_state_map[] =
     "state-map 1\n"
@@ -15,12 +15,12 @@ const char prism_native_kont_state_map[] =
     "bundle  @KONT_TEST_BUNDLE@\n"
     "slot-format prism-native-abi-word-v1\n"
     "state @KONT_TEST_SYMBOL@ @KONT_TEST_HASH@ @KONT_TEST_CORE_NAME@ arity 0 slots abi-word[]\n"
-    "state prism_add @KONT_TEST_HASH@ add arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\n";
+    "state prismfn_add @KONT_TEST_HASH@ add arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\n";
 
 #ifndef PRISM_KONT_NO_PTR_TABLE
 const PrismNativeKontPtr prism_native_kont_ptrs[] = {
-    {(const void *)&prism_main, "@KONT_TEST_SYMBOL@", "@KONT_TEST_HASH@", "@KONT_TEST_CORE_NAME@"},
-    {(const void *)&prism_add, "prism_add", "@KONT_TEST_HASH@", "add"},
+    {(const void *)&prismfn_main, "@KONT_TEST_SYMBOL@", "@KONT_TEST_HASH@", "@KONT_TEST_CORE_NAME@"},
+    {(const void *)&prismfn_add, "prismfn_add", "@KONT_TEST_HASH@", "add"},
 };
 
 const long prism_native_kont_ptrs_len = 2;
@@ -124,23 +124,23 @@ static long check_shadow_api(void) {
     return 1;
 }
 
-long prism_add(long x, long y) {
+long prismfn_add(long x, long y) {
     return x + y;
 }
 
 static long check_resume_entry(void) {
     long args[2] = {40, 2};
     long out = -1;
-    if (!prism_native_kont_resume_entry("prism_add", args, 2, &out)) return fail(37);
+    if (!prism_native_kont_resume_entry("prismfn_add", args, 2, &out)) return fail(37);
     if (out != 42) return fail(38);
-    if (prism_native_kont_resume_entry("prism_add", args, 1, &out)) return fail(39);
+    if (prism_native_kont_resume_entry("prismfn_add", args, 1, &out)) return fail(39);
     if (prism_native_kont_resume_entry("missing", args, 2, &out)) return fail(40);
-    if (prism_native_kont_resume_entry("prism_add", 0, 2, &out)) return fail(41);
-    if (prism_native_kont_resume_entry("prism_add", args, 2, 0)) return fail(42);
+    if (prism_native_kont_resume_entry("prismfn_add", 0, 2, &out)) return fail(41);
+    if (prism_native_kont_resume_entry("prismfn_add", args, 2, 0)) return fail(42);
     return 1;
 }
 
-long prism_main(void) {
+long prismfn_main(void) {
     const char *p = 0;
     long n = -1;
     const char *name = 0;
@@ -159,7 +159,7 @@ long prism_main(void) {
     if (prism_native_kont_lookup("missing", &p, &n, &name, &name_n)) return fail(6);
     if (prism_native_kont_lookup(0, &p, &n, &name, &name_n)) return fail(7);
 #ifndef PRISM_KONT_NO_PTR_TABLE
-    if (!prism_native_kont_lookup_ptr((const void *)&prism_main, &p, &n, &name, &name_n)) {
+    if (!prism_native_kont_lookup_ptr((const void *)&prismfn_main, &p, &n, &name, &name_n)) {
         return fail(8);
     }
     if (!span_eq(p, n, "@KONT_TEST_HASH@")) return fail(9);
@@ -168,7 +168,7 @@ long prism_main(void) {
         return fail(11);
     }
 #else
-    if (prism_native_kont_lookup_ptr((const void *)&prism_main, &p, &n, &name, &name_n)) {
+    if (prism_native_kont_lookup_ptr((const void *)&prismfn_main, &p, &n, &name, &name_n)) {
         return fail(43);
     }
 #endif
@@ -182,7 +182,7 @@ long prism_main(void) {
     {
         long args[2] = {40, 2};
         long out = -1;
-        if (prism_native_kont_resume_entry("prism_add", args, 2, &out)) return fail(44);
+        if (prism_native_kont_resume_entry("prismfn_add", args, 2, &out)) return fail(44);
     }
 #endif
     return 1;

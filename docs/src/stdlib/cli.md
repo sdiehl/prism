@@ -226,6 +226,16 @@ run_argv : forall a. (Cli.Command(a), List(String)) -> Cli.Outcome(a)
 
 Parse argv against a command, yielding a value, a help request, or a usage error. argv is the argument list only (no program name); `cmd.name` supplies the name for usage text.
 
+```prism,mod=Cli
+# let p = build2(\(host) -> \(port) -> (host, port), req_str("host", "H", "HOST", "server host"), opt_int("port", "p", "N", "listen port", 8080))
+# let cmd = Command { name = "serve", about = "run the server", body = Plain(p) }
+run_argv(cmd, ["--host", "example.com"])
+```
+
+```output
+Cli.Parsed((example.com, 8080))
+```
+
 ### `help_text`
 
 ```prism,sig,h-f7dd671c97c3f81011e13931ba7cdbff202851f48fea8aaac0c7a9443b909a8f
@@ -234,6 +244,23 @@ help_text : forall a. (Cli.Command(a)) -> String
 
 The rendered help for a command: dispatches to the plain or group form.
 
+```prism,mod=Cli
+# let p = build2(\(host) -> \(port) -> (host, port), req_str("host", "H", "HOST", "server host"), opt_int("port", "p", "N", "listen port", 8080))
+# let cmd = Command { name = "serve", about = "run the server", body = Plain(p) }
+print(help_text(cmd))
+```
+
+```output
+Usage: serve [--host HOST] [--port N] [--help]
+
+run the server
+
+Options:
+  -H, --host HOST       server host
+  -p, --port N          listen port
+  -h, --help            show this help and exit
+```
+
 ### `describe`
 
 ```prism,sig,h-44e2b838a4380920965f36dff3042aa4ff36b75faf23dbfbe027531e11a67b53
@@ -241,3 +268,11 @@ describe : (Cli.CliError) -> String
 ```
 
 A one-line description of a parse error, naming the offending token and the form expected.
+
+```prism,mod=Cli
+describe(MissingFlag("host"))
+```
+
+```output
+error: required flag '--host' was not provided
+```

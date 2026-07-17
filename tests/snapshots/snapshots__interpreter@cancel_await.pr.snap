@@ -3,6 +3,8 @@ source: tests/snapshots.rs
 expression: interp_output(path)
 input_file: tests/cases/run/cancel_await.pr
 ---
-await observed Cancelled
+target cleanup ran
+one observed Cancelled
+two observed Cancelled
 -1
 => ()

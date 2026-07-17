@@ -6,7 +6,7 @@
 import Concurrent (..)
 
 fn gkid_loop() : Int ! {Async(Int), IO} =
-  yield(())
+  yield()
   gkid_loop()
 
 fn gkid_body() : Int ! {Async(Int), IO} =
@@ -17,7 +17,7 @@ fn gkid() : Int ! {Async(Int), IO} =
   on_cancel(\() -> println("grandchild finalizer ran"), gkid_body)
 
 fn child_loop() : Int ! {Async(Int), IO} =
-  yield(())
+  yield()
   child_loop()
 
 fn child_body() : Int ! {Async(Int), IO} =
@@ -30,14 +30,36 @@ fn child() : Int ! {Async(Int), IO} =
 
 fn scene() : Int ! {Async(Int), IO} =
   let c = fork(child)
-  yield(())
-  yield(())
-  yield(())
+  yield()
+  yield()
+  yield()
   cancel(c)
-  yield(())
-  yield(())
-  yield(())
+  yield()
+  yield()
+  yield()
   println("scene done")
   0
 
-fn main() = println(run_async(scene))
+fn main_child_cleanup() : Unit ! {Async(Int), IO} =
+  println("main descendant cleanup ran")
+
+fn main_child_body(c : Chan) : Int ! {Async(Int), IO} =
+  println("main descendant: parked")
+  send(c, 1)
+  recv(c)
+
+fn main_child(c : Chan) : Int ! {Async(Int), IO} =
+  on_cancel(main_child_cleanup, \() -> main_child_body(c))
+
+fn cancel_main_scene() : Int ! {Async(Int), IO} =
+  let c = channel()
+  let _child = fork(\() -> main_child(c))
+  recv(c)
+  cancel(Fiber(0))
+  yield()
+  99
+
+fn main() =
+  println(run_async(scene))
+  let cancelled_main = default(\() -> run_lifo(cancel_main_scene), 0 - 7)
+  println("main cancellation recovered with {cancelled_main}")

@@ -20,7 +20,7 @@ effect Log
 
 fn worker(name : String) : Int ! {Async(Int), Log} =
   log("{name}: begin")
-  yield(())
+  yield()
   log("{name}: end")
   1
 

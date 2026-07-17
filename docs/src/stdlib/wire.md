@@ -84,6 +84,16 @@ class Serialize(a)
 
 The codec, derived structurally by `deriving (Serialize)`. `encode` writes a value's compact positional body; `decode` reads one back, returning the value alongside the bytes that follow it so a reader can thread a frame's fields in declaration order. Decode is total: it fails through `Fail` on a truncated or malformed body rather than panicking, so hostile input is one ordinary failure channel.
 
+`decode(encode(x))` recovers the value (and the bytes that followed it):
+
+```prism,mod=Wire
+(fst(decode(encode(42))) : Int)
+```
+
+```output
+42
+```
+
 ### `Stable`
 
 ```prism,def,h-8f7d672da3bb5cc2779df057b9c82e0bc4884c26b8b96970a5b17d30771fa91a
@@ -189,10 +199,22 @@ bytes_of_buf : (Buf) -> Wire.Bytes
 bytes_buf : (Wire.Bytes) -> Buf
 ```
 
+Recover the buffer of a body's remaining bytes, compacting away a non-zero cursor with a single slice.
+
 ### `bytes_at`
 
 ```prism,sig,h-df73b372ec6f7a519e5e81691b1c2811f5765c4c7fc5bd44a3b4138f64b82b9c
 bytes_at : (Wire.Bytes, Int) -> Int
+```
+
+The i-th byte of a body, from the cursor. Bounds are the caller's contract (the readers check emptiness first); an out-of-range index traps.
+
+```prism,mod=Wire
+bytes_at(bytes_of_list([10, 20, 30]), 1)
+```
+
+```output
+20
 ```
 
 ### `wire_empty`
@@ -209,6 +231,14 @@ wire_cat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 
 Concatenate two byte bodies into a fresh buffer.
 
+```prism,mod=Wire
+bytes_to_list(wire_cat(bytes_of_list([1, 2]), bytes_of_list([3])))
+```
+
+```output
+[1, 2, 3]
+```
+
 ### `wire_is_empty`
 
 ```prism,sig,h-ad754ff7856da933e459cbc868957d835b7330f72d1bf624f26dce3f3b97598c
@@ -216,6 +246,14 @@ wire_is_empty : (Wire.Bytes) -> Bool
 ```
 
 True when a body has no bytes left. The reader uses it to reject trailing bytes after a value, and a peer uses it to tell a reference frame (no body) from an inline one.
+
+```prism,mod=Wire
+wire_is_empty(wire_empty)
+```
+
+```output
+true
+```
 
 ### `wire_len`
 
@@ -225,6 +263,14 @@ wire_len : (Wire.Bytes) -> Int
 
 The number of bytes in a body.
 
+```prism,mod=Wire
+wire_len(bytes_of_list([1, 2, 3]))
+```
+
+```output
+3
+```
+
 ### `bytes_of_list`
 
 ```prism,sig,h-749627ef9545d668471e3f8473205ae94df2abfce16ccc5a60babc58b59fe78a
@@ -232,6 +278,14 @@ bytes_of_list : (List(Int)) -> Wire.Bytes
 ```
 
 Build a body from a `List(Int)` of byte values (each masked into `0..255`), and read a body back out as that list. These bridge the buffer representation to the older list view for callers that thread bytes as ordinary data.
+
+```prism,mod=Wire
+bytes_to_list(bytes_of_list([1, 2, 3]))
+```
+
+```output
+[1, 2, 3]
+```
 
 ### `bytes_to_list`
 
@@ -247,6 +301,14 @@ wire_tag : (Int) -> Wire.Bytes
 
 Encode a constructor tag (a small non-negative integer) as a varint. The derived `Serialize` for a sum prefixes its body with this.
 
+```prism,mod=Wire
+bytes_to_list(wire_tag(300))
+```
+
+```output
+[172, 2]
+```
+
 ### `wire_get_tag`
 
 ```prism,sig,h-8aed34b5fe8e9a41619572623cd08a6a4493eabddd653adeccf20c74d38652d5
@@ -255,10 +317,28 @@ wire_get_tag : (Wire.Bytes) -> (Int, Wire.Bytes) ! {Fail}
 
 Peel a constructor tag off the front of a body, returning it and the rest. The derived `Serialize` for a sum reads this before dispatching on the tag.
 
+```prism,mod=Wire
+fst(wire_get_tag(wire_tag(300)))
+```
+
+```output
+300
+```
+
 ### `wire_scheme_tag`
 
 ```prism,sig,h-1230acaecea06c7632adb155b4f65d14574b7f1c798aab98e3c44307f2cc517d
 wire_scheme_tag : String
+```
+
+The scheme tag stamped on every frame; a foreign scheme is rejected before anything else in the envelope is read.
+
+```prism,mod=Wire
+wire_scheme_tag
+```
+
+```output
+prism-core-hash-v1
 ```
 
 ### `wire_kind_value`
@@ -267,11 +347,23 @@ wire_scheme_tag : String
 wire_kind_value : Int
 ```
 
+The frame kind for an inline or referenced value (the one implemented today).
+
+```prism,mod=Wire
+wire_kind_value
+```
+
+```output
+0
+```
+
 ### `wire_kind_def`
 
 ```prism,sig,h-c238746efcd770f31f6a62fd6b2c99030809736101e41a8e65df8b93c5a12c9f
 wire_kind_def : Int
 ```
+
+The reserved frame kind naming a definition by its digest.
 
 ### `wire_kind_protocol`
 
@@ -279,17 +371,23 @@ wire_kind_def : Int
 wire_kind_protocol : Int
 ```
 
+The reserved frame kind naming a protocol by its digest.
+
 ### `wire_kind_kont`
 
 ```prism,sig,h-8d5bded8ed42b81cff432808a559cb46f0dd9e9a3229e3ffb23020b7960a42ed
 wire_kind_kont : Int
 ```
 
+The reserved frame kind naming a continuation by its digest.
+
 ### `wire_kind_cert`
 
 ```prism,sig,h-7f02bc50861a58a772eb3a30a94d42257bbd4f5847ceaef4db4f1af4b47d8ce7
 wire_kind_cert : Int
 ```
+
+The reserved frame kind naming a certificate by its digest.
 
 ### `wire_frame`
 
@@ -299,6 +397,14 @@ wire_frame : (Int, String, Wire.Bytes) -> Wire.Bytes
 
 Build a frame around a body. `wire_ref` builds the bodyless reference form.
 
+```prism,mod=Wire
+bytes_to_list(wire_open(wire_frame(wire_kind_value, "dig", bytes_of_list([7, 8])), wire_kind_value, "dig"))
+```
+
+```output
+[7, 8]
+```
+
 ### `wire_ref`
 
 ```prism,sig,h-09dc90c181dc48f4d9beed368ac240d1aed1497fc965c46e60bdb82156d6e2ca
@@ -306,6 +412,14 @@ wire_ref : (Int, String) -> Wire.Bytes
 ```
 
 A pure reference: a frame that carries its contract digest and no body. Its identity is the digest; a peer resolves the body from its store or requests it.
+
+```prism,mod=Wire
+wire_is_reference(wire_ref(wire_kind_value, "d"), wire_kind_value, "d")
+```
+
+```output
+true
+```
 
 ### `wire_open`
 
@@ -331,6 +445,14 @@ wire_open_value_any : (Wire.Bytes) -> (String, Wire.Bytes) ! {Fail}
 
 Open a `value`-kind frame without knowing its contract digest up front, returning that digest alongside the body bytes. It checks the scheme and the `value` kind before the digest. An empty body is legal and returned as-is: a record with no fields encodes to zero bytes, so emptiness cannot be read as "reference" here without an explicit marker in the frame. Trailing-byte discipline is left to the body decoder, exactly as `wire_open` leaves it. A version-dispatched reader uses the returned digest to pick which frozen rung the body decodes as.
 
+```prism,mod=Wire
+fst(wire_open_value_any(wire_frame(wire_kind_value, "dig", wire_empty)))
+```
+
+```output
+dig
+```
+
 ### `wire_encode_value_with_digest`
 
 ```prism,sig,h-83f1f1937bbf3b9d4674920d5190c1bde7c9198b7e28792180accca6ccd8777c
@@ -338,6 +460,14 @@ wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes
 ```
 
 Encode a value as a `value`-kind frame carrying an explicitly supplied contract digest. This is the escape hatch: it trusts the caller's digest verbatim, so it is for code that already holds a compiler-computed digest (a `stable` block's generated frame helpers) or is exercising a hand-built frame in a test. Ordinary `Stable` code uses `wire_encode_stable`, which supplies the digest from the type.
+
+```prism,mod=Wire
+(wire_decode_value_with_digest(wire_encode_value_with_digest("d", 42), "d") : Int)
+```
+
+```output
+42
+```
 
 ### `wire_decode_value_with_digest`
 
@@ -379,6 +509,14 @@ dropped : (List(String)) -> Wire.Loss
 
 A `Loss` naming the fields a downgrade dropped.
 
+```prism,mod=Wire
+loss_names(dropped(["port", "tls"]))
+```
+
+```output
+[port, tls]
+```
+
 ### `loss_names`
 
 ```prism,sig,h-65d1334d3b9011fbc03ff8105a87092b8d6f947af8e12166ae08878f7da860c0
@@ -395,6 +533,14 @@ lossless : (Wire.Loss) -> Bool
 
 True when a `Loss` dropped nothing, so the downgrade was lossless. The safe subset of a version step is exactly the values whose downgrade is lossless.
 
+```prism,mod=Wire
+(lossless(no_loss), lossless(dropped(["x"])))
+```
+
+```output
+(true, false)
+```
+
 ### `loss_union`
 
 ```prism,sig,h-691e6bea2ef18787492eb8db645cc948f13da77fc9825d25b7279d6fe393bd25
@@ -402,6 +548,14 @@ loss_union : (Wire.Loss, Wire.Loss) -> Wire.Loss
 ```
 
 Merge two losses along a composed downgrade.
+
+```prism,mod=Wire
+loss_names(loss_union(dropped(["a"]), dropped(["b"])))
+```
+
+```output
+[a, b]
+```
 
 ### `compose_upgrade`
 
@@ -411,6 +565,14 @@ compose_upgrade : forall a b c. ((a) -> b, (b) -> c) -> (a) -> c
 
 Compose two adjacent upgrades into one spanning upgrade.
 
+```prism,mod=Wire
+compose_upgrade(\(x) -> x + 1, \(y) -> y * 2)(3)
+```
+
+```output
+8
+```
+
 ### `compose_downgrade`
 
 ```prism,sig,h-1cc7ba9e22469d894dec8d4fc6d4a5ca8ac97167b3abf4fb03520a935f149c7a
@@ -419,6 +581,14 @@ compose_downgrade : forall a b c. ((a) -> (b, Wire.Loss), (b) -> (c, Wire.Loss))
 
 Compose two adjacent downgrades into one spanning downgrade, unioning the losses each step reported.
 
+```prism,mod=Wire
+compose_downgrade(\(z) -> (z - 1, dropped(["hi"])), \(m) -> (m, no_loss))(10)
+```
+
+```output
+(9, Wire.Loss([hi]))
+```
+
 ### `reconcile`
 
 ```prism,sig,h-c4a45feb7201bc1f2ab11f9c9b7b911b5350e58f0e0329eff098174ac7bd1252
@@ -426,3 +596,11 @@ reconcile : forall a b. (Wire.Policy, (a) -> (b, Wire.Loss), a) -> (b, Wire.Loss
 ```
 
 Apply a mismatch policy to a downgrade. `Reject` fails through `Fail`; `LargestSafeSubset` runs the downgrade and returns the lowered value with the fields it had to drop.
+
+```prism,mod=Wire
+reconcile(LargestSafeSubset, \(x) -> (x - 1, no_loss), 5)
+```
+
+```output
+(4, Wire.Loss([]))
+```

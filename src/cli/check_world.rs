@@ -55,8 +55,8 @@ const PACKAGE_DOCS_DIR: &str = "docs";
 pub(crate) const PACKAGE_USAGE_SUMMARY: &str = "usage-summary.md";
 pub(crate) const USAGE_SUMMARY_PHASE: &str = "usage-summary-md";
 // The whole-program lowering-tier phase. The usage summary is headed by this same
-// tier (both read the one canonical `effect_strategy`), so the usage gate surfaces
-// it as a scalar in the report without parsing the markdown back.
+// tier (both read the typed cascade's canonical strategy decision), so the usage
+// gate surfaces it as a scalar in the report without parsing the markdown back.
 const TIER_PHASE: &str = "tier";
 const GIT_DIR: &str = ".git";
 const TARGET_DIR: &str = "target";

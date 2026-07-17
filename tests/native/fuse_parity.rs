@@ -21,6 +21,7 @@ use crate::support::{check_native_parity, corpus, parallel_check, require_cc, so
 fn fused() -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.fuse = true;
+    cfg.flags.compiler_cache = false;
     cfg
 }
 
@@ -45,9 +46,27 @@ fn fuse_cases() -> Vec<PathBuf> {
 // program the pass leaves byte-identical builds the same native binary either way,
 // so parity.rs already covers it and it is skipped here.
 fn touched_cases() -> Vec<PathBuf> {
+    // Discovery compiles the whole corpus twice. Debug builds exceed libtest's
+    // smaller worker stack even though the same scan passes on the public
+    // compiler's 8 MiB main-thread stack. The selected cases still run through
+    // `parallel_check`, whose workers retain their separate interpreter budget.
+    let result = std::thread::Builder::new()
+        .name("fusion-case-discovery".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(touched_cases_on_compiler_stack)
+        .expect("spawning fusion case discovery")
+        .join();
+    match result {
+        Ok(cases) => cases,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn touched_cases_on_compiler_stack() -> Vec<PathBuf> {
     let base = Path::new(".");
     let roots = default_roots(base);
-    let off = Config::from_env();
+    let mut off = Config::from_env();
+    off.flags.compiler_cache = false;
     let on = fused();
     let mut cases: Vec<PathBuf> = corpus()
         .into_iter()

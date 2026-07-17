@@ -1,0 +1,10 @@
+-- A performed `alloc` is a fresh cell serviced from an arena, cheaper but not
+-- absent, so an `@ noalloc` function that performs it is rejected exactly like
+-- one that builds a fresh constructor: arenas and the allocation certificate
+-- stay orthogonal and honest.
+effect Alloc
+  once alloc(Int) : Cell
+
+type Cell = Cell(Int)
+
+fn grab(n : Int) : Cell @ noalloc ! {Alloc} = alloc(n)

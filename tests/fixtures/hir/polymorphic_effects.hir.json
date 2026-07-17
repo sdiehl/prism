@@ -1,5 +1,5 @@
 {
-  "schema": "prism-hir-fixture-v1",
+  "schema": "prism-hir-fixture-v2",
   "decls": [
     {
       "name": "twice",
@@ -59,7 +59,14 @@
       "ty": "() -> Int"
     },
     "13": {
-      "ty": "Int"
+      "ty": "Int",
+      "handler_residual": {
+        "forwarded_operations": [],
+        "forwarded_effects": [],
+        "residual_operations": [],
+        "residual_effects": [],
+        "open_row": true
+      }
     },
     "14": {
       "ty": "Int"

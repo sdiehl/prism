@@ -52,8 +52,14 @@ impl Fmt<'_> {
                 out.push_str(&escape_str(s));
             } else {
                 let h = self.fmt_expr_inline(a, Mode::Flat).unwrap_or_else(|| {
+                    // Flatten a broken rendering to one line, collapsing only the
+                    // newline indentation. Never touch spacing inside a token:
+                    // `split_whitespace` here would rewrite a nested string literal
+                    // "a   b" to "a b" and change the program's meaning.
                     self.fmt_expr_break(a, 0, Mode::Flat)
-                        .split_whitespace()
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
                         .collect::<Vec<_>>()
                         .join(" ")
                 });
@@ -145,6 +151,7 @@ impl Fmt<'_> {
             Expr::Unit => Some("()".into()),
             Expr::Str(s) => Some(format!("\"{}\"", escape_str(s))),
             Expr::Var(x) => Some(x.clone()),
+            Expr::Hole(name) => Some(format!("?{name}")),
             // A delimited list collapses onto one line only when nothing inside
             // carries a comment; an interior `--` line comment cannot survive a
             // flat join, so refuse and let the break path emit it verbatim.

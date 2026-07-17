@@ -1,7 +1,6 @@
-// Branching timelines: pause a deterministic boids swarm at any step, poke one
-// agent, and fork. Replay-to-N shipped with the scrubber; this adds the other
-// half of the browser interaction, the run-FROM-state export (`boids_run_from`)
-// and the timeline frontend. A branch is a pure function of its forked state and
+// Branching timelines pause a deterministic boids swarm at any step, perturb one
+// boid, and fork through the run-from-state export (`boids_run_from`). A branch is
+// a pure function of its forked state and
 // step count, so both branches persist AND each reproduces byte-for-byte: the
 // determinism claim, made playable. The whole trajectory (positions AND
 // velocities) is computed in wasm, so forking is just re-running the same
@@ -106,7 +105,7 @@ function serializeFrame(f: Frame): string {
   return f.map((b) => `${b.x},${b.y},${b.vx},${b.vy}`).join(" ");
 }
 
-// The perturbation: poke ONE agent. Reverse boid 0's velocity, leaving every
+// The perturbation: poke ONE boid. Reverse boid 0's velocity, leaving every
 // other boid and the seed untouched. A single reversed heading is a legal input
 // change, and chaos does the rest: within a dozen steps the whole flock diverges.
 function perturb(f: Frame): Frame {

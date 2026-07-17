@@ -49,6 +49,7 @@ pub(crate) const RESOLVE_PROJECT: &str = "E7201";
 pub(crate) const RESOLVE_PACKAGE: &str = "E7202";
 pub(crate) const RESOLVE_LINEAGE: &str = "E7203";
 pub(crate) const RESOLVE_COMMAND: &str = "E7204";
+pub(crate) const PATCH_REFUSAL: &str = "E7205";
 pub(crate) const CODEGEN_BACKEND: &str = "E7400";
 pub(crate) const CODEGEN_DOCS: &str = "E7401";
 pub(crate) const CODEGEN_FORMAT: &str = "E7402";
@@ -60,8 +61,28 @@ pub(crate) const RUNTIME_DEBUGGER: &str = "E7502";
 pub(crate) const IO: &str = "E7600";
 pub(crate) const TYPE_MISMATCH_LEGACY: &str = "E1098";
 pub(crate) const TYPE_OTHER_LEGACY: &str = "E1998";
+/// Dedicated diagnostic identity for a named typed hole.
+pub const TYPED_HOLE: ErrorCode = ErrorCode::new(ErrorPhase::Type, "E1021");
+/// An exhaustive handler omitted a declared operation of an effect it names.
+pub const INCOMPLETE_HANDLER: ErrorCode = ErrorCode::new(ErrorPhase::Type, "E5011");
 pub(crate) const SCOPE_UNBOUND: &str = "E2000";
 pub(crate) const SCOPE_OTHER_LEGACY: &str = "E2099";
+/// The checked declarations could not be converted into the typed-Core
+/// verification environment.
+pub const TYPED_CORE_ENVIRONMENT: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9995");
+/// Erasing verified typed Core changed the compatibility Core tree.
+pub const TYPED_CORE_ERASURE: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9994");
+/// A witness-preserving typed-Core specialization plan could not be constructed.
+pub const TYPED_CORE_SPECIALIZATION: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9993");
+/// Typed-Core simplification did not reach a fixed point within the runaway
+/// rewrite bound.
+pub const TYPED_CORE_SIMPLIFY: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9992");
+/// Typed effect lowering could not produce a verified `EffectLowered` program.
+pub const TYPED_CORE_EFFECT_LOWERING: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9991");
+/// The elaborator could not construct a typed-Core witness.
+pub const TYPED_CORE_CONSTRUCTION: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9996");
+/// The independent typed-Core checker rejected a constructed witness.
+pub const TYPED_CORE_VERIFICATION: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9997");
 pub(crate) const INTERNAL_TYPE: &str = "E9998";
 pub(crate) const INTERNAL: &str = "E9999";
 
@@ -92,6 +113,7 @@ mod tests {
             RESOLVE_PACKAGE,
             RESOLVE_LINEAGE,
             RESOLVE_COMMAND,
+            PATCH_REFUSAL,
             CODEGEN_BACKEND,
             CODEGEN_DOCS,
             CODEGEN_FORMAT,
@@ -103,8 +125,17 @@ mod tests {
             IO,
             TYPE_MISMATCH_LEGACY,
             TYPE_OTHER_LEGACY,
+            TYPED_HOLE.as_str(),
+            INCOMPLETE_HANDLER.as_str(),
             SCOPE_UNBOUND,
             SCOPE_OTHER_LEGACY,
+            TYPED_CORE_ERASURE.as_str(),
+            TYPED_CORE_SPECIALIZATION.as_str(),
+            TYPED_CORE_SIMPLIFY.as_str(),
+            TYPED_CORE_EFFECT_LOWERING.as_str(),
+            TYPED_CORE_ENVIRONMENT.as_str(),
+            TYPED_CORE_CONSTRUCTION.as_str(),
+            TYPED_CORE_VERIFICATION.as_str(),
             INTERNAL_TYPE,
             INTERNAL,
         ];

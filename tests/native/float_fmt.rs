@@ -6,9 +6,9 @@
 //! this gate asserts the two agree by construction across a hard-case corpus
 //! plus a wide deterministic bit-pattern sweep, not by libc's grace.
 //!
-//! The C side is exercised out-of-process: `runtime/prism_rt.c` owns `main`
-//! (which calls `prism_main`), so it cannot be linked into a Rust test binary.
-//! Instead a tiny shim supplying `prism_main` is compiled against the real
+//! The C side is exercised out-of-process: `runtime/prism_io.c` owns `main`
+//! (which calls `prismfn_main`), so it cannot be linked into a Rust test binary.
+//! Instead a tiny shim supplying `prismfn_main` is compiled against the real
 //! runtime, reads raw little-endian f64 bit patterns from stdin, and prints one
 //! formatted line per value through the same `prism_show_float` path a compiled
 //! program uses.
@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use prism::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
+use prism::codegen::MAIN_SYMBOL;
 
 // Pseudo-random bit patterns swept through both formatters. The default keeps
 // the gate quick in the normal suite; PRISM_FLOAT_SWEEP scales it to millions
@@ -145,21 +146,23 @@ fn build_helper() -> PathBuf {
     let libm_archive = write_libm_archive(&dir).unwrap();
     let shim = dir.join(format!("{stem}.c"));
     let bin = dir.join(&stem);
-    // The shim provides prism_main (the runtime's main calls it), reads raw
+    // The shim provides prismfn_main (the runtime's main calls it), reads raw
     // little-endian f64 bit patterns from stdin, and prints each through the
     // real show-float path (print_str appends a newline).
     std::fs::write(
         &shim,
-        r"#include <stdio.h>
+        format!(
+            r"#include <stdio.h>
 #include <stdint.h>
 long prism_show_float(long);
 void print_str(long);
-long prism_main(void) {
+long {MAIN_SYMBOL}(void) {{
 uint64_t bits;
 while (fread(&bits, 8, 1, stdin) == 1) print_str(prism_show_float((long)bits));
 return 1;
-}
-",
+}}
+"
+        ),
     )
     .unwrap();
     let out = Command::new(cc())

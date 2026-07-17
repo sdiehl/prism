@@ -1,16 +1,15 @@
 //! The HIR lint: an independent proof-checker at the elaboration boundary.
 //!
 //! Private construction keeps ordinary code from making a malformed HIR; the
-//! lint catches mistakes in checking itself (and, later, in HIR-to-HIR
-//! transformations). It is proof checking, not proof search: every judgment
+//! lint catches mistakes in checking itself and in HIR-to-HIR transformations.
+//! It is proof checking, not proof search: every judgment
 //! re-verifies a stored fact against the environment it claims to be about,
 //! and it must never grow into a second inference engine. Whole-program
 //! properties (fbip, noalloc, replayability, coherence, tier equivalence)
 //! stay with their own validators.
 //!
-//! Scope grows with the migration: today it verifies the resolution family
-//! (the facts `CheckedHir` owns). Each further family migrated onto the HIR
-//! brings its judgments here.
+//! It verifies the resolution family owned by `CheckedHir`; other fact families
+//! remain with their canonical validators.
 
 use std::fmt;
 
@@ -102,7 +101,6 @@ fn check_dict(checked: &Checked, node: usize, d: &Dict, out: &mut Vec<HirViolati
 #[must_use]
 pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
     let mut out = Vec::new();
-    let mut bad = |node: usize, msg: String| push(&mut out, node, msg);
     let check_step = |step: &(String, usize, usize)| -> Option<String> {
         let (ctor, idx, arity) = step;
         let Some(info) = hir.checked.ctors.get(ctor) else {
@@ -126,12 +124,13 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
             None => {}
             Some(NodeRes::Field(ctor, idx, arity)) => {
                 if let Some(msg) = check_step(&(ctor.clone(), *idx, *arity)) {
-                    bad(i, msg);
+                    push(&mut out, i, msg);
                 }
             }
             Some(NodeRes::UnboxedField(idx, arity)) => {
                 if idx >= arity {
-                    bad(
+                    push(
+                        &mut out,
                         i,
                         format!("unboxed field index {idx} out of bounds (arity {arity})"),
                     );
@@ -139,16 +138,20 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
             }
             Some(NodeRes::Paths(chains)) => {
                 if chains.is_empty() {
-                    bad(i, "update-path resolution with no chains".to_string());
+                    push(
+                        &mut out,
+                        i,
+                        "update-path resolution with no chains".to_string(),
+                    );
                 }
                 for chain in chains {
                     if chain.is_empty() {
-                        bad(i, "update-path chain with no steps".to_string());
+                        push(&mut out, i, "update-path chain with no steps".to_string());
                         continue;
                     }
                     for step in chain {
                         if let Some(msg) = check_step(step) {
-                            bad(i, msg);
+                            push(&mut out, i, msg);
                         }
                     }
                 }
@@ -174,6 +177,116 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
                     check_dict(hir.checked, i, d, &mut out);
                 }
             }
+        }
+    }
+    // Handler residual family: the marker and fact tables must agree exactly,
+    // and both operation lists are canonical, duplicate-free names from the
+    // checked effect environment. The forwarded body uses are necessarily a
+    // subset of the complete handler-expression residual.
+    let handler_len = hir
+        .facts
+        .handler_nodes
+        .len()
+        .max(hir.facts.handler_residual.len());
+    for i in 0..handler_len {
+        let marked = hir.facts.handler_nodes.get(i).copied().unwrap_or(false);
+        let residual = hir.facts.handler_residual.get(i).and_then(Option::as_ref);
+        match (marked, residual) {
+            (true, None) => {
+                push(
+                    &mut out,
+                    i,
+                    "handler node is missing its residual fact".to_string(),
+                );
+            }
+            (false, Some(_)) => {
+                push(
+                    &mut out,
+                    i,
+                    "residual fact is attached to a non-handler node".to_string(),
+                );
+            }
+            (_, Some(fact)) => {
+                let check_operations = |kind: &str, operations: &[Sym]| -> Option<String> {
+                    if !operations
+                        .windows(2)
+                        .all(|pair| pair[0].as_str() < pair[1].as_str())
+                    {
+                        return Some(format!(
+                            "handler {kind} operations are not canonical and duplicate-free"
+                        ));
+                    }
+                    operations
+                        .iter()
+                        .find(|operation| !hir.checked.eff_ops.contains_key(operation.as_str()))
+                        .map(|operation| {
+                            format!("handler {kind} names unknown operation `{operation}`")
+                        })
+                };
+                if let Some(msg) = check_operations("forwarded", fact.forwarded_operations()) {
+                    push(&mut out, i, msg);
+                }
+                if let Some(msg) = check_operations("residual", fact.residual_operations()) {
+                    push(&mut out, i, msg);
+                }
+                let check_effects = |kind: &str, effects: &[Sym]| -> Option<String> {
+                    if !effects
+                        .windows(2)
+                        .all(|pair| pair[0].as_str() < pair[1].as_str())
+                    {
+                        return Some(format!(
+                            "handler {kind} effects are not canonical and duplicate-free"
+                        ));
+                    }
+                    effects
+                        .iter()
+                        .find(|effect| {
+                            !hir.checked
+                                .eff_ops
+                                .values()
+                                .any(|info| info.effect_name == **effect)
+                                && !crate::tc::is_builtin_effect(effect.as_str())
+                        })
+                        .map(|effect| format!("handler {kind} names unknown effect `{effect}`"))
+                };
+                if let Some(msg) = check_effects("forwarded", fact.forwarded_effects()) {
+                    push(&mut out, i, msg);
+                }
+                if let Some(msg) = check_effects("residual", fact.residual_effects()) {
+                    push(&mut out, i, msg);
+                }
+                if let Some(operation) = fact.forwarded_operations().iter().find(|operation| {
+                    if fact.residual_operations().contains(operation) {
+                        return false;
+                    }
+                    let effect = hir
+                        .checked
+                        .eff_ops
+                        .get(operation.as_str())
+                        .map(|info| info.effect_name);
+                    !effect.is_some_and(|effect| fact.residual_effects().contains(&effect))
+                }) {
+                    push(
+                        &mut out,
+                        i,
+                        format!(
+                            "forwarded operation `{operation}` is absent from the handler residual"
+                        ),
+                    );
+                }
+                if let Some(effect) = fact
+                    .forwarded_effects()
+                    .iter()
+                    .find(|effect| !fact.residual_effects().contains(effect))
+                {
+                    push(
+                        &mut out,
+                        i,
+                        format!("forwarded effect `{effect}` is absent from the handler residual"),
+                    );
+                }
+            }
+            (false, None) => {}
         }
     }
     // The lane (fixed numeric) and ty (zonked node type) families are stored

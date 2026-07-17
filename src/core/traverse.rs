@@ -99,6 +99,7 @@ pub trait Rewrite {
                 body: Box::new(self.comp(body, cx)),
             },
             Comp::Reuse(t, v) => Comp::Reuse(*t, self.value(v, cx)),
+            Comp::InitAt(cell, v) => Comp::InitAt(self.value(cell, cx), self.value(v, cx)),
             Comp::RefNew(v) => Comp::RefNew(self.value(v, cx)),
             Comp::RefGet(v) => Comp::RefGet(self.value(v, cx)),
             Comp::RefSet(a, b) => Comp::RefSet(self.value(a, cx), self.value(b, cx)),
@@ -168,7 +169,7 @@ pub trait Visit {
             | Comp::RefNew(v)
             | Comp::RefGet(v)
             | Comp::UnboxedProject(v, _) => self.visit_value(v),
-            Comp::RefSet(a, b) | Comp::Prim(_, a, b) => {
+            Comp::RefSet(a, b) | Comp::Prim(_, a, b) | Comp::InitAt(a, b) => {
                 self.visit_value(a);
                 self.visit_value(b);
             }

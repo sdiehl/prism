@@ -120,7 +120,7 @@ impl CompilerSession {
         }
     }
 
-    /// Decisions recorded by optimizer, lowering, and backend boundaries.
+    /// Decisions recorded by optimizer and backend query boundaries.
     #[must_use]
     pub fn decisions(&self) -> Vec<QueryDecision> {
         self.0
@@ -159,7 +159,9 @@ impl CompilerSession {
             return Ok(());
         }
         let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
-        self.0.facts.commit(&store, &FactScope::of_roots(roots))
+        self.0
+            .facts
+            .commit_retiring(&store, &FactScope::of_roots(roots), &[QueryKind::Effect])
     }
 
     pub(super) fn record_hit(&self) {

@@ -8,7 +8,15 @@ use super::builtins::{builtin, Builtin, BuiltinKind, FloatOp, BUILTINS};
 use super::cbpv::{
     CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value,
 };
-use crate::error::{Error, TypeError};
+use super::typed::{
+    build_typed, build_verify_env, core_fn_sig, dict_type, Elaborated as TypedElaborated,
+    TypedCore, VerifyEnv,
+};
+use super::{verify_typed_core, CoreFnSig};
+use crate::error::{
+    Error, TypeError, TypedCoreConstructionFailure, TypedCoreErasureFailure,
+    TypedCoreVerificationFailure, TypedCoreViolation,
+};
 use crate::fresh::Fresh;
 use crate::hir::{self, CheckedHir, NodeRes};
 use crate::kw;
@@ -40,10 +48,9 @@ struct Elab<'a> {
     // than calling, so a constant pushes no frame.
     consts: BTreeMap<String, &'a S<Expr<CorePhase>>>,
     checked: &'a Checked,
-    // The checked HIR over `checked`: the only view through which the migrated
-    // per-node facts (the resolution family) are read. Side-table lookups for
-    // that family are gone from this module; the fallbacks below serve only
-    // the REPL's re-inferred (non-strict) ids.
+    // The checked HIR over `checked`: the only view of its per-node resolution
+    // facts. Direct side-table lookups for that family are excluded; the
+    // fallbacks below serve only the REPL's re-inferred (non-strict) ids.
     hir: CheckedHir<'a>,
     effect_ops: BTreeSet<String>,
     // True when the `Output` capability is in scope (the prelude declares it), so
@@ -51,6 +58,7 @@ struct Elab<'a> {
     // ops. A prelude-free program has no `Output` handler, so it prints directly.
     route_output: bool,
     show_fns: Vec<CoreFn>,
+    show_sigs: BTreeMap<Sym, CoreFnSig>,
     show_seen: BTreeSet<String>,
     // True when `dicts` and the node tables come from the same check() pass.
     // REPL re-inference assigns fresh ids, so id-keyed integrity checks are off.
@@ -90,6 +98,68 @@ fn checked_routes_output(checked: &Checked) -> bool {
             _ => return false,
         }
     }
+}
+
+fn checked_decl_scheme<'a>(checked: &'a Checked, name: &str) -> Result<&'a Type, Error> {
+    checked
+        .constrained
+        .get(&Sym::from(name))
+        .map(|(scheme, _)| scheme)
+        .or_else(|| {
+            checked
+                .decls
+                .iter()
+                .find(|decl| decl.name == name)
+                .map(|decl| &decl.ty)
+        })
+        .ok_or_else(|| Error::InternalInvariant(format!("no checked scheme for `{name}`")))
+}
+
+fn source_dict_type(class: Sym, argument: Type) -> Type {
+    Type::Con(Sym::from(&names::dict_ctor(class.as_str())), vec![argument])
+}
+
+fn prepend_source_params(ty: Type, prefix: &[Type]) -> Result<Type, Error> {
+    match ty {
+        Type::Forall(name, body) => Ok(Type::Forall(
+            name,
+            Box::new(prepend_source_params(*body, prefix)?),
+        )),
+        Type::RowForall(name, body) => Ok(Type::RowForall(
+            name,
+            Box::new(prepend_source_params(*body, prefix)?),
+        )),
+        Type::Fun(mut params, effects, result) => {
+            let mut all = prefix.to_vec();
+            all.append(&mut params);
+            Ok(Type::Fun(all, effects, result))
+        }
+        other => Err(Error::InternalInvariant(format!(
+            "expected checked function scheme, got {other:?}"
+        ))),
+    }
+}
+
+fn generalize_free(mut ty: Type) -> Type {
+    let mut type_vars = BTreeSet::new();
+    let mut row_vars = BTreeSet::new();
+    ty.free_ty_vars(&mut type_vars);
+    ty.free_row_vars(&mut row_vars);
+    for name in row_vars.into_iter().rev() {
+        ty = Type::RowForall(name, Box::new(ty));
+    }
+    for name in type_vars.into_iter().rev() {
+        ty = Type::Forall(name, Box::new(ty));
+    }
+    ty
+}
+
+fn typed_builder_error(context: &str, error: impl std::fmt::Display) -> Error {
+    TypedCoreConstructionFailure::InvalidDeclaration {
+        declaration: context.into(),
+        detail: error.to_string(),
+    }
+    .into()
 }
 
 // A resolved update path: (ctor name, field index, arity) per segment.
@@ -765,6 +835,9 @@ impl Elab<'_> {
             Expr::Bool(b) => Comp::Return(Value::Bool(*b)),
             Expr::Unit => Comp::Return(Value::Unit),
             Expr::Str(s) => Comp::Return(Value::Str(s.clone())),
+            Expr::Hole(name) => {
+                Comp::Error(Value::Str(crate::error::typed_hole_fault(name, e.span)))
+            }
             // Bare `Null` is the nullary nullable constructor (tag 0, no payload).
             Expr::Var(x) if x == kw::CTOR_NULL && !locals.contains_key(x) => {
                 Comp::Return(Value::Ctor(x.clone().into(), kw::OR_NULL_TAG, vec![]))
@@ -971,7 +1044,7 @@ impl Elab<'_> {
                     Comp::Error(Value::Str(format!("unknown record {ctor_name}")))
                 }
             }
-            Expr::Handle(body, arms) => {
+            Expr::Handle(body, arms, _) => {
                 let body_comp = self.elab(body, locals)?;
                 let mut ops = Vec::new();
                 let mut return_var = None;
@@ -1450,6 +1523,48 @@ pub fn builtin_arities(arity: &mut BTreeMap<String, usize>) {
 /// # Errors
 /// Fails when a checked program cannot be elaborated to core.
 pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, Error> {
+    elaborate_typed(prog, checked).map(TypedElaboration::into_compatibility)
+}
+
+/// Both representations consumed on either side of the typed boundary.
+///
+/// `compatibility` is the exact pre-optimizer identity surface. `typed` carries
+/// the same tree plus witnesses through the typed prefix before its sole semantic
+/// erasure. Keeping both avoids rebuilding witnesses or changing the
+/// content-addressed identity at the boundary.
+pub(crate) struct TypedElaboration {
+    compatibility: Core,
+    typed: TypedCore<TypedElaborated>,
+    verify_env: VerifyEnv,
+}
+
+impl TypedElaboration {
+    #[must_use]
+    pub(crate) const fn compatibility(&self) -> &Core {
+        &self.compatibility
+    }
+
+    #[must_use]
+    pub(crate) fn into_compatibility(self) -> Core {
+        self.compatibility
+    }
+
+    #[must_use]
+    pub(crate) fn into_parts(self) -> (Core, TypedCore<TypedElaborated>, VerifyEnv) {
+        (self.compatibility, self.typed, self.verify_env)
+    }
+}
+
+/// Elaborate once, retaining both the verified typed spine and the exact
+/// compatibility tree consumed by passes outside the typed prefix.
+///
+/// # Errors
+/// Fails when source elaboration, witness construction, or independent typed
+/// verification fails.
+pub(crate) fn elaborate_typed(
+    prog: &Program<CorePhase>,
+    checked: &Checked,
+) -> Result<TypedElaboration, Error> {
     let mut arity: BTreeMap<String, usize> = prog
         .fns
         .iter()
@@ -1481,11 +1596,13 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
         route_output,
         effect_ops,
         show_fns: Vec::new(),
+        show_sigs: BTreeMap::new(),
         show_seen: BTreeSet::new(),
         strict: true,
     };
 
     let mut fns = Vec::with_capacity(prog.fns.len());
+    let mut signatures = BTreeMap::new();
     for d in &prog.fns {
         if d.konst {
             continue;
@@ -1508,8 +1625,23 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             }
             other => other,
         })?;
+        let name = Sym::from(&d.name);
+        let scheme = checked_decl_scheme(checked, &d.name)?;
+        let prefix = checked
+            .constrained
+            .get(&name)
+            .map(|(_, constraints)| {
+                constraints
+                    .iter()
+                    .map(|(class, argument)| dict_type(*class, argument.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let signature = core_fn_sig(scheme, prefix)
+            .map_err(|error| typed_builder_error("function signature", error))?;
+        signatures.insert(name, signature);
         fns.push(CoreFn {
-            name: d.name.clone().into(),
+            name,
             body,
             params: params.into_iter().map(Sym::from).collect(),
             // The leading `_c{i}` dictionary params prepended just above, one per
@@ -1560,8 +1692,22 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
             }
             let mut params = dps.clone();
             params.extend(m.params.iter().map(|p| p.name.clone()));
+            let method_name = Sym::from(&instance_method(&inst.name, &m.name));
+            let dict_params: Vec<Type> = info
+                .context
+                .iter()
+                .chain(&info.supers)
+                .map(|(class, argument)| source_dict_type(*class, argument.clone()))
+                .collect();
+            let method_scheme =
+                generalize_free(prepend_source_params(expected.clone(), &dict_params)?);
+            signatures.insert(
+                method_name,
+                core_fn_sig(&method_scheme, Vec::new())
+                    .map_err(|error| typed_builder_error("instance method signature", error))?,
+            );
             fns.push(CoreFn {
-                name: instance_method(&inst.name, &m.name).into(),
+                name: method_name,
                 body: elab.elab(&m.body, &locals)?,
                 params: params.into_iter().map(Sym::from).collect(),
                 dict_arity: ndict,
@@ -1588,8 +1734,24 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
                 Box::new(call),
             ))));
         }
+        let instance_name = Sym::from(&inst.name);
+        let dictionary_params: Vec<Type> = info
+            .context
+            .iter()
+            .chain(&info.supers)
+            .map(|(class, argument)| source_dict_type(*class, argument.clone()))
+            .collect();
+        let dictionary_scheme = generalize_free(Type::fun(
+            dictionary_params,
+            source_dict_type(info.class, info.head.clone()),
+        ));
+        signatures.insert(
+            instance_name,
+            core_fn_sig(&dictionary_scheme, Vec::new())
+                .map_err(|error| typed_builder_error("instance dictionary signature", error))?,
+        );
         fns.push(CoreFn {
-            name: inst.name.clone().into(),
+            name: instance_name,
             params: dps.into_iter().map(Sym::from).collect(),
             dict_arity: ndict,
             body: Comp::Return(Value::Ctor(
@@ -1601,7 +1763,38 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
     }
 
     fns.append(&mut elab.show_fns);
-    Ok(Core { fns })
+    signatures.append(&mut elab.show_sigs);
+    let raw = Core { fns };
+    let compatibility = raw.clone();
+    let mut verify_env = build_verify_env(checked)?;
+    for constructor in super::opt::newtype_ctors(prog) {
+        verify_env.mark_newtype_constructor(constructor);
+    }
+    let typed = build_typed(raw, &signatures, &verify_env)?;
+    verify_typed_core(&typed, &verify_env).map_err(typed_verification_error)?;
+    let erased = typed.clone().erase();
+    if erased != compatibility {
+        return Err(TypedCoreErasureFailure.into());
+    }
+    Ok(TypedElaboration {
+        compatibility,
+        typed,
+        verify_env,
+    })
+}
+
+pub(crate) fn typed_verification_error(violations: Vec<super::typed::CoreViolation>) -> Error {
+    TypedCoreVerificationFailure {
+        violations: violations
+            .into_iter()
+            .map(|violation| TypedCoreViolation {
+                function: violation.function().to_string(),
+                path: violation.path().into(),
+                detail: violation.message().into(),
+            })
+            .collect(),
+    }
+    .into()
 }
 
 /// # Errors
@@ -1670,6 +1863,7 @@ pub fn elaborate_expr(
         route_output: effect_ops.contains(names::OUTPUT_PRINT_OP) && checked_routes_output(checked),
         effect_ops,
         show_fns: Vec::new(),
+        show_sigs: BTreeMap::new(),
         show_seen: BTreeSet::new(),
         strict: false,
     };

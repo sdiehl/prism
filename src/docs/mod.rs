@@ -22,17 +22,20 @@ use crate::parse::{parse, ParseResult};
 use crate::resolve::{resolve_modules_in, Root};
 use crate::stdlib::STDLIB;
 use crate::syntax::desugar::desugar;
-use crate::types::{check as typecheck, Checked};
+use crate::types::{check_allow_holes, Checked};
 
 mod accept;
 mod doctest;
 mod extract;
 mod mdbook;
 mod render;
+mod typespans;
 
 pub use accept::{accept, ExpectFile, ExpectReport};
 pub use doctest::Report;
 pub use mdbook::preprocess_book;
+pub(crate) use typespans::extract as extract_typespans;
+pub use typespans::{TypeSpan, TypeSpans, TYPESPANS_FORMAT};
 
 /// One generated documentation page.
 #[derive(Debug)]
@@ -67,8 +70,8 @@ pub struct Generated {
 }
 
 impl Generated {
-    /// Compile (and run where applicable) every harvested doctest. Type checking
-    /// resolves against `roots`; running resolves imports relative to `base`.
+    /// Compile (and run where applicable) every harvested doctest against the
+    /// same explicit module search path.
     #[must_use]
     pub fn test(&self, roots: &[Root], base: &Path) -> Report {
         doctest::run(&self.examples, roots, base)
@@ -119,10 +122,14 @@ fn slug_of(dotted: &str) -> String {
 // Bypass the driver's warning emission so a docs run stays quiet, and skip the
 // surface lints (they target user source, not a whole library).
 fn check_quiet(src: &str, roots: &[Root]) -> Result<Checked, Error> {
+    // Hole-tolerant on purpose: a documentation example may carry a typed hole
+    // (`?name`) to teach the hole report itself. It type-checks with the hole
+    // retained (and its tooltip shows the inferred type); running it is the
+    // author's problem, which is what `no_run` is for.
     let ParseResult { program, .. } = parse(src)?;
     let program = resolve_modules_in(program, roots)?;
     let program = desugar(program)?;
-    Ok(typecheck(&program)?)
+    Ok(check_allow_holes(&program)?)
 }
 
 // Render a set of modules into pages plus their harvested doctests, prepending an
@@ -191,6 +198,7 @@ pub fn stdlib_expect_files() -> Vec<ExpectFile> {
         .map(|spec| ExpectFile {
             path: std::path::PathBuf::from(spec.source_path),
             source: spec.src,
+            module: spec.dotted,
         })
         .collect()
 }
@@ -204,13 +212,14 @@ pub fn project_expect_files(modules: &[ModuleSource], base: &Path) -> Vec<Expect
         .map(|m| ExpectFile {
             path: base.join(&m.source_path),
             source: m.source.clone(),
+            module: m.dotted.clone(),
         })
         .collect()
 }
 
 fn stdlib_specs() -> Vec<ModSpec> {
     let mut v = vec![ModSpec {
-        dotted: "Prelude".into(),
+        dotted: doctest::PRELUDE_DOTTED.into(),
         title: "The Prelude".into(),
         slug: "prelude".into(),
         src: PRELUDE.to_string(),

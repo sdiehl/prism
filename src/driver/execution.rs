@@ -7,18 +7,23 @@
 //! `prepared_core` front end and pin their code identity to the program's
 //! namespace root.
 
+use std::io::Cursor;
 use std::path::Path;
 
 use crate::debug::trace;
 use crate::error::Error;
 use crate::eval::{
-    run, run_observed_with_args, run_ruler, run_traced, run_traced_with_args, Run, StepMark, Tape,
+    run, run_observed_lowered_with_args, run_observed_with_args, run_ruler, run_traced,
+    run_traced_with_args, Run, StepMark, Tape,
 };
 use crate::provenance::{CapEvent, ObservationTrace};
 use crate::resolve::{default_roots, Root};
 use serde::Serialize;
 
-use super::{namespace_identity, prepared_core, stdlib_hash, timing, Config};
+use super::{
+    namespace_identity, prepared_core, prepared_core_deferred_holes, reuse_lowered_core,
+    stdlib_hash, timing, Config,
+};
 
 // The version of the runtime semantics a snapshot is bound to. Bumped only when a
 // change to evaluation that a persisted continuation could observe (scheduler
@@ -67,6 +72,16 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
     interpret_at(src, Path::new("."))
 }
 
+/// Interpret with typed holes deferred to deterministic runtime faults.
+///
+/// # Errors
+/// Fails on ordinary front-end errors or when evaluation reaches a hole.
+pub fn interpret_deferred_holes(src: &str) -> Result<Run, Error> {
+    let core =
+        prepared_core_deferred_holes(src, &default_roots(Path::new(".")), &Config::from_env())?;
+    run(&core).map_err(Error::RuntimeEvaluation)
+}
+
 /// Like [`interpret`], resolving any module imports relative to `base`.
 ///
 /// Captures all `print` output into the returned [`Run`]'s `term` (the
@@ -75,7 +90,19 @@ pub fn interpret(src: &str) -> Result<Run, Error> {
 /// # Errors
 /// Fails on front-end errors or a runtime fault.
 pub fn interpret_at(src: &str, base: &Path) -> Result<Run, Error> {
-    let core = prepared_core(src, &default_roots(base), &Config::from_env())?;
+    interpret_on(src, &default_roots(base))
+}
+
+/// Like [`interpret`], resolving module imports against an explicit search path.
+///
+/// This is the non-streaming counterpart of [`interpret_io_on`]. It keeps
+/// type-checking and execution on the same project/package roots while capturing
+/// all `print` output in the returned [`Run`].
+///
+/// # Errors
+/// Fails on front-end errors or a runtime fault.
+pub fn interpret_on(src: &str, roots: &[Root]) -> Result<Run, Error> {
+    let core = prepared_core(src, roots, &Config::from_env())?;
     run(&core).map_err(Error::RuntimeEvaluation)
 }
 
@@ -130,7 +157,38 @@ pub fn interpret_io_on_with_args(
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<Run, Error> {
-    let core = prepared_core(src, roots, cfg)?;
+    interpret_io_on_with_args_policy(src, roots, out_sink, input, cfg, args, false)
+}
+
+/// Streaming interpreter entry point with typed-hole deferral enabled.
+///
+/// # Errors
+/// Fails on ordinary front-end errors or when evaluation reaches a hole.
+pub fn interpret_io_on_with_args_deferred_holes(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+) -> Result<Run, Error> {
+    interpret_io_on_with_args_policy(src, roots, out_sink, input, cfg, args, true)
+}
+
+fn interpret_io_on_with_args_policy(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+    defer_holes: bool,
+) -> Result<Run, Error> {
+    let core = if defer_holes {
+        prepared_core_deferred_holes(src, roots, cfg)?
+    } else {
+        prepared_core(src, roots, cfg)?
+    };
     timing::timed_res(
         cfg.timing.as_ref(),
         timing::Phase::Eval,
@@ -247,7 +305,65 @@ pub fn observe_run_on(
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<RecordedRun, Error> {
-    let core = prepared_core(src, roots, cfg)?;
+    observe_run_on_policy(src, roots, out_sink, input, cfg, args, false)
+}
+
+/// Observe an interpreter run with typed holes preserved as terminal fault
+/// observations.
+///
+/// # Errors
+/// Fails only on ordinary frontend errors.
+pub fn observe_run_on_deferred_holes(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+) -> Result<RecordedRun, Error> {
+    observe_run_on_policy(src, roots, out_sink, input, cfg, args, true)
+}
+
+/// Execute optimized, effect-lowered, reference-counted, reuse-lowered Core
+/// under the verification observation machine.
+///
+/// This verification-only seam lets optimizer gates observe the exact Core tree
+/// handed toward code generation. Input and program arguments are deliberately
+/// empty, matching the deterministic runnable corpus contract. The second tuple
+/// field is a diagnostic rendering used only to prove optimizer configurations
+/// engage. Runtime-node evaluation preserves value/state behavior but deliberately
+/// makes no allocator, reference-count, or reuse-cost claim.
+///
+/// # Errors
+/// Fails only while preparing and lowering source through the compiler pipeline.
+#[doc(hidden)]
+pub fn observe_lowered_run_on(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(ObservationTrace, String), Error> {
+    let (_, core, _, _) = reuse_lowered_core(src, roots, cfg)?;
+    let lowered = crate::core::pp_core_pretty(&core);
+    let mut output = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let run = run_observed_lowered_with_args(&core.0, &mut output, &mut input, Vec::new());
+    Ok((ObservationTrace::new(run.observations), lowered))
+}
+
+fn observe_run_on_policy(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+    defer_holes: bool,
+) -> Result<RecordedRun, Error> {
+    let core = if defer_holes {
+        prepared_core_deferred_holes(src, roots, cfg)?
+    } else {
+        prepared_core(src, roots, cfg)?
+    };
     let run = run_observed_with_args(&core, out_sink, input, args);
     Ok(RecordedRun {
         exit: run.exit,

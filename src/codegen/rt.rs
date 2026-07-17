@@ -336,14 +336,15 @@ mod tests {
     #[cfg(feature = "native")]
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use super::super::{MAIN_SYMBOL, SYM_NAMESPACE, SYM_RUNTIME};
     use super::{native_kont, ALL};
 
     const KONT_RUNTIME_FILES: &[&str] = &["prism_kont.h", "prism_kont.c"];
     const KONT_TEST_SCHEME: &str = "prism-core-hash-v1";
     const KONT_TEST_BUNDLE: &str = "0123456789abcdef";
     const KONT_TEST_HASH: &str = "9d18022b96cb1349a4de4ab500879606121e86d736be1fc2da3f69385c9fcd35";
-    const KONT_TEST_SYMBOL: &str = "prism_main";
-    const KONT_TEST_CORE_NAME: &str = "main";
+    const KONT_TEST_SYMBOL: &str = super::super::MAIN_SYMBOL;
+    const KONT_TEST_CORE_NAME: &str = crate::names::ENTRY_POINT;
     const KONT_LOOKUP_HARNESS: &str = include_str!("../../tests/fixtures/native_kont_lookup.c");
     const KONT_HARNESS_REPLACEMENTS: [(&str, &str); 5] = [
         ("@KONT_TEST_SCHEME@", KONT_TEST_SCHEME),
@@ -377,6 +378,89 @@ mod tests {
                 defined,
                 "runtime symbol `{sym}` (codegen::rt) is not defined in any runtime/ module"
             );
+        }
+    }
+
+    // Blank out comments and string/char literals so the namespace scan below
+    // reads code rather than prose: a comment naming a codegen symbol is not a
+    // definition of one, and `#include "prism_io.h"` is not a symbol at all.
+    fn code_only(src: &str) -> String {
+        let bytes = src.as_bytes();
+        let mut out = String::with_capacity(src.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                    i += 2;
+                    while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                        i += 1;
+                    }
+                    i = (i + 2).min(bytes.len());
+                    out.push(' ');
+                }
+                b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                    out.push(' ');
+                }
+                quote @ (b'"' | b'\'') => {
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != quote {
+                        i += usize::from(bytes[i] == b'\\') + 1;
+                    }
+                    i += 1;
+                    out.push(' ');
+                }
+                c => {
+                    out.push(if c.is_ascii() { c as char } else { ' ' });
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+
+    // Every identifier in `code` that opens the `prism` namespace, i.e. is not
+    // merely the tail of some longer unrelated name.
+    fn namespace_idents(code: &str) -> Vec<&str> {
+        let bytes = code.as_bytes();
+        let ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+        code.match_indices(SYM_NAMESPACE)
+            .filter(|(i, _)| *i == 0 || !ident_byte(bytes[i - 1]))
+            .map(|(i, _)| {
+                let mut end = i;
+                while end < bytes.len() && ident_byte(bytes[end]) {
+                    end += 1;
+                }
+                &code[i..end]
+            })
+            .collect()
+    }
+
+    // The reverse of `symbols_defined_in_runtime`, and the invariant that keeps a
+    // user function named after a runtime intrinsic (`bump`, `alloc`, `box`) from
+    // colliding with it: user and codegen names are minted into namespaces that
+    // differ from the runtime's at index 5, so this holds as long as the runtime
+    // stays entirely inside `prism_`. Checking it here makes a stray runtime
+    // symbol a build failure instead of a duplicate-symbol link error in whatever
+    // user program happens to pick the same name.
+    #[test]
+    fn runtime_defines_nothing_in_a_codegen_namespace() {
+        for (file, body, _) in super::RUNTIME_FILES {
+            for ident in namespace_idents(&code_only(body)) {
+                // The sole deliberate crossing: the runtime's `main` calls the
+                // user's entry point, which lives in the Core-function namespace.
+                if ident == MAIN_SYMBOL {
+                    continue;
+                }
+                assert!(
+                    ident.starts_with(SYM_RUNTIME),
+                    "runtime/{file} names `{ident}`, which is outside the runtime's \
+                     `{SYM_RUNTIME}` namespace; a user function could spell it and \
+                     collide at link time"
+                );
+            }
         }
     }
 

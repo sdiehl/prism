@@ -1,32 +1,124 @@
--- The nursery is fail-fast. When one child fails (`fail()`), its sibling is
--- cancelled (its `on_cancel` finalizer runs) and the failure re-raises at the
--- scope boundary, where `default` recovers it. The sibling loops at `yield`, so
--- it is parked when the cancellation lands; `guard(true)` gives it `Fail` in its
--- row so it shares a type with `failer` in the `scope` list (it never fails).
+-- Failure aborts the whole run under both shipped scheduler policies. When one
+-- scoped child fails, its sibling, that sibling's grandchild, the root fiber, and
+-- an unrelated fiber created outside the scope are all cancelled. Their runnable
+-- cleanups complete before the failure is re-raised at the run boundary. FIFO
+-- and LIFO use different task orderings only to establish the same parked fork
+-- tree before the failure; cross-fiber cleanup order remains policy-observable.
 
 import Concurrent (..)
 
-fn sibling_loop() : Int ! {Async(Int), IO, Fail} =
-  yield(())
-  sibling_loop()
+fn grandchild_cleanup() : Unit ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("grandchild cleanup ran")
+
+fn grandchild_body(c : Chan) : Int ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("grandchild: parked")
+  recv(c)
+
+fn grandchild(c : Chan) : Int ! {Async(Int), IO, Fail} =
+  on_cancel(grandchild_cleanup, \() -> grandchild_body(c))
+
+fn sibling_cleanup() : Unit ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("sibling cleanup ran")
 
 fn sibling_body() : Int ! {Async(Int), IO, Fail} =
-  guard(true)
+  let c = channel()
+  let _g = fork(\() -> grandchild(c))
   println("sibling: running")
-  sibling_loop()
+  recv(c)
 
 fn sibling() : Int ! {Async(Int), IO, Fail} =
-  on_cancel(\() -> println("sibling finalizer ran"), sibling_body)
+  on_cancel(sibling_cleanup, sibling_body)
 
-fn failer() : Int ! {Async(Int), IO, Fail} =
-  println("failer: about to fail")
-  yield(())
+fn outsider_cleanup(release : Chan) : Unit ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("outsider cleanup: waiting")
+  let _released = recv(release)
+  println("outsider cleanup ran")
+
+fn outsider_body(ready : Chan, release : Chan) : Int ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("outsider: parked")
+  send(ready, 1)
+  recv(release)
+
+fn outsider(ready : Chan, release : Chan) : Int ! {Async(Int), IO, Fail} =
+  on_cancel(\() -> outsider_cleanup(release)) fn
+    outsider_body(ready, release)
+
+fn failer_fifo() : Int ! {Async(Int), IO, Fail} =
+  println("fifo failer: about to fail")
+  yield()
   fail()
 
-fn scene() : Int ! {Async(Int), IO, Fail} =
-  scope([sibling, failer])
+fn failer_lifo() : Int ! {Async(Int), IO, Fail} =
+  println("lifo failer: about to fail")
+  fail()
+
+fn fifo_root_cleanup(release : Chan) : Unit ! {Async(Int), IO, Fail} =
+  guard(true)
+  yield()
+  println("fifo root cleanup ran")
+  send(release, 1)
+
+fn fifo_scene_body(
+  ready : Chan,
+  release : Chan
+) : Int ! {Async(Int), IO, Fail} =
+  let _outside = fork(\() -> outsider(ready, release))
+  recv(ready)
+  scope([sibling, failer_fifo])
   0
 
+fn fifo_scene() : Int ! {Async(Int), IO, Fail} =
+  let ready = channel()
+  let release = channel()
+  on_cancel(\() -> fifo_root_cleanup(release)) fn
+    fifo_scene_body(ready, release)
+
+fn lifo_root_cleanup(release : Chan) : Unit ! {Async(Int), IO, Fail} =
+  guard(true)
+  yield()
+  println("lifo root cleanup ran")
+  send(release, 1)
+
+fn lifo_scene_body(
+  ready : Chan,
+  release : Chan
+) : Int ! {Async(Int), IO, Fail} =
+  let _outside = fork(\() -> outsider(ready, release))
+  recv(ready)
+  scope([failer_lifo, sibling])
+  0
+
+fn lifo_scene() : Int ! {Async(Int), IO, Fail} =
+  let ready = channel()
+  let release = channel()
+  on_cancel(\() -> lifo_root_cleanup(release)) fn
+    lifo_scene_body(ready, release)
+
+fn delayed_unawaited_fail() : Int ! {Async(Int), IO, Fail} =
+  yield()
+  fail()
+
+fn completed_sibling() : Int ! {Async(Int), IO, Fail} =
+  guard(true)
+  println("awaited sibling completed")
+  7
+
+fn queued_main_scene() : Int ! {Async(Int), IO, Fail} =
+  let _bad = fork(delayed_unawaited_fail)
+  let done = fork(completed_sibling)
+  let v = await(done)
+  println("unexpected main completion {v}")
+  v
+
 fn main() =
-  let r = default(\() -> run_async(scene), 0 - 1)
-  println("run recovered with {r}")
+  let fifo = default(\() -> run_async(fifo_scene), 0 - 1)
+  println("fifo recovered with {fifo}")
+  let lifo = default(\() -> run_lifo(lifo_scene), 0 - 2)
+  println("lifo recovered with {lifo}")
+  let queued = default(\() -> run_async(queued_main_scene), 0 - 3)
+  println("queued main recovered with {queued}")

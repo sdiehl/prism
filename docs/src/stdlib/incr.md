@@ -42,6 +42,17 @@ run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 
 Discharge the `Incr` effect, running `action` as the root observer of a fresh demand graph. The node table lives only for this scope. The ambient row `e` (the replayable effects the memo thunks perform beyond reading nodes) flows out unchanged, exactly as `run_async` passes its fibers' row through.
 
+```prism,mod=Incr
+run_incr() fn
+  let a = input(10)
+  let b = memo(\() -> get(a) * 2)
+  get(b)
+```
+
+```output
+20
+```
+
 ### `input`
 
 ```prism,sig,h-2ea98abacb0bdce235b44e795eb251403237880edc4bd5cc82d41f9eab591d36
@@ -49,6 +60,14 @@ input : forall a. (a) -> Incr.Incr(a) ! {Incr.IncrRaw}
 ```
 
 Create an input node holding `v`. Its key is its creation order in the run.
+
+```prism,mod=Incr
+run_incr(\() -> get(input(42)))
+```
+
+```output
+42
+```
 
 ### `get`
 
@@ -58,6 +77,17 @@ get : forall a. (Incr.Incr(a)) -> a ! {Fail, Incr.IncrRaw}
 
 Read a node, recording a dependency edge from the memo currently being computed (if any) to this node.
 
+```prism,mod=Incr
+run_incr() fn
+  let a = input(3)
+  let b = input(4)
+  get(a) + get(b)
+```
+
+```output
+7
+```
+
 ### `set`
 
 ```prism,sig,h-c3eca70107a5310c8e0ee6103ff09bf1917aea3c34a1adf5e5045fe4bba068c4
@@ -65,6 +95,17 @@ set : forall a. (Incr.Incr(a), a) -> Unit ! {Incr.IncrRaw}
 ```
 
 Update an input node. A no-op when `v` is equal (by content) to the node's current value.
+
+```prism,mod=Incr
+run_incr() fn
+  let a = input(1)
+  set(a, 10)
+  get(a)
+```
+
+```output
+10
+```
 
 ### `memo`
 
@@ -84,6 +125,17 @@ let ranking = memo() fn
 
 A one-liner is the same thing spelled with a lambda: `memo(\() -> get(a) + 1)`.
 
+```prism,mod=Incr
+run_incr() fn
+  let a = input(10)
+  let plus1 = memo(\() -> get(a) + 1)
+  get(plus1)
+```
+
+```output
+11
+```
+
 ### `run_incr_durable`
 
 ```prism,sig,h-921260143f74c0241d8e90d5dd8b6601130c0d176673aa7f83f0fc8b6e145db9
@@ -93,6 +145,12 @@ run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) ->
 Discharge the `Incr` effect with a durable snapshot at `path`, tagged by `tag` (the caller-named program identity: a snapshot written under a different tag cold-starts). This is the file-substrate form of the production path, which rides the content-addressed store once a program can hold a runtime handle on it; the same reduced table is what that store persists.
 
 The action must be pure up to `Fail`, so its row is closed at `{IncrRaw, Fail}`: a warm hit skips the memo thunk, and skipping a thunk that printed or drew a random would change the output, so only effect-free thunks may be reused across runs. Only the creation prefix (the memos built before the first `get`/`set`) is warmed and persisted; input-dependent memos stay scratch and recompute. Within those bounds a warm run's output is byte-identical to a cold run, and deleting or corrupting the snapshot changes only cost, never the result.
+
+```prism,no_run,mod=Incr
+run_incr_durable("totals.snap", "report") fn
+  let a = input(10)
+  get(memo(\() -> get(a) * 2))
+```
 
 ### `run_incr_store`
 
@@ -104,6 +162,12 @@ Discharge the `Incr` effect with a durable snapshot on the content-addressed sto
 
 Every durability guarantee of the file form carries over. The action is pure up to `Fail`, so only the creation-prefix memos are warmed and persisted; a warm run's output is byte-identical to a cold run; and a missing, dangling, or corrupt store entry cold-starts, changing only cost, never the result.
 
+```prism,no_run,mod=Incr
+run_incr_store(".prism-store", "report") fn
+  let a = input(10)
+  get(memo(\() -> get(a) * 2))
+```
+
 ### `run_incr_durable_replay`
 
 ```prism,sig,h-cd7326ae43ab748d95330837f7c10c4cd9897ddca0222b16b14ceb1d63c38471
@@ -112,6 +176,12 @@ run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Inc
 
 Discharge the `Incr` effect with a durable, trace-replay snapshot at `path`, tagged by `tag`. Unlike `run_incr_durable`, the memo thunks may perform any replayable effect: a cold run records each memo's output beside its result, and a durable warm hit REPLAYS that output instead of re-running the thunk, so a warm run's console is byte-identical to a cold run's, effects included. A missing, corrupt, foreign, or wrong-version snapshot is a silent cold start.
 
+```prism,no_run,mod=Incr
+run_incr_durable_replay("run.snap", "job") fn
+  let a = input(41)
+  get(memo(\() -> get(a) + 1))
+```
+
 ### `run_incr_store_replay`
 
 ```prism,sig,h-8a3b81238d87e75aa0f3acc0e6d27628a058f7d72d8225193cb3ebdde98233e6
@@ -119,3 +189,9 @@ run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.
 ```
 
 The content-addressed-store form of `run_incr_durable_replay`: the traced memo table (results and output traces) rides the real store's object layer, keyed by `tag`, rather than a snapshot file. Every guarantee of the file form carries over; a missing, dangling, or corrupt store entry cold-starts.
+
+```prism,no_run,mod=Incr
+run_incr_store_replay(".prism-store", "job") fn
+  let a = input(41)
+  get(memo(\() -> get(a) + 1))
+```

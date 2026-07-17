@@ -32,6 +32,14 @@ head : forall a. (List(a)) -> Option(a)
 
 The first element as `Some`, or `None` when the list is empty.
 
+```prism,mod=Data.List
+head([1, 2, 3])
+```
+
+```output
+Some(1)
+```
+
 ### `tail`
 
 ```prism,sig,h-d59a69227d9a845beaa2803e49a71295ae085c7d02e151f606c88f9598b6201b
@@ -48,6 +56,14 @@ last : forall a. (List(a)) -> Option(a)
 
 The final element as `Some`, or `None` when the list is empty.
 
+```prism,mod=Data.List
+last([1, 2, 3])
+```
+
+```output
+Some(3)
+```
+
 ### `nth`
 
 ```prism,sig,h-9d36473c0a32433082f3bbf542f70a6a26fcd5414b855ae8ebf0b07e8e0eb382
@@ -55,6 +71,14 @@ nth : forall a. (Int, List(a)) -> Option(a)
 ```
 
 The element at index `n` (zero-based) as `Some`, or `None` if out of range.
+
+```prism,mod=Data.List
+nth(1, [10, 20, 30])
+```
+
+```output
+Some(20)
+```
 
 ### `take`
 
@@ -64,6 +88,14 @@ take : forall a. (Int, List(a)) -> List(a)
 
 The first `n` elements (fewer if the list is shorter).
 
+```prism,mod=Data.List
+take(2, [1, 2, 3, 4])
+```
+
+```output
+[1, 2]
+```
+
 ### `drop`
 
 ```prism,sig,h-23d534c0820c601485a991da1e3120045a09aa22c1b1838145d201f7f08999a0
@@ -71,6 +103,14 @@ drop : forall a. (Int, List(a)) -> List(a)
 ```
 
 The list with its first `n` elements removed.
+
+```prism,mod=Data.List
+drop(2, [1, 2, 3, 4])
+```
+
+```output
+[3, 4]
+```
 
 ### `take_while`
 
@@ -80,6 +120,14 @@ take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 
 The longest prefix of elements satisfying `p`.
 
+```prism,mod=Data.List
+take_while(\(x) -> x < 3, [1, 2, 3, 1])
+```
+
+```output
+[1, 2]
+```
+
 ### `drop_while`
 
 ```prism,sig,h-54a4fe7e560782774fa700eb315da761493ae53e265502ef7737adc606882656
@@ -87,6 +135,14 @@ drop_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
 The suffix remaining after `take_while(p, xs)`.
+
+```prism,mod=Data.List
+drop_while(\(x) -> x < 3, [1, 2, 3, 1])
+```
+
+```output
+[3, 1]
+```
 
 ### `split_at`
 
@@ -104,8 +160,12 @@ map : forall e0 a b. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
 
 Apply `f` to every element, preserving order and length.
 
-```prism
+```prism,mod=Data.List
 map(\(x) -> x + 1, [1, 2, 3])
+```
+
+```output
+[2, 3, 4]
 ```
 
 ### `filter`
@@ -116,8 +176,12 @@ filter : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 
 Keep the elements satisfying `p`.
 
-```prism
+```prism,mod=Data.List
 filter(\(x) -> x > 1, [1, 2, 3])
+```
+
+```output
+[2, 3]
 ```
 
 ### `foldr`
@@ -128,6 +192,14 @@ foldr : forall e0 a b. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
 
 Right fold: `f(x0, f(x1, ... f(xn, z)))`.
 
+```prism,mod=Data.List
+foldr(\(x, acc) -> x + acc, 0, [1, 2, 3])
+```
+
+```output
+6
+```
+
 ### `foldl`
 
 ```prism,sig,h-bd78f0fde16d7e54704625b1d4906ca72cc38c52d599b0e27668bdfa8a1dca9d
@@ -136,8 +208,12 @@ foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
 
 Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
 
-```prism
+```prism,mod=Data.List
 foldl(\(a, b) -> a + b, 0, [1, 2, 3])
+```
+
+```output
+6
 ```
 
 ### `append`
@@ -148,6 +224,14 @@ append : forall a. (List(a), List(a)) -> List(a)
 
 Concatenate two lists.
 
+```prism,mod=Data.List
+append([1, 2], [3, 4])
+```
+
+```output
+[1, 2, 3, 4]
+```
+
 ### `reverse`
 
 ```prism,sig,h-d81133e144bbb68abadaf48b744276c73660a8427c0f3bf490c2f36de32fdb59
@@ -155,6 +239,14 @@ reverse : forall a. (List(a)) -> List(a)
 ```
 
 The list in reverse order.
+
+```prism,mod=Data.List
+reverse([1, 2, 3])
+```
+
+```output
+[3, 2, 1]
+```
 
 ### `flatten`
 
@@ -164,6 +256,14 @@ flatten : forall a. (List(List(a))) -> List(a)
 
 Concatenate a list of lists.
 
+```prism,mod=Data.List
+flatten([[1, 2], [3], [4, 5]])
+```
+
+```output
+[1, 2, 3, 4, 5]
+```
+
 ### `concat_map`
 
 ```prism,sig,h-cc17609e5a8dcde888b8f3d5192cb78738e69584923dba8bef3ea122aab718f6
@@ -171,6 +271,14 @@ concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
 Map `f` over the list and concatenate the resulting lists.
+
+```prism,mod=Data.List
+concat_map(\(x) -> [x, x], [1, 2])
+```
+
+```output
+[1, 1, 2, 2]
+```
 
 ### `zip_with`
 
@@ -180,6 +288,14 @@ zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! 
 
 Combine two lists elementwise with `f`, stopping at the shorter length.
 
+```prism,mod=Data.List
+zip_with(\(x, y) -> x + y, [1, 2, 3], [10, 20])
+```
+
+```output
+[11, 22]
+```
+
 ### `zip`
 
 ```prism,sig,h-791d5335567d72e54570c2e251998639b7c5111bcf3c45d6c2d3895707d3822b
@@ -187,6 +303,14 @@ zip : forall a b. (List(a), List(b)) -> List((a, b))
 ```
 
 Pair up two lists elementwise, stopping at the shorter length.
+
+```prism,mod=Data.List
+zip([1, 2], ["a", "b"])
+```
+
+```output
+[(1, a), (2, b)]
+```
 
 ### `unzip`
 
@@ -196,6 +320,14 @@ unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 
 Split a list of pairs into a pair of lists.
 
+```prism,mod=Data.List
+unzip([(1, "a"), (2, "b")])
+```
+
+```output
+([1, 2], [a, b])
+```
+
 ### `count`
 
 ```prism,sig,h-437b1266c7bd9fe505b5403a436d319ab1527623852fd6f322129d68090aa3d7
@@ -203,6 +335,14 @@ count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
 The number of elements satisfying `p`.
+
+```prism,mod=Data.List
+count(\(x) -> x > 1, [1, 2, 3])
+```
+
+```output
+2
+```
 
 ### `position_go`
 
@@ -220,6 +360,14 @@ position : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
 
 The index of the first element satisfying `p` as `Some`, or `None`.
 
+```prism,mod=Data.List
+position(\(x) -> x == 2, [1, 2, 3])
+```
+
+```output
+Some(1)
+```
+
 ### `maximum`
 
 ```prism,sig,h-f0b6534c4edf226e15be31ee90ee82d282454ab8b57e333e0d8727745056f0d2
@@ -227,6 +375,14 @@ maximum : (List(Int)) -> Option(Int)
 ```
 
 The greatest element as `Some`, or `None` for the empty list.
+
+```prism,mod=Data.List
+maximum([3, 1, 2])
+```
+
+```output
+Some(3)
+```
 
 ### `minimum`
 
@@ -236,6 +392,14 @@ minimum : (List(Int)) -> Option(Int)
 
 The least element as `Some`, or `None` for the empty list.
 
+```prism,mod=Data.List
+minimum([3, 1, 2])
+```
+
+```output
+Some(1)
+```
+
 ### `replicate`
 
 ```prism,sig,h-80b003e44a9b69185ad8af9d65dffecf704421133d7bb7b21eddd27f638eceed
@@ -243,6 +407,14 @@ replicate : forall a. (Int, a) -> List(a)
 ```
 
 A list of `n` copies of `x`.
+
+```prism,mod=Data.List
+replicate(3, 0)
+```
+
+```output
+[0, 0, 0]
+```
 
 ### `range`
 
@@ -252,8 +424,12 @@ range : (Int, Int) -> List(Int)
 
 The ascending list `[lo, lo+1, ..., hi-1]` (empty when `lo >= hi`).
 
-```prism
+```prism,mod=Data.List
 range(0, 5)
+```
+
+```output
+[0, 1, 2, 3, 4]
 ```
 
 ### `tabulate`
@@ -264,6 +440,14 @@ tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 
 The list `[f(0), f(1), ..., f(n-1)]`.
 
+```prism,mod=Data.List
+tabulate(3, \(i) -> i * i)
+```
+
+```output
+[0, 1, 4]
+```
+
 ### `insert_sorted`
 
 ```prism,sig,h-c8612275f166f99903cd45f5aeae8343c71ba8324c36341067041fdcd44d2976
@@ -271,6 +455,14 @@ insert_sorted : (Int, List(Int)) -> List(Int)
 ```
 
 Insert `x` into an already-ascending list, keeping it sorted.
+
+```prism,mod=Data.List
+insert_sorted(3, [1, 2, 4])
+```
+
+```output
+[1, 2, 3, 4]
+```
 
 ### `list_to_option`
 
@@ -288,6 +480,14 @@ partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {
 
 Split into `(matching, non-matching)` by predicate `p`.
 
+```prism,mod=Data.List
+partition(\(x) -> x > 1, [1, 2, 3])
+```
+
+```output
+([2, 3], [1])
+```
+
 ### `chunks_of`
 
 ```prism,sig,h-d40608c9730e577f16268bf90bece94ad031bf1af4de64e977b6fb99d3faf220
@@ -295,6 +495,14 @@ chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 
 Break the list into consecutive chunks of up to `n` elements.
+
+```prism,mod=Data.List
+chunks_of(2, [1, 2, 3, 4, 5])
+```
+
+```output
+[[1, 2], [3, 4], [5]]
+```
 
 ### `scan_left`
 
@@ -304,6 +512,14 @@ scan_left : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
 
 Left scan: the running accumulators of `foldl`, starting from `z`.
 
+```prism,mod=Data.List
+scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
+```
+
+```output
+[0, 1, 3, 6]
+```
+
 ### `list_ap`
 
 ```prism,sig,h-fc1a3d730988bcfcfd46ef1247b550af0d5f209ffb67100d7f2a91f27eb81228
@@ -311,3 +527,11 @@ list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 
 Applicative apply for lists: every function in `fs` applied to every `x`.
+
+```prism,mod=Data.List
+list_ap([\(x) -> x + 1, \(x) -> x * 2], [10, 20])
+```
+
+```output
+[11, 21, 20, 40]
+```

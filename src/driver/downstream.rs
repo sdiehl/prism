@@ -4,14 +4,12 @@ use std::io;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
-    effective_passes, hash_program, lint_core, lower_effects, run_opt_spec, shallow_hashes, Core,
-    CoreFn, CorePass, ElaboratedCore, LoweredCore, OpGrades, PassStage,
+    effective_passes, run_opt_spec, shallow_hashes, Core, CoreFn, CorePass, PassStage,
 };
 use crate::error::Error;
 use crate::lineage::{FactOutcome, QueryKind};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::sym::Sym;
-use crate::types::CtorInfo;
 
 use super::identity::compiler_binary_fingerprint;
 use super::input::field;
@@ -20,17 +18,12 @@ use super::session::QueryDecision;
 use super::Config;
 
 const OPT_SCC_QUERY: &str = "optimized-scc";
+// The `-vN` here is a cache-bust counter, not a compat version: it is hashed into
+// the query key so a format change misses stale entries. No old version or
+// compatibility reader is used.
 const OPT_SCC_QUERY_SCHEMA: &[u8] = b"prism-optimized-scc-query-v3";
 const OPT_SCC_FORMAT: &str = "prism-optimized-scc-fixed-point-v1";
 const MAX_OPT_SCC_ARTIFACT_BYTES: usize = 64 * 1024;
-const EFFECT_PLAN_QUERY: &str = "effect-lowering-plan";
-const EFFECT_PLAN_QUERY_SCHEMA: &[u8] = b"prism-effect-lowering-plan-query-v1";
-const EFFECT_PLAN_FORMAT: &str = "prism-effect-lowering-projection-v1";
-const MAX_EFFECT_PLAN_ARTIFACT_BYTES: usize = 1024 * 1024;
-const EFFECT_RESULT_QUERY: &str = "effect-lowering-result";
-const EFFECT_RESULT_QUERY_SCHEMA: &[u8] = b"prism-effect-lowering-result-query-v1";
-const EFFECT_RESULT_FORMAT: &str = "prism-effect-lowering-result-v1";
-const MAX_EFFECT_RESULT_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OptimizedSccArtifact {
@@ -41,30 +34,10 @@ struct OptimizedSccArtifact {
     input_members: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct EffectLoweringPlan {
-    format: String,
-    key: String,
-    input_members: Vec<String>,
-    retained_members: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct EffectLoweringResult {
-    format: String,
-    key: String,
-    input_members: Vec<String>,
-    output: Core,
-    added_ctors: Vec<String>,
-    warning: Option<String>,
-}
-
 struct SccQueryIdentity {
     compiler: String,
     artifact: String,
 }
-
-type EffectLowered = (LoweredCore, BTreeMap<String, CtorInfo>, Option<String>);
 
 struct SccPassQuery<'a> {
     store: &'a Store,
@@ -89,19 +62,6 @@ pub(super) fn run_opt_queries(
         &cfg.disabled,
         &cfg.flags,
     );
-    if !cache_enabled(cfg)
-        || cfg.flags.core_lint
-        || cfg.flags.opt_stats
-        || cfg.flags.dump_core.is_some()
-    {
-        return Ok(run_opt_spec(core, newtype_ctors, &passes, stage, &[], &cfg.flags).0);
-    }
-
-    let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
-    let identity = SccQueryIdentity {
-        compiler: compiler_binary_fingerprint()?.to_string(),
-        artifact: cfg.artifact_identity_for("frontend").fingerprint(),
-    };
     let pipeline_fingerprint = crate::core::pass_fingerprint(
         cfg.opt,
         cfg.passes.as_ref(),
@@ -109,8 +69,39 @@ pub(super) fn run_opt_queries(
         &cfg.disabled,
         &cfg.flags,
     );
+    run_opt_queries_resolved(
+        core,
+        newtype_ctors,
+        stage,
+        &passes,
+        &pipeline_fingerprint,
+        cfg,
+    )
+}
+
+fn run_opt_queries_resolved(
+    core: &Core,
+    newtype_ctors: &BTreeSet<Sym>,
+    stage: PassStage,
+    passes: &[CorePass],
+    pipeline_fingerprint: &str,
+    cfg: &Config,
+) -> Result<Core, Error> {
+    if !cache_enabled(cfg)
+        || cfg.flags.core_lint
+        || cfg.flags.opt_stats
+        || cfg.flags.dump_core.is_some()
+    {
+        return Ok(run_opt_spec(core, newtype_ctors, passes, stage, &[], &cfg.flags).0);
+    }
+
+    let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+    let identity = SccQueryIdentity {
+        compiler: compiler_binary_fingerprint()?.to_string(),
+        artifact: cfg.artifact_identity_for("frontend").fingerprint(),
+    };
     let mut current = core.clone();
-    for pass in passes {
+    for &pass in passes {
         current = if pass.is_scc_local() {
             run_local_pass(
                 &current,
@@ -119,7 +110,7 @@ pub(super) fn run_opt_queries(
                     newtype_ctors,
                     stage,
                     pass,
-                    pipeline_fingerprint: &pipeline_fingerprint,
+                    pipeline_fingerprint,
                     identity: &identity,
                     cfg,
                 },
@@ -131,24 +122,9 @@ pub(super) fn run_opt_queries(
     Ok(current)
 }
 
-fn effect_identity(core: &Core) -> String {
-    let mut names = core
-        .fns
-        .iter()
-        .map(|function| function.name.as_str())
-        .collect::<Vec<_>>();
-    names.sort_unstable();
-    let mut hasher = blake3::Hasher::new();
-    for name in names {
-        field(&mut hasher, name.as_bytes());
-    }
-    let digest = hasher.finalize().to_hex();
-    format!("whole-program:{}", &digest[..16])
-}
-
 // The single predicate for "may this build read or write the durable store".
-// Both query lowering here and the module interface cache consult it, so the
-// wasm carve-out and the flag logic live in exactly one place.
+// Optimizer queries here and the module interface cache consult it, so the wasm
+// carve-out and the flag logic live in exactly one place.
 //
 // The store is a filesystem cache; wasm32 (the browser playground) has no
 // persistent filesystem and each compile is ephemeral, so opening it would fail
@@ -156,347 +132,6 @@ fn effect_identity(core: &Core) -> String {
 // observationally invisible, so skipping it there changes nothing.
 pub(super) const fn cache_enabled(cfg: &Config) -> bool {
     cfg.flags.compiler_cache && !cfg.flags.store && cfg!(not(target_arch = "wasm32"))
-}
-
-pub(super) fn lower_effect_queries(
-    core: &ElaboratedCore,
-    ctors: &BTreeMap<String, CtorInfo>,
-    grades: &OpGrades,
-    cfg: &Config,
-) -> Result<EffectLowered, Error> {
-    if !cache_enabled(cfg) {
-        return lower_effects(core, ctors, &cfg.flags, grades).map_err(Error::from);
-    }
-    let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
-    let key = effect_plan_key(core, ctors, grades, cfg)?;
-    if let Some(retained) = load_effect_plan(&store, &key, core)? {
-        if let Some(session) = &cfg.session {
-            session.record_hit();
-            session.record_decision(QueryDecision::new(
-                QueryKind::Effect,
-                effect_identity(core),
-                key.clone(),
-                FactOutcome::Hit,
-                store.get_query(EFFECT_PLAN_QUERY, &key)?,
-                Vec::new(),
-            ));
-        }
-        return Ok((LoweredCore(Core { fns: retained }), ctors.clone(), None));
-    }
-    let result_key = effect_result_key(core, ctors, grades, cfg)?;
-    if let Some(result) = load_effect_result(&store, &result_key, core, ctors)? {
-        if let Some(session) = &cfg.session {
-            session.record_hit();
-            session.record_decision(QueryDecision::new(
-                QueryKind::Effect,
-                effect_identity(core),
-                result_key.clone(),
-                FactOutcome::Hit,
-                store.get_query(EFFECT_RESULT_QUERY, &result_key)?,
-                Vec::new(),
-            ));
-        }
-        return Ok(result);
-    }
-    if let Some(session) = &cfg.session {
-        session.record_miss();
-    }
-    let result = lower_effects(core, ctors, &cfg.flags, grades).map_err(Error::from)?;
-    let written = if is_projection(core, ctors, &result) {
-        store_effect_plan(&store, &key, core, &result.0)?
-    } else if let Some(added_ctors) = constructor_delta(ctors, &result.1) {
-        store_effect_result(
-            &store,
-            &result_key,
-            core,
-            &result.0,
-            added_ctors,
-            result.2.as_deref(),
-        )?
-    } else {
-        false
-    };
-    if let Some(session) = &cfg.session {
-        if written {
-            session.record_write();
-        }
-        let (query, query_key) = if is_projection(core, ctors, &result) {
-            (EFFECT_PLAN_QUERY, &key)
-        } else {
-            (EFFECT_RESULT_QUERY, &result_key)
-        };
-        session.record_decision(QueryDecision::new(
-            QueryKind::Effect,
-            effect_identity(core),
-            query_key.clone(),
-            if written {
-                FactOutcome::Write
-            } else {
-                FactOutcome::Miss
-            },
-            store.get_query(query, query_key)?,
-            vec!["strategy, reachability, grades, or lowering flags changed".to_string()],
-        ));
-    }
-    Ok(result)
-}
-
-fn effect_plan_key(
-    core: &ElaboratedCore,
-    ctors: &BTreeMap<String, CtorInfo>,
-    grades: &OpGrades,
-    cfg: &Config,
-) -> Result<String, Error> {
-    let input_digests = hash_program(core, &BTreeMap::new());
-    let mut hasher = blake3::Hasher::new();
-    field(&mut hasher, EFFECT_PLAN_QUERY_SCHEMA);
-    field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
-    field(
-        &mut hasher,
-        cfg.artifact_identity_for("frontend")
-            .fingerprint()
-            .as_bytes(),
-    );
-    for function in &core.fns {
-        field(&mut hasher, function.name.as_str().as_bytes());
-        field(&mut hasher, input_digests[&function.name].as_bytes());
-    }
-    field(&mut hasher, format!("{ctors:?}").as_bytes());
-    field(&mut hasher, format!("{grades:?}").as_bytes());
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-fn effect_result_key(
-    core: &ElaboratedCore,
-    ctors: &BTreeMap<String, CtorInfo>,
-    grades: &OpGrades,
-    cfg: &Config,
-) -> Result<String, Error> {
-    let mut hasher = blake3::Hasher::new();
-    field(&mut hasher, EFFECT_RESULT_QUERY_SCHEMA);
-    field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
-    field(
-        &mut hasher,
-        cfg.artifact_identity_for("frontend")
-            .fingerprint()
-            .as_bytes(),
-    );
-    let exact_core = serde_json::to_vec(&core.0)
-        .map_err(|_| corrupt("could not encode effect-lowering query input"))?;
-    field(&mut hasher, &exact_core);
-    field(&mut hasher, format!("{ctors:?}").as_bytes());
-    field(&mut hasher, format!("{grades:?}").as_bytes());
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
-fn load_effect_plan(
-    store: &Store,
-    key: &str,
-    core: &ElaboratedCore,
-) -> Result<Option<Vec<CoreFn>>, Error> {
-    let Some(object_hash) = store.get_query(EFFECT_PLAN_QUERY, key)? else {
-        return Ok(None);
-    };
-    let bytes = store.get(&object_hash)?;
-    if bytes.len() > MAX_EFFECT_PLAN_ARTIFACT_BYTES {
-        return Err(corrupt("effect-lowering plan exceeds the size limit"));
-    }
-    if blake3::hash(&bytes).to_hex().as_str() != object_hash {
-        return Err(corrupt("effect-lowering plan object hash mismatch"));
-    }
-    let plan: EffectLoweringPlan = serde_json::from_slice(&bytes)
-        .map_err(|error| corrupt(&format!("malformed effect-lowering plan: {error}")))?;
-    let input_members = core
-        .fns
-        .iter()
-        .map(|function| function.name.as_str().to_string())
-        .collect::<Vec<_>>();
-    if plan.format != EFFECT_PLAN_FORMAT || plan.key != key || plan.input_members != input_members {
-        return Err(corrupt("effect-lowering plan failed validation"));
-    }
-    let by_name = core
-        .fns
-        .iter()
-        .map(|function| (function.name.as_str(), function))
-        .collect::<BTreeMap<_, _>>();
-    let mut seen = BTreeSet::new();
-    let mut retained = Vec::with_capacity(plan.retained_members.len());
-    for name in &plan.retained_members {
-        if !seen.insert(name.as_str()) {
-            return Err(corrupt("effect-lowering plan repeats a retained member"));
-        }
-        let Some(function) = by_name.get(name.as_str()) else {
-            return Err(corrupt("effect-lowering plan names an absent member"));
-        };
-        retained.push((*function).clone());
-    }
-    Ok(Some(retained))
-}
-
-fn is_projection(
-    input: &ElaboratedCore,
-    input_ctors: &BTreeMap<String, CtorInfo>,
-    result: &EffectLowered,
-) -> bool {
-    if &result.1 != input_ctors || result.2.is_some() {
-        return false;
-    }
-    let input_by_name = input
-        .fns
-        .iter()
-        .map(|function| (function.name, function))
-        .collect::<BTreeMap<_, _>>();
-    result.0.fns.iter().all(|function| {
-        input_by_name
-            .get(&function.name)
-            .is_some_and(|input| *input == function)
-    })
-}
-
-fn store_effect_plan(
-    store: &Store,
-    key: &str,
-    input: &ElaboratedCore,
-    output: &LoweredCore,
-) -> Result<bool, Error> {
-    let plan = EffectLoweringPlan {
-        format: EFFECT_PLAN_FORMAT.to_string(),
-        key: key.to_string(),
-        input_members: input
-            .fns
-            .iter()
-            .map(|function| function.name.as_str().to_string())
-            .collect(),
-        retained_members: output
-            .fns
-            .iter()
-            .map(|function| function.name.as_str().to_string())
-            .collect(),
-    };
-    let bytes =
-        serde_json::to_vec(&plan).map_err(|_| corrupt("could not encode effect-lowering plan"))?;
-    if bytes.len() > MAX_EFFECT_PLAN_ARTIFACT_BYTES {
-        return Ok(false);
-    }
-    let object_hash = blake3::hash(&bytes).to_hex().to_string();
-    store.put(&object_hash, &bytes)?;
-    store.put_query(EFFECT_PLAN_QUERY, key, &object_hash)?;
-    Ok(true)
-}
-
-fn constructor_delta(
-    input: &BTreeMap<String, CtorInfo>,
-    output: &BTreeMap<String, CtorInfo>,
-) -> Option<Vec<String>> {
-    if input
-        .iter()
-        .any(|(name, ctor)| output.get(name) != Some(ctor))
-    {
-        return None;
-    }
-    Some(
-        output
-            .keys()
-            .filter(|name| !input.contains_key(*name))
-            .cloned()
-            .collect(),
-    )
-}
-
-fn load_effect_result(
-    store: &Store,
-    key: &str,
-    input: &ElaboratedCore,
-    input_ctors: &BTreeMap<String, CtorInfo>,
-) -> Result<Option<EffectLowered>, Error> {
-    let Some(object_hash) = store.get_query(EFFECT_RESULT_QUERY, key)? else {
-        return Ok(None);
-    };
-    let bytes = store.get(&object_hash)?;
-    if bytes.len() > MAX_EFFECT_RESULT_ARTIFACT_BYTES {
-        return Err(corrupt("effect-lowering result exceeds the size limit"));
-    }
-    if blake3::hash(&bytes).to_hex().as_str() != object_hash {
-        return Err(corrupt("effect-lowering result object hash mismatch"));
-    }
-    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
-    deserializer.disable_recursion_limit();
-    let artifact =
-        EffectLoweringResult::deserialize(serde_stacker::Deserializer::new(&mut deserializer))
-            .map_err(|error| corrupt(&format!("malformed effect-lowering result: {error}")))?;
-    deserializer
-        .end()
-        .map_err(|error| corrupt(&format!("malformed effect-lowering result: {error}")))?;
-    let input_members = input
-        .fns
-        .iter()
-        .map(|function| function.name.as_str().to_string())
-        .collect::<Vec<_>>();
-    if artifact.format != EFFECT_RESULT_FORMAT
-        || artifact.key != key
-        || artifact.input_members != input_members
-    {
-        return Err(corrupt("effect-lowering result failed validation"));
-    }
-    let mut names = BTreeSet::new();
-    if artifact
-        .output
-        .fns
-        .iter()
-        .any(|function| !names.insert(function.name))
-    {
-        return Err(corrupt("effect-lowering result repeats a function"));
-    }
-    lint_core(&artifact.output, PassStage::Late)
-        .map_err(|_| corrupt("effect-lowering result contains invalid Core"))?;
-    let mut ctors = input_ctors.clone();
-    let mut added = BTreeSet::new();
-    for name in &artifact.added_ctors {
-        if input_ctors.contains_key(name)
-            || !added.insert(name.as_str())
-            || !crate::core::effect_lower::add_synthetic_ctor(&mut ctors, name)
-        {
-            return Err(corrupt(
-                "effect-lowering result has an invalid constructor delta",
-            ));
-        }
-    }
-    Ok(Some((
-        LoweredCore(artifact.output),
-        ctors,
-        artifact.warning,
-    )))
-}
-
-fn store_effect_result(
-    store: &Store,
-    key: &str,
-    input: &ElaboratedCore,
-    output: &LoweredCore,
-    added_ctors: Vec<String>,
-    warning: Option<&str>,
-) -> Result<bool, Error> {
-    let artifact = EffectLoweringResult {
-        format: EFFECT_RESULT_FORMAT.to_string(),
-        key: key.to_string(),
-        input_members: input
-            .fns
-            .iter()
-            .map(|function| function.name.as_str().to_string())
-            .collect(),
-        output: output.0.clone(),
-        added_ctors,
-        warning: warning.map(ToString::to_string),
-    };
-    let bytes = serde_json::to_vec(&artifact)
-        .map_err(|_| corrupt("could not encode effect-lowering result"))?;
-    if bytes.len() > MAX_EFFECT_RESULT_ARTIFACT_BYTES {
-        return Ok(false);
-    }
-    let object_hash = blake3::hash(&bytes).to_hex().to_string();
-    store.put(&object_hash, &bytes)?;
-    store.put_query(EFFECT_RESULT_QUERY, key, &object_hash)?;
-    Ok(true)
 }
 
 fn optimizer_identity(group: &[CoreFn], stage: PassStage, pass: CorePass) -> String {

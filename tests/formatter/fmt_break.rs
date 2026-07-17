@@ -133,6 +133,12 @@ fn expression_breaking_matches_pinned_layout(
 }
 
 #[test]
+fn partial_handler_keeps_braces_and_roundtrips() {
+    let source = "effect E\n  one() : Int\n  two() : Int\n\nfn run() : Int ! {E} =\n  handle one() + two() with partial {\n    one() resume k => k(1),\n    return r => r\n  }\n";
+    pin(source, source);
+}
+
+#[test]
 fn transact_uses_layout_when_bound() {
     let src = "fn main() =\n  let r = transact let _ = balance -= 40 in let _ = stock -= 1 in let _ = guard(balance >= 0) in 1 else 0\n  r\n";
     let want = "fn main() =\n  let r =\n    transact\n      balance -= 40\n      stock -= 1\n      guard(balance >= 0)\n      1\n    else\n      0\n  r\n";

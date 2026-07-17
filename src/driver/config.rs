@@ -153,7 +153,15 @@ impl Config {
     pub fn from_env() -> Self {
         // The environment is read once, into `DynFlags`; the Config-level fields
         // are projected out of it (the CLI later overrides them with its flags).
-        let flags = DynFlags::from_env();
+        Self::from_flags(DynFlags::from_env())
+    }
+
+    /// Build a config by projecting the Config-level fields out of an already
+    /// resolved [`DynFlags`]. The one place that projection lives, so a caller who
+    /// has layered a manifest and the environment into a `DynFlags` (see
+    /// [`DynFlags::from_env_over`]) gets the same derivation as [`from_env`](Self::from_env).
+    #[must_use]
+    pub fn from_flags(flags: DynFlags) -> Self {
         let mut disabled = Vec::new();
         if flags.no_specialize {
             disabled.push(CorePass::Specialize);

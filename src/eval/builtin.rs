@@ -203,9 +203,15 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::ShowBool, [Rv::Bool(b)]) => Ok(Rv::Str(b.to_string())),
         (B::ShowFloat, [Rv::Float(f)]) => Ok(Rv::Str(fmt_g(*f))),
         (B::ShowFloatPrec, [Rv::Float(f), Rv::Int(d)]) => {
-            // Cap at the runtime's buffer width to stay byte identical (see
-            // `RT_FLOAT_PREC_MAX_CHARS`).
-            let mut s = format!("{f:.*}", usize::try_from(*d).unwrap_or(0));
+            // Cap the precision at the runtime's buffer width before formatting.
+            // Digits past `RT_FLOAT_PREC_MAX_CHARS` are truncated away regardless,
+            // and materializing a user-controlled precision first (e.g. 1e9) would
+            // allocate gigabytes in the interpreter while the native path bounds the
+            // work at the buffer; capping first keeps the output byte identical.
+            let prec = usize::try_from(*d)
+                .unwrap_or(0)
+                .min(RT_FLOAT_PREC_MAX_CHARS);
+            let mut s = format!("{f:.prec$}");
             s.truncate(RT_FLOAT_PREC_MAX_CHARS);
             Ok(Rv::Str(s))
         }
@@ -512,6 +518,13 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             }
             Ok(acc)
         }
+        // `bump` is the arena allocator's raw-cell primitive, emitted only by the
+        // arena-lowering pass into effect-lowered Core. The interpreter runs
+        // un-lowered Core, so a well-formed program never performs `alloc` there
+        // and never reaches this; a direct call is a misuse, reported as such.
+        (B::Bump, _) => Err(
+            "bump: the arena raw-cell allocator is native-only and has no interpreter form".into(),
+        ),
         (op, _) => Err(format!("str builtin {}: wrong args", op.name())),
     }
 }

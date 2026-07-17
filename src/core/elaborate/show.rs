@@ -2,6 +2,7 @@ use super::{
     subst_ty, wrap_binds, BTreeMap, BTreeSet, Builtin, Comp, CoreFn, CorePhase, Elab, Error, Expr,
     IoOp, Locals, NodeId, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
 };
+use crate::core::typed::core_fn_sig;
 use crate::names;
 
 // Name prefix for a generated structural `show` function, completed by the
@@ -9,6 +10,15 @@ use crate::names;
 const SHOW_FN_PREFIX: &str = "_show_";
 
 impl Elab<'_> {
+    fn record_show_sig(&mut self, name: &str, input: Type) -> Result<(), Error> {
+        let signature =
+            core_fn_sig(&Type::fun(vec![input], Type::Str), Vec::new()).map_err(|error| {
+                Error::InternalInvariant(format!("generated show signature: {error}"))
+            })?;
+        self.show_sigs.insert(Sym::from(name), signature);
+        Ok(())
+    }
+
     // Like `local_ty`, but for printing: resolve the print-site type to a
     // concrete printable monotype, or None when the caller must fall back to the
     // integer printer. See `default_printable` for the defaulting rationale.
@@ -280,6 +290,7 @@ impl Elab<'_> {
             arms.push((Pattern::Ctor(cn, subs), body));
         }
         let body = self.compile_match(Value::Var("_sv".into()), arms)?;
+        self.record_show_sig(&fname, Type::Con(Sym::from(name), args.to_vec()))?;
         self.show_fns.push(CoreFn {
             name: fname.clone().into(),
             params: vec!["_sv".into()],
@@ -320,6 +331,7 @@ impl Elab<'_> {
                 ),
             ];
             let body = self.compile_match(Value::Var("_sv".into()), arms)?;
+            self.record_show_sig(fun, Type::Con(Sym::from(LIST), vec![elem.clone()]))?;
             self.show_fns.push(CoreFn {
                 name: fun.clone().into(),
                 params: vec!["_sv".into()],
@@ -359,6 +371,7 @@ impl Elab<'_> {
             .collect();
         let arm = (Pattern::Tuple(subs), body);
         let cased = self.compile_match(Value::Var("_sv".into()), vec![arm])?;
+        self.record_show_sig(&fname, tup)?;
         self.show_fns.push(CoreFn {
             name: fname.clone().into(),
             params: vec!["_sv".into()],

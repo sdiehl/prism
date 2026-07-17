@@ -18,6 +18,7 @@ fn write_and_accept(path: &PathBuf, source: &str) -> prism::ExpectReport {
     let files = vec![ExpectFile {
         path: path.clone(),
         source: source.to_string(),
+        module: String::new(),
     }];
     let base = path.parent().unwrap();
     accept(&files, &default_roots(base), base, true)
@@ -108,6 +109,7 @@ fn accept_refuses_when_file_changed_on_disk() {
     let files = vec![ExpectFile {
         path: path.clone(),
         source: STALE.to_string(),
+        module: String::new(),
     }];
     let base = path.parent().unwrap();
     let report = accept(&files, &default_roots(base), base, true);

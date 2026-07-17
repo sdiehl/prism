@@ -74,6 +74,14 @@ map_insert : forall a b c. (b, c, Map(b, c, a)) -> Map(b, c, a)
 
 Insert `key` with `value`, overwriting any existing binding, and rebalance.
 
+```prism,mod=Data.Map
+map_lookup(1, map_insert(1, "a", map_empty))
+```
+
+```output
+Some(a)
+```
+
 ### `map_lookup`
 
 ```prism,sig,h-e72c9a7106ad78423d0c06e10f29b83fe75f7351fdb2dc40d4d3ba9eb3b1378c
@@ -81,6 +89,14 @@ map_lookup : forall a b c. (b, Map(b, c, a)) -> Option(c)
 ```
 
 The value bound to `key` as `Some`, or `None` when absent.
+
+```prism,mod=Data.Map
+map_lookup(2, map_from_list([(1, "a"), (2, "b")]))
+```
+
+```output
+Some(b)
+```
 
 ### `map_member`
 
@@ -90,6 +106,14 @@ map_member : forall a b c. (b, Map(b, c, a)) -> Bool
 
 True when `key` is present in the map.
 
+```prism,mod=Data.Map
+map_member(2, map_from_list([(1, "a"), (2, "b")]))
+```
+
+```output
+true
+```
+
 ### `map_size`
 
 ```prism,sig,h-7e13f67f8f32fd4a8a440542604d2ded499a1e667b7fa59ad3c2fe82d354e2b2
@@ -97,6 +121,14 @@ map_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
 The number of entries.
+
+```prism,mod=Data.Map
+map_size(map_from_list([(1, "a"), (2, "b")]))
+```
+
+```output
+2
+```
 
 ### `map_min`
 
@@ -106,6 +138,14 @@ map_min : forall a b c. (Map(a, b, c)) -> Option((a, b))
 
 The smallest key and its value as `Some`, or `None` when empty.
 
+```prism,mod=Data.Map
+map_min(map_from_list([(2, "b"), (1, "a")]))
+```
+
+```output
+Some((1, a))
+```
+
 ### `map_delete`
 
 ```prism,sig,h-ae6cf881027760739a9e06fb4c19a980ee374f1776642eb7df3fdcc28acc4d75
@@ -113,6 +153,14 @@ map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a)
 ```
 
 Remove `key` (a no-op if absent), rebalancing the tree.
+
+```prism,mod=Data.Map
+map_to_list(map_delete(1, map_from_list([(1, "a"), (2, "b")])))
+```
+
+```output
+[(2, b)]
+```
 
 ### `map_to_list`
 
@@ -122,6 +170,14 @@ map_to_list : forall a b c. (Map(a, b, c)) -> List((a, b))
 
 The `(key, value)` pairs in ascending key order.
 
+```prism,mod=Data.Map
+map_to_list(map_from_list([(2, "b"), (1, "a")]))
+```
+
+```output
+[(1, a), (2, b)]
+```
+
 ### `map_keys`
 
 ```prism,sig,h-2b599e72a6b2a92dd7f4932f1a54fe53e552c365b7e5aac7ce4d365c7947bac2
@@ -129,6 +185,14 @@ map_keys : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
 The keys in ascending order.
+
+```prism,mod=Data.Map
+map_keys(map_from_list([(2, "b"), (1, "a")]))
+```
+
+```output
+[1, 2]
+```
 
 ### `map_values`
 
@@ -138,6 +202,14 @@ map_values : forall a b c. (Map(a, b, c)) -> List(b)
 
 The values in ascending key order.
 
+```prism,mod=Data.Map
+map_values(map_from_list([(1, "a"), (2, "b")]))
+```
+
+```output
+[a, b]
+```
+
 ### `map_from_list`
 
 ```prism,sig,h-2e183a5ee3d790b8e2d96b2599cc6af741c9673f69ec1c62281050f17d6539e2
@@ -146,6 +218,14 @@ map_from_list : forall a b c. (List((b, c))) -> Map(b, c, a)
 
 Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key.
 
+```prism,mod=Data.Map
+map_to_list(map_from_list([(2, "b"), (1, "a")]))
+```
+
+```output
+[(1, a), (2, b)]
+```
+
 ### `map_map_values`
 
 ```prism,sig,h-670afdc2e6d9e28a74157bc0ebf4e2ca02d8445c92c3aebda8a9341a85ca028e
@@ -153,3 +233,11 @@ map_map_values : forall e0 a b c d e. ((e) -> d ! {e0}, Map(a, e, b)) -> Map(a, 
 ```
 
 Apply `f` to every value, keeping keys and tree structure.
+
+```prism,mod=Data.Map
+map_values(map_map_values(\(v) -> v + 1, map_from_list([(1, 10), (2, 20)])))
+```
+
+```output
+[11, 21]
+```

@@ -5,7 +5,7 @@ use std::process::{self, ExitCode};
 use clap::{Parser, Subcommand};
 use prism::cli::{self, CmdResult, ExampleStdin};
 use prism::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_EXAMPLES_DIR: &str = "examples";
 
@@ -101,6 +101,28 @@ struct Cli {
     /// Dump Core after each pass to SINK (stdout, stderr, or a directory)
     #[arg(long = "dump-core", value_name = "SINK", global = true)]
     dump_core: Option<String>,
+    /// Flag your own definitions sharing a behavior hash: `warn` reports them,
+    /// `strict` fails the build (bare `--warn-dupes` is `warn`; off by default)
+    #[arg(
+        long = "warn-dupes",
+        value_name = "LEVEL",
+        global = true,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "warn"
+    )]
+    warn_dupes: Option<String>,
+    /// Flag a definition that reimplements a standard-library function: `warn`
+    /// (default) reports it, `strict` fails the build, `off` silences it
+    #[arg(
+        long = "warn-stdlib-dupes",
+        value_name = "LEVEL",
+        global = true,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "warn"
+    )]
+    warn_stdlib_dupes: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -121,6 +143,9 @@ enum Cmd {
         /// Write a run-lineage sidecar (requires `--record`, which it explains)
         #[arg(long, value_name = "PATH", requires = "record")]
         lineage: Option<PathBuf>,
+        /// Defer typed holes to deterministic interpreter faults
+        #[arg(long)]
+        defer_holes: bool,
         /// Program arguments, separated from compiler arguments by `--`
         #[arg(last = true, value_name = "ARG")]
         args: Vec<String>,
@@ -229,6 +254,9 @@ enum Cmd {
     /// Content-addressed store verbs
     #[command(subcommand)]
     Store(StoreCmd),
+    /// Digest-pinned semantic patch verbs
+    #[command(subcommand)]
+    Patch(PatchCmd),
     /// mdbook preprocessor for `prism` code blocks
     #[command(hide = true)]
     Mdbook {
@@ -428,16 +456,88 @@ enum StoreCmd {
     },
 }
 
+/// Semantic patches: inspect, judge, stage, and atomically commit.
+#[derive(Subcommand, Debug)]
+enum PatchCmd {
+    /// Fetch an owned definition and its semantic facts by name or digest
+    Fetch {
+        /// A `.pr` file or project containing the definition
+        file: PathBuf,
+        /// Definition name, full digest, or `scheme:digest`
+        target: String,
+    },
+    /// Read the transitive importer cone of a definition
+    Impact {
+        /// A `.pr` file or project to analyze
+        file: PathBuf,
+        /// Definition name, full digest, or `scheme:digest`
+        target: String,
+    },
+    /// Build a `prism-patch-v1` artifact from one replacement declaration
+    Create {
+        /// A `.pr` file or project containing the current definition
+        file: PathBuf,
+        /// Definition name or digest to pin
+        target: String,
+        /// File containing exactly one replacement declaration, or `-` for stdin
+        replacement: PathBuf,
+    },
+    /// Judge and stage a patch without changing source files
+    #[command(visible_alias = "submit")]
+    Apply {
+        /// A `.pr` file or project the patch targets
+        file: PathBuf,
+        /// A `prism-patch-v1` JSON file, or `-` for stdin
+        patch: PathBuf,
+    },
+    /// Compare old and replacement observations over an explicit input corpus
+    Behavior {
+        /// A `.pr` file or project the patch targets
+        file: PathBuf,
+        /// A `prism-patch-v1` JSON file
+        patch: PathBuf,
+        /// A `prism-patch-behavior-corpus-v1` JSON file
+        corpus: PathBuf,
+    },
+    /// Re-judge and atomically commit the staged patch
+    Commit {
+        /// The staged `.pr` file or project
+        file: PathBuf,
+    },
+    /// Discard the staged patch, leaving source files unchanged
+    Discard {
+        /// The staged `.pr` file or project
+        file: PathBuf,
+    },
+    /// Serve the same verbs as versioned JSON lines over stdio
+    Serve {
+        /// A `.pr` file or project fixed for this protocol session
+        file: PathBuf,
+    },
+}
+
+// Parse a `--warn-dupes` / `--warn-stdlib-dupes` severity, reporting an invalid
+// spelling under the given flag name. Shared by both knobs' CLI overrides.
+fn parse_warn_mode(flag: &str, s: &str) -> Option<prism::WarnDupes> {
+    let mode = prism::WarnDupes::parse(s);
+    if mode.is_none() {
+        eprintln!("invalid {flag} `{s}` (expected off, warn, or strict)");
+    }
+    mode
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     if cli.opt.is_some() && cli.passes.is_some() {
         eprintln!("error: `--passes` and `-O` are mutually exclusive");
         return ExitCode::FAILURE;
     }
-    // Start from the environment-implied config, then let explicit flags win. The
-    // resolved value threads through every compile call, replacing the old set of
-    // process-global knobs.
-    let mut cfg = prism::Config::from_env();
+    // Resolve the behavior knobs by precedence CLI > env > prism.toml > default:
+    // the enclosing project's `[flags]` table seeds the base, the environment
+    // overlays it, and the explicit CLI flags below win last. The resolved value
+    // threads through every compile call, replacing the old process-global knobs.
+    let toml_base = prism::project::flag_overrides(Path::new("."), prism::DynFlags::default());
+    let mut cfg = prism::Config::from_flags(prism::DynFlags::from_env_over(&toml_base));
     cfg.session = Some(prism::CompilerSession::new());
     if let Some(s) = &cli.opt {
         let Some(level) = prism::OptLevel::parse(s) else {
@@ -523,6 +623,18 @@ fn main() -> ExitCode {
     if let Some(sink) = cli.dump_core {
         cfg.flags.dump_core = Some(sink.into());
     }
+    if let Some(s) = &cli.warn_dupes {
+        let Some(mode) = parse_warn_mode("--warn-dupes", s) else {
+            return ExitCode::FAILURE;
+        };
+        cfg.flags.warn_dupes = mode;
+    }
+    if let Some(s) = &cli.warn_stdlib_dupes {
+        let Some(mode) = parse_warn_mode("--warn-stdlib-dupes", s) else {
+            return ExitCode::FAILURE;
+        };
+        cfg.flags.warn_stdlib_dupes = mode;
+    }
     // Install the per-phase timing sink for this top-level compile when the flag
     // or `PRISM_TIME_COMPILE` asked for it. The sink lives only on this config, so
     // the compiler's internal re-elaborations (which build their own `from_env`
@@ -559,6 +671,12 @@ fn main() -> ExitCode {
             eprintln!("fatal: {msg}");
             ExitCode::FAILURE
         }
+        // Semantic-patch refusals are already canonical JSON. Keep stdout
+        // machine-readable and do not wrap them in a human diagnostic.
+        Err((Error::SemanticPatch(json), _, _)) => {
+            println!("{json}");
+            ExitCode::FAILURE
+        }
         Err((e, src, name)) => {
             eprint!("{}", e.render(&src, &name));
             ExitCode::FAILURE
@@ -574,6 +692,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             stdin,
             record,
             lineage,
+            defer_holes,
             args,
         } => match (file, examples) {
             (Some(_), Some(_)) => Err((
@@ -589,6 +708,15 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                 "run".into(),
             )),
             (None, Some(dir)) => {
+                if defer_holes {
+                    return Err((
+                        Error::ResolveCommand(
+                            "`--defer-holes` requires a single FILE, not `--examples`".into(),
+                        ),
+                        String::new(),
+                        dir.display().to_string(),
+                    ));
+                }
                 if record.is_some() {
                     return Err((
                         Error::ResolveCommand(
@@ -616,6 +744,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                     lineage.as_deref(),
                     args,
                     cfg,
+                    defer_holes,
                 )?;
                 if let Some(code) = exit {
                     process::exit(code);
@@ -627,6 +756,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         Cmd::Lineage(lineage) => dispatch_lineage(lineage, cfg),
         Cmd::Pkg(pkg) => dispatch_pkg(pkg, cfg),
         Cmd::Store(store) => dispatch_store(store, cfg),
+        Cmd::Patch(patch) => dispatch_patch(patch, cfg),
         Cmd::Build { path, out, mlir } => {
             // `build` is the project verb: locate the nearest enclosing
             // `prism.toml` and compile it. A single file compiles via
@@ -678,7 +808,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             open,
             cfg,
         ),
-        Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest),
+        Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags.mdbook_strict),
     }
 }
 
@@ -761,5 +891,26 @@ fn dispatch_store(store: StoreCmd, cfg: &prism::Config) -> CmdResult {
         StoreCmd::Attest { file } => cli::store::attest(&file, cfg),
         StoreCmd::Query { kind, name, file } => cli::store::query(&kind, &name, &file, cfg),
         StoreCmd::Wire { accept, file } => cli::store::wire(accept, &file),
+    }
+}
+
+fn dispatch_patch(patch: PatchCmd, cfg: &prism::Config) -> CmdResult {
+    match patch {
+        PatchCmd::Fetch { file, target } => cli::patch::fetch(&file, &target, cfg),
+        PatchCmd::Impact { file, target } => cli::patch::impact(&file, &target, cfg),
+        PatchCmd::Create {
+            file,
+            target,
+            replacement,
+        } => cli::patch::create(&file, &target, &replacement, cfg),
+        PatchCmd::Apply { file, patch } => cli::patch::apply(&file, &patch, cfg),
+        PatchCmd::Behavior {
+            file,
+            patch,
+            corpus,
+        } => cli::patch::behavior(&file, &patch, &corpus, cfg),
+        PatchCmd::Commit { file } => cli::patch::commit(&file, cfg),
+        PatchCmd::Discard { file } => cli::patch::discard(&file, cfg),
+        PatchCmd::Serve { file } => cli::patch::serve(&file, cfg),
     }
 }

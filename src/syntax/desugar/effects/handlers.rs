@@ -10,7 +10,9 @@ use super::escape::{escapes, free_resume};
 use super::{rw, Binding, InstanceOps, Vars};
 use crate::error::{ErrKind, TypeError};
 use crate::names::{self, CONT};
-use crate::syntax::ast::{Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, SugarArm, Ty, S};
+use crate::syntax::ast::{
+    Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, HandlerMode, SugarArm, Ty, S,
+};
 use crate::syntax::desugar::{call, evar, sp, Cx};
 
 pub(super) type Vals = Vec<(String, S<Expr<Core>>)>;
@@ -79,11 +81,11 @@ fn check_grade(op: &str, clause: Grade, span: Span, cx: &Cx) -> Result<(), TypeE
 // continuation binder `k`. A single direct tail application is `Once`; no use is
 // `Never`; anything else (more than one application, `k` used as a plain value,
 // `k` applied under a nested lambda whose call count is unknown, or `k` resumed
-// in non-tail position) is `Many`. This is the same single-shot classification
-// `effect_lower::erase_var` recomputes over Core, run here as the up-front
-// check; it is conservative, so a clause it cannot prove to be a single tail
-// resume is `Many` and a stricter declared grade rejects it. The clause body
-// starts in tail position.
+// in non-tail position) is `Many`. Typed effect lowering's var erasure
+// recomputes the same single-shot classification over Core; this is the
+// up-front check. It is conservative, so a clause it cannot prove to be a
+// single tail resume is `Many` and a stricter declared grade rejects it. The
+// clause body starts in tail position.
 fn bare_ctl_grade(body: &S<Expr<Core>>, k: &str) -> Grade {
     let mut direct = 0usize;
     let mut escaped = false;
@@ -362,6 +364,9 @@ pub(super) fn rw_named(
         }
         .at(bad));
     }
-    let handled = sp(Expr::Handle(Box::new(body2), arms2), span);
+    let handled = sp(
+        Expr::Handle(Box::new(body2), arms2, HandlerMode::Exhaustive),
+        span,
+    );
     Ok(wrap_vals(vals, handled, span))
 }

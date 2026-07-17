@@ -6,6 +6,13 @@
 import Data.Char (is_space, to_upper_c, to_lower_c)
 
 -- | Join a list of strings, placing `sep` between adjacent elements.
+--
+-- ```prism
+-- str_join(", ", ["a", "b", "c"])
+-- ```
+-- ```output
+-- a, b, c
+-- ```
 pub fn str_join(sep, xs) =
   match xs of
     Nil => ""
@@ -13,6 +20,13 @@ pub fn str_join(sep, xs) =
     Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
 
 -- | `s` repeated `n` times (the empty string when `n <= 0`).
+--
+-- ```prism
+-- str_repeat("ab", 3)
+-- ```
+-- ```output
+-- ababab
+-- ```
 pub fn str_repeat(s, n) =
   if n <= 0 then
     ""
@@ -20,6 +34,13 @@ pub fn str_repeat(s, n) =
     concat(s, str_repeat(s, n - 1))
 
 -- | Right-align `s` to width `w` by prepending spaces (unchanged if already wider).
+--
+-- ```prism
+-- pad_left("42", 5)
+-- ```
+-- ```output
+--    42
+-- ```
 pub fn pad_left(s, w) =
   let pad = w - str_len(s)
   if pad <= 0 then
@@ -28,6 +49,13 @@ pub fn pad_left(s, w) =
     concat(str_repeat(" ", pad), s)
 
 -- | Left-align `s` to width `w` by appending spaces (unchanged if already wider).
+--
+-- ```prism
+-- pad_right("42", 5)
+-- ```
+-- ```output
+-- 42
+-- ```
 pub fn pad_right(s, w) =
   let pad = w - str_len(s)
   if pad <= 0 then
@@ -36,6 +64,14 @@ pub fn pad_right(s, w) =
     concat(s, str_repeat(" ", pad))
 
 -- | Join a list of strings with newlines between them.
+--
+-- ```prism
+-- lines_of(["one", "two"])
+-- ```
+-- ```output
+-- one
+-- two
+-- ```
 pub fn lines_of(xs) = str_join("\n", xs)
 
 -- | Helper for the substring queries: whether `needle` sits at byte offset `j`
@@ -51,9 +87,23 @@ pub fn occurs_at(needle, s, j, k) =
     false
 
 -- | True when `s` begins with `prefix`.
+--
+-- ```prism
+-- starts_with("foo", "foobar")
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn starts_with(prefix : String, s : String) : Bool = occurs_at(prefix, s, 0, 0)
 
 -- | True when `s` ends with `suffix`.
+--
+-- ```prism
+-- ends_with("bar", "foobar")
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn ends_with(suffix : String, s : String) : Bool =
   let d = byte_len(s) - byte_len(suffix)
   if d < 0 then
@@ -71,9 +121,23 @@ pub fn index_of_go(needle, s, j) =
     index_of_go(needle, s, j + 1)
 
 -- | The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent.
+--
+-- ```prism
+-- index_of("bar", "foobar")
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
 
 -- | True when `needle` occurs anywhere in `s`.
+--
+-- ```prism
+-- contains("oob", "foobar")
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
 
 -- | Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a
@@ -91,10 +155,24 @@ pub fn map_case(s, i, buf, up) =
       )
 
 -- | ASCII upper-case of `s` (non-letters unchanged).
+--
+-- ```prism
+-- to_upper("Hello")
+-- ```
+-- ```output
+-- HELLO
+-- ```
 pub fn to_upper(s : String) : String =
   string_of_buf(map_case(s, 0, buf_empty(), true))
 
 -- | ASCII lower-case of `s` (non-letters unchanged).
+--
+-- ```prism
+-- to_lower("Hello")
+-- ```
+-- ```output
+-- hello
+-- ```
 pub fn to_lower(s : String) : String =
   string_of_buf(map_case(s, 0, buf_empty(), false))
 
@@ -120,6 +198,13 @@ pub fn slice_bytes(s, lo, hi, buf) =
     slice_bytes(s, lo + 1, hi, buf_push(buf, byte_at(s, lo)))
 
 -- | Strip leading and trailing ASCII whitespace.
+--
+-- ```prism
+-- trim("  hi  ")
+-- ```
+-- ```output
+-- hi
+-- ```
 pub fn trim(s : String) : String =
   let lo = ltrim_idx(s, 0)
   let hi = rtrim_idx(s, byte_len(s))
@@ -146,9 +231,23 @@ pub fn split_from(c, s, i) =
     Cons(substring(s, i, j - i), split_from(c, s, j + 1))
 
 -- | Split `s` into the pieces between each occurrence of character `c`.
+--
+-- ```prism
+-- split(char_at(",", 0), "a,b,c")
+-- ```
+-- ```output
+-- [a, b, c]
+-- ```
 pub fn split(c, s) = split_from(c, s, 0)
 
 -- | The single-character string containing `c`.
+--
+-- ```prism
+-- str_of_char(chr(65))
+-- ```
+-- ```output
+-- A
+-- ```
 pub fn str_of_char(c) = show_char(c)
 
 -- | Helper for `chars`: the characters of `s` from position `i` onward.
@@ -159,4 +258,11 @@ pub fn chars_from(s : String, i : Int) : List(Char) =
     Cons(chr(char_at(s, i)), chars_from(s, i + 1))
 
 -- | The list of characters in `s`.
+--
+-- ```prism
+-- chars("hi")
+-- ```
+-- ```output
+-- [104, 105]
+-- ```
 pub fn chars(s : String) : List(Char) = chars_from(s, 0)

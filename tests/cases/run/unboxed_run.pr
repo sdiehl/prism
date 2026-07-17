@@ -1,8 +1,8 @@
 -- Unboxed products run identically on the interpreter and native backends. A
 -- locally constructed-and-projected record scalarizes away entirely (zero heap
--- cells); one returned across a function boundary is boxed by the native backend
--- until cross-boundary flattening lands, but its value semantics are unchanged,
--- so native output matches the interpreter byte for byte.
+-- cells); one returned across a function boundary is boxed by the native backend,
+-- but its value semantics are unchanged, so native output matches the interpreter
+-- byte for byte.
 fn point(n : Int) : #{ x : Int, y : Int } = #{ x = n, y = n * n }
 
 fn local() : Int =

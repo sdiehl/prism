@@ -18,6 +18,14 @@ sum : forall a. (a(Int)) -> Int
 
 The sum of a container of ints (`0` when empty).
 
+```prism,mod=Data.Foldable
+sum([1, 2, 3, 4])
+```
+
+```output
+10
+```
+
 ### `product`
 
 ```prism,sig,h-349ae69eaf5972419bb245b60b7a8b5c3716de91a7adeb34e18cc166b3a3295d
@@ -25,6 +33,14 @@ product : forall a. (a(Int)) -> Int
 ```
 
 The product of a container of ints (`1` when empty).
+
+```prism,mod=Data.Foldable
+product([1, 2, 3, 4])
+```
+
+```output
+24
+```
 
 ### `length`
 
@@ -34,6 +50,14 @@ length : forall a b. (a(b)) -> Int
 
 The number of elements.
 
+```prism,mod=Data.Foldable
+length([1, 2, 3])
+```
+
+```output
+3
+```
+
 ### `is_empty`
 
 ```prism,sig,h-ac86e4897bb32a3da6f3cd6ef4c7b69d6e1badea51ca59d546fdec9e3b0dc33c
@@ -41,6 +65,14 @@ is_empty : forall a b. (a(b)) -> Bool
 ```
 
 True when the container has no elements.
+
+```prism,mod=Data.Foldable
+is_empty([1, 2, 3])
+```
+
+```output
+false
+```
 
 ### `all`
 
@@ -50,6 +82,14 @@ all : forall a b. ((a) -> Bool, b(a)) -> Bool
 
 True when every element satisfies `p` (vacuously true when empty).
 
+```prism,mod=Data.Foldable
+all(\(x) -> x > 0, [1, 2, 3])
+```
+
+```output
+true
+```
+
 ### `any`
 
 ```prism,sig,h-cc3dd29f141c603cbb74be60e386b243f3bc42ef92624c134285c2153c87837d
@@ -57,6 +97,14 @@ any : forall a b. ((a) -> Bool, b(a)) -> Bool
 ```
 
 True when some element satisfies `p`.
+
+```prism,mod=Data.Foldable
+any(\(x) -> x > 2, [1, 2, 3])
+```
+
+```output
+true
+```
 
 ### `find`
 
@@ -66,6 +114,14 @@ find : forall a b. ((a) -> Bool, b(a)) -> Option(a)
 
 The first element satisfying `p` as `Some` (leftmost match), or `None`.
 
+```prism,mod=Data.Foldable
+find(\(x) -> x > 1, [1, 2, 3])
+```
+
+```output
+Some(2)
+```
+
 ### `elem`
 
 ```prism,sig,h-957f4a4324ce7ac62e74f5b423650befe149e674e02a6f8d27c80b8c3b2ac744
@@ -74,10 +130,26 @@ elem : forall a b. (a, b(a)) -> Bool
 
 True when `x` is an element (`Eq`).
 
+```prism,mod=Data.Foldable
+elem(2, [1, 2, 3])
+```
+
+```output
+true
+```
+
 ### `to_list`
 
 ```prism,sig,h-379a3b22ab74dd9532f3118499795214d346e9c13ae71696930be1e74241e316
 to_list : forall a b. (a(b)) -> List(b)
 ```
 
-The elements as a `List`, in fold order.
+The elements as a `List`, in fold order (`Option` yields zero or one).
+
+```prism,mod=Data.Foldable
+to_list(Some(5))
+```
+
+```output
+[5]
+```

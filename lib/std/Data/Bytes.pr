@@ -86,9 +86,23 @@ let b64_alphabet : String =
 -- directly, so it composes with `Wire` the way every other consumer does.
 
 -- | The number of bytes in a `Bytes`.
+--
+-- ```prism
+-- bytes_length(string_to_bytes("Hello"))
+-- ```
+-- ```output
+-- 5
+-- ```
 pub fn bytes_length(bs : Bytes) : Int = wire_len(bs)
 
 -- | The byte at index `i` (0-based). Out of range traps, like array indexing.
+--
+-- ```prism
+-- bytes_index(string_to_bytes("ABC"), 0)
+-- ```
+-- ```output
+-- 65
+-- ```
 pub fn bytes_index(bs : Bytes, i : Int) : Int = bytes_at(bs, i)
 
 -- | The empty `Bytes`.
@@ -97,22 +111,57 @@ pub let bytes_empty : Bytes = wire_empty
 -- | Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded
 -- linearly this is the byte-string builder; a uniquely owned buffer is extended in
 -- place (FBIP), a shared one copied.
+--
+-- ```prism
+-- bytes_to_string(bytes_push(bytes_empty, 65))
+-- ```
+-- ```output
+-- Some(A)
+-- ```
 pub fn bytes_push(bs : Bytes, byte : Int) : Bytes =
   bytes_of_buf(buf_push(bytes_buf(bs), byte))
 
 -- | The `len` bytes starting at `start` (0-based), as a fresh `Bytes`. `start`
 -- and `len` are clamped to the bounds, so an over-long or out-of-range window
 -- yields the in-range remainder rather than trapping.
+--
+-- ```prism
+-- bytes_to_string(bytes_slice(string_to_bytes("hello"), 1, 3))
+-- ```
+-- ```output
+-- Some(ell)
+-- ```
 pub fn bytes_slice(bs : Bytes, start : Int, len : Int) : Bytes =
   bytes_of_buf(buf_slice(bytes_buf(bs), start, len))
 
 -- | Concatenate two byte strings.
+--
+-- ```prism
+-- bytes_to_string(bytes_concat(string_to_bytes("foo"), string_to_bytes("bar")))
+-- ```
+-- ```output
+-- Some(foobar)
+-- ```
 pub fn bytes_concat(a : Bytes, b : Bytes) : Bytes = wire_cat(a, b)
 
 -- | Structural equality of two byte strings.
+--
+-- ```prism
+-- bytes_eq(string_to_bytes("a"), string_to_bytes("a"))
+-- ```
+-- ```output
+-- true
+-- ```
 pub fn bytes_eq(a : Bytes, b : Bytes) : Bool = buf_eq(bytes_buf(a), bytes_buf(b))
 
 -- | Lexicographic comparison (`-1`/`0`/`1`) of two byte strings.
+--
+-- ```prism
+-- bytes_compare(string_to_bytes("a"), string_to_bytes("b"))
+-- ```
+-- ```output
+-- -1
+-- ```
 pub fn bytes_compare(a : Bytes, b : Bytes) : Int =
   buf_cmp(bytes_buf(a), bytes_buf(b))
 
@@ -121,11 +170,25 @@ pub fn bytes_compare(a : Bytes, b : Bytes) : Int =
 pub fn bytes_hash(bs : Bytes) : String = buf_hash(bytes_buf(bs))
 
 -- | Total: a string's raw UTF-8 bytes as a `Bytes`.
+--
+-- ```prism
+-- hex_encode(string_to_bytes("Hi"))
+-- ```
+-- ```output
+-- 4869
+-- ```
 pub fn string_to_bytes(s : String) : Bytes = bytes_of_buf(buf_of_string(s))
 
 -- | Validate the bytes as UTF-8 and, when well-formed, recover the `String`;
 -- `None` on any ill-formed sequence. The single deterministic conversion seam back
 -- from `Bytes` to `String`.
+--
+-- ```prism
+-- bytes_to_string(string_to_bytes("hey"))
+-- ```
+-- ```output
+-- Some(hey)
+-- ```
 pub fn bytes_to_string(bs : Bytes) : Option(String) =
   let b = bytes_buf(bs)
   if buf_utf8_valid(b) then
@@ -153,6 +216,13 @@ fn hex_value(c : Int) : Int =
     0 - 1
 
 -- | Lowercase hex encoding: two hex digits per byte.
+--
+-- ```prism
+-- hex_encode(string_to_bytes("Hi"))
+-- ```
+-- ```output
+-- 4869
+-- ```
 pub fn hex_encode(bs : Bytes) : String =
   string_of_buf(hex_encode_go(buf_empty(), bs, 0, bytes_length(bs)))
 
@@ -173,6 +243,13 @@ fn hex_encode_go(acc : Buf, bs : Bytes, i : Int, n : Int) : Buf =
 
 -- | Decode a hex string to bytes, or `None` on an odd length or a non-hex
 -- character. Upper and lower case digits are both accepted.
+--
+-- ```prism
+-- map_option(bytes_length, hex_decode("4869"))
+-- ```
+-- ```output
+-- Some(2)
+-- ```
 pub fn hex_decode(s : String) : Option(Bytes) =
   let n = byte_len(s)
   if not(mod(n, 2) == 0) then
@@ -195,6 +272,13 @@ fn hex_decode_go(acc : Buf, s : String, i : Int, n : Int) : Option(Bytes) =
 fn b64_char(n : Int) : Int = byte_at(b64_alphabet, n)
 
 -- | Standard base64 encoding with `=` padding.
+--
+-- ```prism
+-- base64_encode(string_to_bytes("Hi"))
+-- ```
+-- ```output
+-- SGk=
+-- ```
 pub fn base64_encode(bs : Bytes) : String =
   string_of_buf(base64_encode_go(buf_empty(), bs, 0, bytes_length(bs)))
 
@@ -264,6 +348,13 @@ fn b64_value(c : Int) : Int =
 
 -- | Decode standard base64 (with `=` padding) to bytes, or `None` on a length that
 -- is not a multiple of four, a stray character, or misplaced padding.
+--
+-- ```prism
+-- map_option(bytes_length, base64_decode("SGk="))
+-- ```
+-- ```output
+-- Some(2)
+-- ```
 pub fn base64_decode(s : String) : Option(Bytes) =
   let n = byte_len(s)
   if not(mod(n, 4) == 0) then
@@ -336,10 +427,18 @@ fn base64_decode_go(acc : Buf, s : String, i : Int, n : Int) : Option(Bytes) =
 -- (the `fs_read_bytes` op the default world handler discharges, via the prelude's
 -- `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a
 -- recorded run reproduces the same bytes.
+--
+-- ```prism,no_run
+-- bytes_length(read_bytes("data.bin"))
+-- ```
 pub fn read_bytes(path : String) : Bytes = bytes_of_buf(read_file_bytes(path))
 
 -- | Write `bs` verbatim to the file at `path`, returning `Ok(())` on success or
 -- `Err(msg)` on failure. The write is the same off-platform output as
 -- `write_file`, over the raw byte buffer so no byte is reinterpreted.
+--
+-- ```prism,no_run
+-- write_bytes("out.bin", string_to_bytes("hi"))
+-- ```
 pub fn write_bytes(path : String, bs : Bytes) : Result(Unit, String) =
   prim_write_bytes(path, bytes_buf(bs))

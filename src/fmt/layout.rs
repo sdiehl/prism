@@ -6,6 +6,7 @@ use super::{
     text_width, Arm, CatchArm, Expr, Fmt, HandlerArm, Mode, Qualifier, Sugar, INDENT, LINE_WIDTH, S,
 };
 use crate::kw;
+use crate::syntax::ast::HandlerMode;
 
 impl Fmt<'_> {
     pub(super) fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
@@ -92,7 +93,15 @@ impl Fmt<'_> {
                     self.fmt_expr_inline(e, Mode::Flat)
                         .unwrap_or_else(|| self.verbatim(e.span.start, e.span.end))
                 }),
-            (Expr::Handle(body, arms), Mode::Layout) => self.fmt_handle_layout(body, arms, indent),
+            (Expr::Handle(body, arms, HandlerMode::Partial), Mode::Layout) => {
+                // The offside preprocessor opens a handler block directly after
+                // `with`; the intervening `partial` marker therefore requires
+                // explicit braces to remain parser-stable.
+                self.fmt_handle_flat(body, arms, HandlerMode::Partial, indent, Mode::Layout)
+            }
+            (Expr::Handle(body, arms, handler_mode), Mode::Layout) => {
+                self.fmt_handle_layout(body, arms, *handler_mode, indent)
+            }
             (Expr::Sugar(Sugar::TryCatch(body, arms)), Mode::Layout) => {
                 self.fmt_trycatch_layout(e, body, arms, indent)
             }
@@ -130,7 +139,9 @@ impl Fmt<'_> {
                     )
                 }
             }
-            (Expr::Handle(body, arms), _) => self.fmt_handle_flat(body, arms, indent, mode),
+            (Expr::Handle(body, arms, handler_mode), _) => {
+                self.fmt_handle_flat(body, arms, *handler_mode, indent, mode)
+            }
             // A record literal too long for one line stacks one field per line,
             // brace-delimited (so layout is suppressed and it reparses), the
             // closing brace back at the record's own column.
@@ -165,7 +176,7 @@ impl Fmt<'_> {
                 kw::FAT_ARROW
             );
             let from = a.guard.as_ref().map_or(a.pat.span.end, |g| g.span.end);
-            let body = self.fmt_arm_body(&a.body, indent + 1, head.len(), from);
+            let body = self.fmt_arm_body(&a.body, indent + 1, text_width(&head), from);
             arm_strs.push(format!("{lead}{head}{body}"));
             prev = a.body.span.end;
         }
@@ -298,12 +309,24 @@ impl Fmt<'_> {
         format!("{x_s}\n{ind}  {} {f_s}", kw::PIPE_RIGHT)
     }
 
-    fn fmt_handle_layout(&self, body: &S<Expr>, arms: &[HandlerArm], indent: usize) -> String {
+    fn fmt_handle_layout(
+        &self,
+        body: &S<Expr>,
+        arms: &[HandlerArm],
+        handler_mode: HandlerMode,
+        indent: usize,
+    ) -> String {
         let body_s = self.fmt_head(body, indent);
+        let marker = match handler_mode {
+            HandlerMode::Exhaustive => "",
+            HandlerMode::Partial => kw::PARTIAL,
+        };
         format!(
-            "{} {body_s} {}\n{}",
+            "{} {body_s} {}{}{}\n{}",
             kw::HANDLE,
             kw::WITH,
+            if marker.is_empty() { "" } else { " " },
+            marker,
             self.fmt_handler_arms(arms, indent + 1, body.span.end)
         )
     }
@@ -333,7 +356,8 @@ impl Fmt<'_> {
                     kw::FAT_ARROW
                 )
             };
-            let arm_body = self.fmt_arm_body(&a.body, indent + 1, head.len(), a.body.span.start);
+            let arm_body =
+                self.fmt_arm_body(&a.body, indent + 1, text_width(&head), a.body.span.start);
             arm_strs.push(format!("{lead}{head}{arm_body}"));
             prev = a.body.span.end;
         }
@@ -395,6 +419,7 @@ impl Fmt<'_> {
         &self,
         body: &S<Expr>,
         arms: &[HandlerArm],
+        handler_mode: HandlerMode,
         indent: usize,
         mode: Mode,
     ) -> String {
@@ -411,10 +436,16 @@ impl Fmt<'_> {
                 )
             })
             .collect();
+        let marker = match handler_mode {
+            HandlerMode::Exhaustive => "",
+            HandlerMode::Partial => kw::PARTIAL,
+        };
         format!(
-            "{} {body_s} {} {{\n{}\n{ind}}}",
+            "{} {body_s} {}{}{} {{\n{}\n{ind}}}",
             kw::HANDLE,
             kw::WITH,
+            if marker.is_empty() { "" } else { " " },
+            marker,
             arm_strs.join(",\n")
         )
     }

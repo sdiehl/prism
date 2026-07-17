@@ -19,6 +19,14 @@ class Blit(s)
 
 Overwrite `dst[dst_off .. dst_off + len)` with `src[src_off .. src_off + len)` and return the updated destination.
 
+```prism,mod=Blit
+blit("XY", 0, 2, "abcd", 1)
+```
+
+```output
+aXYd
+```
+
 ## Instances
 
 ### `blitString`

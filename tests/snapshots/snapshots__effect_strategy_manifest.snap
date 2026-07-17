@@ -2,6 +2,8 @@
 source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
+examples/arena.pr: evidence
+examples/arena_shared.pr: evidence
 examples/async.pr: whole-program-free-monad
 examples/async_capability.pr: whole-program-free-monad
 examples/calc.pr: evidence
@@ -115,6 +117,7 @@ tests/cases/run/fs.pr: evidence
 tests/cases/run/fs_bytes.pr: evidence
 tests/cases/run/grade_ops.pr: selective-free-monad
 tests/cases/run/handler_funval.pr: evidence
+tests/cases/run/handler_partial_forward.pr: selective-free-monad
 tests/cases/run/incr_diff.pr: whole-program-free-monad
 tests/cases/run/indexing_ops.pr: selective-free-monad
 tests/cases/run/interp_effects.pr: evidence

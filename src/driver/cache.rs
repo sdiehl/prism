@@ -41,6 +41,10 @@ const LLVM_BITCODE_QUERY: &str = "llvm-bitcode.semantic";
 const NATIVE_OBJECT_QUERY: &str = "native-object";
 #[cfg(feature = "native")]
 const RUNTIME_OBJECT_QUERY: &str = "runtime-object";
+// These `-vN` suffixes are cache-bust counters, not compat versions: each is
+// hashed into its query key so a format change misses stale entries. No old
+// version is ever read back, so a bumped counter (e.g. native-object at v2) has no
+// backward-compatible read path is required.
 #[cfg(feature = "native")]
 const LINKED_NATIVE_RAW_SCHEMA: &str = "prism-linked-native-raw-query-v1";
 #[cfg(feature = "native")]

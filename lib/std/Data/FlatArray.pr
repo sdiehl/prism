@@ -19,6 +19,13 @@ pub type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
 
 -- | The element contract: how a one-word scalar enters and leaves the flat
 -- storage. Instances exist for `Float` and `I64`.
+--
+-- ```prism
+-- fa_get(fa_set(fa_new(3, 0.0), 1, 9.0), 1)
+-- ```
+-- ```output
+-- 9
+-- ```
 pub class FlatElem(a)
   fa_new : (Int, a) -> FlatArray(a)
   fa_get : (FlatArray(a), Int) -> a ! {Fail}
@@ -47,6 +54,13 @@ instance flatI64 : FlatElem(I64)
       FloatArr(_) => fail()
 
 -- | The element count, independent of the element type.
+--
+-- ```prism
+-- fa_len(fa_new(3, 0.0))
+-- ```
+-- ```output
+-- 3
+-- ```
 pub fn fa_len(xs : FlatArray(a)) : Int =
   match xs of
     FloatArr(b) => tbuf_len(b)

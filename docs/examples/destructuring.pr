@@ -1,0 +1,44 @@
+-- Patterns nest arbitrarily deep: one arm can reach through a constructor,
+-- into a record field, binding every name it needs in a single match.
+type Point = Point { x: Int, y: Int }
+
+type Shape = Circle(Point, Int) | Segment(Point, Point)
+
+-- A bare field name puns, binding a variable of the same name, and `..`
+-- ignores every field the pattern does not mention.
+fn x_coord(p : Point) : Int =
+  match p of
+    Point { x = x, .. } => x
+
+fn at_origin(s : Shape) : Option(Int) =
+  match s of
+    Circle(Point { x = 0, y = 0 }, r) => Some(r)
+    _ => None
+
+-- Tuple and list patterns destructure the corresponding literal forms; a list
+-- pattern is sugar for the nested `Cons`/`Nil` constructor patterns it expands to.
+fn describe(pair : (Int, List(Int))) : String =
+  match pair of
+    (0, Nil) => "zero, empty"
+    (_, Cons(only, Nil)) => "single: {only}"
+    (_, Cons(a, Cons(b, Nil))) => "pair: {a}, {b}"
+    (_, _) => "other"
+
+-- Expected output:
+--   5
+--   Some(5)
+--   None
+--   zero, empty
+--   single: 42
+--   pair: 1, 2
+--   other
+fn main() =
+  println("{x_coord(Point { x = 5, y = 9 })}")
+  println("{at_origin(Circle(Point { x = 0, y = 0 }, 5))}")
+  println(
+      "{at_origin(Segment(Point { x = 0, y = 0 }, Point { x = 1, y = 1 }))}",
+    )
+  println(describe((0, [])))
+  println(describe((1, [42])))
+  println(describe((2, [1, 2])))
+  println(describe((3, [1, 2, 3])))

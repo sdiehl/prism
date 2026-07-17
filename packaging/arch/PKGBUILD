@@ -1,5 +1,6 @@
 # Maintainer: Stephen Diehl <stephen.m.diehl@gmail.com>
-# Binary package tracking the GitHub release tarballs. Refresh sums with updpkgsums.
+# Binary package tracking the GitHub release tarballs. After a release publishes,
+# refresh pkgver and the sums with `just pkgbuild <version>`.
 pkgname=prism-bin
 pkgver=0.11.0
 pkgrel=1
@@ -12,8 +13,8 @@ provides=('prism')
 conflicts=('prism')
 source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/prism-$pkgver-x86_64-unknown-linux-gnu.tar.gz")
 source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/prism-$pkgver-aarch64-unknown-linux-gnu.tar.gz")
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('369d0b604e4f82595f9d28e453a277eb6cc5bf68037c0352db2cf4c4d84c5664')
+sha256sums_aarch64=('ef7b13ed264e306703e58da3f87662e21ee71c7978ba1c7ac3598741006cf103')
 
 package() {
   case "$CARCH" in

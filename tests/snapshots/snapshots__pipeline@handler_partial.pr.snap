@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 14
 expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/handler_partial.pr
 ---
@@ -27,7 +28,7 @@ Program {
                     grade: Many,
                 },
             ],
-            span: 308..344,
+            span: 156..192,
         },
     ],
     errors: [],
@@ -47,7 +48,7 @@ Program {
                         node: Var(
                             "println",
                         ),
-                        span: 360..367,
+                        span: 208..215,
                     },
                     [
                         Spanned {
@@ -61,11 +62,11 @@ Program {
                                                     node: Var(
                                                         "one",
                                                     ),
-                                                    span: 375..378,
+                                                    span: 223..226,
                                                 },
                                                 [],
                                             ),
-                                            span: 375..380,
+                                            span: 223..228,
                                         },
                                         Spanned {
                                             node: Call(
@@ -73,14 +74,14 @@ Program {
                                                     node: Var(
                                                         "two",
                                                     ),
-                                                    span: 383..386,
+                                                    span: 231..234,
                                                 },
                                                 [],
                                             ),
-                                            span: 383..388,
+                                            span: 231..236,
                                         },
                                     ),
-                                    span: 375..388,
+                                    span: 223..236,
                                 },
                                 [
                                     Op(
@@ -93,7 +94,7 @@ Program {
                                                     node: Var(
                                                         "k",
                                                     ),
-                                                    span: 418..419,
+                                                    span: 266..267,
                                                 },
                                                 [
                                                     Spanned {
@@ -103,11 +104,11 @@ Program {
                                                                 suffix: None,
                                                             },
                                                         ),
-                                                        span: 420..421,
+                                                        span: 268..269,
                                                     },
                                                 ],
                                             ),
-                                            span: 418..422,
+                                            span: 266..270,
                                         },
                                     ),
                                     Return(
@@ -116,30 +117,31 @@ Program {
                                             node: Var(
                                                 "r",
                                             ),
-                                            span: 440..441,
+                                            span: 288..289,
                                         },
                                     ),
                                 ],
+                                Exhaustive,
                             ),
-                            span: 368..445,
+                            span: 216..293,
                         },
                     ],
                 ),
-                span: 360..446,
+                span: 208..294,
             },
             wheres: [],
-            span: 346..446,
+            span: 194..294,
         },
     ],
 }
 
 == types ==
 [E5011] Type Error: in `main`: handler for effect `E` is missing `two`; a handler must implement every operation of the effect it handles
-    ╭─[ <source>:10:11 ]
+    ╭─[ <source>:8:11 ]
     │
- 10 │ ╭─▶   println(handle one() + two() with {
+  8 │ ╭─▶   println(handle one() + two() with {
     ┆ ┆   
- 13 │ ├─▶   })
+ 11 │ ├─▶   })
     │ │          
     │ ╰────────── in `main`: handler for effect `E` is missing `two`; a handler must implement every operation of the effect it handles
 ────╯
