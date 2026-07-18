@@ -374,7 +374,7 @@ jobs:
           # pulled a just-published pnpm whose self-installer crashed.
           version: 11.6.0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
